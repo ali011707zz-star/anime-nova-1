@@ -437,9 +437,9 @@ function NativeVideoPlayer({
 }
 
 /* ══════════════════════════════════════════════════════
-   EMBED PLAYER  (iframe via proxy-embed — no direct URL)
-   Shows the site's player with our chrome hidden around it.
-   Blocks popups, ads, external navigation.
+   EMBED PLAYER  (direct iframe — sandbox blocks popups)
+   Loads embed URL directly so CDN/CORS works correctly.
+   sandbox: no allow-popups, no allow-top-navigation.
 ══════════════════════════════════════════════════════ */
 function EmbedPlayer({
   src, title, ep, totalEps,
@@ -457,21 +457,9 @@ function EmbedPlayer({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const nextTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const proxyUrl = `/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`;
-  const nextSrc  = sources[activeIdx + 1];
-
-  /* Listen for postMessage from injected JS */
-  useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (e.data?.type === "nova-cf-block") {
-        setCfBlock(true);
-        if (nextTimer.current) clearTimeout(nextTimer.current);
-        if (nextSrc) nextTimer.current = setTimeout(onNextSrc, 2500);
-      }
-    };
-    window.addEventListener("message", handler);
-    return () => { window.removeEventListener("message", handler); if (nextTimer.current) clearTimeout(nextTimer.current); };
-  }, [src.url, nextSrc, onNextSrc]);
+  // Load embed URL DIRECTLY — not via proxy (proxy caused CORS black screen).
+  // The browser's sandbox attribute blocks popups and top-level navigation instead.
+  const nextSrc = sources[activeIdx + 1];
 
   /* Reset on src change */
   useEffect(() => {
@@ -536,11 +524,14 @@ function EmbedPlayer({
         </div>
       )}
 
-      {/* Iframe — fills the whole screen between top/bottom bars */}
+      {/* Iframe — direct URL, no proxy (proxy caused CORS → black screen).
+           sandbox blocks: popups (no allow-popups), top nav (no allow-top-navigation).
+           allow-same-origin lets the player reach its own CDN for video data. */}
       <iframe
         ref={iframeRef}
-        src={proxyUrl}
-        className="w-full flex-1 border-none"
+        src={src.url}
+        className="w-full flex-1 border-none bg-black"
+        sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
         allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
         onLoad={() => setLoading(false)}
         title={`${title} - الحلقة ${ep}`}
@@ -822,29 +813,49 @@ export default function WatchPage() {
     return () => { sseRef.current?.close(); sseRef.current = null; };
   }, [animeId, ep]);
 
-  /* Background embed test */
+  /* Background embed test — only mark DEAD on hard failures (CF block or 404).
+     "no-video" is NOT a dead signal: most embed pages load video dynamically via JS,
+     so static HTML won't contain <video> elements. We can only detect dead servers
+     if the server itself is down (404) or Cloudflare-blocked server-side. */
   async function testEmbed(url: string): Promise<boolean> {
     try {
       const r = await fetch(`/api/anime/test-embed?url=${encodeURIComponent(url)}`, {
         signal: AbortSignal.timeout(10000),
       });
       const d = await r.json();
-      return d.working === true;
-    } catch { return true; } // assume ok on network error
+      // Only dead on explicit hard failures
+      if (d.reason === "cloudflare" || d.reason === "404" || d.reason === "error") return false;
+      return true; // "no-video" or "ok" → assume working (video loads via JS)
+    } catch { return true; } // network error → assume ok
   }
 
-  /* ── Auto-play first source ── */
+  /* ── Auto-play first source ──
+     Strategy:
+     1. As soon as a directUrl source arrives → play it immediately (best UX).
+     2. If stream finishes with no directUrl → play best non-dead embed source.
+     Never auto-start an embed source while stream is still running
+     (directUrl might arrive 1-2 seconds later via uqload). */
   useEffect(() => {
-    if (autoStarted.current || sources.length === 0 || showPlayer) return;
-    // Prefer first direct source; fall back to first non-dead embed
-    const best = sources.find(s => s.directUrl)
-      || sources.find(s => (statuses[s.url] || "unknown") !== "dead")
+    if (autoStarted.current || showPlayer) return;
+
+    const directBest = sources.find(s => s.directUrl);
+    if (directBest) {
+      // Direct HLS/MP4 found → play now
+      autoStarted.current = true;
+      const idx = sources.indexOf(directBest);
+      setActive(directBest); setActiveIdx(idx); setShowPlayer(true);
+      return;
+    }
+
+    // No direct source yet — only fall back to embed AFTER stream completes
+    if (!streamDone || sources.length === 0) return;
+    const embedBest = sources.find(s => (statuses[s.url] || "unknown") !== "dead")
       || sources[0];
-    if (!best) return;
+    if (!embedBest) return;
     autoStarted.current = true;
-    const idx = sources.indexOf(best);
-    setActive(best); setActiveIdx(idx); setShowPlayer(true);
-  }, [sources, statuses]);
+    const idx = sources.indexOf(embedBest);
+    setActive(embedBest); setActiveIdx(idx); setShowPlayer(true);
+  }, [sources, statuses, streamDone]);
 
   /* ── Probe a source URL ── */
   const probeSource = useCallback(async (src: Source) => {

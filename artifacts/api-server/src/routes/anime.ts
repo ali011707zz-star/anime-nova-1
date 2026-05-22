@@ -26,11 +26,12 @@ const SRC_TTL       = 6 * 3_600_000; // 6 hours
 
 // ── Known-dead / unplayable file hosts ──
 const DEAD_FILE_HOSTS = [
-  // dead file hosts
+  // file hosts (not video players)
   "4shared.com","solidfiles.com","d000d.com","uqload.co","uqload.com",
   "vadbam.net","okfiles.com","gofile.io","uploadfiles.io","hexupload.net",
   "filerio.in","doodstream.com","dood.watch","megaup.net","1fichier.com",
   "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co",
+  "workupload.com",  // file download site, NOT a video player
   // requires browser auth — can't extract
   "mega.nz","mega.co.nz","mediafire.com",
   "drive.google","docs.google","googleapis.com/drive",
@@ -41,7 +42,6 @@ const DEAD_FILE_HOSTS = [
   "jquery.min.js","bootstrap.min.js",
   ".css",".js",".png",".jpg",".jpeg",".gif",".svg",".ico",
   "favicon","robots.txt","sitemap",
-  // file extension blocklist
 ];
 
 // ── Hosts that block server-side scraping ──
