@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const ANILIST_Q = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
-    id title { romaji english }
+    id idMal title { romaji english }
     episodes coverImage { large }
     nextAiringEpisode { episode }
   }
@@ -25,7 +25,8 @@ type ProbeStatus = "unknown" | "testing" | "ok" | "dead" | "incompatible";
 const SITE_LABEL: Record<string, string> = {
   animelek: "AnimeLek", mitanime: "MitAnime", witanime: "WitAnime",
   anime4up: "Anime4Up", animeblkom: "Blkom", "3asq": "3asq", animetitans: "Titans",
-  animegate: "AnimeGate", araanime: "AraAnime", anime4arabs: "4Arabs", cached: "مخزن",
+  animegate: "AnimeGate", araanime: "AraAnime",
+  anime4arabs: "4Arabs", okanime: "OKAnime", db: "DB", cached: "مخزن",
 };
 
 function saveHistory(id: number, title: string, cover: string, ep: number) {
@@ -273,6 +274,7 @@ export default function WatchPage() {
           title: animeData?.title?.romaji || "",
           english: animeData?.title?.english || "",
           anilistId: String(animeId),
+          malId: String(animeData?.idMal || ""),
         });
         if (alekSlug) params.set("alekSlug", alekSlug);
         if (mitSlug)  params.set("mitSlug",  mitSlug);
