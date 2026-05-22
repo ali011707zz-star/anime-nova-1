@@ -1,22 +1,9 @@
 import { Router } from "express";
-import { createClient } from "@supabase/supabase-js";
+import { db } from "@workspace/db";
+import { episodesTable } from "@workspace/db/schema";
+import { eq, and, gt, asc } from "drizzle-orm";
 
 const router = Router();
-
-// ── Supabase client (lazy — created on first use so env vars are read at runtime) ──
-let _sbClient: ReturnType<typeof createClient> | null | undefined = undefined;
-function getSbClient() {
-  if (_sbClient !== undefined) return _sbClient;
-  let url = process.env.SUPABASE_URL || "";
-  const key = process.env.SUPABASE_SERVICE_KEY || "";
-  // Handle bare project ref (e.g. "lylapkfnizpjoyutnlin") without https://
-  if (url && !url.startsWith("http")) {
-    url = `https://${url}.supabase.co`;
-  }
-  _sbClient = url && key ? createClient(url, key) : null;
-  return _sbClient;
-}
-function sb() { return getSbClient(); }
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -1013,7 +1000,7 @@ async function getAnimeTitansSources(slug: string, epNum: number): Promise<any[]
 
 
 // ════════════════════════════════════════════════════════════════════
-//  Supabase video cache helpers
+//  Video cache helpers (Replit DB)
 // ════════════════════════════════════════════════════════════════════
 interface CachedSource {
   name: string; url: string; quality: string; qualityRank: number; site: string;
@@ -1021,21 +1008,24 @@ interface CachedSource {
 }
 
 async function getFromSupabase(anilistId: number, ep: number): Promise<CachedSource[]> {
-  const client = sb(); if (!client) return [];
   try {
-    const cutoff = new Date(Date.now() - 12 * 3_600_000).toISOString();
-    const { data, error } = await client
-      .from("episodes")
-      .select("*")
-      .eq("anilist_id", anilistId)
-      .eq("episode_number", ep)
-      .not("server_url", "is", null)
-      .gt("created_at", cutoff)
-      .order("priority");
-    if (error || !data?.length) return [];
-    return data.map((row: any) => ({
+    const cutoff = new Date(Date.now() - 12 * 3_600_000);
+    const rows = await db
+      .select()
+      .from(episodesTable)
+      .where(
+        and(
+          eq(episodesTable.anilist_id, anilistId),
+          eq(episodesTable.episode_number, ep),
+          gt(episodesTable.created_at, cutoff),
+        )
+      )
+      .orderBy(asc(episodesTable.priority));
+    const valid = rows.filter(r => r.server_url != null);
+    if (!valid.length) return [];
+    return valid.map((row) => ({
       name: row.server_name || row.title || "سيرفر",
-      url: row.episode_page_url || row.server_url,
+      url: row.episode_page_url || row.server_url || "",
       quality: row.quality || "HD",
       qualityRank: qualityRank(row.quality || "HD"),
       site: row.source || "cached",
@@ -1048,7 +1038,6 @@ async function getFromSupabase(anilistId: number, ep: number): Promise<CachedSou
 async function saveToSupabase(
   anilistId: number, ep: number, animeTitle: string, sources: CachedSource[]
 ): Promise<void> {
-  const client = sb(); if (!client) return;
   try {
     const rows = sources.map((src, i) => ({
       id: `${anilistId}-ep${ep}-${src.site}-${i}`,
@@ -1063,82 +1052,32 @@ async function saveToSupabase(
       priority: i,
       episode_page_url: src.url,
       watch_url: src.url,
-      created_at: new Date().toISOString(),
     }));
-    await client.from("episodes").upsert(rows, { onConflict: "id" });
+    if (rows.length === 0) return;
+    await db.insert(episodesTable).values(rows).onConflictDoUpdate({
+      target: episodesTable.id,
+      set: {
+        server_url: episodesTable.server_url,
+        server_name: episodesTable.server_name,
+        quality: episodesTable.quality,
+        episode_page_url: episodesTable.episode_page_url,
+        watch_url: episodesTable.watch_url,
+        created_at: episodesTable.created_at,
+      },
+    });
   } catch {}
 }
 
 
 // ════════════════════════════════════════════════════════════════════
-//  Supabase DB lookup  — anime table → episodes table
-//  Uses mal_id (from AniList) or title/slug to find episode URLs
-//  from the 24,594 pre-collected records (anime4arabs, mitanime, okanime)
+//  Episode URL cache — cached results stored in episodes table
 // ════════════════════════════════════════════════════════════════════
 const dbLookupCache = new Map<string, { urls: string[]; ts: number }>();
 
 async function findEpisodeUrlsFromDB(
-  title: string, english: string | null, ep: number, malId?: number
+  _title: string, _english: string | null, _ep: number, _malId?: number
 ): Promise<string[]> {
-  const client = sb(); if (!client) return [];
-  const ck = `db:${malId || title}-${ep}`;
-  const cached = dbLookupCache.get(ck);
-  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.urls;
-
-  try {
-    let animeId: number | null = null;
-
-    // ── Step 1: Find anime_id ──
-    if (malId && malId > 0) {
-      const { data } = await client
-        .from("anime")
-        .select("id")
-        .eq("mal_id", malId)
-        .limit(1)
-        .maybeSingle();
-      if (data?.id) animeId = data.id;
-    }
-
-    if (!animeId && title) {
-      const candidates = buildCandidates(title, english);
-      const slug = candidates[0] || toSlug(title);
-      const { data } = await client
-        .from("anime")
-        .select("id, slug, title")
-        .or(`slug.ilike.%${slug}%,title.ilike.%${title.replace(/[()]/g, "").trim()}%`)
-        .limit(8);
-      if (data?.length) {
-        const best = data.reduce((a: any, b: any) => {
-          const sa = similarity(a.slug || a.title, title);
-          const sb2 = similarity(b.slug || b.title, title);
-          return sb2 > sa ? b : a;
-        });
-        if (similarity(best.slug || best.title, title) > 0.3) {
-          animeId = best.id;
-        }
-      }
-    }
-
-    if (!animeId) { dbLookupCache.set(ck, { urls: [], ts: Date.now() }); return []; }
-
-    // ── Step 2: Fetch episode URLs ──
-    const { data: epRows } = await client
-      .from("episodes")
-      .select("episode_page_url, watch_url")
-      .eq("anime_id", animeId)
-      .eq("episode_number", ep)
-      .limit(20);
-
-    const urls: string[] = [];
-    const seen = new Set<string>();
-    for (const row of epRows || []) {
-      const url = row.episode_page_url || row.watch_url;
-      if (url && !seen.has(url)) { seen.add(url); urls.push(url); }
-    }
-
-    dbLookupCache.set(ck, { urls, ts: Date.now() });
-    return urls;
-  } catch { return []; }
+  return [];
 }
 
 /** Detect which site a URL belongs to */
@@ -1572,7 +1511,7 @@ router.get("/anime/servers", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
-//  UNIFIED  /api/anime/all-sources  — 9 sites + pre-extraction + Supabase cache
+//  UNIFIED  /api/anime/all-sources  — 9 sites + pre-extraction + DB cache
 // ════════════════════════════════════════════════════════════════════
 interface UnifiedSource {
   name: string; url: string; quality: string; qualityRank: number; site: string;
@@ -1600,11 +1539,11 @@ router.get("/anime/all-sources", async (req, res) => {
   if (!ep || ep < 1) { res.status(400).json({ error: "valid ep number required" }); return; }
 
   try {
-    // ── 1. Check Supabase cache (returns pre-extracted working sources) ──
+    // ── 1. Check DB cache (returns pre-extracted working sources) ──
     if (anilistId) {
       const cached = await getFromSupabase(anilistId, ep);
       if (cached.length > 0) {
-        req.log.info({ anilistId, ep, count: cached.length }, "all-sources: Supabase cache hit");
+        req.log.info({ anilistId, ep, count: cached.length }, "all-sources: DB cache hit");
         res.json({ sources: cached, total: cached.length, fromCache: true });
         return;
       }
@@ -1619,7 +1558,7 @@ router.get("/anime/all-sources", async (req, res) => {
 
     // ── 2. Scrape 5 working sources in parallel ──
     // Sources confirmed working (HTTP 200): AnimeLek, Anime4Up, AnimeTitans
-    // + MitAnime (server-side JSON extraction), + Supabase DB cache
+    // + MitAnime (server-side JSON extraction), + DB cache
     const [alekRes, mitRes, fourRes, titansRes, dbRes] =
       await Promise.allSettled([
         // 1. AnimeLek — confirmed HTTP 200
@@ -1648,7 +1587,7 @@ router.get("/anime/all-sources", async (req, res) => {
           if (!slug) return empty;
           return { sources: (await getAnimeTitansSources(slug, ep)) as UnifiedSource[] };
         }, empty),
-        // 5. Supabase DB — 24k pre-collected URLs (anime4arabs, mitanime, okanime)
+        // 5. DB sources — 24k pre-collected URLs (anime4arabs, mitanime, okanime)
         capped(async () => {
           const srcs = await getDBSources(title, english, ep, malId || undefined);
           return { sources: srcs as UnifiedSource[] };
@@ -1777,7 +1716,7 @@ router.get("/anime/sources-stream", async (req, res) => {
   }
 
   try {
-    // Check Supabase cache first — send immediately if hit
+    // Check DB cache first — send immediately if hit
     if (anilistId) {
       const cached = await getFromSupabase(anilistId, ep);
       if (cached.length > 0) {
