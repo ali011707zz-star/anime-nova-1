@@ -3,12 +3,20 @@ import { createClient } from "@supabase/supabase-js";
 
 const router = Router();
 
-// ── Supabase client (service role key for full DB access) ──
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const sbClient = SUPABASE_URL && SUPABASE_KEY
-  ? createClient(SUPABASE_URL, SUPABASE_KEY)
-  : null;
+// ── Supabase client (lazy — created on first use so env vars are read at runtime) ──
+let _sbClient: ReturnType<typeof createClient> | null | undefined = undefined;
+function getSbClient() {
+  if (_sbClient !== undefined) return _sbClient;
+  let url = process.env.SUPABASE_URL || "";
+  const key = process.env.SUPABASE_SERVICE_KEY || "";
+  // Handle bare project ref (e.g. "lylapkfnizpjoyutnlin") without https://
+  if (url && !url.startsWith("http")) {
+    url = `https://${url}.supabase.co`;
+  }
+  _sbClient = url && key ? createClient(url, key) : null;
+  return _sbClient;
+}
+function sb() { return getSbClient(); }
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -1007,10 +1015,10 @@ interface CachedSource {
 }
 
 async function getFromSupabase(anilistId: number, ep: number): Promise<CachedSource[]> {
-  if (!sbClient) return [];
+  const client = sb(); if (!client) return [];
   try {
     const cutoff = new Date(Date.now() - 12 * 3_600_000).toISOString();
-    const { data, error } = await sbClient
+    const { data, error } = await client
       .from("episodes")
       .select("*")
       .eq("anilist_id", anilistId)
@@ -1034,7 +1042,7 @@ async function getFromSupabase(anilistId: number, ep: number): Promise<CachedSou
 async function saveToSupabase(
   anilistId: number, ep: number, animeTitle: string, sources: CachedSource[]
 ): Promise<void> {
-  if (!sbClient) return;
+  const client = sb(); if (!client) return;
   try {
     const rows = sources.map((src, i) => ({
       id: `${anilistId}-ep${ep}-${src.site}-${i}`,
@@ -1051,7 +1059,7 @@ async function saveToSupabase(
       watch_url: src.url,
       created_at: new Date().toISOString(),
     }));
-    await sbClient.from("episodes").upsert(rows, { onConflict: "id" });
+    await client.from("episodes").upsert(rows, { onConflict: "id" });
   } catch {}
 }
 
@@ -1066,7 +1074,7 @@ const dbLookupCache = new Map<string, { urls: string[]; ts: number }>();
 async function findEpisodeUrlsFromDB(
   title: string, english: string | null, ep: number, malId?: number
 ): Promise<string[]> {
-  if (!sbClient) return [];
+  const client = sb(); if (!client) return [];
   const ck = `db:${malId || title}-${ep}`;
   const cached = dbLookupCache.get(ck);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.urls;
@@ -1076,8 +1084,7 @@ async function findEpisodeUrlsFromDB(
 
     // ── Step 1: Find anime_id ──
     if (malId && malId > 0) {
-      // Fastest: exact match by MAL ID
-      const { data } = await sbClient
+      const { data } = await client
         .from("anime")
         .select("id")
         .eq("mal_id", malId)
@@ -1087,16 +1094,14 @@ async function findEpisodeUrlsFromDB(
     }
 
     if (!animeId && title) {
-      // Fallback: match by title or slug
       const candidates = buildCandidates(title, english);
       const slug = candidates[0] || toSlug(title);
-      const { data } = await sbClient
+      const { data } = await client
         .from("anime")
         .select("id, slug, title")
         .or(`slug.ilike.%${slug}%,title.ilike.%${title.replace(/[()]/g, "").trim()}%`)
         .limit(8);
       if (data?.length) {
-        // Pick closest match
         const best = data.reduce((a: any, b: any) => {
           const sa = similarity(a.slug || a.title, title);
           const sb2 = similarity(b.slug || b.title, title);
@@ -1110,8 +1115,8 @@ async function findEpisodeUrlsFromDB(
 
     if (!animeId) { dbLookupCache.set(ck, { urls: [], ts: Date.now() }); return []; }
 
-    // ── Step 2: Fetch all episode URLs for this anime + episode number ──
-    const { data: epRows } = await sbClient
+    // ── Step 2: Fetch episode URLs ──
+    const { data: epRows } = await client
       .from("episodes")
       .select("episode_page_url, watch_url")
       .eq("anime_id", animeId)
@@ -1502,85 +1507,52 @@ router.get("/anime/all-sources", async (req, res) => {
       }
     }
 
-    // Helper: cap each scraper at SCRAPER_MS to prevent slug resolution from blocking forever
-    const SCRAPER_MS = 12000;
+    // Cap each scraper at 10s to keep response fast
+    const SCRAPER_MS = 10000;
     const capped = <T>(fn: () => Promise<T>, fallback: T): Promise<T> =>
       Promise.race([fn(), new Promise<T>(r => setTimeout(() => r(fallback), SCRAPER_MS))]);
 
     const empty = { sources: [] as UnifiedSource[] };
 
-    // ── 2. Scrape all sources in parallel (each capped at 12s) ──
-    const [alekRes, mitRes, witRes, fourRes, blkomRes, asaqRes, titansRes, gateRes, araRes, dbRes] =
+    // ── 2. Scrape 5 working sources in parallel ──
+    // Sources confirmed working (HTTP 200): AnimeLek, Anime4Up, AnimeTitans
+    // + MitAnime (server-side JSON extraction), + Supabase DB cache
+    const [alekRes, mitRes, fourRes, titansRes, dbRes] =
       await Promise.allSettled([
-        // AnimeLek
+        // 1. AnimeLek — confirmed HTTP 200
         capped(async () => {
           const slug = await resolveAlekSlug(title, english, alekSlug);
           if (!slug) return { slug: null, sources: [] as UnifiedSource[] };
           return { slug, sources: (await getAlekSources(slug, ep)) as UnifiedSource[] };
         }, { slug: null, sources: [] as UnifiedSource[] }),
-        // MitAnime
+        // 2. MitAnime — works via server-side JSON scraping
         capped(async () => {
           const slug = mitSlug || (title ? await resolveMitSlug(title, english) : null);
           if (!slug) return { slug: null, sources: [] as UnifiedSource[] };
           return { slug, sources: (await getMitSources(slug, ep)) as UnifiedSource[] };
         }, { slug: null, sources: [] as UnifiedSource[] }),
-        // WitAnime
-        capped(async () => {
-          if (!title) return empty;
-          const res2 = await resolveWitSlug(title, english);
-          if (!res2) return empty;
-          return { sources: (await getWitSources(res2.slug, res2.base, ep)) as UnifiedSource[] };
-        }, empty),
-        // Anime4Up
+        // 3. Anime4Up — confirmed HTTP 200
         capped(async () => {
           if (!title) return empty;
           const slug = await resolveAnime4upSlug(title, english);
           if (!slug) return empty;
           return { sources: (await getAnime4upSources(slug, ep)) as UnifiedSource[] };
         }, empty),
-        // AnimeBlkom
-        capped(async () => {
-          if (!title) return empty;
-          const slug = await resolveAnimeblkomSlug(title, english);
-          if (!slug) return empty;
-          return { sources: (await getAnimeblkomSources(slug, ep)) as UnifiedSource[] };
-        }, empty),
-        // 3asq
-        capped(async () => {
-          if (!title) return empty;
-          const slug = await resolve3asqSlug(title, english);
-          if (!slug) return empty;
-          return { sources: (await get3asqSources(slug, ep)) as UnifiedSource[] };
-        }, empty),
-        // AnimeTitans
+        // 4. AnimeTitans — confirmed HTTP 200
         capped(async () => {
           if (!title) return empty;
           const slug = await resolveAnimeTitansSlug(title, english);
           if (!slug) return empty;
           return { sources: (await getAnimeTitansSources(slug, ep)) as UnifiedSource[] };
         }, empty),
-        // AnimeGate
-        capped(async () => {
-          if (!title) return empty;
-          const res2 = await resolveAnimeGateSlug(title, english);
-          if (!res2) return empty;
-          return { sources: (await getAnimeGateSources(res2.slug, res2.base, ep)) as UnifiedSource[] };
-        }, empty),
-        // AraAnime
-        capped(async () => {
-          if (!title) return empty;
-          const res2 = await resolveAraAnimeSlug(title, english);
-          if (!res2) return empty;
-          return { sources: (await getAraAnimeSources(res2.slug, res2.base, ep)) as UnifiedSource[] };
-        }, empty),
-        // DB lookup — anime4arabs + mitanime + okanime (24k pre-collected URLs via Supabase + MAL ID)
+        // 5. Supabase DB — 24k pre-collected URLs (anime4arabs, mitanime, okanime)
         capped(async () => {
           const srcs = await getDBSources(title, english, ep, malId || undefined);
           return { sources: srcs as UnifiedSource[] };
         }, empty),
       ]);
 
-    // ── 3. Collect & deduplicate all embed sources ──
+    // ── 3. Collect & deduplicate ──
     const rawSources: UnifiedSource[] = [];
     const seenUrls = new Set<string>();
     const addSources = (result: PromiseSettledResult<{ sources: UnifiedSource[] }>) => {
@@ -1592,13 +1564,12 @@ router.get("/anime/all-sources", async (req, res) => {
         rawSources.push(s);
       }
     };
-    // DB sources first (pre-confirmed episode URLs from Supabase collection)
-    [dbRes, alekRes, witRes, fourRes, blkomRes, asaqRes, titansRes, mitRes, gateRes, araRes].forEach(addSources);
+    // DB/cache first, then scrapers
+    [dbRes, alekRes, fourRes, titansRes, mitRes].forEach(addSources);
 
     const SITE_PRIO: Record<string, number> = {
       anime4arabs: 10, mitanime: 10, okanime: 10, db: 10,
-      witanime: 9, animeblkom: 8, anime4up: 7, "3asq": 6,
-      animegate: 5, araanime: 4, animelek: 2, animetitans: 1,
+      anime4up: 8, animelek: 7, animetitans: 6,
     };
     rawSources.sort((a, b) => {
       // Direct URL sources always come first regardless of site

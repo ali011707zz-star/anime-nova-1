@@ -268,7 +268,7 @@ export default function WatchPage() {
         setAnime(animeData);
         if (animeData) saveHistory(animeId, animeData.title?.romaji || "", animeData.coverImage?.large || "", ep);
 
-        setLoadMsg("جاري جلب السيرفرات من 10 مواقع...");
+        setLoadMsg("جاري جلب السيرفرات من أفضل 5 مواقع...");
         const params = new URLSearchParams({
           ep: String(ep),
           title: animeData?.title?.romaji || "",
