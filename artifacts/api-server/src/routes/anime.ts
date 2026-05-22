@@ -1,6 +1,13 @@
 import { Router } from "express";
+import { createClient } from "@supabase/supabase-js";
 
 const router = Router();
+
+// ── Supabase client for persistent video source cache ──
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://lylapkfnizpjoyutnlin.supabase.co";
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY ||
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5bGFwa2ZuaXpwam95dXRubGluIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0OTQxNDYsImV4cCI6MjA5NDA3MDE0Nn0.VXSyeqOBaCSR9SD8R7goF3zsleeDbvb8MLnrtOC5Keo";
+const sbClient = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -985,6 +992,198 @@ async function getAnimeTitansSources(slug: string, epNum: number): Promise<any[]
 
 
 // ════════════════════════════════════════════════════════════════════
+//  Supabase video cache helpers
+// ════════════════════════════════════════════════════════════════════
+interface CachedSource {
+  name: string; url: string; quality: string; qualityRank: number; site: string;
+  directUrl?: string; directType?: "hls" | "mp4";
+}
+
+async function getFromSupabase(anilistId: number, ep: number): Promise<CachedSource[]> {
+  try {
+    const cutoff = new Date(Date.now() - 12 * 3_600_000).toISOString();
+    const { data, error } = await sbClient
+      .from("episodes")
+      .select("*")
+      .eq("anilist_id", anilistId)
+      .eq("episode_number", ep)
+      .not("server_url", "is", null)
+      .gt("created_at", cutoff)
+      .order("priority");
+    if (error || !data?.length) return [];
+    return data.map((row: any) => ({
+      name: row.server_name || row.title || "سيرفر",
+      url: row.episode_page_url || row.server_url,
+      quality: row.quality || "HD",
+      qualityRank: qualityRank(row.quality || "HD"),
+      site: row.source || "cached",
+      directUrl: row.server_url || undefined,
+      directType: (row.server_url?.includes(".m3u8") ? "hls" : "mp4") as "hls" | "mp4",
+    }));
+  } catch { return []; }
+}
+
+async function saveToSupabase(
+  anilistId: number, ep: number, animeTitle: string, sources: CachedSource[]
+): Promise<void> {
+  try {
+    const rows = sources.map((src, i) => ({
+      id: `${anilistId}-ep${ep}-${src.site}-${i}`,
+      anilist_id: anilistId,
+      episode_number: ep,
+      title: animeTitle,
+      thumbnail: "",
+      server_url: src.directUrl || null,
+      server_name: src.name,
+      quality: src.quality,
+      source: src.site,
+      priority: i,
+      episode_page_url: src.url,
+      watch_url: src.url,
+      created_at: new Date().toISOString(),
+    }));
+    await sbClient.from("episodes").upsert(rows, { onConflict: "id" });
+  } catch {}
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  AnimeGate  (animegate.me — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const GATE_BASES = ["https://animegate.me", "https://animegate.net", "https://anime-gate.net"];
+const GATE_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://animegate.me/" };
+const gateSlugCache = new Map<string, { slug: string | null; base: string; ts: number }>();
+const gateSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolveAnimeGateSlug(romaji: string, english?: string | null): Promise<{ slug: string; base: string } | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = gateSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug ? { slug: cached.slug, base: cached.base } : null;
+  const candidates = buildCandidates(romaji, english);
+  for (const base of GATE_BASES) {
+    for (const slug of candidates.slice(0, 6)) {
+      if ((await safeHead(`${base}/anime/${slug}/`, GATE_HDRS)) === 200) {
+        gateSlugCache.set(cacheKey, { slug, base, ts: Date.now() });
+        return { slug, base };
+      }
+    }
+  }
+  gateSlugCache.set(cacheKey, { slug: null, base: "", ts: Date.now() });
+  return null;
+}
+
+async function getAnimeGateSources(slug: string, base: string, ep: number): Promise<any[]> {
+  const ck = `gate:${slug}-${ep}`;
+  const cached = gateSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+  const epUrls = [
+    `${base}/episode/${slug}-${ep}/`,
+    `${base}/episode/${slug}-episode-${ep}/`,
+    `${base}/watch/${slug}-${ep}/`,
+    `${base}/${slug}-episode-${ep}/`,
+  ];
+  for (const epUrl of epUrls) {
+    try {
+      const r = await fetch(epUrl, { headers: GATE_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow" });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+      const seen = new Set<string>(); const sources: any[] = [];
+      for (const m of html.matchAll(/data-embed="(https?:\/\/[^"]+)"/g)) {
+        const url = m[1].replace(/&amp;/g, "&"); if (seen.has(url)) continue; seen.add(url);
+        if (DEAD_FILE_HOSTS.some(h => url.includes(h))) continue;
+        sources.push({ name: `سيرفر ${sources.length + 1}`, url, quality: "HD", qualityRank: 2, site: "animegate" });
+      }
+      for (const m of html.matchAll(/<iframe[^>]+(?:src|data-src)=["'](https?:\/\/(?!animegate)[^"']+)["']/gi)) {
+        const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+        if (DEAD_FILE_HOSTS.some(h => url.includes(h))) continue;
+        const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./, "")?.split(".")[0] || "سيرفر";
+        sources.push({ name: host, url, quality: "HD", qualityRank: 2, site: "animegate" });
+      }
+      if (sources.length) { gateSrcCache.set(ck, { sources, ts: Date.now() }); return sources; }
+    } catch { continue; }
+  }
+  return [];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  AraAnime  (araanime.net — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const ARA_BASES = ["https://araanime.net", "https://www.araanime.net", "https://araanime.com"];
+const ARA_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://araanime.net/" };
+const araSlugCache = new Map<string, { slug: string | null; base: string; ts: number }>();
+const araSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolveAraAnimeSlug(romaji: string, english?: string | null): Promise<{ slug: string; base: string } | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = araSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug ? { slug: cached.slug, base: cached.base } : null;
+  const candidates = buildCandidates(romaji, english);
+  for (const base of ARA_BASES) {
+    try {
+      const sr = await fetch(`${base}/?s=${encodeURIComponent(romaji)}`, { headers: ARA_HDRS, signal: AbortSignal.timeout(8000) });
+      if (sr.ok) {
+        const html = await sr.text();
+        const linkRe = /href=["']https?:\/\/[^"']*\/anime\/([^/"']+)\//gi;
+        const m = html.match(linkRe);
+        if (m?.[0]) {
+          const slug = m[0].replace(/.*\/anime\/([^/"']+)\/.*/i, "$1");
+          if (slug?.length > 1) {
+            araSlugCache.set(cacheKey, { slug, base, ts: Date.now() });
+            return { slug, base };
+          }
+        }
+      }
+    } catch {}
+    for (const slug of candidates.slice(0, 6)) {
+      if ((await safeHead(`${base}/anime/${slug}/`, ARA_HDRS)) === 200) {
+        araSlugCache.set(cacheKey, { slug, base, ts: Date.now() });
+        return { slug, base };
+      }
+    }
+  }
+  araSlugCache.set(cacheKey, { slug: null, base: "", ts: Date.now() });
+  return null;
+}
+
+async function getAraAnimeSources(slug: string, base: string, ep: number): Promise<any[]> {
+  const ck = `ara:${slug}-${ep}`;
+  const cached = araSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+  const epUrls = [
+    `${base}/episode/${slug}-episode-${ep}/`,
+    `${base}/watch/${slug}/${ep}/`,
+    `${base}/${slug}-episode-${ep}/`,
+    `${base}/episode/${slug}-${ep}/`,
+  ];
+  for (const epUrl of epUrls) {
+    try {
+      const r = await fetch(epUrl, { headers: ARA_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow" });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+      const seen = new Set<string>(); const sources: any[] = [];
+      for (const m of html.matchAll(/<iframe[^>]+(?:src|data-src)=["'](https?:\/\/(?!araanime)[^"']+)["']/gi)) {
+        const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+        if (DEAD_FILE_HOSTS.some(h => url.includes(h))) continue;
+        const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./, "")?.split(".")[0] || "سيرفر";
+        sources.push({ name: host, url, quality: "HD", qualityRank: 2, site: "araanime" });
+      }
+      for (const m of html.matchAll(/"(?:url|file|src|embed)"\s*:\s*"(https?:\/\/[^"\\]+)"/g)) {
+        const url = m[1].replace(/\\/g, "");
+        if (seen.has(url) || url.includes("araanime")) continue; seen.add(url);
+        if (DEAD_FILE_HOSTS.some(h => url.includes(h))) continue;
+        sources.push({ name: `سيرفر ${sources.length + 1}`, url, quality: "HD", qualityRank: 2, site: "araanime" });
+      }
+      if (sources.length) { araSrcCache.set(ck, { sources, ts: Date.now() }); return sources; }
+    } catch { continue; }
+  }
+  return [];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Probe endpoint  GET /api/anime/probe
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/probe", async (req, res) => {
@@ -1077,109 +1276,161 @@ router.get("/anime/servers", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
-//  UNIFIED  /api/anime/all-sources  — 6 sites in parallel
+//  UNIFIED  /api/anime/all-sources  — 9 sites + pre-extraction + Supabase cache
 // ════════════════════════════════════════════════════════════════════
 interface UnifiedSource {
   name: string; url: string; quality: string; qualityRank: number; site: string;
+  directUrl?: string; directType?: "hls" | "mp4";
 }
 
+// Hosts that are impossible to extract server-side (need browser/auth)
+const SKIP_EXTRACT_HOSTS = [
+  "drive.google", "mega.nz", "mediafire.com",
+  "ok.ru", "odnoklassniki.ru",
+  "soraplay.xyz", "anime7u",
+  "youtube.com", "youtu.be",
+];
+
 router.get("/anime/all-sources", async (req, res) => {
-  const title    = (req.query.title    as string | undefined)?.trim() || "";
-  const english  = (req.query.english  as string | undefined)?.trim() || null;
-  const ep       = parseInt((req.query.ep as string) || "1");
-  const alekSlug = (req.query.alekSlug as string | undefined)?.trim() || null;
-  const mitSlug  = (req.query.mitSlug  as string | undefined)?.trim() || null;
+  const title     = (req.query.title    as string | undefined)?.trim() || "";
+  const english   = (req.query.english  as string | undefined)?.trim() || null;
+  const ep        = parseInt((req.query.ep as string) || "1");
+  const alekSlug  = (req.query.alekSlug as string | undefined)?.trim() || null;
+  const mitSlug   = (req.query.mitSlug  as string | undefined)?.trim() || null;
+  const anilistId = parseInt((req.query.anilistId as string) || "0") || 0;
 
   if (!title && !alekSlug) { res.status(400).json({ error: "title or alekSlug required" }); return; }
   if (!ep || ep < 1) { res.status(400).json({ error: "valid ep number required" }); return; }
 
   try {
-    const [alekRes, mitRes, witRes, fourRes, blkomRes, asaqRes, titansRes] = await Promise.allSettled([
-      // AnimeLek
-      (async () => {
-        const slug = await resolveAlekSlug(title, english, alekSlug);
-        if (!slug) return { slug: null, sources: [] as UnifiedSource[] };
-        const srcs = await getAlekSources(slug, ep);
-        return { slug, sources: srcs as UnifiedSource[] };
-      })(),
-      // MitAnime
-      (async () => {
-        const slug = mitSlug || (title ? await resolveMitSlug(title, english) : null);
-        if (!slug) return { slug: null, sources: [] as UnifiedSource[] };
-        const srcs = await getMitSources(slug, ep);
-        return { slug, sources: srcs as UnifiedSource[] };
-      })(),
-      // WitAnime
-      (async () => {
-        if (!title) return { sources: [] as UnifiedSource[] };
-        const resolved = await resolveWitSlug(title, english);
-        if (!resolved) return { sources: [] as UnifiedSource[] };
-        const srcs = await getWitSources(resolved.slug, resolved.base, ep);
-        return { sources: srcs as UnifiedSource[] };
-      })(),
-      // Anime4Up
-      (async () => {
-        if (!title) return { sources: [] as UnifiedSource[] };
-        const slug = await resolveAnime4upSlug(title, english);
-        if (!slug) return { sources: [] as UnifiedSource[] };
-        const srcs = await getAnime4upSources(slug, ep);
-        return { sources: srcs as UnifiedSource[] };
-      })(),
-      // AnimeBlkom
-      (async () => {
-        if (!title) return { sources: [] as UnifiedSource[] };
-        const slug = await resolveAnimeblkomSlug(title, english);
-        if (!slug) return { sources: [] as UnifiedSource[] };
-        const srcs = await getAnimeblkomSources(slug, ep);
-        return { sources: srcs as UnifiedSource[] };
-      })(),
-      // 3asq
-      (async () => {
-        if (!title) return { sources: [] as UnifiedSource[] };
-        const slug = await resolve3asqSlug(title, english);
-        if (!slug) return { sources: [] as UnifiedSource[] };
-        const srcs = await get3asqSources(slug, ep);
-        return { sources: srcs as UnifiedSource[] };
-      })(),
-      // AnimeTitans
-      (async () => {
-        if (!title) return { sources: [] as UnifiedSource[] };
-        const slug = await resolveAnimeTitansSlug(title, english);
-        if (!slug) return { sources: [] as UnifiedSource[] };
-        const srcs = await getAnimeTitansSources(slug, ep);
-        return { sources: srcs as UnifiedSource[] };
-      })(),
-    ]);
+    // ── 1. Check Supabase cache (returns pre-extracted working sources) ──
+    if (anilistId) {
+      const cached = await getFromSupabase(anilistId, ep);
+      if (cached.length > 0) {
+        req.log.info({ anilistId, ep, count: cached.length }, "all-sources: Supabase cache hit");
+        res.json({ sources: cached, total: cached.length, fromCache: true });
+        return;
+      }
+    }
 
-    const allSources: UnifiedSource[] = [];
+    // ── 2. Scrape all 9 sites in parallel ──
+    const [alekRes, mitRes, witRes, fourRes, blkomRes, asaqRes, titansRes, gateRes, araRes] =
+      await Promise.allSettled([
+        // AnimeLek
+        (async () => {
+          const slug = await resolveAlekSlug(title, english, alekSlug);
+          if (!slug) return { slug: null, sources: [] as UnifiedSource[] };
+          return { slug, sources: (await getAlekSources(slug, ep)) as UnifiedSource[] };
+        })(),
+        // MitAnime
+        (async () => {
+          const slug = mitSlug || (title ? await resolveMitSlug(title, english) : null);
+          if (!slug) return { slug: null, sources: [] as UnifiedSource[] };
+          return { slug, sources: (await getMitSources(slug, ep)) as UnifiedSource[] };
+        })(),
+        // WitAnime
+        (async () => {
+          if (!title) return { sources: [] as UnifiedSource[] };
+          const res2 = await resolveWitSlug(title, english);
+          if (!res2) return { sources: [] as UnifiedSource[] };
+          return { sources: (await getWitSources(res2.slug, res2.base, ep)) as UnifiedSource[] };
+        })(),
+        // Anime4Up
+        (async () => {
+          if (!title) return { sources: [] as UnifiedSource[] };
+          const slug = await resolveAnime4upSlug(title, english);
+          if (!slug) return { sources: [] as UnifiedSource[] };
+          return { sources: (await getAnime4upSources(slug, ep)) as UnifiedSource[] };
+        })(),
+        // AnimeBlkom
+        (async () => {
+          if (!title) return { sources: [] as UnifiedSource[] };
+          const slug = await resolveAnimeblkomSlug(title, english);
+          if (!slug) return { sources: [] as UnifiedSource[] };
+          return { sources: (await getAnimeblkomSources(slug, ep)) as UnifiedSource[] };
+        })(),
+        // 3asq
+        (async () => {
+          if (!title) return { sources: [] as UnifiedSource[] };
+          const slug = await resolve3asqSlug(title, english);
+          if (!slug) return { sources: [] as UnifiedSource[] };
+          return { sources: (await get3asqSources(slug, ep)) as UnifiedSource[] };
+        })(),
+        // AnimeTitans
+        (async () => {
+          if (!title) return { sources: [] as UnifiedSource[] };
+          const slug = await resolveAnimeTitansSlug(title, english);
+          if (!slug) return { sources: [] as UnifiedSource[] };
+          return { sources: (await getAnimeTitansSources(slug, ep)) as UnifiedSource[] };
+        })(),
+        // AnimeGate
+        (async () => {
+          if (!title) return { sources: [] as UnifiedSource[] };
+          const res2 = await resolveAnimeGateSlug(title, english);
+          if (!res2) return { sources: [] as UnifiedSource[] };
+          return { sources: (await getAnimeGateSources(res2.slug, res2.base, ep)) as UnifiedSource[] };
+        })(),
+        // AraAnime
+        (async () => {
+          if (!title) return { sources: [] as UnifiedSource[] };
+          const res2 = await resolveAraAnimeSlug(title, english);
+          if (!res2) return { sources: [] as UnifiedSource[] };
+          return { sources: (await getAraAnimeSources(res2.slug, res2.base, ep)) as UnifiedSource[] };
+        })(),
+      ]);
+
+    // ── 3. Collect & deduplicate all embed sources ──
+    const rawSources: UnifiedSource[] = [];
     const seenUrls = new Set<string>();
-
     const addSources = (result: PromiseSettledResult<{ sources: UnifiedSource[] }>) => {
       if (result.status !== "fulfilled") return;
       for (const s of result.value.sources) {
         if (!s.url || seenUrls.has(s.url)) continue;
-        // Skip known dead hosts
         if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) continue;
         seenUrls.add(s.url);
-        allSources.push(s);
+        rawSources.push(s);
       }
     };
+    [alekRes, witRes, fourRes, blkomRes, asaqRes, titansRes, mitRes, gateRes, araRes].forEach(addSources);
 
-    [alekRes, witRes, fourRes, blkomRes, asaqRes, titansRes, mitRes].forEach(addSources);
-
-    // Sort: quality DESC, then by site reliability
     const SITE_PRIO: Record<string, number> = {
-      witanime: 7, animeblkom: 6, anime4up: 5, "3asq": 4, mitanime: 3, animelek: 2, animetitans: 1,
+      witanime: 9, animeblkom: 8, anime4up: 7, "3asq": 6,
+      animegate: 5, araanime: 4, mitanime: 3, animelek: 2, animetitans: 1,
     };
-    allSources.sort((a, b) => {
+    rawSources.sort((a, b) => {
       if (b.qualityRank !== a.qualityRank) return b.qualityRank - a.qualityRank;
       return (SITE_PRIO[b.site] || 0) - (SITE_PRIO[a.site] || 0);
     });
 
+    // ── 4. Extract direct video URLs for all sources in parallel (7s timeout each) ──
+    const extractedSources = await Promise.all(
+      rawSources.map(async (src): Promise<UnifiedSource> => {
+        if (SKIP_EXTRACT_HOSTS.some(h => src.url.toLowerCase().includes(h))) return src;
+        try {
+          const result = await Promise.race([
+            extractVideoDeep(src.url, src.url),
+            new Promise<null>(r => setTimeout(() => r(null), 7000)),
+          ]);
+          if (result?.url) return { ...src, directUrl: result.url, directType: result.type };
+        } catch {}
+        return src;
+      })
+    );
+
+    // ── 5. Sort: sources with direct URL first (play instantly), embed-only last ──
+    const withDirect = extractedSources.filter(s => s.directUrl);
+    const embedOnly  = extractedSources.filter(s => !s.directUrl);
+    const allSources = [...withDirect, ...embedOnly];
+
+    // ── 6. Cache working sources in Supabase (fire-and-forget) ──
+    if (anilistId && withDirect.length > 0) {
+      saveToSupabase(anilistId, ep, title, allSources as CachedSource[]).catch(() => {});
+    }
+
     res.json({
       sources: allSources,
       alekSlug: alekRes.status === "fulfilled" ? (alekRes.value as any).slug : null,
-      mitSlug: mitRes.status === "fulfilled" ? (mitRes.value as any).slug : null,
+      mitSlug:  mitRes.status  === "fulfilled" ? (mitRes.value  as any).slug  : null,
       total: allSources.length,
     });
   } catch (e: any) {

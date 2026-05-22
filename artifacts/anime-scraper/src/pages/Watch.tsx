@@ -18,12 +18,14 @@ const ANILIST_Q = `query ($id: Int) {
 
 interface Source {
   name: string; url: string; quality: string; qualityRank: number; site: string;
+  directUrl?: string; directType?: "hls" | "mp4";
 }
 type ProbeStatus = "unknown" | "testing" | "ok" | "dead" | "incompatible";
 
 const SITE_LABEL: Record<string, string> = {
   animelek: "AnimeLek", mitanime: "MitAnime", witanime: "WitAnime",
   anime4up: "Anime4Up", animeblkom: "Blkom", "3asq": "3asq", animetitans: "Titans",
+  animegate: "AnimeGate", araanime: "AraAnime", cached: "مخزن",
 };
 
 function saveHistory(id: number, title: string, cover: string, ep: number) {
@@ -265,11 +267,12 @@ export default function WatchPage() {
         setAnime(animeData);
         if (animeData) saveHistory(animeId, animeData.title?.romaji || "", animeData.coverImage?.large || "", ep);
 
-        setLoadMsg("جاري جلب السيرفرات من 6 مواقع...");
+        setLoadMsg("جاري جلب السيرفرات من 9 مواقع...");
         const params = new URLSearchParams({
           ep: String(ep),
           title: animeData?.title?.romaji || "",
           english: animeData?.title?.english || "",
+          anilistId: String(animeId),
         });
         if (alekSlug) params.set("alekSlug", alekSlug);
         if (mitSlug)  params.set("mitSlug",  mitSlug);
@@ -293,10 +296,20 @@ export default function WatchPage() {
     })();
   }, [animeId, ep]);
 
-  /* ── Try to extract video from a source (deep multi-hop) ── */
+  /* ── Try to extract video from a source (uses pre-extracted URL if available) ── */
   async function tryExtract(src: Source): Promise<boolean> {
     setStatuses(s => ({ ...s, [src.url]: "testing" }));
     try {
+      // If we already have a direct video URL from server-side extraction, use it immediately
+      if (src.directUrl && src.directType) {
+        setVideoUrl(src.directUrl);
+        setVideoType(src.directType);
+        setActive(src);
+        setPlayerReady(false);
+        setStatuses(s => ({ ...s, [src.url]: "ok" }));
+        return true;
+      }
+      // Otherwise, ask the server to extract it (fallback for embed-only sources)
       const res = await fetch(
         `/api/anime/extract-video?url=${encodeURIComponent(src.url)}&referer=${encodeURIComponent(src.url)}`,
         { signal: AbortSignal.timeout(22000) }
