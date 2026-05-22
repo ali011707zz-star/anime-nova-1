@@ -1981,9 +1981,43 @@ router.get("/anime/animelek/search", async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+//  Test Embed  GET /api/anime/test-embed?url=ENCODED_URL
+//  Quick check: does this embed URL return video content (not CF block)?
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/test-embed", async (req, res) => {
+  const rawUrl = ((req.query.url as string) || "").trim();
+  if (!rawUrl) { res.status(400).json({ working: false, reason: "no url" }); return; }
+  let targetUrl: string;
+  try { targetUrl = decodeURIComponent(rawUrl); } catch { targetUrl = rawUrl; }
+  try {
+    new URL(targetUrl);
+  } catch { res.status(400).json({ working: false, reason: "invalid url" }); return; }
+
+  try {
+    const r = await fetch(targetUrl, {
+      method: "GET",
+      headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*", Referer: targetUrl },
+      signal: AbortSignal.timeout(8000),
+      redirect: "follow",
+    });
+    if (!r.ok) { res.json({ working: false, reason: `HTTP ${r.status}` }); return; }
+    const text = await r.text();
+    if (isCloudflareBlock(text)) { res.json({ working: false, reason: "cloudflare" }); return; }
+    // Check for video player indicators
+    const hasVideo = /<video/i.test(text) || /\.m3u8/i.test(text) || /jwplayer|plyr|playerjs|flowplayer|vidplayer/i.test(text)
+      || /source.*mp4|file.*mp4|url.*mp4/i.test(text) || /videoUrl|video_url|fileUrl|streamUrl/i.test(text);
+    const has404 = /404|not found|page not found/i.test(text.slice(0, 2000));
+    if (has404 && !hasVideo) { res.json({ working: false, reason: "404" }); return; }
+    res.json({ working: hasVideo, reason: hasVideo ? "ok" : "no-video" });
+  } catch (e: any) {
+    res.json({ working: false, reason: e.message });
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Embed Proxy  GET /api/anime/proxy-embed?url=ENCODED_URL
-//  Fetches embed page server-side, injects ad-blocker CSS+JS, returns
-//  clean HTML for use as iframe srcdoc (blocks popups & navigation).
+//  Fetches embed page server-side, strips ads/chrome, injects our UI.
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/proxy-embed", async (req, res) => {
   const rawUrl = ((req.query.url as string) || "").trim();
@@ -1992,7 +2026,6 @@ router.get("/anime/proxy-embed", async (req, res) => {
   let targetUrl: string;
   try { targetUrl = decodeURIComponent(rawUrl); } catch { targetUrl = rawUrl; }
 
-  // Validate URL
   let parsed: URL;
   try { parsed = new URL(targetUrl); } catch { res.status(400).send("invalid url"); return; }
   if (!["http:", "https:"].includes(parsed.protocol)) { res.status(400).send("bad protocol"); return; }
@@ -2000,71 +2033,151 @@ router.get("/anime/proxy-embed", async (req, res) => {
   try {
     const resp = await fetch(targetUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        "User-Agent": BROWSER_UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ar,en-US;q=0.9",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
         "Referer": parsed.origin + "/",
         "Origin": parsed.origin,
       },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(12_000),
       redirect: "follow",
     } as any);
 
-    if (!resp.ok && resp.status !== 200) {
-      // Still try to get body
-    }
-
     let html = await resp.text();
 
-    // ── Strip ad/tracker scripts by src ──
-    const AD_PATTERNS = [
+    // ── If Cloudflare block, return error page ──
+    if (isCloudflareBlock(html)) {
+      res.send(`<html><body style="background:#000;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:12px">
+        <div style="font-size:32px">🛡️</div>
+        <p style="margin:0;font-size:14px;opacity:0.6">محمي بـ Cloudflare</p>
+        <p style="margin:0;font-size:11px;opacity:0.3">${targetUrl.replace(/"/g,"")}</p>
+        <script>window.parent.postMessage({type:'nova-cf-block',url:'${targetUrl.replace(/'/g,"\\'")}'},'*')</script>
+      </body></html>`);
+      return;
+    }
+
+    // ── Strip ad/tracker scripts ──
+    const AD_SCRIPTS = [
       "googlesyndication","doubleclick","adsbygoogle","adsystem","popads",
       "popcash","trafficstars","propellerads","adcash","adbanner","adserver",
       "exoclick","hilltopads","juicyads","clickadu","adsterra","mgid",
-      "taboola","outbrain","revcontent","fuckingfast","adcdn",
+      "taboola","outbrain","revcontent","fuckingfast","adcdn","popunder",
     ];
-    const adRegex = new RegExp(
-      `<script[^>]+src=["'][^"']*(?:${AD_PATTERNS.join("|")})[^"']*["'][^>]*>.*?<\\/script>`,
-      "gis"
+    html = html.replace(
+      new RegExp(`<script[^>]+src=["'][^"']*(?:${AD_SCRIPTS.join("|")})[^"']*["'][^>]*>.*?<\\/script>`, "gis"),
+      ""
     );
-    html = html.replace(adRegex, "");
+    // Strip inline ad iframes
+    html = html.replace(/<iframe[^>]+src=["'][^"']*(?:doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>.*?<\/iframe>/gis, "");
 
-    // ── Inject ad-blocking CSS + JS at head ──
+    // ── Aggressive CSS: hide site chrome, show only the video player ──
     const INJECT = `
 <style>
-/* Nova Anime Ad Blocker */
-[id*="ad_"],[id*="_ad"],[id*="banner"],[id*="popup"],[id*="interstitial"],
-[class*="ad-"],[class*="-ad"],[class*="ads-"],[class*="banner-ad"],
-[class*="popup-ad"],[class*="advert"],[class*="advertisement"],
-[class*="vpn-banner"],[class*="click-under"],[class*="popunder"],
-.adsbygoogle,ins.adsbygoogle,[id="aswift_iframe_anchor"],
-iframe[src*="googlesyndication"],iframe[src*="doubleclick"],
-div[style*="z-index:9999"]:not(#player-container):not(.plyr),
-div[style*="z-index: 9999"]:not(#player-container):not(.plyr) { display:none!important; }
-body,html { overflow:hidden!important; background:#000!important; margin:0!important; }
-/* Remove fixed overlays / interstitials */
-body > div[style*="position:fixed"],body > div[style*="position: fixed"] {
-  pointer-events:none!important; opacity:0!important;
+/* === Nova Anime Embed Cleaner === */
+html, body {
+  margin:0 !important; padding:0 !important;
+  overflow:hidden !important;
+  background:#000 !important;
+  width:100vw !important; height:100vh !important;
+}
+
+/* Hide everything that's not the player */
+header, footer, nav, aside, .header, .footer, .nav, .navbar,
+.top-bar, .bottom-bar, .site-header, .site-footer,
+.breadcrumb, .pagination, .comments, .related-posts,
+.sidebar, .widget, .ad-zone, .ads-container,
+.cookie-notice, .cookie-bar, .gdpr-notice,
+.social-share, .share-buttons, .download-section,
+.subscription-box, .login-box, .register-box,
+.logo, .site-logo, .branding,
+[id*="header"], [id*="footer"], [id*="sidebar"], [id*="navbar"],
+[id*="nav-"], [id*="-nav"], [id*="menu"], [id*="breadcrumb"],
+[id*="comments"], [id*="related"], [id*="share"], [id*="social"],
+[class*="header"]:not([class*="player"]):not([class*="video"]),
+[class*="footer"]:not([class*="player"]):not([class*="video"]),
+[class*="navbar"]:not([class*="player"]):not([class*="video"]),
+[class*="sidebar"]:not([class*="player"]):not([class*="video"]),
+[class*="breadcrumb"], [class*="related"]:not([class*="player"]),
+[class*="comments"], [class*="social"]:not([class*="player"]),
+[class*="share"]:not([class*="player"]), [class*="download-btn"],
+[class*="cookie"], [class*="gdpr"], [class*="subscribe"],
+[class*="logo"]:not([class*="player"]), [class*="branding"] {
+  display: none !important;
+}
+
+/* Hide ads */
+[id*="ad_"], [id*="_ad"], [id*="banner"], [id*="popup"],
+[id*="interstitial"], [id*="overlay"],
+[class*="ad-"], [class*="-ad_"], [class*="ads-"], [class*="-ads"],
+[class*="banner-ad"], [class*="popup-ad"], [class*="advert"],
+[class*="advertisement"], [class*="vpn-banner"],
+[class*="click-under"], [class*="popunder"], [class*="clickad"],
+.adsbygoogle, ins.adsbygoogle, [id="aswift_iframe_anchor"] {
+  display: none !important;
+}
+
+/* Hide fixed overlays that are not the player */
+body > div[style*="position:fixed"]:not([id*="player"]):not([class*="player"]),
+body > div[style*="position: fixed"]:not([id*="player"]):not([class*="player"]) {
+  display: none !important;
+}
+
+/* Force the main player container to fill the screen */
+#player, #vplayer, #video, #videoPlayer, #player-container,
+#jwplayer, #player_container, #video-container,
+.player, .video-player, .player-container, .video-container,
+.jwplayer, .jw-wrapper, .plyr, .plyr__container,
+.mejs-container, .flowplayer, .fp-player,
+[id^="jwplayer"], [id*="player"], [id*="vplayer"],
+[class*="player"]:not([class*="noplayer"]):not([class*="ad-player"]),
+[class*="video-wrap"], [class*="videowrap"],
+[class*="embed-responsive"], [class*="embed_responsive"],
+[class*="video-holder"], [class*="video_holder"] {
+  position: fixed !important;
+  top: 0 !important; left: 0 !important;
+  width: 100vw !important; height: 100vh !important;
+  max-width: none !important; max-height: none !important;
+  margin: 0 !important; padding: 0 !important;
+  border: none !important; border-radius: 0 !important;
+  background: #000 !important;
+  z-index: 1 !important;
+  transform: none !important;
+}
+
+/* Ensure video element itself fills container */
+video {
+  width: 100% !important; height: 100% !important;
+  object-fit: contain !important;
+  background: #000 !important;
+  display: block !important;
+  max-width: none !important; max-height: none !important;
+}
+
+/* Hide player internal ads/overlays */
+.jw-overlays [class*="ad"], .jw-ad, .jw-flag-ads,
+.jw-nextup-container, .jw-logo,
+.plyr__ads, [class*="ima-ad"] {
+  display: none !important;
 }
 </style>
 <script>
 (function(){
-  /* Block window.open (popup ads) */
-  var _open = window.open; window.open = function(){ return null; };
-  window.alert = function(){}; window.confirm = function(){ return false; };
-  window.prompt  = function(){ return null; };
+  /* ── Block ALL popups / new-window attempts ── */
+  window.open = function(){ return { focus:function(){}, closed:false }; };
+  window.alert = function(){};
+  window.confirm = function(){ return false; };
+  window.prompt = function(){ return null; };
 
-  /* Block href navigation away from this page */
+  /* ── Block navigation away from embed ── */
   document.addEventListener('click', function(e){
-    var t = e.target; var tries = 0;
-    while(t && tries++ < 5){
+    var t = e.target, tries = 0;
+    while(t && tries++ < 6){
       if(t.tagName === 'A'){
-        var href = t.getAttribute('href') || '';
-        if(href && (href.startsWith('http') || href.startsWith('//'))) {
-          var isSameDomain = href.indexOf(location.hostname) !== -1;
-          if(!isSameDomain && t.getAttribute('data-allow-nav') !== '1'){
-            e.preventDefault(); e.stopPropagation(); return;
-          }
+        var href = (t.getAttribute('href') || '').trim();
+        if(href && href !== '#' && !href.startsWith('javascript') &&
+          (href.startsWith('http') || href.startsWith('//'))){
+          var same = href.indexOf(location.hostname) !== -1;
+          if(!same){ e.preventDefault(); e.stopPropagation(); return; }
         }
         break;
       }
@@ -2072,21 +2185,52 @@ body > div[style*="position:fixed"],body > div[style*="position: fixed"] {
     }
   }, true);
 
-  /* Neutralise common ad launchers */
-  setTimeout(function(){
-    try {
-      var adSelectors = [
-        '[id*="ad_"]','[class*="ad-banner"]','[class*="popup"]',
-        '.adsbygoogle','[id*="interstitial"]'
-      ];
-      adSelectors.forEach(function(sel){
+  /* ── Block location.href changes ── */
+  try {
+    var _assign = location.assign.bind(location);
+    var _replace = location.replace.bind(location);
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      get: function(){ return location; },
+      set: function(v){
+        if(typeof v === 'string' && v.indexOf(location.hostname) === -1) return;
+        _assign(v);
+      }
+    });
+  } catch(e){}
+
+  /* ── Remove ad elements after DOM ready ── */
+  function cleanAds(){
+    var adSels = [
+      '[id*="ad_"]','[id*="banner"]','[class*="ad-banner"]',
+      '[class*="popup"]','[class*="popunder"]','[class*="clickunder"]',
+      '[class*="overlay"]:not([class*="player"])',
+      '.adsbygoogle','[id*="interstitial"]','[class*="vpn"]',
+      '[class*="subscribe"]','[class*="social-"]',
+    ];
+    adSels.forEach(function(sel){
+      try {
         document.querySelectorAll(sel).forEach(function(el){
           el.style.display = 'none';
           el.style.visibility = 'hidden';
+          el.style.pointerEvents = 'none';
         });
-      });
-    } catch(e){}
-  }, 500);
+      } catch(e){}
+    });
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', cleanAds);
+  } else { cleanAds(); }
+  setTimeout(cleanAds, 800);
+  setTimeout(cleanAds, 2000);
+
+  /* ── Notify parent when CF block detected ── */
+  document.addEventListener('DOMContentLoaded', function(){
+    var text = document.body && document.body.innerText || '';
+    if(text.indexOf('Just a moment') !== -1 || text.indexOf('cf_chl_') !== -1){
+      window.parent.postMessage({type:'nova-cf-block'},'*');
+    }
+  });
 })();
 </script>`;
 
