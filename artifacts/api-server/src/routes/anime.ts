@@ -407,7 +407,7 @@ async function extractVideoDeep(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  AllAnime  (search & resolve)
+//  AllAnime  (search, resolve & direct video sources)
 // ════════════════════════════════════════════════════════════════════
 const ALLANIME_BASE = "https://api.allanime.day/api";
 const ALLANIME_HDRS = {
@@ -425,6 +425,80 @@ async function aaGql(query: string, variables: Record<string, unknown>) {
   });
   if (!r.ok) throw new Error(`AllAnime API error: ${r.status}`);
   return r.json();
+}
+
+function decodeAaUrl(raw: string): string {
+  try {
+    if (raw.startsWith("--")) {
+      const b = raw.slice(2).replace(/-/g, "=");
+      return Buffer.from(b, "base64").toString("utf8");
+    }
+    if (/^[A-Za-z0-9+/=]{20,}$/.test(raw)) {
+      return Buffer.from(raw, "base64").toString("utf8");
+    }
+  } catch {}
+  return raw;
+}
+
+const AA_EP_Q = `
+query ($showId: String!, $episodeString: String!, $type: VaildTranslationTypeEnumType!) {
+  episode(showId: $showId, episodeString: $episodeString, translationType: $type) {
+    sourceUrls
+  }
+}`;
+
+const aaSourceCache = new Map<string, { sources: any[]; ts: number }>();
+
+async function getAllAnimeSources(showId: string, epNum: number): Promise<UnifiedSource[]> {
+  const ck = `aa:${showId}-${epNum}`;
+  const cached = aaSourceCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+
+  try {
+    const d = await aaGql(AA_EP_Q, { showId, episodeString: String(epNum), type: "sub" });
+    const raw = (d as any)?.data?.episode?.sourceUrls;
+    if (!raw) return [];
+
+    const sourceUrls: any[] = Array.isArray(raw) ? raw
+      : typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch { return []; } })()
+      : [];
+
+    const sources: UnifiedSource[] = [];
+    const seen = new Set<string>();
+
+    for (const s of sourceUrls) {
+      try {
+        const url = decodeAaUrl(s.url || "");
+        if (!url || url.length < 10 || !url.startsWith("http")) continue;
+        if (seen.has(url)) continue;
+        seen.add(url);
+        if (DEAD_FILE_HOSTS.some(h => url.toLowerCase().includes(h))) continue;
+
+        const name = (s.sourceName || s.type || "AllAnime").replace(/^--|Gogoanime|Vidstreaming/gi, "").trim();
+        const isM3u8 = url.includes(".m3u8");
+        const isMp4  = url.includes(".mp4");
+        const isEmbed = !isM3u8 && !isMp4 && (
+          url.includes("embed") || url.includes("iframe") ||
+          url.includes("vidstreaming") || url.includes("gogoanime") ||
+          url.includes("ssbcontent") || url.includes("playtaku")
+        );
+
+        if (isM3u8) {
+          sources.push({ name: `AllAnime · ${name}`, url, quality: "HD", qualityRank: 2,
+            site: "allanime", directUrl: url, directType: "hls" });
+        } else if (isMp4) {
+          sources.push({ name: `AllAnime · ${name}`, url, quality: "HD", qualityRank: 2,
+            site: "allanime", directUrl: url, directType: "mp4" });
+        } else if (!isEmbed) {
+          // Unknown — try extraction
+          sources.push({ name: `AllAnime · ${name}`, url, quality: "HD", qualityRank: 2, site: "allanime" });
+        }
+      } catch {}
+    }
+
+    aaSourceCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
 }
 
 const SEARCH_Q = `
@@ -1802,19 +1876,38 @@ router.get("/anime/sources-stream", async (req, res) => {
         } catch {}
       })(),
 
-      // 5. Supabase DB
+      // 5. DB sources
       (async () => {
         try {
           const srcs = await Promise.race([
             getDBSources(title, english, ep, malId || undefined),
             new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
           ]);
-          // DB sources may already have directUrl set (scrapeEpisodePage detects m3u8/mp4)
           await extractAndSend(srcs as UnifiedSource[], sendSrc, EXTRACT_MS);
         } catch {}
       })(),
 
-      // 6. AppsAnime
+      // 6. AllAnime — free API, returns direct m3u8/mp4 CDN links
+      (async () => {
+        try {
+          if (!title) return;
+          const resolved = await Promise.race([
+            resolveTitle([title, english].filter(Boolean) as string[]),
+            new Promise<null>(r => setTimeout(() => r(null), SCRAPER_MS)),
+          ]);
+          if (!resolved) return;
+          const srcs = await Promise.race([
+            getAllAnimeSources(resolved.show._id, ep),
+            new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          const direct = srcs.filter(s => s.directUrl);
+          const embeds = srcs.filter(s => !s.directUrl);
+          for (const s of direct) sendSrc(s);
+          if (embeds.length) await extractAndSend(embeds, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // 7. AppsAnime
       (async () => {
         try {
           if (!title) return;
