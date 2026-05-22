@@ -574,19 +574,23 @@ async function getAlekSources(slug: string, epNum: number): Promise<any[]> {
   const cached = alekSrcCache.get(ck);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
 
-  const epPath = `${slug}-${epNum}-\u0627\u0644\u062d\u0644\u0642\u0629`;
-  const epUrl  = `${ALEK_BASE}/episode/${encodeURIComponent(epPath)}/`;
-  try {
-    const r = await fetch(epUrl, { headers: ALEK_HDRS, signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return [];
-    const html = await r.text();
-    if (isCloudflareBlock(html)) return [];
+  // Build URL candidates — try episode URL, then movie variants (for ep=1)
+  const epPath   = `${slug}-${epNum}-\u0627\u0644\u062d\u0644\u0642\u0629`; // slug-N-الحلقة
+  const urlsToTry: string[] = [
+    `${ALEK_BASE}/episode/${encodeURIComponent(epPath)}/`,
+  ];
+  if (epNum === 1) {
+    // Movies on AnimeLek use "الفيلم" instead of "الحلقة"
+    urlsToTry.push(`${ALEK_BASE}/episode/${encodeURIComponent(`${slug}-\u0627\u0644\u0641\u064a\u0644\u0645`)}/`);
+    // Some movies appear on the anime's main page directly
+    urlsToTry.push(`${ALEK_BASE}/anime/${slug}/`);
+  }
 
+  function extractSourcesFromHtml(html: string): any[] {
     const seen = new Set<string>();
     const sources: any[] = [];
 
-    // Method 1: data-embed attribute
-    // AnimeLek wraps embeds as card.php?random=ACTUAL_URL — extract the real URL directly
+    // Method 1: data-embed attribute (most reliable)
     const embedRe = /data-embed="(https?:\/\/[^"]+)"/g;
     const nameRe  = /<span class="server">([^<]+)<\/span>/g;
     const embeds  = [...html.matchAll(embedRe)].map(m => m[1].replace(/&amp;/g, "&"));
@@ -594,13 +598,9 @@ async function getAlekSources(slug: string, epNum: number): Promise<any[]> {
 
     for (let i = 0; i < embeds.length; i++) {
       let url = embeds[i];
-      // Unwrap card.php?random=ACTUAL_URL
       const randomMatch = url.match(/[?&]random=([^&]+)/);
-      if (randomMatch) {
-        try { url = decodeURIComponent(randomMatch[1]); } catch {}
-      }
+      if (randomMatch) { try { url = decodeURIComponent(randomMatch[1]); } catch {} }
       if (seen.has(url)) continue; seen.add(url);
-      // Skip known dead hosts
       if (DEAD_FILE_HOSTS.some(h => url.toLowerCase().includes(h))) continue;
       const rawName = names[i] || `سيرفر ${sources.length + 1}`;
       const quality = qualityLabel(rawName);
@@ -617,16 +617,29 @@ async function getAlekSources(slug: string, epNum: number): Promise<any[]> {
         const url = m[1];
         if (seen.has(url) || url.includes("animelek")) continue;
         seen.add(url);
+        if (DEAD_FILE_HOSTS.some(h => url.toLowerCase().includes(h))) continue;
         sources.push({ name: `سيرفر ${sources.length + 1}`, url, quality: "HD", qualityRank: 2, site: "animelek" });
       }
     }
-
-    if (sources.length) alekSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
-  } catch (e: any) {
-    console.error("[alek] getAlekSources error:", e?.message ?? e);
-    return [];
   }
+
+  for (const epUrl of urlsToTry) {
+    try {
+      const r = await fetch(epUrl, { headers: ALEK_HDRS, signal: AbortSignal.timeout(8000) });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+      const sources = extractSourcesFromHtml(html);
+      if (sources.length) {
+        alekSrcCache.set(ck, { sources, ts: Date.now() });
+        return sources;
+      }
+    } catch (e: any) {
+      console.error("[alek] getAlekSources error:", e?.message ?? e);
+    }
+  }
+  return [];
 }
 
 

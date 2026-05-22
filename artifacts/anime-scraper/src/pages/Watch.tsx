@@ -437,9 +437,14 @@ function NativeVideoPlayer({
 }
 
 /* ══════════════════════════════════════════════════════
-   EMBED PLAYER  (direct iframe — sandbox blocks popups)
-   Loads embed URL directly so CDN/CORS works correctly.
-   sandbox: no allow-popups, no allow-top-navigation.
+   EMBED PLAYER
+   - iframe fills ENTIRE screen (absolute inset-0)
+   - Our controls overlay as dark gradient bars (top + bottom)
+   - pointer-events:none on containers → clicks pass to video
+   - pointer-events:auto on each button → we capture those only
+   - Dark gradients hide site ads/controls at top & bottom
+   - referrerpolicy="no-referrer" prevents referrer-based blocking
+   - sandbox blocks popups (no allow-popups) and top-nav
 ══════════════════════════════════════════════════════ */
 function EmbedPlayer({
   src, title, ep, totalEps,
@@ -451,119 +456,103 @@ function EmbedPlayer({
   onClose: () => void; onNext: () => void; onPrev: () => void;
   onSelectSource: (s: Source) => void; onNextSrc: () => void;
 }) {
-  const [loading, setLoading]     = useState(true);
-  const [cfBlock, setCfBlock]     = useState(false);
+  const [loading, setLoading] = useState(true);
   const [showSheet, setShowSheet] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const nextTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load embed URL DIRECTLY — not via proxy (proxy caused CORS black screen).
-  // The browser's sandbox attribute blocks popups and top-level navigation instead.
-  const nextSrc = sources[activeIdx + 1];
+  useEffect(() => { setLoading(true); }, [src.url]);
 
-  /* Reset on src change */
-  useEffect(() => {
-    setLoading(true); setCfBlock(false);
-    if (nextTimer.current) clearTimeout(nextTimer.current);
-  }, [src.url]);
+  function fullscreen() {
+    const el = iframeRef.current; if (!el) return;
+    const fn = el.requestFullscreen || (el as any).webkitRequestFullscreen;
+    fn?.call(el);
+  }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col" dir="ltr">
+    <div className="fixed inset-0 z-50 bg-black" dir="ltr">
 
-      {/* Top bar — always visible, semi-transparent gradient */}
-      <div className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between px-3 pt-5 pb-3"
-        style={{ background: "linear-gradient(180deg,rgba(0,0,0,0.85) 0%,transparent 100%)" }}>
-        <div className="flex items-center gap-2">
-          <button onClick={onClose} className="w-9 h-9 bg-black/70 rounded-full flex items-center justify-center border border-white/15 active:scale-90 shrink-0">
-            <X className="w-4 h-4 text-white" />
-          </button>
-          <div dir="rtl">
-            <p className="text-white text-[11px] font-black drop-shadow-lg line-clamp-1">{title}</p>
-            <div className="flex items-center gap-1.5">
-              <p className="text-white/50 text-[9px]">الحلقة {ep}</p>
-              <span className="text-[7px] font-bold text-amber-400/60 bg-amber-500/10 border border-amber-500/15 px-1.5 rounded-full">embed</span>
-            </div>
-          </div>
-        </div>
-        <button onClick={() => {
-          if (iframeRef.current) (iframeRef.current.requestFullscreen || (iframeRef.current as any).webkitRequestFullscreen)?.call(iframeRef.current);
-        }} className="w-8 h-8 bg-black/70 rounded-full flex items-center justify-center border border-white/15 active:scale-90">
-          <Maximize2 className="w-3.5 h-3.5 text-white/70" />
-        </button>
-      </div>
-
-      {/* CF block overlay */}
-      {cfBlock && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/95">
-          <Shield className="w-12 h-12 text-amber-400/70" />
-          <div dir="rtl" className="text-center">
-            <p className="text-white font-black font-['Cairo']">محمي بـ Cloudflare</p>
-            <p className="text-white/40 text-xs font-['Cairo'] mt-1">{src.name}</p>
-            {nextSrc && <p className="text-primary/60 text-[10px] font-['Cairo'] mt-2">جارٍ الانتقال لـ {nextSrc.name}…</p>}
-          </div>
-          <div className="flex gap-2" dir="rtl">
-            <button onClick={onNextSrc}
-              className="flex items-center gap-1.5 bg-primary/20 border border-primary/30 text-primary px-4 py-2 rounded-xl text-sm font-bold font-['Cairo'] active:scale-95">
-              <SkipForward className="w-4 h-4" /> سيرفر آخر
-            </button>
-            <button onClick={() => setShowSheet(true)}
-              className="flex items-center gap-1.5 bg-white/6 border border-white/10 text-white/50 px-4 py-2 rounded-xl text-sm font-bold font-['Cairo'] active:scale-95">
-              <List className="w-4 h-4" /> السيرفرات
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Loading spinner on top of iframe */}
-      {loading && !cfBlock && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
-          <div className="flex flex-col items-center gap-3">
-            <Loader2 className="w-10 h-10 text-primary/60 animate-spin" />
-            <p className="text-white/30 text-xs font-['Cairo']" dir="rtl">جارٍ تحميل المشغّل…</p>
-          </div>
-        </div>
-      )}
-
-      {/* Iframe — direct URL, no proxy (proxy caused CORS → black screen).
-           sandbox blocks: popups (no allow-popups), top nav (no allow-top-navigation).
-           allow-same-origin lets the player reach its own CDN for video data. */}
+      {/* ── Site embed player — fills entire screen ──
+          Direct URL (no proxy) = no CORS issues.
+          referrerpolicy=no-referrer stops referrer-based blocking.
+          sandbox: scripts + same-origin let the player work normally;
+                   no allow-popups blocks pop-up ads entirely. */}
       <iframe
         ref={iframeRef}
         src={src.url}
-        className="w-full flex-1 border-none bg-black"
+        className="absolute inset-0 w-full h-full border-none"
+        referrerPolicy="no-referrer"
         sandbox="allow-scripts allow-same-origin allow-presentation allow-forms"
         allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
         onLoad={() => setLoading(false)}
-        title={`${title} - الحلقة ${ep}`}
+        title={title}
       />
 
-      {/* Bottom bar */}
-      <div className="absolute bottom-0 left-0 right-0 z-30 flex items-center gap-2 px-3 pb-6"
-        style={{ background: "linear-gradient(0deg,rgba(0,0,0,0.85) 0%,transparent 100%)" }}
-        dir="rtl">
+      {/* Loading overlay */}
+      {loading && (
+        <div className="absolute inset-0 z-10 bg-black/85 flex flex-col items-center justify-center gap-3 pointer-events-none">
+          <Loader2 className="w-10 h-10 text-primary/60 animate-spin" />
+          <p className="text-white/35 text-xs font-['Cairo']" dir="rtl">جارٍ تحميل المشغّل…</p>
+        </div>
+      )}
+
+      {/* ── TOP overlay ──
+          Dark gradient covers site header + top ads.
+          pointer-events:none on container → video clicks pass through.
+          Only button elements have pointer-events:auto. */}
+      <div
+        className="absolute top-0 left-0 right-0 z-20 flex items-start gap-2 px-3 pointer-events-none"
+        style={{
+          background: "linear-gradient(to bottom, rgba(0,0,0,0.93) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)",
+          paddingTop: "max(20px, env(safe-area-inset-top))",
+          paddingBottom: "56px",
+        }}
+      >
+        <button onClick={onClose}
+          className="w-10 h-10 bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/20 active:scale-90 pointer-events-auto shrink-0 mt-0.5">
+          <X className="w-4 h-4 text-white" />
+        </button>
+        <div dir="rtl" className="flex-1 min-w-0 mt-1 select-none">
+          <p className="text-white text-[13px] font-black line-clamp-1 drop-shadow-md">{title}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-white/50 text-[10px]">{ep === 0 ? "فيلم" : `الحلقة ${ep}`}</p>
+            <span className="text-[9px] text-primary/70 font-bold bg-primary/10 border border-primary/20 px-1.5 py-px rounded-md">{src.name}</span>
+          </div>
+        </div>
+        <button onClick={fullscreen}
+          className="w-10 h-10 bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/20 active:scale-90 pointer-events-auto shrink-0 mt-0.5">
+          <Maximize2 className="w-4 h-4 text-white/70" />
+        </button>
+      </div>
+
+      {/* ── BOTTOM overlay ──
+          Dark gradient covers site player controls + bottom ads. */}
+      <div
+        className="absolute bottom-0 left-0 right-0 z-20 flex items-end gap-2 px-3 pointer-events-none"
+        dir="rtl"
+        style={{
+          background: "linear-gradient(to top, rgba(0,0,0,0.93) 0%, rgba(0,0,0,0.6) 50%, transparent 100%)",
+          paddingBottom: "max(24px, env(safe-area-inset-bottom))",
+          paddingTop: "56px",
+        }}
+      >
         <button onClick={onPrev} disabled={ep <= 1}
-          className="flex items-center gap-1 bg-black/70 text-white/70 text-[10px] font-bold px-3 py-2 rounded-xl border border-white/15 disabled:opacity-30 active:scale-95 font-['Cairo'] shrink-0">
+          className="flex items-center gap-1 bg-black/75 backdrop-blur-sm text-white/80 text-[11px] font-bold px-3 py-2.5 rounded-xl border border-white/15 disabled:opacity-30 active:scale-95 font-['Cairo'] pointer-events-auto shrink-0">
           <ChevronRight className="w-3.5 h-3.5" /> السابقة
         </button>
-
-        {/* "Episode not working?" quick skip — prominent */}
         <button onClick={onNextSrc}
-          className="flex-1 flex items-center justify-center gap-1.5 bg-black/70 text-amber-400/80 text-[9px] font-bold py-2 rounded-xl border border-amber-500/20 active:scale-95 font-['Cairo']">
-          <SkipForward className="w-3 h-3" /> الحلقة لا تعمل؟
+          className="flex-1 flex items-center justify-center gap-1.5 bg-black/75 backdrop-blur-sm text-amber-400 text-[11px] font-bold py-2.5 rounded-xl border border-amber-400/30 active:scale-95 font-['Cairo'] pointer-events-auto">
+          <SkipForward className="w-3.5 h-3.5" /> الحلقة لا تعمل؟
         </button>
-
         <button onClick={() => setShowSheet(true)}
-          className="flex items-center justify-center gap-1 bg-black/70 text-white/55 text-[9px] font-bold px-2.5 py-2 rounded-xl border border-white/15 active:scale-95 shrink-0">
-          <List className="w-3 h-3" />
+          className="w-10 h-10 bg-black/75 backdrop-blur-sm flex items-center justify-center rounded-xl border border-white/15 active:scale-95 pointer-events-auto shrink-0">
+          <List className="w-4 h-4 text-white/60" />
         </button>
-
         <button onClick={onNext} disabled={ep >= totalEps && totalEps > 0}
-          className="flex items-center gap-1 bg-primary text-white text-[10px] font-black px-3 py-2 rounded-xl disabled:opacity-30 active:scale-95 font-['Cairo'] shrink-0">
+          className="flex items-center gap-1 bg-primary text-white text-[11px] font-black px-3 py-2.5 rounded-xl disabled:opacity-30 active:scale-95 font-['Cairo'] pointer-events-auto shrink-0">
           التالية <ChevronLeft className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      {/* Server sheet */}
       <AnimatePresence>
         {showSheet && (
           <ServerSheet sources={sources} activeIdx={activeIdx} statuses={statuses}
@@ -703,11 +692,13 @@ export default function WatchPage() {
   const [streamDone, setStreamDone]   = useState(false);
   const [toast, setToast]             = useState<string | null>(null);
 
-  const sseRef       = useRef<EventSource | null>(null);
-  const seenUrls     = useRef(new Set<string>());
-  const autoStarted  = useRef(false);
-  const sourcesRef   = useRef<Source[]>([]);
-  const activeIdxRef = useRef(0);
+  const sseRef             = useRef<EventSource | null>(null);
+  const seenUrls           = useRef(new Set<string>());
+  const autoStarted        = useRef(false);
+  const sourcesRef         = useRef<Source[]>([]);
+  const activeIdxRef       = useRef(0);
+  const statusesRef        = useRef<Record<string, ProbeStatus>>({});
+  const embedFallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const title    = anime?.title?.romaji || anime?.title?.english || "أنمي";
   const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
@@ -716,6 +707,7 @@ export default function WatchPage() {
 
   useEffect(() => { sourcesRef.current = sources; }, [sources]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
+  useEffect(() => { statusesRef.current = statuses; }, [statuses]);
 
   /* ── Load metadata + start SSE ── */
   useEffect(() => {
@@ -724,6 +716,7 @@ export default function WatchPage() {
     setStatuses({}); setStreamDone(false); setShowPlayer(false);
     seenUrls.current.clear(); autoStarted.current = false;
     sseRef.current?.close();
+    if (embedFallbackTimer.current) { clearTimeout(embedFallbackTimer.current); embedFallbackTimer.current = null; }
 
     const cacheKey = `${animeId}-${ep}`;
     (async () => {
@@ -813,49 +806,56 @@ export default function WatchPage() {
     return () => { sseRef.current?.close(); sseRef.current = null; };
   }, [animeId, ep]);
 
-  /* Background embed test — only mark DEAD on hard failures (CF block or 404).
-     "no-video" is NOT a dead signal: most embed pages load video dynamically via JS,
-     so static HTML won't contain <video> elements. We can only detect dead servers
-     if the server itself is down (404) or Cloudflare-blocked server-side. */
+  /* Background embed test — only mark DEAD on hard failures (CF/404/error).
+     "no-video" is NOT dead: video loads dynamically via JS in the embed player. */
   async function testEmbed(url: string): Promise<boolean> {
     try {
-      const r = await fetch(`/api/anime/test-embed?url=${encodeURIComponent(url)}`, {
-        signal: AbortSignal.timeout(10000),
-      });
+      const r = await fetch(`/api/anime/test-embed?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(10000) });
       const d = await r.json();
-      // Only dead on explicit hard failures
       if (d.reason === "cloudflare" || d.reason === "404" || d.reason === "error") return false;
-      return true; // "no-video" or "ok" → assume working (video loads via JS)
-    } catch { return true; } // network error → assume ok
+      return true;
+    } catch { return true; }
   }
 
-  /* ── Auto-play first source ──
-     Strategy:
-     1. As soon as a directUrl source arrives → play it immediately (best UX).
-     2. If stream finishes with no directUrl → play best non-dead embed source.
-     Never auto-start an embed source while stream is still running
-     (directUrl might arrive 1-2 seconds later via uqload). */
+  /* ── Auto-play strategy ──
+     1. Direct HLS/MP4 arrives → play immediately (best quality)
+     2. Only embed sources arrive → start 3.5s timer to give direct sources time to arrive,
+        then play best embed if still no direct
+     3. Stream done with nothing started → play best available right away */
   useEffect(() => {
     if (autoStarted.current || showPlayer) return;
 
+    // Priority 1: direct source → play instantly
     const directBest = sources.find(s => s.directUrl);
     if (directBest) {
-      // Direct HLS/MP4 found → play now
+      if (embedFallbackTimer.current) { clearTimeout(embedFallbackTimer.current); embedFallbackTimer.current = null; }
       autoStarted.current = true;
-      const idx = sources.indexOf(directBest);
-      setActive(directBest); setActiveIdx(idx); setShowPlayer(true);
+      setActive(directBest); setActiveIdx(sources.indexOf(directBest)); setShowPlayer(true);
       return;
     }
 
-    // No direct source yet — only fall back to embed AFTER stream completes
-    if (!streamDone || sources.length === 0) return;
-    const embedBest = sources.find(s => (statuses[s.url] || "unknown") !== "dead")
-      || sources[0];
-    if (!embedBest) return;
-    autoStarted.current = true;
-    const idx = sources.indexOf(embedBest);
-    setActive(embedBest); setActiveIdx(idx); setShowPlayer(true);
-  }, [sources, statuses, streamDone]);
+    // Priority 2: embed source available — arm 3.5s fallback timer (once)
+    const embedBest = sources.find(s => (statusesRef.current[s.url] || "unknown") !== "dead");
+    if (embedBest && !embedFallbackTimer.current) {
+      embedFallbackTimer.current = setTimeout(() => {
+        embedFallbackTimer.current = null;
+        if (autoStarted.current) return;
+        const s = sourcesRef.current.find(s2 => s2.directUrl)
+          || sourcesRef.current.find(s2 => (statusesRef.current[s2.url] || "unknown") !== "dead")
+          || sourcesRef.current[0];
+        if (!s) return;
+        autoStarted.current = true;
+        setActive(s); setActiveIdx(sourcesRef.current.indexOf(s)); setShowPlayer(true);
+      }, 3500);
+    }
+
+    // Stream done with no timer running and nothing started → play now
+    if (streamDone && sources.length > 0 && !embedFallbackTimer.current) {
+      const best = sources.find(s => (statusesRef.current[s.url] || "unknown") !== "dead") || sources[0];
+      autoStarted.current = true;
+      setActive(best); setActiveIdx(sources.indexOf(best)); setShowPlayer(true);
+    }
+  }, [sources, streamDone]);
 
   /* ── Probe a source URL ── */
   const probeSource = useCallback(async (src: Source) => {
