@@ -1383,6 +1383,103 @@ async function getAraAnimeSources(slug: string, base: string, ep: number): Promi
 
 
 // ════════════════════════════════════════════════════════════════════
+//  AppsAnime  (apps-anime.com — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const APPS_BASE = "https://apps-anime.com";
+const APPS_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://apps-anime.com/" };
+const appsSlugCache = new Map<string, { uid: string | null; ts: number }>();
+const appsSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolveAppsAnimeUid(romaji: string, english?: string | null): Promise<string | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = appsSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.uid;
+
+  const queries = [romaji, english].filter(Boolean) as string[];
+  for (const q of queries) {
+    try {
+      const sr = await fetch(`${APPS_BASE}/search?q=${encodeURIComponent(q)}`, {
+        headers: APPS_HDRS, signal: AbortSignal.timeout(8000),
+      });
+      if (!sr.ok) continue;
+      const html = await sr.text();
+      if (isCloudflareBlock(html)) continue;
+      // Match links like /anime/one-piece-eXawJ8Wy
+      const m = html.match(/href=["']https?:\/\/apps-anime\.com\/anime\/([^"']+)["']/i);
+      if (m?.[1]) {
+        // Extract the 8-char UID at the end of slug
+        const uid = m[1].trim();
+        appsSlugCache.set(cacheKey, { uid, ts: Date.now() });
+        return uid;
+      }
+    } catch {}
+  }
+  appsSlugCache.set(cacheKey, { uid: null, ts: Date.now() });
+  return null;
+}
+
+async function getAppsAnimeSources(uid: string, ep: number): Promise<any[]> {
+  const ck = `apps:${uid}-${ep}`;
+  const cached = appsSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+
+  const seen = new Set<string>(); const sources: any[] = [];
+
+  const epUrls = [
+    `${APPS_BASE}/anime/${uid}`,
+  ];
+
+  for (const animeUrl of epUrls) {
+    try {
+      const r = await fetch(animeUrl, { headers: APPS_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      // Find episode-specific links
+      const epRe = new RegExp(
+        `href=["'](https?://apps-anime\\.com/[^"']+(?:episode|ep|watch)[^"']*[/-]${ep}[^"']*)["']`,
+        "gi"
+      );
+      const epUrls2: string[] = [];
+      for (const m of html.matchAll(epRe)) epUrls2.push(m[1]);
+
+      // Also look for player iframes on the anime page
+      for (const m of html.matchAll(/<iframe[^>]+src=["'](https?:\/\/apps-player\.com[^"']+)["']/gi)) {
+        const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+        sources.push({ name: "AppsPlayer", url, quality: "HD", qualityRank: 2, site: "appsanime" });
+      }
+
+      // Try fetching episode page
+      for (const epUrl2 of epUrls2.slice(0, 3)) {
+        try {
+          const er = await fetch(epUrl2, { headers: APPS_HDRS, signal: AbortSignal.timeout(6000), redirect: "follow" });
+          if (!er.ok) continue;
+          const ehtml = await er.text();
+          if (isCloudflareBlock(ehtml)) continue;
+          for (const m of ehtml.matchAll(/<iframe[^>]+src=["'](https?:\/\/(?:apps-player|[^"']+)\.com[^"']+)["']/gi)) {
+            const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+            sources.push({ name: "AppsPlayer", url, quality: "HD", qualityRank: 2, site: "appsanime" });
+          }
+          for (const m of ehtml.matchAll(/(https?:\/\/[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)/gi)) {
+            const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+            const isDirect = url.includes(".m3u8");
+            sources.push({ name: "AppsAnime", url, quality: "HD", qualityRank: 2, site: "appsanime",
+              ...(isDirect ? { directUrl: url, directType: "hls" as const } : {}) });
+          }
+        } catch { continue; }
+      }
+
+      if (sources.length) break;
+    } catch { continue; }
+  }
+
+  appsSrcCache.set(ck, { sources, ts: Date.now() });
+  return sources;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Probe endpoint  GET /api/anime/probe
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/probe", async (req, res) => {
@@ -1606,6 +1703,44 @@ router.get("/anime/all-sources", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  Helper: try extractVideoDeep for each embed source in parallel
+//  Sends result (with or without directUrl) as each one completes.
+// ════════════════════════════════════════════════════════════════════
+async function extractAndSend(
+  sources: UnifiedSource[],
+  send: (s: UnifiedSource) => void,
+  timeoutMs = 9000,
+): Promise<void> {
+  await Promise.allSettled(sources.map(async (s) => {
+    // Already has a direct URL — send immediately
+    if (s.directUrl) { send(s); return; }
+    // Known un-extractable hosts — send as embed
+    if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) { send(s); return; }
+    // Direct m3u8/mp4 in the URL itself
+    if (s.url.match(/\.m3u8([?#]|$)/i)) {
+      send({ ...s, directUrl: s.url, directType: "hls" }); return;
+    }
+    if (s.url.match(/\.mp4([?#]|$)/i)) {
+      send({ ...s, directUrl: s.url, directType: "mp4" }); return;
+    }
+    try {
+      const result = await Promise.race([
+        extractVideoDeep(s.url, s.url),
+        new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
+      ]);
+      if (result) {
+        send({ ...s, directUrl: result.url, directType: result.type });
+      } else {
+        send(s);
+      }
+    } catch {
+      send(s);
+    }
+  }));
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Sources Stream  GET /api/anime/sources-stream  (SSE)
 //  Streams sources as they arrive — frontend shows them immediately
 // ════════════════════════════════════════════════════════════════════
@@ -1656,6 +1791,9 @@ router.get("/anime/sources-stream", async (req, res) => {
     const empty = { sources: [] as UnifiedSource[] };
 
     // Run all scrapers independently, send results as each finishes
+    // Each scraper now also tries extractVideoDeep in parallel for embed URLs
+    const EXTRACT_MS = 9000;
+
     const scrapers: Promise<void>[] = [
       // 1. AnimeLek
       (async () => {
@@ -1670,7 +1808,7 @@ router.get("/anime/sources-stream", async (req, res) => {
             getAlekSources(slug, ep),
             new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
           ]);
-          sendMany(srcs as UnifiedSource[]);
+          await extractAndSend(srcs as UnifiedSource[], sendSrc, EXTRACT_MS);
         } catch {}
       })(),
 
@@ -1687,7 +1825,7 @@ router.get("/anime/sources-stream", async (req, res) => {
             getMitSources(slug, ep),
             new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
           ]);
-          sendMany(srcs as UnifiedSource[]);
+          await extractAndSend(srcs as UnifiedSource[], sendSrc, EXTRACT_MS);
         } catch {}
       })(),
 
@@ -1704,7 +1842,7 @@ router.get("/anime/sources-stream", async (req, res) => {
             getAnime4upSources(slug, ep),
             new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
           ]);
-          sendMany(srcs as UnifiedSource[]);
+          await extractAndSend(srcs as UnifiedSource[], sendSrc, EXTRACT_MS);
         } catch {}
       })(),
 
@@ -1721,7 +1859,7 @@ router.get("/anime/sources-stream", async (req, res) => {
             getAnimeTitansSources(slug, ep),
             new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
           ]);
-          sendMany(srcs as UnifiedSource[]);
+          await extractAndSend(srcs as UnifiedSource[], sendSrc, EXTRACT_MS);
         } catch {}
       })(),
 
@@ -1732,7 +1870,25 @@ router.get("/anime/sources-stream", async (req, res) => {
             getDBSources(title, english, ep, malId || undefined),
             new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
           ]);
-          sendMany(srcs as UnifiedSource[]);
+          // DB sources may already have directUrl set (scrapeEpisodePage detects m3u8/mp4)
+          await extractAndSend(srcs as UnifiedSource[], sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // 6. AppsAnime
+      (async () => {
+        try {
+          if (!title) return;
+          const uid = await Promise.race([
+            resolveAppsAnimeUid(title, english),
+            new Promise<null>(r => setTimeout(() => r(null), SCRAPER_MS)),
+          ]);
+          if (!uid) return;
+          const srcs = await Promise.race([
+            getAppsAnimeSources(uid, ep),
+            new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          await extractAndSend(srcs as UnifiedSource[], sendSrc, EXTRACT_MS);
         } catch {}
       })(),
     ];
