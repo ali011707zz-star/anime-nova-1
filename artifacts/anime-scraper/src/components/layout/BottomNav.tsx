@@ -1,13 +1,12 @@
 import { Link, useLocation } from "wouter";
-import { Home, Search, BookMarked, Compass, Settings2 } from "lucide-react";
+import { Home, Search, BookMarked, Compass } from "lucide-react";
 import { motion } from "framer-motion";
 
 const navItems = [
-  { icon: Home,      label: "الرئيسية", href: "/" },
-  { icon: Compass,   label: "تصفح",     href: "/browse" },
-  { icon: Search,    label: "بحث",      href: "/search" },
-  { icon: BookMarked,label: "مكتبتي",   href: "/library" },
-  { icon: Settings2, label: "الإعدادات",href: "/settings" },
+  { icon: Home,       label: "الرئيسية", href: "/" },
+  { icon: Compass,    label: "تصفح",     href: "/browse" },
+  { icon: Search,     label: "بحث",      href: "/search" },
+  { icon: BookMarked, label: "مكتبتي",   href: "/library" },
 ];
 
 const HIDE_ON = ["/watch"];
@@ -18,7 +17,7 @@ export function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 pb-safe">
-      <div className="mx-3 mb-3 flex items-center justify-around bg-[#111116]/96 backdrop-blur-2xl border border-white/[0.08] rounded-[26px] px-1 py-1.5 shadow-2xl shadow-black/60">
+      <div className="mx-3 mb-3 flex items-center justify-around bg-[#111116]/96 backdrop-blur-2xl border border-white/[0.08] rounded-[26px] px-2 py-1.5 shadow-2xl shadow-black/60">
         {navItems.map((item) => {
           const isActive = item.href === "/"
             ? (location === "/" || location === "")
@@ -26,7 +25,7 @@ export function BottomNav() {
           const Icon = item.icon;
           return (
             <Link key={item.href} href={item.href}
-              className="relative flex flex-col items-center justify-center px-3 py-1.5 min-w-[52px]"
+              className="relative flex flex-col items-center justify-center px-5 py-1.5 min-w-[56px]"
             >
               {isActive && (
                 <motion.div

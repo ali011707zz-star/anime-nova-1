@@ -1792,4 +1792,135 @@ router.get("/anime/animelek/search", async (req, res) => {
   catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ════════════════════════════════════════════════════════════════════
+//  Embed Proxy  GET /api/anime/proxy-embed?url=ENCODED_URL
+//  Fetches embed page server-side, injects ad-blocker CSS+JS, returns
+//  clean HTML for use as iframe srcdoc (blocks popups & navigation).
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/proxy-embed", async (req, res) => {
+  const rawUrl = ((req.query.url as string) || "").trim();
+  if (!rawUrl) { res.status(400).send("url required"); return; }
+
+  let targetUrl: string;
+  try { targetUrl = decodeURIComponent(rawUrl); } catch { targetUrl = rawUrl; }
+
+  // Validate URL
+  let parsed: URL;
+  try { parsed = new URL(targetUrl); } catch { res.status(400).send("invalid url"); return; }
+  if (!["http:", "https:"].includes(parsed.protocol)) { res.status(400).send("bad protocol"); return; }
+
+  try {
+    const resp = await fetch(targetUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9",
+        "Referer": parsed.origin + "/",
+        "Origin": parsed.origin,
+      },
+      signal: AbortSignal.timeout(10_000),
+      redirect: "follow",
+    } as any);
+
+    if (!resp.ok && resp.status !== 200) {
+      // Still try to get body
+    }
+
+    let html = await resp.text();
+
+    // ── Strip ad/tracker scripts by src ──
+    const AD_PATTERNS = [
+      "googlesyndication","doubleclick","adsbygoogle","adsystem","popads",
+      "popcash","trafficstars","propellerads","adcash","adbanner","adserver",
+      "exoclick","hilltopads","juicyads","clickadu","adsterra","mgid",
+      "taboola","outbrain","revcontent","fuckingfast","adcdn",
+    ];
+    const adRegex = new RegExp(
+      `<script[^>]+src=["'][^"']*(?:${AD_PATTERNS.join("|")})[^"']*["'][^>]*>.*?<\\/script>`,
+      "gis"
+    );
+    html = html.replace(adRegex, "");
+
+    // ── Inject ad-blocking CSS + JS at head ──
+    const INJECT = `
+<style>
+/* Nova Anime Ad Blocker */
+[id*="ad_"],[id*="_ad"],[id*="banner"],[id*="popup"],[id*="interstitial"],
+[class*="ad-"],[class*="-ad"],[class*="ads-"],[class*="banner-ad"],
+[class*="popup-ad"],[class*="advert"],[class*="advertisement"],
+[class*="vpn-banner"],[class*="click-under"],[class*="popunder"],
+.adsbygoogle,ins.adsbygoogle,[id="aswift_iframe_anchor"],
+iframe[src*="googlesyndication"],iframe[src*="doubleclick"],
+div[style*="z-index:9999"]:not(#player-container):not(.plyr),
+div[style*="z-index: 9999"]:not(#player-container):not(.plyr) { display:none!important; }
+body,html { overflow:hidden!important; background:#000!important; margin:0!important; }
+/* Remove fixed overlays / interstitials */
+body > div[style*="position:fixed"],body > div[style*="position: fixed"] {
+  pointer-events:none!important; opacity:0!important;
+}
+</style>
+<script>
+(function(){
+  /* Block window.open (popup ads) */
+  var _open = window.open; window.open = function(){ return null; };
+  window.alert = function(){}; window.confirm = function(){ return false; };
+  window.prompt  = function(){ return null; };
+
+  /* Block href navigation away from this page */
+  document.addEventListener('click', function(e){
+    var t = e.target; var tries = 0;
+    while(t && tries++ < 5){
+      if(t.tagName === 'A'){
+        var href = t.getAttribute('href') || '';
+        if(href && (href.startsWith('http') || href.startsWith('//'))) {
+          var isSameDomain = href.indexOf(location.hostname) !== -1;
+          if(!isSameDomain && t.getAttribute('data-allow-nav') !== '1'){
+            e.preventDefault(); e.stopPropagation(); return;
+          }
+        }
+        break;
+      }
+      t = t.parentElement;
+    }
+  }, true);
+
+  /* Neutralise common ad launchers */
+  setTimeout(function(){
+    try {
+      var adSelectors = [
+        '[id*="ad_"]','[class*="ad-banner"]','[class*="popup"]',
+        '.adsbygoogle','[id*="interstitial"]'
+      ];
+      adSelectors.forEach(function(sel){
+        document.querySelectorAll(sel).forEach(function(el){
+          el.style.display = 'none';
+          el.style.visibility = 'hidden';
+        });
+      });
+    } catch(e){}
+  }, 500);
+})();
+</script>`;
+
+    if (html.includes("<head>")) {
+      html = html.replace("<head>", "<head>" + INJECT);
+    } else if (/<html[^>]*>/i.test(html)) {
+      html = html.replace(/<html([^>]*)>/i, "<html$1><head>" + INJECT + "</head>");
+    } else {
+      html = INJECT + html;
+    }
+
+    // ── Fix relative URLs so assets load ──
+    html = html.replace(/(src|href|action)=["']\/(?!\/)/g, `$1="${parsed.origin}/`);
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(html);
+  } catch (e: any) {
+    res.status(502).send(`<!-- proxy failed: ${e.message} -->`);
+  }
+});
+
 export default router;
+
