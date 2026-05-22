@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://lylapkfnizpjoyutnlin.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5bGFwa2ZuaXpwam95dXRubGluIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0OTQxNDYsImV4cCI6MjA5NDA3MDE0Nn0.VXSyeqOBaCSR9SD8R7goF3zsleeDbvb8MLnrtOC5Keo';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 export type Episode = {
   id: string;

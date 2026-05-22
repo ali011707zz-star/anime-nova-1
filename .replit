@@ -49,7 +49,7 @@ args = "PORT=24968 BASE_PATH=/ pnpm --filter @workspace/anime-scraper run dev"
 waitForPort = 24968
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
 
 [postMerge]
@@ -71,3 +71,6 @@ externalPort = 80
 [[ports]]
 localPort = 24968
 externalPort = 3000
+
+[nix]
+channel = "stable-25_05"

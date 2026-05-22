@@ -4,10 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 const router = Router();
 
 // ── Supabase client (service role key for full DB access) ──
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://lylapkfnizpjoyutnlin.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5bGFwa2ZuaXpwam95dXRubGluIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQ5NDE0NiwiZXhwIjoyMDk0MDcwMTQ2fQ.qMod_nEbDhkGwNNMRoOWmXt4TMxrk0itA6pnI0SIvTc";
-const sbClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const sbClient = SUPABASE_URL && SUPABASE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_KEY)
+  : null;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -1006,6 +1007,7 @@ interface CachedSource {
 }
 
 async function getFromSupabase(anilistId: number, ep: number): Promise<CachedSource[]> {
+  if (!sbClient) return [];
   try {
     const cutoff = new Date(Date.now() - 12 * 3_600_000).toISOString();
     const { data, error } = await sbClient
@@ -1032,6 +1034,7 @@ async function getFromSupabase(anilistId: number, ep: number): Promise<CachedSou
 async function saveToSupabase(
   anilistId: number, ep: number, animeTitle: string, sources: CachedSource[]
 ): Promise<void> {
+  if (!sbClient) return;
   try {
     const rows = sources.map((src, i) => ({
       id: `${anilistId}-ep${ep}-${src.site}-${i}`,
@@ -1063,6 +1066,7 @@ const dbLookupCache = new Map<string, { urls: string[]; ts: number }>();
 async function findEpisodeUrlsFromDB(
   title: string, english: string | null, ep: number, malId?: number
 ): Promise<string[]> {
+  if (!sbClient) return [];
   const ck = `db:${malId || title}-${ep}`;
   const cached = dbLookupCache.get(ck);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.urls;
