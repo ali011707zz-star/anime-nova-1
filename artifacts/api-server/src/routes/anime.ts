@@ -4,64 +4,407 @@ const router = Router();
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const MOBILE_UA =
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
 
+const BASE_HDRS: Record<string, string> = {
+  "User-Agent": BROWSER_UA,
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+  "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+  // Do NOT set Accept-Encoding — let Node.js handle it natively (no brotli issues)
+  Connection: "keep-alive",
+};
+
+// ── In-memory caches ──
+const searchCache   = new Map<string, { result: any; ts: number }>();
+const translateCache = new Map<string, string>();
+const SEARCH_TTL    = 3_600_000; // 1 hour
+const SRC_TTL       = 6 * 3_600_000; // 6 hours
+
+// ── Known-dead file hosts ──
+const DEAD_FILE_HOSTS = [
+  "4shared.com","solidfiles.com","d000d.com","uqload.co","uqload.com",
+  "vadbam.net","okfiles.com","gofile.io","uploadfiles.io","hexupload.net",
+  "filerio.in","doodstream.com","dood.watch","megaup.net","1fichier.com",
+  "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co",
+];
+
+// ── Hosts that block server-side scraping ──
+const CLOUDFLARE_PATTERNS = [
+  "just a moment",   // actual block page title
+  "cf_chl_",         // challenge token in blocked responses
+  // Removed: "challenge-platform" — it's a monitoring JS on ALL CF-protected pages
+  // Removed: "cf-browser-verification" — old pattern not used on modern CF
+  // Removed: "ray id:" — appears in footer of ALL CF-served pages
+  // Removed: "enable javascript" — too broad
+];
+
+function isCloudflareBlock(html: string): boolean {
+  const lower = html.toLowerCase();
+  return CLOUDFLARE_PATTERNS.some(p => lower.includes(p));
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  UTILITY: slug / similarity
+// ════════════════════════════════════════════════════════════════════
+
+function normalize(s: string) {
+  return s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+}
+function similarity(a: string, b: string) {
+  a = normalize(a); b = normalize(b);
+  if (a === b) return 1;
+  if (a.includes(b) || b.includes(a)) return 0.85;
+  const aw = new Set(a.split(" "));
+  const bw = b.split(" ");
+  return bw.filter((w) => aw.has(w)).length / Math.max(aw.size, bw.length);
+}
+
+function toSlug(s: string): string {
+  return s.toLowerCase()
+    .replace(/[^\w\s-]/g, " ").trim()
+    .replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+
+function buildCandidates(romaji: string, english?: string | null): string[] {
+  const seen = new Set<string>();
+  const add = (s: string) => {
+    const v = s.trim().replace(/-+$/, "");
+    if (v.length > 1) seen.add(v);
+  };
+  for (const raw of [romaji, english].filter(Boolean) as string[]) {
+    const base = toSlug(raw);
+    add(base); add(base + "-tv");
+    const stripped = base
+      .replace(/[-\s]*(2nd|3rd|4th|5th|6th|7th|season[-\s]*\d+|\d+st|\d+nd|\d+rd|\d+th)[-\s]*$/i, "")
+      .replace(/-+$/, "");
+    if (stripped !== base) { add(stripped); add(stripped + "-tv"); }
+    add(base + "-2nd-season"); add(base + "-3rd-season");
+    if (stripped !== base) { add(stripped + "-2nd-season"); add(stripped + "-3rd-season"); }
+    // Without "the" prefix
+    const noThe = base.replace(/^the-/, "");
+    if (noThe !== base) { add(noThe); add(noThe + "-tv"); }
+  }
+  return [...seen];
+}
+
+function qualityRank(quality: string): number {
+  const q = quality.toUpperCase();
+  if (q.includes("FHD") || q.includes("1080") || q.includes("FULLHD")) return 3;
+  if (q.includes("HD") || q.includes("720")) return 2;
+  if (q.includes("SD") || q.includes("480") || q.includes("360")) return 1;
+  return 0;
+}
+
+function qualityLabel(name: string, explicitQuality?: string): string {
+  if (explicitQuality) return explicitQuality.toUpperCase();
+  const m = name.match(/\|\s*(FHD|HD|SD|1080p?|720p?|480p?)/i);
+  return m ? m[1].toUpperCase().replace(/P$/, "") : "HD";
+}
+
+async function safeHead(url: string, headers: Record<string, string>): Promise<number> {
+  try {
+    const r = await fetch(url, {
+      method: "HEAD", headers,
+      signal: AbortSignal.timeout(8000), redirect: "follow",
+    });
+    return r.status;
+  } catch { return 0; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  VIDEO EXTRACTION ENGINE — multi-hop iframe chain + site-specific
+// ════════════════════════════════════════════════════════════════════
+
+/** Unpack p,a,c,k,e,d obfuscated JavaScript (used by uqload, etc.) */
+function unpackPacked(html: string): string | null {
+  const re = /eval\(function\(p,a,c,k,e,d\)\{[^}]+\}\('([\s\S]+?)',(\d+),(\d+),'([\s\S]+?)'\.split\('\|'\)\)\)/g;
+  let m: RegExpExecArray | null;
+  let result = html;
+  let found = false;
+  while ((m = re.exec(html)) !== null) {
+    try {
+      const packed = m[1], base = parseInt(m[2]), count = parseInt(m[3]);
+      const k = m[4].split("|");
+      const toS = (n: number, b: number): string => {
+        const c = "0123456789abcdefghijklmnopqrstuvwxyz";
+        return n < b ? c[n] : toS(Math.floor(n / b), b) + c[n % b];
+      };
+      let unpacked = packed;
+      for (let i = count - 1; i >= 0; i--) {
+        if (k[i]) unpacked = unpacked.replace(new RegExp("\\b" + toS(i, base) + "\\b", "g"), k[i]);
+      }
+      result = result.replace(m[0], unpacked);
+      found = true;
+    } catch {}
+  }
+  return found ? result : null;
+}
+
+/** Parse direct HLS/MP4 URLs from HTML */
+function parseVideoUrl(html: string): { url: string; type: "hls" | "mp4" } | null {
+  // Try unpacking p,a,c,k,e,d first
+  const unpacked = unpackPacked(html);
+  const alts = [
+    html,
+    html.replace(/\\\/\//g, "//").replace(/\\\//g, "/").replace(/\\"/g, '"'),
+    html.replace(/\\u003[Cc]/g, "<").replace(/\\u003[Ee]/g, ">"),
+    html.replace(/\\n/g, "\n").replace(/\\t/g, "\t"),
+    ...(unpacked ? [unpacked] : []),
+  ];
+
+  for (const text of alts) {
+    // HLS (preferred)
+    const m3u8Pats = [
+      /"(?:file|src|url|source|hls|videoUrl|streamUrl)"\s*:\s*"(https?:\/\/[^"\\]+\.m3u8[^"\\]*)"/i,
+      /'(?:file|src|url|source)'\s*:\s*'(https?:\/\/[^'\\]+\.m3u8[^'\\]*)'/i,
+      /<source[^>]+src=["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+      /['"](https?:\/\/[^\s"'<>\\]+\.m3u8(?:\?[^\s"'<>\\]*)?)["']/i,
+      /https?:\/\/[^\s"'<>\\,\)]+\.m3u8(?:\?[^\s"'<>\\,\)]*)?/i,
+    ];
+    for (const p of m3u8Pats) {
+      const m = text.match(p);
+      if (m) {
+        const url = (m[1] || m[0]).replace(/[\\,;\)\s]+$/, "").replace(/\\n.*/s, "");
+        if (url.startsWith("http") && url.length > 20) return { url, type: "hls" };
+      }
+    }
+
+    // MP4
+    const mp4Pats = [
+      /"(?:file|src|url|source|videoUrl|mp4)"\s*:\s*"(https?:\/\/[^"\\]+\.mp4[^"\\]*)"/i,
+      /'(?:file|src|url|source)'\s*:\s*'(https?:\/\/[^'\\]+\.mp4[^'\\]*)'/i,
+      /<source[^>]+src=["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i,
+      /['"](https?:\/\/[^\s"'<>\\]+\.mp4(?:\?[^\s"'<>\\]*)?)["']/i,
+    ];
+    for (const p of mp4Pats) {
+      const m = text.match(p);
+      if (m) {
+        const url = (m[1] || m[0]).replace(/[\\,;\)\s]+$/, "");
+        if (url.startsWith("http") && url.length > 20 &&
+            !url.match(/\/(ads?|banner|track|pixel|promo|thumb|poster)\//i)) {
+          return { url, type: "mp4" };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** ok.ru specific: parses data-options JSON for video URLs */
+function parseOkRu(html: string): { url: string; type: "hls" | "mp4" } | null {
+  try {
+    // ok.ru stores video data in data-options attribute as HTML-encoded JSON
+    const m = html.match(/data-options="([^"]+)"/);
+    if (!m) return null;
+    const decoded = m[1]
+      .replace(/&amp;/g, "&").replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+    const obj = JSON.parse(decoded);
+    // Navigate: flashvars.metadata (JSON string) → videos
+    const metaStr = obj?.flashvars?.metadata || obj?.flashvars?.metadataEmbedded;
+    if (!metaStr) return null;
+    let meta: any;
+    if (typeof metaStr === "string") meta = JSON.parse(metaStr);
+    else meta = metaStr;
+    const videos: Array<{ url: string; type?: string; seekSchema?: number }> =
+      meta?.videos || meta?.movie?.videos || [];
+    if (!videos.length) return null;
+    // Prefer HLS
+    const hls = videos.find(v => v.type === "hls" || (v.url || "").includes(".m3u8"));
+    if (hls?.url) return { url: hls.url, type: "hls" };
+    // Prefer highest quality MP4
+    const sorted = [...videos].sort((a, b) => (b.seekSchema || 0) - (a.seekSchema || 0));
+    if (sorted[0]?.url) return { url: sorted[0].url, type: "mp4" };
+  } catch {}
+  return null;
+}
+
+/** mp4upload specific extraction */
+function parseMp4upload(html: string): { url: string; type: "mp4" | "hls" } | null {
+  try {
+    // mp4upload embeds have a player1 with video URL in a var
+    const pats = [
+      /player1\s*=\s*{[^}]*["']file["']\s*:\s*["'](https?:\/\/[^"']+)["']/i,
+      /"src"\s*:\s*\["(https?:\/\/[^"]+)"\]/i,
+      /var\s+s\s*=\s*["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i,
+    ];
+    for (const p of pats) {
+      const m = html.match(p);
+      if (m) {
+        const url = m[1];
+        return { url, type: url.includes(".m3u8") ? "hls" : "mp4" };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+/** megamax / vidbm / similar custom players */
+function parseMegamax(html: string): { url: string; type: "hls" | "mp4" } | null {
+  // These players often have sources in a JSON array with file/src keys
+  const pats = [
+    /["']sources["']\s*:\s*\[.*?["']file["']\s*:\s*["'](https?:\/\/[^"']+)["']/is,
+    /sources\s*=\s*\[.*?file\s*:\s*["'](https?:\/\/[^"']+)["']/is,
+    /["']src["']\s*:\s*["'](https?:\/\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/i,
+  ];
+  for (const p of pats) {
+    const m = html.match(p);
+    if (m) {
+      const url = m[1];
+      return { url, type: url.includes(".m3u8") ? "hls" : "mp4" };
+    }
+  }
+  return null;
+}
+
+/** Streamtape specific extraction */
+function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
+  try {
+    // Streamtape splits the token across two JS vars and concatenates them
+    // Pattern: var _0x... = '/get_video?id=ID&expires=EXP&ip=IP&token=TOK1' + 'TOK2'
+    const tokenRe = /getElementById\(['"]\S+['"]\)\.innerHTML\s*=\s*["']([^"']+)["']\s*\+\s*["']([^"']+)["']/;
+    const m = html.match(tokenRe);
+    if (m) {
+      const combined = (m[1] + m[2]).replace(/\s/g, "");
+      if (combined.includes("streamtape")) return { url: "https:" + combined, type: "mp4" };
+      return { url: "https://streamtape.com" + combined, type: "mp4" };
+    }
+    // Alt pattern
+    const altRe = /get_video\?id=[^&"']+&expires=\d+&ip=[^&"']+&token=[^&"'\s]+/;
+    const alt = html.match(altRe);
+    if (alt) return { url: "https://streamtape.com/" + alt[0], type: "mp4" };
+  } catch {}
+  return null;
+}
+
+/** StreamWish / WishEmbed / Filemoon specific */
+function parseStreamwish(html: string): { url: string; type: "hls" | "mp4" } | null {
+  // These players embed sources as: sources:[{file:"URL"}] or file:"URL"
+  const pats = [
+    /sources\s*:\s*\[\s*\{\s*file\s*:\s*["'](https?:\/\/[^"']+)["']/i,
+    /jwplayer\([^)]+\)\.setup\([^{]*\{[^}]*file\s*:\s*["'](https?:\/\/[^"']+)["']/i,
+    /["']file["']\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+  ];
+  for (const p of pats) {
+    const m = html.match(p);
+    if (m) {
+      const url = m[1];
+      if (url.includes(".m3u8")) return { url, type: "hls" };
+      if (url.includes(".mp4")) return { url, type: "mp4" };
+    }
+  }
+  return null;
+}
+
+/** Extract iframe src from HTML (first non-self iframe) */
+function extractIframeSrc(html: string, baseUrl: string): string | null {
+  const re = /<iframe[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  const skip = ["facebook.com", "twitter.com", "google.com", "googleapis.com",
+                 "youtube-nocookie", "ads", "doubleclick", "analytics"];
+  const origin = (() => { try { return new URL(baseUrl).hostname; } catch { return ""; } })();
+  while ((m = re.exec(html)) !== null) {
+    let src = m[1].trim();
+    if (!src || src === "about:blank" || src.startsWith("javascript:")) continue;
+    if (skip.some(s => src.includes(s))) continue;
+    if (src.includes(origin)) continue;
+    if (src.startsWith("//")) src = "https:" + src;
+    if (src.startsWith("/")) { try { src = new URL(src, baseUrl).href; } catch { continue; } }
+    if (src.startsWith("http")) return src;
+  }
+  return null;
+}
+
+/** Deep video extraction — follows iframe chain up to 4 hops */
+async function extractVideoDeep(
+  startUrl: string,
+  referer?: string,
+): Promise<{ url: string; type: "hls" | "mp4" } | null> {
+  const visited = new Set<string>();
+  let url = startUrl;
+  let ref = referer || startUrl;
+
+  for (let hop = 0; hop < 4; hop++) {
+    if (visited.has(url)) break;
+    visited.add(url);
+
+    try {
+      let origin = "";
+      try { origin = new URL(url).origin; } catch {}
+
+      const r = await fetch(url, {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          Referer: ref,
+          Origin: origin,
+          Accept: "text/html,application/xhtml+xml,*/*;q=0.9",
+          "Accept-Language": "ar,en;q=0.9",
+        },
+        signal: AbortSignal.timeout(10000),
+        redirect: "follow",
+      });
+      if (!r.ok) break;
+      const html = await r.text();
+
+      if (isCloudflareBlock(html)) break;
+
+      // Site-specific parsers first
+      if (url.includes("ok.ru") || url.includes("odnoklassniki.ru")) {
+        const v = parseOkRu(html);
+        if (v) return v;
+      }
+      if (url.includes("streamtape.com") || url.includes("streamtape.net")) {
+        const v = parseStreamtape(html);
+        if (v) return v;
+      }
+      if (url.includes("streamwish") || url.includes("wishembed") ||
+          url.includes("filemoon") || url.includes("swdyu") || url.includes("awish") ||
+          url.includes("playerwish")) {
+        const v = parseStreamwish(html);
+        if (v) return v;
+      }
+      if (url.includes("mp4upload.com")) {
+        const v = parseMp4upload(html);
+        if (v) return v;
+      }
+      if (url.includes("megamax.me") || url.includes("vidbm.com") ||
+          url.includes("uptostream.com") || url.includes("vidlink") ||
+          url.includes("vidhide") || url.includes("streamlare")) {
+        const v = parseMegamax(html);
+        if (v) return v;
+      }
+
+      // General video URL parser (catches most remaining patterns)
+      const direct = parseVideoUrl(html);
+      if (direct) return direct;
+
+      // Follow iframe
+      const nextSrc = extractIframeSrc(html, url);
+      if (!nextSrc) break;
+      ref = url;
+      url = nextSrc;
+    } catch { break; }
+  }
+  return null;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  AllAnime  (search & resolve)
+// ════════════════════════════════════════════════════════════════════
 const ALLANIME_BASE = "https://api.allanime.day/api";
-const ALLANIME_HEADERS = {
+const ALLANIME_HDRS = {
   "Content-Type": "application/json",
   Referer: "https://allanime.to",
   Origin: "https://allanime.to",
   "User-Agent": BROWSER_UA,
 };
 
-// ─── In-memory caches ───────────────────────────────────────────
-const searchCache = new Map<string, { result: any; ts: number }>();
-const SEARCH_TTL = 3_600_000;
-const translateCache = new Map<string, string>();
-
-// ─── Known dead file-sharing hosts (files expire / get deleted) ──
-// These hosts often return 200 HTTP even when file is unavailable
-const DEAD_FILE_HOSTS = [
-  "4shared.com",
-  "solidfiles.com",
-  "d000d.com",
-  "uqload.co",
-  "uqload.com",
-  "vadbam.net",
-  "okfiles.com",
-  "gofile.io",
-  "uploadfiles.io",
-  "hexupload.net",
-  "filerio.in",
-  "doodstream.com",
-  "dood.watch",
-  "megaup.net",
-  "1fichier.com",
-  "bayfiles.com",
-  "uploadhaven.com",
-  "tusfiles.com",
-  "letsupload.co",
-];
-
-// Patterns in page HTML that indicate an expired/unavailable file
-const DEAD_PAGE_PATTERNS = [
-  "not available any more",
-  "file has been deleted",
-  "file not found",
-  "no longer available",
-  "has been removed",
-  "deleted by user",
-  "this file has expired",
-  "file removed",
-  "invalid link",
-  "link expired",
-  "this link has been disabled",
-];
-
-// ─── AllAnime helpers ───────────────────────────────────────────
 async function aaGql(query: string, variables: Record<string, unknown>) {
   const r = await fetch(ALLANIME_BASE, {
-    method: "POST",
-    headers: ALLANIME_HEADERS,
+    method: "POST", headers: ALLANIME_HDRS,
     body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(15000),
   });
@@ -76,25 +419,12 @@ query ($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTra
   }
 }`;
 
-function normalize(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
-}
-function similarity(a: string, b: string) {
-  a = normalize(a); b = normalize(b);
-  if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.85;
-  const aw = new Set(a.split(" "));
-  const bw = b.split(" ");
-  return bw.filter((w) => aw.has(w)).length / Math.max(aw.size, bw.length);
-}
-
 async function searchAllAnime(query: string) {
   const key = `aa:${query.toLowerCase()}`;
   const cached = searchCache.get(key);
   if (cached && Date.now() - cached.ts < SEARCH_TTL) return cached.result;
   const d = await aaGql(SEARCH_Q, {
-    search: { query, sortBy: "Top" },
-    limit: 15, page: 1,
+    search: { query, sortBy: "Top" }, limit: 15, page: 1,
     translationType: "sub", countryOrigin: "JP",
   });
   const results = (d as any)?.data?.shows?.edges || [];
@@ -109,10 +439,7 @@ async function resolveTitle(titles: string[]) {
       if (!results.length) continue;
       let best = results[0], bestScore = 0;
       for (const r of results) {
-        const s = Math.max(
-          similarity(r.name || "", title),
-          similarity(r.englishName || "", title)
-        );
+        const s = Math.max(similarity(r.name || "", title), similarity(r.englishName || "", title));
         if (s > bestScore) { bestScore = s; best = r; }
       }
       if (bestScore > 0.25) return { show: best, score: bestScore };
@@ -121,7 +448,580 @@ async function resolveTitle(titles: string[]) {
   return null;
 }
 
-// ─── Routes: resolve / search ────────────────────────────────────
+
+// ════════════════════════════════════════════════════════════════════
+//  AnimeLek  (animelek.top — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const ALEK_BASE = "https://animelek.top";
+const ALEK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://animelek.top/" };
+const alekSlugCache = new Map<string, { slug: string; ts: number }>();
+const alekSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function checkAlekSlug(slug: string): Promise<boolean> {
+  return (await safeHead(`${ALEK_BASE}/anime/${slug}/`, ALEK_HDRS)) === 200;
+}
+
+async function resolveAlekSlug(
+  romaji: string, english?: string | null, passedSlug?: string | null
+): Promise<string | null> {
+  const cacheKey = (passedSlug || romaji).toLowerCase().trim();
+  const cached = alekSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
+  if (passedSlug && await checkAlekSlug(passedSlug)) {
+    alekSlugCache.set(cacheKey, { slug: passedSlug, ts: Date.now() });
+    return passedSlug;
+  }
+  for (const slug of buildCandidates(romaji, english)) {
+    if (await checkAlekSlug(slug)) {
+      alekSlugCache.set(cacheKey, { slug, ts: Date.now() });
+      return slug;
+    }
+  }
+  return null;
+}
+
+async function getAlekSources(slug: string, epNum: number): Promise<any[]> {
+  const ck = `alek:${slug}-${epNum}`;
+  const cached = alekSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+
+  const epPath = `${slug}-${epNum}-\u0627\u0644\u062d\u0644\u0642\u0629`;
+  const epUrl  = `${ALEK_BASE}/episode/${encodeURIComponent(epPath)}/`;
+  try {
+    const r = await fetch(epUrl, { headers: ALEK_HDRS, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+
+    const seen = new Set<string>();
+    const sources: any[] = [];
+
+    // Method 1: data-embed attribute
+    // AnimeLek wraps embeds as card.php?random=ACTUAL_URL — extract the real URL directly
+    const embedRe = /data-embed="(https?:\/\/[^"]+)"/g;
+    const nameRe  = /<span class="server">([^<]+)<\/span>/g;
+    const embeds  = [...html.matchAll(embedRe)].map(m => m[1].replace(/&amp;/g, "&"));
+    const names   = [...html.matchAll(nameRe)].map(m => m[1].trim());
+
+    for (let i = 0; i < embeds.length; i++) {
+      let url = embeds[i];
+      // Unwrap card.php?random=ACTUAL_URL
+      const randomMatch = url.match(/[?&]random=([^&]+)/);
+      if (randomMatch) {
+        try { url = decodeURIComponent(randomMatch[1]); } catch {}
+      }
+      if (seen.has(url)) continue; seen.add(url);
+      // Skip known dead hosts
+      if (DEAD_FILE_HOSTS.some(h => url.toLowerCase().includes(h))) continue;
+      const rawName = names[i] || `سيرفر ${sources.length + 1}`;
+      const quality = qualityLabel(rawName);
+      sources.push({
+        name: rawName.replace(/\s*\|\s*(FHD|HD|SD|1080p?|720p?|480p?)/gi, "").trim(),
+        url, quality, qualityRank: qualityRank(quality), site: "animelek",
+      });
+    }
+
+    // Method 2: any iframe src on the page (fallback)
+    if (!sources.length) {
+      const iframeRe = /<iframe[^>]+(?:src|data-src)=["'](https?:\/\/[^"']+)["']/gi;
+      for (const m of html.matchAll(iframeRe)) {
+        const url = m[1];
+        if (seen.has(url) || url.includes("animelek")) continue;
+        seen.add(url);
+        sources.push({ name: `سيرفر ${sources.length + 1}`, url, quality: "HD", qualityRank: 2, site: "animelek" });
+      }
+    }
+
+    if (sources.length) alekSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch (e: any) {
+    console.error("[alek] getAlekSources error:", e?.message ?? e);
+    return [];
+  }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  MitAnime  (mitanime.com — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const MIT_BASE = "https://mitanime.com";
+const MIT_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://mitanime.com/" };
+const mitSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const mitSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+function buildMitCandidates(romaji: string, english?: string | null): string[] {
+  const seen = new Set<string>();
+  const add = (s: string) => { const v = s.trim().replace(/-+$/, ""); if (v.length > 1) seen.add(v); };
+  for (const raw of [english, romaji].filter(Boolean) as string[]) {
+    const base = toSlug(raw); add(base);
+    const stripped = base.replace(/[-\s]*(2nd|3rd|4th|5th|season[-\s]*\d+|\d+st|\d+nd|\d+rd|\d+th)[-\s]*$/i, "").replace(/-+$/, "");
+    if (stripped !== base) add(stripped);
+    add(base + "-2"); if (stripped !== base) add(stripped + "-2");
+  }
+  return [...seen];
+}
+
+async function resolveMitSlug(romaji: string, english?: string | null): Promise<string | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = mitSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
+  for (const slug of buildMitCandidates(romaji, english)) {
+    if ((await safeHead(`${MIT_BASE}/watch/${slug}/1/`, MIT_HDRS)) === 200) {
+      mitSlugCache.set(cacheKey, { slug, ts: Date.now() });
+      return slug;
+    }
+  }
+  mitSlugCache.set(cacheKey, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getMitSources(slug: string, epNum: number): Promise<any[]> {
+  const ck = `mit:${slug}-${epNum}`;
+  const cached = mitSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+  try {
+    const r = await fetch(`${MIT_BASE}/watch/${slug}/${epNum}/`, { headers: MIT_HDRS, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+    const seen = new Set<string>(); const sources: any[] = [];
+    for (const m of html.matchAll(/servers\\":\[([^\]]+)\]/g)) {
+      try {
+        const raw = '[' + m[1].replace(/\\"/g, '"').replace(/\\\//g, '/') + ']';
+        const arr: Array<{ name: string; quality: string; url: string; isLocked: boolean }> = JSON.parse(raw);
+        for (const s of arr) {
+          if (s.isLocked || !s.url || seen.has(s.url)) continue;
+          seen.add(s.url);
+          const q = s.quality?.toUpperCase() || "HD";
+          sources.push({ name: s.name || "سيرفر", url: s.url, quality: q, qualityRank: qualityRank(q), site: "mitanime" });
+        }
+      } catch {}
+    }
+    if (sources.length) mitSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  WitAnime  (witanime.one / .rest / .pics — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const WIT_BASES = ["https://witanime.one", "https://witanime.rest", "https://witanime.pics"];
+const WIT_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://witanime.one/" };
+const witSlugCache = new Map<string, { slug: string | null; base: string; ts: number }>();
+const witSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolveWitSlug(romaji: string, english?: string | null): Promise<{ slug: string; base: string } | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = witSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug ? { slug: cached.slug, base: cached.base } : null;
+  const candidates = buildCandidates(romaji, english);
+  for (const base of WIT_BASES) {
+    for (const slug of candidates) {
+      if ((await safeHead(`${base}/anime/${slug}/`, WIT_HDRS)) === 200) {
+        witSlugCache.set(cacheKey, { slug, base, ts: Date.now() });
+        return { slug, base };
+      }
+    }
+  }
+  witSlugCache.set(cacheKey, { slug: null, base: "", ts: Date.now() });
+  return null;
+}
+
+async function getWitSources(slug: string, base: string, epNum: number): Promise<any[]> {
+  const ck = `wit:${slug}-${epNum}`;
+  const cached = witSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+  try {
+    const r = await fetch(`${base}/episode/${slug}-${epNum}/`, { headers: WIT_HDRS, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+    const seen = new Set<string>(); const sources: any[] = [];
+    const skip = ["witanime", "googleapis", "facebook", "twitter", "google", "ads", "doubleclick"];
+    // Iframes
+    for (const m of html.matchAll(/(?:data-src|src)=["'](https?:\/\/[^"']+)["']/g)) {
+      const url = m[1]; if (seen.has(url)) continue;
+      if (skip.some(s => url.includes(s))) continue;
+      seen.add(url);
+      const qm = url.match(/\b(1080|fhd|720|hd|480|360|sd)\b/i);
+      const q = qm ? qm[1].toUpperCase().replace("720","HD").replace("1080","FHD").replace(/480|360/,"SD") : "HD";
+      const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./,"")?.split(".")[0] || `سيرفر ${sources.length+1}`;
+      sources.push({ name: host, url, quality: q, qualityRank: qualityRank(q), site: "witanime" });
+    }
+    // JSON sources
+    for (const m of html.matchAll(/"url"\s*:\s*"(https?:\/\/[^"]+)"/g)) {
+      const url = m[1].replace(/\\/g, "");
+      if (seen.has(url) || url.includes("witanime")) continue;
+      seen.add(url);
+      const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./,"")?.split(".")[0] || `سيرفر`;
+      sources.push({ name: host, url, quality: "HD", qualityRank: 2, site: "witanime" });
+    }
+    if (sources.length) witSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  Anime4Up  (anime4up.cam — Arabic, very popular)
+// ════════════════════════════════════════════════════════════════════
+const FOUR_BASE = "https://anime4up.cam";
+const FOUR_HDRS: Record<string, string> = {
+  ...BASE_HDRS,
+  Referer: "https://anime4up.cam/",
+  "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate",
+};
+const fourSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const fourSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolveAnime4upSlug(romaji: string, english?: string | null): Promise<string | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = fourSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
+
+  // Try search first
+  try {
+    const searchUrl = `${FOUR_BASE}/?search_param=animes&s=${encodeURIComponent(romaji)}`;
+    const sr = await fetch(searchUrl, { headers: FOUR_HDRS, signal: AbortSignal.timeout(10000) });
+    if (sr.ok) {
+      const html = await sr.text();
+      if (!isCloudflareBlock(html)) {
+        const linkRe = /href=["']https?:\/\/anime4up\.cam\/anime\/([^/"']+)\//gi;
+        const match = html.match(linkRe);
+        if (match?.[0]) {
+          const slug = match[0].replace(/.*\/anime\/([^/"']+)\/.*/i, "$1");
+          if (slug && slug.length > 1) {
+            fourSlugCache.set(cacheKey, { slug, ts: Date.now() });
+            return slug;
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // Fallback: try slug candidates
+  for (const slug of buildCandidates(romaji, english)) {
+    if ((await safeHead(`${FOUR_BASE}/anime/${slug}/`, FOUR_HDRS)) === 200) {
+      fourSlugCache.set(cacheKey, { slug, ts: Date.now() });
+      return slug;
+    }
+  }
+  fourSlugCache.set(cacheKey, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnime4upSources(slug: string, epNum: number): Promise<any[]> {
+  const ck = `4up:${slug}-${epNum}`;
+  const cached = fourSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+
+  // Try multiple episode URL patterns
+  const epUrls = [
+    `${FOUR_BASE}/episode/${slug}-episode-${epNum}/`,
+    `${FOUR_BASE}/watch/${slug}-episode-${epNum}/`,
+    `${FOUR_BASE}/${slug}-episode-${epNum}/`,
+  ];
+
+  for (const epUrl of epUrls) {
+    try {
+      const r = await fetch(epUrl, { headers: FOUR_HDRS, signal: AbortSignal.timeout(15000), redirect: "follow" });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      const seen = new Set<string>(); const sources: any[] = [];
+
+      // Pattern 1: data-embed-id or data-link on server buttons
+      const serverRe = /data-(?:embed-id|link|src|url)=["'](https?:\/\/[^"']+)["'][^>]*>\s*(?:<[^>]+>)*([^<]*)/gi;
+      for (const m of html.matchAll(serverRe)) {
+        const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+        const name = m[2].trim() || `سيرفر ${sources.length + 1}`;
+        const q = qualityLabel(name);
+        sources.push({ name: name.replace(/\s*\|\s*(FHD|HD|SD|1080p?|720p?|480p?)/gi,"").trim(), url, quality: q, qualityRank: qualityRank(q), site: "anime4up" });
+      }
+
+      // Pattern 2: JSON data with server list
+      const jsonRe = /"(?:file|url|link|embed)"\s*:\s*"(https?:\/\/[^"\\]+)"/g;
+      for (const m of html.matchAll(jsonRe)) {
+        const url = m[1].replace(/\\/g,""); if (seen.has(url)) continue; seen.add(url);
+        sources.push({ name: `سيرفر ${sources.length + 1}`, url, quality: "HD", qualityRank: 2, site: "anime4up" });
+      }
+
+      // Pattern 3: iframe src
+      const iframeRe = /<iframe[^>]+(?:src|data-src)=["'](https?:\/\/(?!anime4up)[^"']+)["']/gi;
+      for (const m of html.matchAll(iframeRe)) {
+        const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+        const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./,"")?.split(".")[0] || "سيرفر";
+        sources.push({ name: host, url, quality: "HD", qualityRank: 2, site: "anime4up" });
+      }
+
+      if (sources.length) {
+        fourSrcCache.set(ck, { sources, ts: Date.now() });
+        return sources;
+      }
+    } catch { continue; }
+  }
+  return [];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  AnimeBlkom  (animeblkom.net — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const BLKOM_BASE = "https://animeblkom.net";
+const BLKOM_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://animeblkom.net/" };
+const blkomSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const blkomSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolveAnimeblkomSlug(romaji: string, english?: string | null): Promise<string | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = blkomSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
+
+  // Search via their search endpoint
+  try {
+    const sr = await fetch(`${BLKOM_BASE}/search?query=${encodeURIComponent(english || romaji)}`, {
+      headers: BLKOM_HDRS, signal: AbortSignal.timeout(10000),
+    });
+    if (sr.ok) {
+      const html = await sr.text();
+      if (!isCloudflareBlock(html)) {
+        const linkRe = /href=["']https?:\/\/animeblkom\.net\/animes?\/([^/"']+)\//gi;
+        const m = html.match(linkRe);
+        if (m?.[0]) {
+          const slug = m[0].replace(/.*\/animes?\//,"").replace(/\/.*/,"");
+          if (slug?.length > 1) {
+            blkomSlugCache.set(cacheKey, { slug, ts: Date.now() });
+            return slug;
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // Fallback: candidates
+  for (const slug of buildCandidates(romaji, english)) {
+    for (const path of [`/animes/${slug}/`, `/anime/${slug}/`]) {
+      if ((await safeHead(`${BLKOM_BASE}${path}`, BLKOM_HDRS)) === 200) {
+        blkomSlugCache.set(cacheKey, { slug, ts: Date.now() });
+        return slug;
+      }
+    }
+  }
+  blkomSlugCache.set(cacheKey, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnimeblkomSources(slug: string, epNum: number): Promise<any[]> {
+  const ck = `blkom:${slug}-${epNum}`;
+  const cached = blkomSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+
+  const epUrls = [
+    `${BLKOM_BASE}/watch/${slug}/${epNum}/`,
+    `${BLKOM_BASE}/watch/${slug}-episode-${epNum}/`,
+    `${BLKOM_BASE}/episode/${slug}-${epNum}/`,
+  ];
+
+  for (const epUrl of epUrls) {
+    try {
+      const r = await fetch(epUrl, { headers: BLKOM_HDRS, signal: AbortSignal.timeout(15000), redirect: "follow" });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      const seen = new Set<string>(); const sources: any[] = [];
+
+      // iframes
+      const iframeRe = /<iframe[^>]+(?:src|data-src)=["'](https?:\/\/(?!animeblkom)[^"']+)["']/gi;
+      for (const m of html.matchAll(iframeRe)) {
+        const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+        const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./,"")?.split(".")[0] || "سيرفر";
+        const q = qualityLabel(url);
+        sources.push({ name: host, url, quality: q, qualityRank: qualityRank(q), site: "animeblkom" });
+      }
+
+      // JSON URLs
+      for (const m of html.matchAll(/"(?:url|file|src|embed)"\s*:\s*"(https?:\/\/[^"\\]+)"/g)) {
+        const url = m[1].replace(/\\/g,"");
+        if (seen.has(url) || url.includes("animeblkom")) continue;
+        seen.add(url);
+        sources.push({ name: `سيرفر ${sources.length+1}`, url, quality: "HD", qualityRank: 2, site: "animeblkom" });
+      }
+
+      if (sources.length) {
+        blkomSrcCache.set(ck, { sources, ts: Date.now() });
+        return sources;
+      }
+    } catch { continue; }
+  }
+  return [];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  3asq  (3asq.org — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const ASAQ_BASE = "https://3asq.org";
+const ASAQ_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://3asq.org/" };
+const asaqSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const asaqSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolve3asqSlug(romaji: string, english?: string | null): Promise<string | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = asaqSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
+
+  for (const slug of buildCandidates(romaji, english)) {
+    if ((await safeHead(`${ASAQ_BASE}/anime/${slug}/`, ASAQ_HDRS)) === 200) {
+      asaqSlugCache.set(cacheKey, { slug, ts: Date.now() });
+      return slug;
+    }
+  }
+  asaqSlugCache.set(cacheKey, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function get3asqSources(slug: string, epNum: number): Promise<any[]> {
+  const ck = `3asq:${slug}-${epNum}`;
+  const cached = asaqSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+
+  const epUrls = [
+    `${ASAQ_BASE}/episode/${slug}-${epNum}/`,
+    `${ASAQ_BASE}/episode/${slug}-episode-${epNum}/`,
+    `${ASAQ_BASE}/${slug}-${epNum}/`,
+  ];
+
+  for (const epUrl of epUrls) {
+    try {
+      const r = await fetch(epUrl, { headers: ASAQ_HDRS, signal: AbortSignal.timeout(15000), redirect: "follow" });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      const seen = new Set<string>(); const sources: any[] = [];
+
+      // Pattern like AnimeLek: data-embed attribute
+      for (const m of html.matchAll(/data-embed="(https?:\/\/[^"]+)"/g)) {
+        const url = m[1].replace(/&amp;/g,"&"); if (seen.has(url)) continue; seen.add(url);
+        sources.push({ name: `سيرفر ${sources.length+1}`, url, quality: "HD", qualityRank: 2, site: "3asq" });
+      }
+
+      // Iframes
+      for (const m of html.matchAll(/<iframe[^>]+(?:src|data-src)=["'](https?:\/\/(?!3asq)[^"']+)["']/gi)) {
+        const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+        const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./,"")?.split(".")[0] || "سيرفر";
+        sources.push({ name: host, url, quality: "HD", qualityRank: 2, site: "3asq" });
+      }
+
+      // Server name + embed pairs
+      const serverPairRe = /class="[^"]*ep-server[^"]*"[^>]*>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([^<]+)/gi;
+      for (const m of html.matchAll(serverPairRe)) {
+        const url = m[1]; const name = m[2].trim();
+        if (seen.has(url)) continue; seen.add(url);
+        const q = qualityLabel(name);
+        sources.push({ name: name.replace(/\s*\|\s*(FHD|HD|SD|1080p?|720p?|480p?)/gi,"").trim() || "سيرفر", url, quality: q, qualityRank: qualityRank(q), site: "3asq" });
+      }
+
+      if (sources.length) {
+        asaqSrcCache.set(ck, { sources, ts: Date.now() });
+        return sources;
+      }
+    } catch { continue; }
+  }
+  return [];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  AnimeTitans  (animetitans.net — Arabic)
+// ════════════════════════════════════════════════════════════════════
+const TITANS_BASE = "https://animetitans.net";
+const TITANS_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://animetitans.net/" };
+const titansSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const titansSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolveAnimeTitansSlug(romaji: string, english?: string | null): Promise<string | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = titansSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
+  for (const slug of buildCandidates(romaji, english)) {
+    if ((await safeHead(`${TITANS_BASE}/anime/${slug}/`, TITANS_HDRS)) === 200) {
+      titansSlugCache.set(cacheKey, { slug, ts: Date.now() });
+      return slug;
+    }
+  }
+  titansSlugCache.set(cacheKey, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnimeTitansSources(slug: string, epNum: number): Promise<any[]> {
+  const ck = `titans:${slug}-${epNum}`;
+  const cached = titansSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+  const epUrls = [
+    `${TITANS_BASE}/episode/${slug}-episode-${epNum}/`,
+    `${TITANS_BASE}/watch/${slug}/episode-${epNum}/`,
+  ];
+  for (const epUrl of epUrls) {
+    try {
+      const r = await fetch(epUrl, { headers: TITANS_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow" });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+      const seen = new Set<string>(); const sources: any[] = [];
+      for (const m of html.matchAll(/<iframe[^>]+(?:src|data-src)=["'](https?:\/\/(?!animetitans)[^"']+)["']/gi)) {
+        const url = m[1]; if (seen.has(url)) continue; seen.add(url);
+        const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./,"")?.split(".")[0] || "سيرفر";
+        sources.push({ name: host, url, quality: "HD", qualityRank: 2, site: "animetitans" });
+      }
+      if (sources.length) { titansSrcCache.set(ck, { sources, ts: Date.now() }); return sources; }
+    } catch { continue; }
+  }
+  return [];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  Probe endpoint  GET /api/anime/probe
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/probe", async (req, res) => {
+  const url = (req.query.url as string | undefined)?.trim();
+  if (!url || !url.startsWith("http")) { res.status(400).json({ error: "valid url required" }); return; }
+  try {
+    const r = await fetch(url, {
+      method: "HEAD",
+      headers: { "User-Agent": BROWSER_UA, Referer: url },
+      signal: AbortSignal.timeout(5000), redirect: "follow",
+    });
+    const alive = r.status < 400;
+    res.json({ alive, finalUrl: r.url });
+  } catch { res.json({ alive: true, finalUrl: url }); }
+});
+
+
+// ════════════════════════════════════════════════════════════════════
+//  Extract Direct Video  GET /api/anime/extract-video
+//  Multi-hop: follows iframe chain to find real video URL
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/extract-video", async (req, res) => {
+  const url = (req.query.url as string | undefined)?.trim();
+  const referer = (req.query.referer as string | undefined)?.trim();
+  if (!url || !url.startsWith("http")) { res.status(400).json({ error: "url required" }); return; }
+  try {
+    const result = await extractVideoDeep(url, referer);
+    res.json({ videoUrl: result?.url ?? null, videoType: result?.type ?? null });
+  } catch (e: any) {
+    res.json({ videoUrl: null, videoType: null, error: e.message });
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════
+//  AllAnime resolve & search endpoints
+// ════════════════════════════════════════════════════════════════════
 router.get("/anime/resolve", async (req, res) => {
   const title = req.query.title as string;
   if (!title) { res.status(400).json({ error: "title required" }); return; }
@@ -134,10 +1034,7 @@ router.get("/anime/resolve", async (req, res) => {
       id: `${show._id}-ep-${i + 1}`, number: i + 1, aaShowId: show._id,
     }));
     res.json({ id: show._id, title: show.name, episodes, score: result.score });
-  } catch (e: any) {
-    req.log.error({ err: e }, "resolve failed");
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.post("/anime/resolve", async (req, res) => {
@@ -152,10 +1049,7 @@ router.post("/anime/resolve", async (req, res) => {
       id: `${show._id}-ep-${i + 1}`, number: i + 1, aaShowId: show._id,
     }));
     res.json({ id: show._id, title: show.name, episodes, score: result.score });
-  } catch (e: any) {
-    req.log.error({ err: e }, "resolve post failed");
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get("/anime/search", async (req, res) => {
@@ -164,630 +1058,58 @@ router.get("/anime/search", async (req, res) => {
   try {
     const results = await searchAllAnime(q);
     res.json({ results });
-  } catch (e: any) {
-    req.log.error({ err: e }, "search failed");
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get("/anime/servers", async (req, res) => {
   const epId = req.query.epId as string;
   if (!epId) { res.status(400).json({ error: "epId required" }); return; }
   const match = epId.match(/^(.+)-ep-(\d+)$/);
-  if (!match) { res.json({ servers: [], showId: null, epNum: null }); return; }
-  const showId = match[1], epNum = parseInt(match[2]);
-  const sources = ["Default", "Luf-mp4", "Vid-mp4", "S-mp4", "Yt-mp4"].map((s) => ({
-    name: s, url:
-      `https://embed.ssbcontent.site/?p=web&sourceName=${encodeURIComponent(s)}&showId=${encodeURIComponent(showId)}&episodeString=${epNum}&isMobile=false&translationType=sub`,
+  if (!match) { res.json({ servers: [] }); return; }
+  const [, showId, epNum] = match;
+  const sources = ["Default","Luf-mp4","Vid-mp4","S-mp4","Yt-mp4"].map(s => ({
+    name: s,
+    url: `https://embed.ssbcontent.site/?p=web&sourceName=${encodeURIComponent(s)}&showId=${encodeURIComponent(showId)}&episodeString=${epNum}&isMobile=false&translationType=sub`,
     isEmbed: true, showId, epNum,
   }));
   res.json({ servers: sources, showId, epNum });
 });
 
 
-// ══════════════════════════════════════════════════════════════════
-//  SHARED UTILS
-// ══════════════════════════════════════════════════════════════════
-
-/** Quality rank: FHD=3, HD=2, SD=1, unknown=0 */
-function qualityRank(quality: string): number {
-  const q = quality.toUpperCase();
-  if (q.includes("FHD") || q.includes("1080") || q.includes("FULLHD")) return 3;
-  if (q.includes("HD") || q.includes("720")) return 2;
-  if (q.includes("SD") || q.includes("480") || q.includes("360")) return 1;
-  return 0;
-}
-
-/** Normalize quality label */
-function qualityLabel(name: string, explicitQuality?: string): string {
-  if (explicitQuality) return explicitQuality.toUpperCase();
-  const m = name.match(/\|\s*(FHD|HD|SD|1080p?|720p?|480p?)/i);
-  return m ? m[1].toUpperCase().replace(/P$/, "") : "HD";
-}
-
-/** slug-ify a title */
-function toSlug(s: string): string {
-  return s.toLowerCase().replace(/[^\w\s-]/g, " ").trim()
-    .replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-}
-
-/** Build GogoAnime-style slug candidates */
-function buildCandidates(romaji: string, english?: string | null): string[] {
-  const seen = new Set<string>();
-  const add = (s: string) => {
-    const v = s.trim().replace(/-+$/, "");
-    if (v.length > 1) seen.add(v);
-  };
-  for (const raw of [romaji, english].filter(Boolean) as string[]) {
-    const base = toSlug(raw);
-    add(base);
-    add(base + "-tv");
-    const stripped = base
-      .replace(/[-\s]*(2nd|3rd|4th|5th|6th|season[-\s]*\d+|\d+st|\d+nd|\d+rd|\d+th)[-\s]*$/i, "")
-      .replace(/-+$/, "");
-    if (stripped !== base) { add(stripped); add(stripped + "-tv"); }
-    add(base + "-2nd-season");
-    add(base + "-3rd-season");
-    if (stripped !== base) {
-      add(stripped + "-2nd-season");
-      add(stripped + "-3rd-season");
-    }
-  }
-  return [...seen];
-}
-
-/**
- * Smart probe: follows redirects, checks final URL.
- * If the final URL is a known dead file-sharing host, does a deep content check.
- * Returns false if the resource is confirmed unavailable.
- */
-async function probeUrl(url: string): Promise<{ alive: boolean; finalUrl: string }> {
-  try {
-    const r = await fetch(url, {
-      method: "HEAD",
-      headers: { "User-Agent": BROWSER_UA, "Referer": url },
-      signal: AbortSignal.timeout(5000),
-      redirect: "follow",
-    });
-
-    if (r.status === 404 || r.status === 410 || r.status === 400 || r.status === 403) {
-      return { alive: false, finalUrl: r.url };
-    }
-
-    const finalUrl = r.url;
-
-    // Check if the redirect landed on a known dead file-sharing host
-    const isDeadHost = DEAD_FILE_HOSTS.some(h => finalUrl.includes(h));
-
-    if (isDeadHost) {
-      // Deep check: GET the page content and look for error messages
-      try {
-        const page = await fetch(finalUrl, {
-          method: "GET",
-          headers: { "User-Agent": BROWSER_UA, "Accept": "text/html" },
-          signal: AbortSignal.timeout(5000),
-        });
-        const body = await page.text();
-        const bodyLower = body.toLowerCase();
-        const isDead = DEAD_PAGE_PATTERNS.some(p => bodyLower.includes(p));
-        return { alive: !isDead, finalUrl };
-      } catch {
-        // Can't GET the page — mark as dead since it's a known bad host
-        return { alive: false, finalUrl };
-      }
-    }
-
-    return { alive: true, finalUrl };
-  } catch {
-    // Network/timeout error — could be CORS or server issue
-    // Keep it as potentially alive (browser might handle it differently)
-    return { alive: true, finalUrl: url };
-  }
-}
-
-/** Filter dead URLs in parallel — full probe with smart detection */
-async function filterDeadSources<T extends { url: string }>(
-  sources: T[],
-  maxProbe = 30
-): Promise<Array<T & { finalUrl?: string }>> {
-  if (sources.length === 0) return [];
-  const toProbe = sources.slice(0, maxProbe);
-  const rest    = sources.slice(maxProbe);
-  const results = await Promise.all(
-    toProbe.map(async (s) => {
-      const { alive, finalUrl } = await probeUrl(s.url);
-      return { s: { ...s, finalUrl }, alive };
-    })
-  );
-  const alive = results.filter((r) => r.alive).map((r) => r.s);
-  return [...alive, ...rest];
-}
-
-
-// ══════════════════════════════════════════════════════════════════
-//  AnimeLek Scraper  (animelek.top — Arabic)
-// ══════════════════════════════════════════════════════════════════
-const ALEK_BASE = "https://animelek.top";
-const ALEK_HDRS: Record<string, string> = {
-  "User-Agent": BROWSER_UA,
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-  "Accept-Language": "ar,en;q=0.9",
-  Referer: "https://animelek.top/",
-};
-
-const alekSlugCache = new Map<string, { slug: string; ts: number }>();
-const alekSrcCache = new Map<string, { sources: any[]; ts: number }>();
-const ALEK_TTL = 6 * 3_600_000;
-
-function alekFetch(url: string) {
-  return fetch(url, { headers: ALEK_HDRS, signal: AbortSignal.timeout(15000) });
-}
-
-async function checkAlekSlug(slug: string): Promise<boolean> {
-  try {
-    const r = await fetch(`${ALEK_BASE}/anime/${slug}/`, {
-      method: "HEAD", headers: ALEK_HDRS,
-      signal: AbortSignal.timeout(8000), redirect: "follow",
-    });
-    return r.status === 200;
-  } catch { return false; }
-}
-
-async function resolveAlekSlug(
-  romaji: string, english?: string | null, passedSlug?: string | null
-): Promise<string | null> {
-  const cacheKey = (passedSlug || romaji).toLowerCase().trim();
-  const cached = alekSlugCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < ALEK_TTL) return cached.slug;
-
-  if (passedSlug && await checkAlekSlug(passedSlug)) {
-    alekSlugCache.set(cacheKey, { slug: passedSlug, ts: Date.now() });
-    return passedSlug;
-  }
-
-  const candidates = buildCandidates(romaji, english);
-  for (const slug of candidates) {
-    if (await checkAlekSlug(slug)) {
-      alekSlugCache.set(cacheKey, { slug, ts: Date.now() });
-      return slug;
-    }
-  }
-  return null;
-}
-
-async function getAlekSources(slug: string, epNum: number): Promise<Array<{
-  name: string; url: string; quality: string; qualityRank: number; site: string;
-}>> {
-  const ck = `alek:${slug}-${epNum}`;
-  const cached = alekSrcCache.get(ck);
-  if (cached && Date.now() - cached.ts < ALEK_TTL) return cached.sources;
-
-  const epPath = `${slug}-${epNum}-\u0627\u0644\u062d\u0644\u0642\u0629`;
-  const epUrl = `${ALEK_BASE}/episode/${encodeURIComponent(epPath)}/`;
-  const r = await alekFetch(epUrl);
-  if (!r.ok) return [];
-
-  const html = await r.text();
-  const embedRe = /data-embed="https:\/\/animelek\.top\/card\.php\?random=([^"]+)"/g;
-  const serverRe = /<span class="server">([^<]+)<\/span>/g;
-
-  const embeds = [...html.matchAll(embedRe)].map((m) => m[1].replace(/&amp;/g, "&"));
-  const names = [...html.matchAll(serverRe)].map((m) => m[1].trim());
-
-  const seen = new Set<string>();
-  const sources: Array<{
-    name: string; url: string; quality: string; qualityRank: number; site: string;
-  }> = [];
-
-  for (let i = 0; i < embeds.length; i++) {
-    const url = embeds[i];
-    if (seen.has(url)) continue;
-    seen.add(url);
-    const rawName = names[i] || `سيرفر ${sources.length + 1}`;
-    const quality = qualityLabel(rawName);
-    sources.push({
-      name: rawName.replace(/\s*\|\s*(FHD|HD|SD|1080p?|720p?|480p?)/gi, "").trim(),
-      url,
-      quality,
-      qualityRank: qualityRank(quality),
-      site: "animelek",
-    });
-  }
-
-  if (sources.length) alekSrcCache.set(ck, { sources, ts: Date.now() });
-  return sources;
-}
-
-
-// ══════════════════════════════════════════════════════════════════
-//  MitAnime Scraper  (mitanime.com — Arabic, Next.js)
-// ══════════════════════════════════════════════════════════════════
-const MIT_BASE = "https://mitanime.com";
-const MIT_HDRS: Record<string, string> = {
-  "User-Agent": BROWSER_UA,
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-  "Accept-Language": "ar,en;q=0.9",
-  Referer: "https://mitanime.com/",
-};
-
-const mitSlugCache = new Map<string, { slug: string | null; ts: number }>();
-const mitSrcCache = new Map<string, { sources: any[]; ts: number }>();
-const MIT_TTL = 6 * 3_600_000;
-
-function mitFetch(url: string) {
-  return fetch(url, { headers: MIT_HDRS, signal: AbortSignal.timeout(15000) });
-}
-
-function buildMitCandidates(romaji: string, english?: string | null): string[] {
-  const seen = new Set<string>();
-  const add = (s: string) => {
-    const v = s.trim().replace(/-+$/, "");
-    if (v.length > 1) seen.add(v);
-  };
-  for (const raw of [english, romaji].filter(Boolean) as string[]) {
-    const base = toSlug(raw);
-    add(base);
-    const stripped = base
-      .replace(/[-\s]*(2nd|3rd|4th|5th|season[-\s]*\d+|\d+st|\d+nd|\d+rd|\d+th)[-\s]*$/i, "")
-      .replace(/-+$/, "");
-    if (stripped !== base) add(stripped);
-    add(base + "-2");
-    if (stripped !== base) add(stripped + "-2");
-  }
-  return [...seen];
-}
-
-async function checkMitSlug(slug: string): Promise<boolean> {
-  try {
-    const r = await fetch(`${MIT_BASE}/watch/${slug}/1/`, {
-      method: "HEAD", headers: MIT_HDRS,
-      signal: AbortSignal.timeout(8000), redirect: "follow",
-    });
-    return r.status === 200;
-  } catch { return false; }
-}
-
-async function resolveMitSlug(
-  romaji: string, english?: string | null
-): Promise<string | null> {
-  const cacheKey = romaji.toLowerCase().trim();
-  const cached = mitSlugCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < MIT_TTL) return cached.slug;
-
-  const candidates = buildMitCandidates(romaji, english);
-  for (const slug of candidates) {
-    if (await checkMitSlug(slug)) {
-      mitSlugCache.set(cacheKey, { slug, ts: Date.now() });
-      return slug;
-    }
-  }
-  mitSlugCache.set(cacheKey, { slug: null, ts: Date.now() });
-  return null;
-}
-
-async function getMitSources(slug: string, epNum: number): Promise<Array<{
-  name: string; url: string; quality: string; qualityRank: number; site: string;
-}>> {
-  const ck = `mit:${slug}-${epNum}`;
-  const cached = mitSrcCache.get(ck);
-  if (cached && Date.now() - cached.ts < MIT_TTL) return cached.sources;
-
-  const epUrl = `${MIT_BASE}/watch/${slug}/${epNum}/`;
-  const r = await mitFetch(epUrl);
-  if (!r.ok) return [];
-
-  const html = await r.text();
-
-  const serversRe = /servers\\":\[([^\]]+)\]/g;
-  const seen = new Set<string>();
-  const sources: Array<{
-    name: string; url: string; quality: string; qualityRank: number; site: string;
-  }> = [];
-
-  for (const m of html.matchAll(serversRe)) {
-    try {
-      const raw = '[' + m[1].replace(/\\"/g, '"').replace(/\\\//g, '/') + ']';
-      const arr: Array<{ name: string; quality: string; url: string; isLocked: boolean }> =
-        JSON.parse(raw);
-      for (const s of arr) {
-        if (s.isLocked || !s.url || seen.has(s.url)) continue;
-        seen.add(s.url);
-        const q = s.quality?.toUpperCase() || "HD";
-        sources.push({
-          name: s.name || "سيرفر",
-          url: s.url,
-          quality: q,
-          qualityRank: qualityRank(q),
-          site: "mitanime",
-        });
-      }
-    } catch { /* skip malformed */ }
-  }
-
-  if (sources.length) mitSrcCache.set(ck, { sources, ts: Date.now() });
-  return sources;
-}
-
-
-// ══════════════════════════════════════════════════════════════════
-//  WitAnime Scraper  (witanime.one — Arabic)
-// ══════════════════════════════════════════════════════════════════
-const WIT_BASES = ["https://witanime.one", "https://witanime.rest", "https://witanime.pics"];
-const WIT_HDRS: Record<string, string> = {
-  "User-Agent": BROWSER_UA,
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-  "Accept-Language": "ar,en;q=0.9",
-  Referer: "https://witanime.one/",
-};
-
-const witSlugCache = new Map<string, { slug: string | null; base: string; ts: number }>();
-const witSrcCache = new Map<string, { sources: any[]; ts: number }>();
-const WIT_TTL = 6 * 3_600_000;
-
-async function checkWitSlug(base: string, slug: string): Promise<boolean> {
-  try {
-    const r = await fetch(`${base}/anime/${slug}/`, {
-      method: "HEAD", headers: WIT_HDRS,
-      signal: AbortSignal.timeout(8000), redirect: "follow",
-    });
-    return r.status === 200;
-  } catch { return false; }
-}
-
-async function resolveWitSlug(
-  romaji: string, english?: string | null
-): Promise<{ slug: string; base: string } | null> {
-  const cacheKey = romaji.toLowerCase().trim();
-  const cached = witSlugCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < WIT_TTL) {
-    return cached.slug ? { slug: cached.slug, base: cached.base } : null;
-  }
-
-  const candidates = buildCandidates(romaji, english);
-  for (const base of WIT_BASES) {
-    for (const slug of candidates) {
-      if (await checkWitSlug(base, slug)) {
-        witSlugCache.set(cacheKey, { slug, base, ts: Date.now() });
-        return { slug, base };
-      }
-    }
-  }
-  witSlugCache.set(cacheKey, { slug: null, base: "", ts: Date.now() });
-  return null;
-}
-
-async function getWitSources(slug: string, base: string, epNum: number): Promise<Array<{
-  name: string; url: string; quality: string; qualityRank: number; site: string;
-}>> {
-  const ck = `wit:${slug}-${epNum}`;
-  const cached = witSrcCache.get(ck);
-  if (cached && Date.now() - cached.ts < WIT_TTL) return cached.sources;
-
-  // witanime episode URL patterns
-  const epUrl = `${base}/episode/${slug}-${epNum}/`;
-  let html = "";
-  try {
-    const r = await fetch(epUrl, { headers: WIT_HDRS, signal: AbortSignal.timeout(15000) });
-    if (!r.ok) return [];
-    html = await r.text();
-  } catch { return []; }
-
-  const seen = new Set<string>();
-  const sources: Array<{
-    name: string; url: string; quality: string; qualityRank: number; site: string;
-  }> = [];
-
-  // Extract iframes with src or data-src
-  const iframeRe = /(?:data-src|src)="(https?:\/\/[^"]+)"/g;
-  for (const m of html.matchAll(iframeRe)) {
-    const url = m[1];
-    if (seen.has(url)) continue;
-    // Skip same-site and common non-video URLs
-    if (url.includes("witanime") || url.includes("googleapis") ||
-        url.includes("facebook") || url.includes("twitter") ||
-        url.includes("google") || url.includes("ads")) continue;
-    seen.add(url);
-    // Try to detect quality from URL
-    const qMatch = url.match(/\b(1080|fhd|720|hd|480|360|sd)\b/i);
-    const q = qMatch ? qMatch[1].toUpperCase().replace("720", "HD").replace("1080", "FHD").replace("480", "SD").replace("360", "SD") : "HD";
-    const hostMatch = url.match(/https?:\/\/([^/]+)/);
-    const name = hostMatch ? hostMatch[1].replace(/^www\./, "").split(".")[0] : `سيرفر ${sources.length + 1}`;
-    sources.push({
-      name,
-      url,
-      quality: q,
-      qualityRank: qualityRank(q),
-      site: "witanime",
-    });
-  }
-
-  // Also look for JSON embedded sources
-  const jsonSrcRe = /"url"\s*:\s*"(https?:\/\/[^"]+)"/g;
-  for (const m of html.matchAll(jsonSrcRe)) {
-    const url = m[1].replace(/\\/g, "");
-    if (seen.has(url) || url.includes("witanime")) continue;
-    seen.add(url);
-    const hostMatch = url.match(/https?:\/\/([^/]+)/);
-    const name = hostMatch ? hostMatch[1].replace(/^www\./, "").split(".")[0] : `سيرفر ${sources.length + 1}`;
-    sources.push({
-      name,
-      url,
-      quality: "HD",
-      qualityRank: 2,
-      site: "witanime",
-    });
-  }
-
-  if (sources.length) witSrcCache.set(ck, { sources, ts: Date.now() });
-  return sources;
-}
-
-
-// ══════════════════════════════════════════════════════════════════
-//  Probe endpoint  GET /api/anime/probe?url=URL
-// ══════════════════════════════════════════════════════════════════
-router.get("/anime/probe", async (req, res) => {
-  const url = (req.query.url as string | undefined)?.trim();
-  if (!url || (!url.startsWith("http://") && !url.startsWith("https://"))) {
-    res.status(400).json({ error: "valid url required" }); return;
-  }
-  try {
-    const { alive, finalUrl } = await probeUrl(url);
-    res.json({ alive, finalUrl });
-  } catch (e: any) {
-    res.json({ alive: false, finalUrl: url });
-  }
-});
-
-// ══════════════════════════════════════════════════════════════════
-//  Resolve Link endpoint  GET /api/anime/resolve-link?url=URL
-// ══════════════════════════════════════════════════════════════════
-router.get("/anime/resolve-link", async (req, res) => {
-  const url = (req.query.url as string | undefined)?.trim();
-  if (!url || !url.startsWith("http")) {
-    res.status(400).json({ error: "url required" }); return;
-  }
-  try {
-    const r = await fetch(url, {
-      method: "HEAD",
-      headers: { "User-Agent": BROWSER_UA, "Referer": url },
-      signal: AbortSignal.timeout(8000),
-      redirect: "follow",
-    });
-    res.json({ finalUrl: r.url, status: r.status });
-  } catch (e: any) {
-    res.json({ finalUrl: url, error: e.message });
-  }
-});
-
-// ══════════════════════════════════════════════════════════════════
-//  Extract Direct Video URL  GET /api/anime/extract-video?url=URL
-//  Fetches embed page, extracts real mp4/m3u8 URL (no ads player)
-// ══════════════════════════════════════════════════════════════════
-function parseVideoUrl(html: string): { url: string; type: "hls" | "mp4" } | null {
-  // Produce alternative versions with JSON escapes resolved
-  const alts = [
-    html,
-    html.replace(/\\\/\//g, "//").replace(/\\\//g, "/").replace(/\\"/g, '"'),
-    html.replace(/\\u003[Cc]/g, "<").replace(/\\u003[Ee]/g, ">"),
-  ];
-
-  for (const text of alts) {
-    // ── HLS / m3u8 (preferred — usually from proper CDNs, ad-free) ──
-    const m3u8Pats = [
-      /"(?:file|src|url|source|hls)"\s*:\s*"(https?:\/\/[^"\\]+\.m3u8[^"\\]*)"/i,
-      /'(?:file|src|url|source)'\s*:\s*'(https?:\/\/[^'\\]+\.m3u8[^'\\]*)'/i,
-      /<source[^>]+src=["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
-      /['"](https?:\/\/[^\s"'<>\\]+\.m3u8(?:\?[^\s"'<>\\]*)?)["']/i,
-      /https?:\/\/[^\s"'<>\\,\)]+\.m3u8(?:\?[^\s"'<>\\,\)]*)?/i,
-    ];
-    for (const p of m3u8Pats) {
-      const m = text.match(p);
-      if (m) {
-        const url = (m[1] || m[0]).replace(/[\\,;\)\s]+$/, "").replace(/\\n.*/s, "");
-        if (url.startsWith("http") && url.length > 20) return { url, type: "hls" };
-      }
-    }
-
-    // ── MP4 ──
-    const mp4Pats = [
-      /"(?:file|src|url|source)"\s*:\s*"(https?:\/\/[^"\\]+\.mp4[^"\\]*)"/i,
-      /'(?:file|src|url|source)'\s*:\s*'(https?:\/\/[^'\\]+\.mp4[^'\\]*)'/i,
-      /<source[^>]+src=["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i,
-      /['"](https?:\/\/[^\s"'<>\\]+\.mp4(?:\?[^\s"'<>\\]*)?)["']/i,
-    ];
-    for (const p of mp4Pats) {
-      const m = text.match(p);
-      if (m) {
-        const url = (m[1] || m[0]).replace(/[\\,;\)\s]+$/, "");
-        // Reject ads / tracking pixels
-        if (url.startsWith("http") && url.length > 20 &&
-            !url.match(/\/(ads?|banner|track|pixel|promo|thumb|poster)\//i)) {
-          return { url, type: "mp4" };
-        }
-      }
-    }
-  }
-  return null;
-}
-
-router.get("/anime/extract-video", async (req, res) => {
-  const url = (req.query.url as string | undefined)?.trim();
-  if (!url || !url.startsWith("http")) {
-    res.status(400).json({ error: "url required" }); return;
-  }
-  try {
-    let origin = "";
-    try { origin = new URL(url).origin; } catch {}
-
-    const r = await fetch(url, {
-      method: "GET",
-      headers: {
-        "User-Agent": BROWSER_UA,
-        "Referer": origin || url,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ar,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate",
-      },
-      signal: AbortSignal.timeout(12000),
-      redirect: "follow",
-    });
-
-    if (!r.ok) { res.json({ videoUrl: null, videoType: null }); return; }
-
-    const html = await r.text();
-    const result = parseVideoUrl(html);
-    res.json({ videoUrl: result?.url ?? null, videoType: result?.type ?? null, finalUrl: r.url });
-  } catch (e: any) {
-    res.json({ videoUrl: null, videoType: null, error: e.message });
-  }
-});
-
-
-// ══════════════════════════════════════════════════════════════════
-//  UNIFIED  /api/anime/all-sources
-// ══════════════════════════════════════════════════════════════════
-
+// ════════════════════════════════════════════════════════════════════
+//  UNIFIED  /api/anime/all-sources  — 6 sites in parallel
+// ════════════════════════════════════════════════════════════════════
 interface UnifiedSource {
-  name: string;
-  url: string;
-  quality: string;
-  qualityRank: number;
-  site: string;
-  finalUrl?: string;
+  name: string; url: string; quality: string; qualityRank: number; site: string;
 }
 
 router.get("/anime/all-sources", async (req, res) => {
-  const title    = (req.query.title   as string | undefined)?.trim() || "";
-  const english  = (req.query.english as string | undefined)?.trim() || null;
+  const title    = (req.query.title    as string | undefined)?.trim() || "";
+  const english  = (req.query.english  as string | undefined)?.trim() || null;
   const ep       = parseInt((req.query.ep as string) || "1");
   const alekSlug = (req.query.alekSlug as string | undefined)?.trim() || null;
   const mitSlug  = (req.query.mitSlug  as string | undefined)?.trim() || null;
 
-  if (!title && !alekSlug) {
-    res.status(400).json({ error: "title or alekSlug required" });
-    return;
-  }
-  if (!ep || ep < 1) {
-    res.status(400).json({ error: "valid ep number required" });
-    return;
-  }
+  if (!title && !alekSlug) { res.status(400).json({ error: "title or alekSlug required" }); return; }
+  if (!ep || ep < 1) { res.status(400).json({ error: "valid ep number required" }); return; }
 
   try {
-    // 1. Fetch from all 3 sites in parallel
-    const [alekResult, mitResult, witResult] = await Promise.allSettled([
+    const [alekRes, mitRes, witRes, fourRes, blkomRes, asaqRes, titansRes] = await Promise.allSettled([
+      // AnimeLek
       (async () => {
         const slug = await resolveAlekSlug(title, english, alekSlug);
         if (!slug) return { slug: null, sources: [] as UnifiedSource[] };
         const srcs = await getAlekSources(slug, ep);
         return { slug, sources: srcs as UnifiedSource[] };
       })(),
+      // MitAnime
       (async () => {
         const slug = mitSlug || (title ? await resolveMitSlug(title, english) : null);
         if (!slug) return { slug: null, sources: [] as UnifiedSource[] };
         const srcs = await getMitSources(slug, ep);
         return { slug, sources: srcs as UnifiedSource[] };
       })(),
+      // WitAnime
       (async () => {
         if (!title) return { sources: [] as UnifiedSource[] };
         const resolved = await resolveWitSlug(title, english);
@@ -795,41 +1117,70 @@ router.get("/anime/all-sources", async (req, res) => {
         const srcs = await getWitSources(resolved.slug, resolved.base, ep);
         return { sources: srcs as UnifiedSource[] };
       })(),
+      // Anime4Up
+      (async () => {
+        if (!title) return { sources: [] as UnifiedSource[] };
+        const slug = await resolveAnime4upSlug(title, english);
+        if (!slug) return { sources: [] as UnifiedSource[] };
+        const srcs = await getAnime4upSources(slug, ep);
+        return { sources: srcs as UnifiedSource[] };
+      })(),
+      // AnimeBlkom
+      (async () => {
+        if (!title) return { sources: [] as UnifiedSource[] };
+        const slug = await resolveAnimeblkomSlug(title, english);
+        if (!slug) return { sources: [] as UnifiedSource[] };
+        const srcs = await getAnimeblkomSources(slug, ep);
+        return { sources: srcs as UnifiedSource[] };
+      })(),
+      // 3asq
+      (async () => {
+        if (!title) return { sources: [] as UnifiedSource[] };
+        const slug = await resolve3asqSlug(title, english);
+        if (!slug) return { sources: [] as UnifiedSource[] };
+        const srcs = await get3asqSources(slug, ep);
+        return { sources: srcs as UnifiedSource[] };
+      })(),
+      // AnimeTitans
+      (async () => {
+        if (!title) return { sources: [] as UnifiedSource[] };
+        const slug = await resolveAnimeTitansSlug(title, english);
+        if (!slug) return { sources: [] as UnifiedSource[] };
+        const srcs = await getAnimeTitansSources(slug, ep);
+        return { sources: srcs as UnifiedSource[] };
+      })(),
     ]);
 
-    const alekData = alekResult.status === "fulfilled" ? alekResult.value : { slug: null, sources: [] };
-    const mitData  = mitResult.status  === "fulfilled" ? mitResult.value  : { slug: null, sources: [] };
-    const witData  = witResult.status  === "fulfilled" ? witResult.value  : { sources: [] };
-
-    // 2. Merge & deduplicate
+    const allSources: UnifiedSource[] = [];
     const seenUrls = new Set<string>();
-    const merged: UnifiedSource[] = [];
-    for (const s of [...alekData.sources, ...mitData.sources, ...witData.sources]) {
-      if (!s.url || seenUrls.has(s.url)) continue;
-      seenUrls.add(s.url);
-      merged.push(s);
-    }
 
-    // 3. Pre-filter by known dead host names (fast — no HTTP requests)
-    const alive = merged.filter(s => {
-      const url = s.url.toLowerCase();
-      return !DEAD_FILE_HOSTS.some(h => url.includes(h));
-    });
+    const addSources = (result: PromiseSettledResult<{ sources: UnifiedSource[] }>) => {
+      if (result.status !== "fulfilled") return;
+      for (const s of result.value.sources) {
+        if (!s.url || seenUrls.has(s.url)) continue;
+        // Skip known dead hosts
+        if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) continue;
+        seenUrls.add(s.url);
+        allSources.push(s);
+      }
+    };
 
-    // 4. Sort: qualityRank DESC, prefer non-file-sharing hosts
-    alive.sort((a, b) => {
+    [alekRes, witRes, fourRes, blkomRes, asaqRes, titansRes, mitRes].forEach(addSources);
+
+    // Sort: quality DESC, then by site reliability
+    const SITE_PRIO: Record<string, number> = {
+      witanime: 7, animeblkom: 6, anime4up: 5, "3asq": 4, mitanime: 3, animelek: 2, animetitans: 1,
+    };
+    allSources.sort((a, b) => {
       if (b.qualityRank !== a.qualityRank) return b.qualityRank - a.qualityRank;
-      // Prefer witanime/mitanime sources (usually more reliable CDN)
-      const priority = (s: UnifiedSource) =>
-        s.site === "witanime" ? 3 : s.site === "mitanime" ? 2 : 1;
-      return priority(b) - priority(a);
+      return (SITE_PRIO[b.site] || 0) - (SITE_PRIO[a.site] || 0);
     });
 
     res.json({
-      sources: alive,
-      alekSlug: (alekData as any).slug,
-      mitSlug: (mitData as any).slug,
-      total: alive.length,
+      sources: allSources,
+      alekSlug: alekRes.status === "fulfilled" ? (alekRes.value as any).slug : null,
+      mitSlug: mitRes.status === "fulfilled" ? (mitRes.value as any).slug : null,
+      total: allSources.length,
     });
   } catch (e: any) {
     req.log.error({ err: e }, "all-sources failed");
@@ -838,69 +1189,50 @@ router.get("/anime/all-sources", async (req, res) => {
 });
 
 
-// ══════════════════════════════════════════════════════════════════
-//  TRANSLATE  /api/anime/translate
-// ══════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  Translate  GET /api/anime/translate
+// ════════════════════════════════════════════════════════════════════
 router.get("/anime/translate", async (req, res) => {
   const text = ((req.query.text as string) || "").trim();
   const from = ((req.query.from as string) || "en").trim();
   const to   = ((req.query.to   as string) || "ar").trim();
-
   if (!text) { res.json({ translated: "" }); return; }
-
   const cacheKey = `${from}:${to}:${text.substring(0, 80)}`;
-  if (translateCache.has(cacheKey)) {
-    res.json({ translated: translateCache.get(cacheKey) });
-    return;
-  }
-
+  if (translateCache.has(cacheKey)) { res.json({ translated: translateCache.get(cacheKey) }); return; }
   try {
-    const chunk = text.substring(0, 490);
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=${from}|${to}`;
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.substring(0,490))}&langpair=${from}|${to}`;
     const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
     const d = await r.json();
-    const translated: string = d.responseData?.translatedText || text;
+    const translated = d.responseData?.translatedText || text;
     translateCache.set(cacheKey, translated);
     res.json({ translated });
-  } catch {
-    res.json({ translated: text });
-  }
+  } catch { res.json({ translated: text }); }
 });
 
-// ══════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════
 //  Legacy AnimeLek endpoints
-// ══════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 router.get("/anime/animelek/sources", async (req, res) => {
   const title      = (req.query.title   as string | undefined)?.trim() || "";
   const english    = (req.query.english as string | undefined)?.trim() || null;
   const ep         = parseInt((req.query.ep as string) || "1");
   const passedSlug = (req.query.slug    as string | undefined)?.trim() || null;
-
   if (!title && !passedSlug) { res.status(400).json({ error: "title or slug required" }); return; }
-  if (!ep || ep < 1) { res.status(400).json({ error: "valid ep number required" }); return; }
-
+  if (!ep || ep < 1) { res.status(400).json({ error: "valid ep required" }); return; }
   try {
     const slug = await resolveAlekSlug(title, english, passedSlug);
     if (!slug) { res.json({ sources: [], slug: null }); return; }
-    const sources = await getAlekSources(slug, ep);
-    res.json({ sources, slug });
-  } catch (e: any) {
-    req.log.error({ err: e }, "animelek sources failed");
-    res.status(500).json({ error: e.message });
-  }
+    res.json({ sources: await getAlekSources(slug, ep), slug });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 router.get("/anime/animelek/search", async (req, res) => {
   const title   = (req.query.title   as string | undefined)?.trim() || "";
   const english = (req.query.english as string | undefined)?.trim() || null;
   if (!title) { res.status(400).json({ error: "title required" }); return; }
-  try {
-    const slug = await resolveAlekSlug(title, english);
-    res.json({ slug });
-  } catch (e: any) {
-    req.log.error({ err: e }, "animelek search failed");
-    res.status(500).json({ error: e.message });
-  }
+  try { res.json({ slug: await resolveAlekSlug(title, english) }); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

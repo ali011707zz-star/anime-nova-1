@@ -4,7 +4,7 @@ import Hls from "hls.js";
 import {
   ChevronRight, ChevronLeft, Loader2, Play,
   AlertTriangle, Zap, Settings2, XCircle,
-  Download, Wifi, CheckCircle2
+  Download, CheckCircle2, RefreshCw, SkipForward,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -19,8 +19,12 @@ const ANILIST_Q = `query ($id: Int) {
 interface Source {
   name: string; url: string; quality: string; qualityRank: number; site: string;
 }
-type ProbeStatus = "unknown" | "testing" | "ok" | "dead";
-type PlayerMode  = "native" | "iframe";
+type ProbeStatus = "unknown" | "testing" | "ok" | "dead" | "incompatible";
+
+const SITE_LABEL: Record<string, string> = {
+  animelek: "AnimeLek", mitanime: "MitAnime", witanime: "WitAnime",
+  anime4up: "Anime4Up", animeblkom: "Blkom", "3asq": "3asq", animetitans: "Titans",
+};
 
 function saveHistory(id: number, title: string, cover: string, ep: number) {
   try {
@@ -35,7 +39,7 @@ function saveHistory(id: number, title: string, cover: string, ep: number) {
 const getCache = (k: string) => localStorage.getItem(k) ?? "";
 const setCache = (k: string, v: string) => localStorage.setItem(k, v);
 
-/* ─── Quality Badge ─── */
+/* ── Quality Badge ── */
 function QBadge({ q }: { q: string }) {
   const u = (q || "").toUpperCase();
   if (u === "FHD" || u === "1080")
@@ -45,7 +49,7 @@ function QBadge({ q }: { q: string }) {
   return <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-zinc-600/30 text-zinc-400 border border-zinc-500/20">{q || "SD"}</span>;
 }
 
-/* ─── Native HLS/MP4 Player ─── */
+/* ── Native HLS/MP4 Player ── */
 function NativePlayer({ videoUrl, videoType, onReady, onFail }: {
   videoUrl: string; videoType: "hls" | "mp4";
   onReady: () => void; onFail: () => void;
@@ -57,10 +61,13 @@ function NativePlayer({ videoUrl, videoType, onReady, onFail }: {
     const video = videoRef.current;
     if (!video || !videoUrl) return;
     hlsRef.current?.destroy(); hlsRef.current = null;
+    video.removeAttribute("src");
+
     if (videoType === "hls") {
       if (Hls.isSupported()) {
         const hls = new Hls({ startLevel: -1, maxBufferLength: 60, enableWorker: true });
-        hls.loadSource(videoUrl); hls.attachMedia(video);
+        hls.loadSource(videoUrl);
+        hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => { video.play().catch(() => {}); onReady(); });
         hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) onFail(); });
         hlsRef.current = hls;
@@ -75,12 +82,19 @@ function NativePlayer({ videoUrl, videoType, onReady, onFail }: {
       video.addEventListener("error", onFail, { once: true });
     }
     return () => { hlsRef.current?.destroy(); hlsRef.current = null; };
-  }, [videoUrl]);
+  }, [videoUrl, videoType]);
 
-  return <video ref={videoRef} className="w-full h-full bg-black" controls playsInline autoPlay style={{ outline: "none" }} />;
+  return (
+    <video
+      ref={videoRef}
+      className="w-full h-full bg-black"
+      controls playsInline autoPlay
+      style={{ outline: "none" }}
+    />
+  );
 }
 
-/* ─── Loading Screen — shows anime cover ─── */
+/* ── Loading Cover ── */
 function CoverLoader({ cover, message }: { cover: string | null; message: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 gap-0">
@@ -108,48 +122,63 @@ function CoverLoader({ cover, message }: { cover: string | null; message: string
   );
 }
 
-/* ─── Server Card ─── */
+/* ── Server Card ── */
 function ServerCard({ src, status, isActive, onSelect, onDownload, downloading }: {
   src: Source; status: ProbeStatus; isActive: boolean;
   onSelect: (s: Source) => void; onDownload: (s: Source) => void; downloading: boolean;
 }) {
-  const isDead = status === "dead";
-  const cardCls = isActive  ? "bg-emerald-500/10 border-emerald-500/35" :
-                  isDead    ? "bg-red-500/4 border-red-400/15 opacity-40 pointer-events-none" :
-                              "bg-[#111116] border-white/6";
+  const isDead = status === "dead" || status === "incompatible";
+  const label  = SITE_LABEL[src.site] || src.site;
+
+  const cardCls = isActive
+    ? "bg-emerald-500/10 border-emerald-500/35"
+    : isDead
+    ? "bg-red-500/4 border-red-400/15 opacity-40 pointer-events-none"
+    : "bg-[#111116] border-white/6";
+
   const statusEl =
-    status === "testing" ? <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" /> :
-    status === "ok"      ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> :
-    status === "dead"    ? <XCircle className="w-4 h-4 text-red-400 shrink-0" /> :
-    <Wifi className="w-4 h-4 text-white/18 shrink-0" />;
+    status === "testing"      ? <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" /> :
+    status === "ok"           ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> :
+    status === "dead"         ? <XCircle className="w-4 h-4 text-red-400 shrink-0" /> :
+    status === "incompatible" ? <XCircle className="w-4 h-4 text-orange-400 shrink-0" /> :
+                                <Play className="w-4 h-4 text-white/25 shrink-0" />;
 
   return (
-    <motion.div whileTap={!isDead ? { scale: 0.97 } : {}}
-      className={`flex items-center gap-2.5 px-3.5 py-3 rounded-2xl border transition-all ${cardCls}`}>
+    <motion.div
+      whileTap={!isDead ? { scale: 0.97 } : {}}
+      className={`flex items-center gap-2.5 px-3.5 py-3 rounded-2xl border transition-all ${cardCls}`}
+    >
       {statusEl}
       <div className="flex-1 min-w-0 text-right">
         <p className={`text-sm font-black font-['Cairo'] truncate ${isActive ? "text-emerald-300" : isDead ? "text-white/25" : "text-white/85"}`}>
           {src.name}
         </p>
+        <p className="text-[9px] text-white/30 font-['Cairo']">{label}</p>
       </div>
       <QBadge q={src.quality} />
-      <button onClick={() => !isDead && onSelect(src)} disabled={isDead || status === "testing"}
+      <button
+        onClick={() => !isDead && onSelect(src)}
+        disabled={isDead || status === "testing"}
         className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all active:scale-90
-          ${isActive ? "bg-emerald-500/20 border-emerald-500/35 text-emerald-400" : "bg-primary/15 border-primary/25 text-primary"}`}>
+          ${isActive ? "bg-emerald-500/20 border-emerald-500/35 text-emerald-400" : "bg-primary/15 border-primary/25 text-primary"}`}
+      >
         {status === "testing" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
       </button>
-      <button onClick={() => onDownload(src)} disabled={downloading}
+      <button
+        onClick={() => onDownload(src)}
+        disabled={downloading || isDead}
         className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all active:scale-90
-          ${downloading ? "bg-blue-500/15 border-blue-500/25 text-blue-400" : "bg-white/5 border-white/8 text-white/35 hover:text-white/65"}`}>
+          ${downloading ? "bg-blue-500/15 border-blue-500/25 text-blue-400" : "bg-white/5 border-white/8 text-white/35 hover:text-white/65"}`}
+      >
         {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
       </button>
     </motion.div>
   );
 }
 
-/* ════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════════════════
    MAIN WATCH PAGE
-════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════════ */
 export default function WatchPage() {
   const [, navigate] = useLocation();
   const sp       = new URLSearchParams(window.location.search);
@@ -165,23 +194,24 @@ export default function WatchPage() {
   const [statuses, setStatuses]   = useState<Record<string, ProbeStatus>>({});
   const [videoUrl, setVideoUrl]   = useState<string | null>(null);
   const [videoType, setVideoType] = useState<"hls" | "mp4" | null>(null);
-  const [playerMode, setPlayerMode] = useState<PlayerMode>("iframe");
   const [loading, setLoading]     = useState(true);
   const [loadMsg, setLoadMsg]     = useState("جاري تحميل البيانات...");
   const [playerReady, setPlayerReady] = useState(false);
+  const [extracting, setExtracting]   = useState(false);
   const [toast, setToast]         = useState<string | null>(null);
   const [downloadingUrl, setDownloadingUrl] = useState<string | null>(null);
+  const [autoPlaying, setAutoPlaying] = useState(false);
 
-  const iframeRef   = useRef<HTMLIFrameElement>(null);
-  /* ─── History navigation refs ─── */
-  const hasPlayerState = useRef(false);
-  const ignoreNextPop  = useRef(false);
+  const hasPlayerState  = useRef(false);
+  const ignoreNextPop   = useRef(false);
+  const autoPlayIdx     = useRef(0);
+  const autoPlayActive  = useRef(false);
 
   const title = anime?.title?.romaji || anime?.title?.english || "أنمي";
   const total = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
   const cover = anime?.coverImage?.large || null;
 
-  /* ─── Push history state exactly ONCE when entering player ─── */
+  /* ── Push history state once on entering player ── */
   useEffect(() => {
     if (view === "player" && !hasPlayerState.current) {
       window.history.pushState({ novaView: "player" }, "");
@@ -189,44 +219,38 @@ export default function WatchPage() {
     }
   }, [view]);
 
-  /* ─── Intercept device back from player — let servers view navigate naturally ─── */
+  /* ── Intercept device back button ── */
   useEffect(() => {
     const handler = () => {
       if (ignoreNextPop.current) { ignoreNextPop.current = false; return; }
       if (hasPlayerState.current) {
-        // Device back pressed while in player — go to servers
         setView("servers");
         hasPlayerState.current = false;
-        // Browser already moved back one step — don't call history.go() again
       }
-      // If not in player state, let browser navigate naturally
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, []);
 
-  /* ─── Explicit back button ─── */
   function goBack() {
     if (view === "player") {
       setView("servers");
       if (hasPlayerState.current) {
-        // Pop our pushed state so servers back works in one press
         ignoreNextPop.current = true;
         hasPlayerState.current = false;
         window.history.go(-1);
       }
       return;
     }
-    // Servers view — go to actual previous page
     window.history.back();
   }
 
-  /* ─── Load anime + sources ─── */
+  /* ── Load anime + sources ── */
   useEffect(() => {
     if (!animeId) { setLoading(false); return; }
     setLoading(true); setSources([]); setActive(null);
     setVideoUrl(null); setVideoType(null); setStatuses({});
-    setView("servers");
+    setView("servers"); autoPlayActive.current = false; setAutoPlaying(false);
 
     (async () => {
       try {
@@ -241,7 +265,7 @@ export default function WatchPage() {
         setAnime(animeData);
         if (animeData) saveHistory(animeId, animeData.title?.romaji || "", animeData.coverImage?.large || "", ep);
 
-        setLoadMsg("جاري جلب السيرفرات...");
+        setLoadMsg("جاري جلب السيرفرات من 6 مواقع...");
         const params = new URLSearchParams({
           ep: String(ep),
           title: animeData?.title?.romaji || "",
@@ -250,7 +274,7 @@ export default function WatchPage() {
         if (alekSlug) params.set("alekSlug", alekSlug);
         if (mitSlug)  params.set("mitSlug",  mitSlug);
 
-        const srcRes = await fetch(`/api/anime/all-sources?${params}`, { signal: AbortSignal.timeout(25000) });
+        const srcRes = await fetch(`/api/anime/all-sources?${params}`, { signal: AbortSignal.timeout(35000) });
         if (srcRes.ok) {
           const data = await srcRes.json();
           const srcs: Source[] = data.sources || [];
@@ -269,75 +293,99 @@ export default function WatchPage() {
     })();
   }, [animeId, ep]);
 
-  /* ─── Update iframe src (never remounts) ─── */
-  useEffect(() => {
-    if (!active || playerMode !== "iframe" || !iframeRef.current) return;
-    setPlayerReady(false);
-    iframeRef.current.src = active.url;
-  }, [active?.url, playerMode]);
-
-  /* ─── Select server ─── */
-  async function selectServer(src: Source) {
-    if (statuses[src.url] === "testing") return;
+  /* ── Try to extract video from a source (deep multi-hop) ── */
+  async function tryExtract(src: Source): Promise<boolean> {
     setStatuses(s => ({ ...s, [src.url]: "testing" }));
     try {
-      const exRes = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(src.url)}`, {
-        signal: AbortSignal.timeout(13000),
-      });
-      const exData = await exRes.json();
-      if (exData.videoUrl) {
-        setVideoUrl(exData.videoUrl); setVideoType(exData.videoType);
-        setPlayerMode("native"); setActive(src); setPlayerReady(false);
+      const res = await fetch(
+        `/api/anime/extract-video?url=${encodeURIComponent(src.url)}&referer=${encodeURIComponent(src.url)}`,
+        { signal: AbortSignal.timeout(22000) }
+      );
+      const data = await res.json();
+      if (data.videoUrl) {
+        setVideoUrl(data.videoUrl);
+        setVideoType(data.videoType);
+        setActive(src);
+        setPlayerReady(false);
         setStatuses(s => ({ ...s, [src.url]: "ok" }));
-        setTimeout(() => setView("player"), 400);
-        return;
+        return true;
       }
-      const probeRes = await fetch(`/api/anime/probe?url=${encodeURIComponent(src.url)}`, {
-        signal: AbortSignal.timeout(10000),
-      });
-      const { alive } = await probeRes.json();
-      if (alive) {
-        setVideoUrl(null); setVideoType(null); setPlayerMode("iframe");
-        setActive(src); setPlayerReady(false);
-        setStatuses(s => ({ ...s, [src.url]: "ok" }));
-        setTimeout(() => setView("player"), 400);
-      } else {
-        setStatuses(s => ({ ...s, [src.url]: "dead" }));
-        showToast("❌ هذا السيرفر لا يعمل");
-      }
-    } catch {
-      setVideoUrl(null); setVideoType(null); setPlayerMode("iframe");
-      setActive(src); setPlayerReady(false);
-      setStatuses(s => ({ ...s, [src.url]: "ok" }));
-      setTimeout(() => setView("player"), 400);
+    } catch {}
+    setStatuses(s => ({ ...s, [src.url]: "incompatible" }));
+    return false;
+  }
+
+  /* ── Select server (manual) ── */
+  async function selectServer(src: Source) {
+    if (statuses[src.url] === "testing" || extracting) return;
+    autoPlayActive.current = false;
+    setAutoPlaying(false);
+    setExtracting(true);
+    const ok = await tryExtract(src);
+    setExtracting(false);
+    if (ok) {
+      setTimeout(() => setView("player"), 300);
+    } else {
+      showToast("❌ لا يمكن استخراج الفيديو من هذا السيرفر — جرب غيره");
     }
   }
 
-  /* ─── Direct download ─── */
+  /* ── Auto Play: tries servers one by one until one works ── */
+  async function startAutoPlay() {
+    if (autoPlaying || extracting) return;
+    const candidates = sources.filter(
+      s => statuses[s.url] !== "dead" && statuses[s.url] !== "incompatible"
+    );
+    if (!candidates.length) { showToast("لا يوجد سيرفرات متاحة"); return; }
+
+    autoPlayActive.current = true;
+    setAutoPlaying(true);
+
+    for (let i = 0; i < candidates.length; i++) {
+      if (!autoPlayActive.current) break;
+      autoPlayIdx.current = i;
+      setExtracting(true);
+      const ok = await tryExtract(candidates[i]);
+      setExtracting(false);
+      if (ok) {
+        autoPlayActive.current = false;
+        setAutoPlaying(false);
+        setTimeout(() => setView("player"), 300);
+        return;
+      }
+    }
+
+    autoPlayActive.current = false;
+    setAutoPlaying(false);
+    showToast("⚠ لم يُعثر على سيرفر يعمل — حاول لاحقاً");
+  }
+
+  /* ── Download ── */
   async function handleDownload(src: Source) {
     if (downloadingUrl === src.url) return;
     setDownloadingUrl(src.url);
     showToast("جاري البحث عن رابط التنزيل...");
     try {
-      const exRes = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(src.url)}`, {
-        signal: AbortSignal.timeout(14000),
-      });
-      const exData = await exRes.json();
-      if (exData.videoUrl && exData.videoType === "mp4") {
+      const res = await fetch(
+        `/api/anime/extract-video?url=${encodeURIComponent(src.url)}&referer=${encodeURIComponent(src.url)}`,
+        { signal: AbortSignal.timeout(22000) }
+      );
+      const data = await res.json();
+      if (data.videoUrl && data.videoType === "mp4") {
         const a = document.createElement("a");
-        a.href = exData.videoUrl; a.download = `${title}-ep${ep}.mp4`;
+        a.href = data.videoUrl; a.download = `${title}-ep${ep}.mp4`;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         showToast("⬇ بدأ التنزيل...");
-      } else if (exData.videoUrl) {
+      } else if (data.videoUrl) {
         showToast("⚠ هذا السيرفر HLS — لا يدعم التنزيل المباشر");
       } else {
-        showToast("❌ لا يوجد رابط تنزيل مباشر لهذا السيرفر");
+        showToast("❌ لا يوجد رابط تنزيل مباشر");
       }
-    } catch { showToast("❌ تعذر الوصول لرابط التنزيل"); }
-    finally   { setDownloadingUrl(null); }
+    } catch { showToast("❌ تعذر الوصول للرابط"); }
+    finally  { setDownloadingUrl(null); }
   }
 
-  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
+  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3500); }
 
   function goEp(n: number) {
     const p = new URLSearchParams({ anime: String(animeId), ep: String(n) });
@@ -345,67 +393,67 @@ export default function WatchPage() {
     navigate(`/watch?${p}`);
   }
 
-  const fhdSrcs = sources.filter(s => s.qualityRank === 3);
-  const hdSrcs  = sources.filter(s => s.qualityRank === 2);
-  const sdSrcs  = sources.filter(s => s.qualityRank <= 1);
+  const fhdSrcs     = sources.filter(s => s.qualityRank === 3);
+  const hdSrcs      = sources.filter(s => s.qualityRank === 2);
+  const sdSrcs      = sources.filter(s => s.qualityRank <= 1);
+  const activeCount = sources.filter(
+    s => statuses[s.url] !== "dead" && statuses[s.url] !== "incompatible"
+  ).length;
 
-  /* ══════════════ RENDER ══════════════ */
+  /* ════════════════ RENDER ════════════════ */
   return (
     <div className="bg-[#09090B] min-h-screen text-white" dir="rtl">
 
-      {/* ══ PLAYER ══ */}
+      {/* ══ PLAYER VIEW ══ */}
       <div style={{ display: view === "player" ? "block" : "none" }}>
 
         {/* Video */}
         <div className="relative bg-black w-full overflow-hidden" style={{ aspectRatio: "16/9", minHeight: "230px" }}>
-          {playerMode === "native" && videoUrl && (
-            <NativePlayer videoUrl={videoUrl} videoType={videoType!}
+
+          {videoUrl && videoType && (
+            <NativePlayer
+              videoUrl={videoUrl}
+              videoType={videoType}
               onReady={() => setPlayerReady(true)}
-              onFail={() => { setVideoUrl(null); setVideoType(null); setPlayerMode("iframe"); setPlayerReady(false); }} />
+              onFail={() => {
+                if (active) setStatuses(s => ({ ...s, [active.url]: "dead" }));
+                setView("servers");
+                showToast("⚠ فشل التشغيل — جرب سيرفراً آخر");
+              }}
+            />
           )}
 
-          <iframe ref={iframeRef} src="about:blank"
-            className="w-full h-full" allowFullScreen
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups-to-escape-sandbox"
-            referrerPolicy="no-referrer"
-            style={{ border: "none", display: (playerMode === "iframe" && active) ? "block" : "none" }}
-            onLoad={() => { if (playerMode === "iframe" && active) setPlayerReady(true); }}
-          />
-
           {/* Loading */}
-          {!playerReady && active && (
+          {!playerReady && videoUrl && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#080808] pointer-events-none">
               <Loader2 className="w-8 h-8 text-primary animate-spin mb-2" />
-              <p className="text-white/30 text-[10px] font-['Cairo']">
-                {playerMode === "native" ? "جاري تحميل الفيديو..." : "جاري تحميل المشغل..."}
-              </p>
+              <p className="text-white/30 text-[10px] font-['Cairo']">جاري تحميل الفيديو...</p>
             </div>
           )}
 
-          {/* No source */}
-          {!active && (
+          {/* No video */}
+          {!videoUrl && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-[#080808]">
               <p className="text-white/20 text-xs font-['Cairo']">اختر سيرفراً</p>
             </div>
           )}
 
-          {/* ── Always-visible back button ── */}
+          {/* Back */}
           <button onClick={goBack}
             className="absolute top-3 right-3 z-30 w-9 h-9 bg-black/65 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90">
             <ChevronRight className="w-5 h-5 text-white" />
           </button>
 
-          {/* Native: ad-free badge */}
-          {playerMode === "native" && playerReady && (
+          {/* Ad-free badge */}
+          {playerReady && (
             <div className="absolute top-3 left-3 z-30 flex items-center gap-1 bg-emerald-500/20 border border-emerald-500/25 px-2 py-1 rounded-lg">
               <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-              <span className="text-emerald-400 text-[9px] font-black">بدون إعلانات</span>
+              <span className="text-emerald-400 text-[9px] font-black font-['Cairo']">مشغل مدمج · بدون إعلانات</span>
             </div>
           )}
 
-          {/* Iframe: floating small "change server" pill */}
-          {playerMode === "iframe" && playerReady && (
+          {/* Change server pill */}
+          {playerReady && (
             <button onClick={() => setView("servers")}
               className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 bg-black/70 backdrop-blur-md border border-white/15 text-white/70 text-[10px] font-black px-3 py-1 rounded-full font-['Cairo'] active:scale-95">
               <Settings2 className="w-2.5 h-2.5" /> تغيير السيرفر
@@ -417,7 +465,11 @@ export default function WatchPage() {
         <div className="px-4 pt-3 pb-2 border-b border-white/5">
           <p className="text-[10px] text-white/35 font-['Cairo'] text-center mb-2">
             {title} — الحلقة {ep}
-            {active && playerMode === "native" && <span className="text-emerald-400 mr-2">· مشغل مدمج</span>}
+            {active && (
+              <span className="text-emerald-400 mr-2">
+                · {active.name} ({SITE_LABEL[active.site] || active.site})
+              </span>
+            )}
           </p>
           <div className="flex gap-2">
             <button disabled={ep <= 1} onClick={() => goEp(ep - 1)}
@@ -435,9 +487,9 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Not working row */}
+        {/* Not working */}
         <div className="flex items-center justify-center gap-3 px-4 pt-3 pb-4">
-          <span className="text-[10px] text-white/20 font-['Cairo']">الحلقة لا تشتغل؟</span>
+          <span className="text-[10px] text-white/20 font-['Cairo']">الفيديو لا يعمل؟</span>
           <button onClick={() => setView("servers")}
             className="flex items-center gap-1.5 bg-primary/10 border border-primary/18 text-primary text-[10px] font-black px-3 py-1.5 rounded-xl font-['Cairo'] active:scale-95">
             <Settings2 className="w-2.5 h-2.5" /> جرب سيرفر آخر
@@ -445,10 +497,10 @@ export default function WatchPage() {
         </div>
       </div>
 
-      {/* ══ SERVERS ══ */}
+      {/* ══ SERVERS VIEW ══ */}
       <div style={{ display: view === "servers" ? "flex" : "none", flexDirection: "column", minHeight: "100vh" }}>
 
-        {/* Header */}
+        {/* Sticky header */}
         <div className="sticky top-0 z-30 bg-[#09090B]/97 backdrop-blur-xl border-b border-white/6 px-4 pt-4 pb-3 shrink-0">
           <div className="flex items-center gap-3 mb-3">
             <button onClick={goBack}
@@ -460,7 +512,8 @@ export default function WatchPage() {
                 {loading ? "جاري التحميل..." : title}
               </h1>
               <p className="text-[10px] text-primary font-bold font-['Cairo']">
-                الحلقة {ep}{!loading && sources.length > 0 && ` · ${sources.length} سيرفر`}
+                الحلقة {ep}
+                {!loading && sources.length > 0 && ` · ${sources.length} سيرفر من 6 مواقع`}
               </p>
             </div>
             {active && (
@@ -485,7 +538,7 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Loading with cover */}
+        {/* Loading */}
         {loading && (
           <div className="flex-1 px-4 pt-4">
             <CoverLoader cover={cover} message={loadMsg} />
@@ -509,19 +562,57 @@ export default function WatchPage() {
 
         {/* Sources */}
         {!loading && sources.length > 0 && (
-          <div className="flex-1 px-4 pt-4 pb-10 space-y-5">
-            {/* Banner */}
+          <div className="flex-1 px-4 pt-4 pb-10 space-y-4">
+
+            {/* Info banner */}
             <div className="flex items-center gap-3 p-4 rounded-2xl border border-primary/12"
               style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.10) 0%, rgba(109,40,217,0.04) 100%)" }}>
               <div className="w-9 h-9 rounded-xl bg-primary/18 border border-primary/22 flex items-center justify-center shrink-0">
                 <Zap className="w-4 h-4 text-primary" />
               </div>
               <div>
-                <p className="text-xs font-black text-white/80 font-['Cairo']">اختر سيرفرك وشاهد فوراً</p>
-                <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">▶ تشغيل · ❌ لا يعمل · ⬇ تنزيل mp4</p>
+                <p className="text-xs font-black text-white/80 font-['Cairo']">مشغل داخلي — بدون إعلانات</p>
+                <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">يستخرج الفيديو مباشرة · لا يفتح أي موقع خارجي</p>
               </div>
             </div>
 
+            {/* Extracting indicator */}
+            <AnimatePresence>
+              {extracting && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                  className="flex items-center gap-2.5 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25"
+                >
+                  <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+                  <p className="text-xs font-bold text-amber-300 font-['Cairo']">
+                    {autoPlaying
+                      ? `جاري تجربة السيرفرات تلقائياً... (${autoPlayIdx.current + 1}/${activeCount})`
+                      : "جاري استخراج رابط الفيديو..."}
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Auto play button */}
+            {!extracting && !autoPlaying && (
+              <button
+                onClick={startAutoPlay}
+                className="w-full h-12 flex items-center justify-center gap-2 bg-primary rounded-2xl text-white text-sm font-black font-['Cairo'] shadow-lg shadow-primary/25 active:scale-[0.97]"
+              >
+                <SkipForward className="w-4 h-4" />
+                تشغيل تلقائي (أفضل سيرفر)
+              </button>
+            )}
+
+            {/* Refresh */}
+            {!loading && !extracting && (
+              <button onClick={() => window.location.reload()}
+                className="w-full h-10 flex items-center justify-center gap-2 bg-white/5 border border-white/8 rounded-xl text-white/40 text-xs font-bold font-['Cairo'] active:scale-[0.97]">
+                <RefreshCw className="w-3.5 h-3.5" /> تحديث السيرفرات
+              </button>
+            )}
+
+            {/* Quality groups */}
             {[
               { srcs: fhdSrcs, label: "1080", badge: "FHD", cls: "text-emerald-400 bg-emerald-500/15 border-emerald-500/20" },
               { srcs: hdSrcs,  label: "720",  badge: "HD",  cls: "text-blue-400 bg-blue-500/15 border-blue-500/20" },
@@ -538,11 +629,14 @@ export default function WatchPage() {
                 </div>
                 <div className="space-y-2">
                   {group.srcs.map(src => (
-                    <ServerCard key={src.url} src={src}
+                    <ServerCard
+                      key={src.url} src={src}
                       status={statuses[src.url] || "unknown"}
                       isActive={active?.url === src.url}
-                      onSelect={selectServer} onDownload={handleDownload}
-                      downloading={downloadingUrl === src.url} />
+                      onSelect={selectServer}
+                      onDownload={handleDownload}
+                      downloading={downloadingUrl === src.url}
+                    />
                   ))}
                 </div>
               </div>
@@ -554,9 +648,11 @@ export default function WatchPage() {
       {/* Toast */}
       <AnimatePresence>
         {toast && (
-          <motion.div initial={{ opacity: 0, y: 24, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+          <motion.div
+            initial={{ opacity: 0, y: 24, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12 }}
-            className="fixed bottom-8 left-4 right-4 z-50 bg-[#1C1C22] border border-white/10 rounded-2xl px-4 py-3.5 text-center shadow-2xl">
+            className="fixed bottom-8 left-4 right-4 z-50 bg-[#1C1C22] border border-white/10 rounded-2xl px-4 py-3.5 text-center shadow-2xl"
+          >
             <p className="text-sm text-white/85 font-['Cairo'] font-bold">{toast}</p>
           </motion.div>
         )}
