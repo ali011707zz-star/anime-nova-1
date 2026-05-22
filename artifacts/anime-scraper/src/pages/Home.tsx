@@ -1,54 +1,50 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'wouter';
-import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Film } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect, useState, useCallback } from "react";
+import { Link } from "wouter";
+import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft, Newspaper } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
-const GENRES_AR: { ar: string; en: string }[] = [
-  { ar: "الكل", en: "" },
-  { ar: "أكشن", en: "Action" },
-  { ar: "رومانسي", en: "Romance" },
-  { ar: "كوميدي", en: "Comedy" },
-  { ar: "دراما", en: "Drama" },
-  { ar: "مغامرة", en: "Adventure" },
-  { ar: "خيال علمي", en: "Sci-Fi" },
-  { ar: "فانتازيا", en: "Fantasy" },
-  { ar: "غموض", en: "Mystery" },
-  { ar: "رياضة", en: "Sports" },
-  { ar: "رعب", en: "Horror" },
-  { ar: "نفسي", en: "Psychological" },
-  { ar: "إيسيكاي", en: "Isekai" },
-  { ar: "شريحة حياة", en: "Slice of Life" },
-  { ar: "موسيقى", en: "Music" },
+const GENRES_AR: { ar: string; en: string; color: string; img: string }[] = [
+  { ar: "الكل",       en: "",              color: "#8B5CF6", img: "" },
+  { ar: "أكشن",       en: "Action",        color: "#EF4444", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21459-D0xCKHUZEyb7.jpg" },
+  { ar: "مغامرة",     en: "Adventure",     color: "#F97316", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20958-HuFJyr54Mmir.jpg" },
+  { ar: "كوميدي",     en: "Comedy",        color: "#EAB308", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21202-ikxsGi8iT7nT.jpg" },
+  { ar: "دراما",      en: "Drama",         color: "#8B5CF6", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx9253-p1zPHMVEpIPK.jpg" },
+  { ar: "فانتازيا",   en: "Fantasy",       color: "#06B6D4", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1CTc93blC.jpg" },
+  { ar: "خيال علمي",  en: "Sci-Fi",        color: "#3B82F6", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx5114-KJTQz9AIjCPt.jpg" },
+  { ar: "رياضة",      en: "Sports",        color: "#10B981", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx124194-cPPdxkFEeWC7.jpg" },
+  { ar: "رومانسي",    en: "Romance",       color: "#EC4899", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108465-RFpDKe2CyAqF.jpg" },
+  { ar: "إيسيكاي",    en: "Isekai",        color: "#059669", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108632-rvzNqs1QMgPE.jpg" },
+  { ar: "نفسي",       en: "Psychological", color: "#7C3AED", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx31646-OFBpV5ftOkL3.jpg" },
+  { ar: "رعب",        en: "Horror",        color: "#6B7280", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx98478-m14Pk2KuLIeR.jpg" },
+  { ar: "غموض",       en: "Mystery",       color: "#64748B", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx100388-JVD9ATSnHHWg.jpg" },
 ];
 
 function buildPopularQuery(genre: string) {
-  const genreFilter = genre ? `, genre: "${genre}"` : "";
-  return `
-query ($page: Int, $perPage: Int) {
+  const gf = genre ? `, genre: "${genre}"` : "";
+  return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA]${genreFilter}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA]${gf}) {
       id title { romaji english } coverImage { large extraLarge }
-      bannerImage averageScore episodes genres status
+      bannerImage averageScore episodes genres status format
     }
   }
 }`;
 }
 
-const RECENT_QUERY = `
-query ($page: Int, $perPage: Int) {
+const RECENT_QUERY = `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: START_DATE_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], status: RELEASING) {
+    media(type: ANIME, sort: TRENDING_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], status: RELEASING) {
       id title { romaji } coverImage { large } averageScore episodes
+      nextAiringEpisode { episode }
     }
   }
 }`;
 
-const TRENDING_QUERY = `
-query {
-  Page(perPage: 10) {
-    media(type: ANIME, sort: TRENDING_DESC, countryOfOrigin: "JP") {
-      id title { romaji } coverImage { large } averageScore episodes
+const TRENDING_QUERY = `query {
+  Page(perPage: 12) {
+    media(type: ANIME, sort: TRENDING_DESC, countryOfOrigin: "JP", status: RELEASING) {
+      id title { romaji } coverImage { large } averageScore episodes nextAiringEpisode { episode }
     }
   }
 }`;
@@ -58,40 +54,44 @@ function AnimeCard({ anime }: { anime: any }) {
     <Link href={`/anime/${anime.id}`}>
       <motion.div whileTap={{ scale: 0.93 }} className="group cursor-pointer">
         <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
-          {anime.coverImage?.large ? (
-            <img src={anime.coverImage.large} alt={anime.title.romaji} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center"><p className="text-white/20 text-[9px] text-center p-2">{anime.title.romaji}</p></div>
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+          <img
+            src={anime.coverImage?.large}
+            alt={anime.title?.romaji}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
           {anime.averageScore && (
             <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black flex items-center gap-0.5">
               <Star className="w-2 h-2 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
             </div>
           )}
+          {anime.format === "MOVIE" && (
+            <div className="absolute bottom-1.5 left-1.5 bg-primary/80 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black">فيلم</div>
+          )}
         </div>
-        <h3 className="mt-1.5 text-[11px] text-white/70 truncate font-bold group-hover:text-primary transition-colors">{anime.title.romaji}</h3>
+        <h3 className="mt-1.5 text-[11px] text-white/70 truncate font-bold group-hover:text-primary transition-colors">{anime.title?.romaji}</h3>
       </motion.div>
     </Link>
   );
 }
 
 export default function Home() {
-  const [popular, setPopular] = useState<any[]>([]);
-  const [recent, setRecent] = useState<any[]>([]);
-  const [trending, setTrending] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [popular, setPopular]     = useState<any[]>([]);
+  const [recent, setRecent]       = useState<any[]>([]);
+  const [trending, setTrending]   = useState<any[]>([]);
+  const [loading, setLoading]     = useState(true);
   const [genreLoading, setGenreLoading] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage]           = useState(1);
+  const [hasMore, setHasMore]     = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hero, setHero] = useState<any>(null);
-  const [heroIdx, setHeroIdx] = useState(0);
+  const [hero, setHero]           = useState<any>(null);
+  const [heroIdx, setHeroIdx]     = useState(0);
   const [selectedGenre, setSelectedGenre] = useState("");
 
   const fetch$ = async (query: string, variables?: any) => {
-    const r = await fetch('https://graphql.anilist.co', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, variables }),
     });
     return (await r.json()).data?.Page;
@@ -102,7 +102,7 @@ export default function Home() {
       setLoading(true);
       const [pop, rec, trend] = await Promise.all([
         fetch$(buildPopularQuery(""), { page: 1, perPage: 12 }),
-        fetch$(RECENT_QUERY, { page: 1, perPage: 6 }),
+        fetch$(RECENT_QUERY, { page: 1, perPage: 8 }),
         fetch$(TRENDING_QUERY),
       ]);
       setPopular(pop?.media || []);
@@ -116,7 +116,6 @@ export default function Home() {
     load();
   }, []);
 
-  // Rotate hero every 6s
   useEffect(() => {
     if (!popular.length || selectedGenre) return;
     const heroes = popular.filter(a => a.bannerImage);
@@ -141,12 +140,9 @@ export default function Home() {
       setHasMore(data?.pageInfo?.hasNextPage ?? false);
       if (!genre) {
         const heroes = (data?.media || []).filter((a: any) => a.bannerImage);
-        setHero(heroes[0] || data?.media?.[0]);
-        setHeroIdx(0);
+        setHero(heroes[0] || data?.media?.[0]); setHeroIdx(0);
       }
-    } finally {
-      setGenreLoading(false);
-    }
+    } finally { setGenreLoading(false); }
   }, []);
 
   const loadMore = useCallback(async () => {
@@ -172,25 +168,29 @@ export default function Home() {
 
   return (
     <main className="bg-[#09090B] min-h-screen pb-28 text-white" dir="rtl">
-      {/* Hero */}
-      {hero && (
-        <div className="relative w-full overflow-hidden" style={{ height: 320 }}>
-          <motion.img
-            key={hero.id}
-            initial={{ opacity: 0, scale: 1.05 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.6 }}
-            src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
-            alt=""
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#09090B] via-[#09090B]/55 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/40 to-transparent" />
+
+      {/* Hero Banner */}
+      {hero && !selectedGenre && (
+        <div className="relative w-full overflow-hidden" style={{ height: 310 }}>
+          <AnimatePresence mode="wait">
+            <motion.img
+              key={hero.id}
+              initial={{ opacity: 0, scale: 1.05 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.6 }}
+              src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
+              alt=""
+              className="w-full h-full object-cover"
+            />
+          </AnimatePresence>
+          <div className="absolute inset-0 bg-gradient-to-t from-[#09090B] via-[#09090B]/50 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/30 to-transparent" />
 
           <div className="absolute bottom-0 right-0 left-0 p-5">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-1.5 mb-2 flex-wrap">
               {hero.genres?.slice(0, 3).map((g: string) => (
-                <span key={g} className="text-[8px] font-black bg-white/10 backdrop-blur-sm text-white/70 px-2 py-0.5 rounded-full border border-white/10">{g}</span>
+                <span key={g} className="text-[8px] font-black bg-white/10 backdrop-blur-sm text-white/75 px-2 py-0.5 rounded-full border border-white/10">{g}</span>
               ))}
               {hero.averageScore && (
                 <span className="text-[8px] font-black bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full flex items-center gap-0.5">
@@ -200,7 +200,10 @@ export default function Home() {
             </div>
             <h1 className="text-2xl font-black text-white line-clamp-1 mb-1 drop-shadow-lg">{hero.title?.romaji}</h1>
             {hero.episodes && (
-              <p className="text-white/50 text-[11px] font-bold mb-3 font-['Cairo']">{hero.episodes} حلقة • {hero.status === 'RELEASING' ? 'يُبث حالياً' : 'مكتمل'}</p>
+              <p className="text-white/50 text-[11px] font-bold mb-3 font-['Cairo']">
+                {hero.episodes} حلقة
+                {hero.status === "RELEASING" ? " • يُبث حالياً" : " • مكتمل"}
+              </p>
             )}
             <div className="flex gap-2">
               <Link href={`/episodes/${hero.id}`}>
@@ -209,7 +212,7 @@ export default function Home() {
                 </button>
               </Link>
               <Link href={`/anime/${hero.id}`}>
-                <button className="bg-white/10 backdrop-blur-sm text-white text-xs font-black px-5 py-2.5 rounded-xl border border-white/10 active:scale-95 transition-all font-['Cairo']">
+                <button className="bg-white/12 backdrop-blur-sm text-white text-xs font-black px-5 py-2.5 rounded-xl border border-white/10 active:scale-95 transition-all font-['Cairo']">
                   التفاصيل
                 </button>
               </Link>
@@ -217,53 +220,82 @@ export default function Home() {
           </div>
 
           {/* Hero dots */}
-          {!selectedGenre && popular.filter(a => a.bannerImage).length > 1 && (
+          {popular.filter(a => a.bannerImage).length > 1 && (
             <div className="absolute bottom-3 left-4 flex gap-1">
-              {popular.filter(a => a.bannerImage).slice(0, 5).map((_, i) => (
-                <div key={i} className={`h-1 rounded-full transition-all ${i === heroIdx ? 'w-5 bg-primary' : 'w-1.5 bg-white/30'}`} />
+              {popular.filter(a => a.bannerImage).slice(0, 6).map((_, i) => (
+                <div key={i} className={`h-1 rounded-full transition-all ${i === heroIdx ? "w-5 bg-primary" : "w-1.5 bg-white/30"}`} />
               ))}
             </div>
           )}
         </div>
       )}
 
-      {/* ── Genre Filters ── */}
-      <div className="pt-4 pb-1">
-        <div className="flex gap-2 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: 'none' }}>
+      {/* ── Genre Filters with images ── */}
+      <div className="pt-4 pb-2">
+        <div className="flex gap-2 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
           {GENRES_AR.map((g) => (
             <motion.button
               key={g.en}
-              whileTap={{ scale: 0.93 }}
+              whileTap={{ scale: 0.92 }}
               onClick={() => handleGenreSelect(g.en)}
-              className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-black font-['Cairo'] transition-all border
+              className={`shrink-0 relative overflow-hidden rounded-2xl transition-all border
                 ${selectedGenre === g.en
-                  ? 'bg-primary text-white border-primary shadow-lg shadow-primary/30'
-                  : 'bg-[#18181B] text-white/50 border-white/8 hover:border-primary/30 hover:text-white/80'
+                  ? "border-primary shadow-lg shadow-primary/20"
+                  : "border-white/8"
                 }`}
+              style={{ minWidth: g.en ? 72 : 58, height: 36 }}
             >
-              {g.ar}
+              {g.img && (
+                <img src={g.img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+              )}
+              <div
+                className="absolute inset-0"
+                style={{
+                  background: selectedGenre === g.en
+                    ? `linear-gradient(135deg, ${g.color}EE, ${g.color}99)`
+                    : g.img
+                      ? "linear-gradient(135deg, rgba(0,0,0,0.7), rgba(0,0,0,0.5))"
+                      : `linear-gradient(135deg, ${g.color}33, ${g.color}11)`,
+                }}
+              />
+              <span className={`relative z-10 font-black text-[11px] font-['Cairo'] px-3 flex items-center justify-center h-full
+                ${selectedGenre === g.en ? "text-white" : g.img ? "text-white/85" : `text-white/55`}`}>
+                {g.ar}
+              </span>
             </motion.button>
           ))}
         </div>
       </div>
 
-      {/* Trending horizontal scroll */}
+      {/* ── Trending — Now Airing ── */}
       {trending.length > 0 && !selectedGenre && (
         <div className="mt-5">
-          <div className="flex items-center gap-2 mb-3 px-4">
-            <TrendingUp className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-black font-['Cairo']">الأكثر رواجاً</h2>
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-black font-['Cairo']">يُبث الآن</h2>
+            </div>
+            <Link href="/news">
+              <button className="text-[10px] text-primary font-black font-['Cairo'] flex items-center gap-0.5 active:opacity-70">
+                المزيد <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: 'none' }}>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
             {trending.map((anime, i) => (
               <Link key={anime.id} href={`/anime/${anime.id}`}>
                 <motion.div whileTap={{ scale: 0.94 }} className="shrink-0 w-28 cursor-pointer group">
                   <div className="relative w-28 h-40 rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
-                    <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                    <div className="absolute top-2 right-2 w-5 h-5 bg-primary/90 rounded-full flex items-center justify-center text-[8px] font-black text-white">{i + 1}</div>
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                    <div className="absolute top-2 right-2 w-6 h-6 bg-primary/90 rounded-full flex items-center justify-center text-[9px] font-black text-white shadow-lg">{i + 1}</div>
+                    {anime.nextAiringEpisode && (
+                      <div className="absolute bottom-1.5 right-1.5 bg-emerald-500/80 text-white text-[7px] px-1.5 py-0.5 rounded-full font-black">
+                        حلقة {anime.nextAiringEpisode.episode}
+                      </div>
+                    )}
                   </div>
-                  <p className="mt-1.5 text-[10px] text-white/60 truncate font-bold">{anime.title.romaji}</p>
+                  <p className="mt-1.5 text-[10px] text-white/60 truncate font-bold">{anime.title?.romaji}</p>
                 </motion.div>
               </Link>
             ))}
@@ -271,27 +303,68 @@ export default function Home() {
         </div>
       )}
 
-      {/* Recent */}
+      {/* ── Latest Releases ── */}
       {recent.length > 0 && !selectedGenre && (
-        <div className="mt-7 px-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Clock className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-black font-['Cairo']">آخر الإضافات</h2>
+        <div className="mt-6 px-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-black font-['Cairo']">آخر الإصدارات</h2>
+            </div>
+            <Link href="/news">
+              <button className="text-[10px] text-primary font-black font-['Cairo'] flex items-center gap-0.5 active:opacity-70">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            {recent.map(anime => <AnimeCard key={anime.id} anime={anime} />)}
+          <div className="grid grid-cols-4 gap-2.5">
+            {recent.slice(0, 8).map(anime => (
+              <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <motion.div whileTap={{ scale: 0.93 }} className="cursor-pointer">
+                  <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    {anime.nextAiringEpisode && (
+                      <div className="absolute bottom-1 left-1 right-1 bg-emerald-500/80 text-white text-[7px] text-center py-0.5 rounded-md font-black">
+                        ح {anime.nextAiringEpisode.episode}
+                      </div>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[9px] text-white/55 truncate font-bold">{anime.title?.romaji}</p>
+                </motion.div>
+              </Link>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Popular */}
-      <div className="mt-7 px-4">
+      {/* ── News banner ── */}
+      {!selectedGenre && (
+        <Link href="/news">
+          <div className="mx-4 mt-5 p-4 rounded-2xl border border-primary/15 cursor-pointer active:scale-[0.98] transition-all"
+            style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.12), rgba(109,40,217,0.05))" }}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0">
+                <Newspaper className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-black text-white/90 font-['Cairo']">آخر أخبار الأنمي</p>
+                <p className="text-[10px] text-white/35 font-['Cairo']">الإصدارات القادمة والتريندنج</p>
+              </div>
+              <ChevronLeft className="w-4 h-4 text-primary mr-auto" />
+            </div>
+          </div>
+        </Link>
+      )}
+
+      {/* ── Popular grid ── */}
+      <div className="mt-6 px-4">
         <div className="flex items-center gap-2 mb-3">
-          <Film className="w-4 h-4 text-primary" />
+          <TrendingUp className="w-4 h-4 text-primary" />
           <h2 className="text-sm font-black font-['Cairo']">
             {selectedGenre
               ? GENRES_AR.find(g => g.en === selectedGenre)?.ar || selectedGenre
-              : 'الأكثر شعبية'}
+              : "الأكثر شعبية"}
           </h2>
           {genreLoading && <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />}
         </div>
@@ -309,7 +382,7 @@ export default function Home() {
         </AnimatePresence>
         {hasMore && (
           <button onClick={loadMore} disabled={loadingMore}
-            className="w-full mt-5 py-3.5 bg-[#18181B] border border-white/8 rounded-2xl text-sm font-black flex items-center justify-center gap-2 text-white/50 hover:text-white hover:border-primary/30 transition-all active:scale-98 font-['Cairo']">
+            className="w-full mt-5 py-3.5 bg-[#18181B] border border-white/8 rounded-2xl text-sm font-black flex items-center justify-center gap-2 text-white/50 hover:text-white hover:border-primary/30 transition-all active:scale-98 font-['Cairo'] disabled:opacity-40">
             {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ChevronDown className="w-4 h-4" /> تحميل المزيد</>}
           </button>
         )}

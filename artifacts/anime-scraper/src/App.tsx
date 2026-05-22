@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { Header } from "@/components/layout/Header";
@@ -12,23 +12,31 @@ import WatchById from "@/pages/WatchById";
 import Search from "@/pages/Search";
 import Schedule from "@/pages/Schedule";
 import Library from "@/pages/Library";
+import Browse from "@/pages/Browse";
+import News from "@/pages/News";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
 
-// Routes that have their own full-screen header (hide the global one)
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/news", "/browse"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
-  root.setAttribute('data-theme', t);
-  if (t === 'amoled') {
-    root.style.setProperty('--bg-base', '#000000');
-    root.style.setProperty('--bg-card', '#0A0A0A');
-  } else if (t === 'violet') {
-    root.style.setProperty('--bg-base', '#0B0814');
-    root.style.setProperty('--bg-card', '#130F1E');
+  root.setAttribute("data-theme", t);
+  if (t === "amoled") {
+    root.style.setProperty("--bg-base", "#000000");
+    root.style.setProperty("--bg-card", "#0A0A0A");
+  } else if (t === "violet") {
+    root.style.setProperty("--bg-base", "#0B0814");
+    root.style.setProperty("--bg-card", "#130F1E");
+  } else if (t === "blue") {
+    root.style.setProperty("--bg-base", "#0B1120");
+    root.style.setProperty("--bg-card", "#0F1829");
+  } else if (t === "pink") {
+    root.style.setProperty("--bg-base", "#130811");
+    root.style.setProperty("--bg-card", "#1A0E15");
   } else {
-    root.style.setProperty('--bg-base', '#09090B');
-    root.style.setProperty('--bg-card', '#111116');
+    root.style.setProperty("--bg-base", "#09090B");
+    root.style.setProperty("--bg-card", "#111116");
   }
 }
 
@@ -48,9 +56,12 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
         <Route path="/search" component={Search} />
         <Route path="/schedule" component={Schedule} />
         <Route path="/library" component={Library} />
+        <Route path="/browse" component={Browse} />
+        <Route path="/news" component={News} />
+        <Route path="/settings" component={Settings} />
         <Route component={NotFound} />
       </Switch>
-      {!hideHeader && <BottomNav />}
+      <BottomNav />
       <Toaster />
     </>
   );
@@ -59,9 +70,8 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Apply saved theme on app load
   useEffect(() => {
-    const saved = localStorage.getItem('pref-theme') || 'dark';
+    const saved = localStorage.getItem("pref-theme") || "dark";
     applyTheme(saved);
   }, []);
 

@@ -49,6 +49,12 @@ const DEAD_FILE_HOSTS = [
   "drive.google","docs.google","googleapis.com/drive",
   "ok.ru","odnoklassniki.ru",
   "youtube.com","youtu.be",
+  // CDN/tracking scripts — not video sources
+  "cloudflareinsights.com","beacon.min.js",
+  "jquery.min.js","bootstrap.min.js",
+  ".css",".js",".png",".jpg",".jpeg",".gif",".svg",".ico",
+  "favicon","robots.txt","sitemap",
+  // file extension blocklist
 ];
 
 // ── Hosts that block server-side scraping ──
@@ -1596,6 +1602,147 @@ router.get("/anime/all-sources", async (req, res) => {
     req.log.error({ err: e }, "all-sources failed");
     res.status(500).json({ error: e.message });
   }
+});
+
+
+// ════════════════════════════════════════════════════════════════════
+//  Sources Stream  GET /api/anime/sources-stream  (SSE)
+//  Streams sources as they arrive — frontend shows them immediately
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/sources-stream", async (req, res) => {
+  const title     = ((req.query.title    as string) || "").trim();
+  const english   = ((req.query.english  as string) || "").trim() || null;
+  const ep        = parseInt((req.query.ep as string) || "1");
+  const alekSlug  = (req.query.alekSlug as string | undefined)?.trim() || null;
+  const mitSlug   = (req.query.mitSlug  as string | undefined)?.trim() || null;
+  const anilistId = parseInt((req.query.anilistId as string) || "0") || 0;
+  const malId     = parseInt((req.query.malId     as string) || "0") || 0;
+
+  // SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const seenUrls = new Set<string>();
+  let closed = false;
+  req.on("close", () => { closed = true; });
+
+  function sendSrc(s: UnifiedSource) {
+    if (closed) return;
+    if (!s.url || seenUrls.has(s.url)) return;
+    if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
+    seenUrls.add(s.url);
+    res.write(`data: ${JSON.stringify(s)}\n\n`);
+  }
+
+  function sendMany(sources: UnifiedSource[]) {
+    for (const s of sources) sendSrc(s);
+  }
+
+  try {
+    // Check Supabase cache first — send immediately if hit
+    if (anilistId) {
+      const cached = await getFromSupabase(anilistId, ep);
+      if (cached.length > 0) {
+        sendMany(cached as UnifiedSource[]);
+        if (!closed) res.write("data: [DONE]\n\n");
+        res.end(); return;
+      }
+    }
+
+    const SCRAPER_MS = 9000;
+    const empty = { sources: [] as UnifiedSource[] };
+
+    // Run all scrapers independently, send results as each finishes
+    const scrapers: Promise<void>[] = [
+      // 1. AnimeLek
+      (async () => {
+        try {
+          const slug = await Promise.race([
+            resolveAlekSlug(title, english, alekSlug),
+            new Promise<null>(r => setTimeout(() => r(null), SCRAPER_MS)),
+          ]);
+          if (!slug) return;
+          if (!closed) res.write(`data: [SLUG]${JSON.stringify({ alekSlug: slug })}\n\n`);
+          const srcs = await Promise.race([
+            getAlekSources(slug, ep),
+            new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          sendMany(srcs as UnifiedSource[]);
+        } catch {}
+      })(),
+
+      // 2. MitAnime
+      (async () => {
+        try {
+          const slug = mitSlug || (title ? await Promise.race([
+            resolveMitSlug(title, english),
+            new Promise<null>(r => setTimeout(() => r(null), SCRAPER_MS)),
+          ]) : null);
+          if (!slug) return;
+          if (!closed) res.write(`data: [SLUG]${JSON.stringify({ mitSlug: slug })}\n\n`);
+          const srcs = await Promise.race([
+            getMitSources(slug, ep),
+            new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          sendMany(srcs as UnifiedSource[]);
+        } catch {}
+      })(),
+
+      // 3. Anime4Up
+      (async () => {
+        try {
+          if (!title) return;
+          const slug = await Promise.race([
+            resolveAnime4upSlug(title, english),
+            new Promise<null>(r => setTimeout(() => r(null), SCRAPER_MS)),
+          ]);
+          if (!slug) return;
+          const srcs = await Promise.race([
+            getAnime4upSources(slug, ep),
+            new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          sendMany(srcs as UnifiedSource[]);
+        } catch {}
+      })(),
+
+      // 4. AnimeTitans
+      (async () => {
+        try {
+          if (!title) return;
+          const slug = await Promise.race([
+            resolveAnimeTitansSlug(title, english),
+            new Promise<null>(r => setTimeout(() => r(null), SCRAPER_MS)),
+          ]);
+          if (!slug) return;
+          const srcs = await Promise.race([
+            getAnimeTitansSources(slug, ep),
+            new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          sendMany(srcs as UnifiedSource[]);
+        } catch {}
+      })(),
+
+      // 5. Supabase DB
+      (async () => {
+        try {
+          const srcs = await Promise.race([
+            getDBSources(title, english, ep, malId || undefined),
+            new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          sendMany(srcs as UnifiedSource[]);
+        } catch {}
+      })(),
+    ];
+
+    await Promise.allSettled(scrapers);
+  } catch (e: any) {
+    req.log?.error?.({ err: e }, "sources-stream failed");
+  }
+
+  if (!closed) { res.write("data: [DONE]\n\n"); res.end(); }
 });
 
 

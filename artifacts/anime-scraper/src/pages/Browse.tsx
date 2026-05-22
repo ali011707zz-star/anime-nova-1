@@ -1,0 +1,214 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Link } from "wouter";
+import { Search, Star, Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+
+const GENRES = [
+  { ar: "أكشن",       en: "Action",        color: "#EF4444", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21459-D0xCKHUZEyb7.jpg" },
+  { ar: "مغامرة",     en: "Adventure",     color: "#F97316", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20958-HuFJyr54Mmir.jpg" },
+  { ar: "كوميدي",     en: "Comedy",        color: "#EAB308", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21202-ikxsGi8iT7nT.jpg" },
+  { ar: "دراما",      en: "Drama",         color: "#8B5CF6", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx9253-p1zPHMVEpIPK.jpg" },
+  { ar: "فانتازيا",   en: "Fantasy",       color: "#06B6D4", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1CTc93blC.jpg" },
+  { ar: "خيال علمي",  en: "Sci-Fi",        color: "#3B82F6", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx5114-KJTQz9AIjCPt.jpg" },
+  { ar: "رياضة",      en: "Sports",        color: "#10B981", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx124194-cPPdxkFEeWC7.jpg" },
+  { ar: "رومانسي",    en: "Romance",       color: "#EC4899", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108465-RFpDKe2CyAqF.jpg" },
+  { ar: "رعب",        en: "Horror",        color: "#6B7280", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx98478-m14Pk2KuLIeR.jpg" },
+  { ar: "نفسي",       en: "Psychological", color: "#7C3AED", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx31646-OFBpV5ftOkL3.jpg" },
+  { ar: "إيسيكاي",    en: "Isekai",        color: "#059669", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108632-rvzNqs1QMgPE.jpg" },
+  { ar: "حياة يومية", en: "Slice of Life", color: "#F59E0B", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx9756-YXAFAnVPIZwN.jpg" },
+  { ar: "غموض",       en: "Mystery",       color: "#64748B", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx100388-JVD9ATSnHHWg.jpg" },
+  { ar: "ميكا",       en: "Mecha",         color: "#94A3B8", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx30-3TzzHnXMFqKylaXz.jpg" },
+  { ar: "موسيقى",     en: "Music",         color: "#A78BFA", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx100916-r5rBQpGELLN9.jpg" },
+  { ar: "إثارة",      en: "Thriller",      color: "#DC2626", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx30002-NCM3CbLMJm0N.jpg" },
+];
+
+const FORMAT_TABS = [
+  { id: "TV",    ar: "مسلسلات" },
+  { id: "MOVIE", ar: "أفلام" },
+  { id: "OVA",   ar: "OVA" },
+];
+
+function buildQuery(genre: string, format: string, page: number) {
+  const gf = genre ? `, genre: "${genre}"` : "";
+  const ff = format ? `, format: ${format}` : `, format_in: [TV, MOVIE, OVA, ONA]`;
+  return `query {
+  Page(page: ${page}, perPage: 24) {
+    pageInfo { hasNextPage }
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP"${gf}${ff}) {
+      id title { romaji } coverImage { large } averageScore episodes format status
+    }
+  }
+}`;
+}
+
+function AnimeCard({ anime }: { anime: any }) {
+  return (
+    <Link href={`/anime/${anime.id}`}>
+      <motion.div whileTap={{ scale: 0.93 }} className="cursor-pointer">
+        <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
+          <img src={anime.coverImage?.large} alt={anime.title.romaji} className="w-full h-full object-cover" loading="lazy" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+          {anime.averageScore && (
+            <div className="absolute top-2 right-2 bg-black/75 backdrop-blur-sm text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black flex items-center gap-0.5">
+              <Star className="w-2 h-2 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+            </div>
+          )}
+          {anime.format === "MOVIE" && (
+            <div className="absolute top-2 left-2 bg-primary/80 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">فيلم</div>
+          )}
+        </div>
+        <p className="mt-1.5 text-[10px] text-white/70 truncate font-bold">{anime.title.romaji}</p>
+      </motion.div>
+    </Link>
+  );
+}
+
+export default function Browse() {
+  const [selectedGenre, setSelectedGenre] = useState("");
+  const [selectedFormat, setSelectedFormat] = useState("TV");
+  const [showGenreGrid, setShowGenreGrid] = useState(true);
+  const [animeList, setAnimeList] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetch$ = async (query: string) => {
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    return (await r.json()).data?.Page;
+  };
+
+  const loadAnime = useCallback(async (genre: string, format: string, p: number, append: boolean) => {
+    if (!append) { setLoading(true); } else { setLoadingMore(true); }
+    try {
+      const data = await fetch$(buildQuery(genre, format, p));
+      const list = data?.media || [];
+      setAnimeList(prev => append ? [...prev, ...list] : list);
+      setHasMore(data?.pageInfo?.hasNextPage ?? false);
+    } finally { setLoading(false); setLoadingMore(false); }
+  }, []);
+
+  useEffect(() => {
+    setPage(1); setAnimeList([]);
+    loadAnime(selectedGenre, selectedFormat, 1, false);
+    setShowGenreGrid(!selectedGenre);
+  }, [selectedGenre, selectedFormat]);
+
+  useEffect(() => {
+    if (!searchQ.trim()) { setSearchResults([]); return; }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      setSearchLoading(true);
+      const q = `query { Page(perPage: 20) { media(type: ANIME, search: "${searchQ.replace(/"/g,"")}", sort: POPULARITY_DESC) { id title { romaji } coverImage { large } averageScore format } } }`;
+      const data = await fetch$(q);
+      setSearchResults(data?.media || []);
+      setSearchLoading(false);
+    }, 500);
+  }, [searchQ]);
+
+  const loadMore = () => {
+    const next = page + 1;
+    setPage(next);
+    loadAnime(selectedGenre, selectedFormat, next, true);
+  };
+
+  const displayList = searchQ.trim() ? searchResults : animeList;
+
+  return (
+    <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
+
+      {/* Header */}
+      <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-4 pb-3">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex-1">
+            <h1 className="text-xl font-black font-['Cairo']">
+              {selectedGenre ? GENRES.find(g => g.en === selectedGenre)?.ar || "تصفح" : "تصفح الأنمي"}
+            </h1>
+          </div>
+          {selectedGenre && (
+            <button onClick={() => { setSelectedGenre(""); setShowGenreGrid(true); }}
+              className="text-[10px] text-white/40 bg-white/6 border border-white/8 px-2.5 py-1.5 rounded-lg font-['Cairo'] active:scale-95">
+              × مسح
+            </button>
+          )}
+        </div>
+        <div className="relative mb-3">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+          <input
+            value={searchQ} onChange={e => setSearchQ(e.target.value)}
+            placeholder="ابحث عن أنمي..."
+            className="w-full bg-[#18181B] border border-white/8 rounded-xl px-4 py-2.5 pr-9 text-sm text-white placeholder:text-white/25 font-['Cairo'] focus:outline-none focus:border-primary/40"
+          />
+          {searchLoading && <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />}
+        </div>
+        {!searchQ.trim() && (
+          <div className="flex gap-1.5">
+            {FORMAT_TABS.map(f => (
+              <button key={f.id} onClick={() => setSelectedFormat(f.id)}
+                className={`flex-1 py-2 rounded-xl text-[11px] font-black font-['Cairo'] transition-all
+                  ${selectedFormat === f.id ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-[#18181B] text-white/40 border border-white/6"}`}>
+                {f.ar}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Genre grid */}
+      <AnimatePresence>
+        {showGenreGrid && !searchQ.trim() && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="px-4 pt-4">
+            <p className="text-xs font-black text-white/35 mb-3 font-['Cairo'] tracking-wide">التصنيفات</p>
+            <div className="grid grid-cols-2 gap-2.5 mb-5">
+              {GENRES.map(g => (
+                <motion.button key={g.en} whileTap={{ scale: 0.95 }}
+                  onClick={() => { setSelectedGenre(g.en); setShowGenreGrid(false); }}
+                  className="relative h-[72px] rounded-2xl overflow-hidden border border-white/8 active:border-white/20">
+                  <img src={g.img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${g.color}DD 0%, ${g.color}55 100%)` }} />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-white font-black text-[15px] font-['Cairo'] drop-shadow-lg">{g.ar}</span>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+            <div className="h-px bg-white/5 mb-4" />
+            <p className="text-xs font-black text-white/35 mb-3 font-['Cairo'] tracking-wide">الأكثر شعبية</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Anime grid */}
+      <div className="px-4 pt-2">
+        {loading ? (
+          <div className="grid grid-cols-3 gap-3">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="aspect-[2/3] rounded-2xl bg-white/5 animate-pulse" style={{ animationDelay: `${i * 60}ms` }} />
+            ))}
+          </div>
+        ) : (
+          <AnimatePresence mode="wait">
+            <motion.div key={`${selectedGenre}-${selectedFormat}-${searchQ}`}
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }} className="grid grid-cols-3 gap-3">
+              {displayList.map(a => <AnimeCard key={a.id} anime={a} />)}
+            </motion.div>
+          </AnimatePresence>
+        )}
+        {hasMore && !searchQ.trim() && !loading && (
+          <button onClick={loadMore} disabled={loadingMore}
+            className="w-full mt-5 py-3.5 bg-[#18181B] border border-white/8 rounded-2xl text-sm font-black flex items-center justify-center gap-2 text-white/50 font-['Cairo'] active:scale-98 disabled:opacity-40">
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : "تحميل المزيد"}
+          </button>
+        )}
+      </div>
+    </main>
+  );
+}
