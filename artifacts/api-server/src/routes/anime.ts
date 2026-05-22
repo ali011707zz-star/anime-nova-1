@@ -1048,6 +1048,145 @@ async function saveToSupabase(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  anime4arabs.com  — 24k pre-collected URLs in Supabase
+// ════════════════════════════════════════════════════════════════════
+const A4A_BASE  = "https://anime4arabs.com";
+const A4A_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime4arabs.com/" };
+// URL-encoded Arabic "الحلقة" (episode)
+const AL_HALAQA = "%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9";
+const a4aEpCache = new Map<string, { url: string | null; ts: number }>();
+const a4aSrcCache = new Map<string, { sources: any[]; ts: number }>();
+
+/**
+ * Find episode URL from the 24k pre-collected Supabase records.
+ * Strategy:
+ *  1. Search by URL pattern matching episode number + title slug
+ *  2. Fall back to direct URL construction (slug guessing)
+ */
+async function findAnime4arabsUrl(
+  romaji: string, english: string | null, ep: number
+): Promise<string | null> {
+  const ck = `a4a:${romaji}-${ep}`;
+  const cached = a4aEpCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.url;
+
+  // ── 1. Search Supabase by episode suffix + title keyword ──
+  try {
+    const candidates = buildCandidates(romaji, english);
+    const titleKw = candidates[0]?.split("-").slice(0, 3).join("-") || "";
+    // Match: .../{slug containing titleKw}-الحلقة-{ep}/
+    const epSuffix = `-${AL_HALAQA}-${ep}/`;
+    const { data } = await sbClient
+      .from("episodes")
+      .select("episode_page_url")
+      .like("episode_page_url", `%anime4arabs.com/episode/%`)
+      .ilike("episode_page_url", `%${titleKw}%`)
+      .or(`episode_page_url.like.%${epSuffix}%,episode_page_url.like.%-${ep}/`)
+      .limit(10);
+
+    if (data?.length) {
+      // Pick the row whose slug best matches the title
+      for (const row of data) {
+        const url: string = row.episode_page_url || "";
+        if (!url.includes(`-${ep}/`) && !url.includes(`-${AL_HALAQA}-${ep}`)) continue;
+        a4aEpCache.set(ck, { url, ts: Date.now() });
+        return url;
+      }
+    }
+  } catch {}
+
+  // ── 2. Direct URL construction (slug guessing) ──
+  const slugs = buildCandidates(romaji, english).slice(0, 6);
+  const arabicEp = `\u0627\u0644\u062d\u0644\u0642\u0629`; // الحلقة
+  for (const slug of slugs) {
+    const tryUrls = [
+      `${A4A_BASE}/episode/${slug}-${arabicEp}-${ep}/`,
+      `${A4A_BASE}/episode/${slug}-episode-${ep}/`,
+      `${A4A_BASE}/episode/${slug}-${ep}/`,
+    ];
+    for (const url of tryUrls) {
+      const code = await safeHead(url, A4A_HDRS);
+      if (code === 200 || code === 301 || code === 302) {
+        a4aEpCache.set(ck, { url, ts: Date.now() });
+        return url;
+      }
+    }
+  }
+
+  a4aEpCache.set(ck, { url: null, ts: Date.now() });
+  return null;
+}
+
+/** Scrape video servers from an anime4arabs.com episode page */
+async function getAnime4arabsSources(epUrl: string): Promise<any[]> {
+  const cached = a4aSrcCache.get(epUrl);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+
+  try {
+    const r = await fetch(epUrl, {
+      headers: A4A_HDRS,
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+
+    const seen = new Set<string>();
+    const sources: any[] = [];
+
+    // Pattern 1: data-src iframes (lazy-loaded)
+    for (const m of html.matchAll(/(?:data-src|src)=["'](https?:\/\/(?!anime4arabs)[^"']+)["']/gi)) {
+      const url = m[1].trim();
+      if (seen.has(url) || DEAD_FILE_HOSTS.some(h => url.includes(h))) continue;
+      if (url.includes("anime4arabs.com") || url.includes("gstatic") || url.includes("google.com/recaptcha")) continue;
+      seen.add(url);
+      const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./, "")?.split(".")[0] || "سيرفر";
+      sources.push({ name: host, url, quality: "HD", qualityRank: 2, site: "anime4arabs" });
+    }
+
+    // Pattern 2: embed links inside JS
+    for (const m of html.matchAll(/"(?:url|file|src|embed|link)"\s*:\s*["'](https?:\/\/[^"'\\]+)["']/gi)) {
+      const url = m[1].trim();
+      if (seen.has(url) || DEAD_FILE_HOSTS.some(h => url.includes(h))) continue;
+      if (url.includes("anime4arabs.com")) continue;
+      seen.add(url);
+      sources.push({ name: "سيرفر", url, quality: "HD", qualityRank: 2, site: "anime4arabs" });
+    }
+
+    // Pattern 3: data-embed or data-server attributes
+    for (const m of html.matchAll(/data-(?:embed|server|link|url)=["'](https?:\/\/[^"']+)["']/gi)) {
+      const url = m[1].replace(/&amp;/g, "&").trim();
+      if (seen.has(url) || DEAD_FILE_HOSTS.some(h => url.includes(h))) continue;
+      if (url.includes("anime4arabs.com")) continue;
+      seen.add(url);
+      const host = url.match(/https?:\/\/([^/]+)/)?.[1]?.replace(/^www\./, "")?.split(".")[0] || "سيرفر";
+      sources.push({ name: host, url, quality: "HD", qualityRank: 2, site: "anime4arabs" });
+    }
+
+    // Pattern 4: direct .m3u8 / .mp4 links
+    for (const m of html.matchAll(/(https?:\/\/[^"'\s<>]+\.(?:m3u8|mp4)[^"'\s<>]*)/gi)) {
+      const url = m[1];
+      if (seen.has(url)) continue;
+      seen.add(url);
+      sources.push({
+        name: "مباشر",
+        url,
+        quality: "HD",
+        qualityRank: 2,
+        site: "anime4arabs",
+        directUrl: url,
+        directType: url.includes(".m3u8") ? "hls" : "mp4",
+      });
+    }
+
+    a4aSrcCache.set(epUrl, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  AnimeGate  (animegate.me — Arabic)
 // ════════════════════════════════════════════════════════════════════
 const GATE_BASES = ["https://animegate.me", "https://animegate.net", "https://anime-gate.net"];
@@ -1313,8 +1452,8 @@ router.get("/anime/all-sources", async (req, res) => {
       }
     }
 
-    // ── 2. Scrape all 9 sites in parallel ──
-    const [alekRes, mitRes, witRes, fourRes, blkomRes, asaqRes, titansRes, gateRes, araRes] =
+    // ── 2. Scrape all 10 sites in parallel (anime4arabs uses pre-collected Supabase URLs) ──
+    const [alekRes, mitRes, witRes, fourRes, blkomRes, asaqRes, titansRes, gateRes, araRes, a4aRes] =
       await Promise.allSettled([
         // AnimeLek
         (async () => {
@@ -1377,6 +1516,13 @@ router.get("/anime/all-sources", async (req, res) => {
           if (!res2) return { sources: [] as UnifiedSource[] };
           return { sources: (await getAraAnimeSources(res2.slug, res2.base, ep)) as UnifiedSource[] };
         })(),
+        // anime4arabs — uses 24k pre-collected URLs from Supabase (fastest lookup)
+        (async () => {
+          if (!title) return { sources: [] as UnifiedSource[] };
+          const epUrl = await findAnime4arabsUrl(title, english, ep);
+          if (!epUrl) return { sources: [] as UnifiedSource[] };
+          return { sources: (await getAnime4arabsSources(epUrl)) as UnifiedSource[] };
+        })(),
       ]);
 
     // ── 3. Collect & deduplicate all embed sources ──
@@ -1391,20 +1537,28 @@ router.get("/anime/all-sources", async (req, res) => {
         rawSources.push(s);
       }
     };
-    [alekRes, witRes, fourRes, blkomRes, asaqRes, titansRes, mitRes, gateRes, araRes].forEach(addSources);
+    // anime4arabs first (highest priority — has direct URLs from pre-collection)
+    [a4aRes, alekRes, witRes, fourRes, blkomRes, asaqRes, titansRes, mitRes, gateRes, araRes].forEach(addSources);
 
     const SITE_PRIO: Record<string, number> = {
+      anime4arabs: 10,
       witanime: 9, animeblkom: 8, anime4up: 7, "3asq": 6,
       animegate: 5, araanime: 4, mitanime: 3, animelek: 2, animetitans: 1,
     };
     rawSources.sort((a, b) => {
+      // Direct URL sources always come first regardless of site
+      const aDirect = a.directUrl ? 1 : 0;
+      const bDirect = b.directUrl ? 1 : 0;
+      if (bDirect !== aDirect) return bDirect - aDirect;
       if (b.qualityRank !== a.qualityRank) return b.qualityRank - a.qualityRank;
       return (SITE_PRIO[b.site] || 0) - (SITE_PRIO[a.site] || 0);
     });
 
-    // ── 4. Extract direct video URLs for all sources in parallel (7s timeout each) ──
+    // ── 4. Extract direct video URLs for embed-only sources in parallel (7s each) ──
     const extractedSources = await Promise.all(
       rawSources.map(async (src): Promise<UnifiedSource> => {
+        // Already has a direct URL — skip extraction
+        if (src.directUrl) return src;
         if (SKIP_EXTRACT_HOSTS.some(h => src.url.toLowerCase().includes(h))) return src;
         try {
           const result = await Promise.race([
@@ -1427,6 +1581,7 @@ router.get("/anime/all-sources", async (req, res) => {
       saveToSupabase(anilistId, ep, title, allSources as CachedSource[]).catch(() => {});
     }
 
+    req.log.info({ total: allSources.length, withDirect: withDirect.length }, "all-sources done");
     res.json({
       sources: allSources,
       alekSlug: alekRes.status === "fulfilled" ? (alekRes.value as any).slug : null,

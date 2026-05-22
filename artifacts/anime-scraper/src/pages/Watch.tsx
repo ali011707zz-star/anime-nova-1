@@ -25,7 +25,7 @@ type ProbeStatus = "unknown" | "testing" | "ok" | "dead" | "incompatible";
 const SITE_LABEL: Record<string, string> = {
   animelek: "AnimeLek", mitanime: "MitAnime", witanime: "WitAnime",
   anime4up: "Anime4Up", animeblkom: "Blkom", "3asq": "3asq", animetitans: "Titans",
-  animegate: "AnimeGate", araanime: "AraAnime", cached: "مخزن",
+  animegate: "AnimeGate", araanime: "AraAnime", anime4arabs: "4Arabs", cached: "مخزن",
 };
 
 function saveHistory(id: number, title: string, cover: string, ep: number) {
@@ -267,7 +267,7 @@ export default function WatchPage() {
         setAnime(animeData);
         if (animeData) saveHistory(animeId, animeData.title?.romaji || "", animeData.coverImage?.large || "", ep);
 
-        setLoadMsg("جاري جلب السيرفرات من 9 مواقع...");
+        setLoadMsg("جاري جلب السيرفرات من 10 مواقع...");
         const params = new URLSearchParams({
           ep: String(ep),
           title: animeData?.title?.romaji || "",
