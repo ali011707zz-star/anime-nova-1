@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft, Newspaper } from "lucide-react";
+import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const GENRES_AR: { ar: string; en: string; color: string; img: string }[] = [
@@ -88,6 +88,8 @@ export default function Home() {
   const [hero, setHero]           = useState<any>(null);
   const [heroIdx, setHeroIdx]     = useState(0);
   const [selectedGenre, setSelectedGenre] = useState("");
+  const touchStartX = useRef<number>(0);
+  const heroList = popular.filter(a => a.bannerImage).slice(0, 8);
 
   const fetch$ = async (query: string, variables?: any) => {
     const r = await fetch("https://graphql.anilist.co", {
@@ -171,7 +173,21 @@ export default function Home() {
 
       {/* Hero Banner */}
       {hero && !selectedGenre && (
-        <div className="relative w-full overflow-hidden" style={{ height: 310 }}>
+        <div
+          className="relative w-full overflow-hidden select-none"
+          style={{ height: 310 }}
+          onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
+          onTouchEnd={e => {
+            const dx = e.changedTouches[0].clientX - touchStartX.current;
+            if (Math.abs(dx) < 40) return;
+            const heroes = popular.filter(a => a.bannerImage).slice(0, 8);
+            if (heroes.length <= 1) return;
+            const dir = dx < 0 ? 1 : -1; // swipe left → next, right → prev
+            const next = (heroIdx + dir + heroes.length) % heroes.length;
+            setHeroIdx(next);
+            setHero(heroes[next]);
+          }}
+        >
           <AnimatePresence mode="wait">
             <motion.img
               key={hero.id}
@@ -182,6 +198,7 @@ export default function Home() {
               src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
               alt=""
               className="w-full h-full object-cover"
+              draggable={false}
             />
           </AnimatePresence>
           <div className="absolute inset-0 bg-gradient-to-t from-[#09090B] via-[#09090B]/50 to-transparent" />
@@ -220,10 +237,14 @@ export default function Home() {
           </div>
 
           {/* Hero dots */}
-          {popular.filter(a => a.bannerImage).length > 1 && (
+          {heroList.length > 1 && (
             <div className="absolute bottom-3 left-4 flex gap-1">
-              {popular.filter(a => a.bannerImage).slice(0, 6).map((_, i) => (
-                <div key={i} className={`h-1 rounded-full transition-all ${i === heroIdx ? "w-5 bg-primary" : "w-1.5 bg-white/30"}`} />
+              {heroList.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setHeroIdx(i); setHero(heroList[i]); }}
+                  className={`h-1 rounded-full transition-all ${i === heroIdx ? "w-5 bg-primary" : "w-1.5 bg-white/30"}`}
+                />
               ))}
             </div>
           )}
@@ -243,7 +264,7 @@ export default function Home() {
                   ? "border-primary shadow-lg shadow-primary/20"
                   : "border-white/8"
                 }`}
-              style={{ minWidth: g.en ? 72 : 58, height: 36 }}
+              style={{ minWidth: g.en ? 80 : 58, height: 56 }}
             >
               {g.img && (
                 <img src={g.img} alt="" className="absolute inset-0 w-full h-full object-cover" />
@@ -326,7 +347,7 @@ export default function Home() {
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                     {anime.nextAiringEpisode && (
                       <div className="absolute bottom-1 left-1 right-1 bg-emerald-500/80 text-white text-[7px] text-center py-0.5 rounded-md font-black">
-                        ح {anime.nextAiringEpisode.episode}
+                        حلقة {anime.nextAiringEpisode.episode}
                       </div>
                     )}
                   </div>
@@ -338,24 +359,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── News banner ── */}
-      {!selectedGenre && (
-        <Link href="/news">
-          <div className="mx-4 mt-5 p-4 rounded-2xl border border-primary/15 cursor-pointer active:scale-[0.98] transition-all"
-            style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.12), rgba(109,40,217,0.05))" }}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0">
-                <Newspaper className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm font-black text-white/90 font-['Cairo']">آخر أخبار الأنمي</p>
-                <p className="text-[10px] text-white/35 font-['Cairo']">الإصدارات القادمة والتريندنج</p>
-              </div>
-              <ChevronLeft className="w-4 h-4 text-primary mr-auto" />
-            </div>
-          </div>
-        </Link>
-      )}
 
       {/* ── Popular grid ── */}
       <div className="mt-6 px-4">

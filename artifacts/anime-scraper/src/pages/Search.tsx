@@ -5,11 +5,36 @@ import AnimeCard from '@/components/anime/AnimeCard';
 const SEARCH_QUERY = `
 query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
-      id title { romaji english } coverImage { large } averageScore episodes
+    media(search: $search, type: ANIME, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
+      id title { romaji english native } coverImage { large } averageScore episodes format
     }
   }
 }`;
+
+// Arabic → English common transliterations for better search accuracy
+const AR_TO_EN: Record<string, string> = {
+  "ناروتو": "Naruto", "هانتر": "Hunter", "ون بيس": "One Piece",
+  "ون بيسي": "One Piece", "دراغون بول": "Dragon Ball", "دراجون بول": "Dragon Ball",
+  "ديمون سلاير": "Demon Slayer", "كيميتسو": "Kimetsu", "هجوم العمالقة": "Shingeki no Kyojin",
+  "هجوم": "Attack", "العمالقة": "Kyojin", "ابطال بوكو": "Boku no Hero",
+  "بوكو نو هيرو": "Boku no Hero", "بلاتش": "Bleach", "بليتش": "Bleach",
+  "فيري تيل": "Fairy Tail", "الكيميائي": "Fullmetal Alchemist",
+  "سوورد ارت اونلاين": "Sword Art Online", "توكيو غول": "Tokyo Ghoul",
+  "دياب": "Diablo", "ريزيرو": "Re:Zero", "تيتان": "Titan",
+};
+
+function translateQuery(q: string): string {
+  const trimmed = q.trim();
+  if (AR_TO_EN[trimmed]) return AR_TO_EN[trimmed];
+  // Check if query contains Arabic characters
+  if (/[\u0600-\u06FF]/.test(trimmed)) {
+    // Try partial match
+    for (const [ar, en] of Object.entries(AR_TO_EN)) {
+      if (trimmed.includes(ar)) return trimmed.replace(ar, en);
+    }
+  }
+  return trimmed;
+}
 
 export default function Search() {
   const [query, setQuery] = useState('');
@@ -22,10 +47,11 @@ export default function Search() {
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
+        const searchTerm = translateQuery(query);
         const res = await fetch('https://graphql.anilist.co', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: SEARCH_QUERY, variables: { search: query, page: 1, perPage: 20 } }),
+          body: JSON.stringify({ query: SEARCH_QUERY, variables: { search: searchTerm, page: 1, perPage: 24 } }),
         });
         const json = await res.json();
         setResults(json.data?.Page?.media || []);
@@ -35,7 +61,7 @@ export default function Search() {
       } finally {
         setLoading(false);
       }
-    }, 500);
+    }, 400);
     return () => clearTimeout(timer);
   }, [query]);
 

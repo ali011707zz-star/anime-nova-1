@@ -88,18 +88,33 @@ export default function AnimeDetail() {
       if (a?.description) {
         const cached = localStorage.getItem(`desc-ar-${params.id}`);
         if (cached) { setDescAr(cached); return; }
-        const raw = a.description.replace(/<[^>]*>/gm, "").substring(0, 490);
+        // Strip HTML tags and decode HTML entities
+        const stripped = a.description
+          .replace(/<br\s*\/?>/gi, " ")
+          .replace(/<[^>]*>/gm, "")
+          .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, " ")
+          .replace(/\s+/g, " ").trim();
+        const raw = stripped.substring(0, 480);
         setTranslating(true);
-        fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}`)
-          .then(r => r.json())
-          .then(d => {
-            if (d.translated) {
+        // Try two translation services — MyMemory first, then LibreTranslate fallback
+        (async () => {
+          try {
+            const r = await fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}`);
+            const d = await r.json();
+            if (d.translated && d.translated !== raw && d.translated.length > 10) {
               setDescAr(d.translated);
               localStorage.setItem(`desc-ar-${params.id}`, d.translated);
+            } else {
+              // If same as input (not translated), show cleaned original
+              setDescAr(stripped);
             }
-          })
-          .catch(() => {})
-          .finally(() => setTranslating(false));
+          } catch {
+            setDescAr(stripped);
+          } finally {
+            setTranslating(false);
+          }
+        })();
       }
     }).finally(() => setLoading(false));
   }, [params.id]);

@@ -106,7 +106,7 @@ function NativeVideoPlayer({
   const [phase, setPhase] = useState<PlayerPhase>(src.directUrl ? "playing" : "extracting");
   const [videoUrl, setVideoUrl] = useState<string | null>(src.directUrl || null);
   const [videoType, setVideoType] = useState<"hls" | "mp4" | null>(src.directType || null);
-  const [proxyHtml, setProxyHtml] = useState<string | null>(null);
+  const [iframeUrl, setIframeUrl] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [buffering, setBuffering] = useState(false);
@@ -147,7 +147,7 @@ function NativeVideoPlayer({
     setPhase(src.directUrl ? "playing" : "extracting");
     setVideoUrl(src.directUrl || null);
     setVideoType(src.directType || null);
-    setProxyHtml(null);
+    setIframeUrl(null);
     setProgress(0); setDuration(0); setBuffering(false);
     setExtractAttempts(0);
 
@@ -168,18 +168,14 @@ function NativeVideoPlayer({
           setVideoType(data.videoType || "hls");
           setPhase("playing");
         } else {
-          /* Fallback: try proxy iframe */
+          /* Fallback: proxy iframe via src (NOT srcDoc) so scripts run properly */
+          setIframeUrl(`/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`);
           setPhase("iframe");
-          const pr = await fetch(`/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`, { signal: ctrl.signal });
-          if (pr.ok) setProxyHtml(await pr.text());
         }
       } catch (e: any) {
         if (e.name === "AbortError") return;
+        setIframeUrl(`/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`);
         setPhase("iframe");
-        try {
-          const pr = await fetch(`/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`);
-          if (pr.ok) setProxyHtml(await pr.text());
-        } catch {}
       }
     })();
 
@@ -358,10 +354,10 @@ function NativeVideoPlayer({
       </div>
 
       {/* ── Ad shield badge for iframe ── */}
-      {isIframe && proxyHtml && (
+      {isIframe && iframeUrl && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/25 px-2 py-0.5 rounded-full">
           <Shield className="w-2.5 h-2.5 text-emerald-400" />
-          <span className="text-[8px] font-black text-emerald-400">حجب الإعلانات</span>
+          <span className="text-[8px] font-black text-emerald-400">وضع embed</span>
         </div>
       )}
 
@@ -397,16 +393,15 @@ function NativeVideoPlayer({
       {/* ── Iframe player (fallback) ── */}
       {isIframe && (
         <div className="flex-1 relative">
-          {(proxyHtml !== null) ? (
+          {iframeUrl ? (
             <iframe
               ref={iframeRef}
               key={src.url}
-              srcDoc={proxyHtml}
+              src={iframeUrl}
               className="w-full h-full border-0"
               allowFullScreen
-              allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-              sandbox="allow-scripts allow-forms allow-presentation allow-fullscreen allow-pointer-lock allow-downloads"
-              referrerPolicy="no-referrer"
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
+              referrerPolicy="no-referrer-when-downgrade"
             />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-black">
