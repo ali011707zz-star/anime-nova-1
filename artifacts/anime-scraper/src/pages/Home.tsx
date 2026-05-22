@@ -267,7 +267,13 @@ export default function Home() {
               style={{ minWidth: g.en ? 80 : 58, height: 56 }}
             >
               {g.img && (
-                <img src={g.img} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                <img
+                  src={g.img}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover"
+                  crossOrigin="anonymous"
+                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
               )}
               <div
                 className="absolute inset-0"

@@ -168,13 +168,13 @@ function NativeVideoPlayer({
           setVideoType(data.videoType || "hls");
           setPhase("playing");
         } else {
-          /* Fallback: proxy iframe via src (NOT srcDoc) so scripts run properly */
-          setIframeUrl(`/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`);
+          /* Fallback: load the embed URL directly in iframe — embed sites are designed to be iframed */
+          setIframeUrl(src.url);
           setPhase("iframe");
         }
       } catch (e: any) {
         if (e.name === "AbortError") return;
-        setIframeUrl(`/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`);
+        setIframeUrl(src.url);
         setPhase("iframe");
       }
     })();
@@ -390,21 +390,22 @@ function NativeVideoPlayer({
         </div>
       )}
 
-      {/* ── Iframe player (fallback) ── */}
+      {/* ── Iframe player (direct embed) ── */}
       {isIframe && (
-        <div className="flex-1 relative">
+        <div className="flex-1 relative bg-black">
           {iframeUrl ? (
             <iframe
               ref={iframeRef}
-              key={src.url}
+              key={iframeUrl}
               src={iframeUrl}
               className="w-full h-full border-0"
               allowFullScreen
-              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope; clipboard-write"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-fullscreen allow-popups-to-escape-sandbox allow-pointer-lock"
               referrerPolicy="no-referrer-when-downgrade"
             />
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-black">
+            <div className="w-full h-full flex flex-col items-center justify-center gap-3">
               <Loader2 className="w-8 h-8 text-primary animate-spin" />
               <p className="text-white/40 text-xs font-['Cairo']">تحميل المشغّل...</p>
             </div>
@@ -548,49 +549,71 @@ function LoadingScreen({ cover, title, ep, genres, sourcesCount, directCount }: 
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden" dir="rtl">
+      {/* Blurred background */}
       <div className="absolute inset-0">
-        <img src={cover || bgUrl} alt="" className="w-full h-full object-cover scale-110" style={{ filter: "blur(20px) brightness(0.3)" }} />
+        <img src={cover || bgUrl} alt="" className="w-full h-full object-cover scale-125"
+          style={{ filter: "blur(40px) brightness(0.2) saturate(1.4)" }} />
       </div>
-      <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.7) 0%, rgba(9,9,11,0.9) 100%)" }} />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-[#09090B]/80 to-[#09090B]" />
 
-      <div className="relative z-10 flex flex-col items-center gap-5 px-8 text-center">
+      <div className="relative z-10 flex flex-col items-center gap-6 px-6 text-center w-full max-w-xs">
+        {/* Cover — bigger */}
         {cover && (
           <motion.div
-            initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.5 }} className="relative"
+            initial={{ y: 20, opacity: 0, scale: 0.9 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+            className="relative"
           >
-            <img src={cover} alt="" className="w-32 h-44 object-cover rounded-3xl border border-white/15 shadow-[0_20px_60px_rgba(0,0,0,0.8)]" />
-            <div className="absolute -inset-3 rounded-3xl opacity-40 blur-2xl"
-              style={{ background: "radial-gradient(circle, rgba(139,92,246,0.6) 0%, transparent 70%)" }} />
+            {/* Glow ring */}
+            <div className="absolute -inset-4 rounded-[32px] blur-3xl opacity-50"
+              style={{ background: "radial-gradient(circle, rgba(139,92,246,0.8) 0%, transparent 65%)" }} />
+            <img src={cover} alt=""
+              className="relative w-44 h-64 object-cover rounded-3xl border border-white/15 shadow-[0_30px_80px_rgba(0,0,0,0.9)]" />
+            {/* Episode badge */}
+            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-primary text-white text-[11px] font-black px-4 py-1.5 rounded-full shadow-lg shadow-primary/40 border border-primary/30 whitespace-nowrap">
+              الحلقة {ep}
+            </div>
           </motion.div>
         )}
 
-        <div>
-          <h2 className="text-white text-lg font-black font-['Cairo'] drop-shadow-xl">{title}</h2>
-          <p className="text-primary text-sm font-bold font-['Cairo'] mt-0.5">الحلقة {ep}</p>
-        </div>
+        {/* Title + status */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.45 }}
+          className="flex flex-col items-center gap-1.5 mt-2"
+        >
+          <h2 className="text-white text-base font-black font-['Cairo'] drop-shadow-xl line-clamp-2">{title}</h2>
+          <p className="text-white/40 text-[11px] font-['Cairo']">
+            {sourcesCount > 0
+              ? directCount > 0
+                ? `✦ ${sourcesCount} مصدر · ${directCount} مباشر ⚡`
+                : `✦ ${sourcesCount} مصدر متاح`
+              : "يجري البحث في المصادر..."}
+          </p>
+        </motion.div>
 
-        <div className="flex flex-col items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Loader2 className="w-4 h-4 text-primary animate-spin" />
-            <span className="text-white/60 text-[11px] font-['Cairo'] font-bold">
-              {sourcesCount > 0
-                ? `${sourcesCount} سيرفر متاح${directCount > 0 ? ` · ${directCount} مباشر ⚡` : ""} — جارٍ البحث عن المزيد...`
-                : "جارٍ البحث عن المصادر وتحليل الفيديو..."}
-            </span>
-          </div>
-          {sourcesCount > 0 && (
-            <p className="text-white/30 text-[9px] font-['Cairo']">سيبدأ التشغيل تلقائياً</p>
-          )}
-          {/* Progress bars */}
-          <div className="flex gap-1 mt-1">
-            {[0, 1, 2, 3, 4].map(i => (
-              <div key={i} className="w-6 h-1 rounded-full bg-primary/20 overflow-hidden">
-                <div className="h-full bg-primary rounded-full animate-pulse" style={{ animationDelay: `${i * 0.2}s`, width: i < sourcesCount ? "100%" : "0%" }} />
-              </div>
+        {/* Animated dots */}
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          transition={{ delay: 0.35 }}
+          className="flex flex-col items-center gap-3"
+        >
+          <div className="flex items-center gap-1.5">
+            {[0,1,2,3,4,5].map(i => (
+              <motion.div
+                key={i}
+                className="w-1.5 h-1.5 rounded-full bg-primary"
+                animate={{ opacity: [0.2, 1, 0.2], scale: [0.8, 1.2, 0.8] }}
+                transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
+              />
             ))}
           </div>
-        </div>
+          {sourcesCount > 0 && (
+            <p className="text-white/25 text-[9px] font-['Cairo']">سيبدأ التشغيل تلقائياً</p>
+          )}
+        </motion.div>
       </div>
     </div>
   );
