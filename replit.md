@@ -26,14 +26,13 @@
 
 ## Architecture decisions
 
-- **No external iframes ever** — all episodes play via native `<video>` element with HLS.js or MP4 src
-- **Server-side scraping** — API fetches embed pages and extracts direct HLS/MP4 URLs
+- **Clean iframe player** — all sources play inside a fullscreen unrestricted iframe. No sandbox, no referrer restrictions. Each site uses its own native player. Controls auto-hide after 4s.
+- **Server-side scraping** — API fetches embed pages and extracts direct HLS/MP4 URLs where possible
 - **p,a,c,k,e,d unpacker** — server-side JS unpacker for obfuscated player code (uqload, etc.)
-- **HLS Proxy** — `/api/anime/hls-proxy?url=&ref=` fetches m3u8 server-side + rewrites all segment URLs to `/api/anime/seg-proxy`. Browser NEVER touches CDN → CORS completely bypassed.
-- **Segment Proxy** — `/api/anime/seg-proxy?url=&ref=` proxies TS segments + nested m3u8 to browser.
+- **HLS Proxy** — `/api/anime/hls-proxy` + `/api/anime/seg-proxy` still exist in API but not used by frontend
 - **Cloudflare detection fix** — only block on `"just a moment"` + `"cf_chl_"`, NOT `"challenge-platform"` or `"ray id:"`
-- **Multi-source fallback** — auto-play tries all sources sequentially; dead/incompatible sources marked visually
-- **EmbedPlayer** — full-screen iframe + overlay controls for sources that block server-side extraction
+- **Multi-source fallback** — maga/megamax prioritized first, then Phoenix (9), uqload (8), etc.
+- **Source priority**: megamax/maga (10) → animePhoenix (9) → uqload (8) → anime7u/d000d (7) → voe (6) → wishfast (5)
 
 ## Product
 

@@ -1,9 +1,10 @@
 import { useParams, useLocation } from "wouter";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import {
-  ChevronRight, Play, Star, MessageCircle, Bookmark,
-  X, Loader2
+  ChevronRight, Play, Star, Bookmark, X,
+  Loader2, Calendar, Tv, Clock, Users, ChevronDown,
+  MessageCircle, Send, Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -29,50 +30,46 @@ query ($id: Int) {
   }
 }`;
 
-const STATUS: Record<string, string> = {
-  RELEASING: "يُبث حالياً", FINISHED: "مكتمل",
-  NOT_YET_RELEASED: "قريباً", CANCELLED: "ملغى", HIATUS: "متوقف",
+const STATUS: Record<string, { label: string; color: string }> = {
+  RELEASING:        { label: "يُبث الآن",  color: "text-emerald-400 bg-emerald-500/15 border-emerald-500/25" },
+  FINISHED:         { label: "مكتمل",      color: "text-blue-400   bg-blue-500/15    border-blue-500/25"    },
+  NOT_YET_RELEASED: { label: "قريباً",     color: "text-amber-400  bg-amber-500/15   border-amber-500/25"   },
+  CANCELLED:        { label: "ملغى",       color: "text-red-400    bg-red-500/15     border-red-500/25"     },
+  HIATUS:           { label: "متوقف",      color: "text-orange-400 bg-orange-500/15  border-orange-500/25"  },
 };
-const SEASON: Record<string, string> = {
-  WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
-};
+const SEASON: Record<string, string> = { WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف" };
 const FORMAT: Record<string, string> = {
-  TV: "مسلسل", MOVIE: "فيلم", OVA: "OVA", ONA: "ONA",
-  SPECIAL: "خاص", MUSIC: "موسيقي", TV_SHORT: "قصير",
+  TV: "مسلسل", MOVIE: "فيلم", OVA: "OVA", ONA: "ONA", SPECIAL: "خاص", MUSIC: "موسيقي", TV_SHORT: "قصير",
 };
 const GENRE: Record<string, string> = {
-  "Action": "أكشن", "Adventure": "مغامرة", "Comedy": "كوميدي",
-  "Drama": "دراما", "Fantasy": "فانتازيا", "Horror": "رعب",
-  "Mecha": "ميكا", "Music": "موسيقى", "Mystery": "غموض",
-  "Psychological": "نفسي", "Romance": "رومانسي", "Sci-Fi": "خيال علمي",
-  "Slice of Life": "حياة يومية", "Sports": "رياضي",
-  "Supernatural": "خوارق", "Thriller": "إثارة", "Ecchi": "إيتشي",
-  "Harem": "حريم", "Isekai": "إيسيكاي", "Military": "عسكري",
-  "School": "مدرسي", "Magic": "سحر", "Historical": "تاريخي",
-  "Demons": "شياطين", "Samurai": "ساموراي", "Space": "فضاء",
-  "Mahou Shoujo": "ماهو شوجو", "Super Power": "قوى خارقة",
-  "Vampire": "مصاصي دماء", "Game": "ألعاب", "Kids": "أطفال",
-  "Parody": "محاكاة ساخرة", "Police": "بوليسي", "Seinen": "سيينين",
-  "Shoujo": "شوجو", "Shounen": "شونين",
+  "Action": "أكشن", "Adventure": "مغامرة", "Comedy": "كوميدي", "Drama": "دراما",
+  "Fantasy": "فانتازيا", "Horror": "رعب", "Mecha": "ميكا", "Music": "موسيقى",
+  "Mystery": "غموض", "Psychological": "نفسي", "Romance": "رومانسي", "Sci-Fi": "خيال علمي",
+  "Slice of Life": "حياة يومية", "Sports": "رياضي", "Supernatural": "خوارق",
+  "Thriller": "إثارة", "Ecchi": "إيتشي", "Harem": "حريم", "Isekai": "إيسيكاي",
+  "Military": "عسكري", "School": "مدرسي", "Magic": "سحر", "Historical": "تاريخي",
+  "Demons": "شياطين", "Samurai": "ساموراي", "Space": "فضاء", "Super Power": "قوى خارقة",
+  "Vampire": "مصاصي دماء", "Game": "ألعاب", "Shounen": "شونين", "Seinen": "سيينين",
+  "Shoujo": "شوجو", "Kids": "أطفال",
 };
 
 export default function AnimeDetail() {
   const params = useParams<{ id: string }>();
   const [, navigate] = useLocation();
-  const [anime, setAnime]           = useState<any>(null);
-  const [loading, setLoading]       = useState(true);
-  const [showFull, setShowFull]     = useState(false);
+  const [anime, setAnime]             = useState<any>(null);
+  const [loading, setLoading]         = useState(true);
+  const [showFull, setShowFull]       = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [comments, setComments]     = useState<any[]>([]);
-  const [newComment, setNewComment] = useState("");
-  const [saved, setSaved]           = useState(false);
-  const [descAr, setDescAr]         = useState<string | null>(null);
+  const [comments, setComments]       = useState<any[]>([]);
+  const [newComment, setNewComment]   = useState("");
+  const [saved, setSaved]             = useState(false);
+  const [descAr, setDescAr]           = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!params.id) return;
-    setLoading(true);
-    setDescAr(null);
+    setLoading(true); setDescAr(null); setShowFull(false);
     const savedList: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     setSaved(savedList.includes(parseInt(params.id)));
     const savedC = localStorage.getItem(`comments-${params.id}`);
@@ -85,37 +82,27 @@ export default function AnimeDetail() {
     }).then(r => r.json()).then(d => {
       const a = d.data?.Media;
       setAnime(a);
-      if (a?.description) {
-        const cached = localStorage.getItem(`desc-ar-${params.id}`);
-        if (cached) { setDescAr(cached); return; }
-        // Strip HTML tags and decode HTML entities
-        const stripped = a.description
-          .replace(/<br\s*\/?>/gi, " ")
-          .replace(/<[^>]*>/gm, "")
-          .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-          .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, " ")
-          .replace(/\s+/g, " ").trim();
-        const raw = stripped.substring(0, 480);
-        setTranslating(true);
-        // Try two translation services — MyMemory first, then LibreTranslate fallback
-        (async () => {
-          try {
-            const r = await fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}`);
-            const d = await r.json();
-            if (d.translated && d.translated !== raw && d.translated.length > 10) {
-              setDescAr(d.translated);
-              localStorage.setItem(`desc-ar-${params.id}`, d.translated);
-            } else {
-              // If same as input (not translated), show cleaned original
-              setDescAr(stripped);
-            }
-          } catch {
-            setDescAr(stripped);
-          } finally {
-            setTranslating(false);
-          }
-        })();
-      }
+      if (!a?.description) return;
+      const cached = localStorage.getItem(`desc-ar-${params.id}`);
+      if (cached) { setDescAr(cached); return; }
+      const stripped = a.description
+        .replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
+        .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+        .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
+        .replace(/\s+/g," ").trim();
+      const raw = stripped.substring(0, 480);
+      setTranslating(true);
+      (async () => {
+        try {
+          const r = await fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}`);
+          const d = await r.json();
+          if (d.translated && d.translated !== raw && d.translated.length > 10) {
+            setDescAr(d.translated);
+            localStorage.setItem(`desc-ar-${params.id}`, d.translated);
+          } else { setDescAr(stripped); }
+        } catch { setDescAr(stripped); }
+        finally { setTranslating(false); }
+      })();
     }).finally(() => setLoading(false));
   }, [params.id]);
 
@@ -129,7 +116,7 @@ export default function AnimeDetail() {
 
   const addComment = () => {
     if (!newComment.trim()) return;
-    const c = { id: Date.now(), text: newComment, user: "مستخدم نوفا", time: "الآن" };
+    const c = { id: Date.now(), text: newComment, time: new Date().toLocaleDateString("ar-SA") };
     const upd = [c, ...comments];
     setComments(upd);
     localStorage.setItem(`comments-${params.id}`, JSON.stringify(upd));
@@ -138,158 +125,267 @@ export default function AnimeDetail() {
 
   if (loading) return (
     <div className="bg-[#09090B] min-h-screen flex items-center justify-center">
-      <Loader2 className="w-10 h-10 text-primary animate-spin" />
+      <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
+        <Sparkles className="w-8 h-8 text-primary" />
+      </motion.div>
     </div>
   );
+
   if (!anime) return (
-    <div className="bg-[#09090B] min-h-screen flex items-center justify-center">
-      <div className="text-center" dir="rtl">
-        <p className="text-red-400 font-bold font-['Cairo'] mb-4">الأنمي غير موجود</p>
-        <button onClick={() => window.history.back()} className="text-primary font-['Cairo'] text-sm font-bold">← رجوع</button>
+    <div className="bg-[#09090B] min-h-screen flex items-center justify-center" dir="rtl">
+      <div className="text-center space-y-4 px-6">
+        <p className="text-white/40 font-bold font-['Cairo']">الأنمي غير موجود</p>
+        <button onClick={() => navigate("/")}
+          className="px-6 py-2.5 bg-primary/15 border border-primary/25 text-primary rounded-2xl text-sm font-bold font-['Cairo']">
+          العودة للرئيسية
+        </button>
       </div>
     </div>
   );
 
   const descText = descAr || anime.description?.replace(/<[^>]*>/gm, "") || "لا توجد قصة متاحة";
+  const statusInfo = STATUS[anime.status] || { label: anime.status, color: "text-white/50 bg-white/8 border-white/10" };
+  const score = anime.averageScore ? (anime.averageScore / 10).toFixed(1) : null;
 
   return (
     <main className="bg-[#09090B] min-h-screen pb-32 text-white" dir="rtl">
-      {/* Hero Banner */}
-      <div className="relative w-full overflow-hidden" style={{ height: 260 }}>
-        <img src={anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large}
-          alt="" className="w-full h-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#09090B] via-[#09090B]/50 to-black/20" />
-        <button onClick={() => window.history.back()}
-          className="absolute top-5 right-4 w-10 h-10 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center border border-white/10 z-10 active:scale-90">
+
+      {/* ── Hero Banner ── */}
+      <div className="relative w-full overflow-hidden" style={{ height: 280 }}>
+        <img
+          src={anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large}
+          alt="" className="w-full h-full object-cover"
+        />
+        <div className="absolute inset-0" style={{
+          background: "linear-gradient(to bottom, rgba(9,9,11,0.3) 0%, rgba(9,9,11,0.5) 50%, rgba(9,9,11,1) 100%)"
+        }} />
+        {/* Back button */}
+        <button
+          onClick={() => window.history.back()}
+          className="absolute top-5 right-4 w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90"
+        >
           <ChevronRight className="w-5 h-5 text-white" />
         </button>
+        {/* Score badge */}
+        {score && (
+          <div className="absolute top-5 left-4 bg-black/50 backdrop-blur-md border border-yellow-500/30 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 z-10">
+            <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
+            <span className="text-yellow-300 text-sm font-black">{score}</span>
+          </div>
+        )}
       </div>
 
-      {/* Cover + Info */}
-      <div className="px-4 -mt-16 relative z-10 flex gap-4 items-end">
-        <div className="w-28 h-40 rounded-2xl overflow-hidden border-2 border-[#18181B] shadow-2xl shrink-0">
-          <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" />
+      {/* ── Cover + Title Row ── */}
+      <div className="px-4 -mt-20 relative z-10 flex gap-4 items-end">
+        {/* Cover */}
+        <div className="relative shrink-0">
+          <div className="w-[108px] h-[156px] rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl shadow-black/80">
+            <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" />
+          </div>
+          {/* Format pill */}
+          {anime.format && FORMAT[anime.format] && (
+            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#1C1C22] border border-white/10 text-white/60 text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap font-['Cairo']">
+              {FORMAT[anime.format]}
+            </div>
+          )}
         </div>
-        <div className="flex-1 pb-2 min-w-0">
-          <h1 className="text-lg font-black text-white line-clamp-2 leading-tight font-['Cairo']">{anime.title.romaji}</h1>
-          {anime.title.english && <p className="text-[10px] text-white/40 mt-0.5 line-clamp-1">{anime.title.english}</p>}
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            {anime.averageScore && (
-              <span className="bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1">
-                <Star className="w-2.5 h-2.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+
+        {/* Title + badges */}
+        <div className="flex-1 pb-3 min-w-0 space-y-2">
+          <h1 className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2">
+            {anime.title.romaji}
+          </h1>
+          {anime.title.english && (
+            <p className="text-[10px] text-white/35 line-clamp-1">{anime.title.english}</p>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            <span className={`text-[9px] font-black px-2 py-1 rounded-lg border font-['Cairo'] ${statusInfo.color}`}>
+              {statusInfo.label}
+            </span>
+            {anime.episodes && (
+              <span className="text-[9px] font-black px-2 py-1 rounded-lg border border-primary/20 bg-primary/10 text-primary font-['Cairo']">
+                {anime.episodes} حلقة
               </span>
             )}
-            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black font-['Cairo'] ${anime.status === "RELEASING" ? "bg-green-500/20 text-green-400" : "bg-white/10 text-white/50"}`}>
-              {STATUS[anime.status] || anime.status}
-            </span>
-            {anime.format && FORMAT[anime.format] && (
-              <span className="bg-white/8 text-white/50 px-2 py-0.5 rounded-lg text-[10px] font-black font-['Cairo']">{FORMAT[anime.format]}</span>
-            )}
-            {anime.episodes && (
-              <span className="bg-primary/20 text-primary px-2 py-0.5 rounded-lg text-[10px] font-black font-['Cairo']">{anime.episodes} حلقة</span>
+            {anime.seasonYear && (
+              <span className="text-[9px] font-black px-2 py-1 rounded-lg border border-white/8 bg-white/5 text-white/40 font-['Cairo']">
+                {SEASON[anime.season] || ""} {anime.seasonYear}
+              </span>
             )}
           </div>
         </div>
       </div>
 
-      {/* Genres */}
-      <div className="px-4 mt-4 flex flex-wrap gap-2">
-        {anime.genres?.slice(0, 6).map((g: string) => (
-          <span key={g} className="text-[10px] font-bold bg-primary/10 text-primary px-2.5 py-1 rounded-xl border border-primary/15 font-['Cairo']">
+      {/* ── Quick stats row ── */}
+      {(anime.duration || anime.studios?.nodes?.length) && (
+        <div className="px-4 mt-5 flex gap-3">
+          {anime.duration && (
+            <div className="flex items-center gap-1.5 text-white/40 text-[10px]">
+              <Clock className="w-3 h-3" />
+              <span className="font-['Cairo']">{anime.duration} دقيقة</span>
+            </div>
+          )}
+          {anime.studios?.nodes?.[0] && (
+            <div className="flex items-center gap-1.5 text-white/40 text-[10px]">
+              <Tv className="w-3 h-3" />
+              <span className="font-['Cairo']">{anime.studios.nodes[0].name}</span>
+            </div>
+          )}
+          {anime.seasonYear && (
+            <div className="flex items-center gap-1.5 text-white/40 text-[10px]">
+              <Calendar className="w-3 h-3" />
+              <span className="font-['Cairo']">{anime.seasonYear}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Genres ── */}
+      <div className="mt-4 px-4 flex gap-2 overflow-x-auto no-scrollbar pb-1">
+        {anime.genres?.slice(0, 8).map((g: string) => (
+          <span key={g}
+            className="shrink-0 text-[10px] font-bold bg-[#18181B] text-white/55 px-3 py-1.5 rounded-xl border border-white/6 font-['Cairo'] whitespace-nowrap">
             {GENRE[g] || g}
           </span>
         ))}
-        {anime.seasonYear && (
-          <span className="text-[10px] font-bold bg-white/5 text-white/40 px-2.5 py-1 rounded-xl border border-white/8 font-['Cairo']">
-            {SEASON[anime.season] || ""} {anime.seasonYear}
-          </span>
-        )}
       </div>
 
-      {/* Actions */}
-      <div className="px-4 mt-5 flex flex-col gap-2.5">
-        {/* مشاهدة الآن */}
+      {/* ── CTA Buttons ── */}
+      <div className="px-4 mt-5 space-y-2.5">
         <Link href={`/episodes/${params.id}`}>
-          <button className="w-full h-14 bg-primary text-white rounded-2xl font-black flex items-center justify-center gap-3 shadow-lg shadow-primary/25 active:scale-[0.98] transition-all text-base font-['Cairo']">
-            <Play className="w-5 h-5 fill-white" /> مشاهدة الآن
-          </button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            className="w-full h-14 bg-primary rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-lg shadow-primary/30 text-base font-['Cairo']"
+          >
+            <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
+              <Play className="w-4 h-4 fill-white text-white" />
+            </div>
+            مشاهدة الأنمي
+          </motion.button>
         </Link>
+
         <div className="flex gap-2.5">
-          <button onClick={() => setShowComments(true)}
-            className="flex-1 h-12 bg-[#1C1C22] text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 border border-white/6 active:scale-[0.98] transition-all font-['Cairo']">
-            <MessageCircle className="w-4 h-4 text-primary" /> التعليقات ({comments.length})
-          </button>
-          <button onClick={toggleSave}
-            className={`flex-1 h-12 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 border active:scale-[0.98] transition-all font-['Cairo'] ${saved ? "bg-primary/20 border-primary/30 text-primary" : "bg-[#1C1C22] border-white/6 text-white/70"}`}>
-            <Bookmark className={`w-4 h-4 ${saved ? "fill-current" : ""}`} /> {saved ? "محفوظ" : "حفظ"}
-          </button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => setShowComments(true)}
+            className="flex-1 h-12 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold font-['Cairo'] text-white/70"
+          >
+            <MessageCircle className="w-4 h-4 text-primary" />
+            التعليقات
+            {comments.length > 0 && (
+              <span className="bg-primary/20 text-primary text-[9px] font-black px-1.5 py-0.5 rounded-full">{comments.length}</span>
+            )}
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={toggleSave}
+            className={`flex-1 h-12 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold border transition-all font-['Cairo']
+              ${saved
+                ? "bg-primary/15 border-primary/30 text-primary"
+                : "bg-[#18181B] border-white/7 text-white/60"}`}
+          >
+            <Bookmark className={`w-4 h-4 transition-all ${saved ? "fill-current" : ""}`} />
+            {saved ? "محفوظ ✓" : "حفظ"}
+          </motion.button>
         </div>
       </div>
 
-      {/* Synopsis — Arabic */}
+      {/* ── Synopsis ── */}
       <div className="mt-7 px-4">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-1 h-5 bg-primary rounded-full" />
-          <h2 className="text-base font-black font-['Cairo']">القصة</h2>
-          {translating && <Loader2 className="w-3.5 h-3.5 text-primary animate-spin mr-1" />}
-          {descAr && !translating && (
-            <span className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-black">مترجم</span>
-          )}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-1 h-5 bg-primary rounded-full" />
+            <h2 className="text-[15px] font-black font-['Cairo']">القصة</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            {translating && (
+              <div className="flex items-center gap-1.5 text-primary/60">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span className="text-[9px] font-['Cairo']">جارٍ الترجمة</span>
+              </div>
+            )}
+            {descAr && !translating && (
+              <span className="text-[8px] bg-emerald-500/12 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded-lg font-black flex items-center gap-1">
+                <Sparkles className="w-2.5 h-2.5" /> مُترجم
+              </span>
+            )}
+          </div>
         </div>
-        <div className="bg-[#1C1C22]/60 border border-white/5 rounded-2xl p-4">
-          <p className={`text-[#C4C4C4] leading-relaxed text-sm font-['Cairo'] ${!showFull ? "line-clamp-4" : ""}`}>
+        <div className="bg-[#111116] border border-white/6 rounded-2xl p-4 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-primary/3 rounded-full blur-3xl pointer-events-none" />
+          <p className={`text-[#B4B4B8] leading-relaxed text-[13px] font-['Cairo'] relative z-10 ${!showFull ? "line-clamp-4" : ""}`}>
             {descText}
           </p>
           {descText.length > 200 && (
-            <button onClick={() => setShowFull(p => !p)} className="mt-2 text-primary text-xs font-black font-['Cairo']">
-              {showFull ? "عرض أقل ▲" : "عرض المزيد ▼"}
+            <button
+              onClick={() => setShowFull(p => !p)}
+              className="mt-3 flex items-center gap-1 text-primary text-xs font-black font-['Cairo']"
+            >
+              {showFull ? "عرض أقل" : "عرض المزيد"}
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFull ? "rotate-180" : ""}`} />
             </button>
           )}
         </div>
       </div>
 
-      {/* Characters */}
+      {/* ── Characters ── */}
       {anime.characters?.edges?.length > 0 && (
         <div className="mt-7">
           <div className="flex items-center gap-2 mb-3 px-4">
             <div className="w-1 h-5 bg-primary rounded-full" />
-            <h2 className="text-base font-black font-['Cairo']">الشخصيات</h2>
+            <h2 className="text-[15px] font-black font-['Cairo']">الشخصيات</h2>
+            <span className="text-[9px] text-white/30 bg-white/5 px-2 py-1 rounded-lg font-['Cairo']">
+              <Users className="w-2.5 h-2.5 inline ml-1" />
+              {anime.characters.edges.length}
+            </span>
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-2 no-scrollbar">
             {anime.characters.edges.map((e: any) => (
-              <div key={e.node.id} className="shrink-0 w-[68px] text-center">
-                <img src={e.node.image.large} alt="" className="w-[68px] h-[68px] rounded-2xl object-cover border border-white/10 mb-1.5" />
-                <p className="text-[9px] text-white/50 font-bold truncate">{e.node.name.full}</p>
-              </div>
+              <motion.div
+                key={e.node.id}
+                whileTap={{ scale: 0.95 }}
+                className="shrink-0 w-[70px] text-center"
+              >
+                <div className="relative">
+                  <img
+                    src={e.node.image.large} alt=""
+                    className="w-[70px] h-[70px] rounded-2xl object-cover border border-white/8 mb-1.5"
+                  />
+                </div>
+                <p className="text-[9px] text-white/45 font-bold truncate leading-tight">{e.node.name.full}</p>
+              </motion.div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Recommendations */}
+      {/* ── Recommendations ── */}
       {anime.recommendations?.nodes?.filter((n: any) => n.mediaRecommendation).length > 0 && (
         <div className="mt-7 px-4">
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-4">
             <div className="w-1 h-5 bg-primary rounded-full" />
-            <h2 className="text-base font-black font-['Cairo']">أنمي مشابه</h2>
+            <h2 className="text-[15px] font-black font-['Cairo']">أنمي مشابه</h2>
           </div>
           <div className="grid grid-cols-3 gap-3">
-            {anime.recommendations.nodes.map((n: any) => {
+            {anime.recommendations.nodes.filter((n: any) => n.mediaRecommendation).map((n: any) => {
               const rec = n.mediaRecommendation;
-              if (!rec) return null;
               return (
                 <Link key={rec.id} href={`/anime/${rec.id}`}>
-                  <div className="cursor-pointer group">
+                  <motion.div whileTap={{ scale: 0.96 }} className="cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#1C1C22] border border-white/6">
-                      <img src={rec.coverImage.large} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      <img
+                        src={rec.coverImage.large} alt=""
+                        className="w-full h-full object-cover transition-transform duration-500"
+                      />
                       {rec.averageScore && (
-                        <div className="absolute top-1.5 right-1.5 bg-black/70 text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black">
-                          ⭐ {(rec.averageScore / 10).toFixed(1)}
+                        <div className="absolute top-1.5 right-1.5 bg-black/65 backdrop-blur-sm text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black flex items-center gap-0.5">
+                          <Star className="w-2 h-2 fill-current" />
+                          {(rec.averageScore / 10).toFixed(1)}
                         </div>
                       )}
                     </div>
-                    <h3 className="mt-1.5 text-[10px] text-white/60 font-bold truncate">{rec.title.romaji}</h3>
-                  </div>
+                    <p className="mt-2 text-[10px] text-white/50 font-bold truncate leading-tight">{rec.title.romaji}</p>
+                  </motion.div>
                 </Link>
               );
             })}
@@ -297,46 +393,86 @@ export default function AnimeDetail() {
         </div>
       )}
 
-      {/* Comments Sheet */}
+      {/* ── Comments Sheet ── */}
       <AnimatePresence>
         {showComments && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowComments(false)} className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100]" />
-            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowComments(false)}
+              className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100]"
+            />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 h-[80vh] bg-[#111116] rounded-t-[28px] z-[101] flex flex-col border-t border-white/8">
-              <div className="flex items-center justify-between p-5 border-b border-white/5">
-                <h2 className="text-lg font-black font-['Cairo']">التعليقات ({comments.length})</h2>
-                <button onClick={() => setShowComments(false)} className="w-8 h-8 bg-white/5 rounded-full flex items-center justify-center">
-                  <X className="w-4 h-4" />
+              className="fixed bottom-0 left-0 right-0 h-[80vh] bg-[#0d0d10] rounded-t-[28px] z-[101] flex flex-col border-t border-white/8"
+            >
+              {/* Sheet header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/6 shrink-0">
+                <div className="flex items-center gap-2" dir="rtl">
+                  <MessageCircle className="w-4 h-4 text-primary" />
+                  <h2 className="text-sm font-black font-['Cairo']">التعليقات</h2>
+                  {comments.length > 0 && (
+                    <span className="text-[9px] bg-primary/15 text-primary px-2 py-0.5 rounded-full font-black">{comments.length}</span>
+                  )}
+                </div>
+                <button onClick={() => setShowComments(false)}
+                  className="w-8 h-8 bg-white/6 rounded-full flex items-center justify-center active:scale-90">
+                  <X className="w-4 h-4 text-white/50" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+              {/* Comments list */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3" dir="rtl">
                 {comments.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full opacity-20 gap-2">
-                    <MessageCircle className="w-10 h-10" />
-                    <p className="text-sm font-bold font-['Cairo']">كن أول من يعلق!</p>
+                  <div className="flex flex-col items-center justify-center h-full gap-3 opacity-30">
+                    <MessageCircle className="w-12 h-12" />
+                    <p className="text-sm font-bold font-['Cairo']">كن أول من يعلّق!</p>
                   </div>
-                ) : comments.map(c => (
-                  <div key={c.id} className="flex gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-primary/20 flex items-center justify-center text-primary font-black text-sm shrink-0">م</div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-black font-['Cairo']">{c.user}</span>
-                        <span className="text-[9px] text-white/30">{c.time}</span>
+                ) : (
+                  comments.map(c => (
+                    <motion.div
+                      key={c.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex gap-3"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary/40 to-primary/20 flex items-center justify-center text-primary font-black text-sm shrink-0 border border-primary/20">
+                        م
                       </div>
-                      <p className="text-xs text-white/70 bg-white/5 p-3 rounded-2xl border border-white/5 font-['Cairo']">{c.text}</p>
-                    </div>
-                  </div>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-black font-['Cairo']">مستخدم نوفا</span>
+                          <span className="text-[9px] text-white/25">{c.time}</span>
+                        </div>
+                        <p className="text-xs text-white/65 bg-white/5 px-3 py-2.5 rounded-2xl border border-white/5 font-['Cairo'] leading-relaxed">
+                          {c.text}
+                        </p>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
               </div>
-              <div className="p-4 border-t border-white/5" dir="rtl">
-                <div className="flex gap-2 bg-[#09090B] rounded-2xl p-2 pr-4 border border-white/8">
-                  <input value={newComment} onChange={e => setNewComment(e.target.value)}
+
+              {/* Input */}
+              <div className="px-4 py-3 border-t border-white/6 shrink-0" dir="rtl">
+                <div className="flex items-center gap-2 bg-[#111116] rounded-2xl px-4 py-2.5 border border-white/8">
+                  <input
+                    ref={inputRef}
+                    value={newComment}
+                    onChange={e => setNewComment(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && addComment()}
-                    placeholder="اكتب تعليقك..." className="flex-1 bg-transparent text-white text-sm outline-none font-['Cairo']" />
-                  <button onClick={addComment} className="bg-primary text-white px-4 py-2 rounded-xl text-xs font-black font-['Cairo']">نشر</button>
+                    placeholder="اكتب تعليقك..."
+                    className="flex-1 bg-transparent text-white text-sm outline-none font-['Cairo'] placeholder:text-white/25"
+                  />
+                  <motion.button
+                    whileTap={{ scale: 0.9 }}
+                    onClick={addComment}
+                    disabled={!newComment.trim()}
+                    className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shrink-0 disabled:opacity-40"
+                  >
+                    <Send className="w-3.5 h-3.5 text-white" />
+                  </motion.button>
                 </div>
               </div>
             </motion.div>

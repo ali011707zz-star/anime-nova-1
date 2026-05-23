@@ -28,10 +28,16 @@ const SRC_TTL       = 6 * 3_600_000; // 6 hours
 const DEAD_FILE_HOSTS = [
   // file hosts (not video players)
   "4shared.com","solidfiles.com","d000d.com","uqload.co","uqload.com",
-  "vadbam.net","okfiles.com","gofile.io","uploadfiles.io","hexupload.net",
+  "vadbam.net","vadbam.com","okfiles.com","gofile.io","uploadfiles.io","hexupload.net",
   "filerio.in","doodstream.com","dood.watch","megaup.net","1fichier.com",
   "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co",
-  "workupload.com",  // file download site, NOT a video player
+  "workupload.com",
+  // too many ads or frequently deleted files
+  "mp4upload.com",
+  "uptostream.com",
+  "vidbm.com",
+  "hexload.com",
+  "playerwish.com",
   // requires browser auth — can't extract
   "mega.nz","mega.co.nz","mediafire.com",
   "drive.google","docs.google","googleapis.com/drive",
@@ -1087,6 +1093,45 @@ async function getAnimeTitansSources(slug: string, epNum: number): Promise<any[]
 
 
 // ════════════════════════════════════════════════════════════════════
+//  Anime Phoenix  (anime-phoenix.com — Arabic, WordPress/Streamit)
+//  Episode URL: /episodes/{slug}-episode-{N}
+//  The site runs its own native video player — we embed the page directly.
+// ════════════════════════════════════════════════════════════════════
+const PHOENIX_BASE = "https://anime-phoenix.com";
+const PHOENIX_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime-phoenix.com/" };
+const phoenixSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const phoenixSrcCache  = new Map<string, { sources: any[]; ts: number }>();
+
+async function resolvePhoenixSlug(romaji: string, english?: string | null): Promise<string | null> {
+  const cacheKey = romaji.toLowerCase().trim();
+  const cached = phoenixSlugCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
+  for (const slug of buildCandidates(romaji, english)) {
+    const status = await safeHead(`${PHOENIX_BASE}/animes/${slug}`, PHOENIX_HDRS);
+    if (status === 200) {
+      phoenixSlugCache.set(cacheKey, { slug, ts: Date.now() });
+      return slug;
+    }
+  }
+  phoenixSlugCache.set(cacheKey, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getPhoenixSources(slug: string, epNum: number): Promise<any[]> {
+  const ck = `phoenix:${slug}-${epNum}`;
+  const cached = phoenixSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+  const epUrl = `${PHOENIX_BASE}/episodes/${slug}-episode-${epNum}`;
+  try {
+    const status = await safeHead(epUrl, PHOENIX_HDRS);
+    if (status !== 200) return [];
+    const sources = [{ name: "Anime Phoenix", url: epUrl, quality: "HD", qualityRank: 2, site: "animePhoenix" }];
+    phoenixSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  Video cache helpers (Replit DB)
 // ════════════════════════════════════════════════════════════════════
 interface CachedSource {
@@ -1934,6 +1979,23 @@ router.get("/anime/sources-stream", async (req, res) => {
             new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
           ]);
           await extractAndSend(srcs as UnifiedSource[], sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // 8. Anime Phoenix — embed episode page in iframe directly
+      (async () => {
+        try {
+          if (!title) return;
+          const slug = await Promise.race([
+            resolvePhoenixSlug(title, english),
+            new Promise<null>(r => setTimeout(() => r(null), SCRAPER_MS)),
+          ]);
+          if (!slug) return;
+          const srcs = await Promise.race([
+            getPhoenixSources(slug, ep),
+            new Promise<any[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          sendMany(srcs as UnifiedSource[]);
         } catch {}
       })(),
     ];
