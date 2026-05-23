@@ -19,26 +19,29 @@
 ## Where things live
 
 - `artifacts/anime-scraper/src/` — React frontend
-  - `pages/Watch.tsx` — main watch page with native HLS/MP4 player
-  - `pages/Home.tsx`, `Search.tsx`, `Details.tsx` — other pages
-- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (1200+ lines)
+  - `pages/Watch.tsx` — main watch page with NativeVideoPlayer + EmbedPlayer
+- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (2300+ lines)
   - AnimeLek, MitAnime scrapers + video extractor
+  - HLS proxy (`/api/anime/hls-proxy`, `/api/anime/seg-proxy`)
 
 ## Architecture decisions
 
 - **No external iframes ever** — all episodes play via native `<video>` element with HLS.js or MP4 src
 - **Server-side scraping** — API fetches embed pages and extracts direct HLS/MP4 URLs
 - **p,a,c,k,e,d unpacker** — server-side JS unpacker for obfuscated player code (uqload, etc.)
-- **Cloudflare detection fix** — only block on `"just a moment"` + `"cf_chl_"`, NOT `"challenge-platform"` or `"ray id:"` (those appear on ALL CF-proxied pages)
+- **HLS Proxy** — `/api/anime/hls-proxy?url=&ref=` fetches m3u8 server-side + rewrites all segment URLs to `/api/anime/seg-proxy`. Browser NEVER touches CDN → CORS completely bypassed.
+- **Segment Proxy** — `/api/anime/seg-proxy?url=&ref=` proxies TS segments + nested m3u8 to browser.
+- **Cloudflare detection fix** — only block on `"just a moment"` + `"cf_chl_"`, NOT `"challenge-platform"` or `"ray id:"`
 - **Multi-source fallback** — auto-play tries all sources sequentially; dead/incompatible sources marked visually
+- **EmbedPlayer** — full-screen iframe + overlay controls for sources that block server-side extraction
 
 ## Product
 
 - Homepage with trending anime from AniList
 - Arabic anime search
 - Details page with episode list
-- Watch page: fetches sources from AnimeLek + MitAnime in parallel (19+ sources for popular anime)
-- Native video player with HLS/MP4 support; auto-play tries servers one by one
+- Watch page: fetches sources from AnimeLek + MitAnime in parallel
+- Native video player with HLS/MP4 via server proxy; auto-play tries servers one by one
 - Server status badges (testing/ok/dead/incompatible)
 
 ## User preferences
@@ -47,13 +50,23 @@
 - Play ONLY in internal player — no external iframes ever
 - Filter non-working/dead servers automatically
 
+## What CAN be extracted server-side (direct URL)
+
+- **uqload.net** — p,a,c,k,e,d packed JS → HLS m3u8 on strm2.uqload.is
+- **yourupload** — direct MP4 on vidcache.net
+
+## What CANNOT be extracted (blocks server requests → EmbedPlayer iframe)
+
+- uptostream, vidbm, vadbam, playerwish, megamax — block all server-side requests
+- AllAnime API — now returns `NEED_CAPTCHA` for episode sources
+- mp4upload — files frequently deleted from server
+
 ## Gotchas
 
 - AnimeLek uses `challenge-platform` Cloudflare JSD script on ALL pages — do NOT use it as a CF block indicator
 - AnimeLek episode URL format: `${ALEK_BASE}/episode/${slug}-${ep}-الحلقة/`
-- MitAnime, WitAnime (403 server-side), anime4up, animeblkom also scraped but WitAnime blocks server-side
-- Most embed players (ok.ru, megamax, uptostream, vidbm) use client-side JS — can't extract server-side
-- uqload and similar packed sites CAN be extracted via `unpackPacked()` (p,a,c,k,e,d format)
+- AnimeLek movie URL: `${slug}-الفيلم` or `/anime/${slug}/`
+- HLS proxy rewrites segment URLs to root-relative `/api/anime/seg-proxy?...` — HLS.js resolves against manifest origin
 - AniList API used for anime metadata, cover images, episode counts
 - Slug resolution: use romaji title (from AniList) for best slug matching on Arabic sites
 

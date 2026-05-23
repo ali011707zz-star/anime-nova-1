@@ -2267,5 +2267,127 @@ video {
   }
 });
 
+// ════════════════════════════════════════════════════════════════════
+//  HLS / Segment Proxy  — bypasses CORS on CDN video streams
+//
+//  GET /api/anime/hls-proxy?url=<encoded>&ref=<encoded>
+//    Fetches an m3u8 manifest server-side and rewrites every segment
+//    URL so it routes back through /api/anime/seg-proxy.
+//    The browser only ever talks to our server — CDN CORS is irrelevant.
+//
+//  GET /api/anime/seg-proxy?url=<encoded>&ref=<encoded>
+//    Proxies a TS segment (or nested m3u8) to the browser.
+// ════════════════════════════════════════════════════════════════════
+const HLS_PROXY_HDRS = (ref: string, origin: string) => ({
+  "User-Agent": BROWSER_UA,
+  Referer: ref || "",
+  Origin: origin || "",
+  Accept: "*/*",
+  "Accept-Language": "ar,en;q=0.9",
+});
+
+function rewriteM3u8(manifest: string, baseUrl: string, _selfBase: string, ref: string): string {
+  const base = new URL(baseUrl);
+  const lines = manifest.split("\n");
+  return lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return line;
+    // Resolve segment/nested playlist URL to absolute
+    let absUrl: string;
+    try {
+      absUrl = new URL(trimmed).href;
+    } catch {
+      try { absUrl = new URL(trimmed, base).href; } catch { return line; }
+    }
+    // Use root-relative path — HLS.js resolves it against the manifest origin,
+    // which is our Vite/app domain. This way the browser never touches the CDN.
+    return `/api/anime/seg-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}`;
+  }).join("\n");
+}
+
+router.get("/anime/hls-proxy", async (req, res) => {
+  const rawUrl = (req.query.url as string || "").trim();
+  const ref    = (req.query.ref as string || "").trim();
+  if (!rawUrl) { res.status(400).send("url required"); return; }
+
+  let url: string;
+  try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
+
+  let origin = "";
+  try { origin = new URL(url).origin; } catch {}
+
+  try {
+    const r = await fetch(url, {
+      headers: HLS_PROXY_HDRS(ref || url, origin),
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
+    });
+    if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
+
+    const ct = r.headers.get("content-type") || "";
+    const body = await r.text();
+
+    // Work out the self-base so rewrites point back here
+    const proto = req.headers["x-forwarded-proto"] || "https";
+    const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
+    const selfBase = `${proto}://${host}`;
+
+    const rewritten = rewriteM3u8(body, url, selfBase, ref || url);
+
+    res.setHeader("Content-Type", ct.includes("mpegurl") || url.endsWith(".m3u8")
+      ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(rewritten);
+  } catch (e: any) {
+    res.status(502).send(`proxy error: ${e?.message ?? e}`);
+  }
+});
+
+router.get("/anime/seg-proxy", async (req, res) => {
+  const rawUrl = (req.query.url as string || "").trim();
+  const ref    = (req.query.ref as string || "").trim();
+  if (!rawUrl) { res.status(400).send("url required"); return; }
+
+  let url: string;
+  try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
+
+  let origin = "";
+  try { origin = new URL(url).origin; } catch {}
+
+  try {
+    const r = await fetch(url, {
+      headers: HLS_PROXY_HDRS(ref || url, origin),
+      signal: AbortSignal.timeout(30000),
+      redirect: "follow",
+    });
+    if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
+
+    const ct = r.headers.get("content-type") || "video/mp2t";
+    const len = r.headers.get("content-length");
+
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    if (len) res.setHeader("Content-Length", len);
+
+    // If it's a nested m3u8 (chunked playlist / quality variant), rewrite too
+    if (ct.includes("mpegurl") || url.includes(".m3u8")) {
+      const body = await r.text();
+      const proto = req.headers["x-forwarded-proto"] || "https";
+      const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.send(rewriteM3u8(body, url, `${proto}://${host}`, ref || url));
+      return;
+    }
+
+    // Stream binary segment directly
+    const body = await r.arrayBuffer();
+    res.send(Buffer.from(body));
+  } catch (e: any) {
+    res.status(502).send(`proxy error: ${e?.message ?? e}`);
+  }
+});
+
 export default router;
 

@@ -252,20 +252,25 @@ function NativeVideoPlayer({
     if (nextTimer.current) clearTimeout(nextTimer.current);
     resetCtrl();
 
+    // Route all HLS streams through our server-side proxy to bypass CDN CORS.
+    // MP4 files are served directly (same-origin via Vite proxy → no CORS issue).
+    const hlsProxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`;
+
     if (src.directType === "hls") {
       if (Hls.isSupported()) {
         const hls = new Hls({ enableWorker: true, maxBufferLength: 30, maxMaxBufferLength: 60 });
-        hls.loadSource(src.directUrl);
+        hls.loadSource(hlsProxyUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => { video.play().catch(() => {}); });
         hls.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) fail("رابط HLS فشل"); });
         hlsRef.current = hls;
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = src.directUrl;
+        video.src = hlsProxyUrl;
         video.play().catch(() => {});
       } else { fail("المتصفح لا يدعم HLS"); }
     } else {
-      video.src = src.directUrl;
+      // MP4: proxy through seg-proxy to avoid any CORS issues
+      video.src = `/api/anime/seg-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`;
       video.play().then(() => {}).catch(() => fail("تعذّر تشغيل الملف"));
     }
     return () => { hlsRef.current?.destroy(); hlsRef.current = null; if (nextTimer.current) clearTimeout(nextTimer.current); };
