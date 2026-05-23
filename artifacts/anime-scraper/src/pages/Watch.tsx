@@ -4,9 +4,10 @@ import {
   ChevronRight, ChevronLeft, Loader2, Play,
   AlertTriangle, RefreshCw, CheckCircle2, XCircle,
   Maximize2, List, X, Wifi, WifiOff, SkipForward,
-  MonitorPlay, Zap,
+  MonitorPlay, Zap, Volume2, VolumeX,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import Hls from "hls.js";
 
 /* ─────────────────────────────────────────────────────
    AniList query
@@ -151,8 +152,54 @@ function ServerSheet({ sources, activeIdx, statuses, onSelect, onClose }: {
 }
 
 /* ══════════════════════════════════════════════════════
-   VIDEO PLAYER — clean fullscreen iframe, no restrictions
-   The site plays with its own player completely.
+   NATIVE HLS/MP4 VIDEO PLAYER (for directUrl sources)
+══════════════════════════════════════════════════════ */
+function NativeVideoInner({
+  url, type, onError, onCanPlay,
+}: {
+  url: string; type: "hls" | "mp4";
+  onError: () => void; onCanPlay: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef   = useRef<Hls | null>(null);
+
+  useEffect(() => {
+    const v = videoRef.current; if (!v) return;
+    if (type === "hls" && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      hlsRef.current = hls;
+      hls.loadSource(url);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => { v.play().catch(() => {}); });
+      hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) onError(); });
+    } else if (type === "hls" && v.canPlayType("application/vnd.apple.mpegurl")) {
+      v.src = url;
+      v.play().catch(() => {});
+    } else if (type === "mp4") {
+      v.src = url;
+      v.play().catch(() => {});
+    } else {
+      onError();
+    }
+    return () => { hlsRef.current?.destroy(); hlsRef.current = null; };
+  }, [url, type]);
+
+  return (
+    <video
+      ref={videoRef}
+      className="absolute inset-0 w-full h-full bg-black"
+      controls
+      playsInline
+      autoPlay
+      onCanPlay={onCanPlay}
+      onError={onError}
+      style={{ objectFit: "contain" }}
+    />
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   VIDEO PLAYER — switches between native & iframe
 ══════════════════════════════════════════════════════ */
 function VideoPlayer({
   src, title, ep, totalEps,
@@ -166,49 +213,96 @@ function VideoPlayer({
 }) {
   const [showSheet, setShowSheet] = useState(false);
   const [showBar, setShowBar]     = useState(true);
+  const [nativeError, setNativeError] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const useNative = !nativeError && !!src.directUrl;
 
   const resetHide = useCallback(() => {
     setShowBar(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setShowBar(false), 4000);
+    hideTimer.current = setTimeout(() => setShowBar(false), 5000);
   }, []);
 
   useEffect(() => {
+    setNativeError(false);
     resetHide();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [src.url]);
 
   function fullscreen() {
-    const el = iframeRef.current; if (!el) return;
-    const fn = el.requestFullscreen || (el as any).webkitRequestFullscreen;
+    const el = iframeRef.current || document.querySelector("video");
+    if (!el) return;
+    const fn = (el as any).requestFullscreen || (el as any).webkitRequestFullscreen;
     fn?.call(el);
   }
 
   const playerUrl = src.url;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black" dir="ltr">
+    <div className="fixed inset-0 z-50 bg-black" dir="ltr" onClick={useNative ? resetHide : undefined}>
 
-      {/* Full-screen iframe — no sandbox, no referrer restriction */}
-      <iframe
-        ref={iframeRef}
-        key={playerUrl}
-        src={playerUrl}
-        className="absolute inset-0 w-full h-full border-none"
-        allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope; payment; microphone; camera"
-        allowFullScreen
-        title={title}
-      />
+      {/* ── NATIVE PLAYER (HLS.js / MP4) — for extracted directUrl sources ── */}
+      {useNative && (
+        <NativeVideoInner
+          key={src.directUrl!}
+          url={src.directUrl!}
+          type={src.directType || "hls"}
+          onError={() => { setNativeError(true); }}
+          onCanPlay={resetHide}
+        />
+      )}
 
-      {/* Tap-target strip at top to toggle controls (iframes capture touch events) */}
+      {/* ── IFRAME PLAYER — for embed URLs, sandbox prevents ads redirecting parent ── */}
+      {!useNative && (
+        <iframe
+          ref={iframeRef}
+          key={playerUrl}
+          src={playerUrl}
+          className="absolute inset-0 w-full h-full border-none"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope; microphone; camera"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-fullscreen allow-pointer-lock allow-popups"
+          allowFullScreen
+          title={title}
+        />
+      )}
+
+      {/* ── PERMANENT BACK BUTTON — always visible, never hidden ── */}
+      <button
+        onClick={onClose}
+        className="absolute z-30 flex items-center gap-1.5 bg-black/70 backdrop-blur-md border border-white/15 rounded-full active:scale-90 transition-transform"
+        style={{
+          top: "max(14px, env(safe-area-inset-top))",
+          right: "12px",
+          padding: "8px 14px 8px 10px",
+        }}
+      >
+        <ChevronRight className="w-4 h-4 text-white" />
+        <span className="text-white text-[12px] font-black font-['Cairo']">رجوع</span>
+      </button>
+
+      {/* ── PERMANENT NEXT SERVER BUTTON — always visible ── */}
+      <button
+        onClick={() => { onNextSrc(); }}
+        className="absolute z-30 flex items-center gap-1 bg-black/60 backdrop-blur-md border border-white/10 rounded-full active:scale-90 transition-transform"
+        style={{
+          top: "max(14px, env(safe-area-inset-top))",
+          left: "12px",
+          padding: "8px 12px",
+        }}
+      >
+        <SkipForward className="w-3.5 h-3.5 text-white/70" />
+        <span className="text-white/70 text-[11px] font-bold font-['Cairo']">التالي</span>
+      </button>
+
+      {/* Tap-target strip at top-center to toggle full controls (iframes capture touch events) */}
       <div
-        className="absolute top-0 left-0 right-0 h-1 z-20 cursor-pointer"
+        className="absolute top-0 left-0 right-0 h-2 z-20 cursor-pointer"
         onClick={resetHide}
       />
 
-      {/* TOP BAR */}
+      {/* TOP BAR (full controls — fades) */}
       <AnimatePresence>
         {showBar && (
           <motion.div
@@ -219,17 +313,12 @@ function VideoPlayer({
             transition={{ duration: 0.2 }}
             className="absolute top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pointer-events-none"
             style={{
-              paddingTop: "max(14px, env(safe-area-inset-top))",
+              paddingTop: "max(56px, calc(env(safe-area-inset-top) + 44px))",
               paddingBottom: "14px",
-              background: "linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
+              background: "linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.25) 80%, transparent 100%)",
             }}
           >
-            <button
-              onClick={onClose}
-              className="w-10 h-10 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90 pointer-events-auto shrink-0"
-            >
-              <X className="w-4 h-4 text-white" />
-            </button>
+            <div className="w-10 h-10 shrink-0" />
             <div dir="rtl" className="flex-1 min-w-0">
               <p className="text-white text-[13px] font-black line-clamp-1 drop-shadow-md font-['Cairo']">{title}</p>
               <div className="flex items-center gap-2 mt-0.5">

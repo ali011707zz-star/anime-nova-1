@@ -25,20 +25,16 @@ const SEARCH_TTL    = 3_600_000; // 1 hour
 const SRC_TTL       = 6 * 3_600_000; // 6 hours
 
 // ── Known-dead / unplayable file hosts ──
+// Only put TRULY dead hosts here (require browser auth, or deleted files).
+// Embed-player hosts (vidbm, uptostream, etc.) should be in EMBED_ONLY_HOSTS instead.
 const DEAD_FILE_HOSTS = [
-  // file hosts (not video players)
-  "4shared.com","solidfiles.com","d000d.com","uqload.co","uqload.com",
+  // generic file hosts — no video player, just download links
+  "4shared.com","solidfiles.com","d000d.com",
   "vadbam.net","vadbam.com","okfiles.com","gofile.io","uploadfiles.io","hexupload.net",
   "filerio.in","doodstream.com","dood.watch","megaup.net","1fichier.com",
-  "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co",
-  "workupload.com",
-  // too many ads or frequently deleted files
-  "mp4upload.com",
-  "uptostream.com",
-  "vidbm.com",
+  "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co","workupload.com",
   "hexload.com",
-  "playerwish.com",
-  // requires browser auth — can't extract
+  // requires browser auth — cannot extract or embed
   "mega.nz","mega.co.nz","mediafire.com",
   "drive.google","docs.google","googleapis.com/drive",
   "ok.ru","odnoklassniki.ru",
@@ -46,8 +42,19 @@ const DEAD_FILE_HOSTS = [
   // CDN/tracking scripts — not video sources
   "cloudflareinsights.com","beacon.min.js",
   "jquery.min.js","bootstrap.min.js",
-  ".css",".js",".png",".jpg",".jpeg",".gif",".svg",".ico",
+  ".css",".png",".jpg",".jpeg",".gif",".svg",".ico",
   "favicon","robots.txt","sitemap",
+];
+
+// ── Embed-player hosts: pass through to iframe without server-side extraction ──
+// These block server requests but work fine when embedded directly in an iframe.
+const EMBED_ONLY_HOSTS = [
+  "vidbm.com","vidbm.me",
+  "uptostream.com",
+  "playerwish.com","wishfast.top",
+  "mp4upload.com",
+  "streamvid.net","streamlare.com",
+  "vadbam.com","vadbam.net",
 ];
 
 // ── Hosts that block server-side scraping ──
@@ -1651,11 +1658,14 @@ interface UnifiedSource {
 }
 
 // Hosts that are impossible to extract server-side (need browser/auth)
+// Combined with EMBED_ONLY_HOSTS below — all skipped during extraction
 const SKIP_EXTRACT_HOSTS = [
   "drive.google", "mega.nz", "mediafire.com",
   "ok.ru", "odnoklassniki.ru",
   "soraplay.xyz", "anime7u",
   "youtube.com", "youtu.be",
+  // embed-player hosts block server requests — send as embed directly
+  ...EMBED_ONLY_HOSTS,
 ];
 
 router.get("/anime/all-sources", async (req, res) => {
