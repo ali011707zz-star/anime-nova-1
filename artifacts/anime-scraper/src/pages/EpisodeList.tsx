@@ -145,7 +145,8 @@ export default function EpisodeListPage() {
       localStorage.setItem(`watched-${params.id}`, JSON.stringify([...next]));
       return next;
     });
-    navigate(`/watch?anime=${params.id}&ep=${n}`);
+    const t = encodeURIComponent(anime?.title?.romaji || "");
+    navigate(`/watch?anime=${params.id}&ep=${n}${t ? `&title=${t}` : ""}`);
   }
 
   if (loading) return (

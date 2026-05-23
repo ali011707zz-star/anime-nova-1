@@ -34,6 +34,8 @@ const DEAD_FILE_HOSTS = [
   "filerio.in","doodstream.com","dood.watch","megaup.net","1fichier.com",
   "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co","workupload.com",
   "hexload.com",
+  // files frequently deleted from server — causes black screens
+  "mp4upload.com",
   // requires browser auth — cannot extract or embed
   "mega.nz","mega.co.nz","mediafire.com",
   "drive.google","docs.google","googleapis.com/drive",
@@ -52,10 +54,9 @@ const EMBED_ONLY_HOSTS = [
   "vidbm.com","vidbm.me",
   "uptostream.com",
   "playerwish.com","wishfast.top",
-  "mp4upload.com",
   "streamvid.net","streamlare.com",
-  "vadbam.com","vadbam.net",
 ];
+// mp4upload intentionally NOT in EMBED_ONLY_HOSTS — files are frequently deleted
 
 // ── Hosts that block server-side scraping ──
 const CLOUDFLARE_PATTERNS = [
@@ -1783,9 +1784,31 @@ router.get("/anime/all-sources", async (req, res) => {
 });
 
 
+/** HEAD probe — verify a direct HLS/MP4 URL is actually reachable */
+async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
+  try {
+    const r = await fetch(url, {
+      method: "HEAD",
+      headers: {
+        "User-Agent": BROWSER_UA,
+        ...(referer ? { Referer: referer } : {}),
+        Range: "bytes=0-1024",
+      },
+      signal: AbortSignal.timeout(5000),
+      redirect: "follow",
+    });
+    // 200 OK, 206 Partial Content, or 302/301 redirect (CDN signed URLs)
+    return r.ok || r.status === 206 || r.status === 302 || r.status === 301;
+  } catch {
+    // Network error — could still work from client; don't discard
+    return true;
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  Helper: try extractVideoDeep for each embed source in parallel
 //  Sends result (with or without directUrl) as each one completes.
+//  Probes every directUrl via HEAD before sending to client.
 // ════════════════════════════════════════════════════════════════════
 async function extractAndSend(
   sources: UnifiedSource[],
@@ -1793,16 +1816,25 @@ async function extractAndSend(
   timeoutMs = 9000,
 ): Promise<void> {
   await Promise.allSettled(sources.map(async (s) => {
-    // Already has a direct URL — send immediately
-    if (s.directUrl) { send(s); return; }
+    // Already has a direct URL — probe it first
+    if (s.directUrl) {
+      const alive = await probeDirectUrl(s.directUrl, s.url);
+      if (alive) send(s);
+      // If dead, skip entirely — don't send as embed fallback (embed might also be dead)
+      return;
+    }
     // Known un-extractable hosts — send as embed
     if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) { send(s); return; }
     // Direct m3u8/mp4 in the URL itself
     if (s.url.match(/\.m3u8([?#]|$)/i)) {
-      send({ ...s, directUrl: s.url, directType: "hls" }); return;
+      const alive = await probeDirectUrl(s.url);
+      if (alive) send({ ...s, directUrl: s.url, directType: "hls" });
+      return;
     }
     if (s.url.match(/\.mp4([?#]|$)/i)) {
-      send({ ...s, directUrl: s.url, directType: "mp4" }); return;
+      const alive = await probeDirectUrl(s.url);
+      if (alive) send({ ...s, directUrl: s.url, directType: "mp4" });
+      return;
     }
     try {
       const result = await Promise.race([
@@ -1810,7 +1842,13 @@ async function extractAndSend(
         new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
       ]);
       if (result) {
-        send({ ...s, directUrl: result.url, directType: result.type });
+        // Probe the extracted URL before committing to it
+        const alive = await probeDirectUrl(result.url, s.url);
+        if (alive) {
+          send({ ...s, directUrl: result.url, directType: result.type });
+        } else {
+          send(s); // extracted URL dead → fall back to embed
+        }
       } else {
         send(s);
       }

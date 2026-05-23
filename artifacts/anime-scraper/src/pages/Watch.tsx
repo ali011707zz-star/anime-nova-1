@@ -262,7 +262,7 @@ function VideoPlayer({
           src={playerUrl}
           className="absolute inset-0 w-full h-full border-none"
           allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope; microphone; camera"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-fullscreen allow-pointer-lock allow-popups"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-fullscreen allow-pointer-lock"
           allowFullScreen
           title={title}
         />
@@ -504,11 +504,12 @@ function LoadingScreen({ cover, title, ep, genres, sourcesCount }: {
 ════════════════════════════════════════════════════════════════ */
 export default function WatchPage() {
   const [, navigate] = useLocation();
-  const sp       = new URLSearchParams(window.location.search);
-  const animeId  = parseInt(sp.get("anime") || "0");
-  const ep       = parseInt(sp.get("ep") || "1");
-  const alekSlug = sp.get("slug") || getCache(`alek-slug-${animeId}`);
-  const mitSlug  = getCache(`mit-slug-${animeId}`);
+  const sp         = new URLSearchParams(window.location.search);
+  const animeId    = parseInt(sp.get("anime") || "0");
+  const ep         = parseInt(sp.get("ep") || "1");
+  const titleParam = sp.get("title") || "";  // pre-populated from navigation for faster start
+  const alekSlug   = sp.get("slug") || getCache(`alek-slug-${animeId}`);
+  const mitSlug    = getCache(`mit-slug-${animeId}`);
 
   const [showPlayer, setShowPlayer]   = useState(false);
   const [anime, setAnime]             = useState<any>(null);
@@ -537,6 +538,71 @@ export default function WatchPage() {
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
   useEffect(() => { statusesRef.current = statuses; }, [statuses]);
 
+  /* ── Deduplicate sources: keep best quality per streaming host ── */
+  function dedupSources(srcs: Source[]): Source[] {
+    const seen = new Map<string, number>(); // host → count kept
+    return srcs.filter(s => {
+      let host = "";
+      try { host = new URL(s.url).hostname.replace(/^(www\.|vid\.|player\.)/, ""); } catch {}
+      const n = seen.get(host) || 0;
+      if (n >= 2) return false;
+      seen.set(host, n + 1);
+      return true;
+    });
+  }
+
+  /* ── Sort: directUrl > quality (FHD>HD>SD) > server priority ── */
+  function sortSources(srcs: Source[]): Source[] {
+    return [...srcs].sort((a, b) => {
+      const aDirect = a.directUrl ? 1 : 0;
+      const bDirect = b.directUrl ? 1 : 0;
+      if (bDirect !== aDirect) return bDirect - aDirect;
+      if (b.qualityRank !== a.qualityRank) return b.qualityRank - a.qualityRank;
+      return serverPriority(b) - serverPriority(a);
+    });
+  }
+
+  /* ── Start SSE stream ── */
+  function startSSE(romaji: string, english: string, malId: number) {
+    const cacheKey = `${animeId}-${ep}`;
+    const p = new URLSearchParams({
+      ep: String(ep), title: romaji, english,
+      anilistId: String(animeId), malId: String(malId),
+    });
+    if (alekSlug) p.set("alekSlug", alekSlug);
+    if (mitSlug)  p.set("mitSlug",  mitSlug);
+
+    const es = new EventSource(`/api/anime/sources-stream?${p}`);
+    sseRef.current = es;
+    const accumulated: Source[] = [];
+
+    es.onmessage = (e) => {
+      if (e.data === "[DONE]") {
+        es.close(); sseRef.current = null;
+        setStreamDone(true);
+        setSrcCache(cacheKey, accumulated);
+        return;
+      }
+      if (e.data.startsWith("[SLUG]")) {
+        try {
+          const { alekSlug: as, mitSlug: ms } = JSON.parse(e.data.slice(6));
+          if (as) setCache(`alek-slug-${animeId}`, as);
+          if (ms) setCache(`mit-slug-${animeId}`,  ms);
+        } catch {}
+        return;
+      }
+      try {
+        const src: Source = JSON.parse(e.data);
+        if (!src.url || seenUrls.current.has(src.url)) return;
+        seenUrls.current.add(src.url);
+        accumulated.push(src);
+        setSources(prev => dedupSources(sortSources([...prev, src])));
+        setStatuses(prev => ({ ...prev, [src.url]: "unknown" }));
+      } catch {}
+    };
+    es.onerror = () => { es.close(); sseRef.current = null; setStreamDone(true); };
+  }
+
   /* ── Load metadata + start SSE ── */
   useEffect(() => {
     if (!animeId) { setLoading(false); return; }
@@ -547,8 +613,41 @@ export default function WatchPage() {
     if (autoPlayTimer.current) { clearTimeout(autoPlayTimer.current); autoPlayTimer.current = null; }
 
     const cacheKey = `${animeId}-${ep}`;
+
     (async () => {
       try {
+        // ── Fast path: check cache first (before any network request) ──
+        const cached = getSrcCache(cacheKey);
+        if (cached && cached.length > 0) {
+          setSources(cached);
+          const init: Record<string, ProbeStatus> = {};
+          cached.forEach(s => { init[s.url] = "unknown"; });
+          setStatuses(init);
+          setLoading(false); setStreamDone(true);
+          return;
+        }
+
+        // ── Fast path: if title came from URL, start SSE immediately ──
+        if (titleParam) {
+          setLoading(false);
+          startSSE(titleParam, "", 0);
+          // fetch AniList in parallel for metadata only (cover, genres, etc.)
+          fetch("https://graphql.anilist.co", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } }),
+            signal: AbortSignal.timeout(12000),
+          }).then(r => r.json()).then(j => {
+            const animeData = j.data?.Media;
+            if (animeData) {
+              setAnime(animeData);
+              saveHistory(animeId, animeData.title?.romaji || "", animeData.coverImage?.large || "", ep, animeData.episodes || 0);
+            }
+          }).catch(() => {});
+          return;
+        }
+
+        // ── Normal path: wait for AniList then start SSE ──
         const aniRes = await fetch("https://graphql.anilist.co", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -563,63 +662,8 @@ export default function WatchPage() {
         const english = animeData?.title?.english || "";
         const malId   = animeData?.idMal || 0;
 
-        const cached = getSrcCache(cacheKey);
-        if (cached && cached.length > 0) {
-          setSources(cached);
-          const init: Record<string, ProbeStatus> = {};
-          cached.forEach(s => { init[s.url] = "unknown"; });
-          setStatuses(init);
-          setLoading(false); setStreamDone(true);
-          return;
-        }
-
         setLoading(false);
-
-        const params = new URLSearchParams({
-          ep: String(ep), title: romaji, english,
-          anilistId: String(animeId), malId: String(malId),
-        });
-        if (alekSlug) params.set("alekSlug", alekSlug);
-        if (mitSlug)  params.set("mitSlug",  mitSlug);
-
-        const es = new EventSource(`/api/anime/sources-stream?${params}`);
-        sseRef.current = es;
-        const accumulated: Source[] = [];
-
-        es.onmessage = (e) => {
-          if (e.data === "[DONE]") {
-            es.close(); sseRef.current = null;
-            setStreamDone(true);
-            setSrcCache(cacheKey, accumulated);
-            return;
-          }
-          if (e.data.startsWith("[SLUG]")) {
-            try {
-              const { alekSlug: as, mitSlug: ms } = JSON.parse(e.data.slice(6));
-              if (as) setCache(`alek-slug-${animeId}`, as);
-              if (ms) setCache(`mit-slug-${animeId}`,  ms);
-            } catch {}
-            return;
-          }
-          try {
-            const src: Source = JSON.parse(e.data);
-            if (!src.url || seenUrls.current.has(src.url)) return;
-            seenUrls.current.add(src.url);
-            accumulated.push(src);
-            setSources(prev => {
-              const updated = [...prev, src];
-              // Sort: Phoenix/megamax first, then by quality
-              updated.sort((a, b) => {
-                const ap = serverPriority(a), bp = serverPriority(b);
-                if (bp !== ap) return bp - ap;
-                return b.qualityRank - a.qualityRank;
-              });
-              return updated;
-            });
-            setStatuses(prev => ({ ...prev, [src.url]: "unknown" }));
-          } catch {}
-        };
-        es.onerror = () => { es.close(); sseRef.current = null; setStreamDone(true); };
+        startSSE(romaji, english, malId);
       } catch (err: any) {
         if (err.name !== "AbortError") console.error(err);
         setLoading(false); setStreamDone(true);
