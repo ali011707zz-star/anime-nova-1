@@ -1,6 +1,6 @@
 # Nova Anime
 
-تطبيق بث أنمي عربي يجمع مصادر من موقع shahiid-anime.net ويُشغّلها في مشغّل داخلي فقط (HLS/MP4 native).
+تطبيق بث أنمي عربي يجمع مصادر من shahiid-anime.net و AnimeGG (www.animegg.org) ويُشغّلها في مشغّل داخلي.
 
 ## Run & Operate
 
@@ -14,26 +14,44 @@
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - Frontend: React + Vite + Tailwind CSS + Framer Motion
 - API: Express 5, esbuild bundle
-- No DB required — all data fetched live from AniList GraphQL + shahiid-anime.net
+- No DB required — all data fetched live from AniList GraphQL + shahiid-anime.net + animegg.org
 
 ## Where things live
 
 - `artifacts/anime-scraper/src/` — React frontend
   - `pages/Watch.tsx` — main watch page with NativeVideoPlayer + EmbedPlayer
-- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (~730 lines)
+- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (~1350 lines)
   - Shahiid-anime.net scraper (search → seasons → episodes → AJAX servers)
+  - AnimeGG scraper (search → episode page → embed extraction → direct MP4)
   - Video extraction engine (parseVideoUrl, extractVideoDeep, etc.)
   - HLS proxy (`/api/anime/hls-proxy`, `/api/anime/seg-proxy`)
 
 ## Architecture decisions
 
-- **Single source: shahiid-anime.net** — Arabic anime site with series/episodes
+- **Dual source**: shahiid-anime.net (Arabic dub/sub) + AnimeGG (global)
+- **Parallel scraping** — both scrapers run via `Promise.allSettled` simultaneously
+- **Immediate send** — embed URLs sent immediately, deep extraction fires in background
 - **Server-side scraping** — API fetches embed pages and extracts direct HLS/MP4 URLs where possible
 - **AJAX server fetch** — shahiid uses `action=codecanal_ajax_request` POST to get iframe URLs per server button
 - **extractVideoDeep** — multi-hop iframe follower → extracts real HLS m3u8 / MP4 URL
 - **p,a,c,k,e,d unpacker** — server-side JS unpacker for obfuscated player code
 - **Cloudflare detection** — only block on `"just a moment"` + `"cf_chl_"`, NOT `"challenge-platform"` or `"ray id:"`
 - **No position fallback** — if episode not found by number in slug → return null (no wrong episode)
+
+## AnimeGG scraper flow
+
+1. **Search**: GET `/search/?q={title}` → extract series slug from `href="/series/{slug}"` + title similarity match
+2. **Episode URL**: try `/{slug}-episode-{N}` first
+3. **Prefix fallback**: if 404/no embeds, fetch `/series/{slug}` page → extract all `/{prefix}-episode-N` patterns → try each prefix for target episode (handles cases like AoT where sub uses "shingeki-no-kyojin" vs series slug "attack-on-titan")
+4. **Embed extraction**: fetch `/embed/{id}` → parse `videoSources` JS array → extract direct MP4 URL
+5. **Labels**: first embed = "مدبلج" (dubbed), second = "مترجم" (subbed)
+
+## AnimeGG gotchas
+
+- Episode slug prefix ≠ series slug for some anime (e.g. AoT: sub at `/shingeki-no-kyojin-episode-N`)
+- Direct MP4 URL (`/play/{id}/video.mp4?for=...`) may be IP-tied → embed fallback always included
+- Typically 2 embeds per episode page (dubbed + subbed)
+- `videoSources` JS array: `var videoSources = [{file: "/play/.../video.mp4?for=...", label: "480p"}]`
 
 ## Shahiid-anime.net scraper flow
 
@@ -64,6 +82,7 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 
 ## What CAN be extracted server-side (direct URL)
 
+- **AnimeGG** — direct MP4 via `videoSources` JS array
 - **sendvid.com** — direct MP4 via parseMegamax patterns
 - **streamtape.com** — direct MP4 via parseStreamtape
 - **streamwish / filemoon** — HLS m3u8 via parseStreamwish
@@ -81,7 +100,7 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 
 ## API Endpoints
 
-- `GET /api/anime/sources-stream?title=&english=&ep=` — SSE stream of sources from shahiid
+- `GET /api/anime/sources-stream?title=&english=&ep=` — SSE stream of sources from shahiid + AnimeGG in parallel
 - `GET /api/anime/probe?url=` — HEAD probe a direct URL
 - `GET /api/anime/extract-video?url=` — multi-hop video extraction
 - `GET /api/anime/search?q=` — AllAnime search (metadata)
@@ -99,6 +118,7 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 - The `.buttosn` class (typo "buttosn" not "buttons") is the server button selector
 - `data-_server_code_` and `data-is_film` are usually absent → send empty string in AJAX
 - HLS proxy rewrites segment URLs to `/api/anime/seg-proxy?...`
+- seenUrls dedup key = `src.directUrl || src.url` on both server and frontend
 
 ## User preferences
 

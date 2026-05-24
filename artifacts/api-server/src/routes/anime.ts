@@ -637,25 +637,28 @@ async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
 async function extractAndSend(
   sources: UnifiedSource[],
   send: (s: UnifiedSource) => void,
-  timeoutMs = 9000,
+  timeoutMs = 8000,
 ): Promise<void> {
   await Promise.allSettled(sources.map(async (s) => {
+    // Already has a direct URL (e.g. AnimeGG pre-extracted) — send immediately
     if (s.directUrl) {
-      const alive = await probeDirectUrl(s.directUrl, s.url);
-      if (alive) send(s);
+      send(s);
       return;
     }
+    // Known embed-only → send as embed immediately
     if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) { send(s); return; }
+    // Direct HLS in URL
     if (s.url.match(/\.m3u8([?#]|$)/i)) {
-      const alive = await probeDirectUrl(s.url);
-      if (alive) send({ ...s, directUrl: s.url, directType: "hls" });
+      send({ ...s, directUrl: s.url, directType: "hls" });
       return;
     }
+    // Direct MP4 in URL
     if (s.url.match(/\.mp4([?#]|$)/i)) {
-      const alive = await probeDirectUrl(s.url);
-      if (alive) send({ ...s, directUrl: s.url, directType: "mp4" });
+      send({ ...s, directUrl: s.url, directType: "mp4" });
       return;
     }
+    // Unknown embed: send IMMEDIATELY for fast response, then attempt deep extraction
+    send(s);
     try {
       const result = await Promise.race([
         extractVideoDeep(s.url, s.url),
@@ -663,13 +666,199 @@ async function extractAndSend(
       ]);
       if (result) {
         const alive = await probeDirectUrl(result.url, s.url);
-        if (alive) send({ ...s, directUrl: result.url, directType: result.type });
-        else send(s);
-      } else {
-        send(s);
+        if (alive) {
+          send({ ...s, name: s.name + " ·HD", url: result.url, directUrl: result.url, directType: result.type });
+        }
       }
-    } catch { send(s); }
+    } catch {}
   }));
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIMEGG.ORG scraper
+//  Search: GET /search/?q={query}
+//  Episode: GET /{slug}-episode-{N}  → iframe src="/embed/{id}"
+//  Embed:   GET /embed/{id}          → videoSources[{file, label}]
+// ════════════════════════════════════════════════════════════════════
+const AGG_BASE = "https://www.animegg.org";
+const AGG_HDRS: Record<string, string> = {
+  ...BASE_HDRS,
+  Referer: "https://www.animegg.org/",
+};
+
+const aggSeriesCache = new Map<string, { slug: string | null; ts: number }>();
+const aggSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAnimeGG(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = aggSeriesCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${AGG_BASE}/search/?q=${encodeURIComponent(q)}`, {
+        headers: AGG_HDRS,
+        signal: AbortSignal.timeout(8000),
+        redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      let bestSlug: string | null = null;
+      let bestScore = 0;
+
+      const re = /href="\/series\/([^"]+)"[\s\S]*?<h2>([^<]+)/gi;
+      for (const m of html.matchAll(re)) {
+        const slug  = m[1].trim();
+        const label = m[2].trim();
+        const score = Math.max(
+          similarity(label, title),
+          english ? similarity(label, english) : 0,
+        );
+        if (score > bestScore && score > 0.2) { bestScore = score; bestSlug = slug; }
+      }
+
+      if (bestSlug && bestScore > 0.35) {
+        aggSeriesCache.set(ck, { slug: bestSlug, ts: Date.now() });
+        return bestSlug;
+      }
+    } catch {}
+  }
+
+  aggSeriesCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+/** Parse AnimeGG embed page → direct video URL */
+function parseAnimeGGEmbed(html: string): { url: string; type: "mp4" | "hls" } | null {
+  // og:video meta
+  const ogV = html.match(/<meta[^>]+property="og:video"[^>]+content="([^"]+)"/i);
+  if (ogV) {
+    const u = ogV[1].startsWith("/") ? `${AGG_BASE}${ogV[1]}` : ogV[1];
+    if (u.startsWith("http")) return { url: u, type: "mp4" };
+  }
+  // videoSources JS array
+  const vsM = html.match(/var\s+videoSources\s*=\s*(\[[\s\S]*?\]);/);
+  if (vsM) {
+    try {
+      const raw = vsM[1]
+        .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":')
+        .replace(/'/g, '"');
+      const arr = JSON.parse(raw) as Array<{ file?: string; label?: string }>;
+      const first = arr.find(s => s.file && (s.file.includes(".mp4") || s.file.includes(".m3u8")));
+      if (first?.file) {
+        const u = first.file.startsWith("/") ? `${AGG_BASE}${first.file}` : first.file;
+        if (u.startsWith("http")) return { url: u, type: u.includes(".m3u8") ? "hls" : "mp4" };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+/** Fetch embed IDs from an AnimeGG episode page URL */
+async function fetchAnimeGGEmbedIds(epUrl: string, refUrl: string): Promise<string[]> {
+  try {
+    const r = await fetch(epUrl, {
+      headers: { ...AGG_HDRS, Referer: refUrl },
+      signal: AbortSignal.timeout(8000),
+      redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    for (const m of html.matchAll(/iframe[^>]+src="\/embed\/(\d+)"/gi)) {
+      if (!seen.has(m[1])) { seen.add(m[1]); ids.push(m[1]); }
+    }
+    return ids;
+  } catch { return []; }
+}
+
+async function getAnimeGGSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `agg:${title.toLowerCase()}:${ep}`;
+  const hit = aggSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await searchAnimeGG(title, english);
+    if (!slug) return [];
+
+    const seriesUrl = `${AGG_BASE}/series/${slug}`;
+
+    // 1. Try direct episode URL: /{slug}-episode-{ep}
+    let embedIds = await fetchAnimeGGEmbedIds(`${AGG_BASE}/${slug}-episode-${ep}`, seriesUrl);
+
+    // 2. If no embeds, fetch the series page to discover all episode URL prefixes
+    //    (e.g. AoT sub uses "shingeki-no-kyojin" while series slug is "attack-on-titan")
+    if (!embedIds.length) {
+      try {
+        const sr = await fetch(seriesUrl, {
+          headers: AGG_HDRS,
+          signal: AbortSignal.timeout(8000),
+          redirect: "follow",
+        });
+        if (sr.ok) {
+          const sHtml = await sr.text();
+          const seen = new Set<string>([slug]);
+          // Extract unique episode URL prefixes from the page
+          for (const m of sHtml.matchAll(/href="\/([a-z0-9-]+)-episode-\d+"/gi)) {
+            const prefix = m[1];
+            if (!seen.has(prefix)) seen.add(prefix);
+          }
+          // Try each new prefix until we find embeds
+          for (const prefix of seen) {
+            if (prefix === slug) continue;
+            embedIds = await fetchAnimeGGEmbedIds(`${AGG_BASE}/${prefix}-episode-${ep}`, seriesUrl);
+            if (embedIds.length) break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!embedIds.length) {
+      aggSrcCache.set(ck, { sources: [], ts: Date.now() });
+      return [];
+    }
+
+    const LABELS = ["مدبلج", "مترجم", "سيرفر 3", "سيرفر 4"];
+    const sources: UnifiedSource[] = [];
+    const epRef = seriesUrl;
+
+    await Promise.allSettled(embedIds.map(async (id, idx) => {
+      const embedUrl = `${AGG_BASE}/embed/${id}`;
+      let directUrl: string | undefined;
+      let directType: "mp4" | "hls" | undefined;
+
+      try {
+        const er = await fetch(embedUrl, {
+          headers: { ...AGG_HDRS, Referer: epRef },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (er.ok) {
+          const eHtml = await er.text();
+          const parsed = parseAnimeGGEmbed(eHtml);
+          if (parsed) { directUrl = parsed.url; directType = parsed.type; }
+        }
+      } catch {}
+
+      sources.push({
+        name: `AnimeGG · ${LABELS[idx] ?? `سيرفر ${idx + 1}`}`,
+        url: embedUrl,
+        quality: "480p",
+        qualityRank: 1,
+        site: "animegg",
+        ...(directUrl ? { directUrl, directType } : {}),
+      });
+    }));
+
+    if (sources.length) aggSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
 }
 
 
@@ -778,29 +967,43 @@ router.get("/anime/sources-stream", async (req, res) => {
 
   function sendSrc(s: UnifiedSource) {
     if (closed) return;
-    if (!s.url || seenUrls.has(s.url)) return;
+    const key = s.directUrl || s.url;
+    if (!s.url || seenUrls.has(key)) return;
     if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
-    seenUrls.add(s.url);
+    if (s.directUrl && DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
+    seenUrls.add(key);
     res.write(`data: ${JSON.stringify(s)}\n\n`);
   }
 
   try {
     const SCRAPER_MS = 12000;
-    const EXTRACT_MS = 10000;
+    const EXTRACT_MS = 8000;
 
-    // Shahiid-anime.net scraper
-    await (async () => {
-      try {
-        if (!title) return;
-        const srcs = await Promise.race([
-          getShahiidSources(title, english, ep),
-          new Promise<UnifiedSource[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
-        ]);
-        if (srcs.length && !closed) {
-          await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        }
-      } catch {}
-    })();
+    await Promise.allSettled([
+      // ── Shahiid-anime.net ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await Promise.race([
+            getShahiidSources(title, english, ep),
+            new Promise<UnifiedSource[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── AnimeGG (runs in parallel) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await Promise.race([
+            getAnimeGGSources(title, english, ep),
+            new Promise<UnifiedSource[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
+          ]);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+    ]);
 
   } catch (e: any) {
     console.error("sources-stream error:", e?.message ?? e);

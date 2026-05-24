@@ -34,11 +34,10 @@ type ProbeStatus = "unknown" | "testing" | "ok" | "dead";
    Constants
 ───────────────────────────────────────────────────── */
 const SITE_LABEL: Record<string, string> = {
-  animelek: "AnimeLek", mitanime: "MitAnime", witanime: "WitAnime",
-  anime4up: "Anime4Up", animeblkom: "Blkom", animetitans: "Titans",
-  okanime: "OKAnime", db: "مخزن", cached: "مخزن", appsanime: "AppsAnime",
-  animegate: "AnimeGate", araanime: "AraAnime", "3asq": "3asq",
-  allanime: "AllAnime", animePhoenix: "Phoenix",
+  shahiid: "شاهيد أنمي",
+  animegg: "AnimeGG",
+  allanime: "AllAnime",
+  db: "مخزن", cached: "مخزن",
 };
 
 const GENRE_COVERS: Record<string, string> = {
@@ -508,8 +507,6 @@ export default function WatchPage() {
   const animeId    = parseInt(sp.get("anime") || "0");
   const ep         = parseInt(sp.get("ep") || "1");
   const titleParam = sp.get("title") || "";  // pre-populated from navigation for faster start
-  const alekSlug   = sp.get("slug") || getCache(`alek-slug-${animeId}`);
-  const mitSlug    = getCache(`mit-slug-${animeId}`);
 
   const [showPlayer, setShowPlayer]   = useState(false);
   const [anime, setAnime]             = useState<any>(null);
@@ -569,8 +566,6 @@ export default function WatchPage() {
       ep: String(ep), title: romaji, english,
       anilistId: String(animeId), malId: String(malId),
     });
-    if (alekSlug) p.set("alekSlug", alekSlug);
-    if (mitSlug)  p.set("mitSlug",  mitSlug);
 
     const es = new EventSource(`/api/anime/sources-stream?${p}`);
     sseRef.current = es;
@@ -583,18 +578,11 @@ export default function WatchPage() {
         setSrcCache(cacheKey, accumulated);
         return;
       }
-      if (e.data.startsWith("[SLUG]")) {
-        try {
-          const { alekSlug: as, mitSlug: ms } = JSON.parse(e.data.slice(6));
-          if (as) setCache(`alek-slug-${animeId}`, as);
-          if (ms) setCache(`mit-slug-${animeId}`,  ms);
-        } catch {}
-        return;
-      }
       try {
         const src: Source = JSON.parse(e.data);
-        if (!src.url || seenUrls.current.has(src.url)) return;
-        seenUrls.current.add(src.url);
+        const srcKey = src.directUrl || src.url;
+        if (!src.url || seenUrls.current.has(srcKey)) return;
+        seenUrls.current.add(srcKey);
         accumulated.push(src);
         setSources(prev => dedupSources(sortSources([...prev, src])));
         setStatuses(prev => ({ ...prev, [src.url]: "unknown" }));
@@ -733,9 +721,7 @@ export default function WatchPage() {
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2500); }
 
   function goEp(n: number) {
-    const p = new URLSearchParams({ anime: String(animeId), ep: String(n) });
-    if (alekSlug) p.set("slug", alekSlug);
-    navigate(`/watch?${p}`);
+    navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n) })}`);
   }
 
   const sharedPlayerProps = {
