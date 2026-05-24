@@ -311,6 +311,16 @@ function VideoPlayer({
         onClick={handleTap}
       />
 
+      {/* ── PERMANENT BACK BUTTON — always visible, top-right corner ── */}
+      <button
+        onClick={e => { e.stopPropagation(); onClose(); }}
+        className="absolute z-40 flex items-center gap-1.5 bg-black/70 backdrop-blur-md border border-white/20 rounded-full active:scale-90 transition-transform shadow-lg"
+        style={{ top: "max(14px, env(safe-area-inset-top))", right: "12px", padding: "8px 14px 8px 10px" }}
+      >
+        <ChevronRight className="w-4 h-4 text-white" />
+        <span className="text-white text-[12px] font-black font-['Cairo']">رجوع</span>
+      </button>
+
       {/* ── Pill to restore controls when hidden ── */}
       <AnimatePresence>
         {!showBar && (
@@ -325,7 +335,7 @@ function VideoPlayer({
         )}
       </AnimatePresence>
 
-      {/* ── TOP BAR (includes back + next-server buttons) ── */}
+      {/* ── TOP BAR (next-server + title) ── */}
       <AnimatePresence>
         {showBar && (
           <motion.div
@@ -340,16 +350,6 @@ function VideoPlayer({
               background: "linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
             }}
           >
-            {/* BACK button */}
-            <button
-              onClick={e => { e.stopPropagation(); onClose(); }}
-              className="absolute pointer-events-auto flex items-center gap-1.5 bg-black/60 backdrop-blur-md border border-white/15 rounded-full active:scale-90 transition-transform z-30"
-              style={{ top: "max(14px, env(safe-area-inset-top))", right: "12px", padding: "7px 13px 7px 9px" }}
-            >
-              <ChevronRight className="w-4 h-4 text-white" />
-              <span className="text-white text-[12px] font-black font-['Cairo']">رجوع</span>
-            </button>
-
             {/* NEXT SERVER button */}
             <button
               onClick={e => { e.stopPropagation(); onNextSrc(); }}

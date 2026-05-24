@@ -1,7 +1,17 @@
 import { useParams, useLocation } from "wouter";
-import { useState, useEffect, useCallback } from "react";
-import { ChevronRight, Loader2, Search, Eye, EyeOff, Play, Star } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ChevronRight, Loader2, Search, Eye, EyeOff, Play, Star, MessageCircle, Send, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+
+interface EpComment { id: string; text: string; time: string; }
+
+function getEpComments(animeId: string, ep: number): EpComment[] {
+  try { return JSON.parse(localStorage.getItem(`epcomments-${animeId}-${ep}`) || "[]"); }
+  catch { return []; }
+}
+function saveEpComments(animeId: string, ep: number, list: EpComment[]) {
+  localStorage.setItem(`epcomments-${animeId}-${ep}`, JSON.stringify(list));
+}
 
 const ANIME_QUERY = `
 query ($id: Int) {
@@ -19,10 +29,11 @@ function getWatched(animeId: string): Set<number> {
 
 /* ── Episode Row ── */
 function EpisodeRow({
-  n, anime, epData, animeId, watched, onToggleWatched, onWatch
+  n, anime, epData, animeId, watched, commentCount, onToggleWatched, onWatch, onComment
 }: {
   n: number; anime: any; epData: any; animeId: string;
-  watched: boolean; onToggleWatched: (n: number) => void; onWatch: (n: number) => void;
+  watched: boolean; commentCount: number;
+  onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
 }) {
   const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
@@ -72,6 +83,20 @@ function EpisodeRow({
         )}
       </button>
 
+      {/* Comment button */}
+      <motion.button
+        onClick={e => { e.stopPropagation(); onComment(n); }}
+        whileTap={{ scale: 0.82 }}
+        className="shrink-0 w-9 h-9 rounded-xl flex flex-col items-center justify-center border border-white/8 bg-white/4 text-white/30 relative"
+      >
+        <MessageCircle className="w-4 h-4" />
+        {commentCount > 0 && (
+          <span className="absolute -top-1 -left-1 min-w-[14px] h-[14px] bg-primary rounded-full text-[8px] font-black text-white flex items-center justify-center px-0.5">
+            {commentCount}
+          </span>
+        )}
+      </motion.button>
+
       {/* Eye icon — with animation */}
       <motion.button
         onClick={e => { e.stopPropagation(); onToggleWatched(n); }}
@@ -97,6 +122,96 @@ function EpisodeRow({
   );
 }
 
+/* ── Episode Comment Sheet ── */
+function EpCommentSheet({ epNum, animeId, onClose }: { epNum: number; animeId: string; onClose: () => void }) {
+  const [comments, setComments] = useState<EpComment[]>(() => getEpComments(animeId, epNum));
+  const [newText, setNewText] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 300); }, []);
+
+  function addComment() {
+    const text = newText.trim();
+    if (!text) return;
+    const updated: EpComment[] = [...comments, {
+      id: Date.now().toString(),
+      text,
+      time: new Date().toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }),
+    }];
+    setComments(updated);
+    saveEpComments(animeId, epNum, updated);
+    setNewText("");
+  }
+
+  return (
+    <>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100]"
+      />
+      <motion.div
+        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+        transition={{ type: "spring", damping: 30, stiffness: 300 }}
+        className="fixed bottom-0 left-0 right-0 h-[70vh] bg-[#0d0d10] rounded-t-[28px] z-[101] flex flex-col border-t border-white/8"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/6 shrink-0" dir="rtl">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-black font-['Cairo']">تعليقات الحلقة {epNum}</h2>
+            {comments.length > 0 && (
+              <span className="text-[9px] bg-primary/15 text-primary px-2 py-0.5 rounded-full font-black">{comments.length}</span>
+            )}
+          </div>
+          <button onClick={onClose} className="w-8 h-8 bg-white/6 rounded-full flex items-center justify-center active:scale-90">
+            <X className="w-4 h-4 text-white/50" />
+          </button>
+        </div>
+
+        {/* Comments */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3" dir="rtl">
+          {comments.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 opacity-30">
+              <MessageCircle className="w-10 h-10" />
+              <p className="text-sm font-bold font-['Cairo']">لا تعليقات على هذه الحلقة بعد</p>
+            </div>
+          ) : comments.map(c => (
+            <motion.div key={c.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex gap-3">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/40 to-primary/20 flex items-center justify-center text-primary font-black text-sm shrink-0 border border-primary/20">م</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-black font-['Cairo']">مستخدم نوفا</span>
+                  <span className="text-[9px] text-white/25">{c.time}</span>
+                </div>
+                <p className="text-xs text-white/65 bg-white/5 px-3 py-2.5 rounded-2xl border border-white/5 font-['Cairo'] leading-relaxed">{c.text}</p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Input */}
+        <div className="px-4 py-3 border-t border-white/6 shrink-0" dir="rtl">
+          <div className="flex items-center gap-2 bg-[#111116] rounded-2xl px-4 py-2.5 border border-white/8">
+            <input
+              ref={inputRef}
+              value={newText}
+              onChange={e => setNewText(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addComment()}
+              placeholder="اكتب تعليقك على هذه الحلقة..."
+              className="flex-1 bg-transparent text-white text-sm outline-none font-['Cairo'] placeholder:text-white/25"
+            />
+            <motion.button whileTap={{ scale: 0.9 }} onClick={addComment} disabled={!newText.trim()}
+              className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shrink-0 disabled:opacity-40">
+              <Send className="w-3.5 h-3.5 text-white" />
+            </motion.button>
+          </div>
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
 /* ════════════════════════════════════════════════════════ */
 export default function EpisodeListPage() {
   const params = useParams<{ id: string }>();
@@ -106,12 +221,16 @@ export default function EpisodeListPage() {
   const [epData, setEpData]   = useState<any[]>([]);
   const [search, setSearch]   = useState("");
   const [watched, setWatched] = useState<Set<number>>(new Set());
+  const [activeCommentEp, setActiveCommentEp] = useState<number | null>(null);
+  const [epCommentCounts, setEpCommentCounts] = useState<Record<number, number>>({});
 
   useEffect(() => {
     if (!params.id) return;
     setLoading(true);
     setEpData([]);
     setWatched(getWatched(params.id));
+    setEpCommentCounts({});
+    setActiveCommentEp(null);
 
     fetch("https://graphql.anilist.co", {
       method: "POST",
@@ -137,6 +256,18 @@ export default function EpisodeListPage() {
       return next;
     });
   }, [params.id]);
+
+  function openComment(n: number) {
+    setActiveCommentEp(n);
+  }
+
+  function closeComment() {
+    if (activeCommentEp !== null && params.id) {
+      const count = getEpComments(params.id, activeCommentEp).length;
+      setEpCommentCounts(prev => ({ ...prev, [activeCommentEp]: count }));
+    }
+    setActiveCommentEp(null);
+  }
 
   function watchEp(n: number) {
     setWatched(prev => {
@@ -258,12 +389,26 @@ export default function EpisodeListPage() {
               key={n} n={n} anime={anime} epData={epData}
               animeId={params.id!}
               watched={watched.has(n)}
+              commentCount={epCommentCounts[n] ?? getEpComments(params.id!, n).length}
               onToggleWatched={toggleWatched}
               onWatch={watchEp}
+              onComment={openComment}
             />
           ))}
         </div>
       )}
+
+      {/* ── Per-episode comment sheet ── */}
+      <AnimatePresence>
+        {activeCommentEp !== null && params.id && (
+          <EpCommentSheet
+            key={activeCommentEp}
+            epNum={activeCommentEp}
+            animeId={params.id}
+            onClose={closeComment}
+          />
+        )}
+      </AnimatePresence>
     </main>
   );
 }
