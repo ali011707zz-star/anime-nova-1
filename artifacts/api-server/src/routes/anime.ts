@@ -17,6 +17,8 @@ const searchCache    = new Map<string, { result: any; ts: number }>();
 const translateCache = new Map<string, string>();
 const SEARCH_TTL     = 3_600_000;
 const SRC_TTL        = 6 * 3_600_000;
+const adarSlugCache  = new Map<string, { url: string | null; ts: number }>();
+const adarSrcCache   = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
 // ── Known-dead / unplayable file hosts ──
 const DEAD_FILE_HOSTS = [
@@ -39,6 +41,8 @@ const EMBED_ONLY_HOSTS = [
   "vidbm.com","vidbm.me","uptostream.com",
   "playerwish.com","wishfast.top",
   "streamvid.net","streamlare.com",
+  "vidmoly.biz","vidmoly.to",
+  "asnwish.com",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -1627,6 +1631,196 @@ async function getAnimelekSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMEDAR.NET scraper  (Arabic anime — WordPress/animestream theme)
+//  Search: GET /?s={query}  →  /{slug}/
+//  Series page: /{slug}/ — <ul class="ul-server-position1"> per episode
+//  Server: <li source="ani" type="{type}" data="{id}" quality-data="{q}">
+//  URL builders per type: vidmoly, asnwish, streamwish, filemoon, vidhide, etc.
+// ════════════════════════════════════════════════════════════════════
+
+const ADAR_BASE = "https://animedar.net";
+const ADAR_HDRS: Record<string, string> = {
+  ...BASE_HDRS,
+  Referer: "https://animedar.net/",
+};
+
+// Dead or unplayable types on animestream theme
+const ADAR_DEAD_TYPES = new Set([
+  "mega","4shared","drive","ok","okru","uqload","fembed","videa",
+  "doodstream","dood","waaw","facebook","dailymotion",
+]);
+
+/** Build embed URL from animestream server type + data ID */
+function buildAnimestreamEmbed(type: string, data: string): string | null {
+  const t = type.toLowerCase().trim();
+  const d = data.trim();
+  if (!d || d.length < 3) return null;
+  if (ADAR_DEAD_TYPES.has(t)) return null;
+  switch (t) {
+    case "vidmoly":     return `https://vidmoly.biz/embed-${d}.html`;
+    case "asnwish":     return `https://asnwish.com/embed/${d}`;
+    case "streamwish":  return `https://streamwish.to/e/${d}`;
+    case "filemoon":    return `https://filemoon.sx/e/${d}`;
+    case "vidhide":     return `https://vidhide.com/e/${d}`;
+    case "vidhide2":    return `https://vidhide.com/e/${d}`;
+    case "streamlare":  return `https://streamlare.com/v/${d}`;
+    case "uptostream":  return `https://uptostream.com/${d}`;
+    case "doodstream":  return null;
+    case "mp4upload":   return null;
+    case "uqload":      return null;
+    default:
+      // Generic fallback — try to build a best-guess URL
+      if (d.startsWith("http")) return d;
+      return null;
+  }
+}
+
+/** Parse all episode server lists from series page HTML.
+ *  Returns an array where index 0 = episode 1, index 1 = episode 2, etc.
+ *  Each entry is an array of { type, data, quality } server buttons.
+ */
+function parseAnimadarServers(
+  html: string,
+): Array<Array<{ type: string; data: string; quality: string }>> {
+  const episodes: Array<Array<{ type: string; data: string; quality: string }>> = [];
+  const ulRe = /<ul\s+class="ul-server-position\d+"[^>]*>([\s\S]*?)<\/ul>/gi;
+  for (const ulM of html.matchAll(ulRe)) {
+    const ulHtml = ulM[1];
+    const servers: Array<{ type: string; data: string; quality: string }> = [];
+    for (const liM of ulHtml.matchAll(/<li\b([^>]+)>/gi)) {
+      const attrs = liM[1];
+      // Only pick server buttons (source="ani")
+      if (!/source=["']ani["']/i.test(attrs)) continue;
+      const type    = attrs.match(/\btype=["']([^"']+)["']/)?.[1]         || "";
+      const data    = attrs.match(/\bdata=["']([^"']+)["']/)?.[1]         || "";
+      const quality = attrs.match(/\bquality-data=["']([^"']+)["']/)?.[1] || "HD";
+      if (type && data && data.length >= 3) servers.push({ type, data, quality });
+    }
+    if (servers.length) episodes.push(servers);
+  }
+  return episodes;
+}
+
+/** Search animedar.net for a series page URL matching the title.
+ *  Animedar uses WordPress article cards: each <article> has a href then
+ *  an <h2 itemprop="headline"> with the display title we compare against.
+ */
+async function searchAnimedar(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = adarSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
+
+  const SKIP_SLUGS = ["feed/", "wp-", "/page/", "genre/", "cast/", "tag/", "category/",
+    "dmca", "contact", "about", "privacy", "xmlrpc", "wp-json"];
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, {
+        headers: ADAR_HDRS,
+        signal: AbortSignal.timeout(10000),
+        redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      let best: string | null = null;
+      let bestScore = 0;
+
+      // Animedar article structure:
+      //   <a href="{URL}" itemprop="url" title="{DISPLAY_TITLE}" ...>
+      // Use itemprop="url" anchor to reliably pair href + title in one regex.
+      const anchorRe = /<a\s+href="(https?:\/\/animedar\.net\/([^"#?]+))"[^>]*itemprop="url"[^>]*title="([^"]+)"/gi;
+      for (const m of html.matchAll(anchorRe)) {
+        const url   = m[1];
+        const slug  = m[2];
+        const label = m[3].replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim();
+        if (SKIP_SLUGS.some(s => slug.includes(s))) continue;
+        const score = Math.max(
+          similarity(label, title),
+          english ? similarity(label, english) : 0,
+        );
+        if (score > bestScore && score > 0.2) { bestScore = score; best = url.replace(/\/?$/, "/"); }
+      }
+
+      if (best && bestScore > 0.28) {
+        adarSlugCache.set(ck, { url: best, ts: Date.now() });
+        return best;
+      }
+    } catch {}
+  }
+
+  adarSlugCache.set(ck, { url: null, ts: Date.now() });
+  return null;
+}
+
+/** Get video sources for a given title + episode from animedar.net */
+async function getAnimadarSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `adar:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = adarSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const seriesUrl = await searchAnimedar(title, english);
+    if (!seriesUrl) return [];
+
+    const r = await fetch(seriesUrl, {
+      headers: ADAR_HDRS,
+      signal: AbortSignal.timeout(14000),
+      redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+
+    // Parse all episode server lists
+    const allEpisodes = parseAnimadarServers(html);
+    if (!allEpisodes.length) return [];
+
+    // Determine if ordering is ascending (ep1 first) or descending (latest first).
+    // Animestream themes sometimes show newest episode at index 0.
+    // We check the IDs in the episode selector (#EpList) for order clues:
+    // e.g. <div class="CSB" id="IDSB1">الحلقة 1</div>  → ascending
+    //      <div class="CSB" id="IDSB1">الحلقة 12</div> → descending
+    let epIndex = ep - 1; // default: ascending (ep1 = index 0)
+    const firstEpLabel = html.match(/id=["']IDSB1["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || "";
+    const firstEpNum   = parseInt(firstEpLabel.replace(/\D/g, ""));
+    if (!isNaN(firstEpNum) && firstEpNum > 1) {
+      // Descending order: episode N is at index (firstEpNum - ep)
+      epIndex = firstEpNum - ep;
+    }
+
+    if (epIndex < 0 || epIndex >= allEpisodes.length) {
+      adarSrcCache.set(ck, { sources: [], ts: Date.now() });
+      return [];
+    }
+
+    const servers = allEpisodes[epIndex];
+    const sources: UnifiedSource[] = [];
+
+    for (const { type, data, quality } of servers) {
+      const embedUrl = buildAnimestreamEmbed(type, data);
+      if (!embedUrl) continue;
+      const qRank = quality.toUpperCase().includes("FHD") ? 3
+                  : quality.toUpperCase().includes("HD")  ? 2 : 1;
+      sources.push({
+        name: `AnimeDar · ${type.toUpperCase()} · ${quality}`,
+        url: embedUrl,
+        quality,
+        qualityRank: qRank,
+        site: "animedar",
+      });
+    }
+
+    if (sources.length) adarSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Sources Stream  GET /api/anime/sources-stream  (SSE)
 //  Streams sources as they arrive from shahiid-anime.net
 // ════════════════════════════════════════════════════════════════════
@@ -1686,6 +1880,15 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getAnimelekSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── AnimeDar.net  (Arabic — animestream theme) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnimadarSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })(),
@@ -1777,11 +1980,12 @@ router.get("/anime/proxy-embed", async (req, res) => {
     let html = await resp.text();
 
     if (isCloudflareBlock(html)) {
+      const safeUrl = targetUrl.replace(/['"<>]/g, "");
       res.send(`<html><body style="background:#000;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:12px">
-        <div style="font-size:32px">🛡️</div>
+        <div style="font-size:32px">&#x1F6E1;&#xFE0F;</div>
         <p style="margin:0;font-size:14px;opacity:0.6">محمي بـ Cloudflare</p>
-        <p style="margin:0;font-size:11px;opacity:0.3">${targetUrl.replace(/"/g,"")}</p>
-        <script>window.parent.postMessage({type:'nova-cf-block',url:'${targetUrl.replace(/'/g,"\\'")}'},'*')</script>
+        <p style="margin:0;font-size:11px;opacity:0.3">${safeUrl}</p>
+        <script>window.parent.postMessage({type:'nova-cf-block',url:${JSON.stringify(targetUrl)}},'*');</script>
       </body></html>`);
       return;
     }
