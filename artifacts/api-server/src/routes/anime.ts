@@ -386,9 +386,9 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
         similarity(r.label, romaji),
         english ? similarity(r.label, english) : 0,
       );
-      if (s > bestScore && s > 0.15) { bestScore = s; best = r.url; }
+      if (s > bestScore && s > 0.2) { bestScore = s; best = r.url; }
     }
-    if (best && bestScore > 0.6) break;
+    if (best && bestScore > 0.55) break;
   }
 
   shahiidSeriesCache.set(cacheKey, { url: best, ts: Date.now() });
@@ -483,6 +483,60 @@ async function callShahiidAjax(btn: ShahiidServerBtn, refUrl: string): Promise<s
   return null;
 }
 
+/** Match episode number in a URL slug — padded variants + Arabic encoding */
+function epNumInSlug(link: string, epNum: number): boolean {
+  const padded2 = String(epNum).padStart(2, "0");
+  const padded3 = String(epNum).padStart(3, "0");
+  const decoded = decodeURIComponent(link).toLowerCase();
+  const raw = link.toLowerCase();
+  return (
+    decoded.includes(`-${padded2}-`) || decoded.includes(`-${padded3}-`) ||
+    decoded.includes(`-${epNum}-`) ||
+    raw.includes(`-${padded2}-`) || raw.includes(`-${padded3}-`) ||
+    raw.includes(`-${epNum}-`) ||
+    raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${padded2}-`) ||
+    raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${padded3}-`) ||
+    raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${epNum}-`)
+  );
+}
+
+/** Extract unique episode links from seasons page HTML */
+function extractEpLinks(html: string): string[] {
+  const seen = new Set<string>();
+  const links: string[] = [];
+  for (const m of html.matchAll(/href="(https?:\/\/shahiid-anime\.net\/episodes\/[^"]+)"/gi)) {
+    if (!seen.has(m[1])) { seen.add(m[1]); links.push(m[1]); }
+  }
+  return links;
+}
+
+/** Load more episodes via WordPress misha_loadmore AJAX */
+async function shahiidLoadMore(html: string, seasonsUrl: string, page: number): Promise<string[]> {
+  try {
+    const nonceM = html.match(/["']misha_nonce["']\s*:\s*["']([a-f0-9]+)["']/i);
+    const queryM = html.match(/["']query["']\s*:\s*(\{[\s\S]*?\})\s*,\s*["'](?:current_page|page|nonce)/);
+    if (!nonceM) return [];
+    const nonce = nonceM[1];
+    const query = queryM ? queryM[1] : "{}";
+    const fd = new URLSearchParams({
+      action: "misha_loadmore",
+      nonce,
+      page: String(page),
+      query,
+    });
+    const r = await fetch(`${SHAHIID_BASE}/wp-admin/admin-ajax.php`, {
+      method: "POST",
+      headers: { ...SHAHIID_HDRS, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", Referer: seasonsUrl },
+      body: fd.toString(),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return [];
+    const moreHtml = await r.text();
+    if (!moreHtml || moreHtml.trim() === "0" || moreHtml.trim() === "-1") return [];
+    return extractEpLinks(moreHtml);
+  } catch { return []; }
+}
+
 /** Find the correct episode page URL from the seasons listing */
 async function findShahiidEpisodeUrl(seasonsUrl: string, epNum: number): Promise<string | null> {
   const epCacheKey = `${seasonsUrl}:${epNum}`;
@@ -490,53 +544,63 @@ async function findShahiidEpisodeUrl(seasonsUrl: string, epNum: number): Promise
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.url;
 
   const padded2 = String(epNum).padStart(2, "0");
-  const padded3 = String(epNum).padStart(3, "0");
 
-  // Fetch the seasons page (initial load — site uses AJAX for "load more", URL pagination returns 301)
+  // Fetch the seasons page (initial load)
   try {
     const r = await fetch(seasonsUrl, {
       headers: SHAHIID_HDRS,
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(12000),
       redirect: "follow",
     });
     if (!r.ok) { shahiidEpUrlCache.set(epCacheKey, { url: null, ts: Date.now() }); return null; }
     const html = await r.text();
     if (isCloudflareBlock(html)) { shahiidEpUrlCache.set(epCacheKey, { url: null, ts: Date.now() }); return null; }
 
-    // Collect unique episode links (each URL appears twice in the HTML)
-    const seen = new Set<string>();
-    const links: string[] = [];
-    for (const m of html.matchAll(/href="(https?:\/\/shahiid-anime\.net\/episodes\/[^"]+)"/gi)) {
-      if (!seen.has(m[1])) { seen.add(m[1]); links.push(m[1]); }
+    let links = extractEpLinks(html);
+
+    // If episode not found in initial load AND we might need more pages, try loadmore
+    const needsMore = !links.some(l => epNumInSlug(l, epNum));
+    if (needsMore && links.length > 0) {
+      // Try page 2 and 3 via misha_loadmore
+      for (let page = 2; page <= 3; page++) {
+        const moreLinks = await shahiidLoadMore(html, seasonsUrl, page);
+        if (!moreLinks.length) break;
+        links = [...links, ...moreLinks];
+        if (links.some(l => epNumInSlug(l, epNum))) break;
+      }
     }
+
     if (!links.length) { shahiidEpUrlCache.set(epCacheKey, { url: null, ts: Date.now() }); return null; }
 
-    // Search by episode number in URL slug (encoded or decoded) — no position fallback
+    // Search by episode number in URL slug
     for (const link of links) {
-      const decoded = decodeURIComponent(link);
-      // Match -NN- where NN is the episode number (with or without padding)
-      if (decoded.includes(`-${padded2}-`) || decoded.includes(`-${padded3}-`) ||
-          decoded.includes(`-${epNum}-`) ||
-          link.includes(`-${padded2}-`) || link.includes(`-${padded3}-`) ||
-          link.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${padded2}-`) ||
-          link.includes(`-${epNum}-`)) {
+      if (epNumInSlug(link, epNum)) {
         shahiidEpUrlCache.set(epCacheKey, { url: link, ts: Date.now() });
         return link;
       }
     }
 
-    // Try to construct URL from template of first episode
-    // e.g. /episodes/SERIES-الحلقة-01-SUFFIX/ → /episodes/SERIES-الحلقة-55-SUFFIX/
-    const firstDecoded = decodeURIComponent(links[0]);
-    const tmpl = firstDecoded.match(/\/episodes\/(.+?)-الحلقة-(\d+)-(.+)\//);
-    if (tmpl) {
+    // Try to construct URL from template using first episode as reference
+    for (const sample of links.slice(0, 3)) {
+      const firstDecoded = decodeURIComponent(sample);
+      const tmpl = firstDecoded.match(/\/episodes\/(.+?)-(?:الحلقة|%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9)-(\d+)(?:-(.+))?\//i);
+      if (!tmpl) continue;
       const [, seriesBase, , suffix] = tmpl;
       const epFormatted = epNum < 10 ? padded2 : String(epNum);
-      const candidateUrl = `${SHAHIID_BASE}/episodes/${encodeURIComponent(seriesBase)}-${encodeURIComponent("الحلقة")}-${epFormatted}-${encodeURIComponent(suffix)}/`;
-      const status = await safeHead(candidateUrl, SHAHIID_HDRS);
-      if (status === 200 || status === 301) {
-        shahiidEpUrlCache.set(epCacheKey, { url: candidateUrl, ts: Date.now() });
-        return candidateUrl;
+      // Build candidate URL keeping same encoding as original
+      const epEncoded = encodeURIComponent("الحلقة");
+      const candidates: string[] = [];
+      if (suffix) {
+        candidates.push(`${SHAHIID_BASE}/episodes/${encodeURIComponent(seriesBase)}-${epEncoded}-${epFormatted}-${encodeURIComponent(suffix)}/`);
+        candidates.push(`${SHAHIID_BASE}/episodes/${seriesBase}-${epEncoded}-${epFormatted}-${suffix}/`);
+      }
+      candidates.push(`${SHAHIID_BASE}/episodes/${encodeURIComponent(seriesBase)}-${epEncoded}-${epFormatted}/`);
+      for (const candidateUrl of candidates) {
+        const status = await safeHead(candidateUrl, SHAHIID_HDRS);
+        if (status === 200 || status === 301 || status === 302) {
+          shahiidEpUrlCache.set(epCacheKey, { url: candidateUrl, ts: Date.now() });
+          return candidateUrl;
+        }
       }
     }
   } catch {}
@@ -833,25 +897,46 @@ async function getAnimeGGSources(
       const embedUrl = `${AGG_BASE}/embed/${id}`;
       let directUrl: string | undefined;
       let directType: "mp4" | "hls" | undefined;
+      let quality = "480p";
+      let qualityRank = 1;
 
       try {
         const er = await fetch(embedUrl, {
           headers: { ...AGG_HDRS, Referer: epRef },
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(10000),
         });
         if (er.ok) {
           const eHtml = await er.text();
           const parsed = parseAnimeGGEmbed(eHtml);
-          if (parsed) { directUrl = parsed.url; directType = parsed.type; }
+          if (parsed) {
+            directUrl = parsed.url;
+            directType = parsed.type;
+            // Detect quality from videoSources label
+            const vsM = eHtml.match(/var\s+videoSources\s*=\s*(\[[\s\S]*?\]);/);
+            if (vsM) {
+              try {
+                const raw = vsM[1]
+                  .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":')
+                  .replace(/'/g, '"');
+                const arr = JSON.parse(raw) as Array<{ file?: string; label?: string }>;
+                const lbl = (arr.find(s => s.label)?.label || "").toLowerCase();
+                if (lbl.includes("1080")) { quality = "1080p"; qualityRank = 3; }
+                else if (lbl.includes("720")) { quality = "720p"; qualityRank = 2; }
+                else if (lbl.includes("480")) { quality = "480p"; qualityRank = 1; }
+                else if (lbl.includes("360")) { quality = "360p"; qualityRank = 1; }
+              } catch {}
+            }
+          }
         }
       } catch {}
 
       sources.push({
         name: `AnimeGG · ${LABELS[idx] ?? `سيرفر ${idx + 1}`}`,
         url: embedUrl,
-        quality: "480p",
-        qualityRank: 1,
+        quality,
+        qualityRank,
         site: "animegg",
+        ...(directUrl ? { directUrl, directType } : {}),
       });
     }));
 
@@ -975,8 +1060,8 @@ router.get("/anime/sources-stream", async (req, res) => {
   }
 
   try {
-    const SCRAPER_MS = 12000;
-    const EXTRACT_MS = 8000;
+    const SCRAPER_MS = 18000;
+    const EXTRACT_MS = 12000;
 
     await Promise.allSettled([
       // ── Shahiid-anime.net ──
