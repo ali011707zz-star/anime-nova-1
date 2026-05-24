@@ -154,25 +154,38 @@ function ServerSheet({ sources, activeIdx, statuses, onSelect, onClose }: {
    NATIVE HLS/MP4 VIDEO PLAYER (for directUrl sources)
 ══════════════════════════════════════════════════════ */
 function NativeVideoInner({
-  url, type, onError, onCanPlay,
+  url, type, refUrl, onError, onCanPlay,
 }: {
-  url: string; type: "hls" | "mp4";
+  url: string; type: "hls" | "mp4"; refUrl?: string;
   onError: () => void; onCanPlay: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef   = useRef<Hls | null>(null);
 
+  // Route HLS through our CORS proxy so CDN restrictions don't block playback
+  const effectiveUrl = type === "hls"
+    ? `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(refUrl || url)}`
+    : url;
+
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
     if (type === "hls" && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        fragLoadingTimeOut: 20000,
+        manifestLoadingTimeOut: 15000,
+      });
       hlsRef.current = hls;
-      hls.loadSource(url);
+      hls.loadSource(effectiveUrl);
       hls.attachMedia(v);
       hls.on(Hls.Events.MANIFEST_PARSED, () => { v.play().catch(() => {}); });
       hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) onError(); });
     } else if (type === "hls" && v.canPlayType("application/vnd.apple.mpegurl")) {
-      v.src = url;
+      // Native HLS (Safari) — use direct URL, browser handles CORS via proxy URL
+      v.src = effectiveUrl;
       v.play().catch(() => {});
     } else if (type === "mp4") {
       v.src = url;
@@ -181,7 +194,7 @@ function NativeVideoInner({
       onError();
     }
     return () => { hlsRef.current?.destroy(); hlsRef.current = null; };
-  }, [url, type]);
+  }, [effectiveUrl, type]);
 
   return (
     <video
@@ -267,6 +280,7 @@ function VideoPlayer({
           key={src.directUrl!}
           url={src.directUrl!}
           type={src.directType || "hls"}
+          refUrl={src.url}
           onError={() => setNativeError(true)}
           onCanPlay={() => { setShowBar(true); scheduleHide(); }}
         />
@@ -732,7 +746,7 @@ export default function WatchPage() {
     const all = sourcesRef.current;
     for (let i = cur + 1; i < all.length; i++) {
       const s = all[i];
-      if (statuses[s.url] !== "dead") {
+      if (statusesRef.current[s.url] !== "dead") {
         setActive(s); setActiveIdx(i);
         showToast(`⚡ ${s.name}`);
         return;
