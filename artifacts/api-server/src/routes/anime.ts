@@ -24,7 +24,7 @@ const DEAD_FILE_HOSTS = [
   "vadbam.net","vadbam.com","okfiles.com","gofile.io","uploadfiles.io","hexupload.net",
   "filerio.in","doodstream.com","dood.watch","megaup.net","1fichier.com",
   "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co","workupload.com",
-  "hexload.com","mp4upload.com",
+  "hexload.com","mp4upload.com","uqload.net","uqload.com","file-up.org",
   "mega.nz","mega.co.nz","mediafire.com",
   "drive.google","docs.google","googleapis.com/drive",
   "ok.ru","odnoklassniki.ru","youtube.com","youtu.be",
@@ -912,7 +912,7 @@ async function getAnimeGGSources(
       return [];
     }
 
-    const LABELS = ["مدبلج", "مترجم", "سيرفر 3", "سيرفر 4"];
+    const LABELS = ["مترجم (EN)", "مدبلج (EN)", "سيرفر 3 (EN)", "سيرفر 4 (EN)"];
     const sources: UnifiedSource[] = [];
     const epRef = seriesUrl;
 
@@ -1492,6 +1492,140 @@ async function getAnimeKayanSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMELEK.TOP scraper  (Arabic anime — عربي مترجم)
+//  Search: GET /?s={query}  →  /anime/{slug}/
+//  Series: GET /anime/{slug}/ → episode links: /episode/{slug}-{N}-الحلقة/
+//  Episode: GET /episode/.../ → <a data-embed="...?random={url}">
+// ════════════════════════════════════════════════════════════════════
+
+const ALK_BASE = "https://animelek.top";
+const ALK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://animelek.top/" };
+
+const alkSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const alkSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAnimelek(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = alkSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
+
+  // Strategy 1: try direct slug from English or romanized title
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const slug = toSlug(q);
+    try {
+      const r = await fetch(`${ALK_BASE}/anime/${slug}/`, {
+        headers: ALK_HDRS, signal: AbortSignal.timeout(6000), redirect: "follow",
+      });
+      if (r.ok) {
+        const html = await r.text();
+        if (!isCloudflareBlock(html) && html.includes("/episode/")) {
+          alkSlugCache.set(ck, { slug, ts: Date.now() });
+          return slug;
+        }
+      }
+    } catch {}
+  }
+
+  // Strategy 2: search page
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${ALK_BASE}/?s=${encodeURIComponent(q)}`, {
+        headers: ALK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+      let best: string | null = null, bestScore = 0;
+      for (const m of html.matchAll(/href="https?:\/\/animelek\.top\/anime\/([^/"]+)\/?"/gi)) {
+        const s = m[1];
+        const label = s.replace(/-/g, " ");
+        const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+        if (score > bestScore && score > 0.3) { bestScore = score; best = s; }
+      }
+      if (best) {
+        alkSlugCache.set(ck, { slug: best, ts: Date.now() });
+        return best;
+      }
+    } catch {}
+  }
+
+  alkSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnimelekSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `alk:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = alkSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await searchAnimelek(title, english);
+    if (!slug) return [];
+
+    const seriesUrl = `${ALK_BASE}/anime/${slug}/`;
+    const sr = await fetch(seriesUrl, {
+      headers: ALK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+    });
+    if (!sr.ok) return [];
+    const sHtml = await sr.text();
+
+    // Find episode URL matching episode number
+    // Pattern 1: /episode/{series}-{N}-الحلقة/   (regular episode)
+    // Pattern 2: /episode/{series}-والاخيرة{N}-الحلقة/  (last episode)
+    let epUrl: string | null = null;
+    for (const m of sHtml.matchAll(/href="(https?:\/\/animelek\.top\/episode\/[^"]+)"/gi)) {
+      const url = m[1];
+      const decoded = decodeURIComponent(url);
+      const m1 = decoded.match(/[-](\d+)[-](?:والاخيرة|الحلقة)/);
+      const m2 = decoded.match(/والاخيرة(\d+)[-]/);
+      const num = parseInt((m2?.[1] ?? m1?.[1]) || "");
+      if (!isNaN(num) && num === ep) { epUrl = url; break; }
+    }
+    if (!epUrl) return [];
+
+    const er = await fetch(epUrl, {
+      headers: { ...ALK_HDRS, Referer: seriesUrl },
+      signal: AbortSignal.timeout(8000), redirect: "follow",
+    });
+    if (!er.ok) return [];
+    const eHtml = await er.text();
+
+    // Extract each server: data-embed="...?random={url}" with server name
+    const sources: UnifiedSource[] = [];
+    const seenHosts = new Set<string>();
+    let idx = 0;
+    for (const liM of eHtml.matchAll(/<li>[\s\S]*?<\/li>/gi)) {
+      const liHtml = liM[0];
+      const embedM = liHtml.match(/data-embed="[^"]*[?&]random=([^"&]+)"/i);
+      if (!embedM) continue;
+      let rawUrl = embedM[1];
+      try { rawUrl = decodeURIComponent(rawUrl); } catch {}
+      rawUrl = rawUrl.replace(/&amp;/g, "&");
+      if (!rawUrl.startsWith("http")) continue;
+      if (DEAD_FILE_HOSTS.some(h => rawUrl.includes(h))) continue;
+      const host = (rawUrl.split("/")[2] || "").replace(/^www\./, "");
+      if (seenHosts.has(host)) continue; seenHosts.add(host);
+      const nameM = liHtml.match(/<span class="server">([^<]+)<\/span>/i);
+      const label = (nameM?.[1] || "").trim().replace(/\s*\|.*$/, "").trim();
+      idx++;
+      sources.push({
+        name: `AnimeLek · ${label || `سيرفر ${idx}`}`,
+        url: rawUrl,
+        quality: "HD",
+        qualityRank: 2,
+        site: "animelek",
+      });
+    }
+
+    if (sources.length) alkSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Sources Stream  GET /api/anime/sources-stream  (SSE)
 //  Streams sources as they arrive from shahiid-anime.net
 // ════════════════════════════════════════════════════════════════════
@@ -1528,7 +1662,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
     await Promise.allSettled([
-      // ── Shahiid-anime.net ──
+      // ── Shahiid-anime.net  (Arabic dubbed + subbed) ──
       (async () => {
         try {
           if (!title) return;
@@ -1537,7 +1671,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         } catch {}
       })(),
 
-      // ── AnimeGG ──
+      // ── AnimeGG  (English subbed / dubbed — fallback) ──
       (async () => {
         try {
           if (!title) return;
@@ -1546,47 +1680,11 @@ router.get("/anime/sources-stream", async (req, res) => {
         } catch {}
       })(),
 
-      // ── AllAnime episode video sources ──
+      // ── AnimeLek.top  (Arabic subbed) ──
       (async () => {
         try {
           if (!title) return;
-          const srcs = await race(getAllAnimeSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── Anime4up.info ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnime4upSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── AnimePhoenix.io ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── MyAnime.fan ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getMyAnimeSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── AnimeKayan.com ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimeKayanSources(title, english, ep), SCRAPER_MS, []);
+          const srcs = await race(getAnimelekSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })(),
