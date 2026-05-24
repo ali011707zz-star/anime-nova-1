@@ -376,6 +376,7 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
   const cached = shahiidSeriesCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.url;
 
+  // Strategy 1: search
   let best: string | null = null;
   let bestScore = 0;
 
@@ -386,9 +387,9 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
         similarity(r.label, romaji),
         english ? similarity(r.label, english) : 0,
       );
-      if (s > bestScore && s > 0.2) { bestScore = s; best = r.url; }
+      if (s > bestScore && s > 0.15) { bestScore = s; best = r.url; }
     }
-    if (best && bestScore > 0.55) break;
+    if (best && bestScore > 0.5) break;
   }
 
   shahiidSeriesCache.set(cacheKey, { url: best, ts: Date.now() });
@@ -1526,10 +1527,10 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
     } catch {}
   }
 
-  // Strategy 2: search page
+  // Strategy 2: search page (correct URL: /search/?search_term_string=)
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const r = await fetch(`${ALK_BASE}/?s=${encodeURIComponent(q)}`, {
+      const r = await fetch(`${ALK_BASE}/search/?search_term_string=${encodeURIComponent(q)}`, {
         headers: ALK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
       });
       if (!r.ok) continue;
@@ -1964,6 +1965,66 @@ router.get("/anime/hls-proxy", async (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.send(rewritten);
   } catch (e: any) { res.status(502).send(`proxy error: ${e?.message ?? e}`); }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   VIDEO PROXY  –  streams any MP4 / HLS through this server
+   Fixes IP-restricted URLs (e.g. sendvid, streamtape, etc.)
+   Supports Range requests so seeking works in the browser.
+═══════════════════════════════════════════════════════════ */
+router.get("/anime/video-proxy", async (req, res) => {
+  const rawUrl = (req.query.url as string || "").trim();
+  const ref    = (req.query.ref as string || "").trim();
+  if (!rawUrl) { res.status(400).send("url required"); return; }
+  let url: string;
+  try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
+  if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
+
+  let origin = ""; try { origin = new URL(url).origin; } catch {}
+
+  const reqHeaders: Record<string, string> = {
+    "User-Agent": BROWSER_UA,
+    "Referer": ref || url,
+    "Origin": origin,
+    "Accept": "*/*",
+  };
+  const range = req.headers["range"] as string | undefined;
+  if (range) reqHeaders["Range"] = range;
+
+  try {
+    const r = await fetch(url, {
+      headers: reqHeaders,
+      signal: AbortSignal.timeout(30000),
+      redirect: "follow",
+    });
+
+    const status = (range && r.status === 206) ? 206 : r.status;
+    res.status(status);
+
+    const ct = r.headers.get("content-type") || "video/mp4";
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length");
+
+    const pass = ["content-length","content-range","accept-ranges","cache-control","last-modified","etag"];
+    for (const h of pass) { const v = r.headers.get(h); if (v) res.setHeader(h, v); }
+
+    if (!r.body) { res.end(); return; }
+    const reader = r.body.getReader();
+    req.on("close", () => reader.cancel().catch(() => {}));
+    (async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) { res.end(); break; }
+          if (!res.write(value)) await new Promise<void>(ok => res.once("drain", ok));
+        }
+      } catch { res.end(); }
+    })();
+  } catch (e: any) {
+    if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`);
+  }
 });
 
 router.get("/anime/seg-proxy", async (req, res) => {
