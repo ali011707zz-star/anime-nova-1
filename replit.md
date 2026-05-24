@@ -2,7 +2,7 @@
 
 تطبيق بث أنمي عربي يجمع مصادر من 3 مصادر متوازية ويُشغّلها في مشغّل داخلي.
 
-المصادر الفعّالة: shahiid-anime.net (عربي) · animelek.top (عربي) · AnimeGG (إنجليزي)
+المصادر الفعّالة: shahiid-anime.net (عربي) · animelek.top (عربي) · AnimeGG (إنجليزي) · animedar.net (عربي)
 
 ## Run & Operate
 
@@ -22,9 +22,11 @@
 
 - `artifacts/anime-scraper/src/` — React frontend
   - `pages/Watch.tsx` — main watch page with NativeVideoPlayer + EmbedPlayer
-- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (~1836 lines)
+- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (~2200 lines)
   - Shahiid-anime.net scraper (search → seasons → episodes → AJAX servers)
   - AnimeGG scraper (search → episode page → embed extraction → direct MP4)
+  - AnimeLek.top scraper (search → series → episode → `data-embed` servers)
+  - AnimeDar.net scraper (search → series page → `ul-server-position` → buildAnimestreamEmbed)
   - AllAnime episode video sources (GraphQL → base64-decoded URLs)
   - Anime4up.info scraper (search → episode page → iframe extraction)
   - AnimePhoenix.io scraper (search → episode page → iframe extraction)
@@ -99,11 +101,37 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 
 - vidbm, uptostream, playerwish, wishfast — block server requests → send as embed
 - share4max — blocks extraction → send as embed
+- vidmoly.biz / vidmoly.to — Cloudflare Turnstile on all embed pages → embed-only
+- asnwish.com — Cloudflare-protected → embed-only
+
+## animedar.net scraper flow
+
+1. **Search**: GET `/?s={query}` → parse `<a itemprop="url" title="{title}">` anchors → similarity match
+2. **Series page**: fetch `/{slug}/` → parse `<ul class="ul-server-position{N}">` per episode
+3. **Episode index**: divv11/ul-server-position index = episode N-1 (0-based); check `#IDSB1` label to detect descending order
+4. **Server button**: `<li source="ani" type="{type}" data="{id}" quality-data="{q}">`
+5. **URL build**: `buildAnimestreamEmbed(type, data)` → embed URL by type
+
+## animestream server type → embed URL mapping
+
+- `vidmoly` → `https://vidmoly.biz/embed-{id}.html` (embed-only, Turnstile)
+- `asnwish` → `https://asnwish.com/embed/{id}` (embed-only)
+- `streamwish` → `https://streamwish.to/e/{id}` (extractable via parseStreamwish)
+- `filemoon` → `https://filemoon.sx/e/{id}` (extractable via parseStreamwish)
+- `vidhide` → `https://vidhide.com/e/{id}` (extractable via parseMegamax)
+- `streamlare` → `https://streamlare.com/v/{id}` (embed-only)
+- Dead (skip): `mega`, `4shared`, `drive`, `ok`, `uqload`, `fembed`, `videa`, `doodstream`, `mailru`, `yourupload`
 
 ## eta.animerco.org — BLOCKED
 
 - Cloudflare managed challenge on ALL endpoints (search, RSS, WP JSON)
 - Cannot be scraped server-side without Puppeteer/FlareSolverr
+- Not implemented
+
+## anime-arabe.com — NOT SCRAPABLE
+
+- Next.js SPA + Clerk authentication on all API routes
+- Requires browser execution (Playwright) to access content
 - Not implemented
 
 ## API Endpoints
