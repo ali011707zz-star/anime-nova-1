@@ -358,7 +358,7 @@ async function searchShahiid(query: string): Promise<Array<{ url: string; label:
     const html = await r.text();
     const results: Array<{ url: string; label: string }> = [];
     const seen = new Set<string>();
-    const re = /href="(https?:\/\/shahiid-anime\.net\/(?:series|anime|serieses|seasonses)\/([^/"]+)\/?)"/gi;
+    const re = /href="(https?:\/\/shahiid-anime\.net\/(?:series|anime|serieses|seasonses|seasons)\/([^/"]+)\/?)"/gi;
     for (const m of html.matchAll(re)) {
       const url = m[1].replace(/\/?$/, "/");
       if (seen.has(url)) continue;
@@ -399,6 +399,9 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
 async function getShahiidSeasonsUrl(seriesUrl: string): Promise<string> {
   // Movies/OVAs are already at /anime/ — no seasons
   if (seriesUrl.includes("/anime/")) return seriesUrl;
+
+  // Already a /seasons/ URL — use it directly
+  if (seriesUrl.includes("/seasons/")) return seriesUrl;
 
   // For /series/, /serieses/, /seasonses/ — derive seasons URL
   const seasonsDerived = seriesUrl.replace(/\/(series|serieses|seasonses)\//, "/seasons/");
@@ -857,8 +860,9 @@ async function getAnimeGGSources(
     // 1. Try direct episode URL: /{slug}-episode-{ep}
     let embedIds = await fetchAnimeGGEmbedIds(`${AGG_BASE}/${slug}-episode-${ep}`, seriesUrl);
 
-    // 2. If no embeds, fetch the series page to discover all episode URL prefixes
-    //    (e.g. AoT sub uses "shingeki-no-kyojin" while series slug is "attack-on-titan")
+    // 2. If no embeds, fetch the series page to find exact episode URLs
+    //    AnimeGG episode URLs have numeric IDs: /slug-episode-13-3618-5569
+    //    We must find the full URL for the target episode, not just guess the prefix
     if (!embedIds.length) {
       try {
         const sr = await fetch(seriesUrl, {
@@ -868,17 +872,36 @@ async function getAnimeGGSources(
         });
         if (sr.ok) {
           const sHtml = await sr.text();
-          const seen = new Set<string>([slug]);
-          // Extract unique episode URL prefixes from the page
-          for (const m of sHtml.matchAll(/href="\/([a-z0-9-]+)-episode-\d+"/gi)) {
-            const prefix = m[1];
-            if (!seen.has(prefix)) seen.add(prefix);
+
+          // Extract ALL episode URLs with their numeric ID suffixes
+          // Pattern: href="/some-slug-episode-13-3618-5569" (episode num is first number after -episode-)
+          const epUrlMap = new Map<number, string>();
+          for (const m of sHtml.matchAll(/href="(\/[a-z0-9-]+-episode-(\d+)(?:-\d+)*)"/gi)) {
+            const fullPath = m[1].split("#")[0]; // strip #subbed etc
+            const epNum = parseInt(m[2], 10);
+            if (!isNaN(epNum) && !epUrlMap.has(epNum)) {
+              epUrlMap.set(epNum, `${AGG_BASE}${fullPath}`);
+            }
           }
-          // Try each new prefix until we find embeds
-          for (const prefix of seen) {
-            if (prefix === slug) continue;
-            embedIds = await fetchAnimeGGEmbedIds(`${AGG_BASE}/${prefix}-episode-${ep}`, seriesUrl);
-            if (embedIds.length) break;
+
+          // Try exact episode URL from the map
+          const targetUrl = epUrlMap.get(ep);
+          if (targetUrl) {
+            embedIds = await fetchAnimeGGEmbedIds(targetUrl, seriesUrl);
+          }
+
+          // If still nothing, try the first episode's prefix as reference
+          if (!embedIds.length && epUrlMap.size > 0) {
+            const seen = new Set<string>([slug]);
+            for (const [, fullUrl] of epUrlMap) {
+              const m = fullUrl.match(/\/([a-z0-9-]+)-episode-\d/);
+              if (m && !seen.has(m[1])) seen.add(m[1]);
+            }
+            for (const prefix of seen) {
+              if (prefix === slug) continue;
+              embedIds = await fetchAnimeGGEmbedIds(`${AGG_BASE}/${prefix}-episode-${ep}`, seriesUrl);
+              if (embedIds.length) break;
+            }
           }
         }
       } catch {}

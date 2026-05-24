@@ -228,7 +228,7 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
   const [showControls, setShowControls] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const controlsTimeoutRef = useRef<NodeJS.Timeout>();
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const currentSource = sources.find((s) => s.quality === currentQuality) || sources[0];
   const qualities = [...new Set(sources.map((s) => s.quality || 'auto'))];

@@ -267,6 +267,17 @@ export default function AnimeDetail() {
         <div className="flex gap-2.5">
           <motion.button
             whileTap={{ scale: 0.97 }}
+            onClick={toggleSave}
+            className={`w-14 h-12 rounded-2xl flex flex-col items-center justify-center gap-0.5 border transition-all font-['Cairo'] shrink-0
+              ${saved
+                ? "bg-primary/15 border-primary/30 text-primary"
+                : "bg-[#18181B] border-white/7 text-white/50"}`}
+          >
+            <Bookmark className={`w-4 h-4 transition-all ${saved ? "fill-current" : ""}`} />
+            <span className="text-[8px] font-black">{saved ? "محفوظ" : "حفظ"}</span>
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
             onClick={() => setShowComments(true)}
             className="flex-1 h-12 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold font-['Cairo'] text-white/70"
           >
@@ -275,17 +286,6 @@ export default function AnimeDetail() {
             {comments.length > 0 && (
               <span className="bg-primary/20 text-primary text-[9px] font-black px-1.5 py-0.5 rounded-full">{comments.length}</span>
             )}
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={toggleSave}
-            className={`flex-1 h-12 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold border transition-all font-['Cairo']
-              ${saved
-                ? "bg-primary/15 border-primary/30 text-primary"
-                : "bg-[#18181B] border-white/7 text-white/60"}`}
-          >
-            <Bookmark className={`w-4 h-4 transition-all ${saved ? "fill-current" : ""}`} />
-            {saved ? "محفوظ ✓" : "حفظ"}
           </motion.button>
         </div>
       </div>
