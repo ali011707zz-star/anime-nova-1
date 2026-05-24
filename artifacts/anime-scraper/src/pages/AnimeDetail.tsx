@@ -339,20 +339,20 @@ export default function AnimeDetail() {
               {anime.characters.edges.length}
             </span>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2 no-scrollbar">
+          <div className="flex gap-2.5 overflow-x-auto px-4 pb-2 no-scrollbar">
             {anime.characters.edges.map((e: any) => (
               <motion.div
                 key={e.node.id}
                 whileTap={{ scale: 0.95 }}
-                className="shrink-0 w-[70px] text-center"
+                className="shrink-0 w-[52px] text-center"
               >
                 <div className="relative">
                   <img
                     src={e.node.image.large} alt=""
-                    className="w-[70px] h-[70px] rounded-2xl object-cover border border-white/8 mb-1.5"
+                    className="w-[52px] h-[52px] rounded-xl object-cover border border-white/8 mb-1"
                   />
                 </div>
-                <p className="text-[9px] text-white/45 font-bold truncate leading-tight">{e.node.name.full}</p>
+                <p className="text-[8px] text-white/45 font-bold truncate leading-tight">{e.node.name.full}</p>
               </motion.div>
             ))}
           </div>

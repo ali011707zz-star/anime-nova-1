@@ -852,7 +852,6 @@ async function getAnimeGGSources(
         quality: "480p",
         qualityRank: 1,
         site: "animegg",
-        ...(directUrl ? { directUrl, directType } : {}),
       });
     }));
 

@@ -218,17 +218,32 @@ function VideoPlayer({
 
   const useNative = !nativeError && !!src.directUrl;
 
-  const resetHide = useCallback(() => {
-    setShowBar(true);
+  const scheduleHide = useCallback((delay = 5000) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setShowBar(false), 5000);
+    hideTimer.current = setTimeout(() => setShowBar(false), delay);
   }, []);
+
+  const handleTap = useCallback(() => {
+    setShowBar(prev => {
+      const next = !prev;
+      if (next) scheduleHide();
+      return next;
+    });
+  }, [scheduleHide]);
 
   useEffect(() => {
     setNativeError(false);
-    resetHide();
+    setShowBar(true);
+    scheduleHide();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [src.url]);
+
+  // Auto-switch to next server when native video fails
+  useEffect(() => {
+    if (!nativeError) return;
+    const t = setTimeout(() => onNextSrc(), 1200);
+    return () => clearTimeout(t);
+  }, [nativeError]);
 
   function fullscreen() {
     const el = iframeRef.current || document.querySelector("video");
@@ -240,20 +255,24 @@ function VideoPlayer({
   const playerUrl = src.url;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black" dir="ltr" onClick={useNative ? resetHide : undefined}>
+    <div
+      className="fixed inset-0 z-50 bg-black"
+      dir="ltr"
+      onClick={useNative ? handleTap : undefined}
+    >
 
-      {/* ── NATIVE PLAYER (HLS.js / MP4) — for extracted directUrl sources ── */}
+      {/* ── NATIVE PLAYER (HLS.js / MP4) ── */}
       {useNative && (
         <NativeVideoInner
           key={src.directUrl!}
           url={src.directUrl!}
           type={src.directType || "hls"}
-          onError={() => { setNativeError(true); }}
-          onCanPlay={resetHide}
+          onError={() => setNativeError(true)}
+          onCanPlay={() => { setShowBar(true); scheduleHide(); }}
         />
       )}
 
-      {/* ── IFRAME PLAYER — for embed URLs, sandbox prevents ads redirecting parent ── */}
+      {/* ── IFRAME PLAYER — embed iframes ── */}
       {!useNative && (
         <iframe
           ref={iframeRef}
@@ -267,41 +286,28 @@ function VideoPlayer({
         />
       )}
 
-      {/* ── PERMANENT BACK BUTTON — always visible, never hidden ── */}
-      <button
-        onClick={onClose}
-        className="absolute z-30 flex items-center gap-1.5 bg-black/70 backdrop-blur-md border border-white/15 rounded-full active:scale-90 transition-transform"
-        style={{
-          top: "max(14px, env(safe-area-inset-top))",
-          right: "12px",
-          padding: "8px 14px 8px 10px",
-        }}
-      >
-        <ChevronRight className="w-4 h-4 text-white" />
-        <span className="text-white text-[12px] font-black font-['Cairo']">رجوع</span>
-      </button>
-
-      {/* ── PERMANENT NEXT SERVER BUTTON — always visible ── */}
-      <button
-        onClick={() => { onNextSrc(); }}
-        className="absolute z-30 flex items-center gap-1 bg-black/60 backdrop-blur-md border border-white/10 rounded-full active:scale-90 transition-transform"
-        style={{
-          top: "max(14px, env(safe-area-inset-top))",
-          left: "12px",
-          padding: "8px 12px",
-        }}
-      >
-        <SkipForward className="w-3.5 h-3.5 text-white/70" />
-        <span className="text-white/70 text-[11px] font-bold font-['Cairo']">التالي</span>
-      </button>
-
-      {/* Tap-target strip at top-center to toggle full controls (iframes capture touch events) */}
+      {/* ── Thin tap strip at very top for iframes (iframes eat touches) ── */}
       <div
-        className="absolute top-0 left-0 right-0 h-2 z-20 cursor-pointer"
-        onClick={resetHide}
+        className="absolute top-0 left-0 right-0 h-16 z-20 cursor-pointer"
+        style={{ pointerEvents: showBar ? "none" : "auto" }}
+        onClick={handleTap}
       />
 
-      {/* TOP BAR (full controls — fades) */}
+      {/* ── Pill to restore controls when hidden ── */}
+      <AnimatePresence>
+        {!showBar && (
+          <motion.button
+            key="pill"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={e => { e.stopPropagation(); handleTap(); }}
+            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 w-20 h-1.5 bg-white/25 rounded-full active:bg-white/50 transition-all"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── TOP BAR (includes back + next-server buttons) ── */}
       <AnimatePresence>
         {showBar && (
           <motion.div
@@ -310,34 +316,59 @@ function VideoPlayer({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2 }}
-            className="absolute top-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pointer-events-none"
+            className="absolute top-0 left-0 right-0 z-20 pointer-events-none"
             style={{
-              paddingTop: "max(56px, calc(env(safe-area-inset-top) + 44px))",
               paddingBottom: "14px",
-              background: "linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.25) 80%, transparent 100%)",
+              background: "linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
             }}
           >
-            <div className="w-10 h-10 shrink-0" />
-            <div dir="rtl" className="flex-1 min-w-0">
-              <p className="text-white text-[13px] font-black line-clamp-1 drop-shadow-md font-['Cairo']">{title}</p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <p className="text-white/50 text-[10px] font-['Cairo']">الحلقة {ep === 0 ? "فيلم" : ep}</p>
-                <span className="text-[9px] font-bold text-primary/80 bg-primary/15 border border-primary/20 px-1.5 py-px rounded-md font-['Cairo']">
-                  {src.name}
-                </span>
-              </div>
-            </div>
+            {/* BACK button */}
             <button
-              onClick={fullscreen}
-              className="w-10 h-10 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90 pointer-events-auto shrink-0"
+              onClick={e => { e.stopPropagation(); onClose(); }}
+              className="absolute pointer-events-auto flex items-center gap-1.5 bg-black/60 backdrop-blur-md border border-white/15 rounded-full active:scale-90 transition-transform z-30"
+              style={{ top: "max(14px, env(safe-area-inset-top))", right: "12px", padding: "7px 13px 7px 9px" }}
             >
-              <Maximize2 className="w-4 h-4 text-white/70" />
+              <ChevronRight className="w-4 h-4 text-white" />
+              <span className="text-white text-[12px] font-black font-['Cairo']">رجوع</span>
             </button>
+
+            {/* NEXT SERVER button */}
+            <button
+              onClick={e => { e.stopPropagation(); onNextSrc(); }}
+              className="absolute pointer-events-auto flex items-center gap-1 bg-black/55 backdrop-blur-md border border-white/10 rounded-full active:scale-90 transition-transform z-30"
+              style={{ top: "max(14px, env(safe-area-inset-top))", left: "12px", padding: "7px 11px" }}
+            >
+              <SkipForward className="w-3.5 h-3.5 text-white/70" />
+              <span className="text-white/70 text-[11px] font-bold font-['Cairo']">التالي</span>
+            </button>
+
+            {/* Title row */}
+            <div
+              dir="rtl"
+              className="flex items-center gap-2 px-3"
+              style={{ paddingTop: "max(56px, calc(env(safe-area-inset-top) + 44px))" }}
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-[13px] font-black line-clamp-1 drop-shadow-md font-['Cairo']">{title}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-white/50 text-[10px] font-['Cairo']">الحلقة {ep === 0 ? "فيلم" : ep}</p>
+                  <span className="text-[9px] font-bold text-primary/80 bg-primary/15 border border-primary/20 px-1.5 py-px rounded-md font-['Cairo']">
+                    {src.name}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={e => { e.stopPropagation(); fullscreen(); }}
+                className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90 pointer-events-auto shrink-0"
+              >
+                <Maximize2 className="w-4 h-4 text-white/70" />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* BOTTOM BAR */}
+      {/* ── BOTTOM BAR ── */}
       <AnimatePresence>
         {showBar && (
           <motion.div
@@ -355,25 +386,25 @@ function VideoPlayer({
             }}
           >
             <button
-              onClick={onPrev} disabled={ep <= 1}
+              onClick={e => { e.stopPropagation(); onPrev(); }} disabled={ep <= 1}
               className="flex items-center gap-1 bg-black/60 backdrop-blur-md text-white/80 text-[10px] font-bold px-3 py-2.5 rounded-xl border border-white/12 disabled:opacity-30 active:scale-95 font-['Cairo'] pointer-events-auto shrink-0"
             >
               <ChevronRight className="w-3.5 h-3.5" /> السابقة
             </button>
             <button
-              onClick={() => setShowSheet(true)}
+              onClick={e => { e.stopPropagation(); setShowSheet(true); }}
               className="flex-1 flex items-center justify-center gap-1.5 bg-black/60 backdrop-blur-md text-white/55 text-[10px] font-bold py-2.5 rounded-xl border border-white/12 active:scale-95 font-['Cairo'] pointer-events-auto"
             >
               <List className="w-3.5 h-3.5" /> السيرفرات ({sources.length})
             </button>
             <button
-              onClick={onNextSrc}
+              onClick={e => { e.stopPropagation(); onNextSrc(); }}
               className="w-10 h-10 bg-black/60 backdrop-blur-md flex items-center justify-center rounded-xl border border-white/12 active:scale-95 pointer-events-auto shrink-0"
             >
               <SkipForward className="w-4 h-4 text-white/60" />
             </button>
             <button
-              onClick={onNext} disabled={ep >= totalEps && totalEps > 0}
+              onClick={e => { e.stopPropagation(); onNext(); }} disabled={ep >= totalEps && totalEps > 0}
               className="flex items-center gap-1 bg-primary text-white text-[10px] font-black px-3 py-2.5 rounded-xl disabled:opacity-30 active:scale-95 font-['Cairo'] pointer-events-auto shrink-0"
             >
               التالية <ChevronLeft className="w-3.5 h-3.5" />
@@ -381,14 +412,6 @@ function VideoPlayer({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Show-controls floating tab (always visible, tiny) */}
-      {!showBar && (
-        <button
-          onClick={resetHide}
-          className="absolute top-3 left-1/2 -translate-x-1/2 z-20 w-16 h-1.5 bg-white/20 rounded-full active:bg-white/40 transition-all"
-        />
-      )}
 
       {/* Server sheet */}
       <AnimatePresence>
