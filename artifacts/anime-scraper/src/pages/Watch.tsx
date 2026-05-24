@@ -4,7 +4,7 @@ import {
   ChevronRight, ChevronLeft, Loader2, Play,
   AlertTriangle, RefreshCw, CheckCircle2, XCircle,
   Maximize2, List, X, Wifi, WifiOff, SkipForward,
-  MonitorPlay, Zap, Volume2, VolumeX,
+  MonitorPlay, Zap, Volume2, VolumeX, RotateCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
@@ -167,10 +167,12 @@ function NativeVideoInner({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef   = useRef<Hls | null>(null);
 
-  // Route HLS through our CORS proxy so CDN restrictions don't block playback
+  // Route ALL video through server proxy:
+  // HLS → hls-proxy (rewrites segment URLs)
+  // MP4 → video-proxy (fixes IP-restricted URLs like sendvid)
   const effectiveUrl = type === "hls"
     ? `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(refUrl || url)}`
-    : url;
+    : `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(refUrl || url)}`;
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
@@ -193,7 +195,7 @@ function NativeVideoInner({
       v.src = effectiveUrl;
       v.play().catch(() => {});
     } else if (type === "mp4") {
-      v.src = url;
+      v.src = effectiveUrl;
       v.play().catch(() => {});
     } else {
       onError();
@@ -231,6 +233,7 @@ function VideoPlayer({
   const [showSheet, setShowSheet] = useState(false);
   const [showBar, setShowBar]     = useState(true);
   const [nativeError, setNativeError] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -270,6 +273,29 @@ function VideoPlayer({
     fn?.call(el);
   }
 
+  async function toggleRotation() {
+    try {
+      const ori = (screen.orientation as any);
+      if (!isLandscape) {
+        // try native lock first (works on mobile Chrome/Firefox when in fullscreen or standalone)
+        await ori.lock?.("landscape");
+        setIsLandscape(true);
+      } else {
+        ori.unlock?.();
+        setIsLandscape(false);
+      }
+    } catch {
+      // fallback: force fullscreen then lock
+      try {
+        const root = document.documentElement;
+        const req = (root as any).requestFullscreen || (root as any).webkitRequestFullscreen;
+        await req?.call(root);
+        await (screen.orientation as any).lock?.("landscape");
+        setIsLandscape(true);
+      } catch { setIsLandscape(l => !l); }
+    }
+  }
+
   const playerUrl = src.url;
 
   return (
@@ -305,9 +331,9 @@ function VideoPlayer({
         />
       )}
 
-      {/* ── Thin tap strip at very top for iframes (iframes eat touches) ── */}
+      {/* ── Full-screen tap overlay — tap anywhere to show/hide controls ── */}
       <div
-        className="absolute top-0 left-0 right-0 h-16 z-20 cursor-pointer"
+        className="absolute inset-0 z-10 cursor-pointer"
         style={{ pointerEvents: showBar ? "none" : "auto" }}
         onClick={handleTap}
       />
@@ -376,6 +402,16 @@ function VideoPlayer({
                   </span>
                 </div>
               </div>
+              <button
+                onClick={e => { e.stopPropagation(); toggleRotation(); }}
+                className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90 pointer-events-auto shrink-0"
+                title="قلب الشاشة"
+              >
+                <RotateCw
+                  className="w-4 h-4 text-white/70 transition-transform duration-300"
+                  style={{ transform: isLandscape ? "rotate(90deg)" : "rotate(0deg)" }}
+                />
+              </button>
               <button
                 onClick={e => { e.stopPropagation(); fullscreen(); }}
                 className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90 pointer-events-auto shrink-0"
