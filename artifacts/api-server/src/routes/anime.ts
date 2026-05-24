@@ -917,7 +917,7 @@ async function getAnimeGGSources(
       return [];
     }
 
-    const LABELS = ["مترجم (EN)", "مدبلج (EN)", "سيرفر 3 (EN)", "سيرفر 4 (EN)"];
+    const LABELS = ["مدبلج", "مترجم", "سيرفر 3", "سيرفر 4"];
     const sources: UnifiedSource[] = [];
     const epRef = seriesUrl;
 
@@ -964,7 +964,8 @@ async function getAnimeGGSources(
         quality,
         qualityRank,
         site: "animegg",
-        ...(directUrl ? { directUrl, directType } : {}),
+        // AnimeGG CDN chain (vidcache.net) is incompatible with server-side proxy
+        // Use iframe embed directly — the animegg.org embed player works reliably
       });
     }));
 

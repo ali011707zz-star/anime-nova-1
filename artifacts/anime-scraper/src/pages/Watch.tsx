@@ -1,17 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, ChevronLeft, Loader2, Play,
+  ChevronRight, ChevronLeft, Loader2, Play, Pause,
   AlertTriangle, RefreshCw, CheckCircle2, XCircle,
   Maximize2, List, X, Wifi, WifiOff, SkipForward,
-  MonitorPlay, Zap, Volume2, VolumeX, RotateCw,
+  MonitorPlay, Zap, RotateCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
 
-/* ─────────────────────────────────────────────────────
-   AniList query
-───────────────────────────────────────────────────── */
 const ANILIST_Q = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal title { romaji english }
@@ -21,22 +18,17 @@ const ANILIST_Q = `query ($id: Int) {
   }
 }`;
 
-/* ─────────────────────────────────────────────────────
-   Types
-───────────────────────────────────────────────────── */
 interface Source {
   name: string; url: string; quality: string; qualityRank: number; site: string;
   directUrl?: string; directType?: "hls" | "mp4";
 }
 type ProbeStatus = "unknown" | "testing" | "ok" | "dead";
 
-/* ─────────────────────────────────────────────────────
-   Constants
-───────────────────────────────────────────────────── */
 const SITE_LABEL: Record<string, string> = {
   shahiid:      "شاهيد أنمي",
-  animegg:      "AnimeGG · إنجليزي",
+  animegg:      "AnimeGG",
   animelek:     "انمي ليك",
+  animedar:     "أنمي دار",
   allanime:     "AllAnime",
   anime4up:     "Anime4up",
   animephoenix: "AnimePhoenix",
@@ -56,9 +48,6 @@ const GENRE_COVERS: Record<string, string> = {
   "default":   "https://s4.anilist.co/file/anilistcdn/media/anime/banner/21-YpzLs2jBPpyBY.jpg",
 };
 
-/* ─────────────────────────────────────────────────────
-   Helpers
-───────────────────────────────────────────────────── */
 const getCache  = (k: string) => localStorage.getItem(k) ?? "";
 const setCache  = (k: string, v: string) => localStorage.setItem(k, v);
 
@@ -142,7 +131,7 @@ function ServerSheet({ sources, activeIdx, statuses, onSelect, onClose }: {
       >
         <div className="flex justify-center pt-3 shrink-0"><div className="w-10 h-1 rounded-full bg-white/15" /></div>
         <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-white/6" dir="rtl">
-          <p className="text-sm font-black text-white font-['Cairo']">السيرفرات المتاحة</p>
+          <p className="text-sm font-black text-white font-['Cairo']">السيرفرات المتاحة ({sources.length})</p>
           <button onClick={onClose} className="w-7 h-7 rounded-full bg-white/8 flex items-center justify-center">
             <X className="w-3.5 h-3.5 text-white/50" />
           </button>
@@ -156,46 +145,56 @@ function ServerSheet({ sources, activeIdx, statuses, onSelect, onClose }: {
 }
 
 /* ══════════════════════════════════════════════════════
-   NATIVE HLS/MP4 VIDEO PLAYER (for directUrl sources)
+   NATIVE HLS/MP4 VIDEO PLAYER
+   - MP4: tries direct URL first, falls back to proxy
+   - HLS: always via hls-proxy (CORS bypass)
+   - No browser native controls — all custom
 ══════════════════════════════════════════════════════ */
 function NativeVideoInner({
-  url, type, refUrl, onError, onCanPlay,
+  url, type, refUrl, onError, onCanPlay, onPlayingChange,
 }: {
   url: string; type: "hls" | "mp4"; refUrl?: string;
   onError: () => void; onCanPlay: () => void;
+  onPlayingChange?: (playing: boolean) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef   = useRef<Hls | null>(null);
+  const [attempt, setAttempt] = useState<"direct" | "proxy">("direct");
 
-  // Route ALL video through server proxy:
-  // HLS → hls-proxy (rewrites segment URLs)
-  // MP4 → video-proxy (fixes IP-restricted URLs like sendvid)
-  const effectiveUrl = type === "hls"
-    ? `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(refUrl || url)}`
-    : `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(refUrl || url)}`;
+  const hlsProxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(refUrl || url)}`;
+  const vidProxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(refUrl || url)}`;
+  const effectiveUrl = type === "hls" ? hlsProxyUrl : attempt === "direct" ? url : vidProxyUrl;
+
+  useEffect(() => { setAttempt("direct"); }, [url]);
+
+  function handleErr() {
+    if (type === "mp4" && attempt === "direct") {
+      setAttempt("proxy");
+    } else {
+      onError();
+    }
+  }
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
+    hlsRef.current?.destroy(); hlsRef.current = null;
     if (type === "hls" && Hls.isSupported()) {
       const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        fragLoadingTimeOut: 20000,
-        manifestLoadingTimeOut: 15000,
+        enableWorker: true, lowLatencyMode: false,
+        maxBufferLength: 30, maxMaxBufferLength: 60,
+        fragLoadingTimeOut: 20000, manifestLoadingTimeOut: 15000,
       });
       hlsRef.current = hls;
       hls.loadSource(effectiveUrl);
       hls.attachMedia(v);
       hls.on(Hls.Events.MANIFEST_PARSED, () => { v.play().catch(() => {}); });
-      hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) onError(); });
+      hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) handleErr(); });
     } else if (type === "hls" && v.canPlayType("application/vnd.apple.mpegurl")) {
-      // Native HLS (Safari) — use direct URL, browser handles CORS via proxy URL
       v.src = effectiveUrl;
       v.play().catch(() => {});
     } else if (type === "mp4") {
       v.src = effectiveUrl;
+      v.load();
       v.play().catch(() => {});
     } else {
       onError();
@@ -207,18 +206,19 @@ function NativeVideoInner({
     <video
       ref={videoRef}
       className="absolute inset-0 w-full h-full bg-black"
-      controls
       playsInline
       autoPlay
       onCanPlay={onCanPlay}
-      onError={onError}
+      onError={handleErr}
+      onPlay={() => onPlayingChange?.(true)}
+      onPause={() => onPlayingChange?.(false)}
       style={{ objectFit: "contain" }}
     />
   );
 }
 
 /* ══════════════════════════════════════════════════════
-   VIDEO PLAYER — switches between native & iframe
+   VIDEO PLAYER — full-screen overlay
 ══════════════════════════════════════════════════════ */
 function VideoPlayer({
   src, title, ep, totalEps,
@@ -233,36 +233,47 @@ function VideoPlayer({
   const [showSheet, setShowSheet] = useState(false);
   const [showBar, setShowBar]     = useState(true);
   const [nativeError, setNativeError] = useState(false);
+  const [isPlaying, setIsPlaying]     = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iframeRef  = useRef<HTMLIFrameElement>(null);
+  const hideTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const useNative = !nativeError && !!src.directUrl;
 
-  const scheduleHide = useCallback((delay = 5000) => {
+  const scheduleHide = useCallback((delay = 4000) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setShowBar(false), delay);
   }, []);
 
   const handleTap = useCallback(() => {
+    if (showSheet) return;
     setShowBar(prev => {
       const next = !prev;
       if (next) scheduleHide();
+      else if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
       return next;
     });
-  }, [scheduleHide]);
+  }, [showSheet, scheduleHide]);
+
+  const togglePlayPause = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = document.querySelector("video") as HTMLVideoElement | null;
+    if (!v) return;
+    if (v.paused) v.play().catch(() => {});
+    else v.pause();
+  }, []);
 
   useEffect(() => {
     setNativeError(false);
     setShowBar(true);
+    setIsPlaying(false);
     scheduleHide();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [src.url]);
 
-  // Auto-switch to next server when native video fails
   useEffect(() => {
     if (!nativeError) return;
-    const t = setTimeout(() => onNextSrc(), 1200);
+    const t = setTimeout(() => onNextSrc(), 800);
     return () => clearTimeout(t);
   }, [nativeError]);
 
@@ -276,16 +287,9 @@ function VideoPlayer({
   async function toggleRotation() {
     try {
       const ori = (screen.orientation as any);
-      if (!isLandscape) {
-        // try native lock first (works on mobile Chrome/Firefox when in fullscreen or standalone)
-        await ori.lock?.("landscape");
-        setIsLandscape(true);
-      } else {
-        ori.unlock?.();
-        setIsLandscape(false);
-      }
+      if (!isLandscape) { await ori.lock?.("landscape"); setIsLandscape(true); }
+      else { ori.unlock?.(); setIsLandscape(false); }
     } catch {
-      // fallback: force fullscreen then lock
       try {
         const root = document.documentElement;
         const req = (root as any).requestFullscreen || (root as any).webkitRequestFullscreen;
@@ -296,16 +300,10 @@ function VideoPlayer({
     }
   }
 
-  const playerUrl = src.url;
-
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black"
-      dir="ltr"
-      onClick={useNative ? handleTap : undefined}
-    >
+    <div className="fixed inset-0 z-50 bg-black" dir="ltr">
 
-      {/* ── NATIVE PLAYER (HLS.js / MP4) ── */}
+      {/* ── NATIVE PLAYER ── */}
       {useNative && (
         <NativeVideoInner
           key={src.directUrl!}
@@ -313,108 +311,114 @@ function VideoPlayer({
           type={src.directType || "hls"}
           refUrl={src.url}
           onError={() => setNativeError(true)}
-          onCanPlay={() => { setShowBar(true); scheduleHide(); }}
+          onCanPlay={() => scheduleHide()}
+          onPlayingChange={setIsPlaying}
         />
       )}
 
-      {/* ── IFRAME PLAYER — embed iframes ── */}
+      {/* ── IFRAME PLAYER ── */}
       {!useNative && (
         <iframe
           ref={iframeRef}
-          key={playerUrl}
-          src={playerUrl}
+          key={src.url}
+          src={src.url}
           className="absolute inset-0 w-full h-full border-none"
-          allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope; microphone; camera"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-fullscreen allow-pointer-lock"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock allow-popups"
           allowFullScreen
           title={title}
         />
       )}
 
-      {/* ── Full-screen tap overlay — tap anywhere to show/hide controls ── */}
+      {/* ── Tap overlay (full screen, always active) ── */}
       <div
-        className="absolute inset-0 z-10 cursor-pointer"
-        style={{ pointerEvents: showBar ? "none" : "auto" }}
+        className="absolute inset-0 z-10"
+        style={{ pointerEvents: showSheet ? "none" : "auto" }}
         onClick={handleTap}
       />
 
-      {/* ── Pill to restore controls when hidden ── */}
-      <AnimatePresence>
-        {!showBar && (
-          <motion.button
-            key="pill"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={e => { e.stopPropagation(); handleTap(); }}
-            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 w-20 h-1.5 bg-white/25 rounded-full active:bg-white/50 transition-all"
-          />
-        )}
-      </AnimatePresence>
+      {/* ── Center play/pause indicator (native only, when paused) ── */}
+      {useNative && !isPlaying && (
+        <motion.button
+          initial={{ opacity: 0, scale: 0.85 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.85 }}
+          onClick={togglePlayPause}
+          className="absolute inset-0 z-20 flex items-center justify-center"
+          style={{ pointerEvents: "auto" }}
+        >
+          <div className="w-16 h-16 rounded-full bg-black/65 backdrop-blur-sm border border-white/15 flex items-center justify-center shadow-xl">
+            <Play className="w-7 h-7 text-white fill-white ml-1" />
+          </div>
+        </motion.button>
+      )}
 
-      {/* ── TOP BAR (back + next-server + title) ── */}
+      {/* ── BACK BUTTON — ALWAYS VISIBLE ── */}
+      <button
+        onClick={e => { e.stopPropagation(); onClose(); }}
+        className="absolute z-30 flex items-center gap-1.5 bg-black/60 backdrop-blur-md border border-white/12 rounded-full active:scale-90 transition-transform"
+        style={{
+          top: "max(14px, env(safe-area-inset-top))",
+          right: "12px",
+          padding: "8px 14px 8px 10px",
+          pointerEvents: "auto",
+        }}
+      >
+        <ChevronRight className="w-4 h-4 text-white" />
+        <span className="text-white text-[12px] font-black font-['Cairo']">رجوع</span>
+      </button>
+
+      {/* ── NEXT SERVER button (top-left, always visible) ── */}
+      <button
+        onClick={e => { e.stopPropagation(); onNextSrc(); }}
+        className="absolute z-30 flex items-center gap-1 bg-black/60 backdrop-blur-md border border-white/12 rounded-full active:scale-90 transition-transform"
+        style={{
+          top: "max(14px, env(safe-area-inset-top))",
+          left: "12px",
+          padding: "8px 12px",
+          pointerEvents: "auto",
+        }}
+      >
+        <SkipForward className="w-3.5 h-3.5 text-white/80" />
+        <span className="text-white/80 text-[11px] font-bold font-['Cairo']">التالي</span>
+      </button>
+
+      {/* ── TOP INFO BAR (animated) ── */}
       <AnimatePresence>
         {showBar && (
           <motion.div
             key="topbar"
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.18 }}
             className="absolute top-0 left-0 right-0 z-20 pointer-events-none"
             style={{
-              paddingBottom: "14px",
-              background: "linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
+              paddingBottom: "20px",
+              paddingTop: "max(64px, calc(env(safe-area-inset-top) + 52px))",
+              background: "linear-gradient(to bottom, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.25) 75%, transparent 100%)",
             }}
           >
-            {/* BACK button — dynamic, shown with controls */}
-            <button
-              onClick={e => { e.stopPropagation(); onClose(); }}
-              className="absolute pointer-events-auto flex items-center gap-1.5 bg-black/55 backdrop-blur-md border border-white/10 rounded-full active:scale-90 transition-transform z-30"
-              style={{ top: "max(14px, env(safe-area-inset-top))", right: "12px", padding: "7px 13px 7px 10px" }}
-            >
-              <ChevronRight className="w-3.5 h-3.5 text-white/70" />
-              <span className="text-white/70 text-[11px] font-bold font-['Cairo']">رجوع</span>
-            </button>
-
-            {/* NEXT SERVER button */}
-            <button
-              onClick={e => { e.stopPropagation(); onNextSrc(); }}
-              className="absolute pointer-events-auto flex items-center gap-1 bg-black/55 backdrop-blur-md border border-white/10 rounded-full active:scale-90 transition-transform z-30"
-              style={{ top: "max(14px, env(safe-area-inset-top))", left: "12px", padding: "7px 11px" }}
-            >
-              <SkipForward className="w-3.5 h-3.5 text-white/70" />
-              <span className="text-white/70 text-[11px] font-bold font-['Cairo']">التالي</span>
-            </button>
-
-            {/* Title row */}
-            <div
-              dir="rtl"
-              className="flex items-center gap-2 px-3"
-              style={{ paddingTop: "max(56px, calc(env(safe-area-inset-top) + 44px))" }}
-            >
+            <div className="flex items-center gap-2 px-3" dir="rtl">
               <div className="flex-1 min-w-0">
                 <p className="text-white text-[13px] font-black line-clamp-1 drop-shadow-md font-['Cairo']">{title}</p>
                 <div className="flex items-center gap-2 mt-0.5">
                   <p className="text-white/50 text-[10px] font-['Cairo']">الحلقة {ep === 0 ? "فيلم" : ep}</p>
-                  <span className="text-[9px] font-bold text-primary/80 bg-primary/15 border border-primary/20 px-1.5 py-px rounded-md font-['Cairo']">
+                  <span className="text-[9px] font-bold text-primary/80 bg-primary/15 border border-primary/20 px-1.5 py-px rounded-md font-['Cairo'] truncate max-w-[100px]">
                     {src.name}
                   </span>
                 </div>
               </div>
               <button
                 onClick={e => { e.stopPropagation(); toggleRotation(); }}
-                className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90 pointer-events-auto shrink-0"
-                title="قلب الشاشة"
+                className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/12 active:scale-90 pointer-events-auto shrink-0"
               >
-                <RotateCw
-                  className="w-4 h-4 text-white/70 transition-transform duration-300"
-                  style={{ transform: isLandscape ? "rotate(90deg)" : "rotate(0deg)" }}
-                />
+                <RotateCw className="w-4 h-4 text-white/70 transition-transform duration-300"
+                  style={{ transform: isLandscape ? "rotate(90deg)" : "rotate(0deg)" }} />
               </button>
               <button
                 onClick={e => { e.stopPropagation(); fullscreen(); }}
-                className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90 pointer-events-auto shrink-0"
+                className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/12 active:scale-90 pointer-events-auto shrink-0"
               >
                 <Maximize2 className="w-4 h-4 text-white/70" />
               </button>
@@ -423,40 +427,34 @@ function VideoPlayer({
         )}
       </AnimatePresence>
 
-      {/* ── BOTTOM BAR ── */}
+      {/* ── BOTTOM BAR (animated) ── */}
       <AnimatePresence>
         {showBar && (
           <motion.div
             key="bottombar"
-            initial={{ opacity: 0, y: 8 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.2 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.18 }}
             className="absolute bottom-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pointer-events-none"
             dir="rtl"
             style={{
               paddingBottom: "max(20px, env(safe-area-inset-bottom))",
-              paddingTop: "14px",
+              paddingTop: "16px",
               background: "linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
             }}
           >
             <button
               onClick={e => { e.stopPropagation(); onPrev(); }} disabled={ep <= 1}
-              className="flex items-center gap-1 bg-black/60 backdrop-blur-md text-white/80 text-[10px] font-bold px-3 py-2.5 rounded-xl border border-white/12 disabled:opacity-30 active:scale-95 font-['Cairo'] pointer-events-auto shrink-0"
+              className="flex items-center gap-1 bg-black/65 backdrop-blur-md text-white/80 text-[10px] font-bold px-3 py-2.5 rounded-xl border border-white/12 disabled:opacity-30 active:scale-95 font-['Cairo'] pointer-events-auto shrink-0"
             >
               <ChevronRight className="w-3.5 h-3.5" /> السابقة
             </button>
             <button
               onClick={e => { e.stopPropagation(); setShowSheet(true); }}
-              className="flex-1 flex items-center justify-center gap-1.5 bg-black/60 backdrop-blur-md text-white/55 text-[10px] font-bold py-2.5 rounded-xl border border-white/12 active:scale-95 font-['Cairo'] pointer-events-auto"
+              className="flex-1 flex items-center justify-center gap-1.5 bg-black/65 backdrop-blur-md text-white/60 text-[10px] font-bold py-2.5 rounded-xl border border-white/12 active:scale-95 font-['Cairo'] pointer-events-auto"
             >
               <List className="w-3.5 h-3.5" /> السيرفرات ({sources.length})
-            </button>
-            <button
-              onClick={e => { e.stopPropagation(); onNextSrc(); }}
-              className="w-10 h-10 bg-black/60 backdrop-blur-md flex items-center justify-center rounded-xl border border-white/12 active:scale-95 pointer-events-auto shrink-0"
-            >
-              <SkipForward className="w-4 h-4 text-white/60" />
             </button>
             <button
               onClick={e => { e.stopPropagation(); onNext(); }} disabled={ep >= totalEps && totalEps > 0}
@@ -468,7 +466,7 @@ function VideoPlayer({
         )}
       </AnimatePresence>
 
-      {/* Server sheet */}
+      {/* ── Server sheet ── */}
       <AnimatePresence>
         {showSheet && (
           <ServerSheet
@@ -479,51 +477,6 @@ function VideoPlayer({
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════
-   SERVER CARD  (list view)
-══════════════════════════════════════════════════════ */
-function ServerCard({ src, status, isActive, onSelect }: {
-  src: Source; status: ProbeStatus; isActive: boolean;
-  onSelect: (s: Source) => void;
-}) {
-  const isDead = status === "dead";
-  const label  = SITE_LABEL[src.site] || src.site;
-
-  const cardCls = isActive
-    ? "bg-emerald-500/10 border-emerald-500/35"
-    : isDead
-    ? "bg-red-500/4 border-red-400/15 opacity-35"
-    : "bg-[#111116] border-white/6";
-
-  const statusEl =
-    status === "testing" ? <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" /> :
-    status === "ok"      ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
-    status === "dead"    ? <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" /> :
-    isActive ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
-    <div className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0" />;
-
-  return (
-    <button
-      className={`w-full flex items-center gap-2.5 px-3 py-3 rounded-2xl border transition-all active:scale-[0.98] ${cardCls}`}
-      onClick={() => !isDead && onSelect(src)}
-      disabled={isDead}
-    >
-      {statusEl}
-      <div className="flex-1 min-w-0 text-right">
-        <p className={`text-sm font-black font-['Cairo'] truncate ${isActive ? "text-emerald-300" : isDead ? "text-white/25" : "text-white/85"}`}>
-          {src.name}
-        </p>
-        <p className="text-[9px] text-white/30 font-['Cairo']">{label}</p>
-      </div>
-      <QBadge q={src.quality} />
-      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border
-        ${isActive ? "bg-emerald-500/20 border-emerald-500/35 text-emerald-400" : "bg-primary/15 border-primary/25 text-primary"}`}>
-        <Play className="w-3.5 h-3.5 fill-current" />
-      </div>
-    </button>
   );
 }
 
@@ -569,7 +522,6 @@ function LoadingScreen({ cover, title, ep, genres, sourcesCount }: {
                 transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.15 }} />
             ))}
           </div>
-          {sourcesCount > 0 && <p className="text-white/25 text-[9px] font-['Cairo']">سيبدأ التشغيل تلقائياً</p>}
         </motion.div>
       </div>
     </div>
@@ -584,7 +536,7 @@ export default function WatchPage() {
   const sp         = new URLSearchParams(window.location.search);
   const animeId    = parseInt(sp.get("anime") || "0");
   const ep         = parseInt(sp.get("ep") || "1");
-  const titleParam = sp.get("title") || "";  // pre-populated from navigation for faster start
+  const titleParam = sp.get("title") || "";
 
   const [showPlayer, setShowPlayer]   = useState(false);
   const [anime, setAnime]             = useState<any>(null);
@@ -604,7 +556,7 @@ export default function WatchPage() {
   const statusesRef     = useRef<Record<string, ProbeStatus>>({});
   const autoPlayTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const title    = anime?.title?.romaji || anime?.title?.english || "أنمي";
+  const title    = anime?.title?.romaji || anime?.title?.english || titleParam || "أنمي";
   const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
   const cover    = anime?.coverImage?.large || "";
   const genres   = anime?.genres || [];
@@ -613,9 +565,8 @@ export default function WatchPage() {
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
   useEffect(() => { statusesRef.current = statuses; }, [statuses]);
 
-  /* ── Deduplicate sources: keep best quality per streaming host ── */
   function dedupSources(srcs: Source[]): Source[] {
-    const seen = new Map<string, number>(); // host → count kept
+    const seen = new Map<string, number>();
     return srcs.filter(s => {
       let host = "";
       try { host = new URL(s.url).hostname.replace(/^(www\.|vid\.|player\.)/, ""); } catch {}
@@ -626,7 +577,6 @@ export default function WatchPage() {
     });
   }
 
-  /* ── Sort: directUrl > quality (FHD>HD>SD) > server priority ── */
   function sortSources(srcs: Source[]): Source[] {
     return [...srcs].sort((a, b) => {
       const aDirect = a.directUrl ? 1 : 0;
@@ -637,7 +587,6 @@ export default function WatchPage() {
     });
   }
 
-  /* ── Start SSE stream ── */
   function startSSE(romaji: string, english: string, malId: number) {
     const cacheKey = `${animeId}-${ep}`;
     const p = new URLSearchParams({
@@ -669,7 +618,6 @@ export default function WatchPage() {
     es.onerror = () => { es.close(); sseRef.current = null; setStreamDone(true); };
   }
 
-  /* ── Load metadata + start SSE ── */
   useEffect(() => {
     if (!animeId) { setLoading(false); return; }
     setLoading(true); setSources([]); setActive(null);
@@ -682,7 +630,6 @@ export default function WatchPage() {
 
     (async () => {
       try {
-        // ── Fast path: check cache first (before any network request) ──
         const cached = getSrcCache(cacheKey);
         if (cached && cached.length > 0) {
           setSources(cached);
@@ -693,11 +640,9 @@ export default function WatchPage() {
           return;
         }
 
-        // ── Fast path: if title came from URL, start SSE immediately ──
         if (titleParam) {
           setLoading(false);
           startSSE(titleParam, "", 0);
-          // fetch AniList in parallel for metadata only (cover, genres, etc.)
           fetch("https://graphql.anilist.co", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -713,7 +658,6 @@ export default function WatchPage() {
           return;
         }
 
-        // ── Normal path: wait for AniList then start SSE ──
         const aniRes = await fetch("https://graphql.anilist.co", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -727,7 +671,6 @@ export default function WatchPage() {
         const romaji  = animeData?.title?.romaji  || "";
         const english = animeData?.title?.english || "";
         const malId   = animeData?.idMal || 0;
-
         setLoading(false);
         startSSE(romaji, english, malId);
       } catch (err: any) {
@@ -738,7 +681,6 @@ export default function WatchPage() {
     return () => { sseRef.current?.close(); sseRef.current = null; };
   }, [animeId, ep]);
 
-  /* ── Server priority: direct sources first, then by site ── */
   function serverPriority(s: Source): number {
     if (s.directUrl) return 12;
     const name = s.name.toLowerCase();
@@ -752,7 +694,7 @@ export default function WatchPage() {
     return 3;
   }
 
-  /* ── Auto-play: first available source after 2s ── */
+  /* Auto-play: first available source after 0.5s */
   useEffect(() => {
     if (autoStarted.current || showPlayer) return;
 
@@ -766,7 +708,7 @@ export default function WatchPage() {
         if (!s) return;
         autoStarted.current = true;
         setActive(s); setActiveIdx(sourcesRef.current.indexOf(s)); setShowPlayer(true);
-      }, 2000);
+      }, 500);
     }
 
     if (streamDone && sources.length > 0 && !autoPlayTimer.current) {
@@ -825,14 +767,11 @@ export default function WatchPage() {
         )}
       </AnimatePresence>
 
-      {/* ── SERVER LIST VIEW ── */}
+      {/* ── LOADING / SERVER LIST (hidden when player active) ── */}
       <div className={showPlayer ? "hidden" : "flex flex-col min-h-screen"}>
 
-        {loading && (
+        {(loading || (!loading && sources.length === 0 && !streamDone)) && (
           <LoadingScreen cover={cover} title={title} ep={ep} genres={genres} sourcesCount={sources.length} />
-        )}
-        {!loading && sources.length === 0 && !streamDone && (
-          <LoadingScreen cover={cover} title={title} ep={ep} genres={genres} sourcesCount={0} />
         )}
 
         {(!loading && (sources.length > 0 || streamDone)) && (
@@ -860,7 +799,6 @@ export default function WatchPage() {
                   </button>
                 )}
               </div>
-              {/* Episode nav */}
               <div className="flex gap-2">
                 <button disabled={ep <= 1} onClick={() => goEp(ep - 1)}
                   className="flex-1 h-9 flex items-center justify-center gap-1 bg-[#1C1C22] rounded-xl border border-white/6 disabled:opacity-30 text-[11px] font-bold font-['Cairo'] active:scale-[0.97]">
@@ -878,7 +816,6 @@ export default function WatchPage() {
 
             <div className="flex-1 px-4 pt-4 pb-28 space-y-3">
 
-              {/* Active server banner */}
               {active && (
                 <motion.button initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
                   onClick={() => setShowPlayer(true)}
@@ -926,7 +863,7 @@ export default function WatchPage() {
                   </div>
                   <div className="space-y-2">
                     {sources.map(src => (
-                      <ServerCard
+                      <ServerButton
                         key={src.url}
                         src={src}
                         status={statuses[src.url] || "unknown"}
@@ -952,5 +889,50 @@ export default function WatchPage() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   SERVER BUTTON (list view)
+══════════════════════════════════════════════════════ */
+function ServerButton({ src, status, isActive, onSelect }: {
+  src: Source; status: ProbeStatus; isActive: boolean;
+  onSelect: (s: Source) => void;
+}) {
+  const isDead = status === "dead";
+  const label  = SITE_LABEL[src.site] || src.site;
+
+  const cardCls = isActive
+    ? "bg-emerald-500/10 border-emerald-500/35"
+    : isDead
+    ? "bg-red-500/4 border-red-400/15 opacity-35"
+    : "bg-[#111116] border-white/6";
+
+  const statusEl =
+    status === "testing" ? <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" /> :
+    status === "ok"      ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
+    status === "dead"    ? <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" /> :
+    isActive ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
+    <div className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0" />;
+
+  return (
+    <button
+      className={`w-full flex items-center gap-2.5 px-3 py-3 rounded-2xl border transition-all active:scale-[0.98] ${cardCls}`}
+      onClick={() => !isDead && onSelect(src)}
+      disabled={isDead}
+    >
+      {statusEl}
+      <div className="flex-1 min-w-0 text-right">
+        <p className={`text-sm font-black font-['Cairo'] truncate ${isActive ? "text-emerald-300" : isDead ? "text-white/25" : "text-white/85"}`}>
+          {src.name}
+        </p>
+        <p className="text-[9px] text-white/30 font-['Cairo']">{label}</p>
+      </div>
+      <QBadge q={src.quality} />
+      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border
+        ${isActive ? "bg-emerald-500/20 border-emerald-500/35 text-emerald-400" : "bg-primary/15 border-primary/25 text-primary"}`}>
+        <Play className="w-3.5 h-3.5 fill-current" />
+      </div>
+    </button>
   );
 }
