@@ -34,9 +34,13 @@ type ProbeStatus = "unknown" | "testing" | "ok" | "dead";
    Constants
 ───────────────────────────────────────────────────── */
 const SITE_LABEL: Record<string, string> = {
-  shahiid: "شاهيد أنمي",
-  animegg: "AnimeGG",
-  allanime: "AllAnime",
+  shahiid:      "شاهيد أنمي",
+  animegg:      "AnimeGG",
+  allanime:     "AllAnime",
+  anime4up:     "Anime4up",
+  animephoenix: "AnimePhoenix",
+  myanime:      "MyAnime",
+  animekayan:   "AnimeKayan",
   db: "مخزن", cached: "مخزن",
 };
 
@@ -697,14 +701,15 @@ export default function WatchPage() {
     return () => { sseRef.current?.close(); sseRef.current = null; };
   }, [animeId, ep]);
 
-  /* ── Server priority: maga/megamax first ── */
+  /* ── Server priority: direct sources first, then by site ── */
   function serverPriority(s: Source): number {
+    if (s.directUrl) return 12;
     const name = s.name.toLowerCase();
     if (name.includes("maga") || name.includes("megamax")) return 10;
-    if (s.site === "animePhoenix") return 9;
-    if (name.includes("uqload")) return 8;
+    if (s.site === "animephoenix" || s.site === "anime4up") return 9;
+    if (s.site === "myanime" || s.site === "animekayan") return 8;
+    if (name.includes("uqload")) return 7;
     if (name.includes("anime7u")) return 7;
-    if (name.includes("d000d")) return 7;
     if (name.includes("voe")) return 6;
     if (name.includes("wishfast")) return 5;
     return 3;

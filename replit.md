@@ -1,6 +1,8 @@
 # Nova Anime
 
-تطبيق بث أنمي عربي يجمع مصادر من shahiid-anime.net و AnimeGG (www.animegg.org) ويُشغّلها في مشغّل داخلي.
+تطبيق بث أنمي عربي يجمع مصادر من 7 مصادر متوازية ويُشغّلها في مشغّل داخلي.
+
+المصادر: shahiid-anime.net · AnimeGG · AllAnime · Anime4up · AnimePhoenix · MyAnime.fan · AnimeKayan
 
 ## Run & Operate
 
@@ -20,11 +22,17 @@
 
 - `artifacts/anime-scraper/src/` — React frontend
   - `pages/Watch.tsx` — main watch page with NativeVideoPlayer + EmbedPlayer
-- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (~1350 lines)
+- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (~1836 lines)
   - Shahiid-anime.net scraper (search → seasons → episodes → AJAX servers)
   - AnimeGG scraper (search → episode page → embed extraction → direct MP4)
+  - AllAnime episode video sources (GraphQL → base64-decoded URLs)
+  - Anime4up.info scraper (search → episode page → iframe extraction)
+  - AnimePhoenix.io scraper (search → episode page → iframe extraction)
+  - MyAnime.fan scraper (search → episode page → iframe extraction)
+  - AnimeKayan.com scraper (JSON API search → episode sources)
   - Video extraction engine (parseVideoUrl, extractVideoDeep, etc.)
   - HLS proxy (`/api/anime/hls-proxy`, `/api/anime/seg-proxy`)
+- `scripts/src/scrapers/multi-site-scraper.ts` — original multi-site scraper prototype (6 sources, not used directly)
 
 ## Architecture decisions
 

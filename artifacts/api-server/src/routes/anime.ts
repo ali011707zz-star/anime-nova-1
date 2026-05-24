@@ -1031,6 +1031,444 @@ router.get("/anime/servers", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  AllAnime — episode VIDEO sources (server-side decode)
+// ════════════════════════════════════════════════════════════════════
+
+const AA_EP_SRC_Q = `
+query ($showId: String!, $episodeString: String!, $type: VaildTranslationTypeEnumType!) {
+  episode(showId: $showId, episodeString: $episodeString, translationType: $type) {
+    sourceUrls
+  }
+}`;
+
+function decodeAaUrl(raw: string): string {
+  try {
+    if (raw.startsWith("--")) {
+      const b = raw.slice(2).replace(/-/g, "=");
+      return Buffer.from(b, "base64").toString("utf-8");
+    }
+    if (/^[A-Za-z0-9+/=]{20,}$/.test(raw)) {
+      return Buffer.from(raw, "base64").toString("utf-8");
+    }
+  } catch {}
+  return raw;
+}
+
+const aaSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getAllAnimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `aa-src:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = aaSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const resolved = await resolveTitle([english, title].filter(Boolean) as string[]);
+    if (!resolved) return [];
+    const showId = resolved.show._id;
+
+    let d: any;
+    try { d = await aaGql(AA_EP_SRC_Q, { showId, episodeString: String(ep), type: "sub" }); }
+    catch { return []; }
+
+    const raw = d?.data?.episode?.sourceUrls;
+    if (!raw) return [];
+
+    let srcs: any[] = [];
+    if (Array.isArray(raw)) srcs = raw;
+    else if (typeof raw === "string") { try { srcs = JSON.parse(raw); } catch {} }
+
+    const sources: UnifiedSource[] = [];
+    for (const s of srcs) {
+      try {
+        const url = decodeAaUrl(String(s.url || ""));
+        if (!url || !url.startsWith("http")) continue;
+        if (url.includes("ssbcontent") || url.includes("localhost") || url.includes("allanime.to")) continue;
+        const name = String(s.sourceName || "سيرفر");
+        const isM3u8 = url.includes(".m3u8");
+        const isMp4  = url.includes(".mp4");
+        sources.push({
+          name: `AllAnime · ${name}`,
+          url,
+          quality: "HD",
+          qualityRank: 2,
+          site: "allanime",
+          ...(isM3u8 ? { directUrl: url, directType: "hls" as const } :
+              isMp4  ? { directUrl: url, directType: "mp4" as const } : {}),
+        });
+      } catch {}
+    }
+
+    if (sources.length) aaSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIME4UP.INFO scraper
+//  Search: GET /?s={query}  →  /anime/{slug}/
+//  Episode: /watch/{slug}-episode-{N}/
+//  Servers: iframe src extracted from episode page
+// ════════════════════════════════════════════════════════════════════
+
+const A4UP_BASE = "https://anime4up.info";
+const A4UP_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime4up.info/" };
+const a4upSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const a4upSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAnime4up(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = a4upSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${A4UP_BASE}/?s=${encodeURIComponent(q)}`, {
+        headers: A4UP_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      let bestSlug: string | null = null, bestScore = 0;
+      const re = /href="https?:\/\/anime4up\.(?:info|cam|tv|io|net|live)\/anime\/([^/"]+)\/?"/gi;
+      for (const m of html.matchAll(re)) {
+        const slug = m[1];
+        const label = slug.replace(/-/g, " ");
+        const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+        if (score > bestScore) { bestScore = score; bestSlug = slug; }
+      }
+      if (bestSlug && bestScore > 0.3) {
+        a4upSlugCache.set(ck, { slug: bestSlug, ts: Date.now() });
+        return bestSlug;
+      }
+    } catch {}
+  }
+  a4upSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnime4upSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `a4up:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = a4upSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await searchAnime4up(title, english);
+    if (!slug) return [];
+
+    const epPad = String(ep).padStart(2, "0");
+    const epUrls = [
+      `${A4UP_BASE}/watch/${slug}-episode-${ep}/`,
+      `${A4UP_BASE}/watch/${slug}-episode-${epPad}/`,
+      `${A4UP_BASE}/${slug}-episode-${ep}/`,
+      `${A4UP_BASE}/episode/${slug}-episode-${ep}/`,
+    ];
+
+    let html = "";
+    for (const epUrl of epUrls) {
+      try {
+        const r = await fetch(epUrl, {
+          headers: { ...A4UP_HDRS, Referer: `${A4UP_BASE}/anime/${slug}/` },
+          signal: AbortSignal.timeout(8000), redirect: "follow",
+        });
+        if (!r.ok || r.status === 404) continue;
+        const text = await r.text();
+        if (isCloudflareBlock(text) || /404|not.?found/i.test(text.slice(0, 2000))) continue;
+        html = text; break;
+      } catch {}
+    }
+    if (!html) return [];
+
+    const sources: UnifiedSource[] = [];
+    const seen = new Set<string>();
+    for (const m of html.matchAll(/<iframe[^>]+src=["']([^"']+)["'][^>]*/gi)) {
+      let u = m[1].trim();
+      if (u.startsWith("//")) u = "https:" + u;
+      if (!u.startsWith("http")) continue;
+      if (DEAD_FILE_HOSTS.some(h => u.includes(h))) continue;
+      if (u.includes("google") || u.includes("facebook") || u.includes("youtube")) continue;
+      if (seen.has(u)) continue; seen.add(u);
+      sources.push({ name: "Anime4up · سيرفر", url: u, quality: "HD", qualityRank: 2, site: "anime4up" });
+    }
+
+    if (sources.length) a4upSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIMEPHOENIX.IO scraper
+//  Search: GET /?s={query}  →  /anime/{slug}/
+//  Episode: /{slug}-episode-{N}/  or  /anime/{slug}/episode-{N}/
+// ════════════════════════════════════════════════════════════════════
+
+const APH_BASE = "https://animephoenix.io";
+const APH_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://animephoenix.io/" };
+const aphSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const aphSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAnimePhoenix(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = aphSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${APH_BASE}/?s=${encodeURIComponent(q)}`, {
+        headers: APH_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      let bestSlug: string | null = null, bestScore = 0;
+      const re = /href="https?:\/\/animephoenix\.(?:io|com|net|tv)\/(?:anime\/)?([^/"?]+)\/?"/gi;
+      for (const m of html.matchAll(re)) {
+        const slug = m[1];
+        if (["category","tag","page","wp-","feed","search"].some(x => slug.includes(x))) continue;
+        const label = slug.replace(/-/g, " ");
+        const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+        if (score > bestScore) { bestScore = score; bestSlug = slug; }
+      }
+      if (bestSlug && bestScore > 0.3) {
+        aphSlugCache.set(ck, { slug: bestSlug, ts: Date.now() });
+        return bestSlug;
+      }
+    } catch {}
+  }
+  aphSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnimePhoenixSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `aph:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = aphSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await searchAnimePhoenix(title, english);
+    if (!slug) return [];
+
+    const epUrls = [
+      `${APH_BASE}/${slug}-episode-${ep}/`,
+      `${APH_BASE}/anime/${slug}/episode-${ep}/`,
+      `${APH_BASE}/${slug}/${ep}/`,
+    ];
+
+    let html = "";
+    for (const epUrl of epUrls) {
+      try {
+        const r = await fetch(epUrl, {
+          headers: { ...APH_HDRS, Referer: `${APH_BASE}/anime/${slug}/` },
+          signal: AbortSignal.timeout(8000), redirect: "follow",
+        });
+        if (!r.ok || r.status === 404) continue;
+        const text = await r.text();
+        if (isCloudflareBlock(text) || /404|not.?found/i.test(text.slice(0, 2000))) continue;
+        html = text; break;
+      } catch {}
+    }
+    if (!html) return [];
+
+    const sources: UnifiedSource[] = [];
+    const seen = new Set<string>();
+    for (const m of html.matchAll(/<iframe[^>]+src=["']([^"']+)["'][^>]*/gi)) {
+      let u = m[1].trim();
+      if (u.startsWith("//")) u = "https:" + u;
+      if (!u.startsWith("http")) continue;
+      if (DEAD_FILE_HOSTS.some(h => u.includes(h))) continue;
+      if (u.includes("google") || u.includes("facebook") || u.includes("youtube")) continue;
+      if (seen.has(u)) continue; seen.add(u);
+      sources.push({ name: "AnimePhoenix · سيرفر", url: u, quality: "HD", qualityRank: 2, site: "animephoenix" });
+    }
+
+    if (sources.length) aphSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  MYANIME.FAN scraper
+//  Search: GET /?s={query}  →  /anime/{slug}/
+//  Episode: /{slug}-episode-{N}/
+// ════════════════════════════════════════════════════════════════════
+
+const MYA_BASE = "https://myanime.fan";
+const MYA_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://myanime.fan/" };
+const myaSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const myaSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchMyAnime(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = myaSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${MYA_BASE}/?s=${encodeURIComponent(q)}`, {
+        headers: MYA_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      let bestSlug: string | null = null, bestScore = 0;
+      const re = /href="https?:\/\/myanime\.fan\/(?:anime\/|series\/)?([^/"?]+)\/?"/gi;
+      for (const m of html.matchAll(re)) {
+        const slug = m[1];
+        if (["page","category","tag","wp-","feed","search"].some(x => slug.includes(x))) continue;
+        const label = slug.replace(/-/g, " ");
+        const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+        if (score > bestScore) { bestScore = score; bestSlug = slug; }
+      }
+      if (bestSlug && bestScore > 0.3) {
+        myaSlugCache.set(ck, { slug: bestSlug, ts: Date.now() });
+        return bestSlug;
+      }
+    } catch {}
+  }
+  myaSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getMyAnimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `mya:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = myaSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await searchMyAnime(title, english);
+    if (!slug) return [];
+
+    const epPad = String(ep).padStart(2, "0");
+    const epUrls = [
+      `${MYA_BASE}/${slug}-episode-${ep}/`,
+      `${MYA_BASE}/${slug}-episode-${epPad}/`,
+      `${MYA_BASE}/episode/${slug}-${ep}/`,
+      `${MYA_BASE}/${slug}/${ep}/`,
+    ];
+
+    let html = "";
+    for (const epUrl of epUrls) {
+      try {
+        const r = await fetch(epUrl, {
+          headers: MYA_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+        });
+        if (!r.ok || r.status === 404) continue;
+        const text = await r.text();
+        if (isCloudflareBlock(text) || /404|not.?found/i.test(text.slice(0, 2000))) continue;
+        html = text; break;
+      } catch {}
+    }
+    if (!html) return [];
+
+    const sources: UnifiedSource[] = [];
+    const seen = new Set<string>();
+    for (const m of html.matchAll(/<iframe[^>]+src=["']([^"']+)["'][^>]*/gi)) {
+      let u = m[1].trim();
+      if (u.startsWith("//")) u = "https:" + u;
+      if (!u.startsWith("http")) continue;
+      if (DEAD_FILE_HOSTS.some(h => u.includes(h))) continue;
+      if (u.includes("google") || u.includes("facebook") || u.includes("youtube")) continue;
+      if (seen.has(u)) continue; seen.add(u);
+      sources.push({ name: "MyAnime · سيرفر", url: u, quality: "HD", qualityRank: 2, site: "myanime" });
+    }
+
+    if (sources.length) myaSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIMEKAYAN.COM scraper  (JSON API)
+//  Search: POST /api/search  →  GET /api/anime/{id}/episodes
+// ════════════════════════════════════════════════════════════════════
+
+const AKY_BASE = "https://animekayan.com";
+const AKY_HDRS: Record<string, string> = {
+  ...BASE_HDRS, Referer: "https://animekayan.com/",
+  Accept: "application/json, text/html, */*",
+};
+const akySrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getAnimeKayanSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `aky:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = akySrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const sr = await fetch(`${AKY_BASE}/api/search`, {
+        method: "POST",
+        headers: { ...AKY_HDRS, "Content-Type": "application/json" },
+        body: JSON.stringify({ q }),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!sr.ok) continue;
+      const data = await sr.json() as any;
+      const results: any[] = data?.results || data?.data || [];
+      if (!results.length) continue;
+
+      let bestId: string | null = null, bestScore = 0;
+      for (const res of results) {
+        const rTitle = String(res.title || res.name || "");
+        const score = Math.max(similarity(rTitle, title), english ? similarity(rTitle, english) : 0);
+        if (score > bestScore) { bestScore = score; bestId = String(res.id || res.slug || ""); }
+      }
+      if (!bestId || bestScore < 0.25) continue;
+
+      const er = await fetch(`${AKY_BASE}/api/anime/${bestId}/episodes`, {
+        headers: AKY_HDRS, signal: AbortSignal.timeout(6000),
+      });
+      if (!er.ok) continue;
+      const epData = await er.json() as any;
+      const episodes: any[] = epData?.episodes || epData?.data || [];
+      const episode = episodes.find((e: any) =>
+        (e.number === ep) || (e.ep === ep) || (e.episode === ep)
+      );
+      if (!episode) continue;
+
+      const srcArr: any[] = episode.sources || episode.servers || [];
+      const sources: UnifiedSource[] = [];
+      for (const src of srcArr) {
+        const url = String(src.url || src.link || "");
+        if (!url.startsWith("http")) continue;
+        const isM3u8 = url.includes(".m3u8"), isMp4 = url.includes(".mp4");
+        sources.push({
+          name: `AnimeKayan · ${src.quality || "سيرفر"}`,
+          url,
+          quality: src.quality || "HD",
+          qualityRank: qualityRank(src.quality || "HD"),
+          site: "animekayan",
+          ...(src.isDirect && isMp4  ? { directUrl: url, directType: "mp4" as const } : {}),
+          ...(src.isDirect && isM3u8 ? { directUrl: url, directType: "hls" as const } : {}),
+        });
+      }
+      if (sources.length) {
+        akySrcCache.set(ck, { sources, ts: Date.now() });
+        return sources;
+      }
+    } catch {}
+  }
+  return [];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Sources Stream  GET /api/anime/sources-stream  (SSE)
 //  Streams sources as they arrive from shahiid-anime.net
 // ════════════════════════════════════════════════════════════════════
@@ -1063,27 +1501,69 @@ router.get("/anime/sources-stream", async (req, res) => {
     const SCRAPER_MS = 18000;
     const EXTRACT_MS = 12000;
 
+    const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
+      Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
+
     await Promise.allSettled([
       // ── Shahiid-anime.net ──
       (async () => {
         try {
           if (!title) return;
-          const srcs = await Promise.race([
-            getShahiidSources(title, english, ep),
-            new Promise<UnifiedSource[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
-          ]);
+          const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })(),
 
-      // ── AnimeGG (runs in parallel) ──
+      // ── AnimeGG ──
       (async () => {
         try {
           if (!title) return;
-          const srcs = await Promise.race([
-            getAnimeGGSources(title, english, ep),
-            new Promise<UnifiedSource[]>(r => setTimeout(() => r([]), SCRAPER_MS)),
-          ]);
+          const srcs = await race(getAnimeGGSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── AllAnime episode video sources ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAllAnimeSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── Anime4up.info ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnime4upSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── AnimePhoenix.io ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── MyAnime.fan ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getMyAnimeSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── AnimeKayan.com ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnimeKayanSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })(),
