@@ -1,8 +1,8 @@
 # Nova Anime
 
-تطبيق بث أنمي عربي يجمع مصادر من 7 مصادر متوازية ويُشغّلها في مشغّل داخلي.
+تطبيق بث أنمي عربي يجمع مصادر من 3 مصادر متوازية ويُشغّلها في مشغّل داخلي.
 
-المصادر: shahiid-anime.net · AnimeGG · AllAnime · Anime4up · AnimePhoenix · MyAnime.fan · AnimeKayan
+المصادر الفعّالة: shahiid-anime.net (عربي) · animelek.top (عربي) · AnimeGG (إنجليزي)
 
 ## Run & Operate
 

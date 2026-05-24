@@ -35,7 +35,8 @@ type ProbeStatus = "unknown" | "testing" | "ok" | "dead";
 ───────────────────────────────────────────────────── */
 const SITE_LABEL: Record<string, string> = {
   shahiid:      "شاهيد أنمي",
-  animegg:      "AnimeGG",
+  animegg:      "AnimeGG · إنجليزي",
+  animelek:     "انمي ليك",
   allanime:     "AllAnime",
   anime4up:     "Anime4up",
   animephoenix: "AnimePhoenix",
@@ -311,16 +312,6 @@ function VideoPlayer({
         onClick={handleTap}
       />
 
-      {/* ── PERMANENT BACK BUTTON — always visible, top-right corner ── */}
-      <button
-        onClick={e => { e.stopPropagation(); onClose(); }}
-        className="absolute z-40 flex items-center gap-1.5 bg-black/70 backdrop-blur-md border border-white/20 rounded-full active:scale-90 transition-transform shadow-lg"
-        style={{ top: "max(14px, env(safe-area-inset-top))", right: "12px", padding: "8px 14px 8px 10px" }}
-      >
-        <ChevronRight className="w-4 h-4 text-white" />
-        <span className="text-white text-[12px] font-black font-['Cairo']">رجوع</span>
-      </button>
-
       {/* ── Pill to restore controls when hidden ── */}
       <AnimatePresence>
         {!showBar && (
@@ -335,7 +326,7 @@ function VideoPlayer({
         )}
       </AnimatePresence>
 
-      {/* ── TOP BAR (next-server + title) ── */}
+      {/* ── TOP BAR (back + next-server + title) ── */}
       <AnimatePresence>
         {showBar && (
           <motion.div
@@ -350,6 +341,16 @@ function VideoPlayer({
               background: "linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
             }}
           >
+            {/* BACK button — dynamic, shown with controls */}
+            <button
+              onClick={e => { e.stopPropagation(); onClose(); }}
+              className="absolute pointer-events-auto flex items-center gap-1.5 bg-black/55 backdrop-blur-md border border-white/10 rounded-full active:scale-90 transition-transform z-30"
+              style={{ top: "max(14px, env(safe-area-inset-top))", right: "12px", padding: "7px 13px 7px 10px" }}
+            >
+              <ChevronRight className="w-3.5 h-3.5 text-white/70" />
+              <span className="text-white/70 text-[11px] font-bold font-['Cairo']">رجوع</span>
+            </button>
+
             {/* NEXT SERVER button */}
             <button
               onClick={e => { e.stopPropagation(); onNextSrc(); }}
