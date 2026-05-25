@@ -230,11 +230,12 @@ function VideoPlayer({
   onClose: () => void; onNext: () => void; onPrev: () => void;
   onSelectSource: (s: Source) => void; onNextSrc: () => void;
 }) {
-  const [showSheet, setShowSheet] = useState(false);
-  const [showBar, setShowBar]     = useState(true);
+  const [showSheet, setShowSheet]     = useState(false);
+  const [showBar, setShowBar]         = useState(true);
   const [nativeError, setNativeError] = useState(false);
   const [isPlaying, setIsPlaying]     = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [iframeReady, setIframeReady] = useState(false);
   const iframeRef  = useRef<HTMLIFrameElement>(null);
   const hideTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -265,17 +266,12 @@ function VideoPlayer({
 
   useEffect(() => {
     setNativeError(false);
+    setIframeReady(false);
     setShowBar(true);
     setIsPlaying(false);
     scheduleHide();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [src.url]);
-
-  useEffect(() => {
-    if (!nativeError) return;
-    const t = setTimeout(() => onNextSrc(), 800);
-    return () => clearTimeout(t);
-  }, [nativeError]);
 
   function fullscreen() {
     const el = iframeRef.current || document.querySelector("video");
@@ -318,16 +314,27 @@ function VideoPlayer({
 
       {/* ── IFRAME PLAYER ── */}
       {!useNative && (
-        <iframe
-          ref={iframeRef}
-          key={src.url}
-          src={src.url}
-          className="absolute inset-0 w-full h-full border-none"
-          allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock allow-popups"
-          allowFullScreen
-          title={title}
-        />
+        <>
+          <iframe
+            ref={iframeRef}
+            key={src.url}
+            src={src.url}
+            className="absolute inset-0 w-full h-full border-none"
+            style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s" }}
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock allow-popups"
+            allowFullScreen
+            title={title}
+            onLoad={() => setIframeReady(true)}
+          />
+          {/* Loading indicator until iframe fires onLoad */}
+          {!iframeReady && (
+            <div className="absolute inset-0 z-[5] flex flex-col items-center justify-center gap-3 bg-black pointer-events-none">
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
+              <p className="text-white/40 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
+            </div>
+          )}
+        </>
       )}
 
       {/* ── Tap overlay (full screen, always active) ── */}
@@ -683,14 +690,17 @@ export default function WatchPage() {
 
   function serverPriority(s: Source): number {
     if (s.directUrl) return 12;
+    // AnimeGG embeds are purpose-built for iframe embedding — always work
+    if (s.site === "animegg") return 11;
     const name = s.name.toLowerCase();
     if (name.includes("maga") || name.includes("megamax")) return 10;
     if (s.site === "animephoenix" || s.site === "anime4up") return 9;
     if (s.site === "myanime" || s.site === "animekayan") return 8;
-    if (name.includes("uqload")) return 7;
-    if (name.includes("anime7u")) return 7;
-    if (name.includes("voe")) return 6;
-    if (name.includes("wishfast")) return 5;
+    if (s.site === "animelek") return 7;
+    if (name.includes("sendvid")) return 6;
+    if (name.includes("uqload") || name.includes("anime7u") || name.includes("voe")) return 5;
+    if (name.includes("wishfast")) return 4;
+    // shahiid share4max embeds last — may block X-Frame-Options
     return 3;
   }
 

@@ -926,7 +926,7 @@ async function getAnimeGGSources(
       let directUrl: string | undefined;
       let directType: "mp4" | "hls" | undefined;
       let quality = "480p";
-      let qualityRank = 1;
+      let qualityRank = 2; // treated as HD-tier for sorting purposes
 
       try {
         const er = await fetch(embedUrl, {
@@ -950,8 +950,8 @@ async function getAnimeGGSources(
                 const lbl = (arr.find(s => s.label)?.label || "").toLowerCase();
                 if (lbl.includes("1080")) { quality = "1080p"; qualityRank = 3; }
                 else if (lbl.includes("720")) { quality = "720p"; qualityRank = 2; }
-                else if (lbl.includes("480")) { quality = "480p"; qualityRank = 1; }
-                else if (lbl.includes("360")) { quality = "360p"; qualityRank = 1; }
+                else if (lbl.includes("480")) { quality = "480p"; /* keep qualityRank=2 */ }
+                else if (lbl.includes("360")) { quality = "360p"; /* keep qualityRank=2 */ }
               } catch {}
             }
           }
