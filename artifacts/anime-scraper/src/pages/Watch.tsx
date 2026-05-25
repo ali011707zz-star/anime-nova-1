@@ -264,15 +264,8 @@ function VideoPlayer({
 
   const handleTap = useCallback(() => {
     if (showSheet) return;
-    setShowCtrl(v => {
-      if (v) {
-        if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
-        return false;
-      }
-      scheduleHide();
-      return true;
-    });
-  }, [showSheet, scheduleHide]);
+    showAndSchedule();
+  }, [showSheet, showAndSchedule]);
 
   useEffect(() => {
     setNativeError(false); setIframeReady(false);
@@ -310,7 +303,7 @@ function VideoPlayer({
         />
       ) : (
         <>
-          {/* ─ NO sandbox attribute — fixes "Please Disable Sandbox" ─ */}
+          {/* sandbox blocks top-level ad redirects while allowing playback */}
           <iframe
             ref={iframeRef}
             key={src.url}
@@ -318,6 +311,7 @@ function VideoPlayer({
             className="absolute inset-0 w-full h-full border-none"
             style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s", zIndex: 1 }}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-orientation-lock allow-downloads"
             allowFullScreen
             title={title}
             onLoad={() => { setIframeReady(true); showAndSchedule(6000); }}
@@ -337,12 +331,12 @@ function VideoPlayer({
 
       {/* ══════════════════════════════════════════
           FULL-SCREEN TAP OVERLAY
-          ─ When controls HIDDEN → pointer-events:auto  (catch tap → show controls)
-          ─ When controls SHOWN  → pointer-events:none  (let iframe/native receive input)
+          ─ Always catches taps to show/refresh controls
+          ─ pointer-events:none when sheet open (let sheet receive input)
           ══════════════════════════════════════════ */}
       <div
         className="absolute inset-0 z-[10]"
-        style={{ pointerEvents: showCtrl || showSheet ? "none" : "auto" }}
+        style={{ pointerEvents: showSheet ? "none" : "auto" }}
         onClick={handleTap}
       />
 
@@ -381,14 +375,14 @@ function VideoPlayer({
               className="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 pointer-events-auto"
               style={{
                 paddingTop: "max(12px, env(safe-area-inset-top))",
-                paddingBottom: 20,
+                paddingBottom: 16,
                 background: "linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)",
               }}
             >
               {/* Right: Back */}
               <button
                 onClick={e => { e.stopPropagation(); onClose(); }}
-                className="flex items-center gap-1.5 bg-white/12 backdrop-blur-xl border border-white/15 rounded-xl px-3 py-2 active:scale-90 shrink-0"
+                className="flex items-center gap-1 bg-white/12 backdrop-blur-xl border border-white/15 rounded-xl px-2.5 py-2 active:scale-90 shrink-0"
               >
                 <ChevronRight className="w-4 h-4 text-white" />
                 <span className="text-white text-[11px] font-black font-['Cairo']">رجوع</span>
@@ -396,71 +390,71 @@ function VideoPlayer({
 
               {/* Center: title + server name */}
               <div className="flex-1 min-w-0 text-center">
-                <p className="text-white text-[13px] font-black font-['Cairo'] truncate drop-shadow">{title}</p>
+                <p className="text-white text-[12px] font-black font-['Cairo'] truncate drop-shadow">{title}</p>
                 <p className="text-white/45 text-[10px] font-['Cairo'] truncate">
                   الحلقة {ep === 0 ? "فيلم" : ep} · <span className="text-violet-300/80">{src.name}</span>
                 </p>
               </div>
 
-              {/* Left: Next server */}
+              {/* Orientation toggle */}
               <button
-                onClick={e => { e.stopPropagation(); onNextSrc(); showAndSchedule(); }}
-                className="flex items-center gap-1.5 bg-white/12 backdrop-blur-xl border border-white/15 rounded-xl px-3 py-2 active:scale-90 shrink-0"
+                onClick={e => { e.stopPropagation(); toggleOrientation(); showAndSchedule(); }}
+                className="w-9 h-9 flex items-center justify-center bg-white/10 backdrop-blur-xl border border-white/12 rounded-xl active:scale-90 shrink-0"
+                title={isLandscape ? "وضع عمودي" : "وضع أفقي"}
               >
-                <SkipForward className="w-3.5 h-3.5 text-white/80" />
-                <span className="text-white/80 text-[11px] font-bold font-['Cairo']">سيرفر</span>
+                <RotateCcw className={`w-4 h-4 transition-transform duration-300 ${isLandscape ? "text-violet-300" : "text-white/60 -rotate-90"}`} />
+              </button>
+
+              {/* Fullscreen */}
+              <button
+                onClick={e => { e.stopPropagation(); fullscreen(); }}
+                className="w-9 h-9 flex items-center justify-center bg-white/10 backdrop-blur-xl border border-white/12 rounded-xl active:scale-90 shrink-0"
+              >
+                <Maximize2 className="w-4 h-4 text-white/60" />
               </button>
             </div>
 
             {/* ── BOTTOM BAR ── */}
             <div
               className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 pointer-events-auto"
-              dir="rtl"
               style={{
-                paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-                paddingTop: 18,
+                paddingBottom: "max(14px, env(safe-area-inset-bottom))",
+                paddingTop: 14,
                 background: "linear-gradient(to top, rgba(0,0,0,0.94) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)",
               }}
             >
-              {/* Prev episode */}
+              {/* Right: Prev episode */}
               <button
                 onClick={e => { e.stopPropagation(); onPrev(); }}
                 disabled={ep <= 1}
-                className="flex items-center gap-1 bg-white/10 backdrop-blur-xl border border-white/12 text-white/80 text-[11px] font-bold px-3 py-2.5 rounded-xl disabled:opacity-20 active:scale-95 font-['Cairo'] shrink-0"
+                className="flex items-center gap-1 bg-white/10 backdrop-blur-xl border border-white/12 text-white/80 text-[11px] font-bold px-3 py-2 rounded-xl disabled:opacity-20 active:scale-95 font-['Cairo'] shrink-0"
               >
                 <ChevronRight className="w-3.5 h-3.5" /> السابقة
               </button>
 
-              {/* Servers list */}
+              {/* Center: Servers list — compact */}
               <button
                 onClick={e => { e.stopPropagation(); setShowSheet(true); }}
-                className="flex-1 flex items-center justify-center gap-1.5 bg-white/8 backdrop-blur-xl border border-white/10 text-white/65 text-[11px] font-bold py-2.5 rounded-xl active:scale-[0.97] font-['Cairo']"
+                className="flex-1 flex items-center justify-center gap-1.5 bg-white/8 backdrop-blur-xl border border-white/10 text-white/60 text-[11px] font-bold py-2 rounded-xl active:scale-[0.97] font-['Cairo']"
               >
-                <List className="w-3.5 h-3.5" /> السيرفرات ({sources.length})
+                <List className="w-3.5 h-3.5 shrink-0" />
+                <span>السيرفرات</span>
+                <span className="text-[10px] bg-violet-500/25 text-violet-300 px-1.5 py-0.5 rounded-md font-black">{sources.length}</span>
               </button>
 
-              {/* Orientation toggle */}
+              {/* Left: Next server */}
               <button
-                onClick={e => { e.stopPropagation(); toggleOrientation(); showAndSchedule(); }}
-                className="w-10 h-10 flex items-center justify-center bg-white/8 backdrop-blur-xl border border-white/10 rounded-xl active:scale-95 shrink-0"
-                title={isLandscape ? "وضع عمودي" : "وضع أفقي"}
+                onClick={e => { e.stopPropagation(); onNextSrc(); showAndSchedule(); }}
+                className="flex items-center gap-1 bg-white/10 backdrop-blur-xl border border-white/12 text-white/70 text-[11px] font-bold px-3 py-2 rounded-xl active:scale-95 font-['Cairo'] shrink-0"
               >
-                <RotateCcw className={`w-4 h-4 transition-transform duration-300 ${isLandscape ? "text-violet-300 rotate-0" : "text-white/55 -rotate-90"}`} />
+                <SkipForward className="w-3.5 h-3.5" />
               </button>
 
-              {/* Fullscreen */}
-              <button
-                onClick={e => { e.stopPropagation(); fullscreen(); }}
-                className="w-10 h-10 flex items-center justify-center bg-white/8 backdrop-blur-xl border border-white/10 rounded-xl active:scale-95 shrink-0"
-              >
-                <Maximize2 className="w-4 h-4 text-white/55" />
-              </button>
-
-              {/* Next episode */}
+              {/* Left: Next episode */}
               <button
                 onClick={e => { e.stopPropagation(); onNext(); }}
                 disabled={ep >= totalEps && totalEps > 0}
-                className="flex items-center gap-1 bg-violet-600 text-white text-[11px] font-black px-3 py-2.5 rounded-xl disabled:opacity-20 active:scale-95 font-['Cairo'] shrink-0 shadow-lg shadow-violet-900/40"
+                className="flex items-center gap-1 bg-violet-600 text-white text-[11px] font-black px-3 py-2 rounded-xl disabled:opacity-20 active:scale-95 font-['Cairo'] shrink-0 shadow-lg shadow-violet-900/40"
               >
                 التالية <ChevronLeft className="w-3.5 h-3.5" />
               </button>
