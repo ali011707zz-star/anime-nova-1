@@ -2334,6 +2334,7 @@ router.get("/anime/proxy-embed", async (req, res) => {
     html = html.replace(/<iframe[^>]+src=["'][^"']*(?:doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>.*?<\/iframe>/gis, "");
 
     const INJECT = `
+<base href="${parsed.origin}/">
 <style>
 html, body { margin:0 !important; padding:0 !important; overflow:hidden !important; background:#000 !important; width:100vw !important; height:100vh !important; }
 header, footer, nav, aside, .header, .footer, .nav, .navbar,
@@ -2389,44 +2390,101 @@ video { width: 100% !important; height: 100% !important; object-fit: contain !im
 </style>
 <script>
 (function(){
-  window.open = function(){ return { focus:function(){}, closed:false }; };
+  /* ── Block all popup / navigation tricks ── */
+  window.open = function(){ return { focus:function(){}, closed:false, document:{write:function(){}}, location:{} }; };
   window.alert = function(){};
   window.confirm = function(){ return false; };
   window.prompt = function(){ return null; };
+
+  /* Prevent top-frame navigation (window.top.location = url) */
+  try {
+    Object.defineProperty(window, 'top',    { get: function(){ return window.self; }, configurable: true });
+    Object.defineProperty(window, 'parent', { get: function(){ return window.self; }, configurable: true });
+  } catch(e){}
+
+  /* Block external link clicks anywhere in page */
   document.addEventListener('click', function(e){
     var t = e.target, tries = 0;
-    while(t && tries++ < 6){
+    while(t && tries++ < 8){
       if(t.tagName === 'A'){
         var href = (t.getAttribute('href') || '').trim();
         if(href && href !== '#' && !href.startsWith('javascript') &&
           (href.startsWith('http') || href.startsWith('//'))){
-          var same = href.indexOf(location.hostname) !== -1;
-          if(!same){ e.preventDefault(); e.stopPropagation(); return; }
+          var myHost = '${parsed.hostname}';
+          if(href.indexOf(myHost) === -1){ e.preventDefault(); e.stopPropagation(); return; }
         }
         break;
       }
       t = t.parentElement;
     }
   }, true);
+
+  /* Block location.assign / replace to external sites */
   try {
-    var _assign = location.assign.bind(location);
-    Object.defineProperty(window, 'location', {
-      configurable: true, get: function(){ return location; },
-      set: function(v){ if(typeof v === 'string' && v.indexOf(location.hostname) === -1) return; _assign(v); }
+    var _origHref = Object.getOwnPropertyDescriptor(window.location, 'href') ||
+                    Object.getOwnPropertyDescriptor(Location.prototype, 'href');
+    Object.defineProperty(window.location, 'href', {
+      get: function(){ return location.href; },
+      set: function(v){
+        if(typeof v === 'string' && v.indexOf(location.hostname) === -1) return;
+        location.href = v;
+      },
+      configurable: true,
     });
   } catch(e){}
-  function cleanAds(){
-    var adSels = ['[id*="ad_"]','[id*="banner"]','[class*="ad-banner"]',
+
+  /* Auto-dismiss age-check / adult / VPN popups */
+  function closePopups(){
+    /* Click any "X" close button on overlay/modal dialogs */
+    var closeSels = [
+      '[class*="modal"] [class*="close"]',
+      '[class*="popup"] [class*="close"]',
+      '[class*="overlay"] [class*="close"]',
+      '[class*="dialog"] [class*="close"]',
+      'button.close', '[aria-label="Close"]', '[aria-label="close"]',
+    ];
+    closeSels.forEach(function(sel){
+      try { document.querySelectorAll(sel).forEach(function(btn){ btn.click(); }); } catch(e){}
+    });
+
+    /* Hide age-check overlays that contain Arabic/18+ text */
+    var adSels = [
+      '[id*="ad_"]','[id*="_ad"]','[id*="banner"]','[class*="ad-banner"]',
       '[class*="popup"]','[class*="popunder"]','[class*="clickunder"]',
-      '[class*="overlay"]:not([class*="player"])',
+      '[class*="overlay"]:not([id*="player"]):not([class*="player"])',
+      '[id*="overlay"]:not([id*="player"])',
       '.adsbygoogle','[id*="interstitial"]','[class*="vpn"]',
-      '[class*="subscribe"]','[class*="social-"]'];
+      '[class*="subscribe"]','[class*="age"]','[id*="age"]',
+      '[class*="gdpr"]','[class*="cookie"]',
+      'div[style*="position:fixed"][style*="z-index"]',
+      'div[style*="position: fixed"][style*="z-index"]',
+    ];
     adSels.forEach(function(sel){
-      try { document.querySelectorAll(sel).forEach(function(el){ el.style.display='none'; el.style.visibility='hidden'; el.style.pointerEvents='none'; }); } catch(e){}
+      try {
+        document.querySelectorAll(sel).forEach(function(el){
+          var txt = el.textContent || '';
+          /* Only hide if it looks like an ad/age-check overlay */
+          if(txt.indexOf('18') !== -1 || txt.indexOf('vpn') !== -1 ||
+             txt.indexOf('VPN') !== -1 || txt.indexOf('ad') !== -1 ||
+             el.getAttribute('class')?.includes('ad') ||
+             (el.style.zIndex && parseInt(el.style.zIndex) > 999 && el.tagName === 'DIV')){
+            el.style.setProperty('display','none','important');
+            el.style.setProperty('visibility','hidden','important');
+            el.style.setProperty('pointer-events','none','important');
+          }
+        });
+      } catch(e){}
     });
   }
-  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', cleanAds); } else { cleanAds(); }
-  setTimeout(cleanAds, 800); setTimeout(cleanAds, 2000);
+
+  /* Run immediately, on DOM ready, and periodically */
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', closePopups);
+  } else { closePopups(); }
+  setTimeout(closePopups, 300); setTimeout(closePopups, 800);
+  setTimeout(closePopups, 2000); setTimeout(closePopups, 4000);
+  setInterval(closePopups, 3000);
+
   document.addEventListener('DOMContentLoaded', function(){
     var text = document.body && document.body.innerText || '';
     if(text.indexOf('Just a moment') !== -1 || text.indexOf('cf_chl_') !== -1){
