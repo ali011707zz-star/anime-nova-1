@@ -1929,16 +1929,41 @@ async function getAnimadarSources(
 //  Flow: search → get anime session → get ep session → play page → kwik.si
 //  kwik.si embed → unpack p,a,c,k,e,d → extract m3u8 URL
 // ════════════════════════════════════════════════════════════════════
-const APAHE_BASE = "https://animepahe.ru";
-const APAHE_HDRS: Record<string, string> = {
-  "User-Agent": BROWSER_UA,
-  "Accept": "application/json, text/html, */*",
-  "Referer": "https://animepahe.ru/",
-  "Accept-Language": "en-US,en;q=0.9",
-};
+// Animepahe: try multiple domains in case primary is down
+const APAHE_DOMAINS = ["https://animepahe.ru", "https://animepahe.com", "https://animepahe.org"];
+let apaheBase = APAHE_DOMAINS[0];
+
+function makeApaheHdrs(base: string): Record<string, string> {
+  return {
+    "User-Agent": BROWSER_UA,
+    "Accept": "application/json, text/html, */*",
+    "Referer": `${base}/`,
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+}
+
 const APAHE_TTL = 15 * 60 * 1000;
 const apaheSessionMap = new Map<string, { session: string | null; ts: number }>();
 const apaheEpMap      = new Map<string, { session: string | null; ts: number }>();
+
+async function apaheFetch(path: string, opts: RequestInit = {}): Promise<Response | null> {
+  for (const domain of APAHE_DOMAINS) {
+    try {
+      const hdrs = makeApaheHdrs(domain);
+      const r = await fetch(`${domain}${path}`, {
+        ...opts,
+        headers: { ...hdrs, ...(opts.headers as Record<string,string> || {}) },
+        signal: AbortSignal.timeout(10000),
+        redirect: "follow",
+      });
+      if (r.ok) {
+        apaheBase = domain;
+        return r;
+      }
+    } catch {}
+  }
+  return null;
+}
 
 async function getAnimepaheSession(romaji: string, english: string | null): Promise<string | null> {
   const key = (english || romaji).toLowerCase().slice(0, 60);
@@ -1946,10 +1971,8 @@ async function getAnimepaheSession(romaji: string, english: string | null): Prom
   if (cached && Date.now() - cached.ts < APAHE_TTL) return cached.session;
   try {
     const q = encodeURIComponent(english || romaji);
-    const r = await fetch(`${APAHE_BASE}/api?m=search&q=${q}`, {
-      headers: APAHE_HDRS, signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) { apaheSessionMap.set(key, { session: null, ts: Date.now() }); return null; }
+    const r = await apaheFetch(`/api?m=search&q=${q}`);
+    if (!r) { apaheSessionMap.set(key, { session: null, ts: Date.now() }); return null; }
     const data = await r.json() as any;
     if (!data?.data?.length) { apaheSessionMap.set(key, { session: null, ts: Date.now() }); return null; }
     let best = data.data[0], bestScore = 0;
@@ -1969,10 +1992,8 @@ async function getAnimepaheEpSession(animeSession: string, epNum: number): Promi
   if (cached && Date.now() - cached.ts < APAHE_TTL) return cached.session;
   try {
     for (let page = 1; page <= 15; page++) {
-      const r = await fetch(`${APAHE_BASE}/api?m=release&id=${animeSession}&sort=episode_asc&page=${page}`, {
-        headers: APAHE_HDRS, signal: AbortSignal.timeout(10000),
-      });
-      if (!r.ok) break;
+      const r = await apaheFetch(`/api?m=release&id=${animeSession}&sort=episode_asc&page=${page}`);
+      if (!r) break;
       const data = await r.json() as any;
       if (!data?.data?.length) break;
       for (const ep of data.data) {
@@ -1993,7 +2014,7 @@ async function getAnimepaheEpSession(animeSession: string, epNum: number): Promi
 async function extractKwik(kwikUrl: string): Promise<{ url: string; type: "hls" | "mp4" } | null> {
   try {
     const r = await fetch(kwikUrl.replace("/f/", "/e/"), {
-      headers: { ...APAHE_HDRS, "Accept": "text/html,*/*" },
+      headers: { ...makeApaheHdrs(apaheBase), "Accept": "text/html,*/*" },
       signal: AbortSignal.timeout(12000),
       redirect: "follow",
     });
@@ -2016,11 +2037,10 @@ async function extractKwik(kwikUrl: string): Promise<{ url: string; type: "hls" 
 
 async function getAnimepaheKwikUrls(animeSession: string, epSession: string): Promise<{ url: string; label: string }[]> {
   try {
-    const r = await fetch(`${APAHE_BASE}/play/${animeSession}/${epSession}`, {
-      headers: { ...APAHE_HDRS, "Accept": "text/html,*/*" },
-      signal: AbortSignal.timeout(12000),
+    const r = await apaheFetch(`/play/${animeSession}/${epSession}`, {
+      headers: { "Accept": "text/html,*/*" },
     });
-    if (!r.ok) return [];
+    if (!r) return [];
     const html = await r.text();
     if (isCloudflareBlock(html)) return [];
     const kwiks: { url: string; label: string }[] = [];
