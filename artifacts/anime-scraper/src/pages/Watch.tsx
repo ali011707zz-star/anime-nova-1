@@ -322,7 +322,7 @@ function VideoPlayer({
             className="absolute inset-0 w-full h-full border-none"
             style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s" }}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock allow-popups"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"
             allowFullScreen
             title={title}
             onLoad={() => setIframeReady(true)}
@@ -689,18 +689,16 @@ export default function WatchPage() {
   }, [animeId, ep]);
 
   function serverPriority(s: Source): number {
-    if (s.directUrl) return 12;
-    // AnimeGG embeds are purpose-built for iframe embedding — always work
-    if (s.site === "animegg") return 11;
-    const name = s.name.toLowerCase();
-    if (name.includes("maga") || name.includes("megamax")) return 10;
-    if (s.site === "animephoenix" || s.site === "anime4up") return 9;
-    if (s.site === "myanime" || s.site === "animekayan") return 8;
-    if (s.site === "animelek") return 7;
-    if (name.includes("sendvid")) return 6;
-    if (name.includes("uqload") || name.includes("anime7u") || name.includes("voe")) return 5;
-    if (name.includes("wishfast")) return 4;
-    // shahiid share4max embeds last — may block X-Frame-Options
+    if (s.directUrl) return 14;                          // direct HLS/MP4 always wins
+    // ── Arabic sources first ──
+    if (s.site === "shahiid")   return 13;               // Arabic dubbed/subbed
+    if (s.site === "animelek")  return 12;               // Arabic subbed
+    if (s.site === "animedar")  return 11;               // Arabic
+    // ── Other Arabic scrapers ──
+    if (s.site === "animephoenix" || s.site === "anime4up") return 10;
+    if (s.site === "myanime" || s.site === "animekayan") return 9;
+    // ── English fallback (AnimeGG) — lower priority ──
+    if (s.site === "animegg") return 5;
     return 3;
   }
 

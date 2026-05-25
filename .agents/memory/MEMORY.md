@@ -1,0 +1,4 @@
+- [ShareMax/Megamax Inertia extraction](sharmax-inertia.md) — share4max.com & megamax.me use Inertia.js; video URL requires partial reload, not HTML parsing
+- [Streamtape URL regex](streamtape-regex.md) — altRe pattern must exclude `<>` chars or `</div>` contaminates the token field
+- [Arabic source priority](source-priority.md) — shahiid=13, animelek=12, animedar=11; AnimeGG (English)=5; directUrl always wins at 14
+- [iframe allow-popups](iframe-sandbox.md) — removing allow-popups from sandbox stops iframe from opening external tabs ("exits app")
