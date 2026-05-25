@@ -321,11 +321,11 @@ function VideoPlayer({
         />
       ) : (
         <>
-          {/* Route all embeds through proxy-embed: strips ad scripts, overrides window.open/top */}
+          {/* Direct embed — proxy-embed only for simple HTML pages, not React/Next.js apps */}
           <iframe
             ref={iframeRef}
             key={src.url}
-            src={`/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`}
+            src={src.url}
             className="absolute inset-0 w-full h-full border-none"
             style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s", zIndex: 1 }}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
@@ -348,13 +348,19 @@ function VideoPlayer({
 
       {/* ══════════════════════════════════════════
           FULL-SCREEN TAP OVERLAY
-          ─ Always catches taps to show/refresh controls
-          ─ pointer-events:none when sheet open (let sheet receive input)
+          ─ Catches touch/click anywhere to show controls
+          ─ onTouchEnd for immediate mobile response (no 300ms delay)
           ══════════════════════════════════════════ */}
       <div
         className="absolute inset-0 z-[10]"
-        style={{ pointerEvents: showSheet ? "none" : "auto" }}
+        style={{
+          pointerEvents: showSheet ? "none" : "auto",
+          background: "transparent",
+          touchAction: "manipulation",
+          WebkitTapHighlightColor: "transparent",
+        }}
         onClick={handleTap}
+        onTouchEnd={e => { e.stopPropagation(); handleTap(); }}
       />
 
       {/* ── Native center play/pause ── */}
