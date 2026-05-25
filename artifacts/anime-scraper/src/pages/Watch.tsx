@@ -107,14 +107,17 @@ function ServerSheet({ sources, activeIdx, statuses, onSelect, onClose }: {
           <div className="w-10 h-1 rounded-full bg-white/15" />
         </div>
         <div className="flex items-center justify-between px-5 py-3 shrink-0 border-b border-white/6" dir="rtl">
-          <p className="text-sm font-black text-white font-['Cairo']">السيرفرات ({sources.length})</p>
+          <p className="text-sm font-black text-white font-['Cairo']">
+            السيرفرات ({sources.filter(s => (statuses[s.url] || "unknown") !== "dead").length})
+          </p>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/8 flex items-center justify-center active:scale-90">
             <X className="w-4 h-4 text-white/60" />
           </button>
         </div>
         <div className="overflow-y-auto px-4 py-3 space-y-2 pb-10">
-          {sources.map((src, i) => {
-            const isActive = i === activeIdx;
+          {sources.filter((_src, i) => (statuses[sources[i].url] || "unknown") !== "dead" || i === activeIdx).map((src, i) => {
+            const realIdx = sources.indexOf(src);
+            const isActive = realIdx === activeIdx;
             const st = statuses[src.url] || "unknown";
             const isDead = st === "dead";
             return (
@@ -318,11 +321,11 @@ function VideoPlayer({
         />
       ) : (
         <>
-          {/* No sandbox — allows all players; ad navigation blocked via Navigation API in useEffect */}
+          {/* Route all embeds through proxy-embed: strips ad scripts, overrides window.open/top */}
           <iframe
             ref={iframeRef}
             key={src.url}
-            src={src.url}
+            src={`/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`}
             className="absolute inset-0 w-full h-full border-none"
             style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s", zIndex: 1 }}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
