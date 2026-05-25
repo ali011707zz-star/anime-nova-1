@@ -2116,14 +2116,14 @@ function getVidNestSources(anilistId: number, ep: number): UnifiedSource[] {
   const base = `https://vidnest.fun/animepahe/${anilistId}/${ep}`;
   return [
     {
-      name: "AnimePahe · مترجم",
+      name: "AnimePahe · مترجم إنجليزي",
       url: `${base}/sub`,
       quality: "HD",
       qualityRank: 2,
       site: "vidnest",
     },
     {
-      name: "AnimePahe · مدبلج",
+      name: "AnimePahe · مدبلج إنجليزي",
       url: `${base}/dub`,
       quality: "HD",
       qualityRank: 2,

@@ -52,25 +52,27 @@ const TRENDING_QUERY = `query {
 function AnimeCard({ anime }: { anime: any }) {
   return (
     <Link href={`/anime/${anime.id}`}>
-      <motion.div whileTap={{ scale: 0.93 }} className="group cursor-pointer">
-        <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
+      <motion.div whileTap={{ scale: 0.91 }} className="cursor-pointer">
+        <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.09] shadow-xl shadow-black/60">
           <img
             src={anime.coverImage?.large}
             alt={anime.title?.romaji}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            className="w-full h-full object-cover"
             loading="lazy"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
           {anime.averageScore && (
-            <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black flex items-center gap-0.5">
-              <Star className="w-2 h-2 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+            <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/25">
+              <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
             </div>
           )}
           {anime.format === "MOVIE" && (
-            <div className="absolute bottom-1.5 left-1.5 bg-primary/80 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black">فيلم</div>
+            <div className="absolute top-1.5 left-1.5 bg-primary text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-primary/50">فيلم</div>
           )}
+          <div className="absolute bottom-0 left-0 right-0 px-2 pb-2 pt-4">
+            <h3 className="text-[9.5px] text-white/90 font-bold truncate leading-tight drop-shadow">{anime.title?.romaji}</h3>
+          </div>
         </div>
-        <h3 className="mt-1.5 text-[11px] text-white/70 truncate font-bold group-hover:text-primary transition-colors">{anime.title?.romaji}</h3>
       </motion.div>
     </Link>
   );
@@ -175,14 +177,14 @@ export default function Home() {
       {hero && !selectedGenre && (
         <div
           className="relative w-full overflow-hidden select-none"
-          style={{ height: 310 }}
+          style={{ height: 390 }}
           onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
           onTouchEnd={e => {
             const dx = e.changedTouches[0].clientX - touchStartX.current;
             if (Math.abs(dx) < 40) return;
             const heroes = popular.filter(a => a.bannerImage).slice(0, 8);
             if (heroes.length <= 1) return;
-            const dir = dx < 0 ? 1 : -1; // swipe left → next, right → prev
+            const dir = dx < 0 ? 1 : -1;
             const next = (heroIdx + dir + heroes.length) % heroes.length;
             setHeroIdx(next);
             setHero(heroes[next]);
@@ -191,59 +193,64 @@ export default function Home() {
           <AnimatePresence mode="wait">
             <motion.img
               key={hero.id}
-              initial={{ opacity: 0, scale: 1.05 }}
+              initial={{ opacity: 0, scale: 1.04 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.6 }}
+              transition={{ duration: 0.7 }}
               src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
               alt=""
               className="w-full h-full object-cover"
               draggable={false}
             />
           </AnimatePresence>
-          <div className="absolute inset-0 bg-gradient-to-t from-[#09090B] via-[#09090B]/50 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/30 to-transparent" />
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #09090B 0%, #09090B 8%, rgba(9,9,11,0.7) 45%, rgba(9,9,11,0.1) 100%)" }} />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/50 to-transparent" />
 
-          <div className="absolute bottom-0 right-0 left-0 p-5">
-            <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+          <div className="absolute bottom-0 right-0 left-0 p-5 pb-6">
+            <div className="flex items-center gap-1.5 mb-2.5 flex-wrap">
               {hero.genres?.slice(0, 3).map((g: string) => (
-                <span key={g} className="text-[8px] font-black bg-white/10 backdrop-blur-sm text-white/75 px-2 py-0.5 rounded-full border border-white/10">{g}</span>
+                <span key={g} className="text-[8px] font-black bg-white/12 backdrop-blur-md text-white/80 px-2.5 py-0.5 rounded-full border border-white/12">{GENRES_AR.find(x => x.en === g)?.ar || g}</span>
               ))}
               {hero.averageScore && (
-                <span className="text-[8px] font-black bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                <span className="text-[8px] font-black bg-yellow-500/20 border border-yellow-500/25 text-yellow-400 px-2 py-0.5 rounded-full flex items-center gap-0.5">
                   <Star className="w-2 h-2 fill-current" /> {(hero.averageScore / 10).toFixed(1)}
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-black text-white line-clamp-1 mb-1 drop-shadow-lg">{hero.title?.romaji}</h1>
-            {hero.episodes && (
-              <p className="text-white/50 text-[11px] font-bold mb-3 font-['Cairo']">
-                {hero.episodes} حلقة
-                {hero.status === "RELEASING" ? " • يُبث حالياً" : " • مكتمل"}
-              </p>
-            )}
-            <div className="flex gap-2">
+            <h1 className="text-[28px] font-black text-white line-clamp-1 mb-1.5 drop-shadow-lg tracking-tight">{hero.title?.romaji}</h1>
+            <p className="text-white/45 text-[11px] font-bold mb-4 font-['Cairo']">
+              {hero.episodes ? `${hero.episodes} حلقة · ` : ""}
+              {hero.status === "RELEASING" ? "يُبث حالياً 🔴" : "مكتمل"}
+            </p>
+            <div className="flex gap-2.5">
               <Link href={`/episodes/${hero.id}`}>
-                <button className="bg-primary text-white text-xs font-black px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-primary/30 active:scale-95 transition-all">
-                  <Play className="w-3.5 h-3.5 fill-current" /> مشاهدة
-                </button>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  className="relative overflow-hidden bg-primary text-white text-xs font-black px-6 py-3 rounded-2xl flex items-center gap-2 shadow-xl shadow-primary/40 active:scale-95"
+                  style={{ background: "linear-gradient(135deg, #8B5CF6, #7C3AED)" }}
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" /> مشاهدة الآن
+                </motion.button>
               </Link>
               <Link href={`/anime/${hero.id}`}>
-                <button className="bg-white/12 backdrop-blur-sm text-white text-xs font-black px-5 py-2.5 rounded-xl border border-white/10 active:scale-95 transition-all font-['Cairo']">
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  className="bg-white/10 backdrop-blur-xl text-white text-xs font-black px-5 py-3 rounded-2xl border border-white/15 active:scale-95 font-['Cairo']"
+                >
                   التفاصيل
-                </button>
+                </motion.button>
               </Link>
             </div>
           </div>
 
           {/* Hero dots */}
           {heroList.length > 1 && (
-            <div className="absolute bottom-3 left-4 flex gap-1">
+            <div className="absolute bottom-5 left-5 flex gap-1.5 items-center">
               {heroList.map((_, i) => (
                 <button
                   key={i}
                   onClick={() => { setHeroIdx(i); setHero(heroList[i]); }}
-                  className={`h-1 rounded-full transition-all ${i === heroIdx ? "w-5 bg-primary" : "w-1.5 bg-white/30"}`}
+                  className={`rounded-full transition-all duration-300 ${i === heroIdx ? "w-6 h-1.5 bg-primary shadow-lg shadow-primary/50" : "w-1.5 h-1.5 bg-white/25"}`}
                 />
               ))}
             </div>
@@ -299,30 +306,34 @@ export default function Home() {
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-black font-['Cairo']">يُبث الآن</h2>
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>
+                <Zap className="w-3.5 h-3.5 text-white fill-white" />
+              </div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white">يُبث الآن</h2>
             </div>
             <Link href="/news">
-              <button className="text-[10px] text-primary font-black font-['Cairo'] flex items-center gap-0.5 active:opacity-70">
-                المزيد <ChevronLeft className="w-3 h-3" />
+              <button className="text-[10px] text-primary/80 font-black font-['Cairo'] flex items-center gap-0.5 active:opacity-70 bg-primary/8 px-2.5 py-1 rounded-xl border border-primary/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
               </button>
             </Link>
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
             {trending.map((anime, i) => (
               <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.94 }} className="shrink-0 w-28 cursor-pointer group">
-                  <div className="relative w-28 h-40 rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-                    <div className="absolute top-2 right-2 w-6 h-6 bg-primary/90 rounded-full flex items-center justify-center text-[9px] font-black text-white shadow-lg">{i + 1}</div>
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[120px] cursor-pointer">
+                  <div className="relative w-[120px] h-[168px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
+                    <div className="absolute top-2 right-2 w-6 h-6 rounded-xl flex items-center justify-center text-[9px] font-black text-white shadow-lg" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>{i + 1}</div>
                     {anime.nextAiringEpisode && (
-                      <div className="absolute bottom-1.5 right-1.5 bg-emerald-500/80 text-white text-[7px] px-1.5 py-0.5 rounded-full font-black">
+                      <div className="absolute bottom-8 left-2 bg-emerald-500 text-white text-[7px] px-2 py-0.5 rounded-full font-black shadow-md shadow-emerald-500/40">
                         حلقة {anime.nextAiringEpisode.episode}
                       </div>
                     )}
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                      <p className="text-[9px] text-white/85 font-bold truncate">{anime.title?.romaji}</p>
+                    </div>
                   </div>
-                  <p className="mt-1.5 text-[10px] text-white/60 truncate font-bold">{anime.title?.romaji}</p>
                 </motion.div>
               </Link>
             ))}
@@ -335,29 +346,33 @@ export default function Home() {
         <div className="mt-6 px-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-black font-['Cairo']">آخر الإصدارات</h2>
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#10B981,#059669)" }}>
+                <Clock className="w-3.5 h-3.5 text-white" />
+              </div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white">آخر الإصدارات</h2>
             </div>
             <Link href="/news">
-              <button className="text-[10px] text-primary font-black font-['Cairo'] flex items-center gap-0.5 active:opacity-70">
+              <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 active:opacity-70 bg-emerald-500/8 px-2.5 py-1 rounded-xl border border-emerald-500/15">
                 عرض الكل <ChevronLeft className="w-3 h-3" />
               </button>
             </Link>
           </div>
-          <div className="grid grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-4 gap-2">
             {recent.slice(0, 8).map(anime => (
               <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.93 }} className="cursor-pointer">
-                  <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
+                <motion.div whileTap={{ scale: 0.91 }} className="cursor-pointer">
+                  <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-md shadow-black/40">
                     <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
                     {anime.nextAiringEpisode && (
-                      <div className="absolute bottom-1 left-1 right-1 bg-emerald-500/80 text-white text-[7px] text-center py-0.5 rounded-md font-black">
+                      <div className="absolute bottom-1 left-1 right-1 bg-emerald-500 text-white text-[6.5px] text-center py-0.5 rounded-md font-black shadow-sm">
                         حلقة {anime.nextAiringEpisode.episode}
                       </div>
                     )}
+                    <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-1" style={{ display: anime.nextAiringEpisode ? 'none' : 'block' }}>
+                      <p className="text-[8px] text-white/80 truncate font-bold">{anime.title?.romaji}</p>
+                    </div>
                   </div>
-                  <p className="mt-1 text-[9px] text-white/55 truncate font-bold">{anime.title?.romaji}</p>
                 </motion.div>
               </Link>
             ))}
@@ -369,8 +384,10 @@ export default function Home() {
       {/* ── Popular grid ── */}
       <div className="mt-6 px-4">
         <div className="flex items-center gap-2 mb-3">
-          <TrendingUp className="w-4 h-4 text-primary" />
-          <h2 className="text-sm font-black font-['Cairo']">
+          <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#EF4444,#DC2626)" }}>
+            <TrendingUp className="w-3.5 h-3.5 text-white" />
+          </div>
+          <h2 className="text-[13px] font-black font-['Cairo'] text-white">
             {selectedGenre
               ? GENRES_AR.find(g => g.en === selectedGenre)?.ar || selectedGenre
               : "الأكثر شعبية"}

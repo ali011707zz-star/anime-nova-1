@@ -282,8 +282,13 @@ function VideoPlayer({
 
   const handleTap = useCallback(() => {
     if (showSheet) return;
-    showAndSchedule();
-  }, [showSheet, showAndSchedule]);
+    if (showCtrl) {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      setShowCtrl(false);
+    } else {
+      showAndSchedule();
+    }
+  }, [showSheet, showCtrl, showAndSchedule]);
 
   useEffect(() => {
     setNativeError(false); setIframeReady(false);
