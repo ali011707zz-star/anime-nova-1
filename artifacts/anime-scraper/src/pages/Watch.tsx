@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, ChevronLeft, Loader2, Play,
+  ChevronRight, ChevronLeft, Loader2, Play, Pause,
   AlertTriangle, RefreshCw, CheckCircle2, XCircle,
-  Maximize2, List, X, Wifi, WifiOff, SkipForward,
-  MonitorPlay, Zap,
+  Maximize2, List, X, WifiOff, SkipForward,
+  MonitorPlay, Zap, RotateCcw, Signal,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
@@ -78,68 +78,72 @@ function saveHistory(id: number, title: string, cover: string, ep: number, total
 function QBadge({ q }: { q: string }) {
   const u = (q || "").toUpperCase();
   if (u.includes("1080") || u === "FHD")
-    return <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/20">1080p</span>;
+    return <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/25">1080p</span>;
   if (u.includes("720") || u === "HD")
-    return <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/20">720p</span>;
-  return <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md bg-zinc-600/30 text-zinc-400 border border-zinc-500/20">SD</span>;
+    return <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/25">HD</span>;
+  return <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-white/8 text-white/40 border border-white/10">SD</span>;
 }
 
 /* ══════════════════════════════════════════════════════
-   SERVER PICKER SHEET
+   SERVER SHEET (bottom drawer)
 ══════════════════════════════════════════════════════ */
 function ServerSheet({ sources, activeIdx, statuses, onSelect, onClose }: {
   sources: Source[]; activeIdx: number;
   statuses: Record<string, ProbeStatus>;
   onSelect: (s: Source) => void; onClose: () => void;
 }) {
-  function Row({ src }: { src: Source }) {
-    const idx      = sources.indexOf(src);
-    const isActive = idx === activeIdx;
-    const st       = statuses[src.url] || "unknown";
-    const isDead   = st === "dead";
-    return (
-      <button
-        onClick={() => !isDead && onSelect(src)}
-        disabled={isDead}
-        className={`w-full flex items-center gap-2.5 px-3 py-3 rounded-2xl border transition-all active:scale-[0.98] text-right
-          ${isActive ? "bg-emerald-500/15 border-emerald-500/30"
-          : isDead ? "opacity-30 bg-white/3 border-white/5"
-          : "bg-white/4 border-white/6 hover:bg-white/7"}`}
-      >
-        {isActive         ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
-         st === "testing" ? <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" /> :
-         st === "ok"      ? <Wifi className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
-         st === "dead"    ? <WifiOff className="w-3.5 h-3.5 text-red-400 shrink-0" /> :
-         <div className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0" />}
-        <div className="flex-1 min-w-0 text-right">
-          <p className={`text-sm font-black font-['Cairo'] truncate
-            ${isActive ? "text-emerald-300" : isDead ? "text-white/25" : "text-white/80"}`}>{src.name}</p>
-          <p className="text-[9px] text-white/30 font-['Cairo']">{SITE_LABEL[src.site] || src.site}</p>
-        </div>
-        <QBadge q={src.quality} />
-      </button>
-    );
-  }
-
   return (
     <>
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <motion.div
         initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-        transition={{ type: "spring", damping: 30, stiffness: 330 }}
-        className="absolute bottom-0 left-0 right-0 z-50 bg-[#0d0d10] rounded-t-3xl border-t border-white/8 max-h-[75vh] flex flex-col"
+        transition={{ type: "spring", damping: 32, stiffness: 340 }}
+        className="absolute bottom-0 left-0 right-0 z-50 rounded-t-[28px] border-t border-white/8 max-h-[78vh] flex flex-col overflow-hidden"
+        style={{ background: "linear-gradient(160deg,#111118 0%,#0d0d14 100%)" }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex justify-center pt-3 shrink-0"><div className="w-10 h-1 rounded-full bg-white/15" /></div>
-        <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-white/6" dir="rtl">
-          <p className="text-sm font-black text-white font-['Cairo']">السيرفرات المتاحة ({sources.length})</p>
-          <button onClick={onClose} className="w-7 h-7 rounded-full bg-white/8 flex items-center justify-center">
-            <X className="w-3.5 h-3.5 text-white/50" />
+        <div className="flex justify-center pt-3 pb-1 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-white/15" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3 shrink-0 border-b border-white/6" dir="rtl">
+          <p className="text-sm font-black text-white font-['Cairo']">السيرفرات ({sources.length})</p>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/8 flex items-center justify-center active:scale-90">
+            <X className="w-4 h-4 text-white/60" />
           </button>
         </div>
-        <div className="overflow-y-auto px-3 py-3 pb-8 space-y-1.5">
-          {sources.map(s => <Row key={s.url} src={s} />)}
+        <div className="overflow-y-auto px-4 py-3 space-y-2 pb-10">
+          {sources.map((src, i) => {
+            const isActive = i === activeIdx;
+            const st = statuses[src.url] || "unknown";
+            const isDead = st === "dead";
+            return (
+              <button
+                key={src.url}
+                onClick={() => !isDead && onSelect(src)}
+                disabled={isDead}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all active:scale-[0.98] text-right
+                  ${isActive ? "bg-violet-500/15 border-violet-500/35"
+                  : isDead ? "opacity-25 bg-white/3 border-white/5"
+                  : "bg-white/4 border-white/7 active:bg-white/8"}`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border
+                  ${isActive ? "bg-violet-500/25 border-violet-500/35" : "bg-white/8 border-white/10"}`}>
+                  {isActive         ? <CheckCircle2 className="w-4 h-4 text-violet-300" />
+                  : isDead          ? <XCircle className="w-4 h-4 text-red-400" />
+                  : st === "testing" ? <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                  : st === "ok"     ? <Signal className="w-4 h-4 text-emerald-400" />
+                  : <Play className="w-3.5 h-3.5 text-white/40 fill-white/40" />}
+                </div>
+                <div className="flex-1 min-w-0 text-right">
+                  <p className={`text-sm font-bold font-['Cairo'] truncate
+                    ${isActive ? "text-violet-200" : isDead ? "text-white/20" : "text-white/85"}`}>{src.name}</p>
+                  <p className="text-[10px] text-white/30 font-['Cairo']">{SITE_LABEL[src.site] || src.site}</p>
+                </div>
+                <QBadge q={src.quality} />
+              </button>
+            );
+          })}
         </div>
       </motion.div>
     </>
@@ -147,7 +151,7 @@ function ServerSheet({ sources, activeIdx, statuses, onSelect, onClose }: {
 }
 
 /* ══════════════════════════════════════════════════════
-   NATIVE HLS/MP4 VIDEO PLAYER
+   NATIVE VIDEO INNER
 ══════════════════════════════════════════════════════ */
 function NativeVideoInner({
   url, type, refUrl, onError, onCanPlay, onPlayingChange,
@@ -198,12 +202,10 @@ function NativeVideoInner({
 }
 
 /* ══════════════════════════════════════════════════════
-   VIDEO PLAYER — full-screen overlay (redesigned)
-   Fixes:
-   - All controls (Back, Next, bars) animate together with showControls
-   - Iframe mode: only top+bottom 72px strips capture taps (center → iframe)
-   - Native mode: full-screen tap overlay toggles controls
-   - VidNest: direct iframe URL, no proxy (proxy breaks Next.js)
+   VIDEO PLAYER — FULL SCREEN OVERLAY
+   ─ No sandbox on iframes (fixes "Please Disable Sandbox")
+   ─ Full-screen tap overlay: hidden controls → tap shows them
+   ─ Auto-rotate to landscape on mount, unlock on unmount
 ══════════════════════════════════════════════════════ */
 function VideoPlayer({
   src, title, ep, totalEps,
@@ -220,10 +222,35 @@ function VideoPlayer({
   const [nativeError, setNativeError] = useState(false);
   const [isPlaying, setIsPlaying]     = useState(false);
   const [iframeReady, setIframeReady] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isLandscape, setIsLandscape] = useState(false);
+  const iframeRef  = useRef<HTMLIFrameElement>(null);
+  const hideTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const useNative = !nativeError && !!src.directUrl;
+
+  /* ── Auto-rotate to landscape on mount ── */
+  useEffect(() => {
+    const lock = async () => {
+      try {
+        await (screen.orientation as any).lock("landscape");
+        setIsLandscape(true);
+      } catch {}
+    };
+    lock();
+    return () => {
+      try { (screen.orientation as any).unlock(); } catch {}
+      setIsLandscape(false);
+    };
+  }, []);
+
+  function toggleOrientation() {
+    if (isLandscape) {
+      try { (screen.orientation as any).unlock(); } catch {}
+      setIsLandscape(false);
+    } else {
+      (screen.orientation as any).lock?.("landscape").then(() => setIsLandscape(true)).catch(() => {});
+    }
+  }
 
   const scheduleHide = useCallback((ms = 4500) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
@@ -261,12 +288,16 @@ function VideoPlayer({
     fn?.call(el);
   }
 
-  const STRIP = 72;
+  function togglePlayPause() {
+    const v = document.querySelector("video") as HTMLVideoElement | null;
+    if (!v) return;
+    v.paused ? v.play().catch(() => {}) : v.pause();
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black" dir="ltr">
 
-      {/* ── Content ── */}
+      {/* ── Video content ── */}
       {useNative ? (
         <NativeVideoInner
           key={src.directUrl!}
@@ -279,74 +310,62 @@ function VideoPlayer({
         />
       ) : (
         <>
+          {/* ─ NO sandbox attribute — fixes "Please Disable Sandbox" ─ */}
           <iframe
             ref={iframeRef}
             key={src.url}
             src={src.url}
             className="absolute inset-0 w-full h-full border-none"
-            style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.3s", zIndex: 1 }}
+            style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s", zIndex: 1 }}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"
             allowFullScreen
             title={title}
             onLoad={() => { setIframeReady(true); showAndSchedule(6000); }}
           />
           {!iframeReady && (
-            <div className="absolute inset-0 z-[2] bg-black flex flex-col items-center justify-center gap-3">
-              <Loader2 className="w-9 h-9 text-primary animate-spin" />
-              <p className="text-white/40 text-xs font-['Cairo']">جاري التحميل…</p>
+            <div className="absolute inset-0 z-[2] bg-black flex flex-col items-center justify-center gap-4">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-2xl bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
+                  <Loader2 className="w-7 h-7 text-violet-400 animate-spin" />
+                </div>
+              </div>
+              <p className="text-white/40 text-xs font-['Cairo']">جاري تحميل المشغّل…</p>
             </div>
           )}
         </>
       )}
 
-      {/* ── Native: center play/pause when paused ── */}
+      {/* ══════════════════════════════════════════
+          FULL-SCREEN TAP OVERLAY
+          ─ When controls HIDDEN → pointer-events:auto  (catch tap → show controls)
+          ─ When controls SHOWN  → pointer-events:none  (let iframe/native receive input)
+          ══════════════════════════════════════════ */}
+      <div
+        className="absolute inset-0 z-[10]"
+        style={{ pointerEvents: showCtrl || showSheet ? "none" : "auto" }}
+        onClick={handleTap}
+      />
+
+      {/* ── Native center play/pause ── */}
       <AnimatePresence>
-        {useNative && !isPlaying && showCtrl && (
-          <motion.button
-            key="playpause"
-            initial={{ opacity: 0, scale: 0.8 }}
+        {useNative && !isPlaying && showCtrl && !showSheet && (
+          <motion.div
+            key="playpause-btn"
+            initial={{ opacity: 0, scale: 0.75 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
+            exit={{ opacity: 0, scale: 0.75 }}
+            transition={{ duration: 0.18 }}
             className="absolute inset-0 z-[15] flex items-center justify-center pointer-events-auto"
-            onClick={e => {
-              e.stopPropagation();
-              const v = document.querySelector("video") as HTMLVideoElement | null;
-              v?.paused ? v.play().catch(() => {}) : v?.pause();
-            }}
+            onClick={e => { e.stopPropagation(); togglePlayPause(); showAndSchedule(); }}
           >
-            <div className="w-18 h-18 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center shadow-2xl" style={{ width: 70, height: 70 }}>
+            <div className="w-[70px] h-[70px] rounded-full bg-black/55 backdrop-blur-md border border-white/20 flex items-center justify-center shadow-2xl">
               <Play className="w-8 h-8 text-white fill-white ml-1" />
             </div>
-          </motion.button>
+          </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Tap capture zones ──
-          Native  → full screen (to toggle controls)
-          Iframe  → top strip + bottom strip only (center goes to iframe)  ── */}
-      {useNative ? (
-        <div
-          className="absolute inset-0 z-[10]"
-          style={{ pointerEvents: showSheet ? "none" : "auto" }}
-          onClick={handleTap}
-        />
-      ) : (
-        <>
-          <div
-            className="absolute top-0 left-0 right-0 z-[10]"
-            style={{ height: STRIP, pointerEvents: showSheet ? "none" : "auto" }}
-            onClick={handleTap}
-          />
-          <div
-            className="absolute bottom-0 left-0 right-0 z-[10]"
-            style={{ height: STRIP, pointerEvents: showSheet ? "none" : "auto" }}
-            onClick={handleTap}
-          />
-        </>
-      )}
-
-      {/* ── ALL CONTROLS — unified animated overlay ── */}
+      {/* ── ALL CONTROLS ── */}
       <AnimatePresence>
         {showCtrl && (
           <motion.div
@@ -361,37 +380,35 @@ function VideoPlayer({
             <div
               className="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 pointer-events-auto"
               style={{
-                paddingTop: "max(14px, env(safe-area-inset-top))",
-                paddingBottom: 18,
-                background: "linear-gradient(to bottom, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
+                paddingTop: "max(12px, env(safe-area-inset-top))",
+                paddingBottom: 20,
+                background: "linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)",
               }}
             >
-              {/* Left: Next server */}
-              <button
-                onClick={e => { e.stopPropagation(); onNextSrc(); showAndSchedule(); }}
-                className="flex items-center gap-1.5 bg-white/12 backdrop-blur-xl border border-white/15 rounded-2xl px-3 py-2 active:scale-90 shrink-0"
-              >
-                <SkipForward className="w-3.5 h-3.5 text-white/80" />
-                <span className="text-white/80 text-[11px] font-bold font-['Cairo']">التالي</span>
-              </button>
-
-              {/* Center: title */}
-              <div className="flex-1 min-w-0 text-center mx-1">
-                <p className="text-white text-[13px] font-black font-['Cairo'] truncate drop-shadow-lg">{title}</p>
-                <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                  <span className="text-white/40 text-[9px] font-['Cairo']">الحلقة {ep === 0 ? "فيلم" : ep}</span>
-                  <span className="w-0.5 h-0.5 rounded-full bg-white/30" />
-                  <span className="text-primary/90 text-[9px] font-bold font-['Cairo'] truncate max-w-[95px]">{src.name}</span>
-                </div>
-              </div>
-
               {/* Right: Back */}
               <button
                 onClick={e => { e.stopPropagation(); onClose(); }}
-                className="flex items-center gap-1.5 bg-white/12 backdrop-blur-xl border border-white/15 rounded-2xl px-3 py-2 active:scale-90 shrink-0"
+                className="flex items-center gap-1.5 bg-white/12 backdrop-blur-xl border border-white/15 rounded-xl px-3 py-2 active:scale-90 shrink-0"
               >
-                <ChevronRight className="w-3.5 h-3.5 text-white" />
+                <ChevronRight className="w-4 h-4 text-white" />
                 <span className="text-white text-[11px] font-black font-['Cairo']">رجوع</span>
+              </button>
+
+              {/* Center: title + server name */}
+              <div className="flex-1 min-w-0 text-center">
+                <p className="text-white text-[13px] font-black font-['Cairo'] truncate drop-shadow">{title}</p>
+                <p className="text-white/45 text-[10px] font-['Cairo'] truncate">
+                  الحلقة {ep === 0 ? "فيلم" : ep} · <span className="text-violet-300/80">{src.name}</span>
+                </p>
+              </div>
+
+              {/* Left: Next server */}
+              <button
+                onClick={e => { e.stopPropagation(); onNextSrc(); showAndSchedule(); }}
+                className="flex items-center gap-1.5 bg-white/12 backdrop-blur-xl border border-white/15 rounded-xl px-3 py-2 active:scale-90 shrink-0"
+              >
+                <SkipForward className="w-3.5 h-3.5 text-white/80" />
+                <span className="text-white/80 text-[11px] font-bold font-['Cairo']">سيرفر</span>
               </button>
             </div>
 
@@ -400,41 +417,50 @@ function VideoPlayer({
               className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 pointer-events-auto"
               dir="rtl"
               style={{
-                paddingBottom: "max(18px, env(safe-area-inset-bottom))",
-                paddingTop: 14,
-                background: "linear-gradient(to top, rgba(0,0,0,0.90) 0%, rgba(0,0,0,0.35) 65%, transparent 100%)",
+                paddingBottom: "max(16px, env(safe-area-inset-bottom))",
+                paddingTop: 18,
+                background: "linear-gradient(to top, rgba(0,0,0,0.94) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)",
               }}
             >
               {/* Prev episode */}
               <button
                 onClick={e => { e.stopPropagation(); onPrev(); }}
                 disabled={ep <= 1}
-                className="flex items-center gap-1 bg-white/10 backdrop-blur-xl border border-white/12 text-white/80 text-[11px] font-bold px-3 py-2.5 rounded-2xl disabled:opacity-25 active:scale-95 font-['Cairo'] shrink-0"
+                className="flex items-center gap-1 bg-white/10 backdrop-blur-xl border border-white/12 text-white/80 text-[11px] font-bold px-3 py-2.5 rounded-xl disabled:opacity-20 active:scale-95 font-['Cairo'] shrink-0"
               >
                 <ChevronRight className="w-3.5 h-3.5" /> السابقة
               </button>
 
-              {/* Servers */}
+              {/* Servers list */}
               <button
                 onClick={e => { e.stopPropagation(); setShowSheet(true); }}
-                className="flex-1 flex items-center justify-center gap-1.5 bg-white/8 backdrop-blur-xl border border-white/10 text-white/65 text-[11px] font-bold py-2.5 rounded-2xl active:scale-[0.97] font-['Cairo']"
+                className="flex-1 flex items-center justify-center gap-1.5 bg-white/8 backdrop-blur-xl border border-white/10 text-white/65 text-[11px] font-bold py-2.5 rounded-xl active:scale-[0.97] font-['Cairo']"
               >
                 <List className="w-3.5 h-3.5" /> السيرفرات ({sources.length})
+              </button>
+
+              {/* Orientation toggle */}
+              <button
+                onClick={e => { e.stopPropagation(); toggleOrientation(); showAndSchedule(); }}
+                className="w-10 h-10 flex items-center justify-center bg-white/8 backdrop-blur-xl border border-white/10 rounded-xl active:scale-95 shrink-0"
+                title={isLandscape ? "وضع عمودي" : "وضع أفقي"}
+              >
+                <RotateCcw className={`w-4 h-4 transition-transform duration-300 ${isLandscape ? "text-violet-300 rotate-0" : "text-white/55 -rotate-90"}`} />
               </button>
 
               {/* Fullscreen */}
               <button
                 onClick={e => { e.stopPropagation(); fullscreen(); }}
-                className="w-10 h-10 flex items-center justify-center bg-white/8 backdrop-blur-xl border border-white/10 rounded-2xl active:scale-95 shrink-0"
+                className="w-10 h-10 flex items-center justify-center bg-white/8 backdrop-blur-xl border border-white/10 rounded-xl active:scale-95 shrink-0"
               >
-                <Maximize2 className="w-4 h-4 text-white/65" />
+                <Maximize2 className="w-4 h-4 text-white/55" />
               </button>
 
               {/* Next episode */}
               <button
                 onClick={e => { e.stopPropagation(); onNext(); }}
                 disabled={ep >= totalEps && totalEps > 0}
-                className="flex items-center gap-1 bg-primary text-white text-[11px] font-black px-3 py-2.5 rounded-2xl disabled:opacity-25 active:scale-95 font-['Cairo'] shrink-0"
+                className="flex items-center gap-1 bg-violet-600 text-white text-[11px] font-black px-3 py-2.5 rounded-xl disabled:opacity-20 active:scale-95 font-['Cairo'] shrink-0 shadow-lg shadow-violet-900/40"
               >
                 التالية <ChevronLeft className="w-3.5 h-3.5" />
               </button>
@@ -467,41 +493,94 @@ function LoadingScreen({ cover, title, ep, genres, sourcesCount }: {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden" dir="rtl">
       <div className="absolute inset-0">
-        <img src={cover || bgUrl} alt="" className="w-full h-full object-cover scale-125"
-          style={{ filter: "blur(40px) brightness(0.18) saturate(1.4)" }} />
+        <img src={cover || bgUrl} alt="" className="w-full h-full object-cover scale-110"
+          style={{ filter: "blur(48px) brightness(0.15) saturate(1.6)" }} />
       </div>
-      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-[#09090B]/80 to-[#09090B]" />
-      <div className="relative z-10 flex flex-col items-center gap-6 px-6 text-center w-full max-w-xs">
+      <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom,rgba(0,0,0,0.5) 0%,#09090f 60%,#09090f 100%)" }} />
+      <div className="relative z-10 flex flex-col items-center gap-7 px-6 text-center w-full max-w-xs">
         {cover && (
-          <motion.div initial={{ y: 20, opacity: 0, scale: 0.9 }} animate={{ y: 0, opacity: 1, scale: 1 }}
-            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }} className="relative">
-            <div className="absolute -inset-4 rounded-[32px] blur-3xl opacity-50"
-              style={{ background: "radial-gradient(circle,rgba(139,92,246,0.8) 0%,transparent 65%)" }} />
-            <img src={cover} alt="" className="relative w-44 h-64 object-cover rounded-3xl border border-white/15 shadow-[0_30px_80px_rgba(0,0,0,0.9)]" />
-            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-primary text-white text-[11px] font-black px-4 py-1.5 rounded-full shadow-lg whitespace-nowrap">
+          <motion.div initial={{ y: 24, opacity: 0, scale: 0.88 }} animate={{ y: 0, opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }} className="relative">
+            <div className="absolute -inset-6 rounded-[40px] blur-[48px] opacity-60"
+              style={{ background: "radial-gradient(circle,rgba(139,92,246,0.9) 0%,transparent 70%)" }} />
+            <img src={cover} alt="" className="relative w-40 h-56 object-cover rounded-2xl shadow-[0_32px_80px_rgba(0,0,0,0.95)]"
+              style={{ border: "1px solid rgba(139,92,246,0.25)" }} />
+            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-violet-600 text-white text-[11px] font-black px-4 py-1.5 rounded-full shadow-lg whitespace-nowrap shadow-violet-900/50">
               الحلقة {ep}
             </div>
           </motion.div>
         )}
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-          className="flex flex-col items-center gap-1.5 mt-2">
-          <h2 className="text-white text-base font-black font-['Cairo'] drop-shadow-xl line-clamp-2">{title}</h2>
-          <p className="text-white/40 text-[11px] font-['Cairo']">
-            {sourcesCount > 0 ? `✦ ${sourcesCount} سيرفر · سيبدأ التشغيل تلقائياً` : "يجري البحث في المصادر..."}
+        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+          className="flex flex-col items-center gap-2 mt-1">
+          <h2 className="text-white text-base font-black font-['Cairo'] line-clamp-2 drop-shadow">{title}</h2>
+          <p className="text-white/40 text-xs font-['Cairo']">
+            {sourcesCount > 0
+              ? `${sourcesCount} سيرفر متاح · سيبدأ التشغيل تلقائياً`
+              : "يجري البحث في المصادر…"}
           </p>
         </motion.div>
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}
-          className="flex flex-col items-center gap-3">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
           <div className="flex items-center gap-1.5">
-            {[0,1,2,3,4,5].map(i => (
-              <motion.div key={i} className="w-1.5 h-1.5 rounded-full bg-primary"
-                animate={{ opacity: [0.2, 1, 0.2], scale: [0.8, 1.2, 0.8] }}
-                transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.15 }} />
+            {[0,1,2,3,4].map(i => (
+              <motion.div key={i} className="w-1.5 h-1.5 rounded-full bg-violet-500"
+                animate={{ opacity: [0.2, 1, 0.2], scale: [0.7, 1.3, 0.7] }}
+                transition={{ duration: 1.3, repeat: Infinity, delay: i * 0.18 }} />
             ))}
           </div>
         </motion.div>
       </div>
     </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   SERVER BUTTON
+══════════════════════════════════════════════════════ */
+function ServerButton({ src, status, isActive, onSelect }: {
+  src: Source; status: ProbeStatus; isActive: boolean;
+  onSelect: (s: Source) => void;
+}) {
+  const isDead = status === "dead";
+  const label  = SITE_LABEL[src.site] || src.site;
+  const hasDirect = !!src.directUrl;
+
+  return (
+    <button
+      className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border transition-all active:scale-[0.98]
+        ${isActive ? "bg-violet-500/12 border-violet-500/35"
+        : isDead   ? "opacity-25 bg-white/2 border-white/5"
+        : "bg-white/4 border-white/7 active:bg-white/7"}`}
+      onClick={() => !isDead && onSelect(src)}
+      disabled={isDead}
+    >
+      {/* Icon */}
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border
+        ${isActive ? "bg-violet-500/25 border-violet-500/30"
+        : hasDirect ? "bg-emerald-500/15 border-emerald-500/25"
+        : "bg-white/8 border-white/10"}`}>
+        {isActive          ? <CheckCircle2 className="w-4 h-4 text-violet-300" />
+        : isDead           ? <XCircle className="w-4 h-4 text-red-400" />
+        : status === "testing" ? <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+        : status === "ok"  ? <Signal className="w-4 h-4 text-emerald-400" />
+        : hasDirect        ? <Zap className="w-4 h-4 text-emerald-400" />
+        : <Play className="w-3.5 h-3.5 text-white/40 fill-white/40" />}
+      </div>
+
+      {/* Info */}
+      <div className="flex-1 min-w-0 text-right">
+        <p className={`text-sm font-bold font-['Cairo'] truncate
+          ${isActive ? "text-violet-200" : isDead ? "text-white/20" : "text-white/85"}`}>{src.name}</p>
+        <p className="text-[10px] text-white/30 font-['Cairo']">{label}{hasDirect ? " · مباشر" : ""}</p>
+      </div>
+
+      <QBadge q={src.quality} />
+
+      {/* Play arrow */}
+      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border
+        ${isActive ? "bg-violet-500/25 border-violet-500/30" : "bg-white/5 border-white/8"}`}>
+        <ChevronLeft className={`w-4 h-4 ${isActive ? "text-violet-300" : "text-white/30"}`} />
+      </div>
+    </button>
   );
 }
 
@@ -536,6 +615,7 @@ export default function WatchPage() {
   const title    = anime?.title?.romaji || anime?.title?.english || titleParam || "أنمي";
   const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
   const cover    = anime?.coverImage?.large || "";
+  const banner   = anime?.bannerImage || "";
   const genres   = anime?.genres || [];
 
   useEffect(() => { sourcesRef.current = sources; }, [sources]);
@@ -562,6 +642,18 @@ export default function WatchPage() {
       if (b.qualityRank !== a.qualityRank) return b.qualityRank - a.qualityRank;
       return serverPriority(b) - serverPriority(a);
     });
+  }
+
+  function serverPriority(s: Source): number {
+    if (s.directUrl) return 14;
+    if (s.site === "vidnest")   return 13;
+    if (s.site === "shahiid")   return 12;
+    if (s.site === "animelek")  return 11;
+    if (s.site === "animedar")  return 10;
+    if (s.site === "animephoenix" || s.site === "anime4up") return 9;
+    if (s.site === "myanime" || s.site === "animekayan") return 8;
+    if (s.site === "animegg") return 5;
+    return 3;
   }
 
   function startSSE(romaji: string, english: string, malId: number) {
@@ -658,22 +750,6 @@ export default function WatchPage() {
     return () => { sseRef.current?.close(); sseRef.current = null; };
   }, [animeId, ep]);
 
-  function serverPriority(s: Source): number {
-    if (s.directUrl) return 14;                          // direct HLS/MP4 always wins
-    // ── AnimePahe via VidNest — primary source ──
-    if (s.site === "vidnest")   return 13;               // AnimePahe (Arabic subs)
-    // ── Arabic sources ──
-    if (s.site === "shahiid")   return 12;               // Arabic dubbed/subbed
-    if (s.site === "animelek")  return 11;               // Arabic subbed
-    if (s.site === "animedar")  return 10;               // Arabic
-    // ── Other Arabic scrapers ──
-    if (s.site === "animephoenix" || s.site === "anime4up") return 9;
-    if (s.site === "myanime" || s.site === "animekayan") return 8;
-    // ── English fallback (AnimeGG) — lower priority ──
-    if (s.site === "animegg") return 5;
-    return 3;
-  }
-
   /* Auto-play: first available source after 0.5s */
   useEffect(() => {
     if (autoStarted.current || showPlayer) return;
@@ -735,19 +811,24 @@ export default function WatchPage() {
     onNextSrc: goNextSrc,
   };
 
+  /* ── server list / loading background ── */
+  const bgSrc = banner || cover;
+
   return (
-    <div className="bg-[#09090B] min-h-screen text-white" dir="rtl">
+    <div className="bg-[#09090f] min-h-screen text-white" dir="rtl">
 
       {/* ── PLAYER OVERLAY ── */}
       <AnimatePresence>
         {showPlayer && active && (
-          <motion.div key={active.url} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key={active.url}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}>
             <VideoPlayer src={active} {...sharedPlayerProps} />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── LOADING / SERVER LIST (hidden when player active) ── */}
+      {/* ── SERVER LIST (hidden while player active) ── */}
       <div className={showPlayer ? "hidden" : "flex flex-col min-h-screen"}>
 
         {(loading || (!loading && sources.length === 0 && !streamDone)) && (
@@ -755,89 +836,125 @@ export default function WatchPage() {
         )}
 
         {(!loading && (sources.length > 0 || streamDone)) && (
-          <>
-            {/* Sticky header */}
-            <div className="sticky top-0 z-30 bg-[#09090B]/97 backdrop-blur-xl border-b border-white/6 px-4 pt-4 pb-3 shrink-0">
-              <div className="flex items-center gap-3 mb-3">
+          <div className="flex flex-col min-h-screen">
+
+            {/* ── HERO HEADER ── */}
+            <div className="relative shrink-0 overflow-hidden" style={{ minHeight: 190 }}>
+              {/* Banner/cover blur bg */}
+              {bgSrc && (
+                <img src={bgSrc} alt="" className="absolute inset-0 w-full h-full object-cover scale-105"
+                  style={{ filter: "blur(28px) brightness(0.22) saturate(1.5)" }} />
+              )}
+              <div className="absolute inset-0"
+                style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, #09090f 100%)" }} />
+
+              {/* Top nav */}
+              <div className="relative z-10 flex items-center gap-3 px-4 pt-4 pb-0">
                 <button onClick={() => window.history.back()}
-                  className="w-9 h-9 bg-white/6 border border-white/8 rounded-xl flex items-center justify-center active:scale-90 shrink-0">
-                  <ChevronRight className="w-4 h-4 text-white/65" />
+                  className="w-9 h-9 bg-white/10 border border-white/12 rounded-xl flex items-center justify-center active:scale-90 shrink-0 backdrop-blur-sm">
+                  <ChevronRight className="w-4.5 h-4.5 text-white/70" style={{ width: 18, height: 18 }} />
                 </button>
                 <div className="flex-1 min-w-0">
-                  <h1 className="text-sm font-black font-['Cairo'] line-clamp-1">{title}</h1>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-[10px] text-primary font-bold font-['Cairo']">
-                      الحلقة {ep}{sources.length > 0 && ` · ${sources.length} سيرفر`}
-                    </p>
-                    {!streamDone && <Loader2 className="w-3 h-3 text-primary/60 animate-spin" />}
-                  </div>
+                  <h1 className="text-sm font-black font-['Cairo'] truncate text-white">{title}</h1>
                 </div>
                 {active && (
                   <button onClick={() => setShowPlayer(true)}
-                    className="w-9 h-9 bg-primary/15 border border-primary/25 rounded-xl flex items-center justify-center active:scale-90 shrink-0">
-                    <Play className="w-4 h-4 text-primary fill-primary" />
+                    className="w-9 h-9 bg-violet-500/20 border border-violet-500/35 rounded-xl flex items-center justify-center active:scale-90 shrink-0">
+                    <Play className="w-4 h-4 text-violet-300 fill-violet-300" style={{ marginLeft: 1 }} />
                   </button>
                 )}
               </div>
-              <div className="flex gap-2">
-                <button disabled={ep <= 1} onClick={() => goEp(ep - 1)}
-                  className="flex-1 h-9 flex items-center justify-center gap-1 bg-[#1C1C22] rounded-xl border border-white/6 disabled:opacity-30 text-[11px] font-bold font-['Cairo'] active:scale-[0.97]">
-                  <ChevronRight className="w-3.5 h-3.5" /> السابقة
-                </button>
-                <div className="w-12 h-9 bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-center shrink-0">
-                  <span className="text-sm font-black text-primary">{ep}</span>
+
+              {/* Episode info */}
+              <div className="relative z-10 flex items-end justify-between px-4 pt-4 pb-5">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="px-2.5 py-1 rounded-lg bg-violet-600 text-white text-[11px] font-black font-['Cairo']">
+                      الحلقة {ep}
+                    </div>
+                    {!streamDone && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/20">
+                        <Loader2 className="w-3 h-3 text-amber-400 animate-spin" />
+                        <span className="text-amber-300 text-[10px] font-bold font-['Cairo']">يجري الجلب</span>
+                      </div>
+                    )}
+                    {streamDone && sources.length > 0 && (
+                      <div className="px-2.5 py-1 rounded-lg bg-emerald-500/12 border border-emerald-500/20">
+                        <span className="text-emerald-300 text-[10px] font-bold font-['Cairo']">{sources.length} سيرفر</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-white/35 text-[10px] font-['Cairo']">
+                    {active ? `يشغّل: ${active.name}` : "اختر سيرفراً للمشاهدة"}
+                  </p>
                 </div>
-                <button disabled={ep >= totalEps} onClick={() => goEp(ep + 1)}
-                  className="flex-1 h-9 flex items-center justify-center gap-1 bg-primary rounded-xl disabled:opacity-30 text-[11px] font-black font-['Cairo'] active:scale-[0.97]">
-                  التالية <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
+
+                {/* Episode nav */}
+                <div className="flex items-center gap-1.5">
+                  <button disabled={ep <= 1} onClick={() => goEp(ep - 1)}
+                    className="w-9 h-9 flex items-center justify-center bg-white/8 border border-white/10 rounded-xl disabled:opacity-25 active:scale-90">
+                    <ChevronRight className="w-4 h-4 text-white/60" />
+                  </button>
+                  <button disabled={ep >= totalEps} onClick={() => goEp(ep + 1)}
+                    className="w-9 h-9 flex items-center justify-center bg-violet-600 rounded-xl disabled:opacity-25 active:scale-90 shadow-lg shadow-violet-900/40">
+                    <ChevronLeft className="w-4 h-4 text-white" />
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="flex-1 px-4 pt-4 pb-28 space-y-3">
+            {/* ── CONTENT ── */}
+            <div className="flex-1 px-4 pt-3 pb-28 space-y-3">
 
+              {/* Return to player banner */}
               {active && (
-                <motion.button initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
+                <motion.button initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                   onClick={() => setShowPlayer(true)}
-                  className="w-full flex items-center gap-3 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 active:scale-[0.98]">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                    <MonitorPlay className="w-4 h-4 text-emerald-400" />
+                  className="w-full flex items-center gap-3 p-3.5 rounded-2xl active:scale-[0.98]"
+                  style={{ background: "linear-gradient(135deg,rgba(139,92,246,0.18) 0%,rgba(109,40,217,0.08) 100%)", border: "1px solid rgba(139,92,246,0.28)" }}>
+                  <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
+                    <MonitorPlay className="w-5 h-5 text-violet-300" />
                   </div>
                   <div className="flex-1 text-right">
-                    <p className="text-xs font-black text-emerald-300 font-['Cairo']">يعمل الآن: {active.name}</p>
-                    <p className="text-[9px] text-emerald-400/60 font-['Cairo']">اضغط للعودة للمشغّل</p>
+                    <p className="text-sm font-black text-violet-200 font-['Cairo']">{active.name}</p>
+                    <p className="text-[10px] text-violet-300/50 font-['Cairo']">اضغط للعودة للمشغّل</p>
                   </div>
-                  <Play className="w-4 h-4 text-emerald-400 fill-emerald-400 shrink-0" />
+                  <div className="w-8 h-8 rounded-xl bg-violet-500/20 border border-violet-500/25 flex items-center justify-center shrink-0">
+                    <Play className="w-3.5 h-3.5 text-violet-300 fill-violet-300" style={{ marginLeft: 1 }} />
+                  </div>
                 </motion.button>
               )}
 
+              {/* Refresh button */}
               {streamDone && (
                 <button onClick={() => { localStorage.removeItem(`srccache:${animeId}-${ep}`); window.location.reload(); }}
-                  className="w-full h-9 flex items-center justify-center gap-2 bg-white/5 border border-white/8 rounded-xl text-white/40 text-xs font-bold font-['Cairo'] active:scale-[0.97]">
+                  className="w-full h-10 flex items-center justify-center gap-2 bg-white/4 border border-white/7 rounded-xl text-white/35 text-xs font-bold font-['Cairo'] active:scale-[0.97]">
                   <RefreshCw className="w-3.5 h-3.5" /> تحديث السيرفرات
                 </button>
               )}
 
+              {/* Empty state */}
               {streamDone && sources.length === 0 && (
-                <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
-                  <AlertTriangle className="w-10 h-10 text-white/12" />
+                <div className="flex flex-col items-center justify-center gap-5 py-20 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-white/4 border border-white/8 flex items-center justify-center">
+                    <AlertTriangle className="w-7 h-7 text-white/20" />
+                  </div>
                   <div>
-                    <p className="text-white/45 text-sm font-black font-['Cairo']">لا توجد سيرفرات متاحة</p>
+                    <p className="text-white/50 text-sm font-black font-['Cairo']">لا توجد سيرفرات متاحة</p>
                     <p className="text-white/20 text-xs mt-1 font-['Cairo']">هذه الحلقة غير متوفرة حالياً</p>
                   </div>
                 </div>
               )}
 
+              {/* Server list */}
               {sources.length > 0 && (
                 <>
-                  <div className="flex items-center justify-between px-1">
-                    <p className="text-[10px] text-white/30 font-['Cairo'] flex items-center gap-1">
-                      <Zap className="w-2.5 h-2.5 text-primary" /> السيرفرات المتاحة
-                    </p>
+                  <div className="flex items-center justify-between px-1 pb-1">
+                    <p className="text-[11px] text-white/35 font-['Cairo'] font-bold">السيرفرات المتاحة</p>
                     {!streamDone && (
                       <div className="flex items-center gap-1.5">
-                        <Loader2 className="w-3 h-3 text-amber-400 animate-spin" />
-                        <span className="text-[9px] text-amber-400 font-['Cairo']">جارٍ جلب المزيد</span>
+                        <Loader2 className="w-3 h-3 text-violet-400 animate-spin" />
+                        <span className="text-[10px] text-violet-400/70 font-['Cairo']">جارٍ جلب المزيد…</span>
                       </div>
                     )}
                   </div>
@@ -855,64 +972,20 @@ export default function WatchPage() {
                 </>
               )}
             </div>
-          </>
+          </div>
         )}
       </div>
 
       {/* Toast */}
       <AnimatePresence>
         {toast && (
-          <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
-            className="fixed bottom-8 left-4 right-4 z-[100] bg-[#1C1C22] border border-white/10 rounded-2xl px-4 py-3 text-center shadow-2xl">
+          <motion.div initial={{ opacity: 0, y: 28, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16 }}
+            className="fixed bottom-8 left-4 right-4 z-[100] rounded-2xl px-4 py-3.5 text-center shadow-2xl"
+            style={{ background: "rgba(17,17,24,0.96)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(16px)" }}>
             <p className="text-sm text-white/85 font-['Cairo'] font-bold">{toast}</p>
           </motion.div>
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════
-   SERVER BUTTON (list view)
-══════════════════════════════════════════════════════ */
-function ServerButton({ src, status, isActive, onSelect }: {
-  src: Source; status: ProbeStatus; isActive: boolean;
-  onSelect: (s: Source) => void;
-}) {
-  const isDead = status === "dead";
-  const label  = SITE_LABEL[src.site] || src.site;
-
-  const cardCls = isActive
-    ? "bg-emerald-500/10 border-emerald-500/35"
-    : isDead
-    ? "bg-red-500/4 border-red-400/15 opacity-35"
-    : "bg-[#111116] border-white/6";
-
-  const statusEl =
-    status === "testing" ? <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" /> :
-    status === "ok"      ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
-    status === "dead"    ? <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" /> :
-    isActive ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> :
-    <div className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0" />;
-
-  return (
-    <button
-      className={`w-full flex items-center gap-2.5 px-3 py-3 rounded-2xl border transition-all active:scale-[0.98] ${cardCls}`}
-      onClick={() => !isDead && onSelect(src)}
-      disabled={isDead}
-    >
-      {statusEl}
-      <div className="flex-1 min-w-0 text-right">
-        <p className={`text-sm font-black font-['Cairo'] truncate ${isActive ? "text-emerald-300" : isDead ? "text-white/25" : "text-white/85"}`}>
-          {src.name}
-        </p>
-        <p className="text-[9px] text-white/30 font-['Cairo']">{label}</p>
-      </div>
-      <QBadge q={src.quality} />
-      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border
-        ${isActive ? "bg-emerald-500/20 border-emerald-500/35 text-emerald-400" : "bg-primary/15 border-primary/25 text-primary"}`}>
-        <Play className="w-3.5 h-3.5 fill-current" />
-      </div>
-    </button>
   );
 }
