@@ -2,7 +2,7 @@
 
 تطبيق بث أنمي عربي يجمع مصادر من 3 مصادر متوازية ويُشغّلها في مشغّل داخلي.
 
-المصادر الفعّالة: shahiid-anime.net (عربي) · animelek.top (عربي) · AnimeGG (إنجليزي) · animedar.net (عربي)
+المصادر الفعّالة: **vidnest.fun/AnimePahe (أساسي)** · shahiid-anime.net (عربي) · animelek.top (عربي) · AnimeGG (إنجليزي) · animedar.net (عربي)
 
 ## Run & Operate
 
