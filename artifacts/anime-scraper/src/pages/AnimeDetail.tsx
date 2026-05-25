@@ -179,12 +179,13 @@ export default function AnimeDetail() {
       <div className="px-4 -mt-20 relative z-10 flex gap-4 items-end">
         {/* Cover */}
         <div className="relative shrink-0">
-          <div className="w-[108px] h-[156px] rounded-2xl overflow-hidden border-2 border-white/10 shadow-2xl shadow-black/80">
+          <div className="absolute inset-0 rounded-2xl blur-xl scale-95 translate-y-2 opacity-60" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }} />
+          <div className="relative w-[108px] h-[156px] rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/80">
             <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" />
           </div>
           {/* Format pill */}
           {anime.format && FORMAT[anime.format] && (
-            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#1C1C22] border border-white/10 text-white/60 text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap font-['Cairo']">
+            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#1C1C22] border border-white/12 text-white/60 text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap font-['Cairo']">
               {FORMAT[anime.format]}
             </div>
           )}
@@ -255,9 +256,10 @@ export default function AnimeDetail() {
         <Link href={`/episodes/${params.id}`}>
           <motion.button
             whileTap={{ scale: 0.97 }}
-            className="w-full h-14 bg-primary rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-lg shadow-primary/30 text-base font-['Cairo']"
+            className="w-full h-14 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-base font-['Cairo'] text-white"
+            style={{ background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)", boxShadow: "0 8px 32px rgba(109,40,217,0.45)" }}
           >
-            <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
+            <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
               <Play className="w-4 h-4 fill-white text-white" />
             </div>
             مشاهدة الأنمي

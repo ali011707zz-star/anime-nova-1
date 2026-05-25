@@ -19,8 +19,8 @@ export function Header({ onMenuClick }: HeaderProps) {
           <Menu className="w-5 h-5" />
         </button>
         <div className="flex items-center gap-1">
-          <span className="text-xl font-black text-primary tracking-tight">NOVA</span>
-          <span className="text-xl font-black text-white tracking-tight">ANIME</span>
+          <span className="text-xl font-black tracking-tight" style={{ background: "linear-gradient(135deg,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>NOVA</span>
+          <span className="text-xl font-black text-white/90 tracking-tight">ANIME</span>
         </div>
       </div>
       <div className="flex items-center gap-1">
