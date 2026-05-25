@@ -1680,17 +1680,36 @@ async function getAnimelekSources(
     if (!sr.ok) return [];
     const sHtml = await sr.text();
 
-    // Find episode URL matching episode number
-    // Pattern 1: /episode/{series}-{N}-الحلقة/   (regular episode)
-    // Pattern 2: /episode/{series}-والاخيرة{N}-الحلقة/  (last episode)
+    // Find episode URL from series page listing
+    // Pattern 1: /episode/{slug}-{N}-الحلقة/   (regular episode)
+    // Pattern 2: /episode/{slug}-والاخيرة{N}-الحلقة/  (last episode of season)
     let epUrl: string | null = null;
     for (const m of sHtml.matchAll(/href="(https?:\/\/animelek\.top\/episode\/[^"]+)"/gi)) {
       const url = m[1];
       const decoded = decodeURIComponent(url);
+      // Match: /slug-{N}-الحلقة/ or /slug-{N}-والاخيرة/
       const m1 = decoded.match(/[-](\d+)[-](?:والاخيرة|الحلقة)/);
+      // Match: /slug-والاخيرة{N}-/
       const m2 = decoded.match(/والاخيرة(\d+)[-]/);
       const num = parseInt((m2?.[1] ?? m1?.[1]) || "");
       if (!isNaN(num) && num === ep) { epUrl = url; break; }
+    }
+
+    // Fallback: construct episode URL directly if not in series listing (long series / pagination)
+    if (!epUrl) {
+      const candidates = [
+        `${ALK_BASE}/episode/${slug}-${ep}-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9/`,
+        `${ALK_BASE}/episode/${slug}-${ep}-الحلقة/`,
+      ];
+      for (const u of candidates) {
+        try {
+          const pr = await fetch(u, {
+            headers: { ...ALK_HDRS, Referer: seriesUrl },
+            signal: AbortSignal.timeout(6000), redirect: "follow",
+          });
+          if (pr.ok) { epUrl = u; break; }
+        } catch {}
+      }
     }
     if (!epUrl) return [];
 
@@ -1700,23 +1719,25 @@ async function getAnimelekSources(
     });
     if (!er.ok) return [];
     const eHtml = await er.text();
+    if (isCloudflareBlock(eHtml)) return [];
 
-    // Extract each server: data-embed="...?random={url}" with server name
+    // Extract servers: match <a ... data-embed="...?random=URL"> tags directly
     const sources: UnifiedSource[] = [];
     const seenHosts = new Set<string>();
     let idx = 0;
-    for (const liM of eHtml.matchAll(/<li>[\s\S]*?<\/li>/gi)) {
-      const liHtml = liM[0];
-      const embedM = liHtml.match(/data-embed="[^"]*[?&]random=([^"&]+)"/i);
-      if (!embedM) continue;
-      let rawUrl = embedM[1];
+    for (const aM of eHtml.matchAll(/<a\b[^>]*\bdata-embed="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+      const embedAttr = aM[1];
+      const innerHtml = aM[2];
+      // Extract URL from ?random= or &random= param, or use the attr directly
+      const randM = embedAttr.match(/[?&]random=([^"&\s]+)/i);
+      let rawUrl = randM ? randM[1] : embedAttr;
       try { rawUrl = decodeURIComponent(rawUrl); } catch {}
       rawUrl = rawUrl.replace(/&amp;/g, "&");
       if (!rawUrl.startsWith("http")) continue;
       if (DEAD_FILE_HOSTS.some(h => rawUrl.includes(h))) continue;
       const host = (rawUrl.split("/")[2] || "").replace(/^www\./, "");
       if (seenHosts.has(host)) continue; seenHosts.add(host);
-      const nameM = liHtml.match(/<span class="server">([^<]+)<\/span>/i);
+      const nameM = innerHtml.match(/<span[^>]*class="[^"]*server[^"]*"[^>]*>([^<]+)<\/span>/i);
       const label = (nameM?.[1] || "").trim().replace(/\s*\|.*$/, "").trim();
       idx++;
       sources.push({
