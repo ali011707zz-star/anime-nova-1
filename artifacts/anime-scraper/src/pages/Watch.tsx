@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, ChevronLeft, Loader2, Play, Pause,
+  ChevronRight, ChevronLeft, Loader2, Play,
   AlertTriangle, RefreshCw, CheckCircle2, XCircle,
   Maximize2, List, X, Wifi, WifiOff, SkipForward,
-  MonitorPlay, Zap, RotateCw,
+  MonitorPlay, Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
@@ -26,6 +26,7 @@ type ProbeStatus = "unknown" | "testing" | "ok" | "dead";
 
 const SITE_LABEL: Record<string, string> = {
   vidnest:      "AnimePahe",
+  animapahe:    "AnimePahe",
   shahiid:      "شاهيد أنمي",
   animegg:      "AnimeGG",
   animelek:     "انمي ليك",
@@ -147,9 +148,6 @@ function ServerSheet({ sources, activeIdx, statuses, onSelect, onClose }: {
 
 /* ══════════════════════════════════════════════════════
    NATIVE HLS/MP4 VIDEO PLAYER
-   - MP4: tries direct URL first, falls back to proxy
-   - HLS: always via hls-proxy (CORS bypass)
-   - No browser native controls — all custom
 ══════════════════════════════════════════════════════ */
 function NativeVideoInner({
   url, type, refUrl, onError, onCanPlay, onPlayingChange,
@@ -169,57 +167,43 @@ function NativeVideoInner({
   useEffect(() => { setAttempt("direct"); }, [url]);
 
   function handleErr() {
-    if (type === "mp4" && attempt === "direct") {
-      setAttempt("proxy");
-    } else {
-      onError();
-    }
+    if (type === "mp4" && attempt === "direct") { setAttempt("proxy"); }
+    else { onError(); }
   }
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
     hlsRef.current?.destroy(); hlsRef.current = null;
     if (type === "hls" && Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true, lowLatencyMode: false,
-        maxBufferLength: 30, maxMaxBufferLength: 60,
-        fragLoadingTimeOut: 20000, manifestLoadingTimeOut: 15000,
-      });
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30, maxMaxBufferLength: 60, fragLoadingTimeOut: 20000, manifestLoadingTimeOut: 15000 });
       hlsRef.current = hls;
       hls.loadSource(effectiveUrl);
       hls.attachMedia(v);
       hls.on(Hls.Events.MANIFEST_PARSED, () => { v.play().catch(() => {}); });
       hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) handleErr(); });
     } else if (type === "hls" && v.canPlayType("application/vnd.apple.mpegurl")) {
-      v.src = effectiveUrl;
-      v.play().catch(() => {});
+      v.src = effectiveUrl; v.play().catch(() => {});
     } else if (type === "mp4") {
-      v.src = effectiveUrl;
-      v.load();
-      v.play().catch(() => {});
-    } else {
-      onError();
-    }
+      v.src = effectiveUrl; v.load(); v.play().catch(() => {});
+    } else { onError(); }
     return () => { hlsRef.current?.destroy(); hlsRef.current = null; };
   }, [effectiveUrl, type]);
 
   return (
-    <video
-      ref={videoRef}
-      className="absolute inset-0 w-full h-full bg-black"
-      playsInline
-      autoPlay
-      onCanPlay={onCanPlay}
-      onError={handleErr}
-      onPlay={() => onPlayingChange?.(true)}
-      onPause={() => onPlayingChange?.(false)}
-      style={{ objectFit: "contain" }}
-    />
+    <video ref={videoRef} className="absolute inset-0 w-full h-full bg-black" playsInline autoPlay
+      onCanPlay={onCanPlay} onError={handleErr}
+      onPlay={() => onPlayingChange?.(true)} onPause={() => onPlayingChange?.(false)}
+      style={{ objectFit: "contain" }} />
   );
 }
 
 /* ══════════════════════════════════════════════════════
-   VIDEO PLAYER — full-screen overlay
+   VIDEO PLAYER — full-screen overlay (redesigned)
+   Fixes:
+   - All controls (Back, Next, bars) animate together with showControls
+   - Iframe mode: only top+bottom 72px strips capture taps (center → iframe)
+   - Native mode: full-screen tap overlay toggles controls
+   - VidNest: direct iframe URL, no proxy (proxy breaks Next.js)
 ══════════════════════════════════════════════════════ */
 function VideoPlayer({
   src, title, ep, totalEps,
@@ -232,44 +216,40 @@ function VideoPlayer({
   onSelectSource: (s: Source) => void; onNextSrc: () => void;
 }) {
   const [showSheet, setShowSheet]     = useState(false);
-  const [showBar, setShowBar]         = useState(true);
+  const [showCtrl, setShowCtrl]       = useState(true);
   const [nativeError, setNativeError] = useState(false);
   const [isPlaying, setIsPlaying]     = useState(false);
-  const [isLandscape, setIsLandscape] = useState(false);
   const [iframeReady, setIframeReady] = useState(false);
-  const iframeRef  = useRef<HTMLIFrameElement>(null);
-  const hideTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const useNative = !nativeError && !!src.directUrl;
 
-  const scheduleHide = useCallback((delay = 4000) => {
+  const scheduleHide = useCallback((ms = 4500) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setShowBar(false), delay);
+    hideTimer.current = setTimeout(() => setShowCtrl(false), ms);
   }, []);
+
+  const showAndSchedule = useCallback((ms?: number) => {
+    setShowCtrl(true);
+    scheduleHide(ms);
+  }, [scheduleHide]);
 
   const handleTap = useCallback(() => {
     if (showSheet) return;
-    setShowBar(prev => {
-      const next = !prev;
-      if (next) scheduleHide();
-      else if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
-      return next;
+    setShowCtrl(v => {
+      if (v) {
+        if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+        return false;
+      }
+      scheduleHide();
+      return true;
     });
   }, [showSheet, scheduleHide]);
 
-  const togglePlayPause = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    const v = document.querySelector("video") as HTMLVideoElement | null;
-    if (!v) return;
-    if (v.paused) v.play().catch(() => {});
-    else v.pause();
-  }, []);
-
   useEffect(() => {
-    setNativeError(false);
-    setIframeReady(false);
-    setShowBar(true);
-    setIsPlaying(false);
+    setNativeError(false); setIframeReady(false);
+    setShowCtrl(true); setIsPlaying(false);
     scheduleHide();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [src.url]);
@@ -281,197 +261,184 @@ function VideoPlayer({
     fn?.call(el);
   }
 
-  async function toggleRotation() {
-    try {
-      const ori = (screen.orientation as any);
-      if (!isLandscape) { await ori.lock?.("landscape"); setIsLandscape(true); }
-      else { ori.unlock?.(); setIsLandscape(false); }
-    } catch {
-      try {
-        const root = document.documentElement;
-        const req = (root as any).requestFullscreen || (root as any).webkitRequestFullscreen;
-        await req?.call(root);
-        await (screen.orientation as any).lock?.("landscape");
-        setIsLandscape(true);
-      } catch { setIsLandscape(l => !l); }
-    }
-  }
+  const STRIP = 72;
 
   return (
     <div className="fixed inset-0 z-50 bg-black" dir="ltr">
 
-      {/* ── NATIVE PLAYER ── */}
-      {useNative && (
+      {/* ── Content ── */}
+      {useNative ? (
         <NativeVideoInner
           key={src.directUrl!}
           url={src.directUrl!}
           type={src.directType || "hls"}
           refUrl={src.url}
           onError={() => setNativeError(true)}
-          onCanPlay={() => scheduleHide()}
-          onPlayingChange={setIsPlaying}
+          onCanPlay={() => showAndSchedule()}
+          onPlayingChange={p => { setIsPlaying(p); if (p) scheduleHide(); }}
         />
-      )}
-
-      {/* ── IFRAME PLAYER ── */}
-      {!useNative && (
+      ) : (
         <>
           <iframe
             ref={iframeRef}
             key={src.url}
-            src={src.site === "vidnest"
-              ? `/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`
-              : src.url}
+            src={src.url}
             className="absolute inset-0 w-full h-full border-none"
-            style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s" }}
+            style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.3s", zIndex: 1 }}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
             sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"
             allowFullScreen
             title={title}
-            onLoad={() => setIframeReady(true)}
+            onLoad={() => { setIframeReady(true); showAndSchedule(6000); }}
           />
-          {/* Loading indicator until iframe fires onLoad */}
           {!iframeReady && (
-            <div className="absolute inset-0 z-[5] flex flex-col items-center justify-center gap-3 bg-black pointer-events-none">
-              <Loader2 className="w-8 h-8 text-primary animate-spin" />
-              <p className="text-white/40 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
+            <div className="absolute inset-0 z-[2] bg-black flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-9 h-9 text-primary animate-spin" />
+              <p className="text-white/40 text-xs font-['Cairo']">جاري التحميل…</p>
             </div>
           )}
         </>
       )}
 
-      {/* ── Tap overlay (full screen, always active) ── */}
-      <div
-        className="absolute inset-0 z-10"
-        style={{ pointerEvents: showSheet ? "none" : "auto" }}
-        onClick={handleTap}
-      />
-
-      {/* ── Center play/pause indicator (native only, when paused) ── */}
-      {useNative && !isPlaying && (
-        <motion.button
-          initial={{ opacity: 0, scale: 0.85 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.85 }}
-          onClick={togglePlayPause}
-          className="absolute inset-0 z-20 flex items-center justify-center"
-          style={{ pointerEvents: "auto" }}
-        >
-          <div className="w-16 h-16 rounded-full bg-black/65 backdrop-blur-sm border border-white/15 flex items-center justify-center shadow-xl">
-            <Play className="w-7 h-7 text-white fill-white ml-1" />
-          </div>
-        </motion.button>
-      )}
-
-      {/* ── BACK BUTTON — ALWAYS VISIBLE ── */}
-      <button
-        onClick={e => { e.stopPropagation(); onClose(); }}
-        className="absolute z-30 flex items-center gap-1.5 bg-black/60 backdrop-blur-md border border-white/12 rounded-full active:scale-90 transition-transform"
-        style={{
-          top: "max(14px, env(safe-area-inset-top))",
-          right: "12px",
-          padding: "8px 14px 8px 10px",
-          pointerEvents: "auto",
-        }}
-      >
-        <ChevronRight className="w-4 h-4 text-white" />
-        <span className="text-white text-[12px] font-black font-['Cairo']">رجوع</span>
-      </button>
-
-      {/* ── NEXT SERVER button (top-left, always visible) ── */}
-      <button
-        onClick={e => { e.stopPropagation(); onNextSrc(); }}
-        className="absolute z-30 flex items-center gap-1 bg-black/60 backdrop-blur-md border border-white/12 rounded-full active:scale-90 transition-transform"
-        style={{
-          top: "max(14px, env(safe-area-inset-top))",
-          left: "12px",
-          padding: "8px 12px",
-          pointerEvents: "auto",
-        }}
-      >
-        <SkipForward className="w-3.5 h-3.5 text-white/80" />
-        <span className="text-white/80 text-[11px] font-bold font-['Cairo']">التالي</span>
-      </button>
-
-      {/* ── TOP INFO BAR (animated) ── */}
+      {/* ── Native: center play/pause when paused ── */}
       <AnimatePresence>
-        {showBar && (
-          <motion.div
-            key="topbar"
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.18 }}
-            className="absolute top-0 left-0 right-0 z-20 pointer-events-none"
-            style={{
-              paddingBottom: "20px",
-              paddingTop: "max(64px, calc(env(safe-area-inset-top) + 52px))",
-              background: "linear-gradient(to bottom, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.25) 75%, transparent 100%)",
+        {useNative && !isPlaying && showCtrl && (
+          <motion.button
+            key="playpause"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className="absolute inset-0 z-[15] flex items-center justify-center pointer-events-auto"
+            onClick={e => {
+              e.stopPropagation();
+              const v = document.querySelector("video") as HTMLVideoElement | null;
+              v?.paused ? v.play().catch(() => {}) : v?.pause();
             }}
           >
-            <div className="flex items-center gap-2 px-3" dir="rtl">
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-[13px] font-black line-clamp-1 drop-shadow-md font-['Cairo']">{title}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <p className="text-white/50 text-[10px] font-['Cairo']">الحلقة {ep === 0 ? "فيلم" : ep}</p>
-                  <span className="text-[9px] font-bold text-primary/80 bg-primary/15 border border-primary/20 px-1.5 py-px rounded-md font-['Cairo'] truncate max-w-[100px]">
-                    {src.name}
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={e => { e.stopPropagation(); toggleRotation(); }}
-                className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/12 active:scale-90 pointer-events-auto shrink-0"
-              >
-                <RotateCw className="w-4 h-4 text-white/70 transition-transform duration-300"
-                  style={{ transform: isLandscape ? "rotate(90deg)" : "rotate(0deg)" }} />
-              </button>
-              <button
-                onClick={e => { e.stopPropagation(); fullscreen(); }}
-                className="w-9 h-9 bg-black/55 backdrop-blur-md rounded-full flex items-center justify-center border border-white/12 active:scale-90 pointer-events-auto shrink-0"
-              >
-                <Maximize2 className="w-4 h-4 text-white/70" />
-              </button>
+            <div className="w-18 h-18 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center shadow-2xl" style={{ width: 70, height: 70 }}>
+              <Play className="w-8 h-8 text-white fill-white ml-1" />
             </div>
-          </motion.div>
+          </motion.button>
         )}
       </AnimatePresence>
 
-      {/* ── BOTTOM BAR (animated) ── */}
+      {/* ── Tap capture zones ──
+          Native  → full screen (to toggle controls)
+          Iframe  → top strip + bottom strip only (center goes to iframe)  ── */}
+      {useNative ? (
+        <div
+          className="absolute inset-0 z-[10]"
+          style={{ pointerEvents: showSheet ? "none" : "auto" }}
+          onClick={handleTap}
+        />
+      ) : (
+        <>
+          <div
+            className="absolute top-0 left-0 right-0 z-[10]"
+            style={{ height: STRIP, pointerEvents: showSheet ? "none" : "auto" }}
+            onClick={handleTap}
+          />
+          <div
+            className="absolute bottom-0 left-0 right-0 z-[10]"
+            style={{ height: STRIP, pointerEvents: showSheet ? "none" : "auto" }}
+            onClick={handleTap}
+          />
+        </>
+      )}
+
+      {/* ── ALL CONTROLS — unified animated overlay ── */}
       <AnimatePresence>
-        {showBar && (
+        {showCtrl && (
           <motion.div
-            key="bottombar"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.18 }}
-            className="absolute bottom-0 left-0 right-0 z-20 flex items-center gap-2 px-3 pointer-events-none"
-            dir="rtl"
-            style={{
-              paddingBottom: "max(20px, env(safe-area-inset-bottom))",
-              paddingTop: "16px",
-              background: "linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
-            }}
+            key="controls"
+            className="absolute inset-0 z-[20] pointer-events-none"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
           >
-            <button
-              onClick={e => { e.stopPropagation(); onPrev(); }} disabled={ep <= 1}
-              className="flex items-center gap-1 bg-black/65 backdrop-blur-md text-white/80 text-[10px] font-bold px-3 py-2.5 rounded-xl border border-white/12 disabled:opacity-30 active:scale-95 font-['Cairo'] pointer-events-auto shrink-0"
+            {/* ── TOP BAR ── */}
+            <div
+              className="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 pointer-events-auto"
+              style={{
+                paddingTop: "max(14px, env(safe-area-inset-top))",
+                paddingBottom: 18,
+                background: "linear-gradient(to bottom, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
+              }}
             >
-              <ChevronRight className="w-3.5 h-3.5" /> السابقة
-            </button>
-            <button
-              onClick={e => { e.stopPropagation(); setShowSheet(true); }}
-              className="flex-1 flex items-center justify-center gap-1.5 bg-black/65 backdrop-blur-md text-white/60 text-[10px] font-bold py-2.5 rounded-xl border border-white/12 active:scale-95 font-['Cairo'] pointer-events-auto"
+              {/* Left: Next server */}
+              <button
+                onClick={e => { e.stopPropagation(); onNextSrc(); showAndSchedule(); }}
+                className="flex items-center gap-1.5 bg-white/12 backdrop-blur-xl border border-white/15 rounded-2xl px-3 py-2 active:scale-90 shrink-0"
+              >
+                <SkipForward className="w-3.5 h-3.5 text-white/80" />
+                <span className="text-white/80 text-[11px] font-bold font-['Cairo']">التالي</span>
+              </button>
+
+              {/* Center: title */}
+              <div className="flex-1 min-w-0 text-center mx-1">
+                <p className="text-white text-[13px] font-black font-['Cairo'] truncate drop-shadow-lg">{title}</p>
+                <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                  <span className="text-white/40 text-[9px] font-['Cairo']">الحلقة {ep === 0 ? "فيلم" : ep}</span>
+                  <span className="w-0.5 h-0.5 rounded-full bg-white/30" />
+                  <span className="text-primary/90 text-[9px] font-bold font-['Cairo'] truncate max-w-[95px]">{src.name}</span>
+                </div>
+              </div>
+
+              {/* Right: Back */}
+              <button
+                onClick={e => { e.stopPropagation(); onClose(); }}
+                className="flex items-center gap-1.5 bg-white/12 backdrop-blur-xl border border-white/15 rounded-2xl px-3 py-2 active:scale-90 shrink-0"
+              >
+                <ChevronRight className="w-3.5 h-3.5 text-white" />
+                <span className="text-white text-[11px] font-black font-['Cairo']">رجوع</span>
+              </button>
+            </div>
+
+            {/* ── BOTTOM BAR ── */}
+            <div
+              className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 pointer-events-auto"
+              dir="rtl"
+              style={{
+                paddingBottom: "max(18px, env(safe-area-inset-bottom))",
+                paddingTop: 14,
+                background: "linear-gradient(to top, rgba(0,0,0,0.90) 0%, rgba(0,0,0,0.35) 65%, transparent 100%)",
+              }}
             >
-              <List className="w-3.5 h-3.5" /> السيرفرات ({sources.length})
-            </button>
-            <button
-              onClick={e => { e.stopPropagation(); onNext(); }} disabled={ep >= totalEps && totalEps > 0}
-              className="flex items-center gap-1 bg-primary text-white text-[10px] font-black px-3 py-2.5 rounded-xl disabled:opacity-30 active:scale-95 font-['Cairo'] pointer-events-auto shrink-0"
-            >
-              التالية <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
+              {/* Prev episode */}
+              <button
+                onClick={e => { e.stopPropagation(); onPrev(); }}
+                disabled={ep <= 1}
+                className="flex items-center gap-1 bg-white/10 backdrop-blur-xl border border-white/12 text-white/80 text-[11px] font-bold px-3 py-2.5 rounded-2xl disabled:opacity-25 active:scale-95 font-['Cairo'] shrink-0"
+              >
+                <ChevronRight className="w-3.5 h-3.5" /> السابقة
+              </button>
+
+              {/* Servers */}
+              <button
+                onClick={e => { e.stopPropagation(); setShowSheet(true); }}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-white/8 backdrop-blur-xl border border-white/10 text-white/65 text-[11px] font-bold py-2.5 rounded-2xl active:scale-[0.97] font-['Cairo']"
+              >
+                <List className="w-3.5 h-3.5" /> السيرفرات ({sources.length})
+              </button>
+
+              {/* Fullscreen */}
+              <button
+                onClick={e => { e.stopPropagation(); fullscreen(); }}
+                className="w-10 h-10 flex items-center justify-center bg-white/8 backdrop-blur-xl border border-white/10 rounded-2xl active:scale-95 shrink-0"
+              >
+                <Maximize2 className="w-4 h-4 text-white/65" />
+              </button>
+
+              {/* Next episode */}
+              <button
+                onClick={e => { e.stopPropagation(); onNext(); }}
+                disabled={ep >= totalEps && totalEps > 0}
+                className="flex items-center gap-1 bg-primary text-white text-[11px] font-black px-3 py-2.5 rounded-2xl disabled:opacity-25 active:scale-95 font-['Cairo'] shrink-0"
+              >
+                التالية <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -481,7 +448,7 @@ function VideoPlayer({
         {showSheet && (
           <ServerSheet
             sources={sources} activeIdx={activeIdx} statuses={statuses}
-            onSelect={s => { onSelectSource(s); setShowSheet(false); }}
+            onSelect={s => { onSelectSource(s); setShowSheet(false); showAndSchedule(); }}
             onClose={() => setShowSheet(false)}
           />
         )}
