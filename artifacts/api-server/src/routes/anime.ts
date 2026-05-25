@@ -1925,6 +1925,147 @@ async function getAnimadarSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMEPAHE.RU  direct scraper
+//  Flow: search → get anime session → get ep session → play page → kwik.si
+//  kwik.si embed → unpack p,a,c,k,e,d → extract m3u8 URL
+// ════════════════════════════════════════════════════════════════════
+const APAHE_BASE = "https://animepahe.ru";
+const APAHE_HDRS: Record<string, string> = {
+  "User-Agent": BROWSER_UA,
+  "Accept": "application/json, text/html, */*",
+  "Referer": "https://animepahe.ru/",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+const APAHE_TTL = 15 * 60 * 1000;
+const apaheSessionMap = new Map<string, { session: string | null; ts: number }>();
+const apaheEpMap      = new Map<string, { session: string | null; ts: number }>();
+
+async function getAnimepaheSession(romaji: string, english: string | null): Promise<string | null> {
+  const key = (english || romaji).toLowerCase().slice(0, 60);
+  const cached = apaheSessionMap.get(key);
+  if (cached && Date.now() - cached.ts < APAHE_TTL) return cached.session;
+  try {
+    const q = encodeURIComponent(english || romaji);
+    const r = await fetch(`${APAHE_BASE}/api?m=search&q=${q}`, {
+      headers: APAHE_HDRS, signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) { apaheSessionMap.set(key, { session: null, ts: Date.now() }); return null; }
+    const data = await r.json() as any;
+    if (!data?.data?.length) { apaheSessionMap.set(key, { session: null, ts: Date.now() }); return null; }
+    let best = data.data[0], bestScore = 0;
+    for (const item of data.data) {
+      const s = Math.max(similarity(item.title || "", romaji), similarity(item.title || "", english || ""));
+      if (s > bestScore) { bestScore = s; best = item; }
+    }
+    const session: string | null = best.session || null;
+    apaheSessionMap.set(key, { session, ts: Date.now() });
+    return session;
+  } catch { return null; }
+}
+
+async function getAnimepaheEpSession(animeSession: string, epNum: number): Promise<string | null> {
+  const cacheKey = `${animeSession}:${epNum}`;
+  const cached = apaheEpMap.get(cacheKey);
+  if (cached && Date.now() - cached.ts < APAHE_TTL) return cached.session;
+  try {
+    for (let page = 1; page <= 15; page++) {
+      const r = await fetch(`${APAHE_BASE}/api?m=release&id=${animeSession}&sort=episode_asc&page=${page}`, {
+        headers: APAHE_HDRS, signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) break;
+      const data = await r.json() as any;
+      if (!data?.data?.length) break;
+      for (const ep of data.data) {
+        if (ep.episode === epNum || ep.episode2 === epNum) {
+          apaheEpMap.set(cacheKey, { session: ep.session, ts: Date.now() });
+          return ep.session;
+        }
+      }
+      const last = data.data[data.data.length - 1];
+      if (last && last.episode > epNum + 2) break;
+      if (!data.next_page_url) break;
+    }
+    apaheEpMap.set(cacheKey, { session: null, ts: Date.now() });
+    return null;
+  } catch { return null; }
+}
+
+async function extractKwik(kwikUrl: string): Promise<{ url: string; type: "hls" | "mp4" } | null> {
+  try {
+    const r = await fetch(kwikUrl.replace("/f/", "/e/"), {
+      headers: { ...APAHE_HDRS, "Accept": "text/html,*/*" },
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return null;
+    const unpacked = unpackPacked(html) || html;
+    // Find m3u8
+    const m3u8 = unpacked.match(/["'`](https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*?)["'`]/);
+    if (m3u8) return { url: m3u8[1], type: "hls" };
+    // Find mp4
+    const mp4 = unpacked.match(/["'`](https?:\/\/[^"'`\s]+\.mp4[^"'`\s]*?)["'`]/);
+    if (mp4) return { url: mp4[1], type: "mp4" };
+    // Find source in JS
+    const src = unpacked.match(/source\s*[=:]\s*["'](https?:\/\/[^"']+)["']/);
+    if (src) { const t = src[1].includes(".m3u8") ? "hls" : "mp4"; return { url: src[1], type: t }; }
+    return null;
+  } catch { return null; }
+}
+
+async function getAnimepaheKwikUrls(animeSession: string, epSession: string): Promise<{ url: string; label: string }[]> {
+  try {
+    const r = await fetch(`${APAHE_BASE}/play/${animeSession}/${epSession}`, {
+      headers: { ...APAHE_HDRS, "Accept": "text/html,*/*" },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+    const kwiks: { url: string; label: string }[] = [];
+    // Extract from data-src or href attributes
+    const re1 = /data-(?:src|href)=["'](https?:\/\/kwik\.[a-z]+\/[ef]\/[A-Za-z0-9]+)["']/gi;
+    for (const m of html.matchAll(re1)) {
+      if (!kwiks.find(k => k.url === m[1])) kwiks.push({ url: m[1], label: "مترجم" });
+    }
+    // Extract from script content
+    if (kwiks.length === 0) {
+      const re2 = /https?:\/\/kwik\.[a-z]+\/[ef]\/[A-Za-z0-9]+/g;
+      for (const m of html.matchAll(re2)) {
+        const url = m[0].replace("/f/", "/e/");
+        if (!kwiks.find(k => k.url === url)) kwiks.push({ url, label: "مترجم" });
+      }
+    }
+    // Label multiples
+    return kwiks.map((k, i) => ({ ...k, label: i === 0 ? "مترجم" : `مترجم ${i + 1}` }));
+  } catch { return []; }
+}
+
+async function getAnimepaheSources(romaji: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  try {
+    const animeSession = await getAnimepaheSession(romaji, english);
+    if (!animeSession) return [];
+    const epSession = await getAnimepaheEpSession(animeSession, ep);
+    if (!epSession) return [];
+    const kwikUrls = await getAnimepaheKwikUrls(animeSession, epSession);
+    if (!kwikUrls.length) return [];
+    const results: UnifiedSource[] = [];
+    await Promise.allSettled(kwikUrls.slice(0, 3).map(async (kw, i) => {
+      // Always add embed fallback first
+      results.push({ name: `AnimePahe · ${kw.label}`, url: kw.url, quality: "HD", qualityRank: 2, site: "animapahe" });
+      // Try direct extraction
+      const extracted = await extractKwik(kw.url);
+      if (extracted) {
+        results.push({ name: `AnimePahe · ${kw.label} · مباشر`, url: kw.url, quality: "1080p", qualityRank: 3, site: "animapahe", directUrl: extracted.url, directType: extracted.type });
+      }
+    }));
+    return results;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  VIDNEST / ANIMEPAHE scraper
 //  Uses anilistId directly — no search needed
 //  URL: https://vidnest.fun/animepahe/{anilistId}/{ep}/sub
@@ -1993,6 +2134,15 @@ router.get("/anime/sources-stream", async (req, res) => {
       (async () => {
         try {
           const srcs = getVidNestSources(anilistId, ep);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── AnimePahe.ru  (direct scrape → kwik.si m3u8 extraction) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnimepaheSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })(),
