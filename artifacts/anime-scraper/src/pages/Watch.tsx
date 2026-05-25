@@ -25,6 +25,7 @@ interface Source {
 type ProbeStatus = "unknown" | "testing" | "ok" | "dead";
 
 const SITE_LABEL: Record<string, string> = {
+  vidnest:      "AnimePahe",
   shahiid:      "شاهيد أنمي",
   animegg:      "AnimeGG",
   animelek:     "انمي ليك",
@@ -318,7 +319,9 @@ function VideoPlayer({
           <iframe
             ref={iframeRef}
             key={src.url}
-            src={src.url}
+            src={src.site === "vidnest"
+              ? `/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`
+              : src.url}
             className="absolute inset-0 w-full h-full border-none"
             style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s" }}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
@@ -690,13 +693,15 @@ export default function WatchPage() {
 
   function serverPriority(s: Source): number {
     if (s.directUrl) return 14;                          // direct HLS/MP4 always wins
-    // ── Arabic sources first ──
-    if (s.site === "shahiid")   return 13;               // Arabic dubbed/subbed
-    if (s.site === "animelek")  return 12;               // Arabic subbed
-    if (s.site === "animedar")  return 11;               // Arabic
+    // ── AnimePahe via VidNest — primary source ──
+    if (s.site === "vidnest")   return 13;               // AnimePahe (Arabic subs)
+    // ── Arabic sources ──
+    if (s.site === "shahiid")   return 12;               // Arabic dubbed/subbed
+    if (s.site === "animelek")  return 11;               // Arabic subbed
+    if (s.site === "animedar")  return 10;               // Arabic
     // ── Other Arabic scrapers ──
-    if (s.site === "animephoenix" || s.site === "anime4up") return 10;
-    if (s.site === "myanime" || s.site === "animekayan") return 9;
+    if (s.site === "animephoenix" || s.site === "anime4up") return 9;
+    if (s.site === "myanime" || s.site === "animekayan") return 8;
     // ── English fallback (AnimeGG) — lower priority ──
     if (s.site === "animegg") return 5;
     return 3;

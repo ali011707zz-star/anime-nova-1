@@ -43,6 +43,7 @@ const EMBED_ONLY_HOSTS = [
   "streamvid.net","streamlare.com",
   "vidmoly.biz","vidmoly.to",
   "asnwish.com",
+  "vidnest.fun",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -1924,6 +1925,33 @@ async function getAnimadarSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  VIDNEST / ANIMEPAHE scraper
+//  Uses anilistId directly — no search needed
+//  URL: https://vidnest.fun/animepahe/{anilistId}/{ep}/sub
+// ════════════════════════════════════════════════════════════════════
+function getVidNestSources(anilistId: number, ep: number): UnifiedSource[] {
+  if (!anilistId || anilistId <= 0) return [];
+  const base = `https://vidnest.fun/animepahe/${anilistId}/${ep}`;
+  return [
+    {
+      name: "AnimePahe · مترجم",
+      url: `${base}/sub`,
+      quality: "HD",
+      qualityRank: 2,
+      site: "vidnest",
+    },
+    {
+      name: "AnimePahe · مدبلج",
+      url: `${base}/dub`,
+      quality: "HD",
+      qualityRank: 2,
+      site: "vidnest",
+    },
+  ];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Sources Stream  GET /api/anime/sources-stream  (SSE)
 //  Streams sources as they arrive from shahiid-anime.net
 // ════════════════════════════════════════════════════════════════════
@@ -1931,6 +1959,7 @@ router.get("/anime/sources-stream", async (req, res) => {
   const title     = ((req.query.title    as string) || "").trim();
   const english   = ((req.query.english  as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep as string) || "1");
+  const anilistId = parseInt((req.query.anilistId as string) || "0");
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -1960,6 +1989,14 @@ router.get("/anime/sources-stream", async (req, res) => {
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
     await Promise.allSettled([
+      // ── VidNest / AnimePahe  (PRIMARY — anilistId-based, instant) ──
+      (async () => {
+        try {
+          const srcs = getVidNestSources(anilistId, ep);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
       // ── Shahiid-anime.net  (Arabic dubbed + subbed) ──
       (async () => {
         try {
