@@ -167,7 +167,7 @@ function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
       if (combined.includes("streamtape")) return { url: "https:" + combined, type: "mp4" };
       return { url: "https://streamtape.com" + combined, type: "mp4" };
     }
-    const altRe = /get_video\?id=[^&"']+&expires=\d+&ip=[^&"']+&token=[^&"'\s]+/;
+    const altRe = /get_video\?id=[^&"'<\s]+&expires=\d+&ip=[^&"'<\s]+&token=[^&"'<>\s;]+/;
     const alt = html.match(altRe);
     if (alt) return { url: "https://streamtape.com/" + alt[0], type: "mp4" };
   } catch {}
@@ -204,6 +204,98 @@ function parseMegamax(html: string): { url: string; type: "hls" | "mp4" } | null
       return { url, type: url.includes(".m3u8") ? "hls" : "mp4" };
     }
   }
+  return null;
+}
+
+// ── share4max.com / megamax.me — Inertia.js stream extraction ──
+// Both sites use the same Inertia+Laravel stack. The streams data is NOT in
+// the initial HTML; it's fetched via a partial reload with X-Inertia headers.
+// Once we get the mirrors array, we try streamwish (HLS) then streamtape (MP4).
+async function parseShareMaxStreams(
+  host: string,
+  fileId: string,
+  referer: string,
+): Promise<{ url: string; type: "hls" | "mp4" } | null> {
+  const iframeUrl = `https://${host}/iframe/${fileId}`;
+  const FALLBACK_VERSION = "d98bcc9c79d1c5ff36a86cc41dfcd275";
+  try {
+    // Step 1: GET iframe page — grab Inertia version + cookies
+    const pageRes = await fetch(iframeUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: referer, Accept: "text/html" },
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
+    });
+    if (!pageRes.ok) return null;
+    const pageHtml = await pageRes.text();
+    if (isCloudflareBlock(pageHtml)) return null;
+    const version = pageHtml.match(/"version"\s*:\s*"([a-f0-9]{20,})"/)?.[1] || FALLBACK_VERSION;
+    // Collect Set-Cookie headers (may be multiple)
+    const rawCookies = pageRes.headers.getSetCookie?.() ?? [pageRes.headers.get("set-cookie") ?? ""];
+    const cookieStr = rawCookies.map(c => c.split(";")[0]).filter(Boolean).join("; ");
+
+    // Step 2: Inertia partial reload — only fetch "streams" prop
+    const reload = await fetch(iframeUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        "X-Inertia": "true",
+        "X-Inertia-Version": version,
+        "X-Inertia-Partial-Data": "streams",
+        "X-Inertia-Partial-Component": "files/mirror/video",
+        Referer: iframeUrl,
+        Accept: "application/json, text/plain, */*",
+        ...(cookieStr ? { Cookie: cookieStr } : {}),
+      },
+      signal: AbortSignal.timeout(14000),
+    });
+    if (!reload.ok) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (await reload.json()) as any;
+
+    const streams = data?.props?.streams;
+    if (streams?.status !== "success" || !Array.isArray(streams.data) || !streams.data.length) {
+      return null;
+    }
+
+    // Step 3: Walk all quality tiers and mirrors, try best extractable drivers
+    for (const quality of streams.data) {
+      for (const mirror of (quality.mirrors ?? [])) {
+        let link: string = mirror.link ?? "";
+        if (link.startsWith("//")) link = "https:" + link;
+        if (!link.startsWith("http")) continue;
+
+        const drv: string = mirror.driver ?? "";
+
+        // streamhg driver → streamwish.to (HLS m3u8)
+        if (drv === "streamhg" || link.includes("streamwish")) {
+          try {
+            const r = await fetch(link, {
+              headers: { "User-Agent": BROWSER_UA, Referer: iframeUrl },
+              signal: AbortSignal.timeout(10000),
+              redirect: "follow",
+            });
+            if (r.ok) {
+              const v = parseStreamwish(await r.text());
+              if (v?.url) return v;
+            }
+          } catch {}
+        }
+        // streamtape driver → direct MP4
+        else if (drv === "streamtape") {
+          try {
+            const r = await fetch(link, {
+              headers: { "User-Agent": BROWSER_UA, Referer: iframeUrl },
+              signal: AbortSignal.timeout(10000),
+              redirect: "follow",
+            });
+            if (r.ok) {
+              const v = parseStreamtape(await r.text());
+              if (v?.url) return v;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
   return null;
 }
 
@@ -252,9 +344,19 @@ async function extractVideoDeep(
           url.includes("swdyu") || url.includes("awish") || url.includes("playerwish")) {
         const v = parseStreamwish(html); if (v) return v;
       }
-      if (url.includes("megamax.me") || url.includes("vidbm.com") || url.includes("uptostream.com") ||
-          url.includes("vidlink") || url.includes("vidhide") || url.includes("streamlare") ||
-          url.includes("share4max.com")) {
+      // share4max and megamax use Inertia API — must use parseShareMaxStreams
+      if (url.includes("share4max.com/iframe/") || url.includes("megamax.me/iframe/")) {
+        const m2 = url.match(/\/iframe\/([^/?#]+)/);
+        if (m2) {
+          let hn = "";
+          try { hn = new URL(url).hostname; } catch {}
+          const v = await parseShareMaxStreams(hn, m2[1], ref);
+          if (v) return v;
+          break; // no fallback for these hosts
+        }
+      }
+      if (url.includes("vidbm.com") || url.includes("uptostream.com") ||
+          url.includes("vidlink") || url.includes("vidhide") || url.includes("streamlare")) {
         const v = parseMegamax(html); if (v) return v;
       }
       const direct = parseVideoUrl(html);
