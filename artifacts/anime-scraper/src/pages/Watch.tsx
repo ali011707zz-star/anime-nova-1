@@ -243,6 +243,21 @@ function VideoPlayer({
     };
   }, []);
 
+  /* ── Block iframe ad navigation (Navigation API, Chrome 102+) ── */
+  useEffect(() => {
+    const nav = (window as any).navigation;
+    if (!nav) return;
+    const handler = (e: any) => {
+      const dest: string = e.destination?.url ?? "";
+      // Allow in-app navigation; block external URLs triggered by iframes
+      if (dest && !dest.startsWith(window.location.origin)) {
+        try { e.preventDefault(); } catch {}
+      }
+    };
+    nav.addEventListener("navigate", handler);
+    return () => nav.removeEventListener("navigate", handler);
+  }, []);
+
   function toggleOrientation() {
     if (isLandscape) {
       try { (screen.orientation as any).unlock(); } catch {}
@@ -303,7 +318,7 @@ function VideoPlayer({
         />
       ) : (
         <>
-          {/* sandbox blocks top-level ad redirects while allowing playback */}
+          {/* No sandbox — allows all players; ad navigation blocked via Navigation API in useEffect */}
           <iframe
             ref={iframeRef}
             key={src.url}
@@ -311,7 +326,6 @@ function VideoPlayer({
             className="absolute inset-0 w-full h-full border-none"
             style={{ opacity: iframeReady ? 1 : 0, transition: "opacity 0.35s", zIndex: 1 }}
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-orientation-lock allow-downloads"
             allowFullScreen
             title={title}
             onLoad={() => { setIframeReady(true); showAndSchedule(6000); }}
