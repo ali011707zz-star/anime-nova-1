@@ -5,7 +5,7 @@ import {
   AlertTriangle, RefreshCw, Volume2, VolumeX,
   Maximize2, Minimize2, SkipForward, X,
   Wifi, WifiOff, RotateCcw, RotateCw, Lock, Unlock,
-  CheckCircle, Zap,
+  CheckCircle, Zap, Camera,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
@@ -319,6 +319,9 @@ function VideoPlayer({
   const [seekFlash, setSeekFlash] = useState<{side:"l"|"r"; id:number}|null>(null);
   const [speed,     setSpeed]     = useState(1);
   const [showSpeed, setShowSpeed] = useState(false);
+  const [videoScale, setVideoScale] = useState(1);
+
+  const pinchRef = useRef<{ dist: number; scale: number } | null>(null);
 
   const isHls   = src.directType === "hls";
   // Always proxy - never try direct (IP-tied URLs)
@@ -328,10 +331,18 @@ function VideoPlayer({
       : `/api/anime/video-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`
     : "";
 
-  /* ── Orientation: force landscape ── */
+  /* ── Back button (hardware + browser) ── */
   useEffect(() => {
-    (screen.orientation as any)?.lock?.("landscape")?.catch?.(() => {});
-    return () => { try { (screen.orientation as any)?.unlock?.(); } catch {} };
+    const handler = (e: PopStateEvent) => { e.preventDefault(); onBack(); };
+    window.addEventListener("popstate", handler);
+    // Push a state so back button fires popstate instead of leaving the page
+    window.history.pushState({ nova: true }, "");
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  /* ── Orientation: allow natural rotation (don't force landscape) ── */
+  useEffect(() => {
+    try { (screen.orientation as any)?.unlock?.(); } catch {}
   }, []);
 
   /* ── HLS / MP4 setup ── */
@@ -383,6 +394,43 @@ function VideoPlayer({
     reveal(); setShowCtrl(true);
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [src.url]);
+
+  /* ── Pinch-to-zoom handlers ── */
+  function onPinchStart(e: React.TouchEvent) {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchRef.current = { dist: Math.hypot(dx, dy), scale: videoScale };
+    }
+  }
+  function onPinchMove(e: React.TouchEvent) {
+    if (e.touches.length === 2 && pinchRef.current) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const ratio = Math.hypot(dx, dy) / pinchRef.current.dist;
+      setVideoScale(Math.min(3.5, Math.max(1, pinchRef.current.scale * ratio)));
+    }
+  }
+  function onPinchEnd(e: React.TouchEvent) {
+    if (e.touches.length < 2) pinchRef.current = null;
+    // Snap back to 1 on quick release (optional double-tap to reset)
+  }
+
+  /* ── Screenshot ── */
+  function takeScreenshot() {
+    const v = videoRef.current; if (!v) return;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = v.videoWidth || v.clientWidth;
+      canvas.height = v.videoHeight || v.clientHeight;
+      canvas.getContext("2d")?.drawImage(v, 0, 0, canvas.width, canvas.height);
+      const link = document.createElement("a");
+      link.href = canvas.toDataURL("image/png");
+      link.download = `nova-${title.replace(/\s+/g,"-")}-ep${ep}.png`;
+      link.click();
+    } catch {}
+    reveal();
+  }
 
   /* ── Tap handler ── */
   function handleTap(e: React.MouseEvent | React.TouchEvent) {
@@ -463,7 +511,8 @@ function VideoPlayer({
 
       {/* ── VIDEO ── */}
       {playUrl && (
-        <video ref={videoRef} className="absolute inset-0 w-full h-full" style={{ objectFit: "contain" }}
+        <video ref={videoRef} className="absolute inset-0 w-full h-full"
+          style={{ objectFit: "contain", transform: videoScale !== 1 ? `scale(${videoScale})` : undefined, transition: "transform 0.05s linear" }}
           playsInline autoPlay
           onCanPlay={() => { setBuffering(false); reveal(4000); }}
           onPlay={() => { setPlaying(true); scheduleHide(); }}
@@ -546,10 +595,22 @@ function VideoPlayer({
         </div>
       )}
 
-      {/* ── TAP AREA ── */}
+      {/* ── TAP + PINCH AREA ── */}
       <div className="absolute inset-0 z-[10]"
-        style={{ pointerEvents: "auto", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
-        onClick={handleTap} />
+        style={{ pointerEvents: "auto", touchAction: "none", WebkitTapHighlightColor: "transparent" }}
+        onClick={handleTap}
+        onTouchStart={onPinchStart}
+        onTouchMove={onPinchMove}
+        onTouchEnd={onPinchEnd}
+      />
+      {/* Reset zoom on double-tap when zoomed */}
+      {videoScale > 1 && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[22] pointer-events-none">
+          <div className="bg-black/50 backdrop-blur-sm rounded-full px-3 py-1 border border-white/15">
+            <span className="text-white/70 text-[11px] font-mono">{videoScale.toFixed(1)}×</span>
+          </div>
+        </div>
+      )}
 
       {/* ══════════ CONTROLS ══════════════════════════════════════ */}
       <AnimatePresence>
@@ -678,6 +739,20 @@ function VideoPlayer({
                   <RotateCw className="w-4 h-4 text-white/60" />
                 </button>
 
+                {/* Screenshot */}
+                <button onClick={e => { e.stopPropagation(); takeScreenshot(); }}
+                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
+                  <Camera className="w-4 h-4 text-white/60" />
+                </button>
+
+                {/* Reset zoom (shown only when zoomed) */}
+                {videoScale > 1 && (
+                  <button onClick={e => { e.stopPropagation(); setVideoScale(1); reveal(); }}
+                    className="px-2 h-9 rounded-xl bg-violet-600/50 border border-violet-500/40 flex items-center justify-center active:scale-90">
+                    <span className="text-white/80 text-[10px] font-bold font-mono">1×</span>
+                  </button>
+                )}
+
                 {/* Lock */}
                 <button onClick={e => { e.stopPropagation(); setLocked(true); }}
                   className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
@@ -795,6 +870,7 @@ export default function WatchPage() {
   const sourcesRef    = useRef<Source[]>([]);
   const activeRef     = useRef<Source | null>(null);
   const extractingRef = useRef(false);   // sync ref to avoid stale-closure issues
+  const triedRef      = useRef(new Set<string>()); // tracks urls already attempted for extraction
 
   const title    = anime?.title?.romaji || anime?.title?.english || titleParam || "أنمي";
   const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
@@ -920,8 +996,11 @@ export default function WatchPage() {
   async function triggerExtract(src: Source) {
     if (src.directUrl || extractingRef.current) return;
 
-    // Skip known embed-only hosts — no extraction possible
-    if (EMBED_ONLY_FE.some(h => src.url.includes(h))) { goNextSrc(); return; }
+    // Mark as tried (goNextSrc will skip this URL on its next run)
+    triedRef.current.add(src.url);
+
+    // Skip known embed-only hosts — setTimeout BREAKS the synchronous recursion!
+    if (EMBED_ONLY_FE.some(h => src.url.includes(h))) { setTimeout(() => goNextSrc(), 0); return; }
 
     extractingRef.current = true;
     setExtracting(true);
@@ -939,7 +1018,8 @@ export default function WatchPage() {
     const done = (goNext = false) => {
       extractingRef.current = false;
       setExtracting(false);
-      if (goNext) goNextSrc();
+      // setTimeout breaks the sync call stack to prevent "Maximum call stack exceeded"
+      if (goNext) setTimeout(() => goNextSrc(), 0);
     };
 
     // Step 1: Server-side deep extraction (streamwish, filemoon, vidhide, streamtape, etc.)
@@ -988,8 +1068,11 @@ export default function WatchPage() {
     for (let i = cur + 1; i < all.length; i++) {
       const s = all[i];
       if ((statuses[s.url] || "idle") === "dead") continue;
+      if (triedRef.current.has(s.url)) continue; // skip already-tried (loop prevention)
       playSource(s); return;
     }
+    // All sources tried or dead → back to server list; reset tried set for user retry
+    triedRef.current.clear();
     setPhase("servers");
   }
 
