@@ -3,229 +3,292 @@ import { useLocation } from "wouter";
 import {
   ChevronRight, ChevronLeft, Play, Pause, Loader2,
   AlertTriangle, RefreshCw, Volume2, VolumeX,
-  Maximize2, Minimize2, SkipForward,
-  List, X, Zap, CheckCircle2, XCircle, Signal,
-  RotateCcw, RotateCw,
+  Maximize2, Minimize2, SkipForward, X,
+  Wifi, WifiOff, RotateCcw, RotateCw, Lock, Unlock,
+  CheckCircle, Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
 
-/* ══════════════════════════════════════ ANILIST QUERY ════════════ */
+/* ══════════════════════════════════ ANILIST ══════════════════ */
 const ANILIST_Q = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal title { romaji english }
     episodes coverImage { large extraLarge }
     nextAiringEpisode { episode }
-    bannerImage genres description(asHtml: false)
+    bannerImage genres
   }
 }`;
 
-/* ══════════════════════════════════════ TYPES ════════════════════ */
+/* ══════════════════════════════════ TYPES ════════════════════ */
 interface Source {
   name: string; url: string; quality: string; qualityRank: number; site: string;
   directUrl?: string; directType?: "hls" | "mp4";
 }
-type ProbeStatus = "unknown" | "testing" | "ok" | "dead";
+type ProbeStatus = "idle" | "testing" | "ok" | "dead";
 
-/* ══════════════════════════════════════ CONSTANTS ════════════════ */
+/* ══════════════════════════════════ CONSTANTS ════════════════ */
 const SITE_LABEL: Record<string, string> = {
   vidnest: "AnimePahe", animapahe: "AnimePahe",
-  shahiid: "شاهيد أنمي", animegg: "AnimeGG",
-  animelek: "انمي ليك", animedar: "أنمي دار",
+  shahiid: "شاهيد",    animegg: "AnimeGG",
+  animelek: "AnimeLek", animedar: "AnimeDar",
   allanime: "AllAnime", anime4up: "Anime4up",
-  animephoenix: "AnimePhoenix", myanime: "MyAnime",
-  animekayan: "AnimeKayan", witanime: "ويت أنمي",
-  animerco: "أنمي ركو", animeblkom: "أنمي بالكم",
-  db: "مخزن", cached: "مخزن",
+  animephoenix: "Phoenix", myanime: "MyAnime",
+  animekayan: "Kayan",  witanime: "WitAnime",
+  animerco: "Animerco", animeblkom: "Blkom",
 };
 
-const GENRE_BG: Record<string, string> = {
-  "Action":    "https://s4.anilist.co/file/anilistcdn/media/anime/banner/21459-YEFGheQDsxJHQ8bE.jpg",
-  "Adventure": "https://s4.anilist.co/file/anilistcdn/media/anime/banner/113415-e1G39MX3vOSx.jpg",
-  "Fantasy":   "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-YfZFWRpWmEsm.jpg",
-  "Romance":   "https://s4.anilist.co/file/anilistcdn/media/anime/banner/101921-KmrCkHJqkGaX.jpg",
-  "default":   "https://s4.anilist.co/file/anilistcdn/media/anime/banner/21-YpzLs2jBPpyBY.jpg",
-};
+/* ══════════════════════════════════ HELPERS ══════════════════ */
+function fmtTime(s: number) {
+  if (!isFinite(s) || s < 0) return "0:00";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2,"0")}:${String(ss).padStart(2,"0")}`;
+  return `${m}:${String(ss).padStart(2,"0")}`;
+}
 
-/* ══════════════════════════════════════ CACHE / HISTORY ══════════ */
+function normalizeQuality(src: Source): string {
+  const q = (src.quality || "").toLowerCase();
+  if (q.includes("1080") || src.qualityRank >= 5) return "1080p";
+  if (q.includes("720")  || q === "hd" || src.qualityRank >= 3) return "720p";
+  if (q.includes("480")  || src.qualityRank >= 2) return "480p";
+  if (q.includes("360"))  return "360p";
+  return "HD";
+}
+
+function getSubType(src: Source): string {
+  const n = src.name;
+  if (n.includes("مدبلج")) return "مدبلج";
+  if (n.includes("مترجم")) return "مترجم";
+  if (n.toLowerCase().includes("dub")) return "مدبلج";
+  return "مترجم";
+}
+
+function getLang(src: Source): "ar" | "en" {
+  if (src.site === "animegg" || src.name.toLowerCase().includes("إنجليزي") || src.name.toLowerCase().includes("english")) return "en";
+  return "ar";
+}
+
+function getServerShortName(src: Source): string {
+  const parts = src.name.split("·").map(p => p.trim());
+  if (parts.length >= 2) {
+    const id = parts[1].replace(/مترجم|مدبلج|إنجليزي|عربي|·HD|·SD/gi,"").replace(/\s+/g," ").trim();
+    if (id.length > 0 && id.length <= 20) return id;
+  }
+  return (SITE_LABEL[src.site] || parts[0]).slice(0, 15);
+}
+
+/* ══════════════════════════════════ CACHE ════════════════════ */
 function getSrcCache(key: string): Source[] | null {
   try {
-    const raw = localStorage.getItem(`srccache:${key}`);
-    if (!raw) return null;
-    const { ts, sources } = JSON.parse(raw);
+    const r = localStorage.getItem(`srccache:${key}`); if (!r) return null;
+    const { ts, sources } = JSON.parse(r);
     if (Date.now() - ts > 3_600_000) return null;
     return sources;
   } catch { return null; }
 }
-function setSrcCache(key: string, sources: Source[]) {
-  try { localStorage.setItem(`srccache:${key}`, JSON.stringify({ ts: Date.now(), sources })); } catch {}
+function setSrcCache(k: string, s: Source[]) {
+  try { localStorage.setItem(`srccache:${k}`, JSON.stringify({ ts: Date.now(), sources: s })); } catch {}
 }
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
   try {
     const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
-    const entry = { id, title, cover, ep, date: new Date().toISOString(), totalEps };
-    localStorage.setItem("watch-history",
-      JSON.stringify([entry, ...h.filter(x => !(x.id === id && x.ep === ep))].slice(0, 60)));
+    localStorage.setItem("watch-history", JSON.stringify([{ id, title, cover, ep, date: new Date().toISOString(), totalEps }, ...h.filter(x => !(x.id === id && x.ep === ep))].slice(0, 60)));
   } catch {}
 }
 
-/* ══════════════════════════════════════ FORMAT TIME ═════════════ */
-function fmtTime(sec: number): string {
-  if (!isFinite(sec) || sec < 0) return "0:00";
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = Math.floor(sec % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
+/* ══════════════════════════════════ WIFI ICON ════════════════ */
+function WifiStatus({ status }: { status: ProbeStatus }) {
+  if (status === "testing") return <Loader2 className="w-5 h-5 text-amber-400 animate-spin" />;
+  if (status === "ok")   return <Wifi className="w-5 h-5 text-emerald-400" />;
+  if (status === "dead") return <WifiOff className="w-5 h-5 text-red-400" />;
+  return <Wifi className="w-5 h-5 text-white/30" />;
 }
 
-/* ══════════════════════════════════════ QUALITY BADGE ════════════ */
-function QBadge({ q }: { q: string }) {
-  const u = (q || "").toUpperCase();
-  if (u.includes("1080") || u === "FHD")
-    return <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/25">1080p</span>;
-  if (u.includes("720") || u === "HD")
-    return <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/25">HD</span>;
-  return <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-white/8 text-white/40 border border-white/10">SD</span>;
-}
-
-/* ══════════════════════════════════════ SERVER SHEET ════════════ */
-function ServerSheet({ sources, activeUrl, statuses, onSelect, onClose }: {
-  sources: Source[]; activeUrl: string;
-  statuses: Record<string, ProbeStatus>;
-  onSelect: (s: Source) => void; onClose: () => void;
+/* ══════════════════════════════════ SERVER LIST PAGE ═════════ */
+function ServerListPage({
+  anime, ep, title: titleProp, cover: coverProp,
+  sources, statuses, streamDone,
+  onPlay, onBack, onProbe,
+}: {
+  anime: any; ep: number; title: string; cover: string;
+  sources: Source[]; statuses: Record<string, ProbeStatus>; streamDone: boolean;
+  onPlay: (s: Source) => void; onBack: () => void;
+  onProbe: (s: Source) => void;
 }) {
-  const live = sources.filter(s => (statuses[s.url] || "unknown") !== "dead" || s.url === activeUrl);
-  return (
-    <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="absolute inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-        transition={{ type: "spring", damping: 30, stiffness: 320 }}
-        className="absolute bottom-0 left-0 right-0 z-50 rounded-t-3xl overflow-hidden"
-        style={{ maxHeight: "70vh", background: "rgba(10,10,18,0.97)", borderTop: "1px solid rgba(255,255,255,0.07)" }}
-        onClick={e => e.stopPropagation()}>
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-1">
-          <div className="w-9 h-1 rounded-full bg-white/12" />
-        </div>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-1 pb-4" dir="rtl">
-          <p className="text-sm font-black text-white/90 font-['Cairo']">المصادر المتاحة</p>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/6 flex items-center justify-center active:scale-90">
-            <X className="w-4 h-4 text-white/50" />
-          </button>
-        </div>
-        {/* List */}
-        <div className="overflow-y-auto px-4 pb-10 space-y-2" dir="rtl">
-          {live.map(src => {
-            const isActive = src.url === activeUrl;
-            const st = statuses[src.url] || "unknown";
-            const isDead = st === "dead";
-            const hasUrl = !!src.directUrl;
-            return (
-              <button key={src.url} onClick={() => !isDead && onSelect(src)} disabled={isDead}
-                className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border transition-all active:scale-[0.98]
-                  ${isActive
-                    ? "bg-violet-500/15 border-violet-500/30"
-                    : isDead
-                    ? "opacity-20 bg-white/3 border-white/5 pointer-events-none"
-                    : "bg-white/4 border-white/6 active:bg-white/7"}`}>
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border
-                  ${isActive ? "bg-violet-500/25 border-violet-500/30"
-                  : hasUrl   ? "bg-emerald-500/12 border-emerald-500/22"
-                  : "bg-white/6 border-white/10"}`}>
-                  {isActive    ? <CheckCircle2 className="w-4 h-4 text-violet-300" />
-                  : isDead     ? <XCircle className="w-4 h-4 text-red-400/60" />
-                  : st === "testing" ? <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
-                  : st === "ok"      ? <Signal className="w-4 h-4 text-emerald-400" />
-                  : hasUrl     ? <Zap className="w-4 h-4 text-emerald-400" />
-                  : <Play className="w-3.5 h-3.5 text-white/35 fill-white/35" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-bold font-['Cairo'] truncate ${isActive ? "text-violet-200" : "text-white/80"}`}>{src.name}</p>
-                  <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">
-                    {SITE_LABEL[src.site] || src.site}
-                    {hasUrl && <span className="text-emerald-400/70"> · مباشر</span>}
-                  </p>
-                </div>
-                <QBadge q={src.quality} />
-              </button>
-            );
-          })}
-        </div>
-      </motion.div>
-    </>
-  );
-}
+  const [lang, setLang] = useState<"all" | "ar" | "en">("all");
+  const title = anime?.title?.romaji || anime?.title?.english || titleProp || "";
+  const cover = anime?.coverImage?.large || coverProp || "";
 
-/* ══════════════════════════════════════ SEEK RIPPLE ════════════ */
-function SeekRipple({ side, show }: { side: "left" | "right"; show: boolean }) {
+  const filtered = sources.filter(s => lang === "all" || getLang(s) === lang);
+  const hasAr = sources.some(s => getLang(s) === "ar");
+  const hasEn = sources.some(s => getLang(s) === "en");
+
+  const qualityOrder = ["1080p", "720p", "HD", "480p", "360p"];
+  const groups: Record<string, Source[]> = {};
+  for (const s of filtered) {
+    const q = normalizeQuality(s);
+    if (!groups[q]) groups[q] = [];
+    groups[q].push(s);
+  }
+
+  const [probing, setProbing] = useState<string | null>(null);
+
+  async function handlePlay(src: Source) {
+    if (!src.directUrl && src.site !== "vidnest") {
+      onPlay(src); return;
+    }
+    if (statuses[src.url] === "ok") { onPlay(src); return; }
+    if (statuses[src.url] === "dead") return;
+    setProbing(src.url);
+    onProbe(src);
+    // Give probe a moment then play regardless
+    setTimeout(() => { setProbing(null); onPlay(src); }, 1200);
+  }
+
   return (
-    <AnimatePresence>
-      {show && (
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          transition={{ duration: 0.14 }}
-          className={`absolute top-0 bottom-0 z-[11] w-2/5 flex items-center pointer-events-none
-            ${side === "right" ? "right-0 justify-end pr-6" : "left-0 justify-start pl-6"}`}
-          style={{
-            background: side === "right"
-              ? "radial-gradient(ellipse at 80% 50%, rgba(139,92,246,0.22) 0%, transparent 70%)"
-              : "radial-gradient(ellipse at 20% 50%, rgba(139,92,246,0.22) 0%, transparent 70%)",
-          }}>
-          <div className="flex flex-col items-center gap-1">
-            {side === "right"
-              ? <RotateCw className="w-8 h-8 text-white/75 drop-shadow-lg" />
-              : <RotateCcw className="w-8 h-8 text-white/75 drop-shadow-lg" />}
-            <span className="text-white/60 text-[10px] font-bold font-['Cairo'] tracking-wide">10 ث</span>
-          </div>
-        </motion.div>
+    <div className="fixed inset-0 z-50 bg-[#0c0c14] flex flex-col overflow-hidden" dir="rtl">
+
+      {/* Top bar */}
+      <div className="flex items-center gap-3 px-4 pt-safe-top py-3 shrink-0" style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}>
+        <button onClick={onBack} className="w-10 h-10 rounded-xl bg-white/6 border border-white/8 flex items-center justify-center active:scale-90">
+          <ChevronRight className="w-5 h-5 text-white/70" />
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-white text-[13px] font-black font-['Cairo'] truncate">{title}</p>
+          <p className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</p>
+        </div>
+        {cover && <img src={cover} alt="" className="w-10 h-14 rounded-lg object-cover border border-white/8 shrink-0" />}
+      </div>
+
+      {/* Info bar */}
+      {!streamDone && (
+        <div className="mx-4 mb-3 px-4 py-2.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 flex items-center gap-3 shrink-0">
+          <motion.div className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"
+            animate={{ opacity: [0.4, 1, 0.4] }} transition={{ duration: 1, repeat: Infinity }} />
+          <p className="text-amber-300/80 text-[11px] font-['Cairo']">يجري البحث عن مصادر إضافية…</p>
+        </div>
       )}
-    </AnimatePresence>
+
+      {/* Lang tabs */}
+      {(hasAr && hasEn) && (
+        <div className="flex gap-2 px-4 mb-3 shrink-0">
+          {([["all","الكل"],["ar","🇸🇦 عربي"],["en","🇬🇧 إنجليزي"]] as const).map(([v, label]) => (
+            <button key={v} onClick={() => setLang(v)}
+              className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold font-['Cairo'] transition-all active:scale-95
+                ${lang === v ? "bg-violet-600 text-white" : "bg-white/7 border border-white/10 text-white/55"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Source groups */}
+      <div className="flex-1 overflow-y-auto px-4 pb-8 space-y-5">
+        {filtered.length === 0 && streamDone && (
+          <div className="flex flex-col items-center justify-center gap-3 py-16">
+            <AlertTriangle className="w-10 h-10 text-white/15" />
+            <p className="text-white/35 text-sm font-['Cairo']">لا توجد مصادر متاحة</p>
+          </div>
+        )}
+
+        {qualityOrder.filter(q => groups[q]?.length).map(quality => (
+          <div key={quality}>
+            {/* Quality header */}
+            <div className="flex items-center gap-3 mb-2">
+              <div className="flex-1 h-px bg-white/8" />
+              <span className="text-white/55 text-[11px] font-black font-mono tracking-widest">{quality.toUpperCase()}</span>
+              <div className="flex-1 h-px bg-white/8" />
+            </div>
+
+            {/* Source rows */}
+            <div className="space-y-2">
+              {groups[quality].map(src => {
+                const st = statuses[src.url] || "idle";
+                const isDead = st === "dead";
+                const isProbing = probing === src.url;
+                return (
+                  <div key={src.url}
+                    className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl border transition-all
+                      ${isDead ? "opacity-40 bg-white/3 border-white/5" : "bg-white/5 border-white/8 active:bg-white/8"}`}>
+
+                    {/* WiFi */}
+                    <div className="shrink-0">
+                      <WifiStatus status={isProbing ? "testing" : st} />
+                    </div>
+
+                    {/* Name */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-white/85 text-[13px] font-bold font-['Cairo'] truncate">{getServerShortName(src)}</p>
+                        <span className={`text-[9px] font-black px-2 py-0.5 rounded-md shrink-0
+                          ${getSubType(src) === "مدبلج" ? "bg-orange-500/20 text-orange-300 border border-orange-500/25" : "bg-violet-500/20 text-violet-300 border border-violet-500/25"}`}>
+                          {getSubType(src)}
+                        </span>
+                        {src.directUrl && <Zap className="w-3 h-3 text-emerald-400 shrink-0" />}
+                      </div>
+                      <p className="text-white/30 text-[10px] font-['Cairo'] mt-0.5">{SITE_LABEL[src.site] || src.site}</p>
+                    </div>
+
+                    {/* Play button */}
+                    <button onClick={() => !isDead && handlePlay(src)} disabled={isDead}
+                      className="w-10 h-10 rounded-xl bg-violet-600/80 border border-violet-500/40 flex items-center justify-center active:scale-90 disabled:opacity-30 shrink-0">
+                      {isProbing
+                        ? <Loader2 className="w-4 h-4 text-white animate-spin" />
+                        : <Play className="w-4 h-4 text-white fill-white ml-0.5" />}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
-/* ══════════════════════════════════════ MAIN PLAYER ════════════ */
-function NetflixPlayer({
+/* ══════════════════════════════════ VIDEO PLAYER ══════════════ */
+function VideoPlayer({
   src, title, ep, totalEps, sources, statuses,
-  onBack, onNextEp, onPrevEp, onSelectSource, onNextSrc,
+  onBack, onNextEp, onPrevEp, onNextSrc, onOpenList,
   extracting, streamDone,
 }: {
   src: Source; title: string; ep: number; totalEps: number;
   sources: Source[]; statuses: Record<string, ProbeStatus>;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
-  onSelectSource: (s: Source) => void; onNextSrc: () => void;
+  onNextSrc: () => void; onOpenList: () => void;
   extracting: boolean; streamDone: boolean;
 }) {
-  const videoRef    = useRef<HTMLVideoElement>(null);
-  const hlsRef      = useRef<Hls | null>(null);
-  const hideTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const progressRef = useRef<HTMLDivElement>(null);
-  const tapRef      = useRef<{ n: number; side: "l"|"r"|null; t: ReturnType<typeof setTimeout>|null }>({ n: 0, side: null, t: null });
+  const videoRef   = useRef<HTMLVideoElement>(null);
+  const hlsRef     = useRef<Hls | null>(null);
+  const hideTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progRef    = useRef<HTMLDivElement>(null);
 
-  const [showCtrl,   setShowCtrl]   = useState(true);
-  const [playing,    setPlaying]    = useState(false);
-  const [buffering,  setBuffering]  = useState(true);
-  const [failed,     setFailed]     = useState(false);
-  const [skipping,   setSkipping]   = useState(false);
-  const [progress,   setProgress]   = useState(0);
-  const [buffered,   setBuffered]   = useState(0);
-  const [curTime,    setCurTime]    = useState(0);
-  const [duration,   setDuration]   = useState(0);
-  const [muted,      setMuted]      = useState(false);
-  const [fs,         setFs]         = useState(false);
-  const [showSheet,  setShowSheet]  = useState(false);
-  const [seekFlash,  setSeekFlash]  = useState<{ side: "left"|"right"; id: number }|null>(null);
-
-  const [attempt, setAttempt] = useState<"direct"|"proxy">("direct");
+  const [showCtrl,  setShowCtrl]  = useState(true);
+  const [playing,   setPlaying]   = useState(false);
+  const [buffering, setBuffering] = useState(true);
+  const [failed,    setFailed]    = useState(false);
+  const [skipping,  setSkipping]  = useState(false);
+  const [locked,    setLocked]    = useState(false);
+  const [muted,     setMuted]     = useState(false);
+  const [fs,        setFs]        = useState(false);
+  const [progress,  setProgress]  = useState(0);
+  const [buffered,  setBuffered]  = useState(0);
+  const [curTime,   setCurTime]   = useState(0);
+  const [duration,  setDuration]  = useState(0);
+  const [seekFlash, setSeekFlash] = useState<{side:"l"|"r"; id:number}|null>(null);
+  const [speed,     setSpeed]     = useState(1);
+  const [showSpeed, setShowSpeed] = useState(false);
 
   const isHls   = src.directType === "hls";
-  const hlsUrl  = `/api/anime/hls-proxy?url=${encodeURIComponent(src.directUrl||"")}&ref=${encodeURIComponent(src.url)}`;
-  const vidUrl  = attempt === "direct" ? (src.directUrl || "") : `/api/anime/video-proxy?url=${encodeURIComponent(src.directUrl||"")}&ref=${encodeURIComponent(src.url)}`;
-  const playUrl = isHls ? hlsUrl : vidUrl;
+  // Always proxy - never try direct (IP-tied URLs)
+  const playUrl = src.directUrl
+    ? isHls
+      ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`
+      : `/api/anime/video-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`
+    : "";
 
-  /* ── orientation ── */
+  /* ── Orientation: force landscape ── */
   useEffect(() => {
     (screen.orientation as any)?.lock?.("landscape")?.catch?.(() => {});
     return () => { try { (screen.orientation as any)?.unlock?.(); } catch {} };
@@ -234,94 +297,92 @@ function NetflixPlayer({
   /* ── HLS / MP4 setup ── */
   useEffect(() => {
     setFailed(false); setBuffering(true); setProgress(0);
-    setCurTime(0); setDuration(0); setAttempt("direct"); setPlaying(false);
-    if (!src.directUrl) return;
-
+    setCurTime(0); setDuration(0); setPlaying(false);
+    if (!playUrl) return;
     const v = videoRef.current; if (!v) return;
     hlsRef.current?.destroy(); hlsRef.current = null;
 
     if (isHls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, maxBufferLength: 30, maxMaxBufferLength: 60, fragLoadingTimeOut: 20000, manifestLoadingTimeOut: 15000 });
+      const hls = new Hls({ enableWorker: true, maxBufferLength: 30, fragLoadingTimeOut: 25000, manifestLoadingTimeOut: 15000 });
       hlsRef.current = hls;
       hls.loadSource(playUrl);
       hls.attachMedia(v);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => { v.play().catch(() => {}); });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
       hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) handleFail(); });
     } else if (isHls && v.canPlayType("application/vnd.apple.mpegurl")) {
       v.src = playUrl; v.play().catch(() => {});
     } else if (!isHls) {
       v.src = playUrl; v.load(); v.play().catch(() => {});
-    } else {
-      handleFail();
-    }
+    } else { handleFail(); }
     return () => { hlsRef.current?.destroy(); hlsRef.current = null; };
-  }, [src.url, src.directUrl, attempt]);
+  }, [playUrl]);
 
-  /* ── When failed → auto-skip ── */
+  /* ── Speed ── */
+  useEffect(() => {
+    const v = videoRef.current; if (v) v.playbackRate = speed;
+  }, [speed]);
+
+  /* ── Auto-skip on fail ── */
   useEffect(() => {
     if (!failed) return;
     setSkipping(true);
-    const t = setTimeout(() => { setSkipping(false); onNextSrc(); }, 1400);
+    const t = setTimeout(() => { setSkipping(false); onNextSrc(); }, 1500);
     return () => clearTimeout(t);
   }, [failed]);
 
-  function handleFail() {
-    if (!isHls && attempt === "direct") { setAttempt("proxy"); return; }
-    setFailed(true); setBuffering(false);
-  }
+  function handleFail() { setFailed(true); setBuffering(false); }
 
   /* ── Controls hide ── */
   const scheduleHide = useCallback((ms = 3500) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setShowCtrl(false), ms);
   }, []);
-  const revealCtrl = useCallback((ms?: number) => {
-    setShowCtrl(true); scheduleHide(ms);
-  }, [scheduleHide]);
+  const reveal = useCallback((ms?: number) => { setShowCtrl(true); scheduleHide(ms); }, [scheduleHide]);
 
   useEffect(() => {
-    revealCtrl(); setShowCtrl(true);
+    reveal(); setShowCtrl(true);
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [src.url]);
 
   /* ── Tap handler ── */
   function handleTap(e: React.MouseEvent | React.TouchEvent) {
-    if (showSheet) return;
+    if (locked) return;
+    if (showSpeed) { setShowSpeed(false); return; }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const cX = "touches" in e ? e.changedTouches[0].clientX : (e as React.MouseEvent).clientX;
-    const side: "l"|"r" = (cX - rect.left) < rect.width / 2 ? "l" : "r";
-    tapRef.current.n++;
-    tapRef.current.side = side;
-    if (tapRef.current.t) clearTimeout(tapRef.current.t);
-    tapRef.current.t = setTimeout(() => {
-      const n = tapRef.current.n; tapRef.current.n = 0; tapRef.current.t = null;
-      if (n >= 2) {
-        const v = videoRef.current; if (!v) return;
-        const secs = n * 10;
-        if (tapRef.current.side === "r") v.currentTime = Math.min(v.duration || 0, v.currentTime + secs);
-        else v.currentTime = Math.max(0, v.currentTime - secs);
-        setSeekFlash({ side: tapRef.current.side === "r" ? "right" : "left", id: Date.now() });
-        revealCtrl();
-      } else {
-        if (showCtrl) { if (hideTimer.current) clearTimeout(hideTimer.current); setShowCtrl(false); }
-        else revealCtrl();
-      }
-    }, 230);
+    const side = (cX - rect.left) < rect.width / 2 ? "l" : "r";
+    // Use timeout to detect double-tap
+    if ((e as any)._tapped) return;
+    (e as any)._tapped = true;
+    const current = Date.now();
+    if ((handleTap as any)._lastTap && current - (handleTap as any)._lastTap < 300 && (handleTap as any)._lastSide === side) {
+      // Double tap
+      delete (handleTap as any)._lastTap;
+      const v = videoRef.current; if (!v) return;
+      v.currentTime = side === "r" ? Math.min(v.duration||0, v.currentTime + 10) : Math.max(0, v.currentTime - 10);
+      setSeekFlash({ side, id: Date.now() });
+      reveal();
+    } else {
+      (handleTap as any)._lastTap = current;
+      (handleTap as any)._lastSide = side;
+      if (showCtrl) { clearTimeout(hideTimer.current!); setShowCtrl(false); }
+      else reveal();
+    }
   }
 
-  /* ── Progress seek ── */
+  /* ── Progress bar click ── */
   function seekTo(e: React.MouseEvent<HTMLDivElement>) {
     const v = videoRef.current; if (!v || !v.duration) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     v.currentTime = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * v.duration;
-    revealCtrl();
+    reveal();
   }
 
-  /* ── Play/pause toggle ── */
+  /* ── Play toggle ── */
   function togglePlay() {
     const v = videoRef.current; if (!v) return;
     v.paused ? v.play().catch(() => {}) : v.pause();
-    revealCtrl();
+    reveal();
   }
 
   /* ── Mute ── */
@@ -334,8 +395,7 @@ function NetflixPlayer({
   function toggleFs() {
     const el = document.getElementById("nova-player");
     if (!el) return;
-    if (!document.fullscreenElement) el.requestFullscreen?.().catch(() => {});
-    else document.exitFullscreen?.().catch(() => {});
+    !document.fullscreenElement ? el.requestFullscreen?.().catch(()=>{}) : document.exitFullscreen?.().catch(()=>{});
   }
   useEffect(() => {
     const fn = () => setFs(!!document.fullscreenElement);
@@ -343,7 +403,7 @@ function NetflixPlayer({
     return () => document.removeEventListener("fullscreenchange", fn);
   }, []);
 
-  /* ── Time ── */
+  /* ── Time tracking ── */
   function onTimeUpdate() {
     const v = videoRef.current; if (!v) return;
     setCurTime(v.currentTime); setDuration(v.duration || 0);
@@ -352,20 +412,20 @@ function NetflixPlayer({
       setBuffered(v.duration ? v.buffered.end(v.buffered.length - 1) / v.duration : 0);
   }
 
-  const showLoading = buffering && !failed && !extracting && !!src.directUrl;
-  const liveSrc  = sources.filter(s => statuses[s.url] !== "dead").length;
+  const subType = getSubType(src);
+  const qualLabel = normalizeQuality(src);
+  const liveCount = sources.filter(s => (statuses[s.url] || "idle") !== "dead").length;
+  const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
   return (
-    <div id="nova-player" className="fixed inset-0 z-50 bg-black select-none" dir="ltr">
+    <div id="nova-player" className="fixed inset-0 z-50 bg-black overflow-hidden" dir="ltr"
+      style={{ touchAction: "manipulation" }}>
 
       {/* ── VIDEO ── */}
-      {src.directUrl && (
-        <video
-          ref={videoRef}
-          className="absolute inset-0 w-full h-full"
-          style={{ objectFit: "contain" }}
+      {playUrl && (
+        <video ref={videoRef} className="absolute inset-0 w-full h-full" style={{ objectFit: "contain" }}
           playsInline autoPlay
-          onCanPlay={() => { setBuffering(false); revealCtrl(4000); }}
+          onCanPlay={() => { setBuffering(false); reveal(4000); }}
           onPlay={() => { setPlaying(true); scheduleHide(); }}
           onPause={() => setPlaying(false)}
           onWaiting={() => setBuffering(true)}
@@ -376,11 +436,11 @@ function NetflixPlayer({
         />
       )}
 
-      {/* ── EXTRACTING OVERLAY ── */}
+      {/* ── EXTRACTING ── */}
       <AnimatePresence>
-        {(extracting || (!src.directUrl && !failed)) && (
-          <motion.div key="extract" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[8] bg-black/92 flex flex-col items-center justify-center gap-6">
+        {(extracting || (!playUrl && !failed)) && (
+          <motion.div key="ext" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[8] bg-black/94 flex flex-col items-center justify-center gap-6">
             <div className="relative w-20 h-20">
               <motion.div className="absolute inset-0 rounded-full border-2 border-violet-500/15 border-t-violet-400"
                 animate={{ rotate: 360 }} transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }} />
@@ -388,244 +448,260 @@ function NetflixPlayer({
                 animate={{ rotate: -360 }} transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }} />
               <div className="absolute inset-0 flex items-center justify-center">
                 <motion.div className="w-3 h-3 rounded-full bg-violet-400"
-                  animate={{ scale: [0.8, 1.2, 0.8], opacity: [0.6, 1, 0.6] }}
+                  animate={{ scale: [0.8, 1.2, 0.8], opacity: [0.5, 1, 0.5] }}
                   transition={{ duration: 1.8, repeat: Infinity }} />
               </div>
             </div>
-            <p className="text-white/55 text-[13px] font-['Cairo'] tracking-wide" dir="rtl">يُحضَّر الفيديو…</p>
+            <p className="text-white/45 text-[12px] font-['Cairo'] tracking-wide" dir="rtl">يُحضَّر الفيديو…</p>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── BUFFERING SPINNER ── */}
+      {/* ── BUFFERING ── */}
       <AnimatePresence>
-        {showLoading && (
+        {buffering && playUrl && !failed && !extracting && (
           <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="absolute inset-0 z-[7] flex items-center justify-center pointer-events-none">
-            <motion.div className="w-12 h-12 rounded-full border-2 border-white/8 border-t-white/55"
+            <motion.div className="w-11 h-11 rounded-full border-2 border-white/8 border-t-white/55"
               animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── SKIPPING OVERLAY ── */}
+      {/* ── SKIP ANIMATION ── */}
       <AnimatePresence>
         {skipping && (
           <motion.div key="skip" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[9] bg-black/85 flex flex-col items-center justify-center gap-4">
-            <SkipForward className="w-10 h-10 text-violet-300" />
-            <p className="text-white/60 text-sm font-['Cairo']" dir="rtl">الانتقال للمصدر التالي…</p>
+            className="absolute inset-0 z-[9] bg-black/88 flex flex-col items-center justify-center gap-4">
+            <SkipForward className="w-9 h-9 text-violet-300" />
+            <p className="text-white/55 text-[12px] font-['Cairo']" dir="rtl">الانتقال للمصدر التالي…</p>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* ── SEEK RIPPLE ── */}
-      <SeekRipple side="left"  show={seekFlash?.side === "left"} />
-      <SeekRipple side="right" show={seekFlash?.side === "right"} />
+      <AnimatePresence>
+        {seekFlash && (
+          <motion.div key={seekFlash.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.14 }}
+            className={`absolute top-0 bottom-0 z-[11] w-2/5 flex items-center pointer-events-none
+              ${seekFlash.side === "r" ? "right-0 justify-end pr-8" : "left-0 justify-start pl-8"}`}
+            style={{ background: seekFlash.side === "r"
+              ? "radial-gradient(ellipse at 80% 50%,rgba(139,92,246,0.22) 0%,transparent 70%)"
+              : "radial-gradient(ellipse at 20% 50%,rgba(139,92,246,0.22) 0%,transparent 70%)" }}>
+            <div className="flex flex-col items-center gap-1">
+              {seekFlash.side === "r" ? <RotateCw className="w-7 h-7 text-white/75" /> : <RotateCcw className="w-7 h-7 text-white/75" />}
+              <span className="text-white/60 text-[10px] font-bold font-['Cairo']">10 ث</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── LOCK INDICATOR ── */}
+      {locked && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[25] flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md border border-white/12"
+          onClick={() => setLocked(false)}>
+          <Lock className="w-4 h-4 text-amber-400" />
+          <span className="text-white/70 text-[11px] font-['Cairo']">اضغط للفتح</span>
+        </div>
+      )}
 
       {/* ── TAP AREA ── */}
       <div className="absolute inset-0 z-[10]"
-        style={{ pointerEvents: showSheet ? "none" : "auto", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
+        style={{ pointerEvents: "auto", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
         onClick={handleTap} />
 
-      {/* ════════════════════════ CONTROLS ═══════════════════════════ */}
+      {/* ══════════ CONTROLS ══════════════════════════════════════ */}
       <AnimatePresence>
-        {showCtrl && !showSheet && (
+        {showCtrl && !locked && (
           <motion.div key="ctrl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }} className="absolute inset-0 z-[20] pointer-events-none">
+            transition={{ duration: 0.18 }} className="absolute inset-0 z-[20] pointer-events-none">
 
-            {/* ── TOP BAR ── */}
-            <div className="absolute top-0 left-0 right-0 flex items-center gap-3 px-4 pointer-events-auto"
-              style={{
-                paddingTop: "max(16px, env(safe-area-inset-top))", paddingBottom: 20,
-                background: "linear-gradient(to bottom, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.3) 70%, transparent 100%)",
-              }}>
-              {/* Servers */}
-              <button onClick={e => { e.stopPropagation(); setShowSheet(true); }}
-                className="relative w-10 h-10 rounded-2xl bg-white/8 backdrop-blur-md border border-white/10 flex items-center justify-center shrink-0 active:scale-90 pointer-events-auto">
-                <List className="w-4.5 h-4.5 text-white/75" />
-                {liveSrc > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 rounded-full bg-violet-500 text-white text-[9px] font-black flex items-center justify-center px-1">{liveSrc}</span>
-                )}
-              </button>
-
-              {/* Title */}
-              <div className="flex-1 min-w-0 text-center" dir="rtl">
-                <p className="text-white text-[14px] font-black font-['Cairo'] truncate leading-tight">{title}</p>
-                <p className="text-white/40 text-[11px] font-['Cairo'] leading-tight mt-0.5">
-                  {ep === 0 ? "فيلم" : `الحلقة ${ep}`}
-                  {src.directUrl && <span className="text-emerald-400/70"> · مباشر</span>}
-                </p>
+            {/* TOP gradient + info */}
+            <div className="absolute top-0 left-0 right-0 pointer-events-auto"
+              style={{ background: "linear-gradient(to bottom,rgba(0,0,0,0.85) 0%,rgba(0,0,0,0.3) 65%,transparent 100%)", paddingTop: "max(14px,env(safe-area-inset-top))", paddingBottom: 20 }}>
+              <div className="flex items-start justify-between px-4 gap-4">
+                {/* Title + meta (top-left, LTR layout so it's on the left) */}
+                <div className="min-w-0 flex-1" dir="rtl">
+                  <p className="text-white text-[14px] font-black font-['Cairo'] leading-tight truncate">{title}</p>
+                  <p className="text-white/45 text-[11px] font-['Cairo'] leading-tight mt-0.5">
+                    {qualLabel} · {subType} · الحلقة {ep === 0 ? "فيلم" : ep}
+                  </p>
+                </div>
+                {/* Top-right controls */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Next source */}
+                  <button onClick={e => { e.stopPropagation(); onOpenList(); }}
+                    className="w-9 h-9 rounded-xl bg-black/40 backdrop-blur-sm border border-white/12 flex flex-col items-center justify-center active:scale-90 relative">
+                    <Wifi className="w-4 h-4 text-white/65" />
+                    {liveCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-500 text-white text-[8px] font-black flex items-center justify-center">{liveCount}</span>
+                    )}
+                  </button>
+                  {/* Close → go back to server list */}
+                  <button onClick={e => { e.stopPropagation(); onBack(); }}
+                    className="w-9 h-9 rounded-xl bg-black/40 backdrop-blur-sm border border-white/12 flex items-center justify-center active:scale-90">
+                    <X className="w-4 h-4 text-white/65" />
+                  </button>
+                </div>
               </div>
-
-              {/* Back */}
-              <button onClick={e => { e.stopPropagation(); onBack(); }}
-                className="w-10 h-10 rounded-2xl bg-white/8 backdrop-blur-md border border-white/10 flex items-center justify-center shrink-0 active:scale-90 pointer-events-auto">
-                <ChevronRight className="w-5 h-5 text-white" />
-              </button>
             </div>
 
-            {/* ── CENTER CONTROLS ── */}
-            <div className="absolute inset-0 flex items-center justify-center gap-10 pointer-events-auto">
-              {/* Prev episode */}
+            {/* CENTER: ep nav + play/pause */}
+            <div className="absolute inset-0 flex items-center justify-center gap-12 pointer-events-auto">
               <button onClick={e => { e.stopPropagation(); onPrevEp(); }} disabled={ep <= 1}
-                className="w-12 h-12 rounded-full bg-black/30 backdrop-blur-sm border border-white/8 flex items-center justify-center disabled:opacity-15 active:scale-90 transition-all">
+                className="w-12 h-12 rounded-full bg-black/30 backdrop-blur-sm border border-white/10 flex items-center justify-center disabled:opacity-15 active:scale-90">
                 <ChevronRight className="w-5 h-5 text-white/80" />
               </button>
-
-              {/* Play / Pause */}
-              <button onClick={e => { e.stopPropagation(); if (src.directUrl) togglePlay(); revealCtrl(); }}
-                className="w-[68px] h-[68px] rounded-full bg-white/14 backdrop-blur-md border border-white/18 flex items-center justify-center active:scale-90 shadow-2xl transition-all">
-                {showLoading
-                  ? <Loader2 className="w-7 h-7 text-white animate-spin" />
+              <button onClick={e => { e.stopPropagation(); togglePlay(); reveal(); }}
+                className="w-[72px] h-[72px] rounded-full bg-black/35 backdrop-blur-md border border-white/15 flex items-center justify-center active:scale-90 shadow-2xl">
+                {buffering && playUrl
+                  ? <Loader2 className="w-8 h-8 text-white animate-spin" />
                   : playing
-                  ? <Pause className="w-7 h-7 text-white fill-white" />
-                  : <Play className="w-7 h-7 text-white fill-white ml-1" />}
+                  ? <Pause className="w-8 h-8 text-white fill-white" />
+                  : <Play className="w-8 h-8 text-white fill-white ml-1" />}
               </button>
-
-              {/* Next episode */}
               <button onClick={e => { e.stopPropagation(); onNextEp(); }} disabled={ep >= totalEps && totalEps > 0}
-                className="w-12 h-12 rounded-full bg-black/30 backdrop-blur-sm border border-white/8 flex items-center justify-center disabled:opacity-15 active:scale-90 transition-all">
+                className="w-12 h-12 rounded-full bg-black/30 backdrop-blur-sm border border-white/10 flex items-center justify-center disabled:opacity-15 active:scale-90">
                 <ChevronLeft className="w-5 h-5 text-white/80" />
               </button>
             </div>
 
-            {/* ── BOTTOM BAR ── */}
+            {/* BOTTOM: progress + controls */}
             <div className="absolute bottom-0 left-0 right-0 pointer-events-auto"
-              style={{
-                paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-                background: "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 55%, transparent 100%)",
-              }}>
+              style={{ background: "linear-gradient(to top,rgba(0,0,0,0.9) 0%,rgba(0,0,0,0.4) 55%,transparent 100%)", paddingBottom: "max(14px,env(safe-area-inset-bottom))" }}>
 
-              {/* Progress bar */}
-              {src.directUrl && (
-                <div className="px-4 pt-3 pb-1">
-                  <div className="flex items-center gap-3">
-                    <span className="text-white/50 text-[11px] font-mono tabular-nums shrink-0">{fmtTime(curTime)}</span>
-                    <div className="flex-1 relative h-8 flex items-center cursor-pointer group" onClick={seekTo} ref={progressRef}>
-                      <div className="w-full h-[3px] rounded-full bg-white/15 relative overflow-visible group-hover:h-[5px] transition-all duration-150">
-                        {/* Buffered */}
-                        <div className="absolute inset-y-0 left-0 bg-white/18 rounded-full transition-all duration-300" style={{ width: `${buffered * 100}%` }} />
-                        {/* Progress */}
-                        <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-violet-500 to-fuchsia-400 rounded-full transition-all" style={{ width: `${progress * 100}%` }} />
-                      </div>
-                      {/* Thumb */}
-                      <div className="absolute w-4 h-4 rounded-full bg-white shadow-lg -translate-x-1/2 -translate-y-1/2 top-1/2 pointer-events-none opacity-0 group-hover:opacity-100 transition-all"
-                        style={{ left: `${progress * 100}%` }} />
+              {/* Time + progress */}
+              {playUrl && (
+                <div className="px-4 pb-1 pt-3">
+                  {/* Time row */}
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-white/60 text-[11px] font-mono tabular-nums">{fmtTime(curTime)}</span>
+                    <span className="text-white/35 text-[11px] font-mono tabular-nums">{fmtTime(duration)}</span>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="relative h-6 flex items-center cursor-pointer group" onClick={seekTo} ref={progRef}>
+                    <div className="w-full h-[3px] rounded-full bg-white/15 relative group-hover:h-[5px] transition-all duration-150">
+                      <div className="absolute inset-y-0 left-0 bg-white/22 rounded-full" style={{ width: `${buffered*100}%` }} />
+                      <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-orange-500 to-amber-400 rounded-full" style={{ width: `${progress*100}%` }} />
                     </div>
-                    <span className="text-white/35 text-[11px] font-mono tabular-nums shrink-0">{fmtTime(duration)}</span>
+                    {/* Red dot thumb */}
+                    <div className="absolute w-4 h-4 rounded-full bg-red-500 shadow-lg border-2 border-white/80 -translate-x-1/2 -translate-y-1/2 top-1/2 pointer-events-none"
+                      style={{ left: `${progress*100}%` }} />
                   </div>
                 </div>
               )}
 
               {/* Controls row */}
-              <div className="flex items-center gap-2 px-4 pb-1 pt-1">
-                {/* Volume */}
-                <button onClick={e => { e.stopPropagation(); toggleMute(); revealCtrl(); }}
-                  className="w-9 h-9 rounded-xl bg-black/25 flex items-center justify-center active:scale-90">
-                  {muted ? <VolumeX className="w-4 h-4 text-white/55" /> : <Volume2 className="w-4 h-4 text-white/55" />}
-                </button>
+              <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+                {/* Speed */}
+                <div className="relative">
+                  <button onClick={e => { e.stopPropagation(); setShowSpeed(!showSpeed); }}
+                    className="px-2.5 h-8 rounded-lg bg-black/30 border border-white/10 text-white/60 text-[11px] font-bold font-mono active:scale-90">
+                    {speed}×
+                  </button>
+                  <AnimatePresence>
+                    {showSpeed && (
+                      <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+                        className="absolute bottom-10 left-0 bg-[#14141e] border border-white/12 rounded-xl overflow-hidden shadow-2xl z-30"
+                        onClick={e => e.stopPropagation()}>
+                        {SPEEDS.map(sp => (
+                          <button key={sp} onClick={() => { setSpeed(sp); setShowSpeed(false); }}
+                            className={`flex items-center justify-between w-full px-4 py-2.5 text-[12px] font-mono active:bg-white/8
+                              ${speed === sp ? "text-violet-300 bg-violet-500/10" : "text-white/65"}`}>
+                            {sp}×
+                            {speed === sp && <CheckCircle className="w-3.5 h-3.5 text-violet-400" />}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
-                {/* Next source */}
-                <button onClick={e => { e.stopPropagation(); onNextSrc(); revealCtrl(); }}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/25 border border-white/7 text-white/50 text-[11px] font-bold font-['Cairo'] active:scale-95">
-                  <SkipForward className="w-3.5 h-3.5" />
-                  <span dir="rtl">التالي</span>
+                {/* -10s */}
+                <button onClick={e => { e.stopPropagation(); const v=videoRef.current; if(v) v.currentTime=Math.max(0,v.currentTime-10); reveal(); }}
+                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
+                  <RotateCcw className="w-4 h-4 text-white/60" />
                 </button>
 
                 <div className="flex-1" />
 
-                {/* Loading indicator */}
-                {!streamDone && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/8 border border-amber-500/12">
-                    <motion.div className="w-1.5 h-1.5 rounded-full bg-amber-400"
-                      animate={{ opacity: [0.4, 1, 0.4] }} transition={{ duration: 1.2, repeat: Infinity }} />
-                    <span className="text-amber-300/80 text-[10px] font-['Cairo']" dir="rtl">{sources.length}</span>
-                  </div>
-                )}
+                {/* Volume / Mute */}
+                <button onClick={e => { e.stopPropagation(); toggleMute(); reveal(); }}
+                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
+                  {muted ? <VolumeX className="w-4 h-4 text-white/60" /> : <Volume2 className="w-4 h-4 text-white/60" />}
+                </button>
+
+                {/* +10s */}
+                <button onClick={e => { e.stopPropagation(); const v=videoRef.current; if(v) v.currentTime=Math.min(v.duration||0,v.currentTime+10); reveal(); }}
+                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
+                  <RotateCw className="w-4 h-4 text-white/60" />
+                </button>
+
+                {/* Lock */}
+                <button onClick={e => { e.stopPropagation(); setLocked(true); }}
+                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
+                  <Unlock className="w-4 h-4 text-white/60" />
+                </button>
 
                 {/* Fullscreen */}
-                <button onClick={e => { e.stopPropagation(); toggleFs(); revealCtrl(); }}
-                  className="w-9 h-9 rounded-xl bg-black/25 flex items-center justify-center active:scale-90">
-                  {fs ? <Minimize2 className="w-4 h-4 text-white/55" /> : <Maximize2 className="w-4 h-4 text-white/55" />}
+                <button onClick={e => { e.stopPropagation(); toggleFs(); reveal(); }}
+                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
+                  {fs ? <Minimize2 className="w-4 h-4 text-white/60" /> : <Maximize2 className="w-4 h-4 text-white/60" />}
                 </button>
               </div>
             </div>
-
           </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── SERVER SHEET ── */}
-      <AnimatePresence>
-        {showSheet && (
-          <ServerSheet
-            sources={sources} activeUrl={src.url} statuses={statuses}
-            onSelect={s => { onSelectSource(s); setShowSheet(false); revealCtrl(5000); }}
-            onClose={() => setShowSheet(false)}
-          />
         )}
       </AnimatePresence>
     </div>
   );
 }
 
-/* ══════════════════════════════════════ LOADING SCREEN ══════════ */
-function LoadingScreen({ cover, title, ep, genres, sourcesCount, streamDone, onPlay }: {
-  cover: string; title: string; ep: number; genres: string[]; sourcesCount: number;
-  streamDone: boolean; onPlay?: () => void;
+/* ══════════════════════════════════ LOADING SCREEN ══════════ */
+function LoadingScreen({ cover, title, ep, streamDone, sourcesCount }: {
+  cover: string; title: string; ep: number; streamDone: boolean; sourcesCount: number;
 }) {
-  const bg = GENRE_BG[genres?.[0]] || GENRE_BG["default"];
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#09090f] overflow-hidden" dir="rtl">
-      <div className="absolute inset-0">
-        <img src={cover || bg} alt="" className="w-full h-full object-cover scale-110"
-          style={{ filter: "blur(55px) brightness(0.1) saturate(1.6)" }} />
-      </div>
-      <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, #09090f 60%)" }} />
-
-      <div className="relative z-10 flex flex-col items-center gap-8 px-6 text-center w-full max-w-xs">
+    <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col items-center justify-center overflow-hidden" dir="rtl">
+      {cover && (
+        <>
+          <div className="absolute inset-0">
+            <img src={cover} alt="" className="w-full h-full object-cover scale-110"
+              style={{ filter: "blur(55px) brightness(0.1) saturate(1.6)" }} />
+          </div>
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom,rgba(0,0,0,0.5) 0%,#09090f 60%)" }} />
+        </>
+      )}
+      <div className="relative z-10 flex flex-col items-center gap-7 px-6 text-center w-full max-w-xs">
         {cover && (
-          <motion.div initial={{ y: 24, opacity: 0, scale: 0.88 }} animate={{ y: 0, opacity: 1, scale: 1 }}
-            transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }} className="relative">
-            <div className="absolute -inset-10 rounded-full blur-[70px] opacity-40"
-              style={{ background: "radial-gradient(circle,rgba(139,92,246,0.8),transparent 70%)" }} />
-            <img src={cover} alt="" className="relative w-32 h-48 object-cover rounded-2xl shadow-2xl"
-              style={{ border: "1px solid rgba(139,92,246,0.18)" }} />
+          <motion.div initial={{ y: 20, opacity: 0, scale: 0.9 }} animate={{ y: 0, opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }} className="relative">
+            <div className="absolute -inset-8 rounded-full blur-[60px] opacity-45" style={{ background: "radial-gradient(circle,rgba(139,92,246,0.7),transparent 70%)" }} />
+            <img src={cover} alt="" className="relative w-32 h-48 object-cover rounded-2xl shadow-2xl border border-violet-500/18" />
             <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-violet-600 text-white text-[11px] font-black px-4 py-1 rounded-full shadow-lg whitespace-nowrap">
               {ep === 0 ? "فيلم" : `الحلقة ${ep}`}
             </div>
           </motion.div>
         )}
-
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28 }}
-          className="flex flex-col items-center gap-4">
-          <h2 className="text-white text-[15px] font-black font-['Cairo'] line-clamp-2 leading-snug">{title}</h2>
-
-          {sourcesCount > 0 ? (
-            <>
-              <p className="text-white/40 text-[12px] font-['Cairo']">{sourcesCount} مصدر · جاهز للتشغيل</p>
-              {onPlay && (
-                <motion.button onClick={onPlay} whileTap={{ scale: 0.95 }}
-                  className="flex items-center gap-2.5 px-6 py-3 rounded-2xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] shadow-xl shadow-violet-900/50">
-                  <Play className="w-4 h-4 fill-white" /> تشغيل الآن
-                </motion.button>
-              )}
-            </>
-          ) : (
-            <p className="text-white/30 text-[12px] font-['Cairo']">
-              {streamDone ? "لا توجد مصادر متاحة لهذه الحلقة" : "يجري البحث عن المصادر…"}
-            </p>
-          )}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+          className="flex flex-col items-center gap-3">
+          <h2 className="text-white text-[15px] font-black font-['Cairo'] line-clamp-2">{title}</h2>
+          <p className="text-white/30 text-[12px] font-['Cairo']">
+            {streamDone && sourcesCount === 0
+              ? "لا توجد مصادر متاحة"
+              : sourcesCount > 0
+              ? `${sourcesCount} مصدر · جاري التحقق منها…`
+              : "يجري البحث عن المصادر…"}
+          </p>
         </motion.div>
-
         {!streamDone && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
             className="flex items-center gap-1.5">
-            {[0, 1, 2, 3, 4].map(i => (
+            {[0,1,2,3,4].map(i => (
               <motion.div key={i} className="w-1.5 h-1.5 rounded-full bg-violet-500"
-                animate={{ opacity: [0.2, 1, 0.2], scale: [0.7, 1.3, 0.7] }}
-                transition={{ duration: 1.3, repeat: Infinity, delay: i * 0.18 }} />
+                animate={{ opacity: [0.2,1,0.2], scale: [0.7,1.3,0.7] }}
+                transition={{ duration: 1.3, repeat: Infinity, delay: i*0.18 }} />
             ))}
           </motion.div>
         )}
@@ -634,18 +710,18 @@ function LoadingScreen({ cover, title, ep, genres, sourcesCount, streamDone, onP
   );
 }
 
-/* ══════════════════════════════════════ NO SOURCES ══════════════ */
+/* ══════════════════════════════════ NO SOURCES ══════════════ */
 function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-[#09090f]" dir="rtl">
-      <div className="w-16 h-16 rounded-2xl bg-white/4 border border-white/7 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col items-center justify-center gap-5" dir="rtl">
+      <div className="w-14 h-14 rounded-2xl bg-white/4 border border-white/7 flex items-center justify-center">
         <AlertTriangle className="w-6 h-6 text-white/20" />
       </div>
       <div className="text-center">
-        <p className="text-white/55 text-[14px] font-black font-['Cairo']">لا توجد مصادر متاحة</p>
-        <p className="text-white/25 text-[12px] mt-1 font-['Cairo']">هذه الحلقة غير متوفرة حالياً</p>
+        <p className="text-white/55 text-[14px] font-black font-['Cairo']">لا توجد مصادر</p>
+        <p className="text-white/25 text-[12px] mt-1 font-['Cairo']">الحلقة غير متوفرة حالياً</p>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex gap-3">
         <button onClick={onBack} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/9 text-white/55 text-[13px] font-bold font-['Cairo']">
           <ChevronRight className="w-4 h-4" /> رجوع
         </button>
@@ -657,7 +733,7 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
   );
 }
 
-/* ══════════════════════════════════════ WATCH PAGE ══════════════ */
+/* ══════════════════════════════════ WATCH PAGE ══════════════ */
 export default function WatchPage() {
   const [, navigate] = useLocation();
   const sp        = new URLSearchParams(window.location.search);
@@ -667,16 +743,15 @@ export default function WatchPage() {
 
   const [anime,      setAnime]      = useState<any>(null);
   const [sources,    setSources]    = useState<Source[]>([]);
-  const [active,     setActive]     = useState<Source | null>(null);
   const [statuses,   setStatuses]   = useState<Record<string, ProbeStatus>>({});
-  const [pageLoading, setPageLoading] = useState(true);
+  const [active,     setActive]     = useState<Source | null>(null);
+  const [pageLoad,   setPageLoad]   = useState(true);
   const [streamDone, setStreamDone] = useState(false);
-  const [playing,    setPlaying]    = useState(false);
+  const [phase,      setPhase]      = useState<"loading"|"servers"|"player">("loading");
   const [extracting, setExtracting] = useState(false);
 
   const sseRef      = useRef<EventSource | null>(null);
   const seenUrls    = useRef(new Set<string>());
-  const autoStarted = useRef(false);
   const sourcesRef  = useRef<Source[]>([]);
   const activeRef   = useRef<Source | null>(null);
 
@@ -688,33 +763,20 @@ export default function WatchPage() {
   useEffect(() => { sourcesRef.current = sources; }, [sources]);
   useEffect(() => { activeRef.current  = active;  }, [active]);
 
-  /* ── Sorting ── */
-  function serverPriority(s: Source) {
-    if (s.directUrl) return 15;
-    const sc: Record<string, number> = {
-      shahiid: 13, animelek: 12, animedar: 11, vidnest: 10, animapahe: 9,
-      animephoenix: 8, anime4up: 8, myanime: 7, animekayan: 7,
-      witanime: 6, animerco: 6, animegg: 5,
-    };
-    return sc[s.site] || 3;
-  }
+  /* ── Source utils ── */
   function sortSources(srcs: Source[]): Source[] {
     return [...srcs].sort((a, b) => {
-      const ad = a.directUrl ? 1 : 0, bd = b.directUrl ? 1 : 0;
-      if (bd !== ad) return bd - ad;
+      if ((b.directUrl?1:0) !== (a.directUrl?1:0)) return (b.directUrl?1:0) - (a.directUrl?1:0);
       if (b.qualityRank !== a.qualityRank) return b.qualityRank - a.qualityRank;
-      return serverPriority(b) - serverPriority(a);
+      const sc: Record<string,number> = { shahiid:13, animelek:12, animedar:11, vidnest:10, animapahe:9, animegg:5 };
+      return (sc[b.site]||3) - (sc[a.site]||3);
     });
   }
   function dedupSources(srcs: Source[]): Source[] {
-    const seen = new Map<string, number>();
+    const seen = new Map<string,number>();
     return srcs.filter(s => {
-      let host = "";
-      try { host = new URL(s.url).hostname.replace(/^(www\.|vid\.|player\.)/, ""); } catch {}
-      const n = seen.get(host) || 0;
-      if (n >= 2) return false;
-      seen.set(host, n + 1);
-      return true;
+      let host = ""; try { host = new URL(s.url).hostname.replace(/^(www\.|vid\.|player\.)/,""); } catch {}
+      const n = seen.get(host) || 0; if (n >= 2) return false; seen.set(host, n+1); return true;
     });
   }
 
@@ -724,13 +786,10 @@ export default function WatchPage() {
     const es = new EventSource(`/api/anime/sources-stream?${p}`);
     sseRef.current = es;
     const acc: Source[] = [];
-
     es.onmessage = (e) => {
       if (e.data === "[DONE]") {
-        es.close(); sseRef.current = null;
-        setStreamDone(true);
-        setSrcCache(`${animeId}-${ep}`, acc);
-        return;
+        es.close(); sseRef.current = null; setStreamDone(true);
+        setSrcCache(`${animeId}-${ep}`, acc); return;
       }
       try {
         const src: Source = JSON.parse(e.data);
@@ -739,7 +798,7 @@ export default function WatchPage() {
         seenUrls.current.add(key);
         acc.push(src);
         setSources(prev => dedupSources(sortSources([...prev, src])));
-        setStatuses(prev => ({ ...prev, [src.url]: "unknown" }));
+        setStatuses(prev => ({ ...prev, [src.url]: "idle" }));
       } catch {}
     };
     es.onerror = () => { es.close(); sseRef.current = null; setStreamDone(true); };
@@ -747,118 +806,124 @@ export default function WatchPage() {
 
   /* ── Init ── */
   useEffect(() => {
-    if (!animeId) { setPageLoading(false); return; }
-    setPageLoading(true); setSources([]); setActive(null); setStatuses({});
-    setStreamDone(false); setPlaying(false);
-    seenUrls.current.clear(); autoStarted.current = false;
-    sseRef.current?.close();
+    if (!animeId) { setPageLoad(false); setPhase("servers"); return; }
+    setPageLoad(true); setSources([]); setActive(null); setStatuses({});
+    setStreamDone(false); setPhase("loading");
+    seenUrls.current.clear(); sseRef.current?.close();
 
     (async () => {
       try {
         const cached = getSrcCache(`${animeId}-${ep}`);
         if (cached && cached.length > 0) {
           setSources(cached);
-          const init: Record<string, ProbeStatus> = {};
-          cached.forEach(s => { init[s.url] = "unknown"; });
-          setStatuses(init); setPageLoading(false); setStreamDone(true);
-          return;
+          const init: Record<string,ProbeStatus> = {};
+          cached.forEach(s => { init[s.url] = "idle"; });
+          setStatuses(init); setPageLoad(false); setStreamDone(true); setPhase("servers"); return;
         }
-
         if (titleParam) {
-          setPageLoading(false);
+          setPageLoad(false);
           startSSE(titleParam, "", 0);
-          fetch("https://graphql.anilist.co", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } }),
-            signal: AbortSignal.timeout(12000),
-          }).then(r => r.json()).then(j => {
-            const d = j.data?.Media;
-            if (d) { setAnime(d); saveHistory(animeId, d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0); }
-          }).catch(() => {});
+          fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } }), signal: AbortSignal.timeout(12000) })
+            .then(r => r.json()).then(j => { const d = j.data?.Media; if (d) { setAnime(d); saveHistory(animeId, d.title?.romaji||"", d.coverImage?.large||"", ep, d.episodes||0); } }).catch(() => {});
           return;
         }
-
-        const res = await fetch("https://graphql.anilist.co", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } }),
-          signal: AbortSignal.timeout(12000),
-        });
+        const res = await fetch("https://graphql.anilist.co", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } }), signal: AbortSignal.timeout(12000) });
         const d = (await res.json()).data?.Media;
-        setAnime(d);
-        if (d) saveHistory(animeId, d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0);
-        setPageLoading(false);
-        startSSE(d?.title?.romaji || "", d?.title?.english || "", d?.idMal || 0);
-      } catch { setPageLoading(false); setStreamDone(true); }
+        setAnime(d); if (d) saveHistory(animeId, d.title?.romaji||"", d.coverImage?.large||"", ep, d.episodes||0);
+        setPageLoad(false);
+        startSSE(d?.title?.romaji||"", d?.title?.english||"", d?.idMal||0);
+      } catch { setPageLoad(false); setStreamDone(true); setPhase("servers"); }
     })();
     return () => { sseRef.current?.close(); sseRef.current = null; };
   }, [animeId, ep]);
 
-  /* ── Auto-play: prefer sources with directUrl ── */
+  /* ── When SSE arrives → auto-switch to servers page ── */
   useEffect(() => {
-    if (autoStarted.current || playing) return;
-    // First try: source with directUrl
-    const withUrl = sources.find(s => s.directUrl && statuses[s.url] !== "dead");
-    if (withUrl) {
-      autoStarted.current = true;
-      setActive(withUrl); setPlaying(true);
-      return;
-    }
-    // Second try: vidnest for browser extract (only when SSE stream still open or we have vidnest sources)
-    const vn = sources.find(s => s.site === "vidnest" && statuses[s.url] !== "dead" && !s.directUrl);
-    if (vn && !extracting) {
-      autoStarted.current = true;
-      setActive(vn); setPlaying(true);
-      triggerExtract(vn);
-    }
-  }, [sources, statuses, streamDone]);
+    if (sources.length > 0 && phase === "loading") setPhase("servers");
+  }, [sources.length]);
 
-  /* ── Browser extract (vidnest only) ── */
+  /* ── Also switch to servers when stream done ── */
+  useEffect(() => {
+    if (streamDone && phase === "loading") setPhase("servers");
+  }, [streamDone]);
+
+  /* ── Auto-probe directUrl sources in background ── */
+  useEffect(() => {
+    if (phase !== "servers") return;
+    sources.forEach(src => {
+      if (!src.directUrl || (statuses[src.url] && statuses[src.url] !== "idle")) return;
+      setStatuses(prev => ({ ...prev, [src.url]: "testing" }));
+      fetch(`/api/anime/probe?url=${encodeURIComponent(src.directUrl!)}`)
+        .then(r => r.json())
+        .then(d => setStatuses(prev => ({ ...prev, [src.url]: d.alive ? "ok" : "dead" })))
+        .catch(() => setStatuses(prev => ({ ...prev, [src.url]: "idle" })));
+    });
+  }, [phase, sources]);
+
+  /* ── Manual probe (on play click) ── */
+  function probeSource(src: Source) {
+    const url = src.directUrl || src.url;
+    setStatuses(prev => ({ ...prev, [src.url]: "testing" }));
+    fetch(`/api/anime/probe?url=${encodeURIComponent(url)}`)
+      .then(r => r.json())
+      .then(d => setStatuses(prev => ({ ...prev, [src.url]: d.alive ? "ok" : "dead" })))
+      .catch(() => setStatuses(prev => ({ ...prev, [src.url]: "idle" })));
+  }
+
+  /* ── Browser extract (vidnest/AnimePahe) ── */
   async function triggerExtract(src: Source) {
     if (src.directUrl || extracting) return;
     setExtracting(true);
     try {
       const res  = await fetch(`/api/anime/browser-extract?url=${encodeURIComponent(src.url)}&timeout=28`);
       const data = await res.json();
-      let raw: string = data.directUrl || "";
+      const raw: string = data.directUrl || "";
       if (!raw) { setExtracting(false); goNextSrc(); return; }
 
-      let finalUrl = raw, ref = src.url;
-      if (raw.includes("animanga.fun/proxy")) {
+      // Extract ref/referer — used by hls-proxy and seg-proxy
+      let ref = src.url;
+      if (raw.includes("animanga.fun/proxy") || raw.includes("upcloud.animanga.fun")) {
         try {
-          const pu  = new URL(raw);
-          const inn = pu.searchParams.get("url");
+          const pu = new URL(raw);
           const hdr = JSON.parse(pu.searchParams.get("headers") || "{}");
-          if (inn) { finalUrl = inn; ref = hdr["Referer"] || hdr["referer"] || src.url; }
+          ref = hdr["Referer"] || hdr["referer"] || src.url;
         } catch {}
       }
 
-      const isHls  = finalUrl.includes(".m3u8");
-      const proxy  = `/api/anime/hls-proxy?url=${encodeURIComponent(finalUrl)}&ref=${encodeURIComponent(ref)}`;
-      const updated: Source = { ...src, directUrl: isHls ? proxy : finalUrl, directType: isHls ? "hls" : "mp4" };
+      // Keep the full animanga.fun proxy URL — don't unwrap it.
+      // hls-proxy will fetch through animanga.fun (which handles IP/CORS restrictions).
+      const isHls = raw.includes(".m3u8") || raw.includes("uwu.m3u8") || raw.includes("animanga.fun");
+      const hlsProxy = `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`;
+      const updated: Source = {
+        ...src,
+        directUrl: isHls ? hlsProxy : raw,
+        directType: isHls ? "hls" : "mp4",
+      };
       setActive(updated);
       setSources(prev => prev.map(s => s.url === src.url ? updated : s));
-    } catch {
-      goNextSrc();
-    } finally {
-      setExtracting(false);
-    }
+    } catch { goNextSrc(); }
+    finally { setExtracting(false); }
   }
 
-  /* ── Select server ── */
-  function selectServer(src: Source) {
-    setActive(src); setPlaying(true);
+  /* ── Play source ── */
+  function playSource(src: Source) {
+    setActive(src); setPhase("player");
     if (src.site === "vidnest" && !src.directUrl) triggerExtract(src);
   }
 
-  /* ── Next source (skip sources without directUrl unless vidnest) ── */
+  /* ── Next source ── */
   function goNextSrc() {
     const all = sourcesRef.current;
-    const cur = active ? all.indexOf(activeRef.current!) : -1;
+    const cur = activeRef.current ? all.indexOf(activeRef.current) : -1;
     for (let i = cur + 1; i < all.length; i++) {
       const s = all[i];
       if (statuses[s.url] === "dead") continue;
-      if (s.directUrl || s.site === "vidnest") { selectServer(s); return; }
+      if (s.directUrl || s.site === "vidnest") { playSource(s); return; }
     }
+    // If no more sources, go back to list
+    setPhase("servers");
   }
 
   /* ── Episode nav ── */
@@ -869,51 +934,39 @@ export default function WatchPage() {
   function handleBack() { window.history.back(); }
   function handleRefresh() { localStorage.removeItem(`srccache:${animeId}-${ep}`); window.location.reload(); }
 
-  /* ════════ RENDER ════════════════════════════════════════════════ */
+  /* ════════ RENDER ════════════════════════════════════════════ */
 
-  /* Loading */
-  if (pageLoading || (!streamDone && sources.length === 0)) {
-    return (
-      <LoadingScreen cover={cover} title={title} ep={ep} genres={genres}
-        sourcesCount={sources.length} streamDone={streamDone}
-        onPlay={sources.length > 0 ? () => {
-          const best = sources.find(s => s.directUrl) || sources[0];
-          autoStarted.current = true;
-          setActive(best); setPlaying(true);
-          if (best.site === "vidnest" && !best.directUrl) triggerExtract(best);
-        } : undefined} />
-    );
+  if (pageLoad || (phase === "loading" && sources.length === 0 && !streamDone)) {
+    return <LoadingScreen cover={cover} title={title} ep={ep} streamDone={streamDone} sourcesCount={sources.length} />;
   }
 
-  /* No sources */
-  if (streamDone && sources.length === 0)
+  if (streamDone && sources.length === 0) {
     return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
+  }
 
-  /* Player */
-  if (playing && active) {
+  if (phase === "player" && active) {
     return (
-      <NetflixPlayer
+      <VideoPlayer
         src={active} title={title} ep={ep} totalEps={totalEps}
         sources={sources} statuses={statuses}
-        onBack={handleBack}
+        onBack={() => setPhase("servers")}
         onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
         onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
-        onSelectSource={selectServer}
         onNextSrc={goNextSrc}
+        onOpenList={() => setPhase("servers")}
         extracting={extracting}
         streamDone={streamDone}
       />
     );
   }
 
-  /* Waiting */
   return (
-    <LoadingScreen cover={cover} title={title} ep={ep} genres={genres}
-      sourcesCount={sources.length} streamDone={streamDone}
-      onPlay={sources.length > 0 ? () => {
-        const best = sources.find(s => s.directUrl) || sources[0];
-        autoStarted.current = true;
-        setActive(best); setPlaying(true);
-      } : undefined} />
+    <ServerListPage
+      anime={anime} ep={ep} title={title} cover={cover}
+      sources={sources} statuses={statuses} streamDone={streamDone}
+      onPlay={playSource}
+      onBack={handleBack}
+      onProbe={probeSource}
+    />
   );
 }
