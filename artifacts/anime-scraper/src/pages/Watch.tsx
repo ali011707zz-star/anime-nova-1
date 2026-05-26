@@ -214,11 +214,13 @@ function VideoPlayer({
   src, title, ep, totalEps,
   sources, activeIdx, statuses,
   onClose, onNext, onPrev, onSelectSource, onNextSrc,
+  browserExtracting,
 }: {
   src: Source; title: string; ep: number; totalEps: number;
   sources: Source[]; activeIdx: number; statuses: Record<string, ProbeStatus>;
   onClose: () => void; onNext: () => void; onPrev: () => void;
   onSelectSource: (s: Source) => void; onNextSrc: () => void;
+  browserExtracting?: boolean;
 }) {
   const [showSheet, setShowSheet]     = useState(false);
   const [showCtrl, setShowCtrl]       = useState(true);
@@ -349,6 +351,19 @@ function VideoPlayer({
             </div>
           )}
         </>
+      )}
+
+      {/* ── Browser-extract loading overlay ── */}
+      {browserExtracting && (
+        <div className="absolute inset-0 z-[3] bg-black/90 flex flex-col items-center justify-center gap-4">
+          <div className="w-20 h-20 rounded-2xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
+            <Loader2 className="w-9 h-9 text-violet-400 animate-spin" />
+          </div>
+          <div className="text-center px-6">
+            <p className="text-white/90 text-sm font-bold font-['Cairo']">جارٍ استخراج الرابط المباشر…</p>
+            <p className="text-white/40 text-xs font-['Cairo'] mt-1">AnimePahe · متصفح حقيقي</p>
+          </div>
+        </div>
       )}
 
       {/* ══════════════════════════════════════════
@@ -616,10 +631,11 @@ export default function WatchPage() {
   const ep         = parseInt(sp.get("ep") || "1");
   const titleParam = sp.get("title") || "";
 
-  const [showPlayer, setShowPlayer]   = useState(false);
-  const [anime, setAnime]             = useState<any>(null);
-  const [sources, setSources]         = useState<Source[]>([]);
-  const [active, setActive]           = useState<Source | null>(null);
+  const [showPlayer, setShowPlayer]       = useState(false);
+  const [anime, setAnime]                 = useState<any>(null);
+  const [sources, setSources]             = useState<Source[]>([]);
+  const [active, setActive]               = useState<Source | null>(null);
+  const [browserExtracting, setBrowserExtracting] = useState(false);
   const [activeIdx, setActiveIdx]     = useState(0);
   const [statuses, setStatuses]       = useState<Record<string, ProbeStatus>>({});
   const [loading, setLoading]         = useState(true);
@@ -786,6 +802,7 @@ export default function WatchPage() {
         if (!s) return;
         autoStarted.current = true;
         setActive(s); setActiveIdx(sourcesRef.current.indexOf(s)); setShowPlayer(true);
+        if (s.site === "vidnest" && !s.directUrl) triggerBrowserExtract(s);
       }, 500);
     }
 
@@ -793,14 +810,52 @@ export default function WatchPage() {
       const s = sources.find(s2 => (statusesRef.current[s2.url] || "unknown") !== "dead") || sources[0];
       autoStarted.current = true;
       setActive(s); setActiveIdx(sources.indexOf(s)); setShowPlayer(true);
+      if (s.site === "vidnest" && !s.directUrl) triggerBrowserExtract(s);
     }
   }, [sources, streamDone]);
+
+  async function triggerBrowserExtract(src: Source) {
+    if (src.site !== "vidnest" || src.directUrl) return;
+    setBrowserExtracting(true);
+    try {
+      const res  = await fetch(`/api/anime/browser-extract?url=${encodeURIComponent(src.url)}&timeout=28`);
+      const data = await res.json();
+      let raw: string = data.directUrl || "";
+      if (!raw) return;
+
+      // Decode animanga proxy wrapper → get inner m3u8 + referer
+      let finalUrl = raw;
+      let referer  = src.url;
+      if (raw.includes("animanga.fun/proxy")) {
+        try {
+          const proxyUrl = new URL(raw);
+          const inner    = proxyUrl.searchParams.get("url");
+          const hdrs     = JSON.parse(proxyUrl.searchParams.get("headers") || "{}");
+          if (inner) {
+            finalUrl = inner;
+            referer  = hdrs["Referer"] || hdrs["referer"] || src.url;
+          }
+        } catch {}
+      }
+
+      const isHls = finalUrl.includes(".m3u8");
+      const proxyHls = `/api/anime/hls-proxy?url=${encodeURIComponent(finalUrl)}&ref=${encodeURIComponent(referer)}`;
+      const updated: Source = { ...src, directUrl: proxyHls, directType: isHls ? "hls" : "mp4" };
+      setActive(updated);
+      setSources(prev => prev.map(s => s.url === src.url ? updated : s));
+    } catch (e) {
+      console.error("browser-extract failed", e);
+    } finally {
+      setBrowserExtracting(false);
+    }
+  }
 
   function selectServer(src: Source) {
     const idx = sourcesRef.current.findIndex(s => s.url === src.url);
     setActive(src); setActiveIdx(idx >= 0 ? idx : 0);
     setShowPlayer(true);
     showToast(`▶ ${src.name}`);
+    if (src.site === "vidnest" && !src.directUrl) triggerBrowserExtract(src);
   }
 
   function goNextSrc() {
@@ -831,6 +886,7 @@ export default function WatchPage() {
     onPrev:  () => ep > 1 ? goEp(ep - 1) : undefined,
     onSelectSource: selectServer,
     onNextSrc: goNextSrc,
+    browserExtracting,
   };
 
   /* ── server list / loading background ── */
