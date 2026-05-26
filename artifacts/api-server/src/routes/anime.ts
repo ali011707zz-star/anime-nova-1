@@ -1,6 +1,14 @@
 import { Router } from "express";
+import { execSync } from "child_process";
 
 const router = Router();
+
+// ── Chromium path for Playwright (Nix system install) ──────────────────────
+function getChromiumPath(): string {
+  try { return execSync("which chromium", { timeout: 3000 }).toString().trim(); } catch {}
+  try { return execSync("which chromium-browser", { timeout: 3000 }).toString().trim(); } catch {}
+  return "";
+}
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -2647,6 +2655,102 @@ router.get("/anime/seg-proxy", async (req, res) => {
     const body = await r.arrayBuffer();
     res.send(Buffer.from(body));
   } catch (e: any) { res.status(502).send(`proxy error: ${e?.message ?? e}`); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// BROWSER EXTRACT — Playwright headless Chromium to bypass Cloudflare / JS
+// GET /api/anime/browser-extract?url=...&timeout=20
+// Returns: { directUrl?, embedUrl, title?, method }
+// ════════════════════════════════════════════════════════════════════════════
+router.get("/anime/browser-extract", async (req, res) => {
+  const url   = req.query.url as string;
+  const wait  = Math.min(Number(req.query.timeout) || 20, 60);   // max 60s
+  if (!url || !url.startsWith("http")) {
+    res.status(400).json({ error: "url required" }); return;
+  }
+
+  const chromiumPath = getChromiumPath();
+  if (!chromiumPath) {
+    res.status(503).json({ error: "Chromium not found on this server" }); return;
+  }
+
+  let browser: any = null;
+  try {
+    const { chromium } = await import("playwright-core");
+    browser = await chromium.launch({
+      executablePath: chromiumPath,
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-zygote",
+        "--single-process",
+        "--disable-extensions",
+      ],
+    });
+
+    const ctx  = await browser.newContext({
+      userAgent: BROWSER_UA,
+      viewport: { width: 1280, height: 720 },
+      ignoreHTTPSErrors: true,
+    });
+    const page = await ctx.newPage();
+
+    // Collect video network requests
+    const videoUrls: string[] = [];
+    page.on("request", (r: any) => {
+      const u = r.url() as string;
+      if (
+        u.includes(".m3u8") || u.includes(".mp4") ||
+        u.includes("video/") || u.includes("/hls/") ||
+        u.includes("/stream") || u.includes("master.m3u8")
+      ) {
+        if (!videoUrls.includes(u)) videoUrls.push(u);
+      }
+    });
+
+    // Navigate with timeout
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: wait * 1000 });
+    } catch {}
+
+    // Try clicking play button if present
+    try {
+      const playBtn = await page.$("button.play, [class*='play-btn'], [aria-label*='play' i], video");
+      if (playBtn) await playBtn.click({ timeout: 3000 });
+    } catch {}
+
+    // Wait up to `wait` seconds for a video URL to appear
+    const deadline = Date.now() + wait * 1000;
+    while (videoUrls.length === 0 && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    // Grab page title
+    let title = "";
+    try { title = await page.title(); } catch {}
+
+    await browser.close();
+    browser = null;
+
+    const best = videoUrls.find(u => u.includes(".m3u8"))
+               || videoUrls.find(u => u.includes(".mp4"))
+               || videoUrls[0];
+
+    res.json({
+      directUrl: best || null,
+      allUrls:   videoUrls,
+      embedUrl:  url,
+      title,
+      method:    "playwright",
+    });
+  } catch (e: any) {
+    if (browser) { try { await browser.close(); } catch {} }
+    res.status(500).json({ error: e?.message ?? String(e), method: "playwright" });
+  }
 });
 
 export default router;
