@@ -49,9 +49,11 @@ const EMBED_ONLY_HOSTS = [
   "vidbm.com","vidbm.me","uptostream.com",
   "playerwish.com","wishfast.top",
   "streamvid.net","streamlare.com",
-  "vidmoly.biz","vidmoly.to",
+  "vidmoly.biz","vidmoly.to","vidmoly.net",
   "asnwish.com",
   "vidnest.fun",
+  "anime7u.com",
+  "dsvplay.com",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -516,31 +518,36 @@ async function getShahiidSeasonsUrl(seriesUrl: string): Promise<string> {
   // Movies/OVAs are already at /anime/ — no seasons
   if (seriesUrl.includes("/anime/")) return seriesUrl;
 
-  // Already a /seasons/ URL — use it directly
-  if (seriesUrl.includes("/seasons/")) return seriesUrl;
+  // Already a seasonses/?serie= or /seasons/ URL — use directly
+  if (seriesUrl.includes("/seasonses/") || seriesUrl.includes("?serie=")) return seriesUrl;
+  if (seriesUrl.includes("/seasons/") && !seriesUrl.includes("/serieses/")) return seriesUrl;
 
-  // For /series/, /serieses/, /seasonses/ — derive seasons URL
-  const seasonsDerived = seriesUrl.replace(/\/(series|serieses|seasonses)\//, "/seasons/");
-  if (seasonsDerived !== seriesUrl) {
-    const status = await safeHead(seasonsDerived, SHAHIID_HDRS);
-    if (status === 200) return seasonsDerived;
-  }
-
-  // Fetch series page and find /seasons/ link
+  // Fetch the series page — look for JS redirect (window.location) or href to /seasonses/ or /seasons/
   try {
     const r = await fetch(seriesUrl, {
       headers: SHAHIID_HDRS,
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(10000),
       redirect: "follow",
     });
     if (r.ok) {
       const html = await r.text();
-      const m = html.match(/href="(https?:\/\/shahiid-anime\.net\/seasons\/[^"]+)"/i);
-      if (m) return m[1].replace(/\/?$/, "/");
+
+      // Primary pattern (2024+): window.location = "https://shahiid-anime.net/seasonses/?serie=12345"
+      const jsRedir = html.match(/window\.location\s*=\s*["'](https?:\/\/shahiid-anime\.net\/seasonses\/?[^"']+)["']/i);
+      if (jsRedir) return jsRedir[1];
+
+      // Anchor href to seasonses
+      const hrefSeasonses = html.match(/href="(https?:\/\/shahiid-anime\.net\/seasonses\/[^"]+)"/i);
+      if (hrefSeasonses) return hrefSeasonses[1];
+
+      // Legacy /seasons/ slug href
+      const seasonsHref = html.match(/href="(https?:\/\/shahiid-anime\.net\/seasons\/[^"]+)"/i);
+      if (seasonsHref) return seasonsHref[1].replace(/\/?$/, "/");
     }
   } catch {}
 
-  return seasonsDerived || seriesUrl;
+  // Fallback: slug-based derivation (old site layout)
+  return seriesUrl.replace(/\/(series|serieses|seasonses)\//, "/seasons/");
 }
 
 interface ShahiidServerBtn {
@@ -1075,8 +1082,7 @@ async function getAnimeGGSources(
         quality,
         qualityRank,
         site: "animegg",
-        // AnimeGG CDN chain (vidcache.net) is incompatible with server-side proxy
-        // Use iframe embed directly — the animegg.org embed player works reliably
+        ...(directUrl ? { directUrl, directType } : {}),
       });
     }));
 
@@ -2569,6 +2575,9 @@ router.get("/anime/sources-stream", async (req, res) => {
     if (!s.url || seenUrls.has(key)) return;
     if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
     if (s.directUrl && DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
+    // Filter embed-only sources that can never be played natively (no iframe allowed)
+    if (!s.directUrl && EMBED_ONLY_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
+    if (!s.directUrl && (s.url.includes("share4max.com") || s.url.includes("megamax.me"))) return;
     seenUrls.add(key);
     res.write(`data: ${JSON.stringify(s)}\n\n`);
   }

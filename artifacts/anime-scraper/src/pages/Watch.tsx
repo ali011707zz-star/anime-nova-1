@@ -871,6 +871,7 @@ export default function WatchPage() {
   const activeRef     = useRef<Source | null>(null);
   const extractingRef = useRef(false);   // sync ref to avoid stale-closure issues
   const triedRef      = useRef(new Set<string>()); // tracks urls already attempted for extraction
+  const autoPlayedRef = useRef(false);  // prevent double auto-play
 
   const title    = anime?.title?.romaji || anime?.title?.english || titleParam || "أنمي";
   const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
@@ -927,6 +928,7 @@ export default function WatchPage() {
     setPageLoad(true); setSources([]); setActive(null); setStatuses({});
     setStreamDone(false); setPhase("loading");
     seenUrls.current.clear(); sseRef.current?.close();
+    autoPlayedRef.current = false; triedRef.current.clear();
 
     (async () => {
       try {
@@ -965,6 +967,15 @@ export default function WatchPage() {
   useEffect(() => {
     if (streamDone && phase === "loading") setPhase("servers");
   }, [streamDone]);
+
+  /* ── Auto-play first directUrl source when stream finishes ── */
+  useEffect(() => {
+    if (!streamDone || phase !== "servers" || autoPlayedRef.current) return;
+    const best = sourcesRef.current.find(s => s.directUrl && (statuses[s.url] || "idle") !== "dead");
+    if (!best) return;
+    autoPlayedRef.current = true;
+    setTimeout(() => playSource(best), 400); // small delay so server list is visible first
+  }, [streamDone, phase]);
 
   /* ── Auto-probe directUrl sources in background ── */
   useEffect(() => {
