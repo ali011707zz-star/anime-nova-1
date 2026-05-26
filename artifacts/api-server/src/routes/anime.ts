@@ -2729,16 +2729,28 @@ router.get("/anime/hls-proxy", async (req, res) => {
   if (!rawUrl) { res.status(400).send("url required"); return; }
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
+
+  // For animanga.fun/proxy URLs, extract the inner URL to use as base for
+  // resolving relative segment URLs in the m3u8 manifest.
+  let baseForSegments = url;
+  if (url.includes("animanga.fun") && url.includes("url=")) {
+    try {
+      const pu = new URL(url);
+      const inner = pu.searchParams.get("url");
+      if (inner) baseForSegments = inner;
+    } catch {}
+  }
+
   let origin = ""; try { origin = new URL(url).origin; } catch {}
   try {
-    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
+    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(18000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
     const ct = r.headers.get("content-type") || "";
     const body = await r.text();
     const proto = req.headers["x-forwarded-proto"] || "https";
     const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
     const selfBase = `${proto}://${host}`;
-    const rewritten = rewriteM3u8(body, url, selfBase, ref || url);
+    const rewritten = rewriteM3u8(body, baseForSegments, selfBase, ref || url);
     res.setHeader("Content-Type", ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-cache");
@@ -2769,6 +2781,19 @@ router.get("/anime/video-proxy", async (req, res) => {
   };
   const range = req.headers["range"] as string | undefined;
   if (range) reqHeaders["Range"] = range;
+
+  // For HEAD requests (browser probing before playback), mirror HEAD upstream
+  if (req.method === "HEAD") {
+    try {
+      const r = await fetch(url, { method: "HEAD", headers: reqHeaders, signal: AbortSignal.timeout(8000), redirect: "follow" });
+      res.status(r.status);
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Headers", "Range");
+      const passHead = ["content-type","content-length","accept-ranges","cache-control"];
+      for (const h of passHead) { const v = r.headers.get(h); if (v) res.setHeader(h, v); }
+      res.end(); return;
+    } catch { res.status(200).setHeader("Access-Control-Allow-Origin", "*").end(); return; }
+  }
 
   try {
     const r = await fetch(url, {
