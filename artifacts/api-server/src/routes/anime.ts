@@ -2115,6 +2115,166 @@ async function getAnimepaheSources(romaji: string, english: string | null, ep: n
 
 
 // ════════════════════════════════════════════════════════════════════
+//  BROWSER-BASED SCRAPER  (Playwright headless Chromium)
+//  Used for CF-protected sites: witanime.cyou, eta.animerco.org, etc.
+//  Intercepts network requests to capture direct m3u8/mp4 URLs.
+// ════════════════════════════════════════════════════════════════════
+
+const browserScrapeCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getChromiumBrowser(): Promise<any | null> {
+  const chromiumPath = getChromiumPath();
+  if (!chromiumPath) return null;
+  try {
+    const { chromium } = await import("playwright-core");
+    return chromium.launch({
+      executablePath: chromiumPath,
+      headless: true,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage", "--disable-gpu",
+        "--no-first-run", "--no-zygote", "--single-process",
+        "--disable-extensions", "--disable-background-networking",
+        "--disable-default-apps", "--disable-sync",
+      ],
+    });
+  } catch { return null; }
+}
+
+async function browserScrapeEpisode(
+  siteUrl: string,
+  searchQuery: string,
+  englishQuery: string | null,
+  ep: number,
+  siteName: string,
+  siteKey: string,
+  searchPath: (q: string) => string,
+  seriesLinkPattern: RegExp,
+  episodeLinkBuilder: (seriesHref: string, ep: number) => string[],
+  waitMs = 8000,
+): Promise<UnifiedSource[]> {
+  const ck = `browser:${siteKey}:${(searchQuery + "|" + (englishQuery || "")).toLowerCase()}:${ep}`;
+  const hit = browserScrapeCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  let browser: any = null;
+  try {
+    browser = await getChromiumBrowser();
+    if (!browser) return [];
+
+    const ctx  = await browser.newContext({ userAgent: BROWSER_UA, viewport: { width: 1280, height: 720 }, ignoreHTTPSErrors: true });
+    const page = await ctx.newPage();
+
+    const videoUrls: string[] = [];
+    page.on("request", (r: any) => {
+      const u: string = r.url();
+      if ((u.includes(".m3u8") || u.includes(".mp4")) && !videoUrls.includes(u)) videoUrls.push(u);
+    });
+
+    let seriesUrl: string | null = null;
+    const queries = [englishQuery, searchQuery].filter(Boolean) as string[];
+
+    for (const q of queries) {
+      if (seriesUrl) break;
+      try {
+        await page.goto(searchPath(q), { waitUntil: "domcontentloaded", timeout: 12000 });
+        await page.waitForTimeout(1500);
+        const html: string = await page.content();
+        let bestHref = "", bestScore = 0;
+        for (const m of html.matchAll(seriesLinkPattern)) {
+          const href  = m[1];
+          const label = (m[2] || href.replace(/-/g, " ")).trim();
+          const score = Math.max(similarity(label, searchQuery), englishQuery ? similarity(label, englishQuery) : 0);
+          if (score > bestScore && score > 0.25) { bestScore = score; bestHref = href; }
+        }
+        if (bestHref) seriesUrl = bestHref;
+      } catch {}
+    }
+
+    if (!seriesUrl) { await browser.close(); return []; }
+
+    const epCandidates = episodeLinkBuilder(seriesUrl, ep);
+    let found = false;
+    for (const epUrl of epCandidates) {
+      if (found) break;
+      try {
+        await page.goto(epUrl, { waitUntil: "domcontentloaded", timeout: 12000 });
+        await page.waitForTimeout(2000);
+
+        // Try clicking a play button
+        try { const btn = await page.$("button.play, [class*=play], video, [aria-label*=play i]"); if (btn) await btn.click({ timeout: 2000 }); } catch {}
+        await page.waitForTimeout(waitMs);
+
+        if (videoUrls.length > 0) found = true;
+      } catch {}
+    }
+
+    await browser.close(); browser = null;
+
+    if (!videoUrls.length) return [];
+    const results: UnifiedSource[] = [];
+    const best = videoUrls.find(u => u.includes(".m3u8")) || videoUrls.find(u => u.includes(".mp4"));
+    if (best) {
+      const isHls = best.includes(".m3u8");
+      const proxyUrl = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(best)}&ref=${encodeURIComponent(siteUrl)}`
+        : best;
+      results.push({
+        name: `${siteName} · مباشر`,
+        url: best,
+        quality: "HD", qualityRank: 2, site: siteKey,
+        directUrl: proxyUrl, directType: isHls ? "hls" : "mp4",
+      });
+    }
+    // Include all unique video URLs as fallbacks
+    for (const u of videoUrls.slice(0, 4)) {
+      if (u !== best) {
+        const isHls = u.includes(".m3u8");
+        const proxyUrl = isHls ? `/api/anime/hls-proxy?url=${encodeURIComponent(u)}&ref=${encodeURIComponent(siteUrl)}` : u;
+        results.push({ name: `${siteName} · سيرفر`, url: u, quality: "HD", qualityRank: 2, site: siteKey, directUrl: proxyUrl, directType: isHls ? "hls" : "mp4" });
+      }
+    }
+
+    if (results.length) browserScrapeCache.set(ck, { sources: results, ts: Date.now() });
+    return results;
+  } catch (e) {
+    if (browser) { try { await browser.close(); } catch {} }
+    return [];
+  }
+}
+
+async function getWitAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  return browserScrapeEpisode(
+    "https://witanime.cyou",
+    title, english, ep,
+    "ويت أنمي", "witanime",
+    (q) => `https://witanime.cyou/?search_param=animes&s=${encodeURIComponent(q)}`,
+    /href="(https?:\/\/witanime\.(?:cyou|cc|life)\/anime\/[^"#?]+)"[^>]*>([^<]*)/gi,
+    (seriesHref, n) => [
+      seriesHref.replace(/\/anime\//, `/episode/${seriesHref.split("/anime/")[1]?.replace(/\/$/, "")}-الحلقة-${n}/`),
+      `https://witanime.cyou/episode/${seriesHref.split("/anime/")[1]?.replace(/\//g, "")}-الحلقة-${n}/`,
+    ],
+    7000,
+  );
+}
+
+async function getAnimercoSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  return browserScrapeEpisode(
+    "https://animerco.org",
+    title, english, ep,
+    "أنمي ركو", "animerco",
+    (q) => `https://animerco.org/?s=${encodeURIComponent(q)}`,
+    /href="(https?:\/\/(?:eta\.)?animerco\.org\/[^"#?]+)"[^>]*>([^<]*<[^>]*>)?([^<]+)/gi,
+    (seriesHref, n) => [
+      `${seriesHref.replace(/\/$/, "")}/episode-${n}/`,
+      `${seriesHref.replace(/\/$/, "")}/${n}/`,
+    ],
+    8000,
+  );
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  VIDNEST / ANIMEPAHE scraper
 //  Uses anilistId directly — no search needed
 //  URL: https://vidnest.fun/animepahe/{anilistId}/{ep}/sub
@@ -2229,6 +2389,24 @@ router.get("/anime/sources-stream", async (req, res) => {
           if (!title) return;
           const srcs = await race(getAnimadarSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── WitAnime.cyou  (Arabic — browser scrape, CF-protected) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getWitAnimeSources(title, english, ep), 35000, []);
+          for (const s of srcs) { if (!closed) sendSrc(s); }
+        } catch {}
+      })(),
+
+      // ── Animerco.org  (Arabic — browser scrape, CF-protected) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnimercoSources(title, english, ep), 35000, []);
+          for (const s of srcs) { if (!closed) sendSrc(s); }
         } catch {}
       })(),
     ]);
