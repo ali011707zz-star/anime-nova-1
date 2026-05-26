@@ -35,7 +35,9 @@ const SITE_LABEL: Record<string, string> = {
   allanime: "AllAnime", anime4up: "Anime4up",
   animephoenix: "Phoenix", myanime: "MyAnime",
   animekayan: "Kayan",  witanime: "WitAnime",
-  animerco: "Animerco", animeblkom: "Blkom",
+  animerco: "Animerco", animeblkom: "بلكوم",
+  animeiat: "AnimeIat", anime3rb:   "Anime3rb",
+  goldenanimaniac: "Golden",
 };
 
 /* ══════════════════════════════════ HELPERS ══════════════════ */
@@ -108,12 +110,12 @@ function WifiStatus({ status }: { status: ProbeStatus }) {
 function ServerListPage({
   anime, ep, title: titleProp, cover: coverProp,
   sources, statuses, streamDone,
-  onPlay, onBack, onProbe,
+  onPlay, onBack, onSetStatus,
 }: {
   anime: any; ep: number; title: string; cover: string;
   sources: Source[]; statuses: Record<string, ProbeStatus>; streamDone: boolean;
   onPlay: (s: Source) => void; onBack: () => void;
-  onProbe: (s: Source) => void;
+  onSetStatus: (url: string, status: ProbeStatus) => void;
 }) {
   const [lang, setLang] = useState<"all" | "ar" | "en">("all");
   const title = anime?.title?.romaji || anime?.title?.english || titleProp || "";
@@ -134,15 +136,42 @@ function ServerListPage({
   const [probing, setProbing] = useState<string | null>(null);
 
   async function handlePlay(src: Source) {
-    if (!src.directUrl && src.site !== "vidnest") {
-      onPlay(src); return;
+    // Already probing this source → ignore re-click
+    if (probing === src.url) return;
+
+    // No directUrl → can't probe meaningfully; send to player for extraction
+    if (!src.directUrl) { onPlay(src); return; }
+
+    const st = statuses[src.url];
+
+    // Already confirmed alive → play immediately
+    if (st === "ok") { onPlay(src); return; }
+
+    // Currently dead → re-probe before giving up
+    // (allow user to retry by clicking dead server again)
+    if (st !== "dead") {
+      // If already dead on second click, just try anyway as fallback
     }
-    if (statuses[src.url] === "ok") { onPlay(src); return; }
-    if (statuses[src.url] === "dead") return;
+
+    // Probe then decide
     setProbing(src.url);
-    onProbe(src);
-    // Give probe a moment then play regardless
-    setTimeout(() => { setProbing(null); onPlay(src); }, 1200);
+    onSetStatus(src.url, "testing");
+    try {
+      const r = await fetch(`/api/anime/probe?url=${encodeURIComponent(src.directUrl)}`);
+      const d = await r.json();
+      if (d.alive) {
+        onSetStatus(src.url, "ok");
+        onPlay(src);
+      } else {
+        onSetStatus(src.url, "dead");
+        // Don't play — keep showing dead (red) status
+      }
+    } catch {
+      onSetStatus(src.url, "idle");
+      onPlay(src); // network error → try anyway
+    } finally {
+      setProbing(null);
+    }
   }
 
   return (
@@ -209,7 +238,11 @@ function ServerListPage({
                 return (
                   <div key={src.url}
                     className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl border transition-all
-                      ${isDead ? "opacity-40 bg-white/3 border-white/5" : "bg-white/5 border-white/8 active:bg-white/8"}`}>
+                      ${isDead
+                        ? "opacity-50 bg-red-500/5 border-red-500/20"
+                        : st === "ok"
+                        ? "bg-emerald-500/5 border-emerald-500/20 active:bg-emerald-500/8"
+                        : "bg-white/5 border-white/8 active:bg-white/8"}`}>
 
                     {/* WiFi */}
                     <div className="shrink-0">
@@ -229,11 +262,18 @@ function ServerListPage({
                       <p className="text-white/30 text-[10px] font-['Cairo'] mt-0.5">{SITE_LABEL[src.site] || src.site}</p>
                     </div>
 
-                    {/* Play button */}
-                    <button onClick={() => !isDead && handlePlay(src)} disabled={isDead}
-                      className="w-10 h-10 rounded-xl bg-violet-600/80 border border-violet-500/40 flex items-center justify-center active:scale-90 disabled:opacity-30 shrink-0">
+                    {/* Play / Probe button */}
+                    <button onClick={() => handlePlay(src)}
+                      className={`w-10 h-10 rounded-xl border flex items-center justify-center active:scale-90 shrink-0 transition-all
+                        ${isDead
+                          ? "bg-red-500/15 border-red-500/30"
+                          : st === "ok"
+                          ? "bg-emerald-600/80 border-emerald-500/40"
+                          : "bg-violet-600/80 border-violet-500/40"}`}>
                       {isProbing
                         ? <Loader2 className="w-4 h-4 text-white animate-spin" />
+                        : isDead
+                        ? <RefreshCw className="w-3.5 h-3.5 text-red-300" />
                         : <Play className="w-4 h-4 text-white fill-white ml-0.5" />}
                     </button>
                   </div>
@@ -750,10 +790,11 @@ export default function WatchPage() {
   const [phase,      setPhase]      = useState<"loading"|"servers"|"player">("loading");
   const [extracting, setExtracting] = useState(false);
 
-  const sseRef      = useRef<EventSource | null>(null);
-  const seenUrls    = useRef(new Set<string>());
-  const sourcesRef  = useRef<Source[]>([]);
-  const activeRef   = useRef<Source | null>(null);
+  const sseRef        = useRef<EventSource | null>(null);
+  const seenUrls      = useRef(new Set<string>());
+  const sourcesRef    = useRef<Source[]>([]);
+  const activeRef     = useRef<Source | null>(null);
+  const extractingRef = useRef(false);   // sync ref to avoid stale-closure issues
 
   const title    = anime?.title?.romaji || anime?.title?.english || titleParam || "أنمي";
   const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
@@ -768,7 +809,7 @@ export default function WatchPage() {
     return [...srcs].sort((a, b) => {
       if ((b.directUrl?1:0) !== (a.directUrl?1:0)) return (b.directUrl?1:0) - (a.directUrl?1:0);
       if (b.qualityRank !== a.qualityRank) return b.qualityRank - a.qualityRank;
-      const sc: Record<string,number> = { shahiid:13, animelek:12, animedar:11, vidnest:10, animapahe:9, animegg:5 };
+      const sc: Record<string,number> = { shahiid:13, animelek:12, animedar:11, vidnest:10, animapahe:9, anime4up:8, animeblkom:7, animeiat:6, anime3rb:6, goldenanimaniac:5, animegg:4 };
       return (sc[b.site]||3) - (sc[a.site]||3);
     });
   }
@@ -872,45 +913,72 @@ export default function WatchPage() {
       .catch(() => setStatuses(prev => ({ ...prev, [src.url]: "idle" })));
   }
 
-  /* ── Browser extract (vidnest/AnimePahe) ── */
+  /* ── Embed-only hosts (skip server + browser extraction) ── */
+  const EMBED_ONLY_FE = ["vidbm","uptostream","playerwish","wishfast","streamvid","streamlare","vidmoly","asnwish","share4max","megamax.me"];
+
+  /* ── Extract any source (server-side first, then browser) ── */
   async function triggerExtract(src: Source) {
-    if (src.directUrl || extracting) return;
+    if (src.directUrl || extractingRef.current) return;
+
+    // Skip known embed-only hosts — no extraction possible
+    if (EMBED_ONLY_FE.some(h => src.url.includes(h))) { goNextSrc(); return; }
+
+    extractingRef.current = true;
     setExtracting(true);
-    try {
-      const res  = await fetch(`/api/anime/browser-extract?url=${encodeURIComponent(src.url)}&timeout=28`);
-      const data = await res.json();
-      const raw: string = data.directUrl || "";
-      if (!raw) { setExtracting(false); goNextSrc(); return; }
 
-      // Extract ref/referer — used by hls-proxy and seg-proxy
-      let ref = src.url;
-      if (raw.includes("animanga.fun/proxy") || raw.includes("upcloud.animanga.fun")) {
-        try {
-          const pu = new URL(raw);
-          const hdr = JSON.parse(pu.searchParams.get("headers") || "{}");
-          ref = hdr["Referer"] || hdr["referer"] || src.url;
-        } catch {}
-      }
-
-      // Keep the full animanga.fun proxy URL — don't unwrap it.
-      // hls-proxy will fetch through animanga.fun (which handles IP/CORS restrictions).
+    const applyExtracted = (raw: string, ref: string) => {
       const isHls = raw.includes(".m3u8") || raw.includes("uwu.m3u8") || raw.includes("animanga.fun");
-      const hlsProxy = `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`;
-      const updated: Source = {
-        ...src,
-        directUrl: isHls ? hlsProxy : raw,
-        directType: isHls ? "hls" : "mp4",
-      };
+      const directUrl = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`
+        : `/api/anime/video-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(src.url)}`;
+      const updated: Source = { ...src, directUrl, directType: isHls ? "hls" : "mp4" };
       setActive(updated);
       setSources(prev => prev.map(s => s.url === src.url ? updated : s));
-    } catch { goNextSrc(); }
-    finally { setExtracting(false); }
+    };
+
+    const done = (goNext = false) => {
+      extractingRef.current = false;
+      setExtracting(false);
+      if (goNext) goNextSrc();
+    };
+
+    // Step 1: Server-side deep extraction (streamwish, filemoon, vidhide, streamtape, etc.)
+    try {
+      const res = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(src.url)}`);
+      if (res.ok) {
+        const ss = await res.json();
+        if (ss.videoUrl) { applyExtracted(ss.videoUrl, src.url); done(); return; }
+      }
+    } catch {}
+
+    // Step 2: Browser-based extraction (Playwright — vidnest/AnimePahe, CF-protected)
+    try {
+      const res = await fetch(`/api/anime/browser-extract?url=${encodeURIComponent(src.url)}&timeout=25`);
+      if (res.ok) {
+        const data = await res.json();
+        const raw: string = data.directUrl || "";
+        if (raw) {
+          let ref = src.url;
+          if (raw.includes("animanga.fun")) {
+            try {
+              const pu = new URL(raw);
+              const hdr = JSON.parse(pu.searchParams.get("headers") || "{}");
+              ref = hdr["Referer"] || hdr["referer"] || src.url;
+            } catch {}
+          }
+          applyExtracted(raw, ref); done(); return;
+        }
+      }
+    } catch {}
+
+    // Both failed → skip to next
+    done(true);
   }
 
   /* ── Play source ── */
   function playSource(src: Source) {
     setActive(src); setPhase("player");
-    if (src.site === "vidnest" && !src.directUrl) triggerExtract(src);
+    if (!src.directUrl) triggerExtract(src);
   }
 
   /* ── Next source ── */
@@ -919,10 +987,9 @@ export default function WatchPage() {
     const cur = activeRef.current ? all.indexOf(activeRef.current) : -1;
     for (let i = cur + 1; i < all.length; i++) {
       const s = all[i];
-      if (statuses[s.url] === "dead") continue;
-      if (s.directUrl || s.site === "vidnest") { playSource(s); return; }
+      if ((statuses[s.url] || "idle") === "dead") continue;
+      playSource(s); return;
     }
-    // If no more sources, go back to list
     setPhase("servers");
   }
 
@@ -966,7 +1033,7 @@ export default function WatchPage() {
       sources={sources} statuses={statuses} streamDone={streamDone}
       onPlay={playSource}
       onBack={handleBack}
-      onProbe={probeSource}
+      onSetStatus={(url, status) => setStatuses(prev => ({ ...prev, [url]: status }))}
     />
   );
 }

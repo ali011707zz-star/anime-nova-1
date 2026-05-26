@@ -1954,6 +1954,248 @@ async function getAnimadarSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  GENERIC ANIMESTREAM-THEME SCRAPER
+//  Re-usable for any WordPress/animestream site (same ul-server-position theme):
+//    animeiat.net  ·  anime3rb.com  ·  goldenanimaniac.com  ·  animeback.net
+// ════════════════════════════════════════════════════════════════════
+
+interface AnimestreamSiteConfig {
+  base: string;
+  key: string;
+  name: string;
+  searchPath?: string;
+}
+
+const genericAstreamSlugCache = new Map<string, { url: string | null; ts: number }>();
+const genericAstreamSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchGenericAnimestream(
+  cfg: AnimestreamSiteConfig, title: string, english: string | null,
+): Promise<string | null> {
+  const ck = `${cfg.key}:search:${(title + "|" + (english || "")).toLowerCase()}`;
+  const hit = genericAstreamSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
+
+  const SKIP = ["feed/","wp-","tag/","category/","page/","dmca","contact","about","privacy"];
+  const searchPath = cfg.searchPath || "/?s=";
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${cfg.base}${searchPath}${encodeURIComponent(q)}`, {
+        headers: { ...BASE_HDRS, Referer: `${cfg.base}/` },
+        signal: AbortSignal.timeout(10000), redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      let best: string | null = null, bestScore = 0;
+      const hostRe = cfg.base.replace(/https?:\/\//, "").replace(/\./g, "\\.");
+      const re = new RegExp(`href="(https?:\\/\\/${hostRe}\\/([^"#?/]+)\\/?)"[^>]*(?:title|class)="([^"]*)"`, "gi");
+      for (const m of html.matchAll(re)) {
+        const url   = m[1];
+        const slug  = m[2];
+        const label = (m[3] || slug).replace(/-/g, " ").replace(/&[a-z]+;/g, " ").trim();
+        if (SKIP.some(s => slug.includes(s))) continue;
+        if (slug.length < 4) continue;
+        const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+        if (score > bestScore && score > 0.2) { bestScore = score; best = url.replace(/\/?$/, "/"); }
+      }
+      // Broader fallback — any internal link with reasonable similarity
+      if (!best) {
+        const re2 = new RegExp(`href="(https?:\\/\\/${hostRe}\\/([^"#?]+)\\/?)"`, "gi");
+        for (const m of html.matchAll(re2)) {
+          const url = m[1];
+          const slug = m[2];
+          if (SKIP.some(s => slug.includes(s))) continue;
+          if (slug.split("/").length > 2) continue;
+          const label = slug.replace(/[/-]/g, " ").trim();
+          const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+          if (score > bestScore && score > 0.28) { bestScore = score; best = url.replace(/\/?$/, "/"); }
+        }
+      }
+      if (best && bestScore > 0.28) {
+        genericAstreamSlugCache.set(ck, { url: best, ts: Date.now() });
+        return best;
+      }
+    } catch {}
+  }
+
+  genericAstreamSlugCache.set(ck, { url: null, ts: Date.now() });
+  return null;
+}
+
+async function getGenericAnimestreamSources(
+  cfg: AnimestreamSiteConfig, title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `${cfg.key}:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = genericAstreamSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const seriesUrl = await searchGenericAnimestream(cfg, title, english);
+    if (!seriesUrl) return [];
+
+    const r = await fetch(seriesUrl, {
+      headers: { ...BASE_HDRS, Referer: `${cfg.base}/` },
+      signal: AbortSignal.timeout(14000), redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+
+    const allEpisodes = parseAnimadarServers(html);
+    if (!allEpisodes.length) return [];
+
+    // Detect ascending vs descending order
+    let epIndex = ep - 1;
+    const firstEpLabel = html.match(/id=["']IDSB1["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || "";
+    const firstEpNum   = parseInt(firstEpLabel.replace(/\D/g, ""));
+    if (!isNaN(firstEpNum) && firstEpNum > 1) epIndex = firstEpNum - ep;
+
+    if (epIndex < 0 || epIndex >= allEpisodes.length) return [];
+
+    const servers = allEpisodes[epIndex];
+    const sources: UnifiedSource[] = [];
+    for (const { type, data, quality } of servers) {
+      const embedUrl = buildAnimestreamEmbed(type, data);
+      if (!embedUrl) continue;
+      const qRank = quality.toUpperCase().includes("FHD") ? 3
+                  : quality.toUpperCase().includes("HD")  ? 2 : 1;
+      sources.push({
+        name: `${cfg.name} · ${type.toUpperCase()} · ${quality}`,
+        url: embedUrl, quality, qualityRank: qRank, site: cfg.key,
+      });
+    }
+
+    if (sources.length) genericAstreamSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+// Predefined animestream sites
+const ASTREAM_SITES: AnimestreamSiteConfig[] = [
+  { base: "https://animeiat.net",        key: "animeiat",      name: "AnimeIat"      },
+  { base: "https://anime3rb.com",        key: "anime3rb",      name: "Anime3rb"      },
+  { base: "https://goldenanimaniac.com", key: "goldenanimaniac",name: "Golden"        },
+];
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIMEBLKOM.NET  (Arabic-dubbed — WordPress)
+//  Search: /?s={query}  →  /anime/{slug}/
+//  Episode: /anime/{slug}/episode-{N}/
+//  Servers: <ul class="serversList"> <li data-id="..." data-server="..." ...>
+// ════════════════════════════════════════════════════════════════════
+
+const ABLK_BASE = "https://animeblkom.net";
+const ablkSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const ablkSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAnimeBlkom(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = ablkSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${ABLK_BASE}/?s=${encodeURIComponent(q)}`, {
+        headers: { ...BASE_HDRS, Referer: `${ABLK_BASE}/` },
+        signal: AbortSignal.timeout(10000), redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      let best: string | null = null, bestScore = 0;
+      const re = /href="https?:\/\/animeblkom\.net\/(?:anime|series)\/([^/"]+)\/?"/gi;
+      for (const m of html.matchAll(re)) {
+        const slug  = m[1];
+        const label = slug.replace(/-/g, " ");
+        const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+        if (score > bestScore) { bestScore = score; best = slug; }
+      }
+      if (best && bestScore > 0.28) {
+        ablkSlugCache.set(ck, { slug: best, ts: Date.now() });
+        return best;
+      }
+    } catch {}
+  }
+  ablkSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnimeBlkomSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `ablk:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = ablkSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await searchAnimeBlkom(title, english);
+    if (!slug) return [];
+
+    const epPad = String(ep).padStart(2, "0");
+    const epUrls = [
+      `${ABLK_BASE}/anime/${slug}/episode-${ep}/`,
+      `${ABLK_BASE}/anime/${slug}/episode-${epPad}/`,
+      `${ABLK_BASE}/series/${slug}/episode-${ep}/`,
+      `${ABLK_BASE}/${slug}-${ep}-episode/`,
+      `${ABLK_BASE}/watch/${slug}-episode-${ep}/`,
+    ];
+
+    let html = "";
+    for (const epUrl of epUrls) {
+      try {
+        const r = await fetch(epUrl, {
+          headers: { ...BASE_HDRS, Referer: `${ABLK_BASE}/anime/${slug}/` },
+          signal: AbortSignal.timeout(8000), redirect: "follow",
+        });
+        if (!r.ok) continue;
+        const text = await r.text();
+        if (isCloudflareBlock(text) || /404|not.?found/i.test(text.slice(0, 2000))) continue;
+        html = text; break;
+      } catch {}
+    }
+    if (!html) return [];
+
+    const sources: UnifiedSource[] = [];
+    const seen = new Set<string>();
+
+    // AnimeBlkom uses iframes and data-embed attributes
+    for (const m of html.matchAll(/<iframe[^>]+src=["']([^"']+)["'][^>]*/gi)) {
+      let u = m[1].trim();
+      if (u.startsWith("//")) u = "https:" + u;
+      if (!u.startsWith("http")) continue;
+      if (DEAD_FILE_HOSTS.some(h => u.includes(h))) continue;
+      if (u.includes("google") || u.includes("facebook") || u.includes("youtube")) continue;
+      const host = (u.split("/")[2] || "").replace(/^www\./, "");
+      if (seen.has(host)) continue; seen.add(host);
+      sources.push({ name: `Blkom · سيرفر`, url: u, quality: "HD", qualityRank: 2, site: "animeblkom" });
+    }
+
+    // Also try animestream-style ul-server-position
+    const astreamSrcs = parseAnimadarServers(html);
+    if (astreamSrcs.length > 0) {
+      const epIndex = ep - 1;
+      if (epIndex >= 0 && epIndex < astreamSrcs.length) {
+        for (const { type, data, quality } of astreamSrcs[epIndex]) {
+          const embedUrl = buildAnimestreamEmbed(type, data);
+          if (!embedUrl || seen.has(embedUrl)) continue;
+          seen.add(embedUrl);
+          sources.push({ name: `Blkom · ${type.toUpperCase()}`, url: embedUrl, quality, qualityRank: 2, site: "animeblkom" });
+        }
+      }
+    }
+
+    if (sources.length) ablkSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  ANIMEPAHE.RU  direct scraper
 //  Flow: search → get anime session → get ep session → play page → kwik.si
 //  kwik.si embed → unpack p,a,c,k,e,d → extract m3u8 URL
@@ -2409,6 +2651,33 @@ router.get("/anime/sources-stream", async (req, res) => {
           for (const s of srcs) { if (!closed) sendSrc(s); }
         } catch {}
       })(),
+
+      // ── Anime4up.info  (Arabic — major dubbed/subbed site) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnime4upSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── AnimeBlkom.net  (Arabic dubbed) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnimeBlkomSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── Generic animestream sites (animeiat.net · anime3rb.com · goldenanimaniac.com) ──
+      ...ASTREAM_SITES.map(cfg => (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getGenericAnimestreamSources(cfg, title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })()),
     ]);
 
   } catch (e: any) {
