@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, ChevronLeft, Play, Pause, Loader2,
+  ChevronRight, Play, Pause, Loader2,
   AlertTriangle, RefreshCw, Volume2, VolumeX,
-  Maximize2, Minimize2, SkipForward, X,
-  Wifi, WifiOff, RotateCcw, RotateCw, Lock, Unlock,
-  CheckCircle, Zap, Camera,
+  Maximize2, Minimize2, RotateCcw, RotateCw,
+  Lock, Unlock, Zap, Camera,
+  Settings, X, Wifi, WifiOff,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
@@ -47,16 +47,14 @@ function fmtTime(s: number) {
   if (h > 0) return `${h}:${String(m).padStart(2,"0")}:${String(ss).padStart(2,"0")}`;
   return `${m}:${String(ss).padStart(2,"0")}`;
 }
-
 function normalizeQuality(src: Source): string {
   const q = (src.quality || "").toLowerCase();
   if (q.includes("1080") || src.qualityRank >= 5) return "1080p";
-  if (q.includes("720")  || q === "hd" || src.qualityRank >= 3) return "720p";
-  if (q.includes("480")  || src.qualityRank >= 2) return "480p";
-  if (q.includes("360"))  return "360p";
+  if (q.includes("720") || q === "hd" || src.qualityRank >= 3) return "720p";
+  if (q.includes("480") || src.qualityRank >= 2) return "480p";
+  if (q.includes("360")) return "360p";
   return "HD";
 }
-
 function getSubType(src: Source): string {
   const n = src.name;
   if (n.includes("مدبلج")) return "مدبلج";
@@ -64,12 +62,10 @@ function getSubType(src: Source): string {
   if (n.toLowerCase().includes("dub")) return "مدبلج";
   return "مترجم";
 }
-
 function getLang(src: Source): "ar" | "en" {
   if (src.site === "animegg" || src.name.toLowerCase().includes("إنجليزي") || src.name.toLowerCase().includes("english")) return "en";
   return "ar";
 }
-
 function getServerShortName(src: Source): string {
   const parts = src.name.split("·").map(p => p.trim());
   if (parts.length >= 2) {
@@ -98,15 +94,14 @@ function saveHistory(id: number, title: string, cover: string, ep: number, total
   } catch {}
 }
 
-/* ══════════════════════════════════ WIFI ICON ════════════════ */
+/* ══════════════════════════════════ SERVER LIST ══════════════ */
 function WifiStatus({ status }: { status: ProbeStatus }) {
-  if (status === "testing") return <Loader2 className="w-5 h-5 text-amber-400 animate-spin" />;
-  if (status === "ok")   return <Wifi className="w-5 h-5 text-emerald-400" />;
-  if (status === "dead") return <WifiOff className="w-5 h-5 text-red-400" />;
-  return <Wifi className="w-5 h-5 text-white/30" />;
+  if (status === "testing") return <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
+  if (status === "ok") return <Wifi className="w-4 h-4 text-emerald-400" />;
+  if (status === "dead") return <WifiOff className="w-4 h-4 text-red-400" />;
+  return <Wifi className="w-4 h-4 text-white/25" />;
 }
 
-/* ══════════════════════════════════ SERVER LIST PAGE ═════════ */
 function ServerListPage({
   anime, ep, title: titleProp, cover: coverProp,
   sources, statuses, streamDone,
@@ -124,83 +119,57 @@ function ServerListPage({
   const filtered = sources.filter(s => lang === "all" || getLang(s) === lang);
   const hasAr = sources.some(s => getLang(s) === "ar");
   const hasEn = sources.some(s => getLang(s) === "en");
-
   const qualityOrder = ["1080p", "720p", "HD", "480p", "360p"];
   const groups: Record<string, Source[]> = {};
-  for (const s of filtered) {
-    const q = normalizeQuality(s);
-    if (!groups[q]) groups[q] = [];
-    groups[q].push(s);
-  }
+  for (const s of filtered) { const q = normalizeQuality(s); if (!groups[q]) groups[q] = []; groups[q].push(s); }
 
   const [probing, setProbing] = useState<string | null>(null);
 
   async function handlePlay(src: Source) {
-    // Already probing this source → ignore re-click
     if (probing === src.url) return;
-
-    // No directUrl → can't probe meaningfully; send to player for extraction
     if (!src.directUrl) { onPlay(src); return; }
-
     const st = statuses[src.url];
-
-    // Already confirmed alive → play immediately
     if (st === "ok") { onPlay(src); return; }
-
-    // Currently dead → re-probe before giving up
-    // (allow user to retry by clicking dead server again)
-    if (st !== "dead") {
-      // If already dead on second click, just try anyway as fallback
-    }
-
-    // Probe then decide
     setProbing(src.url);
     onSetStatus(src.url, "testing");
     try {
       const r = await fetch(`/api/anime/probe?url=${encodeURIComponent(src.directUrl)}`);
       const d = await r.json();
-      if (d.alive) {
-        onSetStatus(src.url, "ok");
-        onPlay(src);
-      } else {
-        onSetStatus(src.url, "dead");
-        // Don't play — keep showing dead (red) status
-      }
+      if (d.alive) { onSetStatus(src.url, "ok"); onPlay(src); }
+      else { onSetStatus(src.url, "dead"); }
     } catch {
-      onSetStatus(src.url, "idle");
-      onPlay(src); // network error → try anyway
-    } finally {
-      setProbing(null);
-    }
+      onSetStatus(src.url, "idle"); onPlay(src);
+    } finally { setProbing(null); }
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#0c0c14] flex flex-col overflow-hidden" dir="rtl">
-
+    <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col overflow-hidden" dir="rtl">
       {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 pt-safe-top py-3 shrink-0" style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}>
-        <button onClick={onBack} className="w-10 h-10 rounded-xl bg-white/6 border border-white/8 flex items-center justify-center active:scale-90">
+      <div className="flex items-center gap-3 px-4 pt-safe-top py-3 shrink-0 border-b border-white/5"
+        style={{ paddingTop: "max(14px, env(safe-area-inset-top))" }}>
+        <button onClick={onBack}
+          className="w-9 h-9 rounded-xl bg-white/6 border border-white/8 flex items-center justify-center active:scale-90 transition-transform">
           <ChevronRight className="w-5 h-5 text-white/70" />
         </button>
         <div className="flex-1 min-w-0">
           <p className="text-white text-[13px] font-black font-['Cairo'] truncate">{title}</p>
           <p className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</p>
         </div>
-        {cover && <img src={cover} alt="" className="w-10 h-14 rounded-lg object-cover border border-white/8 shrink-0" />}
+        {cover && <img src={cover} alt="" className="w-9 h-12 rounded-lg object-cover border border-white/10 shrink-0" />}
       </div>
 
-      {/* Info bar */}
+      {/* Loading indicator */}
       {!streamDone && (
-        <div className="mx-4 mb-3 px-4 py-2.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 flex items-center gap-3 shrink-0">
+        <div className="mx-4 mt-3 mb-1 px-4 py-2.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 flex items-center gap-3 shrink-0">
           <motion.div className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"
-            animate={{ opacity: [0.4, 1, 0.4] }} transition={{ duration: 1, repeat: Infinity }} />
+            animate={{ opacity: [0.4,1,0.4] }} transition={{ duration: 1, repeat: Infinity }} />
           <p className="text-amber-300/80 text-[11px] font-['Cairo']">يجري البحث عن مصادر إضافية…</p>
         </div>
       )}
 
       {/* Lang tabs */}
       {(hasAr && hasEn) && (
-        <div className="flex gap-2 px-4 mb-3 shrink-0">
+        <div className="flex gap-2 px-4 pt-3 shrink-0">
           {([["all","الكل"],["ar","🇸🇦 عربي"],["en","🇬🇧 إنجليزي"]] as const).map(([v, label]) => (
             <button key={v} onClick={() => setLang(v)}
               className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold font-['Cairo'] transition-all active:scale-95
@@ -212,24 +181,20 @@ function ServerListPage({
       )}
 
       {/* Source groups */}
-      <div className="flex-1 overflow-y-auto px-4 pb-8 space-y-5">
+      <div className="flex-1 overflow-y-auto px-4 pt-3 pb-8 space-y-5">
         {filtered.length === 0 && streamDone && (
           <div className="flex flex-col items-center justify-center gap-3 py-16">
             <AlertTriangle className="w-10 h-10 text-white/15" />
             <p className="text-white/35 text-sm font-['Cairo']">لا توجد مصادر متاحة</p>
           </div>
         )}
-
         {qualityOrder.filter(q => groups[q]?.length).map(quality => (
           <div key={quality}>
-            {/* Quality header */}
             <div className="flex items-center gap-3 mb-2">
-              <div className="flex-1 h-px bg-white/8" />
-              <span className="text-white/55 text-[11px] font-black font-mono tracking-widest">{quality.toUpperCase()}</span>
-              <div className="flex-1 h-px bg-white/8" />
+              <div className="flex-1 h-px bg-white/7" />
+              <span className="text-white/40 text-[10px] font-black font-mono tracking-widest">{quality}</span>
+              <div className="flex-1 h-px bg-white/7" />
             </div>
-
-            {/* Source rows */}
             <div className="space-y-2">
               {groups[quality].map(src => {
                 const st = statuses[src.url] || "idle";
@@ -238,18 +203,10 @@ function ServerListPage({
                 return (
                   <div key={src.url}
                     className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl border transition-all
-                      ${isDead
-                        ? "opacity-50 bg-red-500/5 border-red-500/20"
-                        : st === "ok"
-                        ? "bg-emerald-500/5 border-emerald-500/20 active:bg-emerald-500/8"
-                        : "bg-white/5 border-white/8 active:bg-white/8"}`}>
-
-                    {/* WiFi */}
-                    <div className="shrink-0">
-                      <WifiStatus status={isProbing ? "testing" : st} />
-                    </div>
-
-                    {/* Name */}
+                      ${isDead ? "opacity-50 bg-red-500/5 border-red-500/20"
+                        : st === "ok" ? "bg-emerald-500/5 border-emerald-500/20"
+                        : "bg-white/4 border-white/8"}`}>
+                    <div className="shrink-0"><WifiStatus status={isProbing ? "testing" : st} /></div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-white/85 text-[13px] font-bold font-['Cairo'] truncate">{getServerShortName(src)}</p>
@@ -261,14 +218,10 @@ function ServerListPage({
                       </div>
                       <p className="text-white/30 text-[10px] font-['Cairo'] mt-0.5">{SITE_LABEL[src.site] || src.site}</p>
                     </div>
-
-                    {/* Play / Probe button */}
                     <button onClick={() => handlePlay(src)}
                       className={`w-10 h-10 rounded-xl border flex items-center justify-center active:scale-90 shrink-0 transition-all
-                        ${isDead
-                          ? "bg-red-500/15 border-red-500/30"
-                          : st === "ok"
-                          ? "bg-emerald-600/80 border-emerald-500/40"
+                        ${isDead ? "bg-red-500/15 border-red-500/30"
+                          : st === "ok" ? "bg-emerald-600/80 border-emerald-500/40"
                           : "bg-violet-600/80 border-violet-500/40"}`}>
                       {isProbing
                         ? <Loader2 className="w-4 h-4 text-white animate-spin" />
@@ -289,12 +242,14 @@ function ServerListPage({
 
 /* ══════════════════════════════════ VIDEO PLAYER ══════════════ */
 function VideoPlayer({
-  src, title, ep, totalEps, sources, statuses,
+  src, anime, ep, totalEps, sources, statuses,
+  title: titleProp, cover: coverProp,
   onBack, onNextEp, onPrevEp, onNextSrc, onOpenList,
   extracting, streamDone,
 }: {
-  src: Source; title: string; ep: number; totalEps: number;
+  src: Source; anime: any; ep: number; totalEps: number;
   sources: Source[]; statuses: Record<string, ProbeStatus>;
+  title: string; cover: string;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onNextSrc: () => void; onOpenList: () => void;
   extracting: boolean; streamDone: boolean;
@@ -303,55 +258,63 @@ function VideoPlayer({
   const hlsRef     = useRef<Hls | null>(null);
   const hideTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progRef    = useRef<HTMLDivElement>(null);
+  const pinchRef   = useRef<{ dist: number; scale: number } | null>(null);
+  const tapTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTap    = useRef<{ t: number; side: "l"|"r" } | null>(null);
 
-  const [showCtrl,  setShowCtrl]  = useState(true);
-  const [playing,   setPlaying]   = useState(false);
-  const [buffering, setBuffering] = useState(true);
-  const [failed,    setFailed]    = useState(false);
-  const [skipping,  setSkipping]  = useState(false);
-  const [locked,    setLocked]    = useState(false);
-  const [muted,     setMuted]     = useState(false);
-  const [fs,        setFs]        = useState(false);
-  const [progress,  setProgress]  = useState(0);
-  const [buffered,  setBuffered]  = useState(0);
-  const [curTime,   setCurTime]   = useState(0);
-  const [duration,  setDuration]  = useState(0);
-  const [seekFlash, setSeekFlash] = useState<{side:"l"|"r"; id:number}|null>(null);
-  const [speed,     setSpeed]     = useState(1);
-  const [showSpeed, setShowSpeed] = useState(false);
+  const [showCtrl,   setShowCtrl]   = useState(true);
+  const [playing,    setPlaying]    = useState(false);
+  const [buffering,  setBuffering]  = useState(true);
+  const [failed,     setFailed]     = useState(false);
+  const [skipping,   setSkipping]   = useState(false);
+  const [locked,     setLocked]     = useState(false);
+  const [muted,      setMuted]      = useState(false);
+  const [fs,         setFs]         = useState(false);
+  const [progress,   setProgress]   = useState(0);
+  const [buffered,   setBuffered]   = useState(0);
+  const [curTime,    setCurTime]    = useState(0);
+  const [duration,   setDuration]   = useState(0);
+  const [seekFlash,  setSeekFlash]  = useState<{side:"l"|"r";id:number}|null>(null);
+  const [speed,      setSpeed]      = useState(1);
+  const [showSpeed,  setShowSpeed]  = useState(false);
   const [videoScale, setVideoScale] = useState(1);
+  const [volume,     setVolume]     = useState(100);
+  const [showVol,    setShowVol]    = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [thumbTime,  setThumbTime]  = useState<number|null>(null);
+  const [thumbX,     setThumbX]     = useState(0);
+  const [rotLocked,  setRotLocked]  = useState(false);
 
-  const pinchRef = useRef<{ dist: number; scale: number } | null>(null);
+  const title = anime?.title?.romaji || anime?.title?.english || titleProp || "أنمي";
+  const cover = anime?.coverImage?.large || coverProp || "";
 
-  const isHls   = src.directType === "hls";
-  // Always proxy - never try direct (IP-tied URLs)
+  const isHls = src.directType === "hls";
   const playUrl = src.directUrl
     ? isHls
       ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`
       : `/api/anime/video-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`
     : "";
 
-  /* ── Back button (hardware + browser) ── */
+  const subType  = getSubType(src);
+  const qualLabel = normalizeQuality(src);
+  const SPEEDS   = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+  /* ── Back button ── */
   useEffect(() => {
     const handler = (e: PopStateEvent) => { e.preventDefault(); onBack(); };
     window.addEventListener("popstate", handler);
-    // Push a state so back button fires popstate instead of leaving the page
     window.history.pushState({ nova: true }, "");
     return () => window.removeEventListener("popstate", handler);
   }, []);
 
-  /* ── Orientation ── */
+  /* ── Orientation lock ── */
   useEffect(() => {
-    try { (screen.orientation as any)?.unlock?.(); } catch {}
-    return () => { try { (screen.orientation as any)?.unlock?.(); } catch {} };
-  }, []);
-  useEffect(() => {
-    if (fs) {
+    if (rotLocked) {
       try { (screen.orientation as any)?.lock?.("landscape").catch(() => {}); } catch {}
     } else {
       try { (screen.orientation as any)?.unlock?.(); } catch {}
     }
-  }, [fs]);
+  }, [rotLocked]);
 
   /* ── HLS / MP4 setup ── */
   useEffect(() => {
@@ -377,9 +340,10 @@ function VideoPlayer({
   }, [playUrl]);
 
   /* ── Speed ── */
-  useEffect(() => {
-    const v = videoRef.current; if (v) v.playbackRate = speed;
-  }, [speed]);
+  useEffect(() => { const v = videoRef.current; if (v) v.playbackRate = speed; }, [speed]);
+
+  /* ── Volume ── */
+  useEffect(() => { const v = videoRef.current; if (v) v.volume = volume / 100; }, [volume]);
 
   /* ── Auto-skip on fail ── */
   useEffect(() => {
@@ -391,7 +355,7 @@ function VideoPlayer({
 
   function handleFail() { setFailed(true); setBuffering(false); }
 
-  /* ── Controls hide ── */
+  /* ── Controls auto-hide ── */
   const scheduleHide = useCallback((ms = 3500) => {
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setShowCtrl(false), ms);
@@ -402,27 +366,6 @@ function VideoPlayer({
     reveal(); setShowCtrl(true);
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, [src.url]);
-
-  /* ── Pinch-to-zoom handlers ── */
-  function onPinchStart(e: React.TouchEvent) {
-    if (e.touches.length === 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      pinchRef.current = { dist: Math.hypot(dx, dy), scale: videoScale };
-    }
-  }
-  function onPinchMove(e: React.TouchEvent) {
-    if (e.touches.length === 2 && pinchRef.current) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      const ratio = Math.hypot(dx, dy) / pinchRef.current.dist;
-      setVideoScale(Math.min(3.5, Math.max(1, pinchRef.current.scale * ratio)));
-    }
-  }
-  function onPinchEnd(e: React.TouchEvent) {
-    if (e.touches.length < 2) pinchRef.current = null;
-    // Snap back to 1 on quick release (optional double-tap to reset)
-  }
 
   /* ── Screenshot ── */
   function takeScreenshot() {
@@ -440,59 +383,101 @@ function VideoPlayer({
     reveal();
   }
 
-  /* ── Tap handler ── */
-  function handleTap(e: React.MouseEvent | React.TouchEvent) {
+  /* ── Pinch zoom ── */
+  function onPinchStart(e: React.TouchEvent) {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchRef.current = { dist: Math.hypot(dx, dy), scale: videoScale };
+    }
+  }
+  function onPinchMove(e: React.TouchEvent) {
+    if (e.touches.length === 2 && pinchRef.current) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const ratio = Math.hypot(dx, dy) / pinchRef.current.dist;
+      setVideoScale(Math.min(3.5, Math.max(1, pinchRef.current.scale * ratio)));
+    }
+  }
+  function onPinchEnd(e: React.TouchEvent) {
+    if (e.touches.length < 2) pinchRef.current = null;
+  }
+
+  /* ── Tap to seek / show controls ── */
+  function handleVideoTap(e: React.MouseEvent | React.TouchEvent) {
     if (locked) return;
     if (showSpeed) { setShowSpeed(false); return; }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const cX = "touches" in e ? e.changedTouches[0].clientX : (e as React.MouseEvent).clientX;
-    const side = (cX - rect.left) < rect.width / 2 ? "l" : "r";
-    // Use timeout to detect double-tap
-    if ((e as any)._tapped) return;
-    (e as any)._tapped = true;
-    const current = Date.now();
-    if ((handleTap as any)._lastTap && current - (handleTap as any)._lastTap < 300 && (handleTap as any)._lastSide === side) {
-      // Double tap
-      delete (handleTap as any)._lastTap;
+    const side: "l"|"r" = (cX - rect.left) < rect.width / 2 ? "l" : "r";
+    const now = Date.now();
+    const last = lastTap.current;
+    if (last && now - last.t < 300 && last.side === side) {
+      lastTap.current = null;
+      if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
       const v = videoRef.current; if (!v) return;
       v.currentTime = side === "r" ? Math.min(v.duration||0, v.currentTime + 10) : Math.max(0, v.currentTime - 10);
       setSeekFlash({ side, id: Date.now() });
       reveal();
     } else {
-      (handleTap as any)._lastTap = current;
-      (handleTap as any)._lastSide = side;
-      if (showCtrl) { clearTimeout(hideTimer.current!); setShowCtrl(false); }
-      else reveal();
+      lastTap.current = { t: now, side };
+      if (tapTimer.current) clearTimeout(tapTimer.current);
+      tapTimer.current = setTimeout(() => {
+        tapTimer.current = null;
+        if (showCtrl) { clearTimeout(hideTimer.current!); setShowCtrl(false); }
+        else reveal();
+      }, 220);
     }
   }
 
-  /* ── Progress bar click ── */
+  /* ── Progress bar ── */
   function seekTo(e: React.MouseEvent<HTMLDivElement>) {
     const v = videoRef.current; if (!v || !v.duration) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     v.currentTime = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * v.duration;
     reveal();
   }
+  function onProgMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    if (!duration) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setThumbTime(ratio * duration);
+    setThumbX((e.clientX - rect.left));
+  }
+  function onProgMouseLeave() { setThumbTime(null); }
 
-  /* ── Play toggle ── */
+  /* ── Progress touch drag ── */
+  function onProgTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+    setIsDragging(true);
+    const v = videoRef.current; if (!v || !v.duration) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.touches[0].clientX - rect.left) / rect.width));
+    v.currentTime = ratio * v.duration;
+  }
+  function onProgTouchMove(e: React.TouchEvent<HTMLDivElement>) {
+    const v = videoRef.current; if (!v || !v.duration) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.touches[0].clientX - rect.left) / rect.width));
+    v.currentTime = ratio * v.duration;
+    setThumbTime(ratio * duration);
+    setThumbX(e.touches[0].clientX - rect.left);
+  }
+  function onProgTouchEnd() { setIsDragging(false); setThumbTime(null); }
+
+  /* ── Play/Pause ── */
   function togglePlay() {
     const v = videoRef.current; if (!v) return;
     v.paused ? v.play().catch(() => {}) : v.pause();
     reveal();
   }
-
-  /* ── Mute ── */
-  function toggleMute() {
-    const v = videoRef.current; if (!v) return;
-    v.muted = !v.muted; setMuted(v.muted);
-  }
-
-  /* ── Fullscreen ── */
+  function toggleMute() { const v = videoRef.current; if (!v) return; v.muted = !v.muted; setMuted(v.muted); }
   function toggleFs() {
     const el = document.getElementById("nova-player");
     if (!el) return;
     !document.fullscreenElement ? el.requestFullscreen?.().catch(()=>{}) : document.exitFullscreen?.().catch(()=>{});
   }
+
+  /* ── Fullscreen event ── */
   useEffect(() => {
     const fn = () => setFs(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", fn);
@@ -505,21 +490,19 @@ function VideoPlayer({
     setCurTime(v.currentTime); setDuration(v.duration || 0);
     setProgress(v.duration ? v.currentTime / v.duration : 0);
     if (v.buffered.length > 0)
-      setBuffered(v.duration ? v.buffered.end(v.buffered.length - 1) / v.duration : 0);
+      setBuffered(v.duration ? v.buffered.end(v.buffered.length-1) / v.duration : 0);
   }
 
-  const subType = getSubType(src);
-  const qualLabel = normalizeQuality(src);
-  const liveCount = sources.filter(s => (statuses[s.url] || "idle") !== "dead").length;
-  const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const liveCount = sources.filter(s => (statuses[s.url]||"idle") !== "dead").length;
 
   return (
-    <div id="nova-player" className="fixed inset-0 z-50 bg-black overflow-hidden" dir="ltr"
-      style={{ touchAction: "manipulation" }}>
+    <div id="nova-player" className="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden select-none"
+      style={{ touchAction: "none" }}>
 
-      {/* ── VIDEO ── */}
+      {/* ══ VIDEO ELEMENT ══ */}
       {playUrl && (
-        <video ref={videoRef} className="absolute inset-0 w-full h-full"
+        <video ref={videoRef}
+          className="absolute inset-0 w-full h-full"
           style={{ objectFit: "contain", transform: videoScale !== 1 ? `scale(${videoScale})` : undefined, transition: "transform 0.05s linear" }}
           playsInline autoPlay crossOrigin="anonymous"
           onCanPlay={() => { setBuffering(false); reveal(4000); }}
@@ -533,264 +516,285 @@ function VideoPlayer({
         />
       )}
 
-      {/* ── EXTRACTING ── */}
+      {/* ══ EXTRACTING OVERLAY ══ */}
       <AnimatePresence>
         {(extracting || (!playUrl && !failed)) && (
           <motion.div key="ext" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[8] bg-black/94 flex flex-col items-center justify-center gap-6">
-            <div className="relative w-20 h-20">
-              <motion.div className="absolute inset-0 rounded-full border-2 border-violet-500/15 border-t-violet-400"
-                animate={{ rotate: 360 }} transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }} />
-              <motion.div className="absolute inset-3 rounded-full border border-violet-400/20 border-b-violet-300/60"
-                animate={{ rotate: -360 }} transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }} />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <motion.div className="w-3 h-3 rounded-full bg-violet-400"
-                  animate={{ scale: [0.8, 1.2, 0.8], opacity: [0.5, 1, 0.5] }}
-                  transition={{ duration: 1.8, repeat: Infinity }} />
-              </div>
-            </div>
-            <p className="text-white/45 text-[12px] font-['Cairo'] tracking-wide" dir="rtl">يُحضَّر الفيديو…</p>
+            className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-4 z-10">
+            <motion.div className="w-16 h-16 rounded-full border-2 border-violet-500/30 flex items-center justify-center"
+              animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }}>
+              <div className="w-10 h-10 rounded-full border-2 border-t-violet-500 border-violet-500/10" />
+            </motion.div>
+            <p className="text-white/60 text-sm font-['Cairo']">يجري استخراج الرابط…</p>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── BUFFERING ── */}
+      {/* ══ FAIL OVERLAY ══ */}
       <AnimatePresence>
-        {buffering && playUrl && !failed && !extracting && (
+        {failed && (
+          <motion.div key="fail" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center gap-3 z-10">
+            <AlertTriangle className="w-10 h-10 text-red-400/70" />
+            <p className="text-white/55 text-sm font-['Cairo']">
+              {skipping ? "جاري الانتقال للمصدر التالي…" : "فشل تشغيل المصدر"}
+            </p>
+            {skipping && (
+              <motion.div className="w-32 h-0.5 bg-white/10 rounded-full overflow-hidden">
+                <motion.div className="h-full bg-violet-500 rounded-full"
+                  initial={{ width: "0%" }} animate={{ width: "100%" }} transition={{ duration: 1.5, ease: "linear" }} />
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ══ BUFFERING SPINNER ══ */}
+      <AnimatePresence>
+        {buffering && !extracting && playUrl && !failed && (
           <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[7] flex items-center justify-center pointer-events-none">
-            <motion.div className="w-11 h-11 rounded-full border-2 border-white/8 border-t-white/55"
-              animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
+            className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+            <motion.div className="w-14 h-14 rounded-full border-[3px] border-t-white border-white/15"
+              animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }} />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── SKIP ANIMATION ── */}
-      <AnimatePresence>
-        {skipping && (
-          <motion.div key="skip" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[9] bg-black/88 flex flex-col items-center justify-center gap-4">
-            <SkipForward className="w-9 h-9 text-violet-300" />
-            <p className="text-white/55 text-[12px] font-['Cairo']" dir="rtl">الانتقال للمصدر التالي…</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── SEEK RIPPLE ── */}
+      {/* ══ SEEK FLASH ══ */}
       <AnimatePresence>
         {seekFlash && (
-          <motion.div key={seekFlash.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={{ duration: 0.14 }}
-            className={`absolute top-0 bottom-0 z-[11] w-2/5 flex items-center pointer-events-none
-              ${seekFlash.side === "r" ? "right-0 justify-end pr-8" : "left-0 justify-start pl-8"}`}
-            style={{ background: seekFlash.side === "r"
-              ? "radial-gradient(ellipse at 80% 50%,rgba(139,92,246,0.22) 0%,transparent 70%)"
-              : "radial-gradient(ellipse at 20% 50%,rgba(139,92,246,0.22) 0%,transparent 70%)" }}>
-            <div className="flex flex-col items-center gap-1">
-              {seekFlash.side === "r" ? <RotateCw className="w-7 h-7 text-white/75" /> : <RotateCcw className="w-7 h-7 text-white/75" />}
-              <span className="text-white/60 text-[10px] font-bold font-['Cairo']">10 ث</span>
-            </div>
+          <motion.div key={seekFlash.id}
+            className={`absolute top-1/2 -translate-y-1/2 z-20 pointer-events-none flex flex-col items-center gap-1
+              ${seekFlash.side === "l" ? "left-8" : "right-8"}`}
+            initial={{ opacity: 1, scale: 0.8 }} animate={{ opacity: 0, scale: 1.1 }}
+            transition={{ duration: 0.6 }}>
+            {seekFlash.side === "l"
+              ? <RotateCcw className="w-8 h-8 text-white" />
+              : <RotateCw   className="w-8 h-8 text-white" />}
+            <span className="text-white text-xs font-bold">10 ثانية</span>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Back button now lives inside the controls overlay — see below */}
-
-      {/* ── LOCK INDICATOR ── */}
-      {locked && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[25] flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md border border-white/12"
-          onClick={() => setLocked(false)}>
-          <Lock className="w-4 h-4 text-amber-400" />
-          <span className="text-white/70 text-[11px] font-['Cairo']">اضغط للفتح</span>
-        </div>
-      )}
-
-      {/* ── TAP + PINCH AREA ── */}
-      <div className="absolute inset-0 z-[10]"
-        style={{ pointerEvents: "auto", touchAction: "none", WebkitTapHighlightColor: "transparent" }}
-        onClick={handleTap}
-        onTouchStart={onPinchStart}
-        onTouchMove={onPinchMove}
-        onTouchEnd={onPinchEnd}
-      />
-      {/* Reset zoom on double-tap when zoomed */}
-      {videoScale > 1 && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[22] pointer-events-none">
-          <div className="bg-black/50 backdrop-blur-sm rounded-full px-3 py-1 border border-white/15">
-            <span className="text-white/70 text-[11px] font-mono">{videoScale.toFixed(1)}×</span>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════ CONTROLS ══════════════════════════════════════ */}
+      {/* ══ CONTROLS OVERLAY ══ */}
       <AnimatePresence>
         {showCtrl && !locked && (
           <motion.div key="ctrl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }} className="absolute inset-0 z-[20] pointer-events-none">
-
-            {/* TOP gradient + bar */}
-            <div className="absolute top-0 left-0 right-0 pointer-events-auto"
-              style={{ background: "linear-gradient(to bottom,rgba(0,0,0,0.92) 0%,rgba(0,0,0,0.45) 60%,transparent 100%)", paddingTop: "max(12px,env(safe-area-inset-top))", paddingBottom: 24 }}>
-              <div className="flex items-center px-3 gap-2">
-                {/* ← Back (closes player → server list) */}
-                <button onClick={e => { e.stopPropagation(); onBack(); }}
-                  className="w-10 h-10 rounded-2xl flex items-center justify-center active:scale-90 shrink-0 transition-transform"
-                  style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
-                  <X className="w-5 h-5 text-white/85" />
+            transition={{ duration: 0.2 }}
+            className="absolute inset-0 z-20 flex flex-col"
+            onClick={handleVideoTap}
+            onTouchStart={onPinchStart}
+            onTouchMove={onPinchMove}
+            onTouchEnd={onPinchEnd}
+          >
+            {/* ── TOP SECTION — title + icons ── */}
+            <div className="bg-gradient-to-b from-black/85 via-black/40 to-transparent pt-safe-top px-4 pb-8 flex-shrink-0"
+              style={{ paddingTop: "max(14px, env(safe-area-inset-top))" }}>
+              {/* Icons row */}
+              <div className="flex items-center justify-end gap-3 mb-3">
+                <button onClick={(e) => { e.stopPropagation(); takeScreenshot(); }}
+                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/15 backdrop-blur flex items-center justify-center active:scale-90 transition-transform">
+                  <Camera className="w-4 h-4 text-white/80" />
                 </button>
-
-                {/* Title + meta */}
-                <div className="flex-1 min-w-0 px-1" dir="rtl">
-                  <p className="text-white text-[13px] font-black font-['Cairo'] leading-tight truncate">{title}</p>
-                  <p className="text-white/40 text-[10px] font-['Cairo'] leading-tight mt-0.5 truncate">
-                    {ep === 0 ? "فيلم" : `الحلقة ${ep}`} · {qualLabel} · {subType}
-                  </p>
-                </div>
-
-                {/* Server list button */}
-                <button onClick={e => { e.stopPropagation(); onOpenList(); }}
-                  className="w-10 h-10 rounded-2xl flex flex-col items-center justify-center active:scale-90 shrink-0 relative transition-transform"
-                  style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
-                  <Wifi className="w-4 h-4 text-white/75" />
-                  {liveCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-500 text-white text-[8px] font-black flex items-center justify-center shadow-lg">{liveCount}</span>
-                  )}
+                <button onClick={(e) => { e.stopPropagation(); setRotLocked(r => !r); }}
+                  className={`w-9 h-9 rounded-xl border backdrop-blur flex items-center justify-center active:scale-90 transition-all
+                    ${rotLocked ? "bg-amber-500/30 border-amber-400/40" : "bg-black/30 border-white/15"}`}>
+                  <RotateCw className="w-4 h-4 text-white/80" />
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); onBack(); }}
+                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/15 backdrop-blur flex items-center justify-center active:scale-90 transition-transform">
+                  <X className="w-4 h-4 text-white/80" />
                 </button>
               </div>
+              {/* Title */}
+              <h1 className="text-white text-[16px] font-black font-['Cairo'] leading-tight mb-1.5" dir="ltr">{title}</h1>
+              {/* Episode meta */}
+              <div className="flex items-center gap-2 flex-wrap" dir="rtl">
+                <span className="text-white/55 text-[12px] font-['Cairo']">الحلقة {ep}</span>
+                <span className="text-white/20">•</span>
+                <span className={`text-[11px] font-bold font-['Cairo'] ${getLang(src) === "ar" ? "text-emerald-300/80" : "text-blue-300/80"}`}>
+                  {getLang(src) === "ar" ? "عربية" : "إنجليزية"}
+                </span>
+                <span className="text-white/20">•</span>
+                <span className={`text-[11px] font-bold font-['Cairo'] ${subType === "مدبلج" ? "text-orange-300/80" : "text-violet-300/80"}`}>
+                  {subType}
+                </span>
+                <span className="text-white/20">•</span>
+                <span className="text-white/55 text-[11px] font-mono">{qualLabel}</span>
+              </div>
+              {/* Server name */}
+              <p className="text-white/25 text-[10px] font-['Cairo'] mt-1">{getServerShortName(src)}</p>
             </div>
 
-            {/* CENTER: ep nav + play/pause */}
-            <div className="absolute inset-0 flex items-center justify-center gap-10 pointer-events-auto">
-              <button onClick={e => { e.stopPropagation(); onPrevEp(); }} disabled={ep <= 1}
-                className="w-12 h-12 rounded-full flex items-center justify-center disabled:opacity-20 active:scale-90 transition-transform"
-                style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.13)", backdropFilter: "blur(10px)" }}>
-                <ChevronRight className="w-6 h-6 text-white/85" />
+            {/* ── CENTER — seek buttons ── */}
+            <div className="flex-1 flex items-center justify-between px-8 pointer-events-none">
+              <button
+                className="w-16 h-16 rounded-full bg-black/35 border border-white/20 backdrop-blur flex flex-col items-center justify-center gap-0.5 active:scale-90 transition-transform pointer-events-auto"
+                onClick={(e) => { e.stopPropagation(); const v = videoRef.current; if (v) { v.currentTime = Math.max(0, v.currentTime - 10); setSeekFlash({ side:"l", id: Date.now() }); reveal(); } }}>
+                <RotateCcw className="w-6 h-6 text-white" />
+                <span className="text-white text-[9px] font-bold leading-none">10</span>
               </button>
-
-              <button onClick={e => { e.stopPropagation(); togglePlay(); reveal(); }}
-                className="w-[76px] h-[76px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                style={{ background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.22)", backdropFilter: "blur(16px)", boxShadow: "0 0 40px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.18)" }}>
-                {buffering && playUrl
-                  ? <Loader2 className="w-9 h-9 text-white animate-spin" />
-                  : playing
-                  ? <Pause className="w-9 h-9 text-white fill-white" />
-                  : <Play className="w-9 h-9 text-white fill-white ml-1" />}
-              </button>
-
-              <button onClick={e => { e.stopPropagation(); onNextEp(); }} disabled={ep >= totalEps && totalEps > 0}
-                className="w-12 h-12 rounded-full flex items-center justify-center disabled:opacity-20 active:scale-90 transition-transform"
-                style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.13)", backdropFilter: "blur(10px)" }}>
-                <ChevronLeft className="w-6 h-6 text-white/85" />
+              <button
+                className="w-16 h-16 rounded-full bg-black/35 border border-white/20 backdrop-blur flex flex-col items-center justify-center gap-0.5 active:scale-90 transition-transform pointer-events-auto"
+                onClick={(e) => { e.stopPropagation(); const v = videoRef.current; if (v) { v.currentTime = Math.min(v.duration||0, v.currentTime + 10); setSeekFlash({ side:"r", id: Date.now() }); reveal(); } }}>
+                <RotateCw className="w-6 h-6 text-white" />
+                <span className="text-white text-[9px] font-bold leading-none">10</span>
               </button>
             </div>
 
-            {/* BOTTOM: progress + controls */}
-            <div className="absolute bottom-0 left-0 right-0 pointer-events-auto"
-              style={{ background: "linear-gradient(to top,rgba(0,0,0,0.95) 0%,rgba(0,0,0,0.5) 50%,transparent 100%)", paddingBottom: "max(14px,env(safe-area-inset-bottom))" }}>
+            {/* ── BOTTOM — controls ── */}
+            <div className="bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-safe-bottom"
+              style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
 
-              {/* Progress bar */}
-              {playUrl && (
-                <div className="px-4 pt-4 pb-2">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-white/55 text-[11px] font-mono tabular-nums tracking-tight">{fmtTime(curTime)}</span>
-                    <span className="text-white/30 text-[11px] font-mono tabular-nums tracking-tight">{fmtTime(duration)}</span>
-                  </div>
-                  <div className="relative h-7 flex items-center cursor-pointer" onClick={seekTo} ref={progRef}>
-                    <div className="w-full h-[3px] rounded-full relative" style={{ background: "rgba(255,255,255,0.12)" }}>
-                      <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${buffered*100}%`, background: "rgba(255,255,255,0.18)" }} />
-                      <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${progress*100}%`, background: "linear-gradient(to right,#f97316,#ef4444)" }} />
-                    </div>
-                    <div className="absolute w-[14px] h-[14px] rounded-full -translate-x-1/2 -translate-y-1/2 top-1/2 pointer-events-none"
-                      style={{ left: `${progress*100}%`, background: "#ef4444", boxShadow: "0 0 0 2px rgba(255,255,255,0.7), 0 2px 8px rgba(239,68,68,0.6)" }} />
-                  </div>
-                </div>
-              )}
-
-              {/* Controls row */}
-              <div className="flex items-center gap-1.5 px-3 pb-1">
-                {/* Speed */}
-                <div className="relative">
-                  <button onClick={e => { e.stopPropagation(); setShowSpeed(!showSpeed); }}
-                    className="px-3 h-9 rounded-xl text-white/60 text-[11px] font-bold font-mono active:scale-90 transition-transform"
-                    style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                    {speed}×
-                  </button>
-                  <AnimatePresence>
-                    {showSpeed && (
-                      <motion.div initial={{ opacity: 0, y: 6, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.95 }}
-                        className="absolute bottom-11 left-0 rounded-2xl overflow-hidden shadow-2xl z-30 min-w-[90px]"
-                        style={{ background: "rgba(14,14,22,0.96)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)" }}
-                        onClick={e => e.stopPropagation()}>
-                        {SPEEDS.map(sp => (
-                          <button key={sp} onClick={() => { setSpeed(sp); setShowSpeed(false); }}
-                            className={`flex items-center justify-between w-full px-4 py-2.5 text-[12px] font-mono active:opacity-60 transition-opacity
-                              ${speed === sp ? "text-orange-300" : "text-white/60"}`}>
-                            {sp}×
-                            {speed === sp && <CheckCircle className="w-3 h-3 text-orange-400" />}
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {/* −10s */}
-                <button onClick={e => { e.stopPropagation(); const v=videoRef.current; if(v) v.currentTime=Math.max(0,v.currentTime-10); reveal(); }}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  <RotateCcw className="w-4 h-4 text-white/65" />
-                </button>
-
-                <div className="flex-1" />
-
-                {/* Volume */}
-                <button onClick={e => { e.stopPropagation(); toggleMute(); reveal(); }}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  {muted ? <VolumeX className="w-4 h-4 text-white/65" /> : <Volume2 className="w-4 h-4 text-white/65" />}
-                </button>
-
-                {/* +10s */}
-                <button onClick={e => { e.stopPropagation(); const v=videoRef.current; if(v) v.currentTime=Math.min(v.duration||0,v.currentTime+10); reveal(); }}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  <RotateCw className="w-4 h-4 text-white/65" />
-                </button>
-
-                {/* Screenshot */}
-                <button onClick={e => { e.stopPropagation(); takeScreenshot(); }}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  <Camera className="w-4 h-4 text-white/65" />
-                </button>
-
-                {/* Reset zoom */}
-                {videoScale > 1 && (
-                  <button onClick={e => { e.stopPropagation(); setVideoScale(1); reveal(); }}
-                    className="px-2.5 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                    style={{ background: "rgba(249,115,22,0.2)", border: "1px solid rgba(249,115,22,0.35)" }}>
-                    <span className="text-orange-300 text-[10px] font-bold font-mono">1×</span>
-                  </button>
+              {/* Speed popup */}
+              <AnimatePresence>
+                {showSpeed && (
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+                    className="flex gap-2 justify-center mb-3">
+                    {SPEEDS.map(s => (
+                      <button key={s} onClick={(e) => { e.stopPropagation(); setSpeed(s); setShowSpeed(false); }}
+                        className={`px-3 py-1.5 rounded-full text-[12px] font-bold font-['Cairo'] transition-all
+                          ${speed === s ? "bg-violet-600 text-white" : "bg-white/10 text-white/60 border border-white/15"}`}>
+                        {s}×
+                      </button>
+                    ))}
+                  </motion.div>
                 )}
+              </AnimatePresence>
 
-                {/* Lock */}
-                <button onClick={e => { e.stopPropagation(); setLocked(true); }}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  <Unlock className="w-4 h-4 text-white/65" />
+              {/* Time + progress */}
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-white/70 text-[11px] font-mono tabular-nums w-10 text-left">{fmtTime(curTime)}</span>
+                <div className="flex-1 relative h-7 flex items-center cursor-pointer group"
+                  ref={progRef}
+                  onClick={(e) => { e.stopPropagation(); seekTo(e); }}
+                  onMouseMove={(e) => { e.stopPropagation(); onProgMouseMove(e); }}
+                  onMouseLeave={onProgMouseLeave}
+                  onTouchStart={(e) => { e.stopPropagation(); onProgTouchStart(e); }}
+                  onTouchMove={(e) => { e.stopPropagation(); onProgTouchMove(e); }}
+                  onTouchEnd={(e) => { e.stopPropagation(); onProgTouchEnd(); }}>
+                  {/* Track */}
+                  <div className="w-full h-[3px] bg-white/20 rounded-full relative overflow-hidden">
+                    {/* Buffered */}
+                    <div className="absolute h-full bg-white/25 rounded-full" style={{ width: `${buffered*100}%` }} />
+                    {/* Progress */}
+                    <div className="absolute h-full bg-rose-500 rounded-full" style={{ width: `${progress*100}%` }} />
+                  </div>
+                  {/* Thumb */}
+                  <div className="absolute w-4 h-4 rounded-full bg-white shadow-lg border-2 border-rose-400 transform -translate-x-1/2 -translate-y-1/2 top-1/2"
+                    style={{ left: `${progress*100}%` }} />
+                  {/* Time preview tooltip */}
+                  {thumbTime !== null && (
+                    <div className="absolute -top-8 bg-black/80 text-white text-[11px] font-mono px-2 py-0.5 rounded-lg pointer-events-none"
+                      style={{ left: Math.max(20, Math.min(thumbX, (progRef.current?.offsetWidth || 200) - 20)) }}>
+                      {fmtTime(thumbTime)}
+                    </div>
+                  )}
+                </div>
+                <span className="text-white/40 text-[11px] font-mono tabular-nums w-10 text-right">{fmtTime(duration)}</span>
+              </div>
+
+              {/* Main controls row */}
+              <div className="flex items-center justify-between">
+                {/* Left: speed + lock */}
+                <div className="flex items-center gap-3">
+                  <button onClick={(e) => { e.stopPropagation(); setShowSpeed(s => !s); }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/8 border border-white/10 active:scale-90 transition-transform">
+                    <Settings className="w-3.5 h-3.5 text-white/70" />
+                    <span className="text-white/70 text-[12px] font-bold font-mono">{speed}×</span>
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); setLocked(true); }}
+                    className="w-9 h-9 rounded-xl bg-white/8 border border-white/10 flex items-center justify-center active:scale-90 transition-transform">
+                    <Unlock className="w-4 h-4 text-white/70" />
+                  </button>
+                </div>
+
+                {/* Center: Play/Pause */}
+                <button onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+                  className="w-16 h-16 rounded-full bg-white flex items-center justify-center active:scale-90 transition-transform shadow-xl">
+                  {buffering
+                    ? <Loader2 className="w-7 h-7 text-black animate-spin" />
+                    : playing
+                    ? <Pause className="w-7 h-7 text-black fill-black" />
+                    : <Play  className="w-7 h-7 text-black fill-black ml-1" />}
                 </button>
 
-                {/* Fullscreen */}
-                <button onClick={e => { e.stopPropagation(); toggleFs(); reveal(); }}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  {fs ? <Minimize2 className="w-4 h-4 text-white/65" /> : <Maximize2 className="w-4 h-4 text-white/65" />}
-                </button>
+                {/* Right: servers + fullscreen */}
+                <div className="flex items-center gap-3">
+                  <button onClick={(e) => { e.stopPropagation(); onOpenList(); }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/8 border border-white/10 active:scale-90 transition-transform">
+                    <Zap className="w-3.5 h-3.5 text-violet-400" />
+                    <span className="text-white/70 text-[12px] font-bold font-['Cairo']">{liveCount}</span>
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); toggleFs(); }}
+                    className="w-9 h-9 rounded-xl bg-white/8 border border-white/10 flex items-center justify-center active:scale-90 transition-transform">
+                    {fs ? <Minimize2 className="w-4 h-4 text-white/70" /> : <Maximize2 className="w-4 h-4 text-white/70" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Bottom action bar */}
+              <div className="flex items-center justify-between mt-3 pt-2 border-t border-white/8">
+                {/* Ep navigation */}
+                <div className="flex items-center gap-2">
+                  <button onClick={(e) => { e.stopPropagation(); ep > 1 && onPrevEp(); }}
+                    disabled={ep <= 1}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white/7 border border-white/10 active:scale-90 transition-transform disabled:opacity-30">
+                    <ChevronRight className="w-4 h-4 text-white/60" />
+                    <span className="text-white/60 text-[11px] font-['Cairo']">سابقة</span>
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); ep < totalEps && onNextEp(); }}
+                    disabled={ep >= totalEps}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white/7 border border-white/10 active:scale-90 transition-transform disabled:opacity-30">
+                    <span className="text-white/60 text-[11px] font-['Cairo']">تالية</span>
+                    <ChevronRight className="w-4 h-4 text-white/60 rotate-180" />
+                  </button>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-2 bg-[#2a2510]/80 border border-amber-500/20 rounded-2xl px-3 py-2">
+                  <button onClick={(e) => { e.stopPropagation(); toggleMute(); }}
+                    className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform">
+                    {muted ? <VolumeX className="w-4 h-4 text-amber-300/70" /> : <Volume2 className="w-4 h-4 text-amber-300/70" />}
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); takeScreenshot(); }}
+                    className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform">
+                    <Camera className="w-4 h-4 text-amber-300/70" />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); onNextSrc(); }}
+                    className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform">
+                    <RefreshCw className="w-4 h-4 text-amber-300/70" />
+                  </button>
+                </div>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ══ LOCKED OVERLAY ══ */}
+      <AnimatePresence>
+        {locked && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="absolute inset-0 z-30 flex items-end justify-center pb-10"
+            onClick={() => setLocked(false)}>
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-black/60 border border-white/15 backdrop-blur">
+              <Lock className="w-4 h-4 text-amber-400" />
+              <span className="text-amber-300/80 text-[12px] font-bold font-['Cairo']">الشاشة مقفلة · اضغط للفتح</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ══ TAP TO SHOW CONTROLS (when hidden) ══ */}
+      {!showCtrl && !locked && (
+        <div className="absolute inset-0 z-10"
+          onClick={handleVideoTap}
+          onTouchStart={onPinchStart}
+          onTouchMove={onPinchMove}
+          onTouchEnd={onPinchEnd}
+        />
+      )}
     </div>
   );
 }
@@ -800,49 +804,30 @@ function LoadingScreen({ cover, title, ep, streamDone, sourcesCount }: {
   cover: string; title: string; ep: number; streamDone: boolean; sourcesCount: number;
 }) {
   return (
-    <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col items-center justify-center overflow-hidden" dir="rtl">
+    <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col items-center justify-center gap-5" dir="rtl">
       {cover && (
-        <>
-          <div className="absolute inset-0">
-            <img src={cover} alt="" className="w-full h-full object-cover scale-110"
-              style={{ filter: "blur(55px) brightness(0.1) saturate(1.6)" }} />
-          </div>
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom,rgba(0,0,0,0.5) 0%,#09090f 60%)" }} />
-        </>
+        <div className="relative">
+          <img src={cover} alt="" className="w-24 h-32 rounded-2xl object-cover opacity-60 blur-[1px]" />
+          <div className="absolute inset-0 rounded-2xl bg-gradient-to-t from-[#09090f] via-transparent to-transparent" />
+        </div>
       )}
-      <div className="relative z-10 flex flex-col items-center gap-7 px-6 text-center w-full max-w-xs">
-        {cover && (
-          <motion.div initial={{ y: 20, opacity: 0, scale: 0.9 }} animate={{ y: 0, opacity: 1, scale: 1 }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }} className="relative">
-            <div className="absolute -inset-8 rounded-full blur-[60px] opacity-45" style={{ background: "radial-gradient(circle,rgba(139,92,246,0.7),transparent 70%)" }} />
-            <img src={cover} alt="" className="relative w-32 h-48 object-cover rounded-2xl shadow-2xl border border-violet-500/18" />
-            <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-violet-600 text-white text-[11px] font-black px-4 py-1 rounded-full shadow-lg whitespace-nowrap">
-              {ep === 0 ? "فيلم" : `الحلقة ${ep}`}
-            </div>
-          </motion.div>
-        )}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-          className="flex flex-col items-center gap-3">
-          <h2 className="text-white text-[15px] font-black font-['Cairo'] line-clamp-2">{title}</h2>
-          <p className="text-white/30 text-[12px] font-['Cairo']">
-            {streamDone && sourcesCount === 0
-              ? "لا توجد مصادر متاحة"
-              : sourcesCount > 0
-              ? `${sourcesCount} مصدر · جاري التحقق منها…`
-              : "يجري البحث عن المصادر…"}
-          </p>
-        </motion.div>
-        {!streamDone && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
-            className="flex items-center gap-1.5">
-            {[0,1,2,3,4].map(i => (
-              <motion.div key={i} className="w-1.5 h-1.5 rounded-full bg-violet-500"
-                animate={{ opacity: [0.2,1,0.2], scale: [0.7,1.3,0.7] }}
-                transition={{ duration: 1.3, repeat: Infinity, delay: i*0.18 }} />
-            ))}
-          </motion.div>
-        )}
-      </div>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+        className="text-center px-8">
+        {title && <h2 className="text-white text-[14px] font-black font-['Cairo'] mb-1">{title}</h2>}
+        <div className="flex items-center justify-center gap-1.5 text-white/35 text-[12px] font-['Cairo']">
+          <span>الحلقة {ep}</span>
+          {sourcesCount > 0 && <><span>·</span><span>{sourcesCount} مصدر</span></>}
+        </div>
+      </motion.div>
+      {!streamDone && (
+        <div className="flex items-center gap-1.5">
+          {[0,1,2,3,4].map(i => (
+            <motion.div key={i} className="w-1.5 h-1.5 rounded-full bg-violet-500"
+              animate={{ opacity:[0.2,1,0.2], scale:[0.7,1.3,0.7] }}
+              transition={{ duration: 1.3, repeat: Infinity, delay: i*0.18 }} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -859,10 +844,10 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
         <p className="text-white/25 text-[12px] mt-1 font-['Cairo']">الحلقة غير متوفرة حالياً</p>
       </div>
       <div className="flex gap-3">
-        <button onClick={onBack} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/9 text-white/55 text-[13px] font-bold font-['Cairo']">
+        <button onClick={onBack} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/9 text-white/55 text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
           <ChevronRight className="w-4 h-4" /> رجوع
         </button>
-        <button onClick={onRefresh} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo']">
+        <button onClick={onRefresh} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
           <RefreshCw className="w-4 h-4" /> إعادة المحاولة
         </button>
       </div>
@@ -891,40 +876,36 @@ export default function WatchPage() {
   const seenUrls      = useRef(new Set<string>());
   const sourcesRef    = useRef<Source[]>([]);
   const activeRef     = useRef<Source | null>(null);
-  const extractingRef = useRef(false);   // sync ref to avoid stale-closure issues
-  const triedRef      = useRef(new Set<string>()); // tracks urls already attempted for extraction
-  const autoPlayedRef = useRef(false);  // prevent double auto-play
+  const extractingRef = useRef(false);
+  const triedRef      = useRef(new Set<string>());
+  const autoPlayedRef = useRef(false);
 
   const title    = anime?.title?.romaji || anime?.title?.english || titleParam || "أنمي";
   const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
   const cover    = anime?.coverImage?.large || "";
-  const genres   = anime?.genres || [];
 
   useEffect(() => { sourcesRef.current = sources; }, [sources]);
   useEffect(() => { activeRef.current  = active;  }, [active]);
 
-  /* ── Source utils ── */
   function sortSources(srcs: Source[]): Source[] {
     return [...srcs].sort((a, b) => {
       if ((b.directUrl?1:0) !== (a.directUrl?1:0)) return (b.directUrl?1:0) - (a.directUrl?1:0);
       if (b.qualityRank !== a.qualityRank) return b.qualityRank - a.qualityRank;
-      const sc: Record<string,number> = { shahiid:13, animelek:12, animedar:11, vidnest:10, animapahe:9, anime4up:8, animeblkom:7, animeiat:6, anime3rb:6, goldenanimaniac:5, animegg:4 };
+      const sc: Record<string,number> = { animelek:12, animeblkom:11, anime3rb:10, animeiat:9, goldenanimaniac:8, animegg:7 };
       return (sc[b.site]||3) - (sc[a.site]||3);
     });
   }
   function dedupSources(srcs: Source[]): Source[] {
-    // Max 3 per site (directUrls always kept; embeds limited)
     const siteCounts = new Map<string,number>();
     return srcs.filter(s => {
       const site = s.site || "unknown";
       const n = siteCounts.get(site) || 0;
-      if (n >= 3) return false;
+      if (!s.directUrl && n >= 3) return false;
       siteCounts.set(site, n + 1);
       return true;
     });
   }
 
-  /* ── SSE ── */
   function startSSE(romaji: string, english: string, malId: number) {
     const p = new URLSearchParams({ ep: String(ep), title: romaji, english, anilistId: String(animeId), malId: String(malId) });
     const es = new EventSource(`/api/anime/sources-stream?${p}`);
@@ -948,7 +929,6 @@ export default function WatchPage() {
     es.onerror = () => { es.close(); sseRef.current = null; setStreamDone(true); };
   }
 
-  /* ── Init ── */
   useEffect(() => {
     if (!animeId) { setPageLoad(false); setPhase("servers"); return; }
     setPageLoad(true); setSources([]); setActive(null); setStatuses({});
@@ -984,19 +964,10 @@ export default function WatchPage() {
     return () => { sseRef.current?.close(); sseRef.current = null; };
   }, [animeId, ep]);
 
-  /* ── When SSE arrives → auto-switch to servers page ── */
-  useEffect(() => {
-    if (sources.length > 0 && phase === "loading") setPhase("servers");
-  }, [sources.length]);
+  useEffect(() => { if (sources.length > 0 && phase === "loading") setPhase("servers"); }, [sources.length]);
+  useEffect(() => { if (streamDone && phase === "loading") setPhase("servers"); }, [streamDone]);
 
-  /* ── Also switch to servers when stream done ── */
-  useEffect(() => {
-    if (streamDone && phase === "loading") setPhase("servers");
-  }, [streamDone]);
-
-  /* ── No auto-play — user must tap Play manually ── */
-
-  /* ── Auto-probe directUrl sources in background ── */
+  /* ── Auto-probe directUrl sources ── */
   useEffect(() => {
     if (phase !== "servers") return;
     sources.forEach(src => {
@@ -1009,31 +980,13 @@ export default function WatchPage() {
     });
   }, [phase, sources]);
 
-  /* ── Manual probe (on play click) ── */
-  function probeSource(src: Source) {
-    const url = src.directUrl || src.url;
-    setStatuses(prev => ({ ...prev, [src.url]: "testing" }));
-    fetch(`/api/anime/probe?url=${encodeURIComponent(url)}`)
-      .then(r => r.json())
-      .then(d => setStatuses(prev => ({ ...prev, [src.url]: d.alive ? "ok" : "dead" })))
-      .catch(() => setStatuses(prev => ({ ...prev, [src.url]: "idle" })));
-  }
-
-  /* ── Embed-only hosts (skip server + browser extraction) ── */
   const EMBED_ONLY_FE = ["vidbm","uptostream","playerwish","wishfast","streamvid","streamlare","vidmoly","asnwish","share4max","megamax.me"];
 
-  /* ── Extract any source (server-side first, then browser) ── */
   async function triggerExtract(src: Source) {
     if (src.directUrl || extractingRef.current) return;
-
-    // Mark as tried (goNextSrc will skip this URL on its next run)
     triedRef.current.add(src.url);
-
-    // Skip known embed-only hosts — setTimeout BREAKS the synchronous recursion!
     if (EMBED_ONLY_FE.some(h => src.url.includes(h))) { setTimeout(() => goNextSrc(), 0); return; }
-
-    extractingRef.current = true;
-    setExtracting(true);
+    extractingRef.current = true; setExtracting(true);
 
     const applyExtracted = (raw: string, ref: string) => {
       const isHls = raw.includes(".m3u8") || raw.includes("uwu.m3u8") || raw.includes("animanga.fun");
@@ -1046,13 +999,10 @@ export default function WatchPage() {
     };
 
     const done = (goNext = false) => {
-      extractingRef.current = false;
-      setExtracting(false);
-      // setTimeout breaks the sync call stack to prevent "Maximum call stack exceeded"
+      extractingRef.current = false; setExtracting(false);
       if (goNext) setTimeout(() => goNextSrc(), 0);
     };
 
-    // Step 1: Server-side deep extraction (5s max — streamwish, filemoon, vidhide, streamtape, etc.)
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 5000);
@@ -1064,58 +1014,48 @@ export default function WatchPage() {
       }
     } catch {}
 
-    // Step 2 removed (browser-extract is too slow — 25s wasted)
-    // Server-side extraction failed → skip to next source
     done(true);
   }
 
-  /* ── Play source ── */
   function playSource(src: Source) {
     setActive(src); setPhase("player");
     if (!src.directUrl) triggerExtract(src);
   }
 
-  /* ── Next source ── */
   function goNextSrc() {
     const all = sourcesRef.current;
     const cur = activeRef.current ? all.indexOf(activeRef.current) : -1;
     for (let i = cur + 1; i < all.length; i++) {
       const s = all[i];
       if ((statuses[s.url] || "idle") === "dead") continue;
-      if (triedRef.current.has(s.url)) continue; // skip already-tried (loop prevention)
+      if (triedRef.current.has(s.url)) continue;
       playSource(s); return;
     }
-    // All sources tried or dead → back to server list; reset tried set for user retry
-    triedRef.current.clear();
-    setPhase("servers");
+    triedRef.current.clear(); setPhase("servers");
   }
 
-  /* ── Episode nav ── */
   function goEp(n: number) {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title })}`);
   }
-
   function handleBack() {
     if (window.history.length > 2) window.history.back();
     else navigate("/");
   }
   function handleRefresh() { localStorage.removeItem(`srccache:${animeId}-${ep}`); window.location.reload(); }
 
-  /* ════════ RENDER ════════════════════════════════════════════ */
-
+  /* ════ RENDER ════ */
   if (pageLoad || (phase === "loading" && sources.length === 0 && !streamDone)) {
     return <LoadingScreen cover={cover} title={title} ep={ep} streamDone={streamDone} sourcesCount={sources.length} />;
   }
-
   if (streamDone && sources.length === 0) {
     return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
   }
-
   if (phase === "player" && active) {
     return (
       <VideoPlayer
-        src={active} title={title} ep={ep} totalEps={totalEps}
+        src={active} anime={anime} ep={ep} totalEps={totalEps}
         sources={sources} statuses={statuses}
+        title={title} cover={cover}
         onBack={() => setPhase("servers")}
         onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
         onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
@@ -1126,7 +1066,6 @@ export default function WatchPage() {
       />
     );
   }
-
   return (
     <ServerListPage
       anime={anime} ep={ep} title={title} cover={cover}
