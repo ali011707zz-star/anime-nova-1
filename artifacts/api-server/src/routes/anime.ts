@@ -487,7 +487,11 @@ async function searchShahiid(query: string): Promise<Array<{ url: string; label:
       const url = m[1].replace(/\/?$/, "/");
       if (seen.has(url)) continue;
       seen.add(url);
-      const label = decodeURIComponent(m[2]).replace(/-/g, " ");
+      const slugLabel = decodeURIComponent(m[2]).replace(/-/g, " ");
+      // Look for <h2> in the next 400 chars after this href — avoids catastrophic backtracking
+      const nearby = html.slice(m.index!, m.index! + 400);
+      const h2m = nearby.match(/<h2>([^<]{1,80})<\/h2>/i);
+      const label = (h2m?.[1] || slugLabel).trim();
       results.push({ url, label });
     }
     return results;
@@ -2594,6 +2598,7 @@ router.get("/anime/sources-stream", async (req, res) => {
   res.flushHeaders?.();
 
   const seenUrls = new Set<string>();
+  const siteEmbedCounts = new Map<string, number>(); // track embed-only per site
   let closed = false;
   req.on("close", () => { closed = true; });
 
@@ -2606,6 +2611,13 @@ router.get("/anime/sources-stream", async (req, res) => {
     // Filter embed-only sources that can never be played natively (no iframe allowed)
     if (!s.directUrl && EMBED_ONLY_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
     if (!s.directUrl && (s.url.includes("share4max.com") || s.url.includes("megamax.me"))) return;
+    // Per-site cap: max 3 embed-only per site (directUrls always pass through)
+    if (!s.directUrl) {
+      const site = s.site || "unknown";
+      const n = siteEmbedCounts.get(site) || 0;
+      if (n >= 3) return;
+      siteEmbedCounts.set(site, n + 1);
+    }
     seenUrls.add(key);
     res.write(`data: ${JSON.stringify(s)}\n\n`);
   }
