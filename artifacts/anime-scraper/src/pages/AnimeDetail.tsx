@@ -161,7 +161,7 @@ export default function AnimeDetail() {
         }} />
         {/* Back button */}
         <button
-          onClick={() => window.history.back()}
+          onClick={() => { if (window.history.length > 1) window.history.back(); else navigate("/"); }}
           className="absolute top-5 right-4 w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90"
         >
           <ChevronRight className="w-5 h-5 text-white" />

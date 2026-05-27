@@ -43,6 +43,11 @@ const DEAD_FILE_HOSTS = [
   "jquery.min.js","bootstrap.min.js",
   ".css",".png",".jpg",".jpeg",".gif",".svg",".ico",
   "favicon","robots.txt","sitemap",
+  // dead video hosts seen in AnimeLek / AnimeBlkom results
+  "larhu.net","larhu.website","larhu.tv","larhu.me","larhu.io","larhu.org","larhu.co",
+  "file-upload.org","file-upload.net","fileupload.pw","fileupload.net",
+  "uptobox.com","uptobox.fr","upstream.to",
+  "flashx.tv","gostream.site","embedrise.com",
 ];
 
 // ── Embed-only hosts (skip server-side extraction) ──
@@ -2640,6 +2645,15 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getAnimeGGSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── Shahiid-anime.net  (عربي مدبلج + مترجم — share4max/streamwish) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })(),
