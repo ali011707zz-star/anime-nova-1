@@ -340,10 +340,18 @@ function VideoPlayer({
     return () => window.removeEventListener("popstate", handler);
   }, []);
 
-  /* ── Orientation: allow natural rotation (don't force landscape) ── */
+  /* ── Orientation ── */
   useEffect(() => {
     try { (screen.orientation as any)?.unlock?.(); } catch {}
+    return () => { try { (screen.orientation as any)?.unlock?.(); } catch {} };
   }, []);
+  useEffect(() => {
+    if (fs) {
+      try { (screen.orientation as any)?.lock?.("landscape").catch(() => {}); } catch {}
+    } else {
+      try { (screen.orientation as any)?.unlock?.(); } catch {}
+    }
+  }, [fs]);
 
   /* ── HLS / MP4 setup ── */
   useEffect(() => {
@@ -513,7 +521,7 @@ function VideoPlayer({
       {playUrl && (
         <video ref={videoRef} className="absolute inset-0 w-full h-full"
           style={{ objectFit: "contain", transform: videoScale !== 1 ? `scale(${videoScale})` : undefined, transition: "transform 0.05s linear" }}
-          playsInline autoPlay
+          playsInline autoPlay crossOrigin="anonymous"
           onCanPlay={() => { setBuffering(false); reveal(4000); }}
           onPlay={() => { setPlaying(true); scheduleHide(); }}
           onPause={() => setPlaying(false)}
@@ -586,6 +594,16 @@ function VideoPlayer({
         )}
       </AnimatePresence>
 
+      {/* ── PERSISTENT BACK BUTTON (always visible, not inside auto-hide controls) ── */}
+      {!locked && (
+        <button
+          onClick={e => { e.stopPropagation(); onBack(); }}
+          className="absolute z-[30] flex items-center justify-center active:scale-90"
+          style={{ top: "max(16px,env(safe-area-inset-top))", right: 16, width: 40, height: 40, borderRadius: 12, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.14)" }}>
+          <X className="w-5 h-5 text-white/80" />
+        </button>
+      )}
+
       {/* ── LOCK INDICATOR ── */}
       {locked && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[25] flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 backdrop-blur-md border border-white/12"
@@ -639,11 +657,7 @@ function VideoPlayer({
                       <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-500 text-white text-[8px] font-black flex items-center justify-center">{liveCount}</span>
                     )}
                   </button>
-                  {/* Close → go back to server list */}
-                  <button onClick={e => { e.stopPropagation(); onBack(); }}
-                    className="w-9 h-9 rounded-xl bg-black/40 backdrop-blur-sm border border-white/12 flex items-center justify-center active:scale-90">
-                    <X className="w-4 h-4 text-white/65" />
-                  </button>
+                  {/* X is now the persistent button above controls */}
                 </div>
               </div>
             </div>
@@ -1033,36 +1047,20 @@ export default function WatchPage() {
       if (goNext) setTimeout(() => goNextSrc(), 0);
     };
 
-    // Step 1: Server-side deep extraction (streamwish, filemoon, vidhide, streamtape, etc.)
+    // Step 1: Server-side deep extraction (5s max — streamwish, filemoon, vidhide, streamtape, etc.)
     try {
-      const res = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(src.url)}`);
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(src.url)}`, { signal: ctrl.signal });
+      clearTimeout(t);
       if (res.ok) {
         const ss = await res.json();
         if (ss.videoUrl) { applyExtracted(ss.videoUrl, src.url); done(); return; }
       }
     } catch {}
 
-    // Step 2: Browser-based extraction (Playwright — vidnest/AnimePahe, CF-protected)
-    try {
-      const res = await fetch(`/api/anime/browser-extract?url=${encodeURIComponent(src.url)}&timeout=25`);
-      if (res.ok) {
-        const data = await res.json();
-        const raw: string = data.directUrl || "";
-        if (raw) {
-          let ref = src.url;
-          if (raw.includes("animanga.fun")) {
-            try {
-              const pu = new URL(raw);
-              const hdr = JSON.parse(pu.searchParams.get("headers") || "{}");
-              ref = hdr["Referer"] || hdr["referer"] || src.url;
-            } catch {}
-          }
-          applyExtracted(raw, ref); done(); return;
-        }
-      }
-    } catch {}
-
-    // Both failed → skip to next
+    // Step 2 removed (browser-extract is too slow — 25s wasted)
+    // Server-side extraction failed → skip to next source
     done(true);
   }
 
