@@ -594,15 +594,7 @@ function VideoPlayer({
         )}
       </AnimatePresence>
 
-      {/* ── PERSISTENT BACK BUTTON (always visible, not inside auto-hide controls) ── */}
-      {!locked && (
-        <button
-          onClick={e => { e.stopPropagation(); onBack(); }}
-          className="absolute z-[30] flex items-center justify-center active:scale-90"
-          style={{ top: "max(16px,env(safe-area-inset-top))", right: 16, width: 40, height: 40, borderRadius: 12, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.14)" }}>
-          <X className="w-5 h-5 text-white/80" />
-        </button>
-      )}
+      {/* Back button now lives inside the controls overlay — see below */}
 
       {/* ── LOCK INDICATOR ── */}
       {locked && (
@@ -634,98 +626,107 @@ function VideoPlayer({
       <AnimatePresence>
         {showCtrl && !locked && (
           <motion.div key="ctrl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }} className="absolute inset-0 z-[20] pointer-events-none">
+            transition={{ duration: 0.2 }} className="absolute inset-0 z-[20] pointer-events-none">
 
-            {/* TOP gradient + info */}
+            {/* TOP gradient + bar */}
             <div className="absolute top-0 left-0 right-0 pointer-events-auto"
-              style={{ background: "linear-gradient(to bottom,rgba(0,0,0,0.85) 0%,rgba(0,0,0,0.3) 65%,transparent 100%)", paddingTop: "max(14px,env(safe-area-inset-top))", paddingBottom: 20 }}>
-              <div className="flex items-start justify-between px-4 gap-4">
-                {/* Title + meta (top-left, LTR layout so it's on the left) */}
-                <div className="min-w-0 flex-1" dir="rtl">
-                  <p className="text-white text-[14px] font-black font-['Cairo'] leading-tight truncate">{title}</p>
-                  <p className="text-white/45 text-[11px] font-['Cairo'] leading-tight mt-0.5">
-                    {qualLabel} · {subType} · الحلقة {ep === 0 ? "فيلم" : ep}
+              style={{ background: "linear-gradient(to bottom,rgba(0,0,0,0.92) 0%,rgba(0,0,0,0.45) 60%,transparent 100%)", paddingTop: "max(12px,env(safe-area-inset-top))", paddingBottom: 24 }}>
+              <div className="flex items-center px-3 gap-2">
+                {/* ← Back (closes player → server list) */}
+                <button onClick={e => { e.stopPropagation(); onBack(); }}
+                  className="w-10 h-10 rounded-2xl flex items-center justify-center active:scale-90 shrink-0 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
+                  <X className="w-5 h-5 text-white/85" />
+                </button>
+
+                {/* Title + meta */}
+                <div className="flex-1 min-w-0 px-1" dir="rtl">
+                  <p className="text-white text-[13px] font-black font-['Cairo'] leading-tight truncate">{title}</p>
+                  <p className="text-white/40 text-[10px] font-['Cairo'] leading-tight mt-0.5 truncate">
+                    {ep === 0 ? "فيلم" : `الحلقة ${ep}`} · {qualLabel} · {subType}
                   </p>
                 </div>
-                {/* Top-right controls */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Next source */}
-                  <button onClick={e => { e.stopPropagation(); onOpenList(); }}
-                    className="w-9 h-9 rounded-xl bg-black/40 backdrop-blur-sm border border-white/12 flex flex-col items-center justify-center active:scale-90 relative">
-                    <Wifi className="w-4 h-4 text-white/65" />
-                    {liveCount > 0 && (
-                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-500 text-white text-[8px] font-black flex items-center justify-center">{liveCount}</span>
-                    )}
-                  </button>
-                  {/* X is now the persistent button above controls */}
-                </div>
+
+                {/* Server list button */}
+                <button onClick={e => { e.stopPropagation(); onOpenList(); }}
+                  className="w-10 h-10 rounded-2xl flex flex-col items-center justify-center active:scale-90 shrink-0 relative transition-transform"
+                  style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
+                  <Wifi className="w-4 h-4 text-white/75" />
+                  {liveCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-500 text-white text-[8px] font-black flex items-center justify-center shadow-lg">{liveCount}</span>
+                  )}
+                </button>
               </div>
             </div>
 
             {/* CENTER: ep nav + play/pause */}
-            <div className="absolute inset-0 flex items-center justify-center gap-12 pointer-events-auto">
+            <div className="absolute inset-0 flex items-center justify-center gap-10 pointer-events-auto">
               <button onClick={e => { e.stopPropagation(); onPrevEp(); }} disabled={ep <= 1}
-                className="w-12 h-12 rounded-full bg-black/30 backdrop-blur-sm border border-white/10 flex items-center justify-center disabled:opacity-15 active:scale-90">
-                <ChevronRight className="w-5 h-5 text-white/80" />
+                className="w-12 h-12 rounded-full flex items-center justify-center disabled:opacity-20 active:scale-90 transition-transform"
+                style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.13)", backdropFilter: "blur(10px)" }}>
+                <ChevronRight className="w-6 h-6 text-white/85" />
               </button>
+
               <button onClick={e => { e.stopPropagation(); togglePlay(); reveal(); }}
-                className="w-[72px] h-[72px] rounded-full bg-black/35 backdrop-blur-md border border-white/15 flex items-center justify-center active:scale-90 shadow-2xl">
+                className="w-[76px] h-[76px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                style={{ background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.22)", backdropFilter: "blur(16px)", boxShadow: "0 0 40px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.18)" }}>
                 {buffering && playUrl
-                  ? <Loader2 className="w-8 h-8 text-white animate-spin" />
+                  ? <Loader2 className="w-9 h-9 text-white animate-spin" />
                   : playing
-                  ? <Pause className="w-8 h-8 text-white fill-white" />
-                  : <Play className="w-8 h-8 text-white fill-white ml-1" />}
+                  ? <Pause className="w-9 h-9 text-white fill-white" />
+                  : <Play className="w-9 h-9 text-white fill-white ml-1" />}
               </button>
+
               <button onClick={e => { e.stopPropagation(); onNextEp(); }} disabled={ep >= totalEps && totalEps > 0}
-                className="w-12 h-12 rounded-full bg-black/30 backdrop-blur-sm border border-white/10 flex items-center justify-center disabled:opacity-15 active:scale-90">
-                <ChevronLeft className="w-5 h-5 text-white/80" />
+                className="w-12 h-12 rounded-full flex items-center justify-center disabled:opacity-20 active:scale-90 transition-transform"
+                style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.13)", backdropFilter: "blur(10px)" }}>
+                <ChevronLeft className="w-6 h-6 text-white/85" />
               </button>
             </div>
 
             {/* BOTTOM: progress + controls */}
             <div className="absolute bottom-0 left-0 right-0 pointer-events-auto"
-              style={{ background: "linear-gradient(to top,rgba(0,0,0,0.9) 0%,rgba(0,0,0,0.4) 55%,transparent 100%)", paddingBottom: "max(14px,env(safe-area-inset-bottom))" }}>
+              style={{ background: "linear-gradient(to top,rgba(0,0,0,0.95) 0%,rgba(0,0,0,0.5) 50%,transparent 100%)", paddingBottom: "max(14px,env(safe-area-inset-bottom))" }}>
 
-              {/* Time + progress */}
+              {/* Progress bar */}
               {playUrl && (
-                <div className="px-4 pb-1 pt-3">
-                  {/* Time row */}
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-white/60 text-[11px] font-mono tabular-nums">{fmtTime(curTime)}</span>
-                    <span className="text-white/35 text-[11px] font-mono tabular-nums">{fmtTime(duration)}</span>
+                <div className="px-4 pt-4 pb-2">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-white/55 text-[11px] font-mono tabular-nums tracking-tight">{fmtTime(curTime)}</span>
+                    <span className="text-white/30 text-[11px] font-mono tabular-nums tracking-tight">{fmtTime(duration)}</span>
                   </div>
-                  {/* Progress bar */}
-                  <div className="relative h-6 flex items-center cursor-pointer group" onClick={seekTo} ref={progRef}>
-                    <div className="w-full h-[3px] rounded-full bg-white/15 relative group-hover:h-[5px] transition-all duration-150">
-                      <div className="absolute inset-y-0 left-0 bg-white/22 rounded-full" style={{ width: `${buffered*100}%` }} />
-                      <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-orange-500 to-amber-400 rounded-full" style={{ width: `${progress*100}%` }} />
+                  <div className="relative h-7 flex items-center cursor-pointer" onClick={seekTo} ref={progRef}>
+                    <div className="w-full h-[3px] rounded-full relative" style={{ background: "rgba(255,255,255,0.12)" }}>
+                      <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${buffered*100}%`, background: "rgba(255,255,255,0.18)" }} />
+                      <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${progress*100}%`, background: "linear-gradient(to right,#f97316,#ef4444)" }} />
                     </div>
-                    {/* Red dot thumb */}
-                    <div className="absolute w-4 h-4 rounded-full bg-red-500 shadow-lg border-2 border-white/80 -translate-x-1/2 -translate-y-1/2 top-1/2 pointer-events-none"
-                      style={{ left: `${progress*100}%` }} />
+                    <div className="absolute w-[14px] h-[14px] rounded-full -translate-x-1/2 -translate-y-1/2 top-1/2 pointer-events-none"
+                      style={{ left: `${progress*100}%`, background: "#ef4444", boxShadow: "0 0 0 2px rgba(255,255,255,0.7), 0 2px 8px rgba(239,68,68,0.6)" }} />
                   </div>
                 </div>
               )}
 
               {/* Controls row */}
-              <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+              <div className="flex items-center gap-1.5 px-3 pb-1">
                 {/* Speed */}
                 <div className="relative">
                   <button onClick={e => { e.stopPropagation(); setShowSpeed(!showSpeed); }}
-                    className="px-2.5 h-8 rounded-lg bg-black/30 border border-white/10 text-white/60 text-[11px] font-bold font-mono active:scale-90">
+                    className="px-3 h-9 rounded-xl text-white/60 text-[11px] font-bold font-mono active:scale-90 transition-transform"
+                    style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
                     {speed}×
                   </button>
                   <AnimatePresence>
                     {showSpeed && (
-                      <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
-                        className="absolute bottom-10 left-0 bg-[#14141e] border border-white/12 rounded-xl overflow-hidden shadow-2xl z-30"
+                      <motion.div initial={{ opacity: 0, y: 6, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.95 }}
+                        className="absolute bottom-11 left-0 rounded-2xl overflow-hidden shadow-2xl z-30 min-w-[90px]"
+                        style={{ background: "rgba(14,14,22,0.96)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(20px)" }}
                         onClick={e => e.stopPropagation()}>
                         {SPEEDS.map(sp => (
                           <button key={sp} onClick={() => { setSpeed(sp); setShowSpeed(false); }}
-                            className={`flex items-center justify-between w-full px-4 py-2.5 text-[12px] font-mono active:bg-white/8
-                              ${speed === sp ? "text-violet-300 bg-violet-500/10" : "text-white/65"}`}>
+                            className={`flex items-center justify-between w-full px-4 py-2.5 text-[12px] font-mono active:opacity-60 transition-opacity
+                              ${speed === sp ? "text-orange-300" : "text-white/60"}`}>
                             {sp}×
-                            {speed === sp && <CheckCircle className="w-3.5 h-3.5 text-violet-400" />}
+                            {speed === sp && <CheckCircle className="w-3 h-3 text-orange-400" />}
                           </button>
                         ))}
                       </motion.div>
@@ -733,50 +734,57 @@ function VideoPlayer({
                   </AnimatePresence>
                 </div>
 
-                {/* -10s */}
+                {/* −10s */}
                 <button onClick={e => { e.stopPropagation(); const v=videoRef.current; if(v) v.currentTime=Math.max(0,v.currentTime-10); reveal(); }}
-                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
-                  <RotateCcw className="w-4 h-4 text-white/60" />
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <RotateCcw className="w-4 h-4 text-white/65" />
                 </button>
 
                 <div className="flex-1" />
 
-                {/* Volume / Mute */}
+                {/* Volume */}
                 <button onClick={e => { e.stopPropagation(); toggleMute(); reveal(); }}
-                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
-                  {muted ? <VolumeX className="w-4 h-4 text-white/60" /> : <Volume2 className="w-4 h-4 text-white/60" />}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  {muted ? <VolumeX className="w-4 h-4 text-white/65" /> : <Volume2 className="w-4 h-4 text-white/65" />}
                 </button>
 
                 {/* +10s */}
                 <button onClick={e => { e.stopPropagation(); const v=videoRef.current; if(v) v.currentTime=Math.min(v.duration||0,v.currentTime+10); reveal(); }}
-                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
-                  <RotateCw className="w-4 h-4 text-white/60" />
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <RotateCw className="w-4 h-4 text-white/65" />
                 </button>
 
                 {/* Screenshot */}
                 <button onClick={e => { e.stopPropagation(); takeScreenshot(); }}
-                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
-                  <Camera className="w-4 h-4 text-white/60" />
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <Camera className="w-4 h-4 text-white/65" />
                 </button>
 
-                {/* Reset zoom (shown only when zoomed) */}
+                {/* Reset zoom */}
                 {videoScale > 1 && (
                   <button onClick={e => { e.stopPropagation(); setVideoScale(1); reveal(); }}
-                    className="px-2 h-9 rounded-xl bg-violet-600/50 border border-violet-500/40 flex items-center justify-center active:scale-90">
-                    <span className="text-white/80 text-[10px] font-bold font-mono">1×</span>
+                    className="px-2.5 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                    style={{ background: "rgba(249,115,22,0.2)", border: "1px solid rgba(249,115,22,0.35)" }}>
+                    <span className="text-orange-300 text-[10px] font-bold font-mono">1×</span>
                   </button>
                 )}
 
                 {/* Lock */}
                 <button onClick={e => { e.stopPropagation(); setLocked(true); }}
-                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
-                  <Unlock className="w-4 h-4 text-white/60" />
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  <Unlock className="w-4 h-4 text-white/65" />
                 </button>
 
                 {/* Fullscreen */}
                 <button onClick={e => { e.stopPropagation(); toggleFs(); reveal(); }}
-                  className="w-9 h-9 rounded-xl bg-black/30 border border-white/8 flex items-center justify-center active:scale-90">
-                  {fs ? <Minimize2 className="w-4 h-4 text-white/60" /> : <Maximize2 className="w-4 h-4 text-white/60" />}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  {fs ? <Minimize2 className="w-4 h-4 text-white/65" /> : <Maximize2 className="w-4 h-4 text-white/65" />}
                 </button>
               </div>
             </div>
@@ -905,10 +913,14 @@ export default function WatchPage() {
     });
   }
   function dedupSources(srcs: Source[]): Source[] {
-    const seen = new Map<string,number>();
+    // Max 3 per site (directUrls always kept; embeds limited)
+    const siteCounts = new Map<string,number>();
     return srcs.filter(s => {
-      let host = ""; try { host = new URL(s.url).hostname.replace(/^(www\.|vid\.|player\.)/,""); } catch {}
-      const n = seen.get(host) || 0; if (n >= 2) return false; seen.set(host, n+1); return true;
+      const site = s.site || "unknown";
+      const n = siteCounts.get(site) || 0;
+      if (n >= 3) return false;
+      siteCounts.set(site, n + 1);
+      return true;
     });
   }
 
@@ -982,14 +994,7 @@ export default function WatchPage() {
     if (streamDone && phase === "loading") setPhase("servers");
   }, [streamDone]);
 
-  /* ── Auto-play first directUrl source when stream finishes ── */
-  useEffect(() => {
-    if (!streamDone || phase !== "servers" || autoPlayedRef.current) return;
-    const best = sourcesRef.current.find(s => s.directUrl && (statuses[s.url] || "idle") !== "dead");
-    if (!best) return;
-    autoPlayedRef.current = true;
-    setTimeout(() => playSource(best), 400); // small delay so server list is visible first
-  }, [streamDone, phase]);
+  /* ── No auto-play — user must tap Play manually ── */
 
   /* ── Auto-probe directUrl sources in background ── */
   useEffect(() => {
@@ -1090,7 +1095,10 @@ export default function WatchPage() {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title })}`);
   }
 
-  function handleBack() { window.history.back(); }
+  function handleBack() {
+    if (window.history.length > 2) window.history.back();
+    else navigate("/");
+  }
   function handleRefresh() { localStorage.removeItem(`srccache:${animeId}-${ep}`); window.location.reload(); }
 
   /* ════════ RENDER ════════════════════════════════════════════ */
