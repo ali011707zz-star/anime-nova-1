@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft } from "lucide-react";
+import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const GENRES_AR: { ar: string; en: string; color: string; img: string }[] = [
@@ -89,6 +89,7 @@ export default function Home() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hero, setHero]           = useState<any>(null);
   const [heroIdx, setHeroIdx]     = useState(0);
+  const [heroDir, setHeroDir]     = useState(1);
   const [selectedGenre, setSelectedGenre] = useState("");
   const touchStartX = useRef<number>(0);
   const heroList = popular.filter(a => a.bannerImage).slice(0, 8);
@@ -125,12 +126,13 @@ export default function Home() {
     const heroes = popular.filter(a => a.bannerImage);
     if (heroes.length <= 1) return;
     const t = setInterval(() => {
+      setHeroDir(1);
       setHeroIdx(i => {
         const next = (i + 1) % heroes.length;
         setHero(heroes[next]);
         return next;
       });
-    }, 6000);
+    }, 7000);
     return () => clearInterval(t);
   }, [popular, selectedGenre]);
 
@@ -177,7 +179,7 @@ export default function Home() {
       {hero && !selectedGenre && (
         <div
           className="relative w-full overflow-hidden select-none"
-          style={{ height: 390 }}
+          style={{ height: 420 }}
           onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
           onTouchEnd={e => {
             const dx = e.changedTouches[0].clientX - touchStartX.current;
@@ -186,71 +188,146 @@ export default function Home() {
             if (heroes.length <= 1) return;
             const dir = dx < 0 ? 1 : -1;
             const next = (heroIdx + dir + heroes.length) % heroes.length;
+            setHeroDir(dir);
             setHeroIdx(next);
             setHero(heroes[next]);
           }}
         >
-          <AnimatePresence mode="wait">
-            <motion.img
-              key={hero.id}
-              initial={{ opacity: 0, scale: 1.04 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.7 }}
-              src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
-              alt=""
-              className="w-full h-full object-cover"
-              draggable={false}
-            />
+          {/* Background image — cross-fade + subtle pan */}
+          <AnimatePresence mode="sync" custom={heroDir}>
+            <motion.div
+              key={hero.id + "-bg"}
+              className="absolute inset-0"
+              custom={heroDir}
+              variants={{
+                enter: (d: number) => ({ opacity: 0, x: d * 40, scale: 1.06 }),
+                center: { opacity: 1, x: 0, scale: 1 },
+                exit: (d: number) => ({ opacity: 0, x: d * -30, scale: 0.98 }),
+              }}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.75, ease: [0.32, 0.72, 0, 1] }}
+            >
+              <img
+                src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
+                alt=""
+                className="w-full h-full object-cover"
+                draggable={false}
+              />
+            </motion.div>
           </AnimatePresence>
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #09090B 0%, #09090B 8%, rgba(9,9,11,0.7) 45%, rgba(9,9,11,0.1) 100%)" }} />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/50 to-transparent" />
 
-          <div className="absolute bottom-0 right-0 left-0 p-5 pb-6">
-            <div className="flex items-center gap-1.5 mb-2.5 flex-wrap">
-              {hero.genres?.slice(0, 3).map((g: string) => (
-                <span key={g} className="text-[8px] font-black bg-white/12 backdrop-blur-md text-white/80 px-2.5 py-0.5 rounded-full border border-white/12">{GENRES_AR.find(x => x.en === g)?.ar || g}</span>
-              ))}
-              {hero.averageScore && (
-                <span className="text-[8px] font-black bg-yellow-500/20 border border-yellow-500/25 text-yellow-400 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                  <Star className="w-2 h-2 fill-current" /> {(hero.averageScore / 10).toFixed(1)}
-                </span>
-              )}
-            </div>
-            <h1 className="text-[28px] font-black text-white line-clamp-1 mb-1.5 drop-shadow-lg tracking-tight">{hero.title?.romaji}</h1>
-            <p className="text-white/45 text-[11px] font-bold mb-4 font-['Cairo']">
-              {hero.episodes ? `${hero.episodes} حلقة · ` : ""}
-              {hero.status === "RELEASING" ? "يُبث حالياً 🔴" : "مكتمل"}
-            </p>
-            <div className="flex gap-2.5">
-              <Link href={`/episodes/${hero.id}`}>
-                <motion.button
-                  whileTap={{ scale: 0.94 }}
-                  className="relative overflow-hidden bg-primary text-white text-xs font-black px-6 py-3 rounded-2xl flex items-center gap-2 shadow-xl shadow-primary/40 active:scale-95"
-                  style={{ background: "linear-gradient(135deg, #8B5CF6, #7C3AED)" }}
-                >
-                  <Play className="w-3.5 h-3.5 fill-current" /> مشاهدة الآن
-                </motion.button>
-              </Link>
-              <Link href={`/anime/${hero.id}`}>
-                <motion.button
-                  whileTap={{ scale: 0.94 }}
-                  className="bg-white/10 backdrop-blur-xl text-white text-xs font-black px-5 py-3 rounded-2xl border border-white/15 active:scale-95 font-['Cairo']"
-                >
-                  التفاصيل
-                </motion.button>
-              </Link>
-            </div>
-          </div>
+          {/* Gradients */}
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #09090B 0%, #09090B 6%, rgba(9,9,11,0.75) 40%, rgba(9,9,11,0.05) 100%)" }} />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/60 via-transparent to-transparent" />
 
-          {/* Hero dots */}
+          {/* Text content — slides in with stagger */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={hero.id + "-text"}
+              className="absolute bottom-0 right-0 left-0 p-5 pb-7"
+              initial={{ opacity: 0, y: 22 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
+            >
+              {/* Genre + score badges */}
+              <motion.div
+                className="flex items-center gap-1.5 mb-2.5 flex-wrap"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, delay: 0.18 }}
+              >
+                {hero.genres?.slice(0, 3).map((g: string) => (
+                  <span key={g} className="text-[8px] font-black bg-white/12 backdrop-blur-md text-white/80 px-2.5 py-0.5 rounded-full border border-white/12">{GENRES_AR.find(x => x.en === g)?.ar || g}</span>
+                ))}
+                {hero.averageScore && (
+                  <span className="text-[8px] font-black bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                    <Star className="w-2 h-2 fill-current" /> {(hero.averageScore / 10).toFixed(1)}
+                  </span>
+                )}
+                {hero.status === "RELEASING" && (
+                  <span className="text-[8px] font-black bg-red-500/20 border border-red-500/30 text-red-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse inline-block" /> يُبث الآن
+                  </span>
+                )}
+              </motion.div>
+
+              {/* Title */}
+              <motion.h1
+                className="text-[26px] font-black text-white line-clamp-1 mb-1 drop-shadow-lg tracking-tight leading-tight"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.22 }}
+              >
+                {hero.title?.romaji}
+              </motion.h1>
+
+              {/* Subtitle */}
+              <motion.p
+                className="text-white/40 text-[11px] font-bold mb-4 font-['Cairo']"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, delay: 0.28 }}
+              >
+                {hero.episodes ? `${hero.episodes} حلقة` : ""}
+                {hero.episodes && hero.format ? " · " : ""}
+                {hero.format === "MOVIE" ? "فيلم" : hero.format === "ONA" ? "أونا" : hero.format === "OVA" ? "أوفا" : ""}
+              </motion.p>
+
+              {/* CTA buttons */}
+              <motion.div
+                className="flex gap-2.5"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, delay: 0.33 }}
+              >
+                <Link href={`/episodes/${hero.id}`}>
+                  <motion.button
+                    whileTap={{ scale: 0.93 }}
+                    className="relative overflow-hidden text-white text-xs font-black px-6 py-3 rounded-2xl flex items-center gap-2 shadow-xl active:scale-95"
+                    style={{ background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)", boxShadow: "0 8px 24px rgba(109,40,217,0.5)" }}
+                  >
+                    {/* shimmer */}
+                    <motion.span
+                      className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12"
+                      initial={{ x: "-100%" }}
+                      animate={{ x: "200%" }}
+                      transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 3, ease: "easeInOut" }}
+                    />
+                    <Play className="w-3.5 h-3.5 fill-current relative z-10" />
+                    <span className="relative z-10">مشاهدة الآن</span>
+                  </motion.button>
+                </Link>
+                <Link href={`/anime/${hero.id}`}>
+                  <motion.button
+                    whileTap={{ scale: 0.93 }}
+                    className="bg-white/10 backdrop-blur-xl text-white text-xs font-black px-4 py-3 rounded-2xl border border-white/15 active:scale-95 font-['Cairo'] flex items-center gap-1.5"
+                  >
+                    <Info className="w-3.5 h-3.5" /> التفاصيل
+                  </motion.button>
+                </Link>
+              </motion.div>
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Hero indicator dots + progress */}
           {heroList.length > 1 && (
-            <div className="absolute bottom-5 left-5 flex gap-1.5 items-center">
+            <div className="absolute bottom-7 left-5 flex gap-1.5 items-center">
               {heroList.map((_, i) => (
-                <button
+                <motion.button
                   key={i}
-                  onClick={() => { setHeroIdx(i); setHero(heroList[i]); }}
-                  className={`rounded-full transition-all duration-300 ${i === heroIdx ? "w-6 h-1.5 bg-primary shadow-lg shadow-primary/50" : "w-1.5 h-1.5 bg-white/25"}`}
+                  onClick={() => {
+                    const d = i > heroIdx ? 1 : -1;
+                    setHeroDir(d);
+                    setHeroIdx(i);
+                    setHero(heroList[i]);
+                  }}
+                  animate={{ width: i === heroIdx ? 20 : 5, opacity: i === heroIdx ? 1 : 0.35 }}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                  className={`h-1.5 rounded-full ${i === heroIdx ? "bg-primary shadow-md shadow-primary/60" : "bg-white"}`}
+                  style={{ width: 5 }}
                 />
               ))}
             </div>

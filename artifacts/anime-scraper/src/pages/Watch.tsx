@@ -1081,7 +1081,8 @@ export default function WatchPage() {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title })}`);
   }
   function handleBack() {
-    if (window.history.length > 2) window.history.back();
+    if (animeId) navigate(`/anime/${animeId}`);
+    else if (window.history.length > 1) window.history.back();
     else navigate("/");
   }
   function handleRefresh() { localStorage.removeItem(`srccache:${animeId}-${ep}`); window.location.reload(); }
