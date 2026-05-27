@@ -2630,33 +2630,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
     await Promise.allSettled([
-      // ── VidNest / AnimePahe  (PRIMARY — anilistId-based, instant) ──
-      (async () => {
-        try {
-          const srcs = getVidNestSources(anilistId, ep);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── AnimePahe.ru  (direct scrape → kwik.si m3u8 extraction) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimepaheSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── Shahiid-anime.net  (Arabic dubbed + subbed — longer timeout for multi-hop) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getShahiidSources(title, english, ep), 30000, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── AnimeGG  (English subbed / dubbed — fallback) ──
+      // ── AnimeGG  (MP4 مباشر — مترجم + مدبلج إنجليزي) ──
       (async () => {
         try {
           if (!title) return;
@@ -2665,7 +2639,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         } catch {}
       })(),
 
-      // ── AnimeLek.top  (Arabic subbed) ──
+      // ── AnimeLek.top  (عربي — streamwish/filemoon → m3u8 مباشر) ──
       (async () => {
         try {
           if (!title) return;
@@ -2674,43 +2648,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         } catch {}
       })(),
 
-      // ── AnimeDar.net  (Arabic — animestream theme) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimadarSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── WitAnime.cyou  (Arabic — browser scrape, CF-protected) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getWitAnimeSources(title, english, ep), 35000, []);
-          for (const s of srcs) { if (!closed) sendSrc(s); }
-        } catch {}
-      })(),
-
-      // ── Animerco.org  (Arabic — browser scrape, CF-protected) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimercoSources(title, english, ep), 35000, []);
-          for (const s of srcs) { if (!closed) sendSrc(s); }
-        } catch {}
-      })(),
-
-      // ── Anime4up.info  (Arabic — major dubbed/subbed site) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnime4upSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
-        } catch {}
-      })(),
-
-      // ── AnimeBlkom.net  (Arabic dubbed) ──
+      // ── AnimeBlkom.net  (عربي مدبلج — streamwish/filemoon → m3u8 مباشر) ──
       (async () => {
         try {
           if (!title) return;
@@ -2719,7 +2657,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         } catch {}
       })(),
 
-      // ── Generic animestream sites (animeiat.net · anime3rb.com · goldenanimaniac.com) ──
+      // ── مواقع أنميستريم العربية (anime3rb · animeiat · goldenanimaniac) ──
       ...ASTREAM_SITES.map(cfg => (async () => {
         try {
           if (!title) return;
