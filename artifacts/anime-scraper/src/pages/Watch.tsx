@@ -76,16 +76,30 @@ function getServerShortName(src: Source): string {
 }
 
 /* ══════════════════════════════════ CACHE ════════════════════ */
+const CACHE_VER = "v3";
 function getSrcCache(key: string): Source[] | null {
   try {
-    const r = localStorage.getItem(`srccache:${key}`); if (!r) return null;
+    const r = localStorage.getItem(`srccache:${CACHE_VER}:${key}`); if (!r) return null;
     const { ts, sources } = JSON.parse(r);
-    if (Date.now() - ts > 3_600_000) return null;
-    return sources;
+    if (Date.now() - ts > 1_800_000) return null; // 30 min expiry
+    // Filter out stale shahiid / dead-host sources from old cache
+    const cleaned = (sources as Source[]).filter(s =>
+      s.site !== "shahiid" &&
+      !["dood.to","dood.la","doodstream","dood.watch"].some(h => s.url?.includes(h))
+    );
+    return cleaned.length > 0 ? cleaned : null;
   } catch { return null; }
 }
 function setSrcCache(k: string, s: Source[]) {
-  try { localStorage.setItem(`srccache:${k}`, JSON.stringify({ ts: Date.now(), sources: s })); } catch {}
+  try { localStorage.setItem(`srccache:${CACHE_VER}:${k}`, JSON.stringify({ ts: Date.now(), sources: s })); } catch {}
+  // Clean up old cache keys
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("srccache:") && !key.startsWith(`srccache:${CACHE_VER}:`)) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {}
 }
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
   try {
@@ -127,6 +141,31 @@ function ServerListPage({
 
   async function handlePlay(src: Source) {
     if (probing === src.url) return;
+    // AnimeGG: re-extract fresh URL (for= token tied to CDN, need fresh each play)
+    if (src.site === "animegg") {
+      setProbing(src.url);
+      onSetStatus(src.url, "testing");
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const r = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(src.url)}`, { signal: ctrl.signal });
+        clearTimeout(t);
+        if (r.ok) {
+          const d = await r.json();
+          if (d.videoUrl) {
+            const freshSrc: Source = { ...src, directUrl: d.videoUrl, directType: "mp4" };
+            onSetStatus(src.url, "ok");
+            onPlay(freshSrc);
+            return;
+          }
+        }
+      } catch {}
+      finally { setProbing(null); }
+      // fallback to cached directUrl if re-extract failed
+      if (src.directUrl) { onSetStatus(src.url, "ok"); onPlay(src); }
+      else { onSetStatus(src.url, "dead"); }
+      return;
+    }
     if (!src.directUrl) { onPlay(src); return; }
     const st = statuses[src.url];
     if (st === "ok") { onPlay(src); return; }
@@ -289,10 +328,14 @@ function VideoPlayer({
   const cover = anime?.coverImage?.large || coverProp || "";
 
   const isHls = src.directType === "hls";
+  // AnimeGG CDN uses non-standard ports (8161, etc.) blocked by Replit proxy → play direct in browser
+  const isDirectPlay = src.site === "animegg" && src.directType === "mp4";
   const playUrl = src.directUrl
     ? isHls
       ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`
-      : `/api/anime/video-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`
+      : isDirectPlay
+        ? src.directUrl
+        : `/api/anime/video-proxy?url=${encodeURIComponent(src.directUrl)}&ref=${encodeURIComponent(src.url)}`
     : "";
 
   const subType  = getSubType(src);

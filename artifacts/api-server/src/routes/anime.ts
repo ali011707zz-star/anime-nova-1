@@ -32,7 +32,8 @@ const adarSrcCache   = new Map<string, { sources: UnifiedSource[]; ts: number }>
 const DEAD_FILE_HOSTS = [
   "4shared.com","solidfiles.com","d000d.com",
   "vadbam.net","vadbam.com","okfiles.com","gofile.io","uploadfiles.io","hexupload.net",
-  "filerio.in","doodstream.com","dood.watch","megaup.net","1fichier.com",
+  "filerio.in","doodstream.com","dood.watch","dood.to","dood.la","dood.ws","dood.pm",
+  "dooood.com","doodrive.com","megaup.net","1fichier.com",
   "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co","workupload.com",
   "hexload.com","mp4upload.com","uqload.net","uqload.com","file-up.org",
   "mega.nz","mega.co.nz","mediafire.com",
@@ -355,6 +356,10 @@ async function extractVideoDeep(
       if (!r.ok) break;
       const html = await r.text();
       if (isCloudflareBlock(html)) break;
+      // AnimeGG embed page — parse videoSources JS array
+      if (url.includes("animegg.org/embed/")) {
+        const v = parseAnimeGGEmbed(html); if (v) return v;
+      }
       if (url.includes("streamtape.com") || url.includes("streamtape.net")) {
         const v = parseStreamtape(html); if (v) return v;
       }
