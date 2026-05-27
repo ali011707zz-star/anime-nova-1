@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, Play, Pause, Loader2,
+  ChevronRight, ChevronLeft, Play, Pause, Loader2,
   AlertTriangle, RefreshCw, Volume2, VolumeX,
   Maximize2, Minimize2, RotateCcw, RotateCw,
-  Lock, Unlock, Zap, Camera,
-  Settings, X, Wifi, WifiOff,
+  Lock, Unlock, Zap, Camera, Globe,
+  Settings, X, Wifi, WifiOff, List,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
@@ -76,15 +76,14 @@ function getServerShortName(src: Source): string {
 }
 
 /* ══════════════════════════════════ CACHE ════════════════════ */
-const CACHE_VER = "v3";
+const CACHE_VER = "v4";
 function getSrcCache(key: string): Source[] | null {
   try {
     const r = localStorage.getItem(`srccache:${CACHE_VER}:${key}`); if (!r) return null;
     const { ts, sources } = JSON.parse(r);
     if (Date.now() - ts > 1_800_000) return null; // 30 min expiry
-    // Filter out stale shahiid / dead-host sources from old cache
+    // Filter out expired/dead hosts only
     const cleaned = (sources as Source[]).filter(s =>
-      s.site !== "shahiid" &&
       !["dood.to","dood.la","doodstream","dood.watch"].some(h => s.url?.includes(h))
     );
     return cleaned.length > 0 ? cleaned : null;
@@ -253,7 +252,9 @@ function ServerListPage({
                           ${getSubType(src) === "مدبلج" ? "bg-orange-500/20 text-orange-300 border border-orange-500/25" : "bg-violet-500/20 text-violet-300 border border-violet-500/25"}`}>
                           {getSubType(src)}
                         </span>
-                        {src.directUrl && <Zap className="w-3 h-3 text-emerald-400 shrink-0" />}
+                        {src.directUrl
+                          ? <Zap className="w-3 h-3 text-emerald-400 shrink-0" />
+                          : <Globe className="w-3 h-3 text-sky-400/70 shrink-0" />}
                       </div>
                       <p className="text-white/30 text-[10px] font-['Cairo'] mt-0.5">{SITE_LABEL[src.site] || src.site}</p>
                     </div>
@@ -898,6 +899,119 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
   );
 }
 
+/* ══════════════════════════════════ IFRAME PLAYER ══════════ */
+function IframePlayer({
+  src, ep, totalEps, title: titleProp, cover: coverProp, anime,
+  onBack, onOpenList, onNextEp, onPrevEp,
+}: {
+  src: Source; ep: number; totalEps: number; title: string; cover: string; anime: any;
+  onBack: () => void; onOpenList: () => void;
+  onNextEp: () => void; onPrevEp: () => void;
+}) {
+  const [cfBlock,  setCfBlock]  = useState(false);
+  const [iframeOk, setIframeOk] = useState(false);
+  const title  = anime?.title?.romaji || anime?.title?.english || titleProp;
+  const proxyUrl = `/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`;
+
+  useEffect(() => {
+    const handler = (e: PopStateEvent) => { e.preventDefault(); onBack(); };
+    window.addEventListener("popstate", handler);
+    window.history.pushState({ nova: true }, "");
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === "nova-cf-block") setCfBlock(true);
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 bg-black flex flex-col"
+      initial={{ opacity: 0, y: 24 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 24 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      dir="rtl"
+    >
+      {/* Top bar */}
+      <div className="flex items-center gap-3 px-4 bg-[#0a0a12] border-b border-white/5 shrink-0"
+        style={{ paddingTop: "max(14px, env(safe-area-inset-top))", paddingBottom: 10 }}>
+        <button onClick={onBack}
+          className="w-9 h-9 rounded-xl bg-white/6 border border-white/8 flex items-center justify-center active:scale-90 transition-transform shrink-0">
+          <ChevronRight className="w-5 h-5 text-white/70" />
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-white text-[13px] font-black font-['Cairo'] truncate">{title}</p>
+          <p className="text-white/35 text-[11px] font-['Cairo']">
+            {SITE_LABEL[src.site] || src.site} · الحلقة {ep}
+          </p>
+        </div>
+        <button onClick={onOpenList}
+          className="flex items-center gap-1.5 text-[11px] font-bold text-white/50 border border-white/10 rounded-xl px-3 py-2 font-['Cairo'] active:scale-90 transition-transform shrink-0">
+          <List className="w-3.5 h-3.5" /> السيرفرات
+        </button>
+      </div>
+
+      {/* iframe area */}
+      <div className="relative flex-1 bg-black overflow-hidden">
+        {!iframeOk && !cfBlock && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black">
+            <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
+            <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
+          </div>
+        )}
+        {cfBlock ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-[#0a0a12]">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+              <Globe className="w-7 h-7 text-amber-400/70" />
+            </div>
+            <div className="text-center px-8">
+              <p className="text-white/60 text-[14px] font-black font-['Cairo']">محتوى محمي</p>
+              <p className="text-white/25 text-[11px] mt-1 font-['Cairo']">لا يمكن تحميل هذا السيرفر</p>
+            </div>
+            <button onClick={onOpenList}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
+              <List className="w-4 h-4" /> جرب سيرفراً آخر
+            </button>
+          </div>
+        ) : (
+          <iframe
+            key={src.url}
+            src={proxyUrl}
+            className="absolute inset-0 w-full h-full border-0"
+            onLoad={() => setIframeOk(true)}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+            allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+            allowFullScreen
+            referrerPolicy="no-referrer"
+          />
+        )}
+      </div>
+
+      {/* Episode nav */}
+      <div className="flex items-center justify-between px-6 bg-[#0a0a12] border-t border-white/5 shrink-0"
+        style={{ paddingTop: 10, paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}>
+        <button onClick={onPrevEp} disabled={ep <= 1}
+          className="flex items-center gap-1.5 text-[12px] font-bold text-white/45 disabled:opacity-20 font-['Cairo'] active:scale-95 transition-transform">
+          <ChevronRight className="w-4 h-4" /> السابقة
+        </button>
+        <div className="flex items-center gap-1.5">
+          <Globe className="w-3 h-3 text-violet-400/60" />
+          <span className="text-white/20 text-[10px] font-['Cairo']">iframe</span>
+        </div>
+        <button onClick={onNextEp} disabled={ep >= totalEps}
+          className="flex items-center gap-1.5 text-[12px] font-bold text-white/45 disabled:opacity-20 font-['Cairo'] active:scale-95 transition-transform flex-row-reverse">
+          <ChevronLeft className="w-4 h-4" /> التالية
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 /* ══════════════════════════════════ WATCH PAGE ══════════════ */
 export default function WatchPage() {
   const [, navigate] = useLocation();
@@ -1010,6 +1124,14 @@ export default function WatchPage() {
   useEffect(() => { if (sources.length > 0 && phase === "loading") setPhase("servers"); }, [sources.length]);
   useEffect(() => { if (streamDone && phase === "loading") setPhase("servers"); }, [streamDone]);
 
+  /* ── Auto-play best directUrl source when stream completes ── */
+  useEffect(() => {
+    if (!streamDone || autoPlayedRef.current || phase !== "servers") return;
+    const best = sources.find(s => s.directUrl && (statuses[s.url] !== "dead"));
+    if (best) { autoPlayedRef.current = true; playSource(best); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamDone, sources.length, phase]);
+
   /* ── Auto-probe directUrl sources ── */
   useEffect(() => {
     if (phase !== "servers") return;
@@ -1028,7 +1150,8 @@ export default function WatchPage() {
   async function triggerExtract(src: Source) {
     if (src.directUrl || extractingRef.current) return;
     triedRef.current.add(src.url);
-    if (EMBED_ONLY_FE.some(h => src.url.includes(h))) { setTimeout(() => goNextSrc(), 0); return; }
+    // Embed-only sites → don't extract, let IframePlayer handle it
+    if (EMBED_ONLY_FE.some(h => src.url.includes(h))) { return; }
     extractingRef.current = true; setExtracting(true);
 
     const applyExtracted = (raw: string, ref: string) => {
@@ -1087,6 +1210,8 @@ export default function WatchPage() {
   }
   function handleRefresh() { localStorage.removeItem(`srccache:${animeId}-${ep}`); window.location.reload(); }
 
+  const isIframeMode = phase === "player" && !!active && !active.directUrl && !extracting;
+
   /* ════ RENDER ════ */
   if (pageLoad || (phase === "loading" && sources.length === 0 && !streamDone)) {
     return <LoadingScreen cover={cover} title={title} ep={ep} streamDone={streamDone} sourcesCount={sources.length} />;
@@ -1094,6 +1219,21 @@ export default function WatchPage() {
   if (streamDone && sources.length === 0) {
     return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
   }
+
+  /* ── Iframe mode: no directUrl and extraction finished/skipped ── */
+  if (isIframeMode) {
+    return (
+      <IframePlayer
+        src={active!} ep={ep} totalEps={totalEps} title={title} cover={cover} anime={anime}
+        onBack={() => { setPhase("servers"); setActive(null); }}
+        onOpenList={() => { setPhase("servers"); setActive(null); }}
+        onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
+        onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
+      />
+    );
+  }
+
+  /* ── Native player: has directUrl ── */
   if (phase === "player" && active) {
     return (
       <VideoPlayer
@@ -1110,13 +1250,24 @@ export default function WatchPage() {
       />
     );
   }
+
   return (
-    <ServerListPage
-      anime={anime} ep={ep} title={title} cover={cover}
-      sources={sources} statuses={statuses} streamDone={streamDone}
-      onPlay={playSource}
-      onBack={handleBack}
-      onSetStatus={(url, status) => setStatuses(prev => ({ ...prev, [url]: status }))}
-    />
+    <AnimatePresence mode="wait">
+      <motion.div key="servers"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -12 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        className="fixed inset-0"
+      >
+        <ServerListPage
+          anime={anime} ep={ep} title={title} cover={cover}
+          sources={sources} statuses={statuses} streamDone={streamDone}
+          onPlay={playSource}
+          onBack={handleBack}
+          onSetStatus={(url, status) => setStatuses(prev => ({ ...prev, [url]: status }))}
+        />
+      </motion.div>
+    </AnimatePresence>
   );
 }
