@@ -72,11 +72,12 @@
 5. **Server AJAX**: POST `action=codecanal_ajax_request` → iframe HTML → extract src
 6. **Extract video**: `extractVideoDeep(iframeUrl)` → direct HLS/MP4 URL
 
-## Shahiid URL structure
+## Shahiid URL structure (updated — all paths now have extra 's')
 
-- Series: `https://shahiid-anime.net/series/{slug}/`
-- Seasons: `https://shahiid-anime.net/seasons/{slug}/`
-- Episodes: `https://shahiid-anime.net/episodes/{series}-الحلقة-{NN}-{suffix}/`
+- Series: `https://shahiid-anime.net/serieses/{slug}/`
+- Seasons: `https://shahiid-anime.net/seasonses/{slug}/` or `seasonses/?serie=ID`
+- Episodes: `https://shahiid-anime.net/episodeses/{series}-الحلقة-{NN}-{seasonN}/`
+- Old paths (`/series/`, `/seasons/`, `/episodes/`) — may still exist but new content uses the `*eses` form
 - Movies/OVAs: `https://shahiid-anime.net/anime/{slug}/` (video directly on page)
 - Episodes per initial page: ~20 (site uses misha_loadmore AJAX, `posts_per_page: 54`)
 

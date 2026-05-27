@@ -4,3 +4,4 @@
 - [iframe allow-popups](iframe-sandbox.md) — removing allow-popups from sandbox stops iframe from opening external tabs ("exits app")
 - [AnimePahe HLS proxy chain](animapahe-hls-chain.md) — don't unwrap animanga.fun proxy URLs; pass full URL to hls-proxy; use inner URL as base for segment resolution
 - [IP-tied MP4 proxy](ip-tied-mp4.md) — shahiid directUrls (sendvid/streamtape) contain ip=35.234.223.23; always use video-proxy, never direct; add HEAD handling to video-proxy
+- [Shahiid URL scheme change](shahiid-url-scheme.md) — shahiid changed /episodes/ → /episodeses/ (and /seasons/ → /seasonses/, /series/ → /serieses/) — extractEpLinks must match episodeses?

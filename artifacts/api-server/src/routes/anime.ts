@@ -54,6 +54,13 @@ const EMBED_ONLY_HOSTS = [
   "vidnest.fun",
   "anime7u.com",
   "dsvplay.com",
+  // dead / unextractable platforms
+  "uqload.is","uqload.co","uqload.com",
+  "dailymotion.com",
+  "videa.hu",
+  "vkvideo.ru","vk.com",
+  "ok.ru","odnoklassniki.ru",
+  "yourupload.com",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -630,7 +637,8 @@ function epNumInSlug(link: string, epNum: number): boolean {
 function extractEpLinks(html: string): string[] {
   const seen = new Set<string>();
   const links: string[] = [];
-  for (const m of html.matchAll(/href="(https?:\/\/shahiid-anime\.net\/episodes\/[^"]+)"/gi)) {
+  // Match both /episodes/ (old URL scheme) and /episodeses/ (new URL scheme)
+  for (const m of html.matchAll(/href="(https?:\/\/shahiid-anime\.net\/episodeses?\/[^"]+)"/gi)) {
     if (!seen.has(m[1])) { seen.add(m[1]); links.push(m[1]); }
   }
   return links;
@@ -684,6 +692,24 @@ async function findShahiidEpisodeUrl(seasonsUrl: string, epNum: number): Promise
 
     let links = extractEpLinks(html);
 
+    // ── Special case: seasonses/?serie=ID page lists sub-season pages, not episodes ──
+    // Fetch all sub-season pages in parallel and merge their episode links
+    if (!links.length && seasonsUrl.includes("seasonses") && seasonsUrl.includes("serie=")) {
+      const subUrls = [...html.matchAll(/href="(https?:\/\/shahiid-anime\.net\/seasonses\/[^?#"][^"]+\/?)"/gi)]
+        .map(m => m[1]).filter((u, i, a) => a.indexOf(u) === i).slice(0, 10);
+      if (subUrls.length) {
+        const subResults = await Promise.allSettled(subUrls.map(async (subUrl) => {
+          const r2 = await fetch(subUrl, { headers: SHAHIID_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" });
+          if (!r2.ok) return [] as string[];
+          const h2 = await r2.text();
+          return isCloudflareBlock(h2) ? [] as string[] : extractEpLinks(h2);
+        }));
+        for (const res of subResults) {
+          if (res.status === "fulfilled" && res.value.length) links = [...links, ...res.value];
+        }
+      }
+    }
+
     // If episode not found in initial load AND we might need more pages, try loadmore
     const needsMore = !links.some(l => epNumInSlug(l, epNum));
     if (needsMore && links.length > 0) {
@@ -709,18 +735,20 @@ async function findShahiidEpisodeUrl(seasonsUrl: string, epNum: number): Promise
     // Try to construct URL from template using first episode as reference
     for (const sample of links.slice(0, 3)) {
       const firstDecoded = decodeURIComponent(sample);
-      const tmpl = firstDecoded.match(/\/episodes\/(.+?)-(?:الحلقة|%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9)-(\d+)(?:-(.+))?\//i);
+      // Match both /episodes/ (old) and /episodeses/ (new URL scheme)
+      const tmpl = firstDecoded.match(/\/episodeses?\/(.+?)-(?:الحلقة|%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9)-(\d+)(?:-(.+))?\//i);
       if (!tmpl) continue;
       const [, seriesBase, , suffix] = tmpl;
+      // Detect which scheme the sample uses and replicate it
+      const epScheme = firstDecoded.includes("/episodeses/") ? "episodeses" : "episodes";
       const epFormatted = epNum < 10 ? padded2 : String(epNum);
-      // Build candidate URL keeping same encoding as original
       const epEncoded = encodeURIComponent("الحلقة");
       const candidates: string[] = [];
       if (suffix) {
-        candidates.push(`${SHAHIID_BASE}/episodes/${encodeURIComponent(seriesBase)}-${epEncoded}-${epFormatted}-${encodeURIComponent(suffix)}/`);
-        candidates.push(`${SHAHIID_BASE}/episodes/${seriesBase}-${epEncoded}-${epFormatted}-${suffix}/`);
+        candidates.push(`${SHAHIID_BASE}/${epScheme}/${encodeURIComponent(seriesBase)}-${epEncoded}-${epFormatted}-${encodeURIComponent(suffix)}/`);
+        candidates.push(`${SHAHIID_BASE}/${epScheme}/${seriesBase}-${epEncoded}-${epFormatted}-${suffix}/`);
       }
-      candidates.push(`${SHAHIID_BASE}/episodes/${encodeURIComponent(seriesBase)}-${epEncoded}-${epFormatted}/`);
+      candidates.push(`${SHAHIID_BASE}/${epScheme}/${encodeURIComponent(seriesBase)}-${epEncoded}-${epFormatted}/`);
       for (const candidateUrl of candidates) {
         const status = await safeHead(candidateUrl, SHAHIID_HDRS);
         if (status === 200 || status === 301 || status === 302) {
@@ -2584,7 +2612,7 @@ router.get("/anime/sources-stream", async (req, res) => {
 
   try {
     const SCRAPER_MS = 18000;
-    const EXTRACT_MS = 12000;
+    const EXTRACT_MS = 6000;
 
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
@@ -2607,11 +2635,11 @@ router.get("/anime/sources-stream", async (req, res) => {
         } catch {}
       })(),
 
-      // ── Shahiid-anime.net  (Arabic dubbed + subbed) ──
+      // ── Shahiid-anime.net  (Arabic dubbed + subbed — longer timeout for multi-hop) ──
       (async () => {
         try {
           if (!title) return;
-          const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []);
+          const srcs = await race(getShahiidSources(title, english, ep), 30000, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })(),
