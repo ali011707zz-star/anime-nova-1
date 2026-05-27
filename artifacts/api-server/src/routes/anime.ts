@@ -2618,9 +2618,6 @@ router.get("/anime/sources-stream", async (req, res) => {
     if (!s.url || seenUrls.has(key)) return;
     if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
     if (s.directUrl && DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
-    // Filter embed-only sources that can never be played natively (no iframe allowed)
-    if (!s.directUrl && EMBED_ONLY_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
-    if (!s.directUrl && (s.url.includes("share4max.com") || s.url.includes("megamax.me"))) return;
     // Per-site cap: max 3 embed-only per site (directUrls always pass through)
     if (!s.directUrl) {
       const site = s.site || "unknown";
