@@ -2855,86 +2855,152 @@ router.get("/anime/sources-stream", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
-//  Stream endpoint  GET /api/anime/stream/:id
-//  Returns { servers: { "1080p FHD": [...], "720p HD": [...], "360p SD": [...] } }
-//  Built from the same scrapers as sources-stream, aggregated synchronously.
+//  AniPub scraper helpers
 // ════════════════════════════════════════════════════════════════════
-router.get("/anime/stream/:id", async (req, res) => {
-  const animeId = req.params.id;
-  const title   = ((req.query.title   as string) || "").trim();
-  const english = ((req.query.english as string) || "").trim() || null;
-  const ep      = parseInt((req.query.ep      as string) || "1");
-  const quality = ((req.query.q       as string) || "").trim(); // optional filter
+const anipubIdCache = new Map<string, { id: number; ts: number }>();
+const ANIPUB_ID_TTL = 24 * 3_600_000; // 24h
 
-  if (!title) { res.status(400).json({ error: "title required" }); return; }
+function titleToSlug(t: string): string {
+  return t.toLowerCase().trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
 
-  // 300ms rate-limit buffer
-  await new Promise(r => setTimeout(r, 300));
+async function getAniPubId(titles: string[]): Promise<number | null> {
+  const cacheKey = titles.join("|").toLowerCase();
+  const hit = anipubIdCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < ANIPUB_ID_TTL) return hit.id;
 
-  const SCRAPER_MS = 18000;
-  const EXTRACT_MS = 6000;
-  const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
-    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
+  const slugs = [...new Set(titles.map(titleToSlug).filter(Boolean))];
 
-  const collected: UnifiedSource[] = [];
-  const seenUrls = new Set<string>();
-  const siteEmbedCounts = new Map<string, number>();
-
-  function collect(s: UnifiedSource) {
-    const key = s.directUrl || s.url;
-    if (!s.url || seenUrls.has(key)) return;
-    if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
-    if (s.directUrl && DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
-    if (!s.directUrl) {
-      const site = s.site || "unknown";
-      const n = siteEmbedCounts.get(site) || 0;
-      if (n >= 5) return;
-      siteEmbedCounts.set(site, n + 1);
-    }
-    seenUrls.add(key);
-    collected.push(s);
+  for (const slug of slugs) {
+    try {
+      const r = await fetch(`https://anipub.xyz/api/info/${encodeURIComponent(slug)}`, {
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (r.ok) {
+        const d = await r.json() as any;
+        if (d._id) {
+          anipubIdCache.set(cacheKey, { id: d._id, ts: Date.now() });
+          return d._id;
+        }
+      }
+    } catch {}
   }
+
+  // Try searchall with first title
+  for (const t of titles) {
+    try {
+      const r = await fetch(`https://anipub.xyz/api/searchall/${encodeURIComponent(t)}`, {
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (r.ok) {
+        const d = await r.json() as any;
+        const items: any[] = d.results || d.data || (Array.isArray(d) ? d : []);
+        if (items.length > 0 && items[0]._id) {
+          anipubIdCache.set(cacheKey, { id: items[0]._id, ts: Date.now() });
+          return items[0]._id;
+        }
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+const anipubEpCache = new Map<string, { servers: string[]; ts: number }>();
+const ANIPUB_EP_TTL = 6 * 3_600_000; // 6h
+
+async function getAniPubEpisodeServers(animeId: number, ep: number): Promise<string[]> {
+  const cacheKey = `${animeId}:${ep}`;
+  const hit = anipubEpCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < ANIPUB_EP_TTL) return hit.servers;
 
   try {
-    await Promise.allSettled([
-      (async () => { try { const srcs = await race(getAnimeGGSources(title, english, ep), SCRAPER_MS, []); await extractAndSend(srcs, collect, EXTRACT_MS); } catch {} })(),
-      (async () => { try { const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []); await extractAndSend(srcs, collect, EXTRACT_MS); } catch {} })(),
-      (async () => { try { const srcs = await race(getAnimeLekSources(title, english, ep), SCRAPER_MS, []); await extractAndSend(srcs, collect, EXTRACT_MS); } catch {} })(),
-    ]);
-  } catch {}
+    const r = await fetch(`https://anipub.xyz/v1/api/details/${animeId}`, {
+      headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) return [];
+    const d = await r.json() as any;
+    const episodes: Array<{ link?: string; _id?: string; name?: string }> = d?.local?.ep || [];
+    if (!episodes.length || ep < 1 || ep > episodes.length) return [];
 
-  // Quality ranking helper
-  function getQualityBucket(src: UnifiedSource): string {
-    const q = (src.quality || "").toLowerCase();
-    const r = src.qualityRank || 0;
-    if (q.includes("1080") || r >= 5) return "1080p FHD";
-    if (q.includes("720") || q === "hd" || r >= 3) return "720p HD";
-    return "360p SD";
-  }
+    const epData = episodes[ep - 1];
+    if (!epData?.link) return [];
 
-  // Build buckets — directUrl sources first, max 5 per bucket
-  const sorted = [...collected].sort((a, b) => {
-    if ((b.directUrl ? 1 : 0) !== (a.directUrl ? 1 : 0)) return (b.directUrl ? 1 : 0) - (a.directUrl ? 1 : 0);
-    return (b.qualityRank || 0) - (a.qualityRank || 0);
-  });
+    // Strip "src=" prefix that AniPub stores
+    const rawLink = epData.link.replace(/^src=/, "").trim();
+    if (!rawLink) return [];
 
-  const buckets: Record<string, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
-  for (const src of sorted) {
-    const bucket = getQualityBucket(src);
-    if (buckets[bucket].length < 5) {
-      buckets[bucket].push(src.directUrl || src.url);
+    const servers: string[] = [rawLink];
+
+    // For gogoanime with hd-1 → generate hd-2, hd-3 fallbacks
+    if (rawLink.includes("gogoanime") && rawLink.includes("server=hd-1")) {
+      servers.push(rawLink.replace("server=hd-1", "server=hd-2"));
+      servers.push(rawLink.replace("server=hd-1", "server=hd-3"));
+      servers.push(rawLink.replace("server=hd-1", "server=hd-4"));
     }
-  }
 
-  // Fill empty buckets by promoting/demoting
-  const all = sorted.map(s => s.directUrl || s.url).filter(Boolean);
-  for (const key of Object.keys(buckets)) {
-    if (buckets[key].length === 0 && all.length > 0) {
-      buckets[key] = all.slice(0, Math.min(5, all.length));
+    // For anipub.xyz/video/ — check if there's a sub variant
+    if (rawLink.includes("anipub.xyz/video/") && rawLink.endsWith("/dub")) {
+      servers.push(rawLink.replace("/dub", "/sub"));
     }
+
+    const result = servers.slice(0, 5);
+    anipubEpCache.set(cacheKey, { servers: result, ts: Date.now() });
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  GET /api/anime/anipub-stream
+//  Returns { servers: { "1080p FHD": [...], "720p HD": [...], "360p SD": [...] } }
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/anipub-stream", async (req, res) => {
+  const title   = ((req.query.title   as string) || "").trim();
+  const english = ((req.query.english as string) || "").trim();
+  const ep      = parseInt((req.query.ep as string) || "1");
+
+  if (!title && !english) {
+    res.status(400).json({ error: "title required" });
+    return;
   }
 
-  res.json({ servers: buckets, total: collected.length });
+  // 300ms rate-limit buffer as requested
+  await new Promise(r => setTimeout(r, 300));
+
+  try {
+    const titles = [english, title].filter(Boolean) as string[];
+    const animeId = await getAniPubId(titles);
+
+    if (!animeId) {
+      res.json({ servers: { "1080p FHD": [], "720p HD": [], "360p SD": [] }, total: 0 });
+      return;
+    }
+
+    const servers = await getAniPubEpisodeServers(animeId, ep);
+
+    // All quality tiers share the same servers (AniPub doesn't differentiate quality)
+    res.json({
+      servers: {
+        "1080p FHD": servers,
+        "720p HD":   servers,
+        "360p SD":   servers,
+      },
+      total: servers.length,
+      animeId,
+    });
+  } catch (e: any) {
+    console.error("anipub-stream error:", e?.message ?? e);
+    res.status(500).json({ error: "Failed to fetch servers" });
+  }
 });
 
 
