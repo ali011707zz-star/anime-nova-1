@@ -76,7 +76,7 @@ function getServerShortName(src: Source): string {
 }
 
 /* ══════════════════════════════════ CACHE ════════════════════ */
-const CACHE_VER = "v4";
+const CACHE_VER = "v5";
 function getSrcCache(key: string): Source[] | null {
   try {
     const r = localStorage.getItem(`srccache:${CACHE_VER}:${key}`); if (!r) return null;
@@ -908,24 +908,21 @@ function IframePlayer({
   onBack: () => void; onOpenList: () => void;
   onNextEp: () => void; onPrevEp: () => void;
 }) {
-  const [cfBlock,  setCfBlock]  = useState(false);
   const [iframeOk, setIframeOk] = useState(false);
-  const title  = anime?.title?.romaji || anime?.title?.english || titleProp;
-  const proxyUrl = `/api/anime/proxy-embed?url=${encodeURIComponent(src.url)}`;
+  const [iframeErr, setIframeErr] = useState(false);
+  const title = anime?.title?.romaji || anime?.title?.english || titleProp;
+  // Use the embed URL directly — sandbox blocks navigation/popups, video player scripts load correctly
+  const embedUrl = src.url;
+
+  useEffect(() => {
+    setIframeOk(false); setIframeErr(false);
+  }, [src.url]);
 
   useEffect(() => {
     const handler = (e: PopStateEvent) => { e.preventDefault(); onBack(); };
     window.addEventListener("popstate", handler);
     window.history.pushState({ nova: true }, "");
     return () => window.removeEventListener("popstate", handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (e.data?.type === "nova-cf-block") setCfBlock(true);
-    };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
   }, []);
 
   return (
@@ -958,33 +955,34 @@ function IframePlayer({
 
       {/* iframe area */}
       <div className="relative flex-1 bg-black overflow-hidden">
-        {!iframeOk && !cfBlock && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black">
+        {!iframeOk && !iframeErr && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black pointer-events-none">
             <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
             <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
           </div>
         )}
-        {cfBlock ? (
+        {iframeErr ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-[#0a0a12]">
             <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
               <Globe className="w-7 h-7 text-amber-400/70" />
             </div>
             <div className="text-center px-8">
-              <p className="text-white/60 text-[14px] font-black font-['Cairo']">محتوى محمي</p>
-              <p className="text-white/25 text-[11px] mt-1 font-['Cairo']">لا يمكن تحميل هذا السيرفر</p>
+              <p className="text-white/60 text-[14px] font-black font-['Cairo']">تعذّر تحميل السيرفر</p>
+              <p className="text-white/25 text-[11px] mt-1 font-['Cairo']">جرّب سيرفراً آخر من القائمة</p>
             </div>
             <button onClick={onOpenList}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
-              <List className="w-4 h-4" /> جرب سيرفراً آخر
+              <List className="w-4 h-4" /> السيرفرات
             </button>
           </div>
         ) : (
           <iframe
-            key={src.url}
-            src={proxyUrl}
+            key={embedUrl}
+            src={embedUrl}
             className="absolute inset-0 w-full h-full border-0"
             onLoad={() => setIframeOk(true)}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+            onError={() => setIframeErr(true)}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"
             allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
             allowFullScreen
             referrerPolicy="no-referrer"

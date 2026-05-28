@@ -45,7 +45,7 @@ const DEAD_FILE_HOSTS = [
   "favicon","robots.txt","sitemap",
   // dead video hosts seen in AnimeLek / AnimeBlkom results
   "larhu.net","larhu.website","larhu.tv","larhu.me","larhu.io","larhu.org","larhu.co",
-  "file-upload.org","file-upload.net","fileupload.pw","fileupload.net",
+  "file-upload.com","file-upload.org","file-upload.net","fileupload.pw","fileupload.net",
   "uptobox.com","uptobox.fr","upstream.to",
   "flashx.tv","gostream.site","embedrise.com",
 ];
@@ -561,8 +561,8 @@ async function getShahiidSeasonsUrl(seriesUrl: string): Promise<string> {
       const hrefSeasonses = html.match(/href="(https?:\/\/shahiid-anime\.net\/seasonses\/[^"]+)"/i);
       if (hrefSeasonses) return hrefSeasonses[1];
 
-      // Legacy /seasons/ slug href
-      const seasonsHref = html.match(/href="(https?:\/\/shahiid-anime\.net\/seasons\/[^"]+)"/i);
+      // Legacy /seasons/ slug href — skip generic nav links (page/, feed/, tag/, etc.)
+      const seasonsHref = html.match(/href="(https?:\/\/shahiid-anime\.net\/seasons\/(?!(?:page|feed|tag|category|author)\/)[^"]+)"/i);
       if (seasonsHref) return seasonsHref[1].replace(/\/?$/, "/");
     }
   } catch {}
@@ -651,8 +651,8 @@ function epNumInSlug(link: string, epNum: number): boolean {
 function extractEpLinks(html: string): string[] {
   const seen = new Set<string>();
   const links: string[] = [];
-  // Match both /episodes/ (old URL scheme) and /episodeses/ (new URL scheme)
-  for (const m of html.matchAll(/href="(https?:\/\/shahiid-anime\.net\/episodeses?\/[^"]+)"/gi)) {
+  // Match both /episodes/ and /episodeses/ URL schemes
+  for (const m of html.matchAll(/href="(https?:\/\/shahiid-anime\.net\/episodes(?:es)?\/[^"]+)"/gi)) {
     if (!seen.has(m[1])) { seen.add(m[1]); links.push(m[1]); }
   }
   return links;
@@ -864,6 +864,159 @@ async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
     });
     return r.ok || r.status === 206 || r.status === 302 || r.status === 301;
   } catch { return true; }
+}
+
+// ── Playwright / Browser-based page loader & video interceptor ───────────
+const CHROMIUM_EXEC: string = (() => {
+  try {
+    const p = execSync(
+      "which chromium-browser 2>/dev/null || which chromium 2>/dev/null",
+      { timeout: 3000 },
+    ).toString().trim().split("\n")[0];
+    return p || "";
+  } catch { return ""; }
+})();
+
+const BROWSER_LAUNCH_ARGS = [
+  "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+  "--disable-gpu", "--disable-blink-features=AutomationControlled", "--headless=new",
+];
+
+interface BrowserFetchResult { html: string; videoUrl?: string; videoType?: "hls" | "mp4"; }
+
+async function browserFetch(
+  pageUrl: string,
+  opts: { interceptVideo?: boolean; waitMs?: number; waitUntil?: "load" | "domcontentloaded" | "networkidle" } = {},
+): Promise<BrowserFetchResult> {
+  if (!CHROMIUM_EXEC) return { html: "" };
+  const { interceptVideo = false, waitMs = 0, waitUntil = "networkidle" } = opts;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let browser: any = null;
+  try {
+    // playwright-core is externalized in esbuild — loaded from node_modules at runtime
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pw: any = await import("playwright-core");
+    browser = await pw.chromium.launch({ executablePath: CHROMIUM_EXEC, args: BROWSER_LAUNCH_ARGS, headless: true });
+    const ctx = await browser.newContext({
+      userAgent: BROWSER_UA,
+      viewport: { width: 1280, height: 720 },
+      locale: "ar-SA",
+    });
+    const page = await ctx.newPage();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+
+    let videoUrl: string | undefined;
+    let videoType: "hls" | "mp4" = "hls";
+    if (interceptVideo) {
+      page.on("request", (req: any) => {
+        if (videoUrl) return;
+        const u: string = req.url();
+        if (u.includes(".m3u8") && !u.includes("thumb") && !u.includes("segment")) {
+          videoUrl = u; videoType = "hls";
+        } else if (u.match(/\.mp4(\?|$)/i) && u.length < 500 && !u.includes("thumb")) {
+          videoUrl = u; videoType = "mp4";
+        }
+      });
+    }
+
+    await page.goto(pageUrl, { waitUntil, timeout: 25000 }).catch(() => {});
+    if (waitMs > 0) await page.waitForTimeout(waitMs).catch(() => {});
+    if (interceptVideo && !videoUrl) await page.waitForTimeout(4000).catch(() => {});
+
+    const html = await page.content().catch(() => "");
+    return { html, videoUrl, videoType };
+  } catch { return { html: "" }; }
+  finally { try { await browser?.close(); } catch {} }
+}
+
+// ── witanime.cyou — Arabic anime scraper (Playwright) ────────────────────
+const WITA_BASE = "https://witanime.cyou";
+const witaSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const witaSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getWitanimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  if (!CHROMIUM_EXEC) return [];
+  const ck = `wita:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = witaSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    // Step 1: search page (browser to bypass Cloudflare JS challenge)
+    const searchQ = encodeURIComponent(english || title);
+    const slugCk = (title + "|" + (english || "")).toLowerCase();
+    const slugHit = witaSlugCache.get(slugCk);
+    let slug: string | null = slugHit && Date.now() - slugHit.ts < SRC_TTL ? slugHit.slug : undefined as unknown as string | null;
+
+    if (slug === undefined) {
+      const { html: searchHtml } = await browserFetch(`${WITA_BASE}/?s=${searchQ}`, { waitUntil: "networkidle", waitMs: 3000 });
+      if (!searchHtml || isCloudflareBlock(searchHtml)) {
+        witaSlugCache.set(slugCk, { slug: null, ts: Date.now() });
+        return [];
+      }
+      let bestSlug: string | null = null, bestScore = 0;
+      const re = /href="https?:\/\/witanime\.(?:cyou|live|pw|vip|site)\/anime\/([^/"?]+)\/?"/gi;
+      for (const m of searchHtml.matchAll(re)) {
+        const s = m[1];
+        const label = s.replace(/-/g, " ");
+        const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+        if (score > bestScore) { bestScore = score; bestSlug = s; }
+      }
+      slug = bestSlug && bestScore > 0.3 ? bestSlug : null;
+      witaSlugCache.set(slugCk, { slug, ts: Date.now() });
+    }
+    if (!slug) return [];
+
+    // Step 2: episode page
+    const epPad = String(ep).padStart(2, "0");
+    const epUrls = [
+      `${WITA_BASE}/episode/${slug}-episode-${ep}/`,
+      `${WITA_BASE}/episode/${slug}-episode-${epPad}/`,
+      `${WITA_BASE}/${slug}-episode-${ep}/`,
+    ];
+
+    for (const epUrl of epUrls) {
+      const { html: epHtml, videoUrl, videoType } = await browserFetch(epUrl, { interceptVideo: true, waitUntil: "networkidle", waitMs: 2000 });
+      if (!epHtml) continue;
+
+      // If we intercepted a direct video URL, use it
+      if (videoUrl) {
+        const proxied = videoType === "hls"
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(epUrl)}`
+          : videoUrl;
+        const srcs: UnifiedSource[] = [{
+          name: "Witanime · مباشر",
+          url: videoUrl,
+          quality: "HD",
+          qualityRank: 3,
+          site: "witanime",
+          directUrl: proxied,
+          directType: videoType,
+        }];
+        witaSrcCache.set(ck, { sources: srcs, ts: Date.now() });
+        return srcs;
+      }
+
+      // Otherwise parse iframe embed URLs from the HTML
+      const sources: UnifiedSource[] = [];
+      const seen = new Set<string>();
+      for (const m of epHtml.matchAll(/<iframe[^>]+src=["']([^"']+)["'][^>]*/gi)) {
+        let u = m[1].trim();
+        if (u.startsWith("//")) u = "https:" + u;
+        if (!u.startsWith("http")) continue;
+        if (DEAD_FILE_HOSTS.some(h => u.includes(h))) continue;
+        if (seen.has(u)) continue; seen.add(u);
+        sources.push({ name: "Witanime · سيرفر", url: u, quality: "HD", qualityRank: 2, site: "witanime" });
+      }
+      if (sources.length) {
+        witaSrcCache.set(ck, { sources, ts: Date.now() });
+        return sources;
+      }
+    }
+
+    return [];
+  } catch { return []; }
 }
 
 async function extractAndSend(
@@ -2681,6 +2834,16 @@ router.get("/anime/sources-stream", async (req, res) => {
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })()),
+
+      // ── Witanime.cyou  (عربي — Playwright browser scraper) ──
+      (async () => {
+        try {
+          if (!title || !CHROMIUM_EXEC) return;
+          const WITA_MS = 55000; // browser scraper is slower
+          const srcs = await race(getWitanimeSources(title, english, ep), WITA_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
     ]);
 
   } catch (e: any) {
