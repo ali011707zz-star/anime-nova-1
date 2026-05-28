@@ -2855,6 +2855,90 @@ router.get("/anime/sources-stream", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  Stream endpoint  GET /api/anime/stream/:id
+//  Returns { servers: { "1080p FHD": [...], "720p HD": [...], "360p SD": [...] } }
+//  Built from the same scrapers as sources-stream, aggregated synchronously.
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/stream/:id", async (req, res) => {
+  const animeId = req.params.id;
+  const title   = ((req.query.title   as string) || "").trim();
+  const english = ((req.query.english as string) || "").trim() || null;
+  const ep      = parseInt((req.query.ep      as string) || "1");
+  const quality = ((req.query.q       as string) || "").trim(); // optional filter
+
+  if (!title) { res.status(400).json({ error: "title required" }); return; }
+
+  // 300ms rate-limit buffer
+  await new Promise(r => setTimeout(r, 300));
+
+  const SCRAPER_MS = 18000;
+  const EXTRACT_MS = 6000;
+  const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
+    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
+
+  const collected: UnifiedSource[] = [];
+  const seenUrls = new Set<string>();
+  const siteEmbedCounts = new Map<string, number>();
+
+  function collect(s: UnifiedSource) {
+    const key = s.directUrl || s.url;
+    if (!s.url || seenUrls.has(key)) return;
+    if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
+    if (s.directUrl && DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
+    if (!s.directUrl) {
+      const site = s.site || "unknown";
+      const n = siteEmbedCounts.get(site) || 0;
+      if (n >= 5) return;
+      siteEmbedCounts.set(site, n + 1);
+    }
+    seenUrls.add(key);
+    collected.push(s);
+  }
+
+  try {
+    await Promise.allSettled([
+      (async () => { try { const srcs = await race(getAnimeGGSources(title, english, ep), SCRAPER_MS, []); await extractAndSend(srcs, collect, EXTRACT_MS); } catch {} })(),
+      (async () => { try { const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []); await extractAndSend(srcs, collect, EXTRACT_MS); } catch {} })(),
+      (async () => { try { const srcs = await race(getAnimeLekSources(title, english, ep), SCRAPER_MS, []); await extractAndSend(srcs, collect, EXTRACT_MS); } catch {} })(),
+    ]);
+  } catch {}
+
+  // Quality ranking helper
+  function getQualityBucket(src: UnifiedSource): string {
+    const q = (src.quality || "").toLowerCase();
+    const r = src.qualityRank || 0;
+    if (q.includes("1080") || r >= 5) return "1080p FHD";
+    if (q.includes("720") || q === "hd" || r >= 3) return "720p HD";
+    return "360p SD";
+  }
+
+  // Build buckets — directUrl sources first, max 5 per bucket
+  const sorted = [...collected].sort((a, b) => {
+    if ((b.directUrl ? 1 : 0) !== (a.directUrl ? 1 : 0)) return (b.directUrl ? 1 : 0) - (a.directUrl ? 1 : 0);
+    return (b.qualityRank || 0) - (a.qualityRank || 0);
+  });
+
+  const buckets: Record<string, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
+  for (const src of sorted) {
+    const bucket = getQualityBucket(src);
+    if (buckets[bucket].length < 5) {
+      buckets[bucket].push(src.directUrl || src.url);
+    }
+  }
+
+  // Fill empty buckets by promoting/demoting
+  const all = sorted.map(s => s.directUrl || s.url).filter(Boolean);
+  for (const key of Object.keys(buckets)) {
+    if (buckets[key].length === 0 && all.length > 0) {
+      buckets[key] = all.slice(0, Math.min(5, all.length));
+    }
+  }
+
+  res.json({ servers: buckets, total: collected.length });
+});
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Translate  GET /api/anime/translate
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/translate", async (req, res) => {
