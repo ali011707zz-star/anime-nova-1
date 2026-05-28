@@ -5,3 +5,6 @@
 - [AnimePahe HLS proxy chain](animapahe-hls-chain.md) — don't unwrap animanga.fun proxy URLs; pass full URL to hls-proxy; use inner URL as base for segment resolution
 - [IP-tied MP4 proxy](ip-tied-mp4.md) — shahiid directUrls (sendvid/streamtape) contain ip=35.234.223.23; always use video-proxy, never direct; add HEAD handling to video-proxy
 - [Shahiid URL scheme change](shahiid-url-scheme.md) — shahiid changed /episodes/ → /episodeses/ (and /seasons/ → /seasonses/, /series/ → /serieses/) — extractEpLinks must match episodeses?
+- [AniPub titleSimilarity bug](anipub-similarity.md) — includes() shortcut returns same score for title+sequel; use length-ratio formula instead
+- [AniPub movie ep case](anipub-similarity.md) — when local.ep[] is empty, use local.link directly (movie has one link, not episode array)
+- [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
