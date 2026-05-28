@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, ChevronLeft, Play, Pause, Loader2,
+  ChevronRight, ChevronLeft, Play, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
-  Settings, List,
+  Settings, Subtitles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -24,6 +24,7 @@ interface StreamData {
   total: number;
   animeId?: number;
 }
+interface SubCue { start: number; end: number; text: string }
 
 /* ══════════════════════════════════ HELPERS ══════════════════ */
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
@@ -42,6 +43,26 @@ const QUALITY_SHORT: Record<Quality, string> = {
   "720p HD": "720",
   "360p SD": "360",
 };
+
+/* ══════════════════════════════════ SRT PARSER ══════════════ */
+function parseSrt(srt: string): SubCue[] {
+  const cues: SubCue[] = [];
+  const blocks = srt.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split(/\n{2,}/);
+  const toSec = (ts: string) => {
+    const m = ts.match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/);
+    if (!m) return 0;
+    return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 1000;
+  };
+  for (const block of blocks) {
+    const lines = block.trim().split("\n");
+    const timeLine = lines.find(l => l.includes("-->"));
+    if (!timeLine) continue;
+    const [startStr, endStr] = timeLine.split("-->").map(s => s.trim());
+    const textLines = lines.filter(l => l !== timeLine && !l.match(/^\d+$/)).join(" ").replace(/<[^>]+>/g, "").trim();
+    if (textLines) cues.push({ start: toSec(startStr), end: toSec(endStr), text: textLines });
+  }
+  return cues;
+}
 
 /* ══════════════════════════════════ LOADING SCREEN ══════════ */
 function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep: number }) {
@@ -106,7 +127,6 @@ function QualityPicker({
 }) {
   return (
     <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col" dir="rtl">
-      {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5"
         style={{ paddingTop: "max(14px, env(safe-area-inset-top))" }}>
         <button onClick={onBack}
@@ -120,7 +140,6 @@ function QualityPicker({
         {cover && <img src={cover} alt="" className="w-9 h-12 rounded-lg object-cover border border-white/10 shrink-0" />}
       </div>
 
-      {/* Content */}
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
         {cover && (
           <div className="relative">
@@ -129,11 +148,10 @@ function QualityPicker({
           </div>
         )}
         <div className="text-center">
-          <p className="text-white/55 text-[13px] font-['Cairo'] mb-1">اختر جودة التشغيل</p>
-          <p className="text-white/25 text-[11px] font-['Cairo']">يمكنك تغييرها لاحقاً أثناء المشاهدة</p>
+          <p className="text-white/55 text-[13px] font-['Cairo'] mb-1">اختر خادم التشغيل</p>
+          <p className="text-white/25 text-[11px] font-['Cairo']">يمكنك تغييره لاحقاً أثناء المشاهدة</p>
         </div>
 
-        {/* Quality buttons */}
         <div className="flex gap-3 justify-center">
           {QUALITY_LABELS.map(q => {
             const count = streamData.servers[q]?.length || 0;
@@ -154,14 +172,34 @@ function QualityPicker({
   );
 }
 
+/* ══════════════════════════════════ SUBTITLE OVERLAY ════════ */
+function SubtitleOverlay({
+  cues, running, elapsed,
+}: {
+  cues: SubCue[]; running: boolean; elapsed: number;
+}) {
+  const current = cues.find(c => elapsed >= c.start && elapsed <= c.end);
+  if (!current) return null;
+  return (
+    <div className="absolute bottom-16 left-0 right-0 flex justify-center px-4 z-20 pointer-events-none">
+      <div className="bg-black/80 backdrop-blur-sm rounded-xl px-4 py-2 max-w-[90%] text-center">
+        <p className="text-white font-['Cairo'] text-[14px] font-semibold leading-relaxed"
+          dir="rtl" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>
+          {current.text}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════ EPISODE PLAYER ═════════ */
 function EpisodePlayer({
   servers, quality, allServers,
-  title, cover, ep, totalEps,
+  title, cover, ep, totalEps, animeTitle,
   onBack, onNextEp, onPrevEp, onChangeQuality,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
-  title: string; cover: string; ep: number; totalEps: number;
+  title: string; cover: string; ep: number; totalEps: number; animeTitle: string;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
 }) {
@@ -174,9 +212,20 @@ function EpisodePlayer({
   const retryCount     = useRef(0);
   const retryTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Subtitle state ──
+  const [subState,    setSubState]    = useState<"idle"|"loading"|"ready"|"none">("idle");
+  const [subCues,     setSubCues]     = useState<SubCue[]>([]);
+  const [subLang,     setSubLang]     = useState<string | null>(null);
+  const [subRunning,  setSubRunning]  = useState(false);
+  const [subElapsed,  setSubElapsed]  = useState(0);
+  const [subOffset,   setSubOffset]   = useState(0);
+  const subStartedAt  = useRef<number | null>(null);
+  const subTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [showSubPanel, setShowSubPanel] = useState(false);
+
   const currentUrl = servers[currentServer] || "";
 
-  /* ── Reset on quality/server change ── */
+  /* ── Reset on server/quality change ── */
   useEffect(() => {
     setCurrentServer(0);
     setIframeLoaded(false);
@@ -186,7 +235,7 @@ function EpisodePlayer({
     if (retryTimer.current) clearTimeout(retryTimer.current);
   }, [quality, servers]);
 
-  /* ── Back button handler ── */
+  /* ── Back button ── */
   useEffect(() => {
     const handler = (e: PopStateEvent) => { e.preventDefault(); onBack(); };
     window.addEventListener("popstate", handler);
@@ -209,23 +258,68 @@ function EpisodePlayer({
       : document.exitFullscreen?.().catch(() => {});
   }
 
-  /* ── Fallback logic: wait 2s then try next server ── */
-  function handleIframeError() {
-    if (retryCount.current >= 3) {
-      setIframeErr(true); return;
+  /* ── Subtitle timer ── */
+  useEffect(() => {
+    if (subTimerRef.current) clearInterval(subTimerRef.current);
+    if (subRunning && subStartedAt.current !== null) {
+      subTimerRef.current = setInterval(() => {
+        const e = (Date.now() - subStartedAt.current!) / 1000 + subOffset;
+        setSubElapsed(e);
+      }, 200);
     }
+    return () => { if (subTimerRef.current) clearInterval(subTimerRef.current); };
+  }, [subRunning, subOffset]);
+
+  function startSubTimer() {
+    subStartedAt.current = Date.now() - subOffset * 1000;
+    setSubRunning(true);
+  }
+  function pauseSubTimer() { setSubRunning(false); }
+  function adjustOffset(delta: number) {
+    setSubOffset(o => {
+      const newOff = o + delta;
+      if (subStartedAt.current !== null) {
+        subStartedAt.current = Date.now() - newOff * 1000;
+      }
+      return newOff;
+    });
+  }
+
+  /* ── Fetch subtitles ── */
+  async function fetchSubtitles() {
+    if (subState === "loading" || subState === "ready") return;
+    setSubState("loading");
+    setShowSubPanel(true);
+    try {
+      const params = new URLSearchParams({ title: animeTitle, ep: String(ep) });
+      const r = await fetch(`/api/anime/subtitles?${params}`);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json() as { lang: string | null; content: string | null };
+      if (!d.content) { setSubState("none"); return; }
+      const cues = parseSrt(d.content);
+      if (!cues.length) { setSubState("none"); return; }
+      setSubCues(cues);
+      setSubLang(d.lang);
+      setSubState("ready");
+    } catch {
+      setSubState("none");
+    }
+  }
+
+  /* ── Iframe error handling ── */
+  function handleIframeError() {
+    if (retryCount.current >= 3) { setIframeErr(true); return; }
     retryCount.current++;
     setRetrying(true);
     retryTimer.current = setTimeout(() => {
       setRetrying(false);
       if (currentServer + 1 < servers.length) {
         setCurrentServer(s => s + 1);
-        setIframeLoaded(false);
-        setIframeErr(false);
+        setIframeLoaded(false); setIframeErr(false);
       } else {
         setIframeErr(true);
       }
-    }, 2000); // 2s delay before next server
+    }, 2000);
   }
 
   function tryNextServer() {
@@ -236,7 +330,6 @@ function EpisodePlayer({
       retryCount.current++;
     }
   }
-
   function tryPrevServer() {
     if (retryTimer.current) clearTimeout(retryTimer.current);
     if (currentServer > 0) {
@@ -272,12 +365,23 @@ function EpisodePlayer({
           </div>
         </div>
 
-        {/* Quality change button */}
+        {/* Subtitle button */}
+        <button onClick={fetchSubtitles}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[11px] font-bold font-['Cairo'] transition-all active:scale-90 shrink-0
+            ${subState === "ready" ? "bg-violet-600 border-violet-400 text-white" :
+              subState === "loading" ? "bg-white/8 border-white/12 text-violet-300 animate-pulse" :
+              subState === "none" ? "bg-white/5 border-white/8 text-white/25" :
+              "bg-white/8 border-white/12 text-white/60"}`}>
+          <Subtitles className="w-3.5 h-3.5" />
+          <span>ترجمة</span>
+        </button>
+
+        {/* Quality button */}
         <button onClick={() => setShowQuality(s => !s)}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[11px] font-bold font-mono transition-all active:scale-90 shrink-0
             ${showQuality ? "bg-violet-600 border-violet-400 text-white" : "bg-white/8 border-white/12 text-white/60"}`}>
           <Settings className="w-3.5 h-3.5" />
-          {QUALITY_SHORT[quality]}p
+          {QUALITY_SHORT[quality]}
         </button>
 
         <button onClick={toggleFs}
@@ -309,10 +413,95 @@ function EpisodePlayer({
         )}
       </AnimatePresence>
 
-      {/* ── iframe area ── */}
-      <div className="relative flex-1 bg-black overflow-hidden" onClick={() => setShowQuality(false)}>
+      {/* ── Subtitle control panel ── */}
+      <AnimatePresence>
+        {showSubPanel && subState !== "idle" && (
+          <motion.div key="subpanel"
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+            className="absolute top-[60px] left-0 right-0 z-30 flex justify-center px-4 pt-2">
+            <div className="bg-[#12121e] border border-white/12 rounded-2xl px-5 py-4 shadow-2xl w-full max-w-sm" dir="rtl">
 
-        {/* Loading spinner */}
+              {subState === "loading" && (
+                <div className="flex items-center gap-3 text-white/50">
+                  <Loader2 className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
+                  <p className="text-[12px] font-['Cairo']">جاري البحث عن ترجمة عربية…</p>
+                </div>
+              )}
+
+              {subState === "none" && (
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-4 h-4 text-white/20 shrink-0" />
+                  <p className="text-[12px] font-['Cairo'] text-white/35">لا توجد ترجمة متاحة لهذه الحلقة</p>
+                  <button onClick={() => setShowSubPanel(false)}
+                    className="mr-auto text-white/30 active:scale-90"><X className="w-4 h-4" /></button>
+                </div>
+              )}
+
+              {subState === "ready" && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-violet-500" />
+                      <p className="text-[12px] font-['Cairo'] text-white/70">
+                        {subLang === "ara" ? "ترجمة عربية" : "مترجمة تلقائياً"}
+                        <span className="text-white/30 mr-1">· {subCues.length} سطر</span>
+                      </p>
+                    </div>
+                    <button onClick={() => setShowSubPanel(false)}
+                      className="text-white/30 active:scale-90"><X className="w-4 h-4" /></button>
+                  </div>
+
+                  {/* Timer controls */}
+                  <div className="flex items-center gap-2 justify-center">
+                    <button onClick={() => adjustOffset(-2)}
+                      className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
+                      ‒2s
+                    </button>
+                    <button onClick={() => adjustOffset(-0.5)}
+                      className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
+                      ‒½s
+                    </button>
+
+                    {!subRunning ? (
+                      <button onClick={startSubTimer}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 border border-violet-500 text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform">
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                        ابدأ الآن
+                      </button>
+                    ) : (
+                      <button onClick={pauseSubTimer}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600/60 border border-violet-500/50 text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform">
+                        <span className="w-3.5 h-3.5 flex items-center justify-center gap-0.5">
+                          <span className="w-1 h-3 bg-white rounded-sm inline-block" />
+                          <span className="w-1 h-3 bg-white rounded-sm inline-block" />
+                        </span>
+                        إيقاف
+                      </button>
+                    )}
+
+                    <button onClick={() => adjustOffset(0.5)}
+                      className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
+                      +½s
+                    </button>
+                    <button onClick={() => adjustOffset(2)}
+                      className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
+                      +2s
+                    </button>
+                  </div>
+
+                  <p className="text-center text-white/25 text-[10px] font-['Cairo']">
+                    اضغط "ابدأ الآن" عند بداية تشغيل الفيديو للمزامنة
+                  </p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── iframe area ── */}
+      <div className="relative flex-1 bg-black overflow-hidden" onClick={() => { setShowQuality(false); setShowSubPanel(false); }}>
+
         {!iframeLoaded && !iframeErr && !retrying && currentUrl && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black pointer-events-none">
             <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
@@ -320,7 +509,6 @@ function EpisodePlayer({
           </div>
         )}
 
-        {/* Retrying overlay */}
         {retrying && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black">
             <motion.div className="w-16 h-16 rounded-full border-[3px] border-t-violet-500 border-violet-500/15"
@@ -333,7 +521,6 @@ function EpisodePlayer({
           </div>
         )}
 
-        {/* Error state */}
         {iframeErr && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-[#0a0a12] z-10">
             <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
@@ -371,8 +558,12 @@ function EpisodePlayer({
             sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"
             allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
             allowFullScreen
-            referrerPolicy="no-referrer"
           />
+        )}
+
+        {/* Subtitle overlay (on top of iframe) */}
+        {subState === "ready" && subRunning && (
+          <SubtitleOverlay cues={subCues} running={subRunning} elapsed={subElapsed} />
         )}
       </div>
 
@@ -384,7 +575,6 @@ function EpisodePlayer({
           <ChevronRight className="w-4 h-4" /> السابقة
         </button>
 
-        {/* Server switcher */}
         <div className="flex items-center gap-2">
           {servers.map((_, i) => (
             <button key={i} onClick={() => {
@@ -412,7 +602,6 @@ function EpisodePlayer({
 export default function WatchPage() {
   const [, navigate] = useLocation();
 
-  // Read URL params once (stable refs)
   const sp           = useRef(new URLSearchParams(window.location.search)).current;
   const animeId      = parseInt(sp.get("anime") || "0");
   const ep           = parseInt(sp.get("ep") || "1");
@@ -425,13 +614,13 @@ export default function WatchPage() {
   const [phase,       setPhase]      = useState<"loading" | "quality" | "player" | "nosrc">("loading");
   const [loadingDone, setLoadingDone] = useState(false);
   const [fetchDone,   setFetchDone]  = useState(false);
-  const fetchStarted = useRef(false); // guard: only one fetch per ep
+  const fetchStarted = useRef(false);
 
-  const title    = anime?.title?.romaji || anime?.title?.english || titleParam || "أنمي";
+  const title    = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
+  const animeTitle = title;
   const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
   const cover    = anime?.coverImage?.large || "";
 
-  /* ── Fetch AniPub servers — called once per (ep, title) ── */
   const doFetchServers = useCallback((t: string, e: string) => {
     if (fetchStarted.current) return;
     fetchStarted.current = true;
@@ -442,13 +631,11 @@ export default function WatchPage() {
       .catch(() => setFetchDone(true));
   }, [ep]);
 
-  /* ── 1.5s loading delay ── */
   useEffect(() => {
     const t = setTimeout(() => setLoadingDone(true), 1500);
     return () => clearTimeout(t);
   }, []);
 
-  /* ── Fetch AniList metadata ── */
   useEffect(() => {
     if (!animeId) return;
     fetch("https://graphql.anilist.co", {
@@ -462,8 +649,7 @@ export default function WatchPage() {
         const d = j.data?.Media;
         if (d) {
           setAnime(d);
-          saveHistory(animeId, d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0);
-          // If we haven't started fetching yet (no title in URL), use AniList title
+          saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0);
           if (!fetchStarted.current) {
             doFetchServers(d.title?.romaji || "", d.title?.english || "");
           }
@@ -472,14 +658,12 @@ export default function WatchPage() {
       .catch(() => {});
   }, [animeId]);
 
-  /* ── Start AniPub fetch immediately if we have URL title ── */
   useEffect(() => {
     if (titleParam || englishParam) {
       doFetchServers(titleParam, englishParam);
     }
-  }, []); // mount only
+  }, []);
 
-  /* ── Advance phase once both timers are done ── */
   useEffect(() => {
     if (!loadingDone || !fetchDone) return;
     if (!streamData) { setPhase("nosrc"); return; }
@@ -499,13 +683,9 @@ export default function WatchPage() {
 
   const servers = streamData?.servers[quality] || [];
 
-  /* ════ RENDER ════ */
-  if (phase === "loading") {
-    return <LoadingScreen cover={cover} title={title} ep={ep} />;
-  }
-  if (phase === "nosrc") {
-    return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
-  }
+  if (phase === "loading") return <LoadingScreen cover={cover} title={title} ep={ep} />;
+  if (phase === "nosrc")   return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
+
   if (phase === "quality") {
     return (
       <AnimatePresence mode="wait">
@@ -530,7 +710,9 @@ export default function WatchPage() {
           servers={servers}
           quality={quality}
           allServers={streamData!.servers}
-          title={title} cover={cover} ep={ep} totalEps={totalEps}
+          title={title}
+          animeTitle={animeTitle}
+          cover={cover} ep={ep} totalEps={totalEps}
           onBack={() => setPhase("quality")}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}

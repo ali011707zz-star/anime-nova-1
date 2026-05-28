@@ -2868,6 +2868,23 @@ function titleToSlug(t: string): string {
     .replace(/^-|-$/g, "");
 }
 
+function titleSimilarity(a: string, b: string): number {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const na = norm(a); const nb = norm(b);
+  if (na === nb) return 1;
+  // If one contains the other, score by length ratio (prefer tighter match)
+  if (na.includes(nb) || nb.includes(na)) {
+    const shorter = Math.min(na.length, nb.length);
+    const longer  = Math.max(na.length, nb.length);
+    return 0.5 + 0.5 * (shorter / longer);
+  }
+  const wa = new Set(na.split(" ").filter(w => w.length > 2));
+  const wb = new Set(nb.split(" ").filter(w => w.length > 2));
+  const common = [...wa].filter(w => wb.has(w)).length;
+  const union = new Set([...wa, ...wb]).size;
+  return union > 0 ? common / union : 0;
+}
+
 async function getAniPubId(titles: string[]): Promise<number | null> {
   const cacheKey = titles.join("|").toLowerCase();
   const hit = anipubIdCache.get(cacheKey);
@@ -2891,22 +2908,37 @@ async function getAniPubId(titles: string[]): Promise<number | null> {
     } catch {}
   }
 
-  // Try searchall with first title
-  for (const t of titles) {
-    try {
-      const r = await fetch(`https://anipub.xyz/api/searchall/${encodeURIComponent(t)}`, {
-        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (r.ok) {
+  // searchAll with each title + shortened variants
+  for (const t of titles.filter(Boolean)) {
+    const queries: string[] = [t];
+    const words = t.trim().split(/\s+/);
+    if (words.length > 2) queries.push(words.slice(0, 2).join(" "));
+    if (words.length > 1) queries.push(words[0]);
+
+    for (const q of queries) {
+      if (q.length < 3) continue;
+      try {
+        const r = await fetch(`https://anipub.xyz/api/searchAll/${encodeURIComponent(q)}`, {
+          headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) continue;
         const d = await r.json() as any;
-        const items: any[] = d.results || d.data || (Array.isArray(d) ? d : []);
-        if (items.length > 0 && items[0]._id) {
-          anipubIdCache.set(cacheKey, { id: items[0]._id, ts: Date.now() });
-          return items[0]._id;
+        const items: any[] = d.AniData || d.results || d.data || (Array.isArray(d) ? d : []);
+        if (!items.length) continue;
+
+        // Find best-matching result by name similarity
+        let best: any = null; let bestScore = 0;
+        for (const item of items) {
+          const score = Math.max(...titles.map(tt => titleSimilarity(tt, item.Name || "")));
+          if (score > bestScore) { bestScore = score; best = item; }
         }
-      }
-    } catch {}
+        if (best?._id && bestScore >= 0.25) {
+          anipubIdCache.set(cacheKey, { id: best._id, ts: Date.now() });
+          return best._id;
+        }
+      } catch {}
+    }
   }
 
   return null;
@@ -2928,7 +2960,23 @@ async function getAniPubEpisodeServers(animeId: number, ep: number): Promise<str
     if (!r.ok) return [];
     const d = await r.json() as any;
     const episodes: Array<{ link?: string; _id?: string; name?: string }> = d?.local?.ep || [];
-    if (!episodes.length || ep < 1 || ep > episodes.length) return [];
+
+    // Movie case: ep[] is empty but local.link has the direct video link
+    if (!episodes.length) {
+      const movieLink = d?.local?.link;
+      if (movieLink) {
+        const raw = String(movieLink).replace(/^src=/, "").trim();
+        if (raw) {
+          const result = [raw];
+          if (raw.includes("anipub.xyz/video/") && raw.endsWith("/sub")) result.push(raw.replace("/sub", "/dub"));
+          if (raw.includes("anipub.xyz/video/") && raw.endsWith("/dub")) result.push(raw.replace("/dub", "/sub"));
+          anipubEpCache.set(cacheKey, { servers: result, ts: Date.now() });
+          return result;
+        }
+      }
+      return [];
+    }
+    if (ep < 1 || ep > episodes.length) return [];
 
     const epData = episodes[ep - 1];
     if (!epData?.link) return [];
@@ -3003,6 +3051,122 @@ router.get("/anime/anipub-stream", async (req, res) => {
   }
 });
 
+
+// ════════════════════════════════════════════════════════════════════
+//  Subtitles  GET /api/anime/subtitles?title=&ep=&season=&malId=
+//  Returns Arabic SRT (from OpenSubtitles, or translated from English)
+// ════════════════════════════════════════════════════════════════════
+const subCache = new Map<string, { content: string; lang: string; ts: number }>();
+const SUB_TTL = 12 * 3_600_000;
+
+async function fetchSrt(link: string): Promise<string | null> {
+  try {
+    const r = await fetch(link, { signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    // OpenSubtitles returns gzip-compressed files
+    try {
+      const { gunzipSync } = await import("zlib");
+      return gunzipSync(buf).toString("utf8");
+    } catch {
+      return buf.toString("utf8");
+    }
+  } catch { return null; }
+}
+
+async function srtToArabic(srt: string): Promise<string> {
+  // Extract only dialog lines (non-empty, non-number, non-timing)
+  const lines = srt.split("\n");
+  const textIdx: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (l && !l.match(/^\d+$/) && !l.match(/\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->/)) {
+      textIdx.push(i);
+    }
+  }
+  // Translate in batches of 30 lines
+  const BATCH = 30;
+  for (let b = 0; b < textIdx.length; b += BATCH) {
+    const slice = textIdx.slice(b, b + BATCH);
+    const combined = slice.map(i => lines[i]).join("\n");
+    try {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q=${encodeURIComponent(combined)}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) continue;
+      const j = await r.json() as any[][];
+      const translated = (j[0] as any[][]).map((s: any[]) => s[0] as string).join("").split("\n");
+      slice.forEach((lineIdx, k) => {
+        if (translated[k] !== undefined) lines[lineIdx] = translated[k];
+      });
+    } catch {}
+    // Small delay between batches to avoid rate limit
+    if (b + BATCH < textIdx.length) await new Promise(r => setTimeout(r, 200));
+  }
+  return lines.join("\n");
+}
+
+router.get("/anime/subtitles", async (req, res) => {
+  const title  = ((req.query.title  as string) || "").trim();
+  const ep     = parseInt((req.query.ep as string) || "1");
+  const season = parseInt((req.query.season as string) || "1");
+  const malId  = ((req.query.malId as string) || "").trim();
+
+  if (!title && !malId) { res.status(400).json({ error: "title required" }); return; }
+
+  const cacheKey = `${title}:${ep}:${season}:${malId}`;
+  const hit = subCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < SUB_TTL) {
+    res.json({ lang: hit.lang, content: hit.content }); return;
+  }
+
+  const UA = "TemporaryUserAgent";
+
+  async function searchOsub(lang: string): Promise<string | null> {
+    try {
+      let url: string;
+      if (malId) {
+        url = `https://rest.opensubtitles.org/search/imdbid-${malId}/sublanguageid-${lang}/season-${season}/episode-${ep}`;
+      } else {
+        const q = encodeURIComponent(title.replace(/[^a-z0-9 ]/gi, " ").trim());
+        url = `https://rest.opensubtitles.org/search/query-${q}/sublanguageid-${lang}/season-${season}/episode-${ep}`;
+      }
+      const r = await fetch(url, { headers: { "X-User-Agent": UA }, signal: AbortSignal.timeout(10000) });
+      if (!r.ok) return null;
+      const subs = await r.json() as any[];
+      if (!subs?.length) return null;
+      // Prefer subs with good ratings
+      const sorted = subs.filter((s: any) => s.SubDownloadLink).sort((a: any, b: any) =>
+        (parseFloat(b.SubRating || "0") - parseFloat(a.SubRating || "0"))
+      );
+      for (const sub of sorted.slice(0, 3)) {
+        const srt = await fetchSrt(sub.SubDownloadLink);
+        if (srt && srt.length > 100) return srt;
+      }
+      return null;
+    } catch { return null; }
+  }
+
+  try {
+    // 1. Try Arabic subtitle directly
+    const araSrt = await searchOsub("ara");
+    if (araSrt) {
+      subCache.set(cacheKey, { content: araSrt, lang: "ara", ts: Date.now() });
+      res.json({ lang: "ara", content: araSrt }); return;
+    }
+
+    // 2. Try English → translate to Arabic
+    const engSrt = await searchOsub("eng");
+    if (engSrt) {
+      const translated = await srtToArabic(engSrt);
+      subCache.set(cacheKey, { content: translated, lang: "ara-tr", ts: Date.now() });
+      res.json({ lang: "ara-tr", content: translated }); return;
+    }
+
+    res.json({ lang: null, content: null });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? String(e) });
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════
 //  Translate  GET /api/anime/translate
