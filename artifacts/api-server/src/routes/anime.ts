@@ -3353,9 +3353,13 @@ router.get("/anime/anipub-stream", async (req, res) => {
     "360p SD":   [],
   };
 
+  const RACE_MS = 18000;
+  const race = <T>(p: Promise<T>, fallback: T) =>
+    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), RACE_MS))]);
+
   try {
-    // Run AniPub + AnimeX in parallel
-    const [anipubResult, animexSrcs] = await Promise.allSettled([
+    // Run all scrapers in parallel
+    const [anipubResult, animexSrcs, shahiidSrcs, animelekSrcs] = await Promise.allSettled([
       // ── AniPub (embed iframes) ──
       (async () => {
         if (!title && !english) return null;
@@ -3371,19 +3375,57 @@ router.get("/anime/anipub-stream", async (req, res) => {
         if (!anilistId || anilistId <= 0) return [];
         return getAnimexEpisodeSources(anilistId, ep);
       })(),
+
+      // ── Shahiid-anime.net (Arabic — embed iframes) ──
+      race(
+        (async () => {
+          if (!title) return [] as UnifiedSource[];
+          return getShahiidSources(title, english, ep);
+        })(),
+        [] as UnifiedSource[]
+      ),
+
+      // ── AnimeLek.top (Arabic — HLS direct when extractable) ──
+      race(
+        (async () => {
+          if (!title) return [] as UnifiedSource[];
+          return getAnimelekSources(title, english, ep);
+        })(),
+        [] as UnifiedSource[]
+      ),
     ]);
 
-    // Merge AniPub servers (embed URLs) — only into 720p HD tier since they have no real quality info
-    if (anipubResult.status === "fulfilled" && anipubResult.value?.servers?.length) {
-      const apServers = anipubResult.value.servers;
-      result["720p HD"].push(...apServers);
+    // Helper: convert UnifiedSource[] → URL strings (prefer directUrl over embed url)
+    function sourcesToUrls(srcs: UnifiedSource[]): string[] {
+      return srcs.map(s => s.directUrl || s.url).filter(Boolean) as string[];
     }
 
-    // Merge AnimeX via lazy-player URL (fetches fresh m3u8 at play time so token is always current)
+    // Merge AniPub servers (embed URLs) — only into 720p HD tier
+    if (anipubResult.status === "fulfilled" && anipubResult.value?.servers?.length) {
+      result["720p HD"].push(...anipubResult.value.servers);
+    }
+
+    // Merge AnimeX via lazy-player URL (fetches fresh m3u8 at play time)
     if (anilistId > 0 && animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value) && animexSrcs.value.length > 0) {
       for (const tier of ["1080p FHD", "720p HD", "360p SD"] as const) {
         const q = tier === "1080p FHD" ? "1080" : tier === "720p HD" ? "720" : "360";
         result[tier].unshift(`/api/anime/animex-player?anilistId=${anilistId}&ep=${ep}&quality=${q}`);
+      }
+    }
+
+    // Merge Shahiid Arabic sources → 720p HD tier
+    if (shahiidSrcs.status === "fulfilled" && shahiidSrcs.value.length > 0) {
+      const urls = sourcesToUrls(shahiidSrcs.value);
+      for (const url of urls) {
+        if (url && !result["720p HD"].includes(url)) result["720p HD"].push(url);
+      }
+    }
+
+    // Merge AnimeLek Arabic sources → 720p HD tier
+    if (animelekSrcs.status === "fulfilled" && animelekSrcs.value.length > 0) {
+      const urls = sourcesToUrls(animelekSrcs.value);
+      for (const url of urls) {
+        if (url && !result["720p HD"].includes(url)) result["720p HD"].push(url);
       }
     }
 

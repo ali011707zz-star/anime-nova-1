@@ -54,20 +54,36 @@ const QUALITY_AR: Record<Quality, string> = {
 /* ── Server source detection ── */
 interface ServerInfo { label: string; sublabel: string; isHls: boolean; }
 function getServerInfo(url: string, idx: number): ServerInfo {
+  // AnimexX — specific path must be first
   if (url.includes("animex-player") || url.includes("animex-source")) {
     return { label: "AnimeX", sublabel: "مترجم للعربية", isHls: true };
   }
-  if (url.includes("hls-player") || url.includes("hls-proxy")) {
-    return { label: "AnimeX", sublabel: "مترجم للعربية", isHls: true };
+  // AniPub — dub vs sub distinction
+  if (url.includes("anipub.xyz/video/")) {
+    if (url.endsWith("/dub")) return { label: "AniPub", sublabel: "مدبلج إنجليزي", isHls: false };
+    if (url.endsWith("/sub")) return { label: "AniPub", sublabel: "مترجم إنجليزي", isHls: false };
+    return { label: "AniPub", sublabel: "إنجليزي", isHls: false };
   }
   if (url.includes("anipub") || url.includes("gogoanime") || url.includes("gogocdn")) {
-    return { label: "AniPub", sublabel: "مترجم للعربية", isHls: false };
+    return { label: "AniPub", sublabel: "مترجم إنجليزي", isHls: false };
   }
-  if (url.includes("shahiid") || url.includes("share4max") || url.includes("vidbm")) {
+  // Shahiid Arabic sources (embed) — all known embed hosts from shahiid
+  if (url.includes("shahiid") || url.includes("share4max") || url.includes("vidbm")
+   || url.includes("uptostream") || url.includes("dood") || url.includes("voe.sx")
+   || url.includes("megamax.me") || url.includes("leech.megamax") || url.includes("videa.hu")
+   || url.includes("anime7u") || url.includes("vid4up")) {
     return { label: "شاهد أنمي", sublabel: "مترجم عربي", isHls: false };
   }
-  if (url.includes("animelek") || url.includes("streamwish") || url.includes("filemoon")) {
-    return { label: "أنمي ليك", sublabel: "مترجم عربي", isHls: false };
+  // AnimeLek / Streamwish / Filemoon / Wishfast — check BEFORE generic hls-proxy
+  if (url.includes("streamwish") || url.includes("filemoon") || url.includes("animelek")
+   || url.includes("wishfast") || url.includes("playerwish") || url.includes("asnwish")
+   || url.includes("vidmoly")) {
+    const isHlsUrl = url.includes(".m3u8") || url.includes("hls-proxy");
+    return { label: "أنمي ليك", sublabel: isHlsUrl ? "عربي · جودة عالية" : "مترجم عربي", isHls: isHlsUrl };
+  }
+  // Generic hls-proxy fallback
+  if (url.includes("hls-player") || url.includes("hls-proxy")) {
+    return { label: "مشغّل", sublabel: "بث مباشر", isHls: true };
   }
   return { label: `سيرفر ${idx + 1}`, sublabel: "مترجم عربي", isHls: false };
 }
