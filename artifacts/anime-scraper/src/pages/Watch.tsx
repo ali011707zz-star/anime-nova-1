@@ -410,9 +410,9 @@ function NativeHLSPlayer({
       return;
     }
 
-    /* animex-player → fetch animex-source to get fresh m3u8
-       Always add _t=timestamp to bust browser/server cache so the
-       CDN token in the returned m3u8 URL is never stale */
+    /* animex-player → fetch animex-source to get fresh m3u8 raw URL
+       CDN (uwucdn.top) has CORS:* and allows browser IPs freely — load directly
+       without server-side hls-proxy (which gets blocked by Cloudflare) */
     if (src.includes("/animex-player")) {
       try {
         const qs = src.includes("?") ? src.split("?")[1] : "";
@@ -429,13 +429,12 @@ function NativeHLSPlayer({
           setLoading(false);
           return;
         }
-        const data = await r.json() as { proxyUrl?: string; rawUrl?: string; quality?: string };
-        if (!data.proxyUrl) { setError("لا يوجد رابط HLS"); setLoading(false); return; }
-        m3u8Url = data.proxyUrl;
-        /* Report actual stream quality to parent */
+        const data = await r.json() as { rawUrl?: string; quality?: string };
+        if (!data.rawUrl) { setError("لا يوجد رابط HLS من AnimeX"); setLoading(false); return; }
+        m3u8Url = data.rawUrl;
         if (data.quality && onRealQuality) onRealQuality(data.quality);
       } catch (ex: any) {
-        setError("خطأ في الاتصال بخادم المصدر");
+        setError("خطأ في الاتصال بخادم AnimeX");
         setLoading(false);
         return;
       }
@@ -1244,7 +1243,7 @@ export default function WatchPage() {
   }, [ep, animeId]);
 
   useEffect(() => {
-    const t = setTimeout(() => setLoadingDone(true), 1500);
+    const t = setTimeout(() => setLoadingDone(true), 300);
     return () => clearTimeout(t);
   }, []);
 
