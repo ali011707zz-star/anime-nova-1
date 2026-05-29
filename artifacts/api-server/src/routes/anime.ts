@@ -48,9 +48,12 @@ const DEAD_FILE_HOSTS = [
   "file-upload.com","file-upload.org","file-upload.net","fileupload.pw","fileupload.net",
   "uptobox.com","uptobox.fr","upstream.to",
   "flashx.tv","gostream.site","embedrise.com",
+  // AniPub embeds redirect to megaplay.buzz → Cloudflare-protected
+  "megaplay.buzz",
 ];
 
 // ── Embed-only hosts (skip server-side extraction) ──
+// These are removed from the stream entirely — they can't play in the internal player
 const EMBED_ONLY_HOSTS = [
   "vidbm.com","vidbm.me","uptostream.com",
   "playerwish.com","wishfast.top",
@@ -67,6 +70,9 @@ const EMBED_ONLY_HOSTS = [
   "vkvideo.ru","vk.com",
   "ok.ru","odnoklassniki.ru",
   "yourupload.com",
+  // embed-only — blocks server extraction
+  "share4max.com","share4max.net",
+  "megamax.me","megamax.net",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -2852,8 +2858,11 @@ router.get("/anime/sources-stream", async (req, res) => {
     if (closed) return;
     const key = s.directUrl || s.url;
     if (!s.url || seenUrls.has(key)) return;
+    // Filter dead hosts
     if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
     if (s.directUrl && DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
+    // Filter embed-only hosts — they can't play in the internal player
+    if (EMBED_ONLY_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
     // Per-site cap: max 3 embed-only per site (directUrls always pass through)
     if (!s.directUrl) {
       const site = s.site || "unknown";
@@ -3209,8 +3218,8 @@ router.get("/anime/animex-player", async (req, res) => {
           return;
         }
         var data=await r.json();
-        var src=data.proxyUrl;
-        if(!src){showErr('لا يوجد رابط');return;}
+        var src=data.rawUrl;
+        if(!src){showErr('لا يوجد رابط HLS');return;}
 
         if(typeof Hls!=='undefined'&&Hls.isSupported()){
           hlsInstance=new Hls({enableWorker:false,lowLatencyMode:false,maxBufferLength:30});
@@ -3419,8 +3428,12 @@ router.get("/anime/anipub-stream", async (req, res) => {
     ]);
 
     // ── AniPub embed servers → 720p HD ──
+    // Filter out anipub.xyz/video embeds — they redirect to megaplay.buzz (Cloudflare-protected)
     if (anipubResult.status === "fulfilled" && anipubResult.value?.servers?.length) {
-      result["720p HD"].push(...anipubResult.value.servers);
+      const anipubServers = anipubResult.value.servers.filter(
+        (u: string) => !u.includes("anipub.xyz/video") && !u.includes("megaplay.buzz")
+      );
+      if (anipubServers.length) result["720p HD"].push(...anipubServers);
     }
 
     // ── AnimeX HLS → all quality tiers ──
@@ -3441,12 +3454,19 @@ router.get("/anime/anipub-stream", async (req, res) => {
     }
 
     // ── Phase 2: Arabic sources (shahiid + animelek) ──
-    // Try direct extraction first; if it fails, still include the embed URL so the
-    // user has something to try (IframePlayer handles embeds that can't be extracted).
+    // Filter dead/embed-only hosts, then try to extract direct URLs.
+    // Only include sources that are either direct-extracted or from reliable hosts.
+    const isAllowedEmbed = (url: string) => {
+      const u = url.toLowerCase();
+      if (DEAD_FILE_HOSTS.some(h => u.includes(h))) return false;
+      if (EMBED_ONLY_HOSTS.some(h => u.includes(h))) return false;
+      return true;
+    };
+
     const arabicRaw: UnifiedSource[] = [
       ...(shahiidSrcs.status === "fulfilled" ? shahiidSrcs.value : []),
       ...(animelekSrcs.status === "fulfilled" ? animelekSrcs.value : []),
-    ];
+    ].filter(s => isAllowedEmbed(s.url));
 
     if (arabicRaw.length > 0) {
       const extractedUrls = await timedOut(
@@ -3456,8 +3476,16 @@ router.get("/anime/anipub-stream", async (req, res) => {
       );
       for (let i = 0; i < arabicRaw.length; i++) {
         const directUrl = extractedUrls[i];
+        // Only include the fallback embed URL if it's a reliable extractable host
+        // (vidfast, streamwish, filemoon, jawcloud etc.) — NOT blocked embeds
         const fallbackUrl = arabicRaw[i].url;
-        const urlToAdd = directUrl || fallbackUrl;
+        const isReliableEmbed = (url: string) => {
+          const u = url.toLowerCase();
+          return u.includes("vidfast.co") || u.includes("streamwish") ||
+            u.includes("filemoon") || u.includes("jawcloud") ||
+            u.includes("sendvid") || u.includes("streamtape");
+        };
+        const urlToAdd = directUrl || (isReliableEmbed(fallbackUrl) ? fallbackUrl : null);
         if (urlToAdd && !result["720p HD"].includes(urlToAdd)) {
           result["720p HD"].push(urlToAdd);
         }
