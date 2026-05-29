@@ -3862,7 +3862,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
     const rewritten = rewriteM3u8(body, baseForSegments, selfBase, ref || url);
     res.setHeader("Content-Type", ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
     res.send(rewritten);
   } catch (e: any) { res.status(502).send(`proxy error: ${e?.message ?? e}`); }
 });
