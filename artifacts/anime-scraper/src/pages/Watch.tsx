@@ -301,10 +301,11 @@ function SubtitleOverlay({ cues, elapsed }: { cues: SubCue[]; elapsed: number })
 
 /* ══════════════════════════════════ NATIVE HLS PLAYER ═══════ */
 function NativeHLSPlayer({
-  src, onRealQuality,
+  src, onRealQuality, onTimeUpdate,
 }: {
   src: string;
   onRealQuality?: (q: string) => void;
+  onTimeUpdate?: (t: number) => void;
 }) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const hlsRef      = useRef<Hls | null>(null);
@@ -405,12 +406,15 @@ function NativeHLSPlayer({
       hls.loadSource(m3u8Url);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (hlsRef.current !== hls) return; // stale instance — ignore
+        setError(null);
         setLoading(false);
         video.play().catch(() => {});
         setShowControls(true);
         scheduleHide();
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
+        if (hlsRef.current !== hls) return; // stale instance — ignore
         if (data.fatal) {
           setError("فشل تحميل البث — اضغط إعادة المحاولة");
           setLoading(false);
@@ -450,6 +454,7 @@ function NativeHLSPlayer({
     const onTime    = () => {
       setCurrentTime(video.currentTime);
       if (video.buffered.length > 0) setBuffered(video.buffered.end(video.buffered.length - 1));
+      onTimeUpdate?.(video.currentTime);
     };
     const onLoaded  = () => setDuration(video.duration);
     const onWaiting = () => setLoading(true);
@@ -683,6 +688,7 @@ function EpisodePlayer({
   const [showQuality,  setShowQuality]    = useState(false);
   const [fs,           setFs]             = useState(false);
   const [realQuality,  setRealQuality]    = useState<string | null>(null);
+  const [hlsTime,      setHlsTime]        = useState(0);
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -778,10 +784,34 @@ function EpisodePlayer({
       setSubCues(cues);
       setSubLang(d.lang);
       setSubState("ready");
+      setShowSubPanel(true);
     } catch {
       setSubState("none");
     }
   }
+
+  /* ── Auto-load subtitles on mount (silent — no panel popup until ready) ── */
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      if (subState !== "idle") return;
+      setSubState("loading");
+      try {
+        const params = new URLSearchParams({ title: animeTitle, ep: String(ep) });
+        const r = await fetch(`/api/anime/subtitles?${params}`);
+        if (!r.ok) { setSubState("none"); return; }
+        const d = await r.json() as { lang: string | null; content: string | null };
+        if (!d.content) { setSubState("none"); return; }
+        const cues = parseSrt(d.content);
+        if (!cues.length) { setSubState("none"); return; }
+        setSubCues(cues);
+        setSubLang(d.lang);
+        setSubState("ready");
+        // Silently activate subtitles — panel stays hidden unless user opens it
+      } catch { setSubState("none"); }
+    }, 1800);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animeTitle, ep]);
 
   /* ── Iframe error handling ── */
   function handleIframeError() {
@@ -953,7 +983,13 @@ function EpisodePlayer({
                       ‒½s
                     </button>
 
-                    {!subRunning ? (
+                    {/* HLS: subtitle is auto-synced to video time — no manual start needed */}
+                    {currentInfo.isHls ? (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600/20 border border-violet-500/30">
+                        <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+                        <span className="text-violet-200 text-[11px] font-['Cairo'] font-bold">مزامنة تلقائية</span>
+                      </div>
+                    ) : !subRunning ? (
                       <button onClick={startSubTimer}
                         className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 border border-violet-500 text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform">
                         <Play className="w-3.5 h-3.5 fill-white" />
@@ -996,11 +1032,18 @@ function EpisodePlayer({
 
         {/* ── HLS Native Player ── */}
         {currentInfo.isHls && currentUrl && (
-          <NativeHLSPlayer
-            key={`hls-${currentUrl}-${currentServer}`}
-            src={currentUrl}
-            onRealQuality={q => setRealQuality(q)}
-          />
+          <>
+            <NativeHLSPlayer
+              key={`hls-${currentUrl}-${currentServer}`}
+              src={currentUrl}
+              onRealQuality={q => setRealQuality(q)}
+              onTimeUpdate={t => setHlsTime(t)}
+            />
+            {/* Subtitle overlay synced directly to video time */}
+            {subState === "ready" && subCues.length > 0 && (
+              <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
+            )}
+          </>
         )}
 
         {/* ── Iframe Player (non-HLS) ── */}
