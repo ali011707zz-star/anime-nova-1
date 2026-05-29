@@ -52,11 +52,14 @@ const QUALITY_AR: Record<Quality, string> = {
 /* ── Server source detection ── */
 interface ServerInfo { label: string; sublabel: string; isHls: boolean; }
 function getServerInfo(url: string, idx: number): ServerInfo {
+  if (url.includes("animex-player") || url.includes("animex-source")) {
+    return { label: "AnimeX", sublabel: "مترجم للعربية", isHls: true };
+  }
   if (url.includes("hls-player") || url.includes("hls-proxy")) {
-    return { label: "AnimeX", sublabel: "مترجم · HLS مباشر", isHls: true };
+    return { label: "AnimeX", sublabel: "مترجم للعربية", isHls: true };
   }
   if (url.includes("anipub") || url.includes("gogoanime") || url.includes("gogocdn")) {
-    return { label: "AniPub", sublabel: "مترجم · بث مباشر", isHls: false };
+    return { label: "AniPub", sublabel: "مترجم للعربية", isHls: false };
   }
   if (url.includes("shahiid") || url.includes("share4max") || url.includes("vidbm")) {
     return { label: "شاهد أنمي", sublabel: "مترجم عربي", isHls: false };
@@ -64,7 +67,7 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   if (url.includes("animelek") || url.includes("streamwish") || url.includes("filemoon")) {
     return { label: "أنمي ليك", sublabel: "مترجم عربي", isHls: false };
   }
-  return { label: `سيرفر ${idx + 1}`, sublabel: "مترجم · بث مباشر", isHls: false };
+  return { label: `سيرفر ${idx + 1}`, sublabel: "مترجم عربي", isHls: false };
 }
 
 /* ══════════════════════════════════ SRT PARSER ══════════════ */
@@ -152,62 +155,107 @@ function ServerPicker({
     q, servers: streamData.servers[q] || [],
   })).filter(g => g.servers.length > 0);
 
+  // Flatten all rows with group info for global stagger
+  const flatRows: { q: Quality; url: string; idx: number; globalIdx: number }[] = [];
+  allGroups.forEach(({ q, servers }) =>
+    servers.forEach((url, idx) => flatRows.push({ q, url, idx, globalIdx: flatRows.length }))
+  );
+
   return (
-    <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col" dir="rtl">
+    <div className="fixed inset-0 z-50 flex flex-col" dir="rtl"
+      style={{ background: "radial-gradient(ellipse 90% 60% at 50% 0%, rgba(109,40,217,.18) 0%, #09090f 65%)" }}>
+
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 shrink-0 border-b border-white/6"
-        style={{ paddingTop: "max(14px, env(safe-area-inset-top))", paddingBottom: 12 }}>
+      <div className="flex items-center gap-3 px-4 shrink-0 z-10"
+        style={{ paddingTop: "max(16px, env(safe-area-inset-top))", paddingBottom: 14 }}>
         <button onClick={onBack}
-          className="w-9 h-9 rounded-xl bg-white/6 border border-white/8 flex items-center justify-center active:scale-90 transition-transform shrink-0">
-          <ChevronRight className="w-5 h-5 text-white/70" />
+          className="w-10 h-10 rounded-2xl bg-white/7 border border-white/10 flex items-center justify-center active:scale-90 transition-transform shrink-0">
+          <ChevronRight className="w-5 h-5 text-white/60" />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-white text-[13px] font-black font-['Cairo'] truncate">{title}</p>
-          <p className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep} · اختر المصدر</p>
+          <p className="text-white text-[14px] font-black font-['Cairo'] truncate leading-tight">{title}</p>
+          <p className="text-violet-300/50 text-[11px] font-['Cairo'] font-bold mt-0.5">الحلقة {ep} · اختر المصدر</p>
         </div>
-        {cover && <img src={cover} alt="" className="w-9 h-12 rounded-lg object-cover border border-white/10 shrink-0" />}
+        {cover && (
+          <div className="relative shrink-0">
+            <img src={cover} alt="" className="w-10 h-14 rounded-xl object-cover" />
+            <div className="absolute inset-0 rounded-xl ring-1 ring-white/15" />
+          </div>
+        )}
       </div>
 
-      {/* Scrollable server list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4"
-        style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
+      {/* Thin separator */}
+      <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mx-4 mb-1" />
+
+      {/* Scrollable list */}
+      <div className="flex-1 overflow-y-auto px-4 pt-3 space-y-6"
+        style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
         {allGroups.map(({ q, servers }) => (
           <div key={q}>
-            {/* Quality section header */}
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <span className="text-violet-400 font-black font-mono text-[15px]">{QUALITY_SHORT[q]}</span>
-              <span className="text-white/30 text-[10px] font-['Cairo'] font-bold">{QUALITY_AR[q]}</span>
+            {/* Quality section pill */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/8">
+                <span className="text-white font-black font-mono text-[16px] leading-none">{QUALITY_SHORT[q]}</span>
+                <span className="w-px h-3.5 bg-white/15" />
+                <span className="text-white/40 text-[10px] font-['Cairo'] font-bold">{QUALITY_AR[q]}</span>
+              </div>
               <div className="flex-1 h-px bg-white/6" />
-              <span className="text-white/20 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
+              <span className="text-white/18 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
             </div>
 
-            {/* Server rows */}
-            <div className="space-y-2">
+            {/* Server cards */}
+            <div className="space-y-2.5">
               {servers.map((url, idx) => {
                 const info = getServerInfo(url, idx);
+                const globalIdx = flatRows.findIndex(r => r.q === q && r.idx === idx);
+                const isAnimex = info.isHls;
                 return (
                   <motion.button key={idx}
-                    initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.04 }}
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: globalIdx * 0.055, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                     onClick={() => onPick(q, idx)}
-                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-white/4 border border-white/8 active:scale-[0.97] transition-all hover:bg-violet-600/10 hover:border-violet-500/25 text-right">
-                    {/* Source icon */}
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0
-                      ${info.isHls ? "bg-violet-600/20 border border-violet-500/30" : "bg-blue-600/15 border border-blue-500/25"}`}>
-                      {info.isHls
-                        ? <MonitorPlay className="w-4 h-4 text-violet-400" />
-                        : <Tv2 className="w-4 h-4 text-blue-400" />}
+                    className="w-full text-right active:scale-[0.97] transition-transform"
+                  >
+                    <div className={`relative flex items-center gap-4 px-4 py-4 rounded-2xl overflow-hidden
+                      ${isAnimex
+                        ? "bg-gradient-to-l from-violet-950/70 to-[#0e0b1e] border border-violet-500/20"
+                        : "bg-white/[0.04] border border-white/8"
+                      }`}>
+                      {/* Subtle glow blob for AnimeX */}
+                      {isAnimex && (
+                        <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full bg-violet-600/20 blur-2xl pointer-events-none" />
+                      )}
+
+                      {/* Icon */}
+                      <div className={`relative w-11 h-11 rounded-2xl flex items-center justify-center shrink-0
+                        ${isAnimex
+                          ? "bg-violet-600/25 border border-violet-400/30"
+                          : "bg-white/6 border border-white/10"}`}>
+                        {isAnimex
+                          ? <MonitorPlay className="w-5 h-5 text-violet-300" />
+                          : <Tv2 className="w-5 h-5 text-blue-300/80" />}
+                      </div>
+
+                      {/* Text */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className={`text-[15px] font-black font-['Cairo'] leading-tight
+                            ${isAnimex ? "text-white" : "text-white/85"}`}>
+                            {info.label}
+                          </p>
+                          {isAnimex && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-violet-500/30 text-violet-200 border border-violet-400/25 leading-none">
+                              جديد
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-white/35 text-[11px] font-['Cairo'] mt-0.5">{info.sublabel}</p>
+                      </div>
+
+                      {/* Arrow */}
+                      <ChevronLeft className={`w-4 h-4 shrink-0 ${isAnimex ? "text-violet-400/60" : "text-white/20"}`} />
                     </div>
-                    <div className="flex-1 min-w-0 text-right">
-                      <p className="text-white text-[13px] font-black font-['Cairo']">{info.label}</p>
-                      <p className="text-white/35 text-[10px] font-['Cairo']">{info.sublabel}</p>
-                    </div>
-                    {info.isHls && (
-                      <span className="text-[9px] font-bold bg-violet-600/20 text-violet-300 border border-violet-500/30 px-2 py-0.5 rounded-full shrink-0">
-                        HLS
-                      </span>
-                    )}
-                    <ChevronLeft className="w-4 h-4 text-white/25 shrink-0" />
                   </motion.button>
                 );
               })}
@@ -773,7 +821,7 @@ export default function WatchPage() {
 
   return (
     <AnimatePresence mode="wait">
-      <motion.div key="player" className="fixed inset-0">
+      <motion.div key={`player-${quality}-${initialSrv}`} className="fixed inset-0">
         <EpisodePlayer
           servers={servers}
           quality={quality}
