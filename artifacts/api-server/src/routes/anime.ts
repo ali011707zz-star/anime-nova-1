@@ -3373,12 +3373,10 @@ router.get("/anime/anipub-stream", async (req, res) => {
       })(),
     ]);
 
-    // Merge AniPub servers (embed URLs) — shared across all quality tiers
+    // Merge AniPub servers (embed URLs) — only into 720p HD tier since they have no real quality info
     if (anipubResult.status === "fulfilled" && anipubResult.value?.servers?.length) {
       const apServers = anipubResult.value.servers;
-      result["1080p FHD"].push(...apServers);
       result["720p HD"].push(...apServers);
-      result["360p SD"].push(...apServers);
     }
 
     // Merge AnimeX via lazy-player URL (fetches fresh m3u8 at play time so token is always current)

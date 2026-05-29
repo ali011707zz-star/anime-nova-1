@@ -691,6 +691,7 @@ function EpisodePlayer({
   const [hlsTime,      setHlsTime]        = useState(0);
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFirstQualityMount = useRef(true);
 
   /* Detect if all quality tiers have the same server list (flat mode → hide quality picker) */
   const q1 = allServers["1080p FHD"] || [];
@@ -715,8 +716,13 @@ function EpisodePlayer({
   const currentUrl = servers[currentServer] || "";
   const currentInfo = getServerInfo(currentUrl, currentServer);
 
-  /* ── Reset on server/quality change ── */
+  /* ── Stable HLS callbacks — must not recreate on every render or HLS restarts ── */
+  const handleRealQuality = useCallback((q: string) => setRealQuality(q), []);
+  const handleHlsTime     = useCallback((t: number) => setHlsTime(t), []);
+
+  /* ── Reset on quality/server-list change (skip first mount to preserve initialServer) ── */
   useEffect(() => {
+    if (isFirstQualityMount.current) { isFirstQualityMount.current = false; return; }
     setCurrentServer(0);
     setIframeLoaded(false);
     setIframeErr(false);
@@ -1036,8 +1042,8 @@ function EpisodePlayer({
             <NativeHLSPlayer
               key={`hls-${currentUrl}-${currentServer}`}
               src={currentUrl}
-              onRealQuality={q => setRealQuality(q)}
-              onTimeUpdate={t => setHlsTime(t)}
+              onRealQuality={handleRealQuality}
+              onTimeUpdate={handleHlsTime}
             />
             {/* Subtitle overlay synced directly to video time */}
             {subState === "ready" && subCues.length > 0 && (
