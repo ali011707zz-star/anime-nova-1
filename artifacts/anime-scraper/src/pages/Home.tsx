@@ -179,7 +179,7 @@ export default function Home() {
       {hero && !selectedGenre && (
         <div
           className="relative w-full overflow-hidden select-none"
-          style={{ height: 420 }}
+          style={{ height: 430 }}
           onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
           onTouchEnd={e => {
             const dx = e.changedTouches[0].clientX - touchStartX.current;
@@ -193,54 +193,52 @@ export default function Home() {
             setHero(heroes[next]);
           }}
         >
-          {/* Background image — cross-fade + subtle pan */}
-          <AnimatePresence mode="sync" custom={heroDir}>
+          {/* Background image — smooth crossfade + Ken Burns pan */}
+          <AnimatePresence mode="sync">
             <motion.div
               key={hero.id + "-bg"}
               className="absolute inset-0"
-              custom={heroDir}
-              variants={{
-                enter: (d: number) => ({ opacity: 0, x: d * 40, scale: 1.06 }),
-                center: { opacity: 1, x: 0, scale: 1 },
-                exit: (d: number) => ({ opacity: 0, x: d * -30, scale: 0.98 }),
-              }}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.75, ease: [0.32, 0.72, 0, 1] }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.8, ease: "easeInOut" }}
             >
-              <img
+              <motion.img
                 src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
                 alt=""
                 className="w-full h-full object-cover"
                 draggable={false}
+                initial={{ scale: 1.08 }}
+                animate={{ scale: 1.0 }}
+                transition={{ duration: 8, ease: "linear" }}
               />
             </motion.div>
           </AnimatePresence>
 
-          {/* Gradients */}
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #09090B 0%, #09090B 6%, rgba(9,9,11,0.75) 40%, rgba(9,9,11,0.05) 100%)" }} />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/60 via-transparent to-transparent" />
+          {/* Layered gradients for cinematic look */}
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, #09090B 0%, #09090B 8%, rgba(9,9,11,0.82) 45%, rgba(9,9,11,0.1) 100%)" }} />
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to right, rgba(9,9,11,0.7) 0%, rgba(9,9,11,0.15) 60%, transparent 100%)" }} />
+          <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse at 80% 50%, transparent 40%, rgba(9,9,11,0.35) 100%)" }} />
 
-          {/* Text content — slides in with stagger */}
+          {/* Text content — smooth fade + lift */}
           <AnimatePresence mode="wait">
             <motion.div
               key={hero.id + "-text"}
-              className="absolute bottom-0 right-0 left-0 p-5 pb-7"
-              initial={{ opacity: 0, y: 22 }}
+              className="absolute bottom-0 right-0 left-0 p-5 pb-8"
+              initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
+              exit={{ opacity: 0, y: -10, transition: { duration: 0.2 } }}
+              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
             >
               {/* Genre + score badges */}
               <motion.div
                 className="flex items-center gap-1.5 mb-2.5 flex-wrap"
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.45, delay: 0.18 }}
+                transition={{ duration: 0.4, delay: 0.22, ease: [0.22, 1, 0.36, 1] }}
               >
                 {hero.genres?.slice(0, 3).map((g: string) => (
-                  <span key={g} className="text-[8px] font-black bg-white/12 backdrop-blur-md text-white/80 px-2.5 py-0.5 rounded-full border border-white/12">{GENRES_AR.find(x => x.en === g)?.ar || g}</span>
+                  <span key={g} className="text-[8px] font-black bg-white/10 backdrop-blur-md text-white/80 px-2.5 py-0.5 rounded-full border border-white/10">{GENRES_AR.find(x => x.en === g)?.ar || g}</span>
                 ))}
                 {hero.averageScore && (
                   <span className="text-[8px] font-black bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 px-2 py-0.5 rounded-full flex items-center gap-0.5">
@@ -248,7 +246,7 @@ export default function Home() {
                   </span>
                 )}
                 {hero.status === "RELEASING" && (
-                  <span className="text-[8px] font-black bg-red-500/20 border border-red-500/30 text-red-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <span className="text-[8px] font-black bg-red-500/15 border border-red-500/25 text-red-400 px-2 py-0.5 rounded-full flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse inline-block" /> يُبث الآن
                   </span>
                 )}
@@ -256,10 +254,11 @@ export default function Home() {
 
               {/* Title */}
               <motion.h1
-                className="text-[26px] font-black text-white line-clamp-1 mb-1 drop-shadow-lg tracking-tight leading-tight"
-                initial={{ opacity: 0, y: 12 }}
+                className="text-[27px] font-black text-white line-clamp-1 mb-1 tracking-tight leading-tight"
+                style={{ textShadow: "0 2px 20px rgba(0,0,0,0.8)" }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.22 }}
+                transition={{ duration: 0.45, delay: 0.27, ease: [0.22, 1, 0.36, 1] }}
               >
                 {hero.title?.romaji}
               </motion.h1>
@@ -267,9 +266,9 @@ export default function Home() {
               {/* Subtitle */}
               <motion.p
                 className="text-white/40 text-[11px] font-bold mb-4 font-['Cairo']"
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.45, delay: 0.28 }}
+                transition={{ duration: 0.4, delay: 0.32, ease: [0.22, 1, 0.36, 1] }}
               >
                 {hero.episodes ? `${hero.episodes} حلقة` : ""}
                 {hero.episodes && hero.format ? " · " : ""}
@@ -279,22 +278,21 @@ export default function Home() {
               {/* CTA buttons */}
               <motion.div
                 className="flex gap-2.5"
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.45, delay: 0.33 }}
+                transition={{ duration: 0.4, delay: 0.37, ease: [0.22, 1, 0.36, 1] }}
               >
                 <Link href={`/episodes/${hero.id}`}>
                   <motion.button
-                    whileTap={{ scale: 0.93 }}
-                    className="relative overflow-hidden text-white text-xs font-black px-6 py-3 rounded-2xl flex items-center gap-2 shadow-xl active:scale-95"
-                    style={{ background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)", boxShadow: "0 8px 24px rgba(109,40,217,0.5)" }}
+                    whileTap={{ scale: 0.94 }}
+                    className="relative overflow-hidden text-white text-xs font-black px-6 py-3 rounded-2xl flex items-center gap-2 shadow-xl"
+                    style={{ background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)", boxShadow: "0 6px 20px rgba(109,40,217,0.45)" }}
                   >
-                    {/* shimmer */}
                     <motion.span
                       className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12"
                       initial={{ x: "-100%" }}
                       animate={{ x: "200%" }}
-                      transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 3, ease: "easeInOut" }}
+                      transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 3.5, ease: "easeInOut" }}
                     />
                     <Play className="w-3.5 h-3.5 fill-current relative z-10" />
                     <span className="relative z-10">مشاهدة الآن</span>
@@ -302,8 +300,8 @@ export default function Home() {
                 </Link>
                 <Link href={`/anime/${hero.id}`}>
                   <motion.button
-                    whileTap={{ scale: 0.93 }}
-                    className="bg-white/10 backdrop-blur-xl text-white text-xs font-black px-4 py-3 rounded-2xl border border-white/15 active:scale-95 font-['Cairo'] flex items-center gap-1.5"
+                    whileTap={{ scale: 0.94 }}
+                    className="bg-white/10 backdrop-blur-xl text-white text-xs font-black px-4 py-3 rounded-2xl border border-white/15 font-['Cairo'] flex items-center gap-1.5"
                   >
                     <Info className="w-3.5 h-3.5" /> التفاصيل
                   </motion.button>
@@ -312,9 +310,9 @@ export default function Home() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Hero indicator dots + progress */}
+          {/* Hero indicator dots — sleek pill style */}
           {heroList.length > 1 && (
-            <div className="absolute bottom-7 left-5 flex gap-1.5 items-center">
+            <div className="absolute bottom-8 left-5 flex gap-1.5 items-center">
               {heroList.map((_, i) => (
                 <motion.button
                   key={i}
@@ -324,9 +322,13 @@ export default function Home() {
                     setHeroIdx(i);
                     setHero(heroList[i]);
                   }}
-                  animate={{ width: i === heroIdx ? 20 : 5, opacity: i === heroIdx ? 1 : 0.35 }}
-                  transition={{ duration: 0.35, ease: "easeOut" }}
-                  className={`h-1.5 rounded-full ${i === heroIdx ? "bg-primary shadow-md shadow-primary/60" : "bg-white"}`}
+                  animate={{
+                    width: i === heroIdx ? 22 : 5,
+                    opacity: i === heroIdx ? 1 : 0.3,
+                    backgroundColor: i === heroIdx ? "#8B5CF6" : "#ffffff",
+                  }}
+                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  className="h-1.5 rounded-full"
                   style={{ width: 5 }}
                 />
               ))}
