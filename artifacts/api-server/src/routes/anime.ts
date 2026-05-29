@@ -3353,59 +3353,74 @@ router.get("/anime/anipub-stream", async (req, res) => {
     "360p SD":   [],
   };
 
-  const RACE_MS = 18000;
-  const race = <T>(p: Promise<T>, fallback: T) =>
-    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), RACE_MS))]);
+  const SCRAPER_MS = 14000;
+  const EXTRACT_MS = 6000;
+  const timedOut = <T>(p: Promise<T>, ms: number, fb: T) =>
+    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fb), ms))]);
+
+  // ── Helper: try to extract a direct video URL from a UnifiedSource ──
+  async function tryExtractDirect(s: UnifiedSource): Promise<string | null> {
+    // Already extracted server-side → use it
+    if (s.directUrl) return s.directUrl;
+    // Known unextractable embed hosts → skip
+    if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) return null;
+    // Bare m3u8 / mp4 URLs
+    if (s.url.match(/\.m3u8([?#]|$)/i)) return s.url;
+    if (s.url.match(/\.mp4([?#]|$)/i)) return s.url;
+    // Attempt deep extraction
+    try {
+      const extracted = await timedOut(extractVideoDeep(s.url, s.url), EXTRACT_MS, null);
+      if (!extracted) return null;
+      const alive = await probeDirectUrl(extracted.url, s.url).catch(() => false);
+      return alive ? extracted.url : null;
+    } catch { return null; }
+  }
 
   try {
-    // Run all scrapers in parallel
-    const [anipubResult, animexSrcs, shahiidSrcs, animelekSrcs] = await Promise.allSettled([
-      // ── AniPub (embed iframes) ──
-      (async () => {
+    // ── Phase 1: Run all scrapers in parallel ──
+    const [anipubResult, animexSrcs, shahiidSrcs, animelekSrcs, allAnimeSrcs] = await Promise.allSettled([
+
+      // AniPub (embed iframes — dub + sub)
+      timedOut((async () => {
         if (!title && !english) return null;
         const titles = [english, title].filter(Boolean) as string[];
         const animeId = await getAniPubId(titles);
         if (!animeId) return null;
         const servers = await getAniPubEpisodeServers(animeId, ep);
         return { animeId, servers };
-      })(),
+      })(), SCRAPER_MS, null),
 
-      // ── AnimeX (direct HLS via hls-player page) ──
-      (async () => {
-        if (!anilistId || anilistId <= 0) return [];
+      // AnimeX (direct HLS)
+      timedOut((async () => {
+        if (!anilistId || anilistId <= 0) return [] as string[];
         return getAnimexEpisodeSources(anilistId, ep);
-      })(),
+      })(), SCRAPER_MS, [] as string[]),
 
-      // ── Shahiid-anime.net (Arabic — embed iframes) ──
-      race(
-        (async () => {
-          if (!title) return [] as UnifiedSource[];
-          return getShahiidSources(title, english, ep);
-        })(),
-        [] as UnifiedSource[]
-      ),
+      // Shahiid-anime.net (Arabic)
+      timedOut((async () => {
+        if (!title) return [] as UnifiedSource[];
+        return getShahiidSources(title, english, ep);
+      })(), SCRAPER_MS, [] as UnifiedSource[]),
 
-      // ── AnimeLek.top (Arabic — HLS direct when extractable) ──
-      race(
-        (async () => {
-          if (!title) return [] as UnifiedSource[];
-          return getAnimelekSources(title, english, ep);
-        })(),
-        [] as UnifiedSource[]
-      ),
+      // AnimeLek.top (Arabic)
+      timedOut((async () => {
+        if (!title) return [] as UnifiedSource[];
+        return getAnimelekSources(title, english, ep);
+      })(), SCRAPER_MS, [] as UnifiedSource[]),
+
+      // AllAnime — direct m3u8 / mp4 video URLs
+      timedOut((async () => {
+        if (!title && !english) return [] as UnifiedSource[];
+        return getAllAnimeSources(title || english, english || null, ep);
+      })(), SCRAPER_MS, [] as UnifiedSource[]),
     ]);
 
-    // Helper: convert UnifiedSource[] → URL strings (prefer directUrl over embed url)
-    function sourcesToUrls(srcs: UnifiedSource[]): string[] {
-      return srcs.map(s => s.directUrl || s.url).filter(Boolean) as string[];
-    }
-
-    // Merge AniPub servers (embed URLs) — only into 720p HD tier
+    // ── AniPub embed servers → 720p HD ──
     if (anipubResult.status === "fulfilled" && anipubResult.value?.servers?.length) {
       result["720p HD"].push(...anipubResult.value.servers);
     }
 
-    // Merge AnimeX via lazy-player URL (fetches fresh m3u8 at play time)
+    // ── AnimeX HLS → all quality tiers ──
     if (anilistId > 0 && animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value) && animexSrcs.value.length > 0) {
       for (const tier of ["1080p FHD", "720p HD", "360p SD"] as const) {
         const q = tier === "1080p FHD" ? "1080" : tier === "720p HD" ? "720" : "360";
@@ -3413,18 +3428,30 @@ router.get("/anime/anipub-stream", async (req, res) => {
       }
     }
 
-    // Merge Shahiid Arabic sources → 720p HD tier
-    if (shahiidSrcs.status === "fulfilled" && shahiidSrcs.value.length > 0) {
-      const urls = sourcesToUrls(shahiidSrcs.value);
-      for (const url of urls) {
+    // ── AllAnime direct sources → 720p HD (only if they have a real direct URL) ──
+    if (allAnimeSrcs.status === "fulfilled") {
+      for (const s of allAnimeSrcs.value) {
+        const url = s.directUrl
+          ?? (s.url.match(/\.m3u8([?#]|$)/i) || s.url.match(/\.mp4([?#]|$)/i) ? s.url : null);
         if (url && !result["720p HD"].includes(url)) result["720p HD"].push(url);
       }
     }
 
-    // Merge AnimeLek Arabic sources → 720p HD tier
-    if (animelekSrcs.status === "fulfilled" && animelekSrcs.value.length > 0) {
-      const urls = sourcesToUrls(animelekSrcs.value);
-      for (const url of urls) {
+    // ── Phase 2: Extract direct URLs from Arabic sources (shahiid + animelek) ──
+    // Only add sources that successfully resolve to a direct playable URL.
+    // Dead embeds (megamax, dood, voe, wishfast, anime7u …) are silently dropped.
+    const arabicRaw: UnifiedSource[] = [
+      ...(shahiidSrcs.status === "fulfilled" ? shahiidSrcs.value : []),
+      ...(animelekSrcs.status === "fulfilled" ? animelekSrcs.value : []),
+    ];
+
+    if (arabicRaw.length > 0) {
+      const extractedUrls = await timedOut(
+        Promise.all(arabicRaw.map(s => tryExtractDirect(s))),
+        EXTRACT_MS + 2000,
+        arabicRaw.map(() => null),
+      );
+      for (const url of extractedUrls) {
         if (url && !result["720p HD"].includes(url)) result["720p HD"].push(url);
       }
     }

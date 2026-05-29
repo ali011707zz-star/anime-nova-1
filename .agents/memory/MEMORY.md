@@ -8,3 +8,6 @@
 - [AniPub titleSimilarity bug](anipub-similarity.md) — includes() shortcut returns same score for title+sequel; use length-ratio formula instead
 - [AniPub movie ep case](anipub-similarity.md) — when local.ep[] is empty, use local.link directly (movie has one link, not episode array)
 - [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
+- [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
+- [anipub-stream extraction filter](anipub-stream-filter.md) — Arabic sources run through tryExtractDirect; only directUrl results shown; dead embeds (megamax/dood/voe/wishfast/anime7u) silently dropped
+- [Direct MP4 in Watch.tsx](direct-mp4-player.md) — streamtape/sendvid URLs use NativeHLSPlayer via video-proxy (isDirect=true); NativeHLSPlayer detects .mp4/streamtape/sendvid and uses <video src=proxyUrl> not HLS.js

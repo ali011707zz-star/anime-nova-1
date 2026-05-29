@@ -52,9 +52,9 @@ const QUALITY_AR: Record<Quality, string> = {
 };
 
 /* ── Server source detection ── */
-interface ServerInfo { label: string; sublabel: string; isHls: boolean; }
+interface ServerInfo { label: string; sublabel: string; isHls: boolean; isDirect?: boolean; }
 function getServerInfo(url: string, idx: number): ServerInfo {
-  // AnimexX — specific path must be first
+  // AnimeX — specific path must be first
   if (url.includes("animex-player") || url.includes("animex-source")) {
     return { label: "AnimeX", sublabel: "مترجم للعربية", isHls: true };
   }
@@ -67,23 +67,32 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   if (url.includes("anipub") || url.includes("gogoanime") || url.includes("gogocdn")) {
     return { label: "AniPub", sublabel: "مترجم إنجليزي", isHls: false };
   }
-  // Shahiid Arabic sources (embed) — all known embed hosts from shahiid
-  if (url.includes("shahiid") || url.includes("share4max") || url.includes("vidbm")
-   || url.includes("uptostream") || url.includes("dood") || url.includes("voe.sx")
-   || url.includes("megamax.me") || url.includes("leech.megamax") || url.includes("videa.hu")
-   || url.includes("anime7u") || url.includes("vid4up")) {
-    return { label: "شاهد أنمي", sublabel: "مترجم عربي", isHls: false };
+  // Direct video extracted from Arabic sources — route via video-proxy, play natively
+  if (url.includes("streamtape.com") || url.includes("sendvid.com")
+   || url.includes("/video-proxy?")) {
+    return { label: "مصدر مباشر", sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
   }
-  // AnimeLek / Streamwish / Filemoon / Wishfast — check BEFORE generic hls-proxy
+  // Streamwish / Filemoon HLS extracted
   if (url.includes("streamwish") || url.includes("filemoon") || url.includes("animelek")
    || url.includes("wishfast") || url.includes("playerwish") || url.includes("asnwish")
    || url.includes("vidmoly")) {
     const isHlsUrl = url.includes(".m3u8") || url.includes("hls-proxy");
     return { label: "أنمي ليك", sublabel: isHlsUrl ? "عربي · جودة عالية" : "مترجم عربي", isHls: isHlsUrl };
   }
+  // Bare m3u8 direct URL
+  if (url.match(/\.m3u8([?#]|$)/i)) {
+    return { label: "بث مباشر", sublabel: "جودة عالية", isHls: true };
+  }
   // Generic hls-proxy fallback
   if (url.includes("hls-player") || url.includes("hls-proxy")) {
     return { label: "مشغّل", sublabel: "بث مباشر", isHls: true };
+  }
+  // Shahiid Arabic embed hosts
+  if (url.includes("shahiid") || url.includes("share4max") || url.includes("vidbm")
+   || url.includes("uptostream") || url.includes("dood") || url.includes("voe.sx")
+   || url.includes("megamax.me") || url.includes("leech.megamax") || url.includes("videa.hu")
+   || url.includes("anime7u") || url.includes("vid4up")) {
+    return { label: "شاهد أنمي", sublabel: "مترجم عربي", isHls: false };
   }
   return { label: `سيرفر ${idx + 1}`, sublabel: "مترجم عربي", isHls: false };
 }
@@ -378,6 +387,28 @@ function NativeHLSPlayer({
     setIsPlaying(false);
 
     let m3u8Url = src;
+
+    /* ── Direct MP4 via video-proxy (streamtape, sendvid IP-tied) ── */
+    const isDirectMp4 = src.includes("streamtape.com") || src.includes("sendvid.com")
+      || (src.includes(".mp4") && !src.includes("m3u8"));
+    if (isDirectMp4) {
+      const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
+      video.src = proxyUrl;
+      video.load();
+      const onMeta = () => {
+        setLoading(false);
+        video.play().catch(() => {});
+        setShowControls(true);
+        scheduleHide();
+      };
+      const onErr = () => {
+        setError("فشل تشغيل المصدر المباشر");
+        setLoading(false);
+      };
+      video.addEventListener("loadedmetadata", onMeta, { once: true });
+      video.addEventListener("error", onErr, { once: true });
+      return;
+    }
 
     /* animex-player → fetch animex-source to get fresh m3u8
        Always add _t=timestamp to bust browser/server cache so the
