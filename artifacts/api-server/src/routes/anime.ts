@@ -3068,21 +3068,26 @@ async function getAniPubEpisodeServers(animeId: number, ep: number): Promise<str
     const rawLink = epData.link.replace(/^src=/, "").trim();
     if (!rawLink) return [];
 
-    const servers: string[] = [rawLink];
-
-    // For gogoanime with hd-1 → generate hd-2, hd-3 fallbacks
-    if (rawLink.includes("gogoanime") && rawLink.includes("server=hd-1")) {
-      servers.push(rawLink.replace("server=hd-1", "server=hd-2"));
-      servers.push(rawLink.replace("server=hd-1", "server=hd-3"));
-      servers.push(rawLink.replace("server=hd-1", "server=hd-4"));
-    }
-
-    // For anipub.xyz/video/ — check if there's a sub variant
+    // Only keep /sub (مترجم) variant — skip /dub and gogoanime embeds (English-only)
     if (rawLink.includes("anipub.xyz/video/") && rawLink.endsWith("/dub")) {
-      servers.push(rawLink.replace("/dub", "/sub"));
+      // dub → try sub variant instead
+      const subLink = rawLink.replace("/dub", "/sub");
+      anipubEpCache.set(cacheKey, { servers: [subLink], ts: Date.now() });
+      return [subLink];
+    }
+    if (rawLink.includes("anipub.xyz/video/") && rawLink.endsWith("/sub")) {
+      // already sub — good
+      anipubEpCache.set(cacheKey, { servers: [rawLink], ts: Date.now() });
+      return [rawLink];
+    }
+    // gogoanime embeds are English-only — skip entirely
+    if (rawLink.includes("gogoanime")) {
+      anipubEpCache.set(cacheKey, { servers: [], ts: Date.now() });
+      return [];
     }
 
-    const result = servers.slice(0, 5);
+    const servers: string[] = [rawLink];
+    const result = servers.slice(0, 3);
     anipubEpCache.set(cacheKey, { servers: result, ts: Date.now() });
     return result;
   } catch {
@@ -3115,14 +3120,12 @@ router.get("/anime/animex-source", async (req, res) => {
       return scoreQ(a.quality) - scoreQ(b.quality);
     });
     const best = ranked[0];
-    // Normalize kwik.cx referer to include trailing slash (CDN requires exact match)
-    let ref = best.referer || "https://kwik.cx/";
-    if (ref.includes("kwik.cx") && !ref.endsWith("/")) ref += "/";
-    // Proxy through our hls-proxy so CDN sees the same server IP that fetched the token
-    const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(best.url)}&ref=${encodeURIComponent(ref)}`;
+    // uwucdn.top CDN returns 403 from Replit server IP (Cloudflare bot block) but has
+    // CORS: * and allows browser IPs freely — so send rawUrl directly to the browser.
+    // The browser's HLS.js will fetch the m3u8 and segments directly without any proxy.
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
-    res.json({ proxyUrl, rawUrl: best.url, quality: best.quality, referer: ref });
+    res.json({ rawUrl: best.url, quality: best.quality });
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "failed" });
   }
@@ -3437,9 +3440,9 @@ router.get("/anime/anipub-stream", async (req, res) => {
       }
     }
 
-    // ── Phase 2: Extract direct URLs from Arabic sources (shahiid + animelek) ──
-    // Only add sources that successfully resolve to a direct playable URL.
-    // Dead embeds (megamax, dood, voe, wishfast, anime7u …) are silently dropped.
+    // ── Phase 2: Arabic sources (shahiid + animelek) ──
+    // Try direct extraction first; if it fails, still include the embed URL so the
+    // user has something to try (IframePlayer handles embeds that can't be extracted).
     const arabicRaw: UnifiedSource[] = [
       ...(shahiidSrcs.status === "fulfilled" ? shahiidSrcs.value : []),
       ...(animelekSrcs.status === "fulfilled" ? animelekSrcs.value : []),
@@ -3451,8 +3454,13 @@ router.get("/anime/anipub-stream", async (req, res) => {
         EXTRACT_MS + 2000,
         arabicRaw.map(() => null),
       );
-      for (const url of extractedUrls) {
-        if (url && !result["720p HD"].includes(url)) result["720p HD"].push(url);
+      for (let i = 0; i < arabicRaw.length; i++) {
+        const directUrl = extractedUrls[i];
+        const fallbackUrl = arabicRaw[i].url;
+        const urlToAdd = directUrl || fallbackUrl;
+        if (urlToAdd && !result["720p HD"].includes(urlToAdd)) {
+          result["720p HD"].push(urlToAdd);
+        }
       }
     }
 
