@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   ChevronRight, ChevronLeft, Play, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
-  Settings, Subtitles,
+  Settings, Subtitles, MonitorPlay, Tv2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -43,6 +43,29 @@ const QUALITY_SHORT: Record<Quality, string> = {
   "720p HD": "720",
   "360p SD": "360",
 };
+const QUALITY_AR: Record<Quality, string> = {
+  "1080p FHD": "دقة عالية جداً",
+  "720p HD": "دقة عالية",
+  "360p SD": "دقة متوسطة",
+};
+
+/* ── Server source detection ── */
+interface ServerInfo { label: string; sublabel: string; isHls: boolean; }
+function getServerInfo(url: string, idx: number): ServerInfo {
+  if (url.includes("hls-player") || url.includes("hls-proxy")) {
+    return { label: "AnimeX", sublabel: "مترجم · HLS مباشر", isHls: true };
+  }
+  if (url.includes("anipub") || url.includes("gogoanime") || url.includes("gogocdn")) {
+    return { label: "AniPub", sublabel: "مترجم · بث مباشر", isHls: false };
+  }
+  if (url.includes("shahiid") || url.includes("share4max") || url.includes("vidbm")) {
+    return { label: "شاهد أنمي", sublabel: "مترجم عربي", isHls: false };
+  }
+  if (url.includes("animelek") || url.includes("streamwish") || url.includes("filemoon")) {
+    return { label: "أنمي ليك", sublabel: "مترجم عربي", isHls: false };
+  }
+  return { label: `سيرفر ${idx + 1}`, sublabel: "مترجم · بث مباشر", isHls: false };
+}
 
 /* ══════════════════════════════════ SRT PARSER ══════════════ */
 function parseSrt(srt: string): SubCue[] {
@@ -115,58 +138,82 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
   );
 }
 
-/* ══════════════════════════════════ QUALITY PICKER ══════════ */
-function QualityPicker({
+/* ══════════════════════════════════ SERVER PICKER ═══════════ */
+function ServerPicker({
   cover, title, ep,
   streamData, onPick, onBack,
 }: {
   cover: string; title: string; ep: number;
   streamData: StreamData;
-  onPick: (q: Quality) => void;
+  onPick: (q: Quality, idx: number) => void;
   onBack: () => void;
 }) {
+  const allGroups = QUALITY_LABELS.map(q => ({
+    q, servers: streamData.servers[q] || [],
+  })).filter(g => g.servers.length > 0);
+
   return (
     <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col" dir="rtl">
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5"
-        style={{ paddingTop: "max(14px, env(safe-area-inset-top))" }}>
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 shrink-0 border-b border-white/6"
+        style={{ paddingTop: "max(14px, env(safe-area-inset-top))", paddingBottom: 12 }}>
         <button onClick={onBack}
-          className="w-9 h-9 rounded-xl bg-white/6 border border-white/8 flex items-center justify-center active:scale-90 transition-transform">
+          className="w-9 h-9 rounded-xl bg-white/6 border border-white/8 flex items-center justify-center active:scale-90 transition-transform shrink-0">
           <ChevronRight className="w-5 h-5 text-white/70" />
         </button>
         <div className="flex-1 min-w-0">
           <p className="text-white text-[13px] font-black font-['Cairo'] truncate">{title}</p>
-          <p className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</p>
+          <p className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep} · اختر المصدر</p>
         </div>
         {cover && <img src={cover} alt="" className="w-9 h-12 rounded-lg object-cover border border-white/10 shrink-0" />}
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
-        {cover && (
-          <div className="relative">
-            <img src={cover} alt="" className="w-28 h-36 rounded-2xl object-cover opacity-70" />
-            <div className="absolute inset-0 rounded-2xl bg-gradient-to-t from-[#09090f]/80 to-transparent" />
-          </div>
-        )}
-        <div className="text-center">
-          <p className="text-white/55 text-[13px] font-['Cairo'] mb-1">اختر خادم التشغيل</p>
-          <p className="text-white/25 text-[11px] font-['Cairo']">يمكنك تغييره لاحقاً أثناء المشاهدة</p>
-        </div>
+      {/* Scrollable server list */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4"
+        style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
+        {allGroups.map(({ q, servers }) => (
+          <div key={q}>
+            {/* Quality section header */}
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <span className="text-violet-400 font-black font-mono text-[15px]">{QUALITY_SHORT[q]}</span>
+              <span className="text-white/30 text-[10px] font-['Cairo'] font-bold">{QUALITY_AR[q]}</span>
+              <div className="flex-1 h-px bg-white/6" />
+              <span className="text-white/20 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
+            </div>
 
-        <div className="flex gap-3 justify-center">
-          {QUALITY_LABELS.map(q => {
-            const count = streamData.servers[q]?.length || 0;
-            return (
-              <button key={q} onClick={() => onPick(q)}
-                className="flex flex-col items-center gap-1.5 px-5 py-4 rounded-2xl bg-white/5 border border-white/10 active:scale-90 transition-all hover:bg-violet-600/20 hover:border-violet-500/40">
-                <span className="text-white font-black text-[18px] font-mono">{QUALITY_SHORT[q]}</span>
-                <span className="text-white/40 text-[9px] font-bold uppercase tracking-widest">
-                  {q.split(" ")[1]}
-                </span>
-                <span className="text-white/25 text-[9px] font-['Cairo']">{count} سيرفر</span>
-              </button>
-            );
-          })}
-        </div>
+            {/* Server rows */}
+            <div className="space-y-2">
+              {servers.map((url, idx) => {
+                const info = getServerInfo(url, idx);
+                return (
+                  <motion.button key={idx}
+                    initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.04 }}
+                    onClick={() => onPick(q, idx)}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-white/4 border border-white/8 active:scale-[0.97] transition-all hover:bg-violet-600/10 hover:border-violet-500/25 text-right">
+                    {/* Source icon */}
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0
+                      ${info.isHls ? "bg-violet-600/20 border border-violet-500/30" : "bg-blue-600/15 border border-blue-500/25"}`}>
+                      {info.isHls
+                        ? <MonitorPlay className="w-4 h-4 text-violet-400" />
+                        : <Tv2 className="w-4 h-4 text-blue-400" />}
+                    </div>
+                    <div className="flex-1 min-w-0 text-right">
+                      <p className="text-white text-[13px] font-black font-['Cairo']">{info.label}</p>
+                      <p className="text-white/35 text-[10px] font-['Cairo']">{info.sublabel}</p>
+                    </div>
+                    {info.isHls && (
+                      <span className="text-[9px] font-bold bg-violet-600/20 text-violet-300 border border-violet-500/30 px-2 py-0.5 rounded-full shrink-0">
+                        HLS
+                      </span>
+                    )}
+                    <ChevronLeft className="w-4 h-4 text-white/25 shrink-0" />
+                  </motion.button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -196,14 +243,16 @@ function SubtitleOverlay({
 function EpisodePlayer({
   servers, quality, allServers,
   title, cover, ep, totalEps, animeTitle,
+  initialServer,
   onBack, onNextEp, onPrevEp, onChangeQuality,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; cover: string; ep: number; totalEps: number; animeTitle: string;
+  initialServer?: number;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
 }) {
-  const [currentServer, setCurrentServer] = useState(0);
+  const [currentServer, setCurrentServer] = useState(initialServer ?? 0);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [iframeErr,    setIframeErr]    = useState(false);
   const [retrying,     setRetrying]     = useState(false);
@@ -235,13 +284,12 @@ function EpisodePlayer({
     if (retryTimer.current) clearTimeout(retryTimer.current);
   }, [quality, servers]);
 
-  /* ── Back button ── */
+  /* ── Back button (native swipe/gesture) ── */
   useEffect(() => {
-    const handler = (e: PopStateEvent) => { e.preventDefault(); onBack(); };
+    const handler = () => onBack();
     window.addEventListener("popstate", handler);
-    window.history.pushState({ nova: true }, "");
     return () => window.removeEventListener("popstate", handler);
-  }, []);
+  }, [onBack]);
 
   /* ── Fullscreen ── */
   useEffect(() => {
@@ -568,29 +616,39 @@ function EpisodePlayer({
       </div>
 
       {/* ── Bottom bar ── */}
-      <div className="flex items-center justify-between px-6 bg-black/80 backdrop-blur border-t border-white/8 shrink-0"
+      <div className="flex items-center justify-between px-4 bg-black/80 backdrop-blur border-t border-white/8 shrink-0"
         style={{ paddingTop: 10, paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}>
         <button onClick={onPrevEp} disabled={ep <= 1}
-          className="flex items-center gap-1.5 text-[12px] font-bold text-white/45 disabled:opacity-20 font-['Cairo'] active:scale-95 transition-transform">
+          className="flex items-center gap-1 text-[12px] font-bold text-white/45 disabled:opacity-20 font-['Cairo'] active:scale-95 transition-transform">
           <ChevronRight className="w-4 h-4" /> السابقة
         </button>
 
-        <div className="flex items-center gap-2">
-          {servers.map((_, i) => (
-            <button key={i} onClick={() => {
-              if (retryTimer.current) clearTimeout(retryTimer.current);
-              setCurrentServer(i);
-              setIframeLoaded(false); setIframeErr(false); setRetrying(false);
-            }}
-              className={`w-6 h-6 rounded-lg text-[9px] font-black transition-all active:scale-90
-                ${i === currentServer ? "bg-violet-600 text-white" : "bg-white/8 border border-white/12 text-white/40"}`}>
-              {i + 1}
-            </button>
-          ))}
+        {/* Server switcher — shows labeled buttons */}
+        <div className="flex items-center gap-1.5 overflow-x-auto max-w-[55%]" style={{ scrollbarWidth: "none" }}>
+          {servers.map((url, i) => {
+            const info = getServerInfo(url, i);
+            const isActive = i === currentServer;
+            return (
+              <button key={i} onClick={() => {
+                if (retryTimer.current) clearTimeout(retryTimer.current);
+                setCurrentServer(i);
+                setIframeLoaded(false); setIframeErr(false); setRetrying(false);
+              }}
+                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold font-['Cairo'] whitespace-nowrap transition-all active:scale-90 shrink-0
+                  ${isActive
+                    ? info.isHls ? "bg-violet-600 text-white" : "bg-blue-600 text-white"
+                    : "bg-white/8 border border-white/12 text-white/40"}`}>
+                {info.isHls
+                  ? <MonitorPlay className="w-3 h-3 shrink-0" />
+                  : <Tv2 className="w-3 h-3 shrink-0" />}
+                {info.label}
+              </button>
+            );
+          })}
         </div>
 
         <button onClick={onNextEp} disabled={ep >= totalEps}
-          className="flex items-center gap-1.5 text-[12px] font-bold text-white/45 disabled:opacity-20 font-['Cairo'] active:scale-95 transition-transform flex-row-reverse">
+          className="flex items-center gap-1 text-[12px] font-bold text-white/45 disabled:opacity-20 font-['Cairo'] active:scale-95 transition-transform flex-row-reverse">
           <ChevronLeft className="w-4 h-4" /> التالية
         </button>
       </div>
@@ -608,18 +666,19 @@ export default function WatchPage() {
   const titleParam   = sp.get("title") || "";
   const englishParam = sp.get("english") || "";
 
-  const [anime,       setAnime]      = useState<any>(null);
-  const [streamData,  setStreamData] = useState<StreamData | null>(null);
-  const [quality,     setQuality]    = useState<Quality>("720p HD");
-  const [phase,       setPhase]      = useState<"loading" | "quality" | "player" | "nosrc">("loading");
-  const [loadingDone, setLoadingDone] = useState(false);
-  const [fetchDone,   setFetchDone]  = useState(false);
+  const [anime,        setAnime]       = useState<any>(null);
+  const [streamData,   setStreamData]  = useState<StreamData | null>(null);
+  const [quality,      setQuality]     = useState<Quality>("720p HD");
+  const [initialSrv,   setInitialSrv]  = useState(0);
+  const [phase,        setPhase]       = useState<"loading" | "picker" | "player" | "nosrc">("loading");
+  const [loadingDone,  setLoadingDone] = useState(false);
+  const [fetchDone,    setFetchDone]   = useState(false);
   const fetchStarted = useRef(false);
 
-  const title    = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
+  const title     = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
-  const totalEps = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
-  const cover    = anime?.coverImage?.large || "";
+  const totalEps  = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
+  const cover     = anime?.coverImage?.large || "";
 
   const doFetchServers = useCallback((t: string, e: string) => {
     if (fetchStarted.current) return;
@@ -669,34 +728,42 @@ export default function WatchPage() {
     if (!loadingDone || !fetchDone) return;
     if (!streamData) { setPhase("nosrc"); return; }
     const hasAny = QUALITY_LABELS.some(q => (streamData.servers[q]?.length || 0) > 0);
-    setPhase(hasAny ? "quality" : "nosrc");
+    setPhase(hasAny ? "picker" : "nosrc");
   }, [loadingDone, fetchDone, streamData]);
 
   function goEp(n: number) {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`);
   }
+
+  /* Back: go to anime detail page, replacing current history entry so back-swipe skips watch page */
   function handleBack() {
     if (animeId) navigate(`/anime/${animeId}`);
-    else if (window.history.length > 1) window.history.back();
-    else navigate("/");
+    else window.history.back();
   }
   function handleRefresh() { window.location.reload(); }
+
+  /* When user picks a server from the picker */
+  function handlePickServer(q: Quality, idx: number) {
+    setQuality(q);
+    setInitialSrv(idx);
+    setPhase("player");
+  }
 
   const servers = streamData?.servers[quality] || [];
 
   if (phase === "loading") return <LoadingScreen cover={cover} title={title} ep={ep} />;
   if (phase === "nosrc")   return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
 
-  if (phase === "quality") {
+  if (phase === "picker") {
     return (
       <AnimatePresence mode="wait">
-        <motion.div key="quality"
+        <motion.div key="picker"
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
-          <QualityPicker
+          <ServerPicker
             cover={cover} title={title} ep={ep}
             streamData={streamData!}
-            onPick={q => { setQuality(q); setPhase("player"); }}
+            onPick={handlePickServer}
             onBack={handleBack}
           />
         </motion.div>
@@ -711,13 +778,14 @@ export default function WatchPage() {
           servers={servers}
           quality={quality}
           allServers={streamData!.servers}
+          initialServer={initialSrv}
           title={title}
           animeTitle={animeTitle}
           cover={cover} ep={ep} totalEps={totalEps}
-          onBack={() => setPhase("quality")}
+          onBack={() => setPhase("picker")}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
-          onChangeQuality={q => setQuality(q)}
+          onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
         />
       </motion.div>
     </AnimatePresence>

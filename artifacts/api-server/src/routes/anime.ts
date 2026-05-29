@@ -3101,16 +3101,9 @@ router.get("/anime/hls-player", async (req, res) => {
   const quality = ((req.query.quality as string) || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
 
-  // Build the proxied m3u8 URL (route through our hls-proxy for CORS bypass)
-  let m3u8Url: string;
-  try {
-    // If it's already pointing to our hls-proxy, use as-is
-    if (rawUrl.includes("/api/anime/hls-proxy") || rawUrl.includes("/api/anime/seg-proxy")) {
-      m3u8Url = rawUrl;
-    } else {
-      m3u8Url = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(ref || rawUrl)}`;
-    }
-  } catch { m3u8Url = rawUrl; }
+  // Use the URL directly — AnimeX CDN serves to browsers fine (CORS allowed)
+  // Only route through proxy if it's already a proxy URL
+  const m3u8Url = rawUrl.startsWith("/api/") ? rawUrl : rawUrl;
 
   const qualityLabel = quality ? ` · ${quality}` : "";
   const html = `<!DOCTYPE html>
@@ -3225,20 +3218,20 @@ router.get("/anime/anipub-stream", async (req, res) => {
     }
 
     // Merge AnimeX HLS sources → wrap each in /api/anime/hls-player
+    // Pass the raw m3u8 URL directly (browser fetches it, no server proxy needed — CDN allows browser requests)
     if (animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value)) {
       for (const src of animexSrcs.value as AnimexHlsSrc[]) {
         if (!src.url) continue;
-        const proxiedM3u8 = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(src.referer)}`;
-        const playerUrl   = `/api/anime/hls-player?url=${encodeURIComponent(proxiedM3u8)}&quality=${encodeURIComponent(src.quality)}`;
+        // Direct browser HLS: hls.js in the iframe page fetches the m3u8 directly from the CDN
+        const playerUrl = `/api/anime/hls-player?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(src.referer)}&quality=${encodeURIComponent(src.quality)}`;
         const q = src.quality.toLowerCase();
         if (q.includes("1080")) {
-          result["1080p FHD"].unshift(playerUrl); // AnimeX first (direct HLS is best)
+          result["1080p FHD"].unshift(playerUrl);
         } else if (q.includes("720")) {
           result["720p HD"].unshift(playerUrl);
         } else if (q.includes("480") || q.includes("360") || q.includes("240")) {
           result["360p SD"].unshift(playerUrl);
         } else {
-          // unknown quality → add to all tiers
           result["720p HD"].unshift(playerUrl);
         }
       }
@@ -3693,7 +3686,10 @@ router.get("/anime/hls-proxy", async (req, res) => {
     } catch {}
   }
 
-  let origin = ""; try { origin = new URL(url).origin; } catch {}
+  // Use origin from the referer page (e.g. animex.one) so CDNs that check Origin allow the request
+  let origin = "";
+  try { origin = new URL(ref || url).origin; } catch {}
+  if (!origin) try { origin = new URL(url).origin; } catch {}
   try {
     const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(18000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
