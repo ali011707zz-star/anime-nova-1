@@ -3120,6 +3120,8 @@ router.get("/anime/animex-source", async (req, res) => {
     if (ref.includes("kwik.cx") && !ref.endsWith("/")) ref += "/";
     // Proxy through our hls-proxy so CDN sees the same server IP that fetched the token
     const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(best.url)}&ref=${encodeURIComponent(ref)}`;
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
     res.json({ proxyUrl, rawUrl: best.url, quality: best.quality, referer: ref });
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "failed" });

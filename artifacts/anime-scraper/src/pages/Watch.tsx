@@ -162,9 +162,24 @@ function ServerPicker({
   onPick: (q: Quality, idx: number) => void;
   onBack: () => void;
 }) {
-  const allGroups = QUALITY_LABELS.map(q => ({
-    q, servers: streamData.servers[q] || [],
-  })).filter(g => g.servers.length > 0);
+  /* Detect if all quality tiers have identical server lists → flat mode */
+  const q1 = streamData.servers["1080p FHD"] || [];
+  const q2 = streamData.servers["720p HD"]   || [];
+  const q3 = streamData.servers["360p SD"]   || [];
+  const allIdentical =
+    q1.length > 0 &&
+    q1.length === q2.length && q1.length === q3.length &&
+    q1.every((u, i) => u === q2[i] && u === q3[i]);
+
+  /* In flat mode use the 1080p tier as canonical, pick quality that has any servers */
+  const canonicalQ: Quality = allIdentical
+    ? "1080p FHD"
+    : (QUALITY_LABELS.find(q => (streamData.servers[q]?.length || 0) > 0) || "720p HD");
+
+  const allGroups = allIdentical
+    ? [{ q: canonicalQ, servers: q1 }]
+    : QUALITY_LABELS.map(q => ({ q, servers: streamData.servers[q] || [] }))
+        .filter(g => g.servers.length > 0);
 
   const flatRows: { q: Quality; url: string; idx: number; globalIdx: number }[] = [];
   allGroups.forEach(({ q, servers }) =>
@@ -199,15 +214,18 @@ function ServerPicker({
         style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
         {allGroups.map(({ q, servers }) => (
           <div key={q}>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/8">
-                <span className="text-white font-black font-mono text-[16px] leading-none">{QUALITY_SHORT[q]}</span>
-                <span className="w-px h-3.5 bg-white/15" />
-                <span className="text-white/40 text-[10px] font-['Cairo'] font-bold">{QUALITY_AR[q]}</span>
+            {/* Quality section header — hidden in flat mode */}
+            {!allIdentical && (
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/8">
+                  <span className="text-white font-black font-mono text-[16px] leading-none">{QUALITY_SHORT[q]}</span>
+                  <span className="w-px h-3.5 bg-white/15" />
+                  <span className="text-white/40 text-[10px] font-['Cairo'] font-bold">{QUALITY_AR[q]}</span>
+                </div>
+                <div className="flex-1 h-px bg-white/6" />
+                <span className="text-white/18 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
               </div>
-              <div className="flex-1 h-px bg-white/6" />
-              <span className="text-white/18 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
-            </div>
+            )}
 
             <div className="space-y-2.5">
               {servers.map((url, idx) => {
@@ -283,16 +301,15 @@ function SubtitleOverlay({ cues, elapsed }: { cues: SubCue[]; elapsed: number })
 
 /* ══════════════════════════════════ NATIVE HLS PLAYER ═══════ */
 function NativeHLSPlayer({
-  src, onLoadError,
+  src, onRealQuality,
 }: {
   src: string;
-  onLoadError: () => void;
+  onRealQuality?: (q: string) => void;
 }) {
-  const videoRef   = useRef<HTMLVideoElement>(null);
-  const hlsRef     = useRef<Hls | null>(null);
-  const hideTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoRef    = useRef<HTMLVideoElement>(null);
+  const hlsRef      = useRef<Hls | null>(null);
+  const hideTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressRef = useRef<HTMLDivElement>(null);
-  const isDragging  = useRef(false);
 
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
@@ -345,27 +362,33 @@ function NativeHLSPlayer({
 
     let m3u8Url = src;
 
-    /* animex-player → fetch animex-source to get fresh m3u8 */
+    /* animex-player → fetch animex-source to get fresh m3u8
+       Always add _t=timestamp to bust browser/server cache so the
+       CDN token in the returned m3u8 URL is never stale */
     if (src.includes("/animex-player")) {
       try {
         const qs = src.includes("?") ? src.split("?")[1] : "";
         const params = new URLSearchParams(qs);
+        params.set("_t", String(Date.now()));
         const sourceApi = `/api/anime/animex-source?${params.toString()}`;
-        const r = await fetch(sourceApi, { signal: AbortSignal.timeout(15000) });
+        const r = await fetch(sourceApi, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(18000),
+        });
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));
           setError((d as any).error || `فشل جلب المصدر (${r.status})`);
           setLoading(false);
-          onLoadError();
           return;
         }
-        const data = await r.json() as { proxyUrl?: string; rawUrl?: string };
-        if (!data.proxyUrl) { setError("لا يوجد رابط"); setLoading(false); onLoadError(); return; }
+        const data = await r.json() as { proxyUrl?: string; rawUrl?: string; quality?: string };
+        if (!data.proxyUrl) { setError("لا يوجد رابط HLS"); setLoading(false); return; }
         m3u8Url = data.proxyUrl;
+        /* Report actual stream quality to parent */
+        if (data.quality && onRealQuality) onRealQuality(data.quality);
       } catch (ex: any) {
-        setError("خطأ في الاتصال: " + (ex?.message || ""));
+        setError("خطأ في الاتصال بخادم المصدر");
         setLoading(false);
-        onLoadError();
         return;
       }
     }
@@ -376,9 +399,7 @@ function NativeHLSPlayer({
         enableWorker: false,
         lowLatencyMode: false,
         maxBufferLength: 30,
-        xhrSetup(xhr) {
-          xhr.withCredentials = false;
-        },
+        xhrSetup(xhr) { xhr.withCredentials = false; },
       });
       hlsRef.current = hls;
       hls.loadSource(m3u8Url);
@@ -391,9 +412,8 @@ function NativeHLSPlayer({
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          setError("فشل تحميل الفيديو — يرجى تجربة مصدر آخر");
+          setError("فشل تحميل البث — اضغط إعادة المحاولة");
           setLoading(false);
-          onLoadError();
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -403,16 +423,14 @@ function NativeHLSPlayer({
         video.play().catch(() => {});
       }, { once: true });
       video.addEventListener("error", () => {
-        setError("فشل التشغيل — المتصفح لا يدعم هذا التنسيق");
+        setError("فشل التشغيل على هذا المتصفح");
         setLoading(false);
-        onLoadError();
       }, { once: true });
     } else {
-      setError("المتصفح لا يدعم تشغيل HLS");
+      setError("المتصفح لا يدعم تشغيل HLS — جرّب Chrome أو Firefox");
       setLoading(false);
-      onLoadError();
     }
-  }, [src]);
+  }, [src, onRealQuality]);
 
   useEffect(() => {
     loadSource();
@@ -664,8 +682,18 @@ function EpisodePlayer({
   const [retrying,     setRetrying]       = useState(false);
   const [showQuality,  setShowQuality]    = useState(false);
   const [fs,           setFs]             = useState(false);
+  const [realQuality,  setRealQuality]    = useState<string | null>(null);
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* Detect if all quality tiers have the same server list (flat mode → hide quality picker) */
+  const q1 = allServers["1080p FHD"] || [];
+  const q2 = allServers["720p HD"]   || [];
+  const q3 = allServers["360p SD"]   || [];
+  const allQualityIdentical =
+    q1.length > 0 &&
+    q1.length === q2.length && q1.length === q3.length &&
+    q1.every((u, i) => u === q2[i] && u === q3[i]);
 
   /* ── Subtitle state ── */
   const [subState,    setSubState]    = useState<"idle"|"loading"|"ready"|"none">("idle");
@@ -687,6 +715,7 @@ function EpisodePlayer({
     setIframeLoaded(false);
     setIframeErr(false);
     setRetrying(false);
+    setRealQuality(null);
     retryCount.current = 0;
     if (retryTimer.current) clearTimeout(retryTimer.current);
   }, [quality, servers]);
@@ -829,13 +858,21 @@ function EpisodePlayer({
           <span>ترجمة</span>
         </button>
 
-        {/* Quality button */}
-        <button onClick={() => setShowQuality(s => !s)}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[11px] font-bold font-mono transition-all active:scale-90 shrink-0
-            ${showQuality ? "bg-violet-600 border-violet-400 text-white" : "bg-white/8 border-white/12 text-white/60"}`}>
-          <Settings className="w-3.5 h-3.5" />
-          {QUALITY_SHORT[quality]}
-        </button>
+        {/* Quality button — hidden when all tiers identical (quality picker has no effect) */}
+        {!allQualityIdentical && (
+          <button onClick={() => setShowQuality(s => !s)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[11px] font-bold font-mono transition-all active:scale-90 shrink-0
+              ${showQuality ? "bg-violet-600 border-violet-400 text-white" : "bg-white/8 border-white/12 text-white/60"}`}>
+            <Settings className="w-3.5 h-3.5" />
+            {QUALITY_SHORT[quality]}
+          </button>
+        )}
+        {/* Actual stream quality badge (HLS only) */}
+        {realQuality && (
+          <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 shrink-0">
+            <span className="text-[10px] font-bold font-mono text-white/45">{realQuality}</span>
+          </div>
+        )}
 
         {!currentInfo.isHls && (
           <button onClick={toggleFs}
@@ -962,13 +999,7 @@ function EpisodePlayer({
           <NativeHLSPlayer
             key={`hls-${currentUrl}-${currentServer}`}
             src={currentUrl}
-            onLoadError={() => {
-              if (currentServer + 1 < servers.length) {
-                setCurrentServer(s => s + 1);
-              } else {
-                setIframeErr(true);
-              }
-            }}
+            onRealQuality={q => setRealQuality(q)}
           />
         )}
 
