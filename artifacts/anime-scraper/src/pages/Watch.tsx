@@ -625,11 +625,12 @@ export default function WatchPage() {
     if (fetchStarted.current) return;
     fetchStarted.current = true;
     const params = new URLSearchParams({ title: t, english: e, ep: String(ep) });
+    if (animeId) params.set("anilistId", String(animeId));
     fetch(`/api/anime/anipub-stream?${params}`)
       .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then((d: StreamData) => { setStreamData(d); setFetchDone(true); })
       .catch(() => setFetchDone(true));
-  }, [ep]);
+  }, [ep, animeId]);
 
   useEffect(() => {
     const t = setTimeout(() => setLoadingDone(true), 1500);

@@ -2718,6 +2718,89 @@ async function getAnimercoSources(title: string, english: string | null, ep: num
 
 
 // ════════════════════════════════════════════════════════════════════
+//  AnimeX scraper  (animex.one)
+//  Flow: AniList ID → GraphQL slug → REST servers → REST sources → HLS m3u8
+//  Provides direct HLS streams playable via our hls-player page
+// ════════════════════════════════════════════════════════════════════
+const ANIMEX_GRAPHQL = "https://graphql.animex.one/graphql";
+const ANIMEX_REST    = "https://pp.animex.one/rest/api";
+const ANIMEX_HDRS: Record<string, string> = {
+  "User-Agent": BROWSER_UA,
+  "Accept": "application/json, text/plain, */*",
+  "Origin": "https://animex.one",
+  "Referer": "https://animex.one/",
+};
+const animexSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const ANIMEX_SLUG_TTL = 24 * 3_600_000;
+
+async function getAnimexSlug(anilistId: number): Promise<string | null> {
+  const ck = String(anilistId);
+  const hit = animexSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < ANIMEX_SLUG_TTL) return hit.slug;
+  try {
+    const r = await fetch(ANIMEX_GRAPHQL, {
+      method: "POST",
+      headers: { ...ANIMEX_HDRS, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: "query($id:Int){anime(anilistId:$id){id anilistId}}",
+        variables: { id: anilistId },
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) { animexSlugCache.set(ck, { slug: null, ts: Date.now() }); return null; }
+    const d = await r.json() as any;
+    const slug: string | null = d?.data?.anime?.id ?? null;
+    animexSlugCache.set(ck, { slug, ts: Date.now() });
+    return slug;
+  } catch { animexSlugCache.set(ck, { slug: null, ts: Date.now() }); return null; }
+}
+
+interface AnimexHlsSrc { url: string; quality: string; referer: string; }
+
+async function getAnimexEpisodeSources(anilistId: number, ep: number): Promise<AnimexHlsSrc[]> {
+  const slug = await getAnimexSlug(anilistId);
+  if (!slug) return [];
+
+  let subProviders: any[] = [];
+  try {
+    const r = await fetch(
+      `${ANIMEX_REST}/servers?id=${encodeURIComponent(slug)}&epNum=${ep}`,
+      { headers: ANIMEX_HDRS, signal: AbortSignal.timeout(8000) },
+    );
+    if (r.ok) {
+      const d = await r.json() as any;
+      subProviders = Array.isArray(d.subProviders) ? d.subProviders : [];
+    }
+  } catch { return []; }
+
+  if (!subProviders.length) return [];
+
+  const orderedIds: string[] = [
+    ...subProviders.filter((p: any) => p?.default).map((p: any) => p.id),
+    ...subProviders.filter((p: any) => !p?.default).map((p: any) => p.id),
+  ].filter(Boolean) as string[];
+
+  for (const providerId of orderedIds) {
+    try {
+      const r = await fetch(
+        `${ANIMEX_REST}/sources?id=${encodeURIComponent(slug)}&epNum=${ep}&type=sub&providerId=${encodeURIComponent(providerId)}`,
+        { headers: ANIMEX_HDRS, signal: AbortSignal.timeout(12000) },
+      );
+      if (!r.ok) continue;
+      const d = await r.json() as any;
+      const sources: any[] = Array.isArray(d.sources) ? d.sources : [];
+      if (!sources.length) continue;
+      const referer: string = d.headers?.Referer || d.headers?.referer || "https://animex.one/";
+      const result: AnimexHlsSrc[] = sources
+        .filter((s: any) => s?.url)
+        .map((s: any) => ({ url: s.url as string, quality: (s.quality as string) || "default", referer }));
+      if (result.length) return result;
+    } catch { continue; }
+  }
+  return [];
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  VIDNEST / ANIMEPAHE scraper
 //  Uses anilistId directly — no search needed
 //  URL: https://vidnest.fun/animepahe/{anilistId}/{ep}/sub
@@ -3008,43 +3091,163 @@ async function getAniPubEpisodeServers(animeId: number, ep: number): Promise<str
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  HLS Player page  GET /api/anime/hls-player?url=&ref=&quality=
+//  Returns an HTML page that plays an HLS m3u8 stream via hls.js
+//  Designed to be loaded inside the existing iframe player
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/hls-player", async (req, res) => {
+  const rawUrl  = ((req.query.url  as string) || "").trim();
+  const ref     = ((req.query.ref  as string) || "").trim();
+  const quality = ((req.query.quality as string) || "").trim();
+  if (!rawUrl) { res.status(400).send("url required"); return; }
+
+  // Build the proxied m3u8 URL (route through our hls-proxy for CORS bypass)
+  let m3u8Url: string;
+  try {
+    // If it's already pointing to our hls-proxy, use as-is
+    if (rawUrl.includes("/api/anime/hls-proxy") || rawUrl.includes("/api/anime/seg-proxy")) {
+      m3u8Url = rawUrl;
+    } else {
+      m3u8Url = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(ref || rawUrl)}`;
+    }
+  } catch { m3u8Url = rawUrl; }
+
+  const qualityLabel = quality ? ` · ${quality}` : "";
+  const html = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AnimeX${qualityLabel}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{width:100%;height:100%;background:#000;overflow:hidden}
+    video{width:100%;height:100%;object-fit:contain;display:block}
+    #loading{position:absolute;inset:0;background:#000;display:flex;align-items:center;justify-content:center;z-index:10;flex-direction:column;gap:12px}
+    .spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,0.1);border-top-color:#7c3aed;border-radius:50%;animation:spin 0.8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    #lbl{color:rgba(255,255,255,0.35);font-family:Cairo,sans-serif;font-size:12px}
+    #err{display:none;position:absolute;inset:0;background:#000;z-index:11;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px;text-align:center}
+    #err.show{display:flex}
+    #err p{color:rgba(255,255,255,0.55);font-family:Cairo,sans-serif;font-size:13px}
+    #err button{padding:8px 20px;background:#7c3aed;color:#fff;border:none;border-radius:10px;cursor:pointer;font-family:Cairo,sans-serif;font-size:13px}
+    .qbadge{position:absolute;top:10px;right:10px;background:rgba(124,58,237,0.85);color:#fff;padding:3px 10px;border-radius:8px;font-size:11px;font-family:monospace;font-weight:bold;z-index:5;pointer-events:none}
+  </style>
+</head>
+<body>
+  <div id="loading"><div class="spinner"></div><span id="lbl">AnimeX${qualityLabel ? " " + qualityLabel : ""}</span></div>
+  <div id="err"><p>⚠️ فشل تحميل الفيديو</p><button onclick="location.reload()">إعادة المحاولة</button></div>
+  ${quality ? `<div class="qbadge">${quality}</div>` : ""}
+  <video id="v" autoplay controls playsinline></video>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+  <script>
+    (function(){
+      var src=${JSON.stringify(m3u8Url)};
+      var v=document.getElementById('v');
+      var loading=document.getElementById('loading');
+      var err=document.getElementById('err');
+      function hide(){loading.style.display='none';}
+      function showErr(){loading.style.display='none';err.className='show';}
+      if(typeof Hls!=='undefined'&&Hls.isSupported()){
+        var hls=new Hls({enableWorker:false,lowLatencyMode:false,maxBufferLength:30,maxMaxBufferLength:60});
+        hls.loadSource(src);
+        hls.attachMedia(v);
+        hls.on(Hls.Events.MANIFEST_PARSED,function(){hide();v.play().catch(function(){});});
+        hls.on(Hls.Events.ERROR,function(e,d){if(d.fatal)showErr();});
+      } else if(v.canPlayType('application/vnd.apple.mpegurl')){
+        v.src=src;
+        v.addEventListener('loadedmetadata',function(){hide();v.play().catch(function(){});});
+        v.addEventListener('error',showErr);
+      } else {showErr();}
+    })();
+  </script>
+</body>
+</html>`;
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(html);
+});
+
+
+// ════════════════════════════════════════════════════════════════════
 //  GET /api/anime/anipub-stream
 //  Returns { servers: { "1080p FHD": [...], "720p HD": [...], "360p SD": [...] } }
+//  Merges AniPub embed sources + AnimeX direct HLS sources (via hls-player)
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/anipub-stream", async (req, res) => {
-  const title   = ((req.query.title   as string) || "").trim();
-  const english = ((req.query.english as string) || "").trim();
-  const ep      = parseInt((req.query.ep as string) || "1");
+  const title     = ((req.query.title     as string) || "").trim();
+  const english   = ((req.query.english   as string) || "").trim();
+  const ep        = parseInt((req.query.ep as string) || "1");
+  const anilistId = parseInt((req.query.anilistId as string) || "0");
 
-  if (!title && !english) {
-    res.status(400).json({ error: "title required" });
+  if (!title && !english && !anilistId) {
+    res.status(400).json({ error: "title or anilistId required" });
     return;
   }
 
-  // 300ms rate-limit buffer as requested
+  // 300ms rate-limit buffer
   await new Promise(r => setTimeout(r, 300));
 
-  try {
-    const titles = [english, title].filter(Boolean) as string[];
-    const animeId = await getAniPubId(titles);
+  const result: { "1080p FHD": string[]; "720p HD": string[]; "360p SD": string[] } = {
+    "1080p FHD": [],
+    "720p HD":   [],
+    "360p SD":   [],
+  };
 
-    if (!animeId) {
-      res.json({ servers: { "1080p FHD": [], "720p HD": [], "360p SD": [] }, total: 0 });
-      return;
+  try {
+    // Run AniPub + AnimeX in parallel
+    const [anipubResult, animexSrcs] = await Promise.allSettled([
+      // ── AniPub (embed iframes) ──
+      (async () => {
+        if (!title && !english) return null;
+        const titles = [english, title].filter(Boolean) as string[];
+        const animeId = await getAniPubId(titles);
+        if (!animeId) return null;
+        const servers = await getAniPubEpisodeServers(animeId, ep);
+        return { animeId, servers };
+      })(),
+
+      // ── AnimeX (direct HLS via hls-player page) ──
+      (async () => {
+        if (!anilistId || anilistId <= 0) return [];
+        return getAnimexEpisodeSources(anilistId, ep);
+      })(),
+    ]);
+
+    // Merge AniPub servers (embed URLs) — shared across all quality tiers
+    if (anipubResult.status === "fulfilled" && anipubResult.value?.servers?.length) {
+      const apServers = anipubResult.value.servers;
+      result["1080p FHD"].push(...apServers);
+      result["720p HD"].push(...apServers);
+      result["360p SD"].push(...apServers);
     }
 
-    const servers = await getAniPubEpisodeServers(animeId, ep);
+    // Merge AnimeX HLS sources → wrap each in /api/anime/hls-player
+    if (animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value)) {
+      for (const src of animexSrcs.value as AnimexHlsSrc[]) {
+        if (!src.url) continue;
+        const proxiedM3u8 = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(src.referer)}`;
+        const playerUrl   = `/api/anime/hls-player?url=${encodeURIComponent(proxiedM3u8)}&quality=${encodeURIComponent(src.quality)}`;
+        const q = src.quality.toLowerCase();
+        if (q.includes("1080")) {
+          result["1080p FHD"].unshift(playerUrl); // AnimeX first (direct HLS is best)
+        } else if (q.includes("720")) {
+          result["720p HD"].unshift(playerUrl);
+        } else if (q.includes("480") || q.includes("360") || q.includes("240")) {
+          result["360p SD"].unshift(playerUrl);
+        } else {
+          // unknown quality → add to all tiers
+          result["720p HD"].unshift(playerUrl);
+        }
+      }
+    }
 
-    // All quality tiers share the same servers (AniPub doesn't differentiate quality)
-    res.json({
-      servers: {
-        "1080p FHD": servers,
-        "720p HD":   servers,
-        "360p SD":   servers,
-      },
-      total: servers.length,
-      animeId,
-    });
+    const total = Object.values(result).reduce((s, a) => s + a.length, 0);
+    const animeId = anipubResult.status === "fulfilled" ? anipubResult.value?.animeId : undefined;
+    res.json({ servers: result, total, animeId });
+
   } catch (e: any) {
     console.error("anipub-stream error:", e?.message ?? e);
     res.status(500).json({ error: "Failed to fetch servers" });
