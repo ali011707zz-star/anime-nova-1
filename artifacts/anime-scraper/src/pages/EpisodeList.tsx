@@ -314,7 +314,7 @@ export default function EpisodeListPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/20 to-transparent" />
 
         {/* Back button */}
-        <button onClick={() => navigate(`/anime/${params.id}`)}
+        <button onClick={() => window.history.back()}
           className="absolute top-4 right-4 w-10 h-10 bg-black/50 backdrop-blur-md rounded-2xl flex items-center justify-center border border-white/10 active:scale-90 transition-transform">
           <ChevronRight className="w-5 h-5 text-white" />
         </button>
