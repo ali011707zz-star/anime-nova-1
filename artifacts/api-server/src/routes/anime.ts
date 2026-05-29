@@ -3091,6 +3091,168 @@ async function getAniPubEpisodeServers(animeId: number, ep: number): Promise<str
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  AnimeX lazy source  GET /api/anime/animex-source?anilistId=&ep=&quality=
+//  Fetches fresh m3u8 at request-time so token is never stale
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/animex-source", async (req, res) => {
+  const anilistId  = parseInt((req.query.anilistId as string) || "0");
+  const ep         = parseInt((req.query.ep        as string) || "1");
+  const qualityPref = ((req.query.quality as string) || "720").trim();
+
+  if (!anilistId) { res.status(400).json({ error: "anilistId required" }); return; }
+  try {
+    const srcs = await getAnimexEpisodeSources(anilistId, ep);
+    if (!srcs.length) { res.status(404).json({ error: "no sources" }); return; }
+
+    // Pick closest quality match
+    const ranked = [...srcs].sort((a, b) => {
+      const scoreQ = (q: string) => {
+        if (qualityPref === "1080" && q.includes("1080")) return 0;
+        if (qualityPref === "720"  && q.includes("720"))  return 0;
+        if (qualityPref === "360"  && (q.includes("480") || q.includes("360") || q.includes("240"))) return 0;
+        return 1;
+      };
+      return scoreQ(a.quality) - scoreQ(b.quality);
+    });
+    const best = ranked[0];
+    // Normalize kwik.cx referer to include trailing slash (CDN requires exact match)
+    let ref = best.referer || "https://kwik.cx/";
+    if (ref.includes("kwik.cx") && !ref.endsWith("/")) ref += "/";
+    // Proxy through our hls-proxy so CDN sees the same server IP that fetched the token
+    const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(best.url)}&ref=${encodeURIComponent(ref)}`;
+    res.json({ proxyUrl, rawUrl: best.url, quality: best.quality, referer: ref });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? "failed" });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  AnimeX lazy player  GET /api/anime/animex-player?anilistId=&ep=&quality=
+//  Returns HTML page that fetches fresh m3u8 at load time via /animex-source
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/animex-player", async (req, res) => {
+  const anilistId  = ((req.query.anilistId as string) || "").trim();
+  const ep         = ((req.query.ep        as string) || "1").trim();
+  const quality    = ((req.query.quality   as string) || "720").trim();
+
+  const sourceApiUrl = `/api/anime/animex-source?anilistId=${encodeURIComponent(anilistId)}&ep=${encodeURIComponent(ep)}&quality=${encodeURIComponent(quality)}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AnimeX</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:Cairo,sans-serif}
+    video{width:100%;height:100%;object-fit:contain;display:block}
+    #loading{position:absolute;inset:0;background:#09090f;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;z-index:10}
+    .ring{width:42px;height:42px;border:3px solid rgba(139,92,246,.15);border-top-color:#8b5cf6;border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    #loading p{color:rgba(255,255,255,.35);font-size:12px}
+    #err{display:none;position:absolute;inset:0;background:#09090f;z-index:11;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:24px;text-align:center}
+    #err.show{display:flex}
+    #err .icon{font-size:32px}
+    #err h3{color:rgba(255,255,255,.7);font-size:14px;font-weight:900}
+    #err p{color:rgba(255,255,255,.3);font-size:11px;line-height:1.6}
+    #err button{padding:10px 24px;background:#7c3aed;color:#fff;border:none;border-radius:12px;cursor:pointer;font-size:13px;font-family:Cairo,sans-serif;font-weight:700}
+    .qbadge{position:absolute;top:8px;right:8px;background:rgba(139,92,246,.8);color:#fff;padding:2px 8px;border-radius:6px;font-size:10px;font-family:monospace;font-weight:700;z-index:5;pointer-events:none}
+  </style>
+</head>
+<body>
+  <div id="loading"><div class="ring"></div><p>AnimeX · جاري تحميل الحلقة…</p></div>
+  <div id="err">
+    <div class="icon">⚠️</div>
+    <h3 id="errTitle">تعذّر تحميل الفيديو</h3>
+    <p id="errMsg">يرجى تجربة مصدر آخر أو الضغط على إعادة المحاولة</p>
+    <button onclick="startLoad()">إعادة المحاولة</button>
+  </div>
+  <div class="qbadge">${quality}p</div>
+  <video id="v" autoplay controls playsinline></video>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+  <script>
+  (function(){
+    var sourceApi=${JSON.stringify(sourceApiUrl)};
+    var v=document.getElementById('v');
+    var loading=document.getElementById('loading');
+    var err=document.getElementById('err');
+    var errMsg=document.getElementById('errMsg');
+    var hlsInstance=null;
+
+    function hide(){loading.style.display='none';}
+    function showErr(msg){
+      hide();
+      if(msg)errMsg.textContent=msg;
+      err.className='show';
+    }
+
+    window.startLoad=function(){
+      err.className='';
+      loading.style.display='flex';
+      if(hlsInstance){hlsInstance.destroy();hlsInstance=null;}
+      v.src='';
+      load();
+    };
+
+    async function load(){
+      try{
+        var r=await fetch(sourceApi);
+        if(!r.ok){
+          var d=await r.json().catch(()=>({}));
+          showErr(d.error||'فشل جلب المصدر ('+r.status+')');
+          return;
+        }
+        var data=await r.json();
+        var src=data.proxyUrl;
+        if(!src){showErr('لا يوجد رابط');return;}
+
+        if(typeof Hls!=='undefined'&&Hls.isSupported()){
+          hlsInstance=new Hls({enableWorker:false,lowLatencyMode:false,maxBufferLength:30});
+          hlsInstance.loadSource(src);
+          hlsInstance.attachMedia(v);
+          hlsInstance.on(Hls.Events.MANIFEST_PARSED,function(){hide();v.play().catch(function(){});});
+          hlsInstance.on(Hls.Events.ERROR,function(e,d){
+            if(d.fatal){
+              // Fallback: try raw URL directly (in case proxy had issues)
+              if(data.rawUrl&&src!==data.rawUrl){
+                hlsInstance.destroy();
+                hlsInstance=new Hls({enableWorker:false});
+                hlsInstance.loadSource(data.rawUrl);
+                hlsInstance.attachMedia(v);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED,function(){hide();v.play().catch(function(){});});
+                hlsInstance.on(Hls.Events.ERROR,function(e2,d2){if(d2.fatal)showErr('فشل تحميل الفيديو من المصدر المباشر');});
+              } else {
+                showErr('فشل تحميل الفيديو — يرجى تجربة مصدر آخر');
+              }
+            }
+          });
+        } else if(v.canPlayType('application/vnd.apple.mpegurl')){
+          v.src=src;
+          v.addEventListener('loadedmetadata',function(){hide();v.play().catch(function(){});});
+          v.addEventListener('error',function(){showErr('فشل التشغيل');});
+        } else {
+          showErr('المتصفح لا يدعم تشغيل HLS');
+        }
+      } catch(ex){
+        showErr('خطأ في الاتصال: '+ex.message);
+      }
+    }
+
+    load();
+  })();
+  </script>
+</body>
+</html>`;
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(html);
+});
+
+
+// ════════════════════════════════════════════════════════════════════
 //  HLS Player page  GET /api/anime/hls-player?url=&ref=&quality=
 //  Returns an HTML page that plays an HLS m3u8 stream via hls.js
 //  Designed to be loaded inside the existing iframe player
@@ -3217,23 +3379,11 @@ router.get("/anime/anipub-stream", async (req, res) => {
       result["360p SD"].push(...apServers);
     }
 
-    // Merge AnimeX HLS sources → wrap each in /api/anime/hls-player
-    // Pass the raw m3u8 URL directly (browser fetches it, no server proxy needed — CDN allows browser requests)
-    if (animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value)) {
-      for (const src of animexSrcs.value as AnimexHlsSrc[]) {
-        if (!src.url) continue;
-        // Direct browser HLS: hls.js in the iframe page fetches the m3u8 directly from the CDN
-        const playerUrl = `/api/anime/hls-player?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(src.referer)}&quality=${encodeURIComponent(src.quality)}`;
-        const q = src.quality.toLowerCase();
-        if (q.includes("1080")) {
-          result["1080p FHD"].unshift(playerUrl);
-        } else if (q.includes("720")) {
-          result["720p HD"].unshift(playerUrl);
-        } else if (q.includes("480") || q.includes("360") || q.includes("240")) {
-          result["360p SD"].unshift(playerUrl);
-        } else {
-          result["720p HD"].unshift(playerUrl);
-        }
+    // Merge AnimeX via lazy-player URL (fetches fresh m3u8 at play time so token is always current)
+    if (anilistId > 0 && animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value) && animexSrcs.value.length > 0) {
+      for (const tier of ["1080p FHD", "720p HD", "360p SD"] as const) {
+        const q = tier === "1080p FHD" ? "1080" : tier === "720p HD" ? "720" : "360";
+        result[tier].unshift(`/api/anime/animex-player?anilistId=${anilistId}&ep=${ep}&quality=${q}`);
       }
     }
 
@@ -3648,23 +3798,32 @@ video { width: 100% !important; height: 100% !important; object-fit: contain !im
 // ════════════════════════════════════════════════════════════════════
 //  HLS / Segment Proxy — bypasses CORS on CDN video streams
 // ════════════════════════════════════════════════════════════════════
-const HLS_PROXY_HDRS = (ref: string, origin: string) => ({
+const HLS_PROXY_HDRS = (ref: string, origin?: string) => ({
   "User-Agent": BROWSER_UA,
-  Referer: ref || "",
-  Origin: origin || "",
+  ...(ref ? { Referer: ref } : {}),
+  // Only send Origin when explicitly needed (kwik.cx CDN blocks requests that include Origin)
+  ...(origin && !ref.includes("kwik.cx") ? { Origin: origin } : {}),
   Accept: "*/*",
   "Accept-Language": "ar,en;q=0.9",
 });
 
 function rewriteM3u8(manifest: string, baseUrl: string, _selfBase: string, ref: string): string {
   const base = new URL(baseUrl);
+  const toProxy = (raw: string) => {
+    let absUrl: string;
+    try { absUrl = new URL(raw).href; }
+    catch { try { absUrl = new URL(raw, base).href; } catch { return raw; } }
+    return `/api/anime/seg-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}`;
+  };
   return manifest.split("\n").map(line => {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) return line;
-    let absUrl: string;
-    try { absUrl = new URL(trimmed).href; }
-    catch { try { absUrl = new URL(trimmed, base).href; } catch { return line; } }
-    return `/api/anime/seg-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}`;
+    if (!trimmed) return line;
+    // Rewrite EXT-X-KEY URI (AES-128 decryption key)
+    if (trimmed.startsWith("#EXT-X-KEY") && trimmed.includes('URI="')) {
+      return trimmed.replace(/URI="([^"]+)"/, (_, uri) => `URI="${toProxy(uri)}"`);
+    }
+    if (trimmed.startsWith("#")) return line;
+    return toProxy(trimmed);
   }).join("\n");
 }
 
