@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, ChevronLeft, Play, Loader2,
+  ChevronRight, ChevronLeft, Play, Pause, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
-  Settings, Subtitles, MonitorPlay, Tv2,
+  Settings, Subtitles, MonitorPlay, Tv2, Volume2, VolumeX,
+  SkipBack, SkipForward,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import Hls from "hls.js";
 
 /* ══════════════════════════════════ ANILIST ══════════════════ */
 const ANILIST_Q = `query ($id: Int) {
@@ -68,6 +70,15 @@ function getServerInfo(url: string, idx: number): ServerInfo {
     return { label: "أنمي ليك", sublabel: "مترجم عربي", isHls: false };
   }
   return { label: `سيرفر ${idx + 1}`, sublabel: "مترجم عربي", isHls: false };
+}
+
+function fmtTime(s: number) {
+  if (!isFinite(s) || s < 0) return "0:00";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
 /* ══════════════════════════════════ SRT PARSER ══════════════ */
@@ -155,7 +166,6 @@ function ServerPicker({
     q, servers: streamData.servers[q] || [],
   })).filter(g => g.servers.length > 0);
 
-  // Flatten all rows with group info for global stagger
   const flatRows: { q: Quality; url: string; idx: number; globalIdx: number }[] = [];
   allGroups.forEach(({ q, servers }) =>
     servers.forEach((url, idx) => flatRows.push({ q, url, idx, globalIdx: flatRows.length }))
@@ -165,7 +175,6 @@ function ServerPicker({
     <div className="fixed inset-0 z-50 flex flex-col" dir="rtl"
       style={{ background: "radial-gradient(ellipse 90% 60% at 50% 0%, rgba(109,40,217,.18) 0%, #09090f 65%)" }}>
 
-      {/* Header */}
       <div className="flex items-center gap-3 px-4 shrink-0 z-10"
         style={{ paddingTop: "max(16px, env(safe-area-inset-top))", paddingBottom: 14 }}>
         <button onClick={onBack}
@@ -184,15 +193,12 @@ function ServerPicker({
         )}
       </div>
 
-      {/* Thin separator */}
       <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mx-4 mb-1" />
 
-      {/* Scrollable list */}
       <div className="flex-1 overflow-y-auto px-4 pt-3 space-y-6"
         style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
         {allGroups.map(({ q, servers }) => (
           <div key={q}>
-            {/* Quality section pill */}
             <div className="flex items-center gap-3 mb-3">
               <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/8">
                 <span className="text-white font-black font-mono text-[16px] leading-none">{QUALITY_SHORT[q]}</span>
@@ -203,7 +209,6 @@ function ServerPicker({
               <span className="text-white/18 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
             </div>
 
-            {/* Server cards */}
             <div className="space-y-2.5">
               {servers.map((url, idx) => {
                 const info = getServerInfo(url, idx);
@@ -222,12 +227,9 @@ function ServerPicker({
                         ? "bg-gradient-to-l from-violet-950/70 to-[#0e0b1e] border border-violet-500/20"
                         : "bg-white/[0.04] border border-white/8"
                       }`}>
-                      {/* Subtle glow blob for AnimeX */}
                       {isAnimex && (
                         <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full bg-violet-600/20 blur-2xl pointer-events-none" />
                       )}
-
-                      {/* Icon */}
                       <div className={`relative w-11 h-11 rounded-2xl flex items-center justify-center shrink-0
                         ${isAnimex
                           ? "bg-violet-600/25 border border-violet-400/30"
@@ -236,8 +238,6 @@ function ServerPicker({
                           ? <MonitorPlay className="w-5 h-5 text-violet-300" />
                           : <Tv2 className="w-5 h-5 text-blue-300/80" />}
                       </div>
-
-                      {/* Text */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className={`text-[15px] font-black font-['Cairo'] leading-tight
@@ -246,14 +246,12 @@ function ServerPicker({
                           </p>
                           {isAnimex && (
                             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-violet-500/30 text-violet-200 border border-violet-400/25 leading-none">
-                              جديد
+                              HLS مدمج
                             </span>
                           )}
                         </div>
                         <p className="text-white/35 text-[11px] font-['Cairo'] mt-0.5">{info.sublabel}</p>
                       </div>
-
-                      {/* Arrow */}
                       <ChevronLeft className={`w-4 h-4 shrink-0 ${isAnimex ? "text-violet-400/60" : "text-white/20"}`} />
                     </div>
                   </motion.button>
@@ -268,11 +266,7 @@ function ServerPicker({
 }
 
 /* ══════════════════════════════════ SUBTITLE OVERLAY ════════ */
-function SubtitleOverlay({
-  cues, running, elapsed,
-}: {
-  cues: SubCue[]; running: boolean; elapsed: number;
-}) {
+function SubtitleOverlay({ cues, elapsed }: { cues: SubCue[]; elapsed: number }) {
   const current = cues.find(c => elapsed >= c.start && elapsed <= c.end);
   if (!current) return null;
   return (
@@ -283,6 +277,370 @@ function SubtitleOverlay({
           {current.text}
         </p>
       </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════ NATIVE HLS PLAYER ═══════ */
+function NativeHLSPlayer({
+  src, onLoadError,
+}: {
+  src: string;
+  onLoadError: () => void;
+}) {
+  const videoRef   = useRef<HTMLVideoElement>(null);
+  const hlsRef     = useRef<Hls | null>(null);
+  const hideTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
+  const isDragging  = useRef(false);
+
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState<string | null>(null);
+  const [isPlaying,    setIsPlaying]    = useState(false);
+  const [currentTime,  setCurrentTime]  = useState(0);
+  const [duration,     setDuration]     = useState(0);
+  const [buffered,     setBuffered]     = useState(0);
+  const [muted,        setMuted]        = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const [isFs,         setIsFs]         = useState(false);
+  const [retrying,     setRetrying]     = useState(false);
+
+  /* ── Schedule control hide ── */
+  function scheduleHide() {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setShowControls(false), 3000);
+  }
+  function touchControls() {
+    setShowControls(true);
+    scheduleHide();
+  }
+
+  /* ── Fullscreen ── */
+  useEffect(() => {
+    const fn = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", fn);
+    return () => document.removeEventListener("fullscreenchange", fn);
+  }, []);
+
+  function toggleFs() {
+    const el = videoRef.current?.closest("[data-hls-container]") as HTMLElement | null || videoRef.current;
+    if (!el) return;
+    !document.fullscreenElement
+      ? el.requestFullscreen?.().catch(() => {})
+      : document.exitFullscreen?.().catch(() => {});
+  }
+
+  /* ── Load source ── */
+  const loadSource = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    video.src = "";
+    setLoading(true);
+    setError(null);
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPlaying(false);
+
+    let m3u8Url = src;
+
+    /* animex-player → fetch animex-source to get fresh m3u8 */
+    if (src.includes("/animex-player")) {
+      try {
+        const qs = src.includes("?") ? src.split("?")[1] : "";
+        const params = new URLSearchParams(qs);
+        const sourceApi = `/api/anime/animex-source?${params.toString()}`;
+        const r = await fetch(sourceApi, { signal: AbortSignal.timeout(15000) });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          setError((d as any).error || `فشل جلب المصدر (${r.status})`);
+          setLoading(false);
+          onLoadError();
+          return;
+        }
+        const data = await r.json() as { proxyUrl?: string; rawUrl?: string };
+        if (!data.proxyUrl) { setError("لا يوجد رابط"); setLoading(false); onLoadError(); return; }
+        m3u8Url = data.proxyUrl;
+      } catch (ex: any) {
+        setError("خطأ في الاتصال: " + (ex?.message || ""));
+        setLoading(false);
+        onLoadError();
+        return;
+      }
+    }
+
+    /* Init hls.js or native HLS */
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: false,
+        lowLatencyMode: false,
+        maxBufferLength: 30,
+        xhrSetup(xhr) {
+          xhr.withCredentials = false;
+        },
+      });
+      hlsRef.current = hls;
+      hls.loadSource(m3u8Url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setLoading(false);
+        video.play().catch(() => {});
+        setShowControls(true);
+        scheduleHide();
+      });
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          setError("فشل تحميل الفيديو — يرجى تجربة مصدر آخر");
+          setLoading(false);
+          onLoadError();
+        }
+      });
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = m3u8Url;
+      video.addEventListener("loadedmetadata", () => {
+        setLoading(false);
+        video.play().catch(() => {});
+      }, { once: true });
+      video.addEventListener("error", () => {
+        setError("فشل التشغيل — المتصفح لا يدعم هذا التنسيق");
+        setLoading(false);
+        onLoadError();
+      }, { once: true });
+    } else {
+      setError("المتصفح لا يدعم تشغيل HLS");
+      setLoading(false);
+      onLoadError();
+    }
+  }, [src]);
+
+  useEffect(() => {
+    loadSource();
+    return () => {
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, [loadSource]);
+
+  /* ── Video event listeners ── */
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onPlay    = () => setIsPlaying(true);
+    const onPause   = () => setIsPlaying(false);
+    const onTime    = () => {
+      setCurrentTime(video.currentTime);
+      if (video.buffered.length > 0) setBuffered(video.buffered.end(video.buffered.length - 1));
+    };
+    const onLoaded  = () => setDuration(video.duration);
+    const onWaiting = () => setLoading(true);
+    const onPlaying = () => setLoading(false);
+
+    video.addEventListener("play",          onPlay);
+    video.addEventListener("pause",         onPause);
+    video.addEventListener("timeupdate",    onTime);
+    video.addEventListener("durationchange",onLoaded);
+    video.addEventListener("waiting",       onWaiting);
+    video.addEventListener("playing",       onPlaying);
+
+    return () => {
+      video.removeEventListener("play",          onPlay);
+      video.removeEventListener("pause",         onPause);
+      video.removeEventListener("timeupdate",    onTime);
+      video.removeEventListener("durationchange",onLoaded);
+      video.removeEventListener("waiting",       onWaiting);
+      video.removeEventListener("playing",       onPlaying);
+    };
+  }, []);
+
+  function togglePlay() {
+    const v = videoRef.current;
+    if (!v) return;
+    v.paused ? v.play().catch(() => {}) : v.pause();
+    touchControls();
+  }
+
+  function toggleMute() {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setMuted(v.muted);
+    touchControls();
+  }
+
+  function seek(e: React.MouseEvent | React.TouchEvent) {
+    const bar = progressRef.current;
+    const v   = videoRef.current;
+    if (!bar || !v || !duration) return;
+    const rect = bar.getBoundingClientRect();
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    v.currentTime = frac * duration;
+    setCurrentTime(frac * duration);
+    touchControls();
+  }
+
+  function skipSeconds(delta: number) {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, Math.min(duration, v.currentTime + delta));
+    touchControls();
+  }
+
+  const pct    = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const bufPct = duration > 0 ? (buffered  / duration) * 100 : 0;
+
+  function retry() {
+    setRetrying(true);
+    setError(null);
+    setTimeout(() => { setRetrying(false); loadSource(); }, 500);
+  }
+
+  return (
+    <div
+      data-hls-container
+      className="relative w-full h-full bg-black overflow-hidden"
+      onClick={togglePlay}
+      onTouchStart={touchControls}
+      onMouseMove={touchControls}
+    >
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain"
+        playsInline
+        preload="metadata"
+      />
+
+      {/* Loading spinner */}
+      {(loading && !error) && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 pointer-events-none">
+          <motion.div className="w-14 h-14 rounded-full border-[3px] border-t-violet-500 border-violet-500/15"
+            animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
+          <p className="text-white/40 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
+        </div>
+      )}
+
+      {/* Error state */}
+      {error && !retrying && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-[#0a0a12] z-20 pointer-events-auto" dir="rtl"
+          onClick={e => e.stopPropagation()}>
+          <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+            <AlertTriangle className="w-7 h-7 text-red-400/70" />
+          </div>
+          <div className="text-center px-8">
+            <p className="text-white/60 text-[14px] font-black font-['Cairo']">تعذّر تحميل الفيديو</p>
+            <p className="text-white/25 text-[11px] mt-1 font-['Cairo'] leading-relaxed">{error}</p>
+          </div>
+          <button onClick={retry}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95">
+            <RefreshCw className="w-4 h-4" /> إعادة المحاولة
+          </button>
+        </div>
+      )}
+
+      {/* Controls overlay */}
+      <AnimatePresence>
+        {showControls && !loading && !error && (
+          <motion.div
+            key="controls"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="absolute inset-0 z-10 flex flex-col justify-end pointer-events-none"
+            style={{ background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.2) 40%, transparent 70%)" }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Center play/pause */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-auto" onClick={togglePlay}>
+              <motion.div
+                key={isPlaying ? "play" : "pause"}
+                initial={{ scale: 0.6, opacity: 0.8 }}
+                animate={{ scale: 1, opacity: 0 }}
+                transition={{ duration: 0.5 }}
+                className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"
+              >
+                {isPlaying
+                  ? <Pause className="w-9 h-9 text-white fill-white" />
+                  : <Play  className="w-9 h-9 text-white fill-white" />}
+              </motion.div>
+            </div>
+
+            {/* Skip buttons */}
+            <div className="absolute inset-0 flex items-center justify-between px-10 pointer-events-auto">
+              <button onClick={e => { e.stopPropagation(); skipSeconds(10); }}
+                className="flex flex-col items-center gap-1 active:scale-90 transition-transform">
+                <SkipForward className="w-8 h-8 text-white/70" />
+                <span className="text-white/50 text-[9px] font-bold">10s</span>
+              </button>
+              <button onClick={e => { e.stopPropagation(); skipSeconds(-10); }}
+                className="flex flex-col items-center gap-1 active:scale-90 transition-transform">
+                <SkipBack className="w-8 h-8 text-white/70" />
+                <span className="text-white/50 text-[9px] font-bold">10s</span>
+              </button>
+            </div>
+
+            {/* Bottom controls */}
+            <div className="pointer-events-auto px-4 pb-4 space-y-3">
+              {/* Progress bar */}
+              <div
+                ref={progressRef}
+                className="relative h-8 flex items-center cursor-pointer group"
+                onMouseDown={seek}
+                onTouchStart={seek}
+              >
+                {/* Track */}
+                <div className="w-full h-1 rounded-full bg-white/20 relative overflow-hidden group-hover:h-1.5 transition-all">
+                  {/* Buffered */}
+                  <div className="absolute inset-y-0 left-0 bg-white/20 rounded-full"
+                    style={{ width: `${bufPct}%` }} />
+                  {/* Played */}
+                  <div className="absolute inset-y-0 left-0 bg-violet-500 rounded-full"
+                    style={{ width: `${pct}%` }} />
+                </div>
+                {/* Thumb */}
+                <div className="absolute w-4 h-4 rounded-full bg-white shadow-lg shadow-violet-500/40 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ left: `${pct}%` }} />
+              </div>
+
+              {/* Controls row */}
+              <div className="flex items-center gap-3">
+                {/* Play/Pause */}
+                <button onClick={e => { e.stopPropagation(); togglePlay(); }}
+                  className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-transform shrink-0">
+                  {isPlaying
+                    ? <Pause className="w-5 h-5 text-white fill-white" />
+                    : <Play  className="w-5 h-5 text-white fill-white" />}
+                </button>
+
+                {/* Time */}
+                <span className="text-white/70 text-[11px] font-mono tabular-nums shrink-0">
+                  {fmtTime(currentTime)} / {fmtTime(duration)}
+                </span>
+
+                <div className="flex-1" />
+
+                {/* Mute */}
+                <button onClick={e => { e.stopPropagation(); toggleMute(); }}
+                  className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-transform shrink-0">
+                  {muted
+                    ? <VolumeX className="w-4 h-4 text-white/70" />
+                    : <Volume2 className="w-4 h-4 text-white/70" />}
+                </button>
+
+                {/* Fullscreen */}
+                <button onClick={e => { e.stopPropagation(); toggleFs(); }}
+                  className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-transform shrink-0">
+                  {isFs
+                    ? <Minimize2 className="w-4 h-4 text-white/70" />
+                    : <Maximize2 className="w-4 h-4 text-white/70" />}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -301,15 +659,15 @@ function EpisodePlayer({
   onChangeQuality: (q: Quality) => void;
 }) {
   const [currentServer, setCurrentServer] = useState(initialServer ?? 0);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
-  const [iframeErr,    setIframeErr]    = useState(false);
-  const [retrying,     setRetrying]     = useState(false);
-  const [showQuality,  setShowQuality]  = useState(false);
-  const [fs,           setFs]           = useState(false);
-  const retryCount     = useRef(0);
-  const retryTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [iframeLoaded, setIframeLoaded]   = useState(false);
+  const [iframeErr,    setIframeErr]      = useState(false);
+  const [retrying,     setRetrying]       = useState(false);
+  const [showQuality,  setShowQuality]    = useState(false);
+  const [fs,           setFs]             = useState(false);
+  const retryCount = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Subtitle state ──
+  /* ── Subtitle state ── */
   const [subState,    setSubState]    = useState<"idle"|"loading"|"ready"|"none">("idle");
   const [subCues,     setSubCues]     = useState<SubCue[]>([]);
   const [subLang,     setSubLang]     = useState<string | null>(null);
@@ -321,6 +679,7 @@ function EpisodePlayer({
   const [showSubPanel, setShowSubPanel] = useState(false);
 
   const currentUrl = servers[currentServer] || "";
+  const currentInfo = getServerInfo(currentUrl, currentServer);
 
   /* ── Reset on server/quality change ── */
   useEffect(() => {
@@ -332,14 +691,7 @@ function EpisodePlayer({
     if (retryTimer.current) clearTimeout(retryTimer.current);
   }, [quality, servers]);
 
-  /* ── Back button (native swipe/gesture) ── */
-  useEffect(() => {
-    const handler = () => onBack();
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
-  }, [onBack]);
-
-  /* ── Fullscreen ── */
+  /* ── Fullscreen listener ── */
   useEffect(() => {
     const fn = () => setFs(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", fn);
@@ -458,15 +810,20 @@ function EpisodePlayer({
             <span className="text-violet-300/60 font-bold">{quality}</span>
             <span>·</span>
             <span>سيرفر {currentServer + 1}/{servers.length}</span>
+            {currentInfo.isHls && (
+              <span className="bg-violet-600/30 text-violet-300 text-[8px] font-bold px-1.5 py-0.5 rounded-md border border-violet-500/25">
+                HLS مدمج
+              </span>
+            )}
           </div>
         </div>
 
         {/* Subtitle button */}
         <button onClick={fetchSubtitles}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[11px] font-bold font-['Cairo'] transition-all active:scale-90 shrink-0
-            ${subState === "ready" ? "bg-violet-600 border-violet-400 text-white" :
+            ${subState === "ready"   ? "bg-violet-600 border-violet-400 text-white" :
               subState === "loading" ? "bg-white/8 border-white/12 text-violet-300 animate-pulse" :
-              subState === "none" ? "bg-white/5 border-white/8 text-white/25" :
+              subState === "none"    ? "bg-white/5 border-white/8 text-white/25" :
               "bg-white/8 border-white/12 text-white/60"}`}>
           <Subtitles className="w-3.5 h-3.5" />
           <span>ترجمة</span>
@@ -480,10 +837,12 @@ function EpisodePlayer({
           {QUALITY_SHORT[quality]}
         </button>
 
-        <button onClick={toggleFs}
-          className="w-9 h-9 rounded-xl bg-white/8 border border-white/12 flex items-center justify-center active:scale-90 transition-transform shrink-0">
-          {fs ? <Minimize2 className="w-4 h-4 text-white/60" /> : <Maximize2 className="w-4 h-4 text-white/60" />}
-        </button>
+        {!currentInfo.isHls && (
+          <button onClick={toggleFs}
+            className="w-9 h-9 rounded-xl bg-white/8 border border-white/12 flex items-center justify-center active:scale-90 transition-transform shrink-0">
+            {fs ? <Minimize2 className="w-4 h-4 text-white/60" /> : <Maximize2 className="w-4 h-4 text-white/60" />}
+          </button>
+        )}
       </div>
 
       {/* ── Quality picker overlay ── */}
@@ -547,7 +906,6 @@ function EpisodePlayer({
                       className="text-white/30 active:scale-90"><X className="w-4 h-4" /></button>
                   </div>
 
-                  {/* Timer controls */}
                   <div className="flex items-center gap-2 justify-center">
                     <button onClick={() => adjustOffset(-2)}
                       className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
@@ -595,71 +953,91 @@ function EpisodePlayer({
         )}
       </AnimatePresence>
 
-      {/* ── iframe area ── */}
-      <div className="relative flex-1 bg-black overflow-hidden" onClick={() => { setShowQuality(false); setShowSubPanel(false); }}>
+      {/* ── Video area ── */}
+      <div className="relative flex-1 bg-black overflow-hidden"
+        onClick={() => { setShowQuality(false); setShowSubPanel(false); }}>
 
-        {!iframeLoaded && !iframeErr && !retrying && currentUrl && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black pointer-events-none">
-            <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
-            <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
-          </div>
-        )}
-
-        {retrying && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black">
-            <motion.div className="w-16 h-16 rounded-full border-[3px] border-t-violet-500 border-violet-500/15"
-              animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }} />
-            <p className="text-white/50 text-[13px] font-['Cairo']">جاري الانتقال للسيرفر التالي…</p>
-            <motion.div className="w-32 h-0.5 bg-white/10 rounded-full overflow-hidden">
-              <motion.div className="h-full bg-violet-500 rounded-full"
-                initial={{ width: "0%" }} animate={{ width: "100%" }} transition={{ duration: 2, ease: "linear" }} />
-            </motion.div>
-          </div>
-        )}
-
-        {iframeErr && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-[#0a0a12] z-10">
-            <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-              <AlertTriangle className="w-7 h-7 text-red-400/70" />
-            </div>
-            <div className="text-center px-8">
-              <p className="text-white/60 text-[14px] font-black font-['Cairo']">فشل تحميل المصدر</p>
-              <p className="text-white/25 text-[11px] mt-1 font-['Cairo']">جُرّبت {retryCount.current} سيرفرات</p>
-            </div>
-            <div className="flex gap-3">
-              {currentServer > 0 && (
-                <button onClick={tryPrevServer}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/55 text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
-                  <ChevronRight className="w-4 h-4" /> السابق
-                </button>
-              )}
-              {currentServer + 1 < servers.length && (
-                <button onClick={tryNextServer}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
-                  <RefreshCw className="w-4 h-4" /> سيرفر آخر
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Iframe */}
-        {currentUrl && !retrying && (
-          <iframe
-            key={`${currentUrl}-${currentServer}`}
+        {/* ── HLS Native Player ── */}
+        {currentInfo.isHls && currentUrl && (
+          <NativeHLSPlayer
+            key={`hls-${currentUrl}-${currentServer}`}
             src={currentUrl}
-            className="absolute inset-0 w-full h-full border-0"
-            onLoad={() => setIframeLoaded(true)}
-            onError={handleIframeError}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"
-            allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-            allowFullScreen
+            onLoadError={() => {
+              if (currentServer + 1 < servers.length) {
+                setCurrentServer(s => s + 1);
+              } else {
+                setIframeErr(true);
+              }
+            }}
           />
         )}
 
-        {/* Subtitle overlay (on top of iframe) */}
+        {/* ── Iframe Player (non-HLS) ── */}
+        {!currentInfo.isHls && (
+          <>
+            {!iframeLoaded && !iframeErr && !retrying && currentUrl && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black pointer-events-none">
+                <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
+                <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
+              </div>
+            )}
+
+            {retrying && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black">
+                <motion.div className="w-16 h-16 rounded-full border-[3px] border-t-violet-500 border-violet-500/15"
+                  animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }} />
+                <p className="text-white/50 text-[13px] font-['Cairo']">جاري الانتقال للسيرفر التالي…</p>
+                <motion.div className="w-32 h-0.5 bg-white/10 rounded-full overflow-hidden">
+                  <motion.div className="h-full bg-violet-500 rounded-full"
+                    initial={{ width: "0%" }} animate={{ width: "100%" }} transition={{ duration: 2, ease: "linear" }} />
+                </motion.div>
+              </div>
+            )}
+
+            {iframeErr && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-[#0a0a12] z-10">
+                <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                  <AlertTriangle className="w-7 h-7 text-red-400/70" />
+                </div>
+                <div className="text-center px-8">
+                  <p className="text-white/60 text-[14px] font-black font-['Cairo']">فشل تحميل المصدر</p>
+                  <p className="text-white/25 text-[11px] mt-1 font-['Cairo']">جُرّبت {retryCount.current} سيرفرات</p>
+                </div>
+                <div className="flex gap-3">
+                  {currentServer > 0 && (
+                    <button onClick={tryPrevServer}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/55 text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
+                      <ChevronRight className="w-4 h-4" /> السابق
+                    </button>
+                  )}
+                  {currentServer + 1 < servers.length && (
+                    <button onClick={tryNextServer}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
+                      <RefreshCw className="w-4 h-4" /> سيرفر آخر
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {currentUrl && !retrying && !iframeErr && (
+              <iframe
+                key={`${currentUrl}-${currentServer}`}
+                src={currentUrl}
+                className="absolute inset-0 w-full h-full border-0"
+                onLoad={() => setIframeLoaded(true)}
+                onError={handleIframeError}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"
+                allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+                allowFullScreen
+              />
+            )}
+          </>
+        )}
+
+        {/* Subtitle overlay */}
         {subState === "ready" && subRunning && (
-          <SubtitleOverlay cues={subCues} running={subRunning} elapsed={subElapsed} />
+          <SubtitleOverlay cues={subCues} elapsed={subElapsed} />
         )}
       </div>
 
@@ -671,7 +1049,6 @@ function EpisodePlayer({
           <ChevronRight className="w-4 h-4" /> السابقة
         </button>
 
-        {/* Server switcher — shows labeled buttons */}
         <div className="flex items-center gap-1.5 overflow-x-auto max-w-[55%]" style={{ scrollbarWidth: "none" }}>
           {servers.map((url, i) => {
             const info = getServerInfo(url, i);
@@ -783,14 +1160,12 @@ export default function WatchPage() {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`);
   }
 
-  /* Back: go to anime detail page, replacing current history entry so back-swipe skips watch page */
+  /* Back: use browser history (avoids push-loop with AnimeDetail/EpisodeList) */
   function handleBack() {
-    if (animeId) navigate(`/anime/${animeId}`);
-    else window.history.back();
+    window.history.back();
   }
   function handleRefresh() { window.location.reload(); }
 
-  /* When user picks a server from the picker */
   function handlePickServer(q: Quality, idx: number) {
     setQuality(q);
     setInitialSrv(idx);
