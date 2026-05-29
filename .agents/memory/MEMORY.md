@@ -9,5 +9,6 @@
 - [AniPub movie ep case](anipub-similarity.md) — when local.ep[] is empty, use local.link directly (movie has one link, not episode array)
 - [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
 - [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
-- [anipub-stream extraction filter](anipub-stream-filter.md) — Arabic sources run through tryExtractDirect; only directUrl results shown; dead embeds (megamax/dood/voe/wishfast/anime7u) silently dropped
+- [anipub-stream extraction filter](anipub-stream-filter.md) — EMBED_ONLY_HOSTS filtered in sendSrc AND anipub-stream Phase 2; anipub.xyz/video → megaplay.buzz (CF-protected) → filter at AniPub layer; share4max in EMBED_ONLY_HOSTS
+- [AnimeX CDN CORS](animex-cdn-cors.md) — uwucdn.top blocks server IP but has CORS:* for browsers; send rawUrl directly to browser, no hls-proxy; animex-player HTML must use data.rawUrl not data.proxyUrl
 - [Direct MP4 in Watch.tsx](direct-mp4-player.md) — streamtape/sendvid URLs use NativeHLSPlayer via video-proxy (isDirect=true); NativeHLSPlayer detects .mp4/streamtape/sendvid and uses <video src=proxyUrl> not HLS.js
