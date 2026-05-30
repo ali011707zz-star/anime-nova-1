@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft, Info } from "lucide-react";
+import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const GENRES_AR: { ar: string; en: string; color: string; img: string }[] = [
@@ -349,11 +349,11 @@ export default function Home() {
                 </motion.div>
               </AnimatePresence>
 
-              {/* Right: 3D Poster Card */}
+              {/* Right: 3D Poster Card — visible on all screens */}
               <AnimatePresence mode="wait">
                 <motion.div
                   key={hero.id + "-poster"}
-                  className="hidden sm:block flex-shrink-0"
+                  className="flex-shrink-0"
                   initial={{ opacity: 0, scale: 0.85, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
@@ -361,21 +361,21 @@ export default function Home() {
                   style={{ perspective: "600px" }}
                 >
                   <motion.div
-                    className="relative overflow-hidden shadow-2xl"
+                    className="relative overflow-hidden shadow-2xl bg-[#111]"
                     style={{
-                      width: 110,
-                      height: 158,
-                      borderRadius: 16,
+                      width: "clamp(82px, 22vw, 120px)",
+                      height: "clamp(118px, 31vw, 172px)",
+                      borderRadius: 14,
                       transformStyle: "preserve-3d",
                       transform: `rotateX(${posterTilt.rx}deg) rotateY(${posterTilt.ry}deg)`,
                       transition: "transform 0.6s cubic-bezier(0.22, 1, 0.36, 1)",
-                      boxShadow: "0 20px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)",
+                      boxShadow: "0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.1)",
                     }}
                   >
                     <img
                       src={hero.coverImage?.extraLarge || hero.coverImage?.large}
                       alt={hero.title?.romaji}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-contain"
                       draggable={false}
                     />
                     {/* Poster shimmer */}
@@ -384,13 +384,42 @@ export default function Home() {
                       animate={{ opacity: [0.3, 0.6, 0.3] }}
                       transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
                     />
-                    {/* Bottom fade */}
-                    <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-black/60 to-transparent" />
                   </motion.div>
                 </motion.div>
               </AnimatePresence>
             </div>
           </div>
+
+          {/* Left / Right navigation arrows */}
+          {heroList.length > 1 && (
+            <>
+              {/* Left arrow = next (RTL) */}
+              <motion.button
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  const next = (heroIdx + 1) % heroList.length;
+                  setHeroDir(1); setHeroIdx(next); setHero(heroList[next]);
+                }}
+                className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
+                style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)" }}
+              >
+                <ChevronLeft className="w-5 h-5 text-white" />
+              </motion.button>
+
+              {/* Right arrow = previous (RTL) */}
+              <motion.button
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  const prev = (heroIdx - 1 + heroList.length) % heroList.length;
+                  setHeroDir(-1); setHeroIdx(prev); setHero(heroList[prev]);
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
+                style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.15)" }}
+              >
+                <ChevronRight className="w-5 h-5 text-white" />
+              </motion.button>
+            </>
+          )}
 
           {/* Hero indicator dots — centered at bottom */}
           {heroList.length > 1 && (

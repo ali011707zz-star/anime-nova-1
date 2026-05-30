@@ -513,7 +513,9 @@ function NativeHLSPlayer({
           return;
         }
         const data = await r.json() as { proxyUrl?: string; rawUrl?: string; quality?: string };
-        const hlsUrl = data.proxyUrl || data.rawUrl;
+        // Use rawUrl first — CDN (owocdn.top/uwucdn.top) has CORS:* for browsers
+        // but blocks server IPs, so hls-proxy (proxyUrl) returns 403.
+        const hlsUrl = data.rawUrl || data.proxyUrl;
         if (!hlsUrl) { setError("لا يوجد رابط HLS من AnimeX"); setLoading(false); return; }
         m3u8Url = hlsUrl;
         if (data.quality && onRealQuality) onRealQuality(data.quality);
