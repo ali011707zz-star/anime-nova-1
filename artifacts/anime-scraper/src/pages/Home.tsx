@@ -49,6 +49,22 @@ const TRENDING_QUERY = `query {
   }
 }`;
 
+const MOVIES_QUERY = `query {
+  Page(perPage: 12) {
+    media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP") {
+      id title { romaji } coverImage { large } averageScore
+    }
+  }
+}`;
+
+const TOP_RATED_QUERY = `query {
+  Page(perPage: 12) {
+    media(type: ANIME, sort: SCORE_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE], averageScore_greater: 75) {
+      id title { romaji } coverImage { large } averageScore episodes format
+    }
+  }
+}`;
+
 function AnimeCard({ anime }: { anime: any }) {
   return (
     <Link href={`/anime/${anime.id}`}>
@@ -82,6 +98,8 @@ export default function Home() {
   const [popular, setPopular]     = useState<any[]>([]);
   const [recent, setRecent]       = useState<any[]>([]);
   const [trending, setTrending]   = useState<any[]>([]);
+  const [movies, setMovies]       = useState<any[]>([]);
+  const [topRated, setTopRated]   = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [genreLoading, setGenreLoading] = useState(false);
   const [page, setPage]           = useState(1);
@@ -122,15 +140,19 @@ export default function Home() {
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [pop, rec, trend] = await Promise.all([
+      const [pop, rec, trend, mov, top] = await Promise.all([
         fetch$(buildPopularQuery(""), { page: 1, perPage: 12 }),
         fetch$(RECENT_QUERY, { page: 1, perPage: 8 }),
         fetch$(TRENDING_QUERY),
+        fetch$(MOVIES_QUERY),
+        fetch$(TOP_RATED_QUERY),
       ]);
       setPopular(pop?.media || []);
       setHasMore(pop?.pageInfo?.hasNextPage ?? false);
       setRecent(rec?.media || []);
       setTrending(trend?.media || []);
+      setMovies(mov?.media || []);
+      setTopRated(top?.media || []);
       const heroes = (pop?.media || []).filter((a: any) => a.bannerImage);
       setHero(heroes[0] || pop?.media?.[0]);
       setLoading(false);
@@ -570,6 +592,77 @@ export default function Home() {
         </div>
       )}
 
+
+      {/* ── Top Rated ── */}
+      {topRated.length > 0 && !selectedGenre && (
+        <div className="mt-6">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#EAB308,#CA8A04)" }}>
+                <Star className="w-3.5 h-3.5 text-white fill-white" />
+              </div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white">أعلى تقييماً</h2>
+            </div>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+            {topRated.map((anime, i) => (
+              <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
+                  <div className="relative w-[110px] h-[154px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
+                    <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
+                      <Star className="w-1.5 h-1.5 fill-current" /> {anime.averageScore ? (anime.averageScore / 10).toFixed(1) : "—"}
+                    </div>
+                    {anime.format === "MOVIE" && (
+                      <div className="absolute top-2 left-2 bg-primary text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-primary/50">فيلم</div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                      <div className="text-[7.5px] text-yellow-400/60 font-black font-mono mb-0.5">#{i + 1}</div>
+                      <p className="text-[9px] text-white/85 font-bold truncate leading-tight">{anime.title?.romaji}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Movies ── */}
+      {movies.length > 0 && !selectedGenre && (
+        <div className="mt-6">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#3B82F6,#1D4ED8)" }}>
+                <Play className="w-3.5 h-3.5 text-white fill-white" />
+              </div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white">أفلام أنمي</h2>
+            </div>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+            {movies.map(anime => (
+              <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
+                  <div className="relative w-[110px] h-[154px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
+                    <div className="absolute top-2 left-2 bg-blue-500 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-blue-500/50">فيلم</div>
+                    {anime.averageScore && (
+                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
+                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                      <p className="text-[9px] text-white/85 font-bold truncate leading-tight">{anime.title?.romaji}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Popular grid ── */}
       <div className="mt-6 px-4">
