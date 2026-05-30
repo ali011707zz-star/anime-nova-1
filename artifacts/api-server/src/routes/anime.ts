@@ -3622,11 +3622,26 @@ router.get("/anime/anipub-stream", async (req, res) => {
       if (anipubServers.length) result["720p HD"].push(...anipubServers);
     }
 
-    // ── AnimeX HLS → all quality tiers ──
+    // ── AnimeX HLS → raw uwucdn.top URLs (CORS:* — loads directly in browser HLS.js) ──
+    // DO NOT use animex-player HTML page — it requires a second server API call at play-time
+    // which often fails. Use the raw URLs already fetched during scraping instead.
     if (anilistId > 0 && animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value) && animexSrcs.value.length > 0) {
-      for (const tier of ["1080p FHD", "720p HD", "360p SD"] as const) {
-        const q = tier === "1080p FHD" ? "1080" : tier === "720p HD" ? "720" : "360";
-        result[tier].unshift(`/api/anime/animex-player?anilistId=${anilistId}&ep=${ep}&quality=${q}`);
+      const animexList = animexSrcs.value as AnimexHlsSrc[];
+      for (const src of animexList) {
+        const tier: keyof typeof result =
+          src.quality.includes("1080") ? "1080p FHD" :
+          (src.quality.includes("360") || src.quality.includes("240") || src.quality.includes("480")) ? "360p SD"
+          : "720p HD";
+        // Append #animex fragment so Watch.tsx can label it correctly (HLS.js ignores fragments)
+        const taggedUrl = src.url.includes("#") ? src.url : src.url + "#animex";
+        if (!result[tier].includes(taggedUrl)) result[tier].push(taggedUrl);
+      }
+      // If only one quality returned, propagate to adjacent tiers so user always has a choice
+      if (animexList.length === 1) {
+        const u = (animexList[0].url.includes("#") ? animexList[0].url : animexList[0].url + "#animex");
+        for (const tier of ["1080p FHD", "720p HD", "360p SD"] as const) {
+          if (!result[tier].includes(u)) result[tier].push(u);
+        }
       }
     }
 
@@ -3649,11 +3664,15 @@ router.get("/anime/anipub-stream", async (req, res) => {
       }
     }
 
-    // ── FlixCloud (ReAnime.to / Zoro) → 720p HD — proxy through hls-proxy ──
+    // ── FlixCloud (ReAnime.to / Zoro) → 720p HD ──
+    // JWT client_ip is bound to our server IP — hls-proxy sends from that IP, should match.
+    // Try hls-proxy first; browser gets the proxied stream.
     if (flixSrc.status === "fulfilled" && flixSrc.value) {
       const flixM3u8 = flixSrc.value;
       const proxied  = `/api/anime/hls-proxy?url=${encodeURIComponent(flixM3u8)}&ref=${encodeURIComponent("https://reanime.to/")}`;
       if (!result["720p HD"].includes(proxied)) result["720p HD"].push(proxied);
+      // Also add raw URL as fallback — browser may have direct access (CORS:*)
+      if (!result["720p HD"].includes(flixM3u8)) result["720p HD"].push(flixM3u8);
     }
 
     // ── Phase 2: Arabic sources (shahiid + animelek) ──

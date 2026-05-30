@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import {
   ChevronRight, ChevronLeft, Play, Pause, Loader2,
@@ -54,16 +54,16 @@ const QUALITY_AR: Record<Quality, string> = {
 /* ── Server source detection ── */
 interface ServerInfo { label: string; sublabel: string; isHls: boolean; isDirect?: boolean; }
 function getServerInfo(url: string, idx: number): ServerInfo {
-  // AnimeX — specific path must be first
-  if (url.includes("animex-player") || url.includes("animex-source")) {
-    return { label: "AnimeX", sublabel: "مترجم للعربية", isHls: true };
+  // AnimeX — raw uwucdn.top URL tagged with #animex fragment
+  if (url.includes("#animex") || url.includes("animex-player") || url.includes("animex-source")) {
+    return { label: "AnimeX", sublabel: "مترجم للعربية · HLS مباشر", isHls: true };
   }
-  // AnimePahe via Miruro (uwucdn.top HLS — CORS:* open)
+  // AnimePahe via Miruro (uwucdn.top HLS — CORS:* open, no tag = AnimePahe)
   if (url.includes("uwucdn.top")) {
     return { label: "AnimePahe", sublabel: "جودة عالية · مترجم", isHls: true };
   }
-  // FlixCloud via ReAnime.to (Zoro/AniWave HLS through hls-proxy)
-  if (url.includes("flixcloud") || url.includes("fetch1.flixcloud") || url.includes("hls-proxy") && url.includes("reanime")) {
+  // FlixCloud via ReAnime.to — hls-proxy wrapped or raw flixcloud URL
+  if (url.includes("flixcloud") || (url.includes("hls-proxy") && url.includes("flixcloud"))) {
     return { label: "Zoro · AniWave", sublabel: "جودة عالية · مترجم", isHls: true };
   }
   // AniPub — dub vs sub distinction
@@ -79,6 +79,10 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   if (url.includes("streamtape.com") || url.includes("sendvid.com")
    || url.includes("/video-proxy?")) {
     return { label: "مصدر مباشر", sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
+  }
+  // Any direct MP4 URL (e.g. AnimeGG play URLs, other direct extractions)
+  if (url.match(/\.mp4([?#]|$)/i) && !url.includes(".m3u8")) {
+    return { label: "مصدر مباشر", sublabel: "تشغيل مباشر", isHls: true, isDirect: true };
   }
   // Streamwish / Filemoon HLS extracted
   if (url.includes("streamwish") || url.includes("filemoon") || url.includes("animelek")
@@ -101,6 +105,10 @@ function getServerInfo(url: string, idx: number): ServerInfo {
    || url.includes("megamax.me") || url.includes("leech.megamax") || url.includes("videa.hu")
    || url.includes("anime7u") || url.includes("vid4up")) {
     return { label: "شاهد أنمي", sublabel: "مترجم عربي", isHls: false };
+  }
+  // Fallback: treat as native playable if it looks like a direct video URL
+  if (url.match(/^https?:\/\//i) && !url.includes("/embed") && !url.includes("/iframe")) {
+    return { label: `مصدر ${idx + 1}`, sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
   }
   return { label: `سيرفر ${idx + 1}`, sublabel: "مترجم عربي", isHls: false };
 }
@@ -1216,6 +1224,8 @@ function EpisodePlayer({
 }
 
 /* ══════════════════════════════════ WATCH PAGE ══════════════ */
+const EMPTY_SSE: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
+
 export default function WatchPage() {
   const [, navigate] = useLocation();
 
@@ -1227,28 +1237,77 @@ export default function WatchPage() {
 
   const [anime,        setAnime]       = useState<any>(null);
   const [streamData,   setStreamData]  = useState<StreamData | null>(null);
+  const [sseServers,   setSseServers]  = useState<Record<Quality, string[]>>(EMPTY_SSE);
   const [quality,      setQuality]     = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]  = useState(0);
   const [phase,        setPhase]       = useState<"loading" | "picker" | "player" | "nosrc">("loading");
   const [loadingDone,  setLoadingDone] = useState(false);
   const [fetchDone,    setFetchDone]   = useState(false);
-  const fetchStarted = useRef(false);
+  const fetchStarted   = useRef(false);
+  const sseRef         = useRef<EventSource | null>(null);
+  const seenSseUrls    = useRef(new Set<string>());
 
   const title     = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
   const totalEps  = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
   const cover     = anime?.coverImage?.large || "";
 
+  /* Merge anipub-stream (primary) + sources-stream SSE (Arabic) into one quality map */
+  const mergedServers = useMemo<Record<Quality, string[]>>(() => {
+    const result: Record<Quality, string[]> = {
+      "1080p FHD": [...(streamData?.servers["1080p FHD"] || [])],
+      "720p HD":   [...(streamData?.servers["720p HD"]   || [])],
+      "360p SD":   [...(streamData?.servers["360p SD"]   || [])],
+    };
+    for (const q of QUALITY_LABELS) {
+      for (const url of sseServers[q]) {
+        if (!result[q].includes(url)) result[q].push(url);
+      }
+    }
+    return result;
+  }, [streamData, sseServers]);
+
   const doFetchServers = useCallback((t: string, e: string) => {
     if (fetchStarted.current) return;
     fetchStarted.current = true;
     const params = new URLSearchParams({ title: t, english: e, ep: String(ep) });
     if (animeId) params.set("anilistId", String(animeId));
+
+    /* Primary: anipub-stream (AnimeX · AnimePahe · FlixCloud) */
     fetch(`/api/anime/anipub-stream?${params}`)
       .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then((d: StreamData) => { setStreamData(d); setFetchDone(true); })
       .catch(() => setFetchDone(true));
+
+    /* Secondary SSE: sources-stream (shahiid · animelek · animegg) */
+    if (sseRef.current) sseRef.current.close();
+    const es = new EventSource(`/api/anime/sources-stream?${params}`);
+    sseRef.current = es;
+    const closeTimer = setTimeout(() => es.close(), 38000);
+    es.onmessage = (ev) => {
+      try {
+        const src = JSON.parse(ev.data) as {
+          url: string; directUrl?: string; qualityRank?: number; site?: string;
+        };
+        /* Only add sources we can actually play natively:
+           - directUrl set (MP4 or HLS extracted server-side)
+           - OR bare m3u8 URL */
+        const playUrl = src.directUrl || src.url;
+        if (!playUrl) return;
+        const isPlayable = !!src.directUrl || !!(playUrl.match(/\.m3u8([?#]|$)/i));
+        if (!isPlayable) return;
+        if (seenSseUrls.current.has(playUrl)) return;
+        seenSseUrls.current.add(playUrl);
+        const rank = src.qualityRank ?? 2;
+        const tier: Quality = rank >= 3 ? "1080p FHD" : rank >= 2 ? "720p HD" : "360p SD";
+        setSseServers(prev => ({ ...prev, [tier]: [...prev[tier], playUrl] }));
+      } catch {}
+    };
+    es.onerror = () => { clearTimeout(closeTimer); es.close(); };
   }, [ep, animeId]);
+
+  /* Cleanup SSE on unmount */
+  useEffect(() => () => { sseRef.current?.close(); }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setLoadingDone(true), 300);
@@ -1285,10 +1344,11 @@ export default function WatchPage() {
 
   useEffect(() => {
     if (!loadingDone || !fetchDone) return;
-    if (!streamData) { setPhase("nosrc"); return; }
-    const hasAny = QUALITY_LABELS.some(q => (streamData.servers[q]?.length || 0) > 0);
-    setPhase(hasAny ? "picker" : "nosrc");
-  }, [loadingDone, fetchDone, streamData]);
+    const hasAny = QUALITY_LABELS.some(q =>
+      (mergedServers[q]?.length || 0) > 0
+    );
+    setPhase(prev => prev === "player" ? prev : hasAny ? "picker" : "nosrc");
+  }, [loadingDone, fetchDone, mergedServers]);
 
   function goEp(n: number) {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`);
@@ -1306,7 +1366,8 @@ export default function WatchPage() {
     setPhase("player");
   }
 
-  const servers = streamData?.servers[quality] || [];
+  const servers = mergedServers[quality] || [];
+  const mergedStreamData: StreamData = { servers: mergedServers, total: servers.length };
 
   if (phase === "loading") return <LoadingScreen cover={cover} title={title} ep={ep} />;
   if (phase === "nosrc")   return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
@@ -1319,7 +1380,7 @@ export default function WatchPage() {
           transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
           <ServerPicker
             cover={cover} title={title} ep={ep}
-            streamData={streamData!}
+            streamData={mergedStreamData}
             onPick={handlePickServer}
             onBack={handleBack}
           />
@@ -1334,7 +1395,7 @@ export default function WatchPage() {
         <EpisodePlayer
           servers={servers}
           quality={quality}
-          allServers={streamData!.servers}
+          allServers={mergedServers}
           initialServer={initialSrv}
           title={title}
           animeTitle={animeTitle}
