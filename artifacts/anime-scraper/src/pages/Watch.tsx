@@ -445,9 +445,10 @@ function NativeHLSPlayer({
           setLoading(false);
           return;
         }
-        const data = await r.json() as { rawUrl?: string; quality?: string };
-        if (!data.rawUrl) { setError("لا يوجد رابط HLS من AnimeX"); setLoading(false); return; }
-        m3u8Url = data.rawUrl;
+        const data = await r.json() as { proxyUrl?: string; rawUrl?: string; quality?: string };
+        const hlsUrl = data.proxyUrl || data.rawUrl;
+        if (!hlsUrl) { setError("لا يوجد رابط HLS من AnimeX"); setLoading(false); return; }
+        m3u8Url = hlsUrl;
         if (data.quality && onRealQuality) onRealQuality(data.quality);
       } catch (ex: any) {
         setError("خطأ في الاتصال بخادم AnimeX");
