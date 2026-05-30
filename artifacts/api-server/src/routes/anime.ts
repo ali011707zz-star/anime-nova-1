@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { execSync } from "child_process";
+import { createHash, pbkdf2Sync, createDecipheriv } from "crypto";
+import { gunzipSync } from "zlib";
 
 const router = Router();
 
@@ -3341,6 +3343,178 @@ router.get("/anime/hls-player", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  Miruro Pipe → AnimePahe (kiwi provider) HLS sources
+//  Uses miruro.tv encrypted pipe to get AnimePahe uwucdn.top m3u8 URLs
+// ════════════════════════════════════════════════════════════════════
+const MIRURO_PIPE    = "https://www.miruro.tv/api/secure/pipe";
+const MIRURO_HDRS   = { "User-Agent": BROWSER_UA, "Referer": "https://www.miruro.tv/" };
+const miruroPaheCache = new Map<string, { streams: PaheStream[]; ts: number }>();
+
+interface PaheStream { quality: string; url: string; }
+
+function encodeMiruroPipe(payload: object): string {
+  return Buffer.from(JSON.stringify(payload)).toString("base64url");
+}
+function decodeMiruroResponse(raw: string): any {
+  const padded = raw + "=".repeat((4 - raw.length % 4) % 4);
+  return JSON.parse(gunzipSync(Buffer.from(padded, "base64url")).toString("utf8"));
+}
+
+async function getMiruroAnimePaheSources(anilistId: number, ep: number): Promise<PaheStream[]> {
+  const ckey = `${anilistId}:${ep}`;
+  const hit = miruroPaheCache.get(ckey);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.streams;
+  try {
+    // Step 1: episode list — kiwi = AnimePahe
+    const epsEnc = encodeMiruroPipe({ path: "episodes", method: "GET", query: { anilistId }, body: null, version: "0.1.0" });
+    const epsRes = await fetch(`${MIRURO_PIPE}?e=${epsEnc}`, { headers: MIRURO_HDRS, signal: AbortSignal.timeout(12000) });
+    if (!epsRes.ok) return [];
+    const epsData = decodeMiruroResponse((await epsRes.text()).trim());
+    const kiwiProv = epsData?.providers?.kiwi;
+    const kiwiEps: any[] = Array.isArray(kiwiProv?.episodes?.sub)
+      ? kiwiProv.episodes.sub
+      : Array.isArray(kiwiProv?.episodes) ? kiwiProv.episodes : [];
+    const target = kiwiEps.find((e: any) => Number(e.number) === ep);
+    if (!target?.id) return [];
+
+    // Step 2: sources for this episode
+    const srcEnc = encodeMiruroPipe({ path: "sources", method: "GET", query: { episodeId: target.id, provider: "kiwi", category: "sub", anilistId }, body: null, version: "0.1.0" });
+    const srcRes = await fetch(`${MIRURO_PIPE}?e=${srcEnc}`, { headers: MIRURO_HDRS, signal: AbortSignal.timeout(12000) });
+    if (!srcRes.ok) return [];
+    const srcData = decodeMiruroResponse((await srcRes.text()).trim());
+    const streams: PaheStream[] = (srcData?.streams ?? [])
+      .filter((s: any) => s.type === "hls" && typeof s.url === "string" && s.url.includes("uwucdn"))
+      .map((s: any) => ({ quality: String(s.quality ?? "720p"), url: s.url }));
+
+    miruroPaheCache.set(ckey, { streams, ts: Date.now() });
+    return streams;
+  } catch {
+    return [];
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  FlixCloud decrypt → ReAnime.to (Zoro/AniWave) HLS stream
+//  Ports decrypt.mjs logic to TypeScript (WASM + PBKDF2 + AES-256-CBC)
+// ════════════════════════════════════════════════════════════════════
+const flixCache = new Map<string, { url: string; ts: number }>();
+
+function sha256hex(s: string): string {
+  return createHash("sha256").update(s).digest("hex");
+}
+
+function leFields(seed: string) {
+  let e = seed;
+  for (let i = 0; i < 3; i++) e = sha256hex(e + i);
+  let l = e;
+  for (let i = 0; i < 3; i++) l = sha256hex(l + i);
+  return {
+    keyField:      "kf_"  + e.substring(8,  16),
+    ivField:       "ivf_" + e.substring(16, 24),
+    containerName: "cd_"  + e.substring(24, 32),
+    arrayName:     "ad_"  + e.substring(32, 40),
+    objectName:    "od_"  + e.substring(40, 48),
+    tokenField:    e.substring(48, 64) + "_" + e.substring(56, 64),
+    keyFrag2Field: l.substring(0, 16)  + "_" + l.substring(16, 24),
+  };
+}
+
+function extractSsrObj(html: string): string {
+  const m = html.match(/\{type:"data",data:(\{)/);
+  if (!m) throw new Error("SSR data block not found");
+  let depth = 0;
+  const start = html.indexOf("{", (m.index ?? 0) + m[0].length - 1);
+  for (let i = start; i < html.length; i++) {
+    if (html[i] === "{") depth++;
+    else if (html[i] === "}") { if (--depth === 0) return html.slice(start, i + 1); }
+  }
+  throw new Error("SSR brace matching failed");
+}
+
+async function runFlixWasm(wasmB64: string, frag1: Buffer, kf2: Buffer, T: Buffer, seedInt: number): Promise<Buffer> {
+  const { instance } = await (WebAssembly as any).instantiate(Buffer.from(wasmB64, "base64")) as any;
+  const { _s, _r, memory } = instance.exports as any;
+  const h = new Uint8Array(memory.buffer as ArrayBuffer);
+  const len = frag1.length;
+  const [y, v, t, out] = [1000, 1000 + len, 1000 + 2 * len, 1000 + 3 * len];
+  h.set(frag1, y); h.set(kf2, v); h.set(T, t);
+  _s(seedInt); _r(y, v, t, out, len);
+  return Buffer.from(h.subarray(out, out + len));
+}
+
+async function decryptFlixcloudHtml(html: string): Promise<string> {
+  const raw   = extractSsrObj(html);
+  // eslint-disable-next-line no-new-func
+  const data  = (new Function("return (" + raw + ")"))() as any;
+  const seed  = data.obfuscation_seed as string;
+  const f     = leFields(seed);
+  const ocd   = data.obfuscated_crypto_data;
+  const obj   = ocd[f.containerName][f.arrayName][0][f.objectName];
+  const frag1 = Buffer.from(obj[f.keyField],         "base64");
+  const iv    = Buffer.from(obj[f.ivField],           "base64");
+  const kf2   = Buffer.from(data[f.keyFrag2Field],    "base64");
+  const token = data[f.tokenField] as string;
+  if (!token) throw new Error("token missing");
+
+  const tokRes = await fetch(`https://flixcloud.cc/api/m3u8/${token}`, {
+    headers: { "Referer": "https://reanime.to/", "User-Agent": BROWSER_UA },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!tokRes.ok) throw new Error(`tok ${tokRes.status}`);
+  const tok: any = await tokRes.json();
+
+  const vidKey = sha256hex(token + "vid").substring(0, 10);
+  const keyKey = sha256hex(token + "key").substring(0, 10);
+  const vBytes = Buffer.from(tok[vidKey], "base64");
+  const TBytes = Buffer.from(tok[keyKey], "base64");
+
+  const wasmOut = await runFlixWasm(data.w_payload, frag1, kf2, TBytes, parseInt(seed.substring(0, 8), 16));
+  const pbk  = pbkdf2Sync(wasmOut, seed, 1000, 32, "sha256");
+  const r    = Buffer.from(pbk);
+  for (let i = 0; i < 32; i++) r[i] ^= seed.charCodeAt(i % seed.length);
+  const aesKey = createHash("sha256").update(r).digest();
+
+  const decipher = createDecipheriv("aes-256-cbc", aesKey, iv);
+  const url = Buffer.concat([decipher.update(vBytes), decipher.final()]).toString("utf8").trim();
+  if (!url.startsWith("http")) throw new Error(`bad url: ${url.slice(0, 50)}`);
+  return url;
+}
+
+async function getFlixCloudStream(anilistId: number, ep: number): Promise<string | null> {
+  const ckey = `flix:${anilistId}:${ep}`;
+  const hit  = flixCache.get(ckey);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
+  try {
+    const flixRes = await fetch(`https://reanime.to/api/flix/${anilistId}/${ep}`, {
+      headers: { "User-Agent": BROWSER_UA, "Referer": "https://reanime.to/" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!flixRes.ok) return null;
+    const flixData: any = await flixRes.json();
+    if (!flixData.success || !flixData.servers?.length) return null;
+
+    const ordered: any[] = [
+      ...flixData.servers.filter((s: any) => s.serverName === "HD-2" && s.dataType === "sub"),
+      ...flixData.servers.filter((s: any) => s.serverName === "HD-1" && s.dataType === "sub"),
+    ];
+    for (const srv of ordered) {
+      try {
+        const embRes = await fetch(srv.dataLink, {
+          headers: { "User-Agent": BROWSER_UA, "Referer": "https://reanime.to/" },
+          signal: AbortSignal.timeout(12000),
+        });
+        if (!embRes.ok) continue;
+        const html = await embRes.text();
+        const url  = await decryptFlixcloudHtml(html);
+        flixCache.set(ckey, { url, ts: Date.now() });
+        return url;
+      } catch { continue; }
+    }
+    return null;
+  } catch { return null; }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  GET /api/anime/anipub-stream
 //  Returns { servers: { "1080p FHD": [...], "720p HD": [...], "360p SD": [...] } }
 //  Merges AniPub embed sources + AnimeX direct HLS sources (via hls-player)
@@ -3390,7 +3564,7 @@ router.get("/anime/anipub-stream", async (req, res) => {
 
   try {
     // ── Phase 1: Run all scrapers in parallel ──
-    const [anipubResult, animexSrcs, shahiidSrcs, animelekSrcs, allAnimeSrcs] = await Promise.allSettled([
+    const [anipubResult, animexSrcs, shahiidSrcs, animelekSrcs, allAnimeSrcs, paheSrcs, flixSrc] = await Promise.allSettled([
 
       // AniPub (embed iframes — dub + sub)
       timedOut((async () => {
@@ -3425,6 +3599,18 @@ router.get("/anime/anipub-stream", async (req, res) => {
         if (!title && !english) return [] as UnifiedSource[];
         return getAllAnimeSources(title || english, english || null, ep);
       })(), SCRAPER_MS, [] as UnifiedSource[]),
+
+      // AnimePahe via Miruro pipe (kiwi provider → uwucdn.top HLS)
+      timedOut((async () => {
+        if (!anilistId || anilistId <= 0) return [] as PaheStream[];
+        return getMiruroAnimePaheSources(anilistId, ep);
+      })(), SCRAPER_MS, [] as PaheStream[]),
+
+      // FlixCloud via ReAnime.to (Zoro/AniWave — WASM decrypt)
+      timedOut((async () => {
+        if (!anilistId || anilistId <= 0) return null;
+        return getFlixCloudStream(anilistId, ep);
+      })(), SCRAPER_MS + 2000, null as string | null),
     ]);
 
     // ── AniPub embed servers → 720p HD ──
@@ -3451,6 +3637,23 @@ router.get("/anime/anipub-stream", async (req, res) => {
           ?? (s.url.match(/\.m3u8([?#]|$)/i) || s.url.match(/\.mp4([?#]|$)/i) ? s.url : null);
         if (url && !result["720p HD"].includes(url)) result["720p HD"].push(url);
       }
+    }
+
+    // ── AnimePahe (Miruro kiwi) → quality tiers — uwucdn.top HLS, CORS:* ──
+    if (paheSrcs.status === "fulfilled" && paheSrcs.value.length > 0) {
+      for (const s of paheSrcs.value) {
+        const tier: keyof typeof result =
+          s.quality.includes("1080") ? "1080p FHD" :
+          s.quality.includes("360")  ? "360p SD"   : "720p HD";
+        if (!result[tier].includes(s.url)) result[tier].unshift(s.url);
+      }
+    }
+
+    // ── FlixCloud (ReAnime.to / Zoro) → 720p HD — proxy through hls-proxy ──
+    if (flixSrc.status === "fulfilled" && flixSrc.value) {
+      const flixM3u8 = flixSrc.value;
+      const proxied  = `/api/anime/hls-proxy?url=${encodeURIComponent(flixM3u8)}&ref=${encodeURIComponent("https://reanime.to/")}`;
+      if (!result["720p HD"].includes(proxied)) result["720p HD"].push(proxied);
     }
 
     // ── Phase 2: Arabic sources (shahiid + animelek) ──
