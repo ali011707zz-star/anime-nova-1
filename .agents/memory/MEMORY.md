@@ -3,14 +3,15 @@
 - [Arabic source priority](source-priority.md) — shahiid=13, animelek=12, animedar=11; AnimeGG (English)=5; directUrl always wins at 14
 - [iframe allow-popups](iframe-sandbox.md) — removing allow-popups from sandbox stops iframe from opening external tabs ("exits app")
 - [AnimePahe HLS proxy chain](animapahe-hls-chain.md) — don't unwrap animanga.fun proxy URLs; pass full URL to hls-proxy; use inner URL as base for segment resolution
-- [IP-tied MP4 proxy](ip-tied-mp4.md) — shahiid directUrls (sendvid/streamtape) contain ip=35.234.223.23; always use video-proxy, never direct; add HEAD handling to video-proxy
+- [IP-tied MP4 proxy](ip-tied-mp4.md) — shahiid/animelek directUrls (sendvid) contain ip=34.93.51.232; video-proxy works (same server IP); always proxy, never direct
 - [Shahiid URL scheme change](shahiid-url-scheme.md) — shahiid changed /episodes/ → /episodeses/ (and /seasons/ → /seasonses/, /series/ → /serieses/) — extractEpLinks must match episodeses?
 - [AniPub titleSimilarity bug](anipub-similarity.md) — includes() shortcut returns same score for title+sequel; use length-ratio formula instead
 - [AniPub movie ep case](anipub-similarity.md) — when local.ep[] is empty, use local.link directly (movie has one link, not episode array)
 - [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
 - [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
 - [anipub-stream extraction filter](anipub-stream-filter.md) — EMBED_ONLY_HOSTS filtered in sendSrc AND anipub-stream Phase 2; anipub.xyz/video → megaplay.buzz (CF-protected) → filter at AniPub layer; share4max in EMBED_ONLY_HOSTS
-- [AnimeX CDN CORS](animex-cdn-cors.md) — uwucdn.top blocks server IP but has CORS:* for browsers; send rawUrl directly to browser, no hls-proxy; animex-player HTML must use data.rawUrl not data.proxyUrl
+- [AnimeX CDN CORS](animex-cdn-cors.md) — uwucdn.top blocks server IP but has CORS:* for browsers; send rawUrl+#animex tag directly to browser, no hls-proxy; Watch.tsx identifies AnimeX by #animex fragment
 - [Miruro AnimePahe pipe](miruro-animepah.md) — miruro.tv/api/secure/pipe encoded as base64url→gzip; kiwi=AnimePahe; returns uwucdn.top HLS URLs; CORS:* so send raw to browser
-- [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN may block server IP → proxied via hls-proxy
-- [Direct MP4 in Watch.tsx](direct-mp4-player.md) — streamtape/sendvid URLs use NativeHLSPlayer via video-proxy (isDirect=true); NativeHLSPlayer detects .mp4/streamtape/sendvid and uses <video src=proxyUrl> not HLS.js
+- [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN blocks server IP (hls-proxy→403); raw URL sent as fallback
+- [Direct MP4 in Watch.tsx](direct-mp4-player.md) — any .mp4 URL goes to NativeHLSPlayer via video-proxy (isHls=true, isDirect=true); getServerInfo matches .mp4 pattern before generic fallback
+- [Dual stream Watch.tsx](dual-stream-watch.md) — Watch.tsx calls BOTH anipub-stream (JSON) AND sources-stream (SSE); Arabic sources only come from sources-stream; merge via useMemo into mergedServers
