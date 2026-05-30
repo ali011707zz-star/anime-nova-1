@@ -11,4 +11,6 @@
 - [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
 - [anipub-stream extraction filter](anipub-stream-filter.md) — EMBED_ONLY_HOSTS filtered in sendSrc AND anipub-stream Phase 2; anipub.xyz/video → megaplay.buzz (CF-protected) → filter at AniPub layer; share4max in EMBED_ONLY_HOSTS
 - [AnimeX CDN CORS](animex-cdn-cors.md) — uwucdn.top blocks server IP but has CORS:* for browsers; send rawUrl directly to browser, no hls-proxy; animex-player HTML must use data.rawUrl not data.proxyUrl
+- [Miruro AnimePahe pipe](miruro-animepah.md) — miruro.tv/api/secure/pipe encoded as base64url→gzip; kiwi=AnimePahe; returns uwucdn.top HLS URLs; CORS:* so send raw to browser
+- [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN may block server IP → proxied via hls-proxy
 - [Direct MP4 in Watch.tsx](direct-mp4-player.md) — streamtape/sendvid URLs use NativeHLSPlayer via video-proxy (isDirect=true); NativeHLSPlayer detects .mp4/streamtape/sendvid and uses <video src=proxyUrl> not HLS.js

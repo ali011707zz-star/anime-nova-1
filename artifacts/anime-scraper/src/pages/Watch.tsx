@@ -58,6 +58,14 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   if (url.includes("animex-player") || url.includes("animex-source")) {
     return { label: "AnimeX", sublabel: "مترجم للعربية", isHls: true };
   }
+  // AnimePahe via Miruro (uwucdn.top HLS — CORS:* open)
+  if (url.includes("uwucdn.top")) {
+    return { label: "AnimePahe", sublabel: "جودة عالية · مترجم", isHls: true };
+  }
+  // FlixCloud via ReAnime.to (Zoro/AniWave HLS through hls-proxy)
+  if (url.includes("flixcloud") || url.includes("fetch1.flixcloud") || url.includes("hls-proxy") && url.includes("reanime")) {
+    return { label: "Zoro · AniWave", sublabel: "جودة عالية · مترجم", isHls: true };
+  }
   // AniPub — dub vs sub distinction
   if (url.includes("anipub.xyz/video/")) {
     if (url.endsWith("/dub")) return { label: "AniPub", sublabel: "مدبلج إنجليزي", isHls: false };
@@ -85,7 +93,7 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   }
   // Generic hls-proxy fallback
   if (url.includes("hls-player") || url.includes("hls-proxy")) {
-    return { label: "مشغّل", sublabel: "بث مباشر", isHls: true };
+    return { label: "زورو · أنيويف", sublabel: "مترجم · جودة عالية", isHls: true };
   }
   // Shahiid Arabic embed hosts
   if (url.includes("shahiid") || url.includes("share4max") || url.includes("vidbm")
