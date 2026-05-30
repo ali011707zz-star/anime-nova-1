@@ -3660,13 +3660,15 @@ router.get("/anime/anipub-stream", async (req, res) => {
       }
     }
 
-    // ── AnimePahe (Miruro kiwi) → quality tiers — uwucdn.top HLS, CORS:* ──
+    // ── AnimePahe (Miruro kiwi) → quality tiers — uwucdn.top needs Referer: kwik.cx ──
+    // Browser HLS.js cannot set Referer header → wrap in hls-proxy so server adds it
     if (paheSrcs.status === "fulfilled" && paheSrcs.value.length > 0) {
       for (const s of paheSrcs.value) {
         const tier: keyof typeof result =
           s.quality.includes("1080") ? "1080p FHD" :
           s.quality.includes("360")  ? "360p SD"   : "720p HD";
-        if (!result[tier].includes(s.url)) result[tier].unshift(s.url);
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${encodeURIComponent("https://kwik.cx/")}`;
+        if (!result[tier].includes(proxied)) result[tier].unshift(proxied);
       }
     }
 
