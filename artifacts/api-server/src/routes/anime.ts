@@ -28,6 +28,20 @@ const translateCache = new Map<string, string>();
 const SEARCH_TTL     = 3_600_000;
 const SRC_TTL        = 6 * 3_600_000;
 const adarSlugCache  = new Map<string, { url: string | null; ts: number }>();
+
+// CDN response cache — prevents IP rate-limiting by vault-13/kwik.cx CDN
+// (same URL fetched from server only once per TTL, then served from memory)
+const cdnCache = new Map<string, { body: Buffer; ct: string; ts: number }>();
+const CDN_CACHE_TTL = 8 * 60_000; // 8 minutes
+const CDN_CACHE_HOSTS = ["vault-13.owocdn.top", "owocdn.top", "kwik.cx"];
+function isCdnCacheable(url: string): boolean {
+  try { return CDN_CACHE_HOSTS.some(h => new URL(url).hostname.endsWith(h)); } catch { return false; }
+}
+function evictCdnCache() {
+  const now = Date.now();
+  for (const [k, v] of cdnCache) { if (now - v.ts > CDN_CACHE_TTL) cdnCache.delete(k); }
+}
+setInterval(evictCdnCache, 2 * 60_000);
 const adarSrcCache   = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
 // ── Known-dead / unplayable file hosts ──
@@ -4166,6 +4180,16 @@ router.get("/anime/hls-proxy", async (req, res) => {
   let origin = "";
   try { origin = new URL(ref || url).origin; } catch {}
   if (!origin) try { origin = new URL(url).origin; } catch {}
+  const cacheKey = `hls:${url}`;
+  const hit = cdnCache.get(cacheKey);
+  if (hit && isCdnCacheable(url) && Date.now() - hit.ts < CDN_CACHE_TTL) {
+    res.setHeader("Content-Type", hit.ct);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Cache", "HIT");
+    res.send(hit.body);
+    return;
+  }
   try {
     const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(18000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
@@ -4175,7 +4199,11 @@ router.get("/anime/hls-proxy", async (req, res) => {
     const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
     const selfBase = `${proto}://${host}`;
     const rewritten = rewriteM3u8(body, baseForSegments, selfBase, ref || url);
-    res.setHeader("Content-Type", ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl");
+    const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
+    if (isCdnCacheable(url)) {
+      cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() });
+    }
+    res.setHeader("Content-Type", finalCt);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
@@ -4263,25 +4291,43 @@ router.get("/anime/seg-proxy", async (req, res) => {
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
   let origin = ""; try { origin = new URL(url).origin; } catch {}
+
+  const cacheKey = `seg:${url}`;
+  const hit = cdnCache.get(cacheKey);
+  if (hit && isCdnCacheable(url) && Date.now() - hit.ts < CDN_CACHE_TTL) {
+    res.setHeader("Content-Type", hit.ct);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("Content-Length", String(hit.body.length));
+    res.setHeader("X-Cache", "HIT");
+    res.send(hit.body);
+    return;
+  }
+
   try {
     const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(30000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
     const ct = r.headers.get("content-type") || "video/mp2t";
     const len = r.headers.get("content-length");
-    res.setHeader("Content-Type", ct);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    if (len) res.setHeader("Content-Length", len);
     if (ct.includes("mpegurl") || url.includes(".m3u8")) {
       const body = await r.text();
       const proto = req.headers["x-forwarded-proto"] || "https";
       const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
+      const rewritten = rewriteM3u8(body, url, `${proto}://${host}`, ref || url);
+      if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: "application/vnd.apple.mpegurl", ts: Date.now() });
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-      res.send(rewriteM3u8(body, url, `${proto}://${host}`, ref || url));
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(rewritten);
       return;
     }
-    const body = await r.arrayBuffer();
-    res.send(Buffer.from(body));
+    const body = Buffer.from(await r.arrayBuffer());
+    if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body, ct, ts: Date.now() });
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    if (len) res.setHeader("Content-Length", len);
+    res.send(body);
   } catch (e: any) { res.status(502).send(`proxy error: ${e?.message ?? e}`); }
 });
 
