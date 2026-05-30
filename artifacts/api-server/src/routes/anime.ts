@@ -3131,12 +3131,12 @@ router.get("/anime/animex-source", async (req, res) => {
       return scoreQ(a.quality) - scoreQ(b.quality);
     });
     const best = ranked[0];
-    // uwucdn.top CDN returns 403 from Replit server IP (Cloudflare bot block) but has
-    // CORS: * and allows browser IPs freely — so send rawUrl directly to the browser.
-    // The browser's HLS.js will fetch the m3u8 and segments directly without any proxy.
+    // uwucdn.top CDN requires Referer: https://kwik.cx/ — browser HLS.js cannot set
+    // Referer headers, so we MUST route through hls-proxy which injects the correct header.
+    const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(best.url)}&ref=${encodeURIComponent("https://kwik.cx/")}`;
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
-    res.json({ rawUrl: best.url, quality: best.quality });
+    res.json({ proxyUrl, rawUrl: best.url, quality: best.quality });
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "failed" });
   }
@@ -3614,33 +3614,25 @@ router.get("/anime/anipub-stream", async (req, res) => {
     ]);
 
     // ── AniPub embed servers → 720p HD ──
-    // Filter out anipub.xyz/video embeds — they redirect to megaplay.buzz (Cloudflare-protected)
+    // Filter out: anipub.xyz/video (→ megaplay.buzz CF-protected), gogoanime.com.by (→ megaplay.buzz nested iframe)
     if (anipubResult.status === "fulfilled" && anipubResult.value?.servers?.length) {
       const anipubServers = anipubResult.value.servers.filter(
-        (u: string) => !u.includes("anipub.xyz/video") && !u.includes("megaplay.buzz")
+        (u: string) => !u.includes("anipub.xyz/video") && !u.includes("megaplay.buzz") && !u.includes("gogoanime.com.by")
       );
       if (anipubServers.length) result["720p HD"].push(...anipubServers);
     }
 
-    // ── AnimeX HLS → raw uwucdn.top URLs (CORS:* — loads directly in browser HLS.js) ──
-    // DO NOT use animex-player HTML page — it requires a second server API call at play-time
-    // which often fails. Use the raw URLs already fetched during scraping instead.
-    if (anilistId > 0 && animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value) && animexSrcs.value.length > 0) {
-      const animexList = animexSrcs.value as AnimexHlsSrc[];
-      for (const src of animexList) {
-        const tier: keyof typeof result =
-          src.quality.includes("1080") ? "1080p FHD" :
-          (src.quality.includes("360") || src.quality.includes("240") || src.quality.includes("480")) ? "360p SD"
-          : "720p HD";
-        // Append #animex fragment so Watch.tsx can label it correctly (HLS.js ignores fragments)
-        const taggedUrl = src.url.includes("#") ? src.url : src.url + "#animex";
-        if (!result[tier].includes(taggedUrl)) result[tier].push(taggedUrl);
-      }
-      // If only one quality returned, propagate to adjacent tiers so user always has a choice
-      if (animexList.length === 1) {
-        const u = (animexList[0].url.includes("#") ? animexList[0].url : animexList[0].url + "#animex");
-        for (const tier of ["1080p FHD", "720p HD", "360p SD"] as const) {
-          if (!result[tier].includes(u)) result[tier].push(u);
+    // ── AnimeX HLS → lazy animex-player URLs ──
+    // CDN (uwucdn.top/vault-13) requires Referer: kwik.cx/ — browser HLS.js cannot set that.
+    // Use animex-player lazy URLs: Watch.tsx calls /animex-source at play-time to get a fresh
+    // hls-proxy URL (which adds the correct Referer server-side). This avoids CDN 403.
+    if (anilistId > 0) {
+      const hasAnimex = animexSrcs.status === "fulfilled" && Array.isArray(animexSrcs.value) && animexSrcs.value.length > 0;
+      if (hasAnimex) {
+        for (const tier of (["1080p FHD", "720p HD", "360p SD"] as const)) {
+          const q = tier.includes("1080") ? "1080" : tier.includes("720") ? "720" : "360";
+          const playerUrl = `/api/anime/animex-player?anilistId=${anilistId}&ep=${ep}&quality=${q}`;
+          if (!result[tier].includes(playerUrl)) result[tier].unshift(playerUrl);
         }
       }
     }
@@ -3671,8 +3663,6 @@ router.get("/anime/anipub-stream", async (req, res) => {
       const flixM3u8 = flixSrc.value;
       const proxied  = `/api/anime/hls-proxy?url=${encodeURIComponent(flixM3u8)}&ref=${encodeURIComponent("https://reanime.to/")}`;
       if (!result["720p HD"].includes(proxied)) result["720p HD"].push(proxied);
-      // Also add raw URL as fallback — browser may have direct access (CORS:*)
-      if (!result["720p HD"].includes(flixM3u8)) result["720p HD"].push(flixM3u8);
     }
 
     // ── Phase 2: Arabic sources (shahiid + animelek) ──
