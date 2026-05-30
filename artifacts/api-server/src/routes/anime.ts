@@ -3620,11 +3620,8 @@ router.get("/anime/anipub-stream", async (req, res) => {
         return getMiruroAnimePaheSources(anilistId, ep);
       })(), SCRAPER_MS, [] as PaheStream[]),
 
-      // FlixCloud via ReAnime.to (Zoro/AniWave — WASM decrypt)
-      timedOut((async () => {
-        if (!anilistId || anilistId <= 0) return null;
-        return getFlixCloudStream(anilistId, ep);
-      })(), SCRAPER_MS + 2000, null as string | null),
+      // FlixCloud disabled — JWT client_ip binding prevents reliable proxying
+      timedOut(Promise.resolve(null as string | null), 0, null as string | null),
     ]);
 
     // ── AniPub embed servers → 720p HD ──
