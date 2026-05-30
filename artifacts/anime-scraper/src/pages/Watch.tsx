@@ -415,14 +415,30 @@ function NativeHLSPlayer({
   const [isFs,         setIsFs]         = useState(false);
   const [retrying,     setRetrying]     = useState(false);
 
-  /* ── Schedule control hide ── */
+  const touchHandledRef = useRef(false);
+
+  /* ── Control visibility ── */
   function scheduleHide() {
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setShowControls(false), 3000);
+    hideTimer.current = setTimeout(() => setShowControls(false), 4500);
   }
-  function touchControls() {
+  /* Mouse move → show + auto-hide */
+  function handleMouseMove() {
+    if (touchHandledRef.current) return;
     setShowControls(true);
     scheduleHide();
+  }
+  /* Touch → TOGGLE (tap to show, tap again to hide, no auto-hide) */
+  function handleTouchStart() {
+    touchHandledRef.current = true;
+    setTimeout(() => { touchHandledRef.current = false; }, 600);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    setShowControls(prev => !prev);
+  }
+  /* Click (mouse only, not touch) → play/pause */
+  function handleClick() {
+    if (touchHandledRef.current) return;
+    togglePlay();
   }
 
   /* ── Fullscreen ── */
@@ -595,7 +611,7 @@ function NativeHLSPlayer({
     const v = videoRef.current;
     if (!v) return;
     v.paused ? v.play().catch(() => {}) : v.pause();
-    touchControls();
+    setShowControls(true);
   }
 
   function toggleMute() {
@@ -603,7 +619,6 @@ function NativeHLSPlayer({
     if (!v) return;
     v.muted = !v.muted;
     setMuted(v.muted);
-    touchControls();
   }
 
   function seek(e: React.MouseEvent | React.TouchEvent) {
@@ -615,14 +630,14 @@ function NativeHLSPlayer({
     const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     v.currentTime = frac * duration;
     setCurrentTime(frac * duration);
-    touchControls();
+    setShowControls(true);
   }
 
   function skipSeconds(delta: number) {
     const v = videoRef.current;
     if (!v) return;
     v.currentTime = Math.max(0, Math.min(duration, v.currentTime + delta));
-    touchControls();
+    setShowControls(true);
   }
 
   const pct    = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -637,10 +652,10 @@ function NativeHLSPlayer({
   return (
     <div
       data-hls-container
-      className="relative w-full h-full bg-black overflow-hidden"
-      onClick={togglePlay}
-      onTouchStart={touchControls}
-      onMouseMove={touchControls}
+      className="relative w-full h-full bg-black overflow-hidden select-none"
+      onMouseMove={handleMouseMove}
+      onTouchStart={handleTouchStart}
+      onClick={handleClick}
     >
       <video
         ref={videoRef}
@@ -649,129 +664,179 @@ function NativeHLSPlayer({
         preload="metadata"
       />
 
-      {/* Loading spinner */}
+      {/* ── Loading spinner ── */}
       {(loading && !error) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 pointer-events-none">
-          <motion.div className="w-14 h-14 rounded-full border-[3px] border-t-violet-500 border-violet-500/15"
-            animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
-          <p className="text-white/40 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
+        <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+          <motion.div
+            className="w-12 h-12 rounded-full border-2 border-violet-500/20 border-t-violet-400"
+            animate={{ rotate: 360 }}
+            transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+          />
         </div>
       )}
 
-      {/* Error state */}
+      {/* ── Error state ── */}
       {error && !retrying && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-[#0a0a12] z-20 pointer-events-auto" dir="rtl"
-          onClick={e => e.stopPropagation()}>
-          <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-            <AlertTriangle className="w-7 h-7 text-red-400/70" />
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-5 z-20 pointer-events-auto"
+          style={{ background: "radial-gradient(ellipse at 50% 50%, rgba(90,10,10,0.18) 0%, rgba(0,0,0,0.97) 65%)" }}
+          onClick={e => e.stopPropagation()}
+          onTouchStart={e => e.stopPropagation()}
+        >
+          <div className="w-16 h-16 rounded-full border border-red-500/20 flex items-center justify-center"
+            style={{ background: "rgba(239,68,68,0.07)" }}>
+            <AlertTriangle className="w-7 h-7 text-red-400/60" />
           </div>
-          <div className="text-center px-8">
-            <p className="text-white/60 text-[14px] font-black font-['Cairo']">تعذّر تحميل الفيديو</p>
-            <p className="text-white/25 text-[11px] mt-1 font-['Cairo'] leading-relaxed">{error}</p>
+          <div className="text-center px-10">
+            <p className="text-white/65 text-[15px] font-black font-['Cairo']">تعذّر تحميل الفيديو</p>
+            <p className="text-white/28 text-[11px] mt-2 font-['Cairo'] leading-relaxed">{error}</p>
           </div>
-          <button onClick={retry}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95">
+          <button
+            onClick={retry}
+            className="flex items-center gap-2 px-6 py-3 rounded-2xl text-white/75 text-[13px] font-bold font-['Cairo'] active:scale-95 transition-all"
+            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.13)" }}
+          >
             <RefreshCw className="w-4 h-4" /> إعادة المحاولة
           </button>
         </div>
       )}
 
-      {/* Controls overlay */}
+      {/* ── Controls overlay ── */}
       <AnimatePresence>
         {showControls && !loading && !error && (
           <motion.div
-            key="controls"
+            key="hls-ctrl"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="absolute inset-0 z-10 flex flex-col justify-end pointer-events-none"
-            style={{ background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.2) 40%, transparent 70%)" }}
-            onClick={e => e.stopPropagation()}
+            transition={{ duration: 0.18 }}
+            className="absolute inset-0 z-10 flex flex-col pointer-events-none"
+            style={{
+              background: [
+                "linear-gradient(to bottom, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0) 22%)",
+                "linear-gradient(to top,   rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.42) 30%, rgba(0,0,0,0) 58%)",
+              ].join(", "),
+            }}
           >
-            {/* Center play/pause */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-auto" onClick={togglePlay}>
-              <motion.div
-                key={isPlaying ? "play" : "pause"}
-                initial={{ scale: 0.6, opacity: 0.8 }}
-                animate={{ scale: 1, opacity: 0 }}
-                transition={{ duration: 0.5 }}
-                className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"
+            {/* CENTER: skip + play/pause */}
+            <div className="flex-1 flex items-center justify-between px-7 pointer-events-auto">
+              {/* ← 10s back */}
+              <button
+                onClick={e => { e.stopPropagation(); skipSeconds(-10); }}
+                onTouchStart={e => e.stopPropagation()}
+                className="flex flex-col items-center gap-1.5 active:scale-90 transition-transform"
               >
-                {isPlaying
-                  ? <Pause className="w-9 h-9 text-white fill-white" />
-                  : <Play  className="w-9 h-9 text-white fill-white" />}
-              </motion.div>
+                <div
+                  className="flex items-center justify-center rounded-full"
+                  style={{ width: 54, height: 54, background: "rgba(0,0,0,0.28)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.12)" }}
+                >
+                  <SkipBack className="w-5 h-5 text-white/85" />
+                </div>
+                <span className="text-white/42 text-[9px] font-bold font-mono tracking-widest">-10</span>
+              </button>
+
+              {/* ▶/⏸ center */}
+              <button
+                onClick={e => { e.stopPropagation(); togglePlay(); }}
+                onTouchStart={e => e.stopPropagation()}
+                className="active:scale-90 transition-transform"
+              >
+                <div
+                  className="flex items-center justify-center rounded-full shadow-2xl"
+                  style={{
+                    width: 72, height: 72,
+                    background: "rgba(255,255,255,0.13)",
+                    backdropFilter: "blur(18px) saturate(160%)",
+                    border: "1.5px solid rgba(255,255,255,0.24)",
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+                  }}
+                >
+                  {isPlaying
+                    ? <Pause className="w-7 h-7 text-white fill-white" />
+                    : <Play  className="w-7 h-7 text-white fill-white ml-1" />}
+                </div>
+              </button>
+
+              {/* → 10s forward */}
+              <button
+                onClick={e => { e.stopPropagation(); skipSeconds(10); }}
+                onTouchStart={e => e.stopPropagation()}
+                className="flex flex-col items-center gap-1.5 active:scale-90 transition-transform"
+              >
+                <div
+                  className="flex items-center justify-center rounded-full"
+                  style={{ width: 54, height: 54, background: "rgba(0,0,0,0.28)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.12)" }}
+                >
+                  <SkipForward className="w-5 h-5 text-white/85" />
+                </div>
+                <span className="text-white/42 text-[9px] font-bold font-mono tracking-widest">+10</span>
+              </button>
             </div>
 
-            {/* Skip buttons */}
-            <div className="absolute inset-0 flex items-center justify-between px-10 pointer-events-auto">
-              <button onClick={e => { e.stopPropagation(); skipSeconds(10); }}
-                className="flex flex-col items-center gap-1 active:scale-90 transition-transform">
-                <SkipForward className="w-8 h-8 text-white/70" />
-                <span className="text-white/50 text-[9px] font-bold">10s</span>
-              </button>
-              <button onClick={e => { e.stopPropagation(); skipSeconds(-10); }}
-                className="flex flex-col items-center gap-1 active:scale-90 transition-transform">
-                <SkipBack className="w-8 h-8 text-white/70" />
-                <span className="text-white/50 text-[9px] font-bold">10s</span>
-              </button>
-            </div>
-
-            {/* Bottom controls */}
-            <div className="pointer-events-auto px-4 pb-4 space-y-3">
-              {/* Progress bar */}
+            {/* BOTTOM: progress + controls row */}
+            <div
+              className="pointer-events-auto px-4 pb-4 space-y-2"
+              onTouchStart={e => e.stopPropagation()}
+            >
+              {/* Progress track */}
               <div
                 ref={progressRef}
-                className="relative h-8 flex items-center cursor-pointer group"
+                className="relative flex items-center cursor-pointer"
+                style={{ height: 36 }}
                 onMouseDown={seek}
-                onTouchStart={seek}
+                onTouchStart={e => { e.stopPropagation(); seek(e); }}
               >
-                {/* Track */}
-                <div className="w-full h-1 rounded-full bg-white/20 relative overflow-hidden group-hover:h-1.5 transition-all">
-                  {/* Buffered */}
-                  <div className="absolute inset-y-0 left-0 bg-white/20 rounded-full"
-                    style={{ width: `${bufPct}%` }} />
-                  {/* Played */}
-                  <div className="absolute inset-y-0 left-0 bg-violet-500 rounded-full"
-                    style={{ width: `${pct}%` }} />
+                <div className="relative w-full rounded-full" style={{ height: 3, background: "rgba(255,255,255,0.15)" }}>
+                  <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${bufPct}%`, background: "rgba(255,255,255,0.22)" }} />
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full"
+                    style={{ width: `${pct}%`, background: "linear-gradient(90deg, #7c3aed 0%, #c084fc 100%)" }}
+                  />
                 </div>
                 {/* Thumb */}
-                <div className="absolute w-4 h-4 rounded-full bg-white shadow-lg shadow-violet-500/40 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ left: `${pct}%` }} />
+                <div
+                  className="absolute rounded-full bg-white"
+                  style={{
+                    width: 14, height: 14,
+                    left: `${pct}%`, top: "50%",
+                    transform: "translate(-50%, -50%)",
+                    boxShadow: "0 0 0 3px rgba(167,139,250,0.35), 0 2px 8px rgba(0,0,0,0.55)",
+                  }}
+                />
               </div>
 
               {/* Controls row */}
-              <div className="flex items-center gap-3">
-                {/* Play/Pause */}
-                <button onClick={e => { e.stopPropagation(); togglePlay(); }}
-                  className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-transform shrink-0">
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={e => { e.stopPropagation(); togglePlay(); }}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                  style={{ background: "rgba(255,255,255,0.1)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.12)" }}
+                >
                   {isPlaying
-                    ? <Pause className="w-5 h-5 text-white fill-white" />
-                    : <Play  className="w-5 h-5 text-white fill-white" />}
+                    ? <Pause className="w-4 h-4 text-white fill-white" />
+                    : <Play  className="w-4 h-4 text-white fill-white" />}
                 </button>
 
-                {/* Time */}
-                <span className="text-white/70 text-[11px] font-mono tabular-nums shrink-0">
+                <span className="text-white/75 text-[12px] font-mono tabular-nums font-semibold shrink-0 tracking-tight">
                   {fmtTime(currentTime)} / {fmtTime(duration)}
                 </span>
 
                 <div className="flex-1" />
 
-                {/* Mute */}
-                <button onClick={e => { e.stopPropagation(); toggleMute(); }}
-                  className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-transform shrink-0">
-                  {muted
-                    ? <VolumeX className="w-4 h-4 text-white/70" />
-                    : <Volume2 className="w-4 h-4 text-white/70" />}
+                <button
+                  onClick={e => { e.stopPropagation(); toggleMute(); }}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                  style={{ background: "rgba(255,255,255,0.1)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.12)" }}
+                >
+                  {muted ? <VolumeX className="w-4 h-4 text-white/62" /> : <Volume2 className="w-4 h-4 text-white/62" />}
                 </button>
 
-                {/* Fullscreen */}
-                <button onClick={e => { e.stopPropagation(); toggleFs(); }}
-                  className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-transform shrink-0">
-                  {isFs
-                    ? <Minimize2 className="w-4 h-4 text-white/70" />
-                    : <Maximize2 className="w-4 h-4 text-white/70" />}
+                <button
+                  onClick={e => { e.stopPropagation(); toggleFs(); }}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                  style={{ background: "rgba(255,255,255,0.1)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.12)" }}
+                >
+                  {isFs ? <Minimize2 className="w-4 h-4 text-white/62" /> : <Maximize2 className="w-4 h-4 text-white/62" />}
                 </button>
               </div>
             </div>
@@ -967,190 +1032,15 @@ function EpisodePlayer({
 
   return (
     <motion.div id="nova-player"
-      className="fixed inset-0 z-50 bg-black flex flex-col"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 20 }}
-      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      className="fixed inset-0 z-50 bg-black overflow-hidden"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
       dir="rtl"
     >
-      {/* ── Top bar ── */}
-      <div className="flex items-center gap-3 px-4 bg-black/80 backdrop-blur border-b border-white/8 shrink-0 z-20"
-        style={{ paddingTop: "max(12px, env(safe-area-inset-top))", paddingBottom: 10 }}>
-        <button onClick={onBack}
-          className="w-9 h-9 rounded-xl bg-white/8 border border-white/12 flex items-center justify-center active:scale-90 transition-transform shrink-0">
-          <ChevronRight className="w-5 h-5 text-white/70" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <p className="text-white text-[13px] font-black font-['Cairo'] truncate">{title}</p>
-          <div className="flex items-center gap-1.5 text-white/35 text-[10px] font-['Cairo']">
-            <span>الحلقة {ep}</span>
-            <span>·</span>
-            <span className="text-violet-300/60 font-bold">{quality}</span>
-            <span>·</span>
-            <span>سيرفر {currentServer + 1}/{servers.length}</span>
-            {currentInfo.isHls && (
-              <span className="bg-violet-600/30 text-violet-300 text-[8px] font-bold px-1.5 py-0.5 rounded-md border border-violet-500/25">
-                HLS مدمج
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Subtitle button */}
-        <button onClick={fetchSubtitles}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[11px] font-bold font-['Cairo'] transition-all active:scale-90 shrink-0
-            ${subState === "ready"   ? "bg-violet-600 border-violet-400 text-white" :
-              subState === "loading" ? "bg-white/8 border-white/12 text-violet-300 animate-pulse" :
-              subState === "none"    ? "bg-white/5 border-white/8 text-white/25" :
-              "bg-white/8 border-white/12 text-white/60"}`}>
-          <Subtitles className="w-3.5 h-3.5" />
-          <span>ترجمة</span>
-        </button>
-
-        {/* Quality button — hidden when all tiers identical (quality picker has no effect) */}
-        {!allQualityIdentical && (
-          <button onClick={() => setShowQuality(s => !s)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[11px] font-bold font-mono transition-all active:scale-90 shrink-0
-              ${showQuality ? "bg-violet-600 border-violet-400 text-white" : "bg-white/8 border-white/12 text-white/60"}`}>
-            <Settings className="w-3.5 h-3.5" />
-            {QUALITY_SHORT[quality]}
-          </button>
-        )}
-        {/* Actual stream quality badge (HLS only) */}
-        {realQuality && (
-          <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 shrink-0">
-            <span className="text-[10px] font-bold font-mono text-white/45">{realQuality}</span>
-          </div>
-        )}
-
-        {!currentInfo.isHls && (
-          <button onClick={toggleFs}
-            className="w-9 h-9 rounded-xl bg-white/8 border border-white/12 flex items-center justify-center active:scale-90 transition-transform shrink-0">
-            {fs ? <Minimize2 className="w-4 h-4 text-white/60" /> : <Maximize2 className="w-4 h-4 text-white/60" />}
-          </button>
-        )}
-      </div>
-
-      {/* ── Quality picker overlay ── */}
-      <AnimatePresence>
-        {showQuality && (
-          <motion.div key="qpick"
-            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-            className="absolute top-[60px] left-0 right-0 z-30 flex justify-center px-4 pt-2">
-            <div className="bg-[#12121e] border border-white/12 rounded-2xl px-4 py-3 flex gap-3 shadow-2xl">
-              <p className="text-white/30 text-[10px] font-['Cairo'] self-center ml-2">الجودة:</p>
-              {QUALITY_LABELS.map(q => (
-                <button key={q} onClick={() => { onChangeQuality(q); setShowQuality(false); }}
-                  className={`flex flex-col items-center gap-0.5 px-4 py-2.5 rounded-xl border transition-all active:scale-90
-                    ${q === quality
-                      ? "bg-violet-600 border-violet-500 text-white"
-                      : "bg-white/5 border-white/10 text-white/50 hover:bg-white/10"}`}>
-                  <span className="font-black text-[16px] font-mono">{QUALITY_SHORT[q]}</span>
-                  <span className="text-[8px] font-bold opacity-70 uppercase tracking-wider">{q.split(" ")[1]}</span>
-                </button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Subtitle control panel ── */}
-      <AnimatePresence>
-        {showSubPanel && subState !== "idle" && (
-          <motion.div key="subpanel"
-            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-            className="absolute top-[60px] left-0 right-0 z-30 flex justify-center px-4 pt-2">
-            <div className="bg-[#12121e] border border-white/12 rounded-2xl px-5 py-4 shadow-2xl w-full max-w-sm" dir="rtl">
-
-              {subState === "loading" && (
-                <div className="flex items-center gap-3 text-white/50">
-                  <Loader2 className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
-                  <p className="text-[12px] font-['Cairo']">جاري البحث عن ترجمة عربية…</p>
-                </div>
-              )}
-
-              {subState === "none" && (
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="w-4 h-4 text-white/20 shrink-0" />
-                  <p className="text-[12px] font-['Cairo'] text-white/35">لا توجد ترجمة متاحة لهذه الحلقة</p>
-                  <button onClick={() => setShowSubPanel(false)}
-                    className="mr-auto text-white/30 active:scale-90"><X className="w-4 h-4" /></button>
-                </div>
-              )}
-
-              {subState === "ready" && (
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-violet-500" />
-                      <p className="text-[12px] font-['Cairo'] text-white/70">
-                        {subLang === "ara" ? "ترجمة عربية" : "مترجمة تلقائياً"}
-                        <span className="text-white/30 mr-1">· {subCues.length} سطر</span>
-                      </p>
-                    </div>
-                    <button onClick={() => setShowSubPanel(false)}
-                      className="text-white/30 active:scale-90"><X className="w-4 h-4" /></button>
-                  </div>
-
-                  <div className="flex items-center gap-2 justify-center">
-                    <button onClick={() => adjustOffset(-2)}
-                      className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
-                      ‒2s
-                    </button>
-                    <button onClick={() => adjustOffset(-0.5)}
-                      className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
-                      ‒½s
-                    </button>
-
-                    {/* HLS: subtitle is auto-synced to video time — no manual start needed */}
-                    {currentInfo.isHls ? (
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600/20 border border-violet-500/30">
-                        <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
-                        <span className="text-violet-200 text-[11px] font-['Cairo'] font-bold">مزامنة تلقائية</span>
-                      </div>
-                    ) : !subRunning ? (
-                      <button onClick={startSubTimer}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 border border-violet-500 text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform">
-                        <Play className="w-3.5 h-3.5 fill-white" />
-                        ابدأ الآن
-                      </button>
-                    ) : (
-                      <button onClick={pauseSubTimer}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600/60 border border-violet-500/50 text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform">
-                        <span className="w-3.5 h-3.5 flex items-center justify-center gap-0.5">
-                          <span className="w-1 h-3 bg-white rounded-sm inline-block" />
-                          <span className="w-1 h-3 bg-white rounded-sm inline-block" />
-                        </span>
-                        إيقاف
-                      </button>
-                    )}
-
-                    <button onClick={() => adjustOffset(0.5)}
-                      className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
-                      +½s
-                    </button>
-                    <button onClick={() => adjustOffset(2)}
-                      className="px-3 py-1.5 rounded-lg bg-white/6 border border-white/10 text-white/50 text-[11px] font-bold active:scale-90 transition-transform">
-                      +2s
-                    </button>
-                  </div>
-
-                  <p className="text-center text-white/25 text-[10px] font-['Cairo']">
-                    اضغط "ابدأ الآن" عند بداية تشغيل الفيديو للمزامنة
-                  </p>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Video area ── */}
-      <div className="relative flex-1 bg-black overflow-hidden"
-        onClick={() => { setShowQuality(false); setShowSubPanel(false); }}>
-
-        {/* ── HLS Native Player ── */}
+      {/* ══ VIDEO FILLS ENTIRE SCREEN ══ */}
+      <div className="absolute inset-0">
         {currentInfo.isHls && currentUrl && (
           <>
             <NativeHLSPlayer
@@ -1159,54 +1049,65 @@ function EpisodePlayer({
               onRealQuality={handleRealQuality}
               onTimeUpdate={handleHlsTime}
             />
-            {/* Subtitle overlay synced directly to video time */}
             {subState === "ready" && subCues.length > 0 && (
               <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
             )}
           </>
         )}
 
-        {/* ── Iframe Player (non-HLS) ── */}
         {!currentInfo.isHls && (
           <>
             {!iframeLoaded && !iframeErr && !retrying && currentUrl && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black pointer-events-none">
-                <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black pointer-events-none z-10">
+                <motion.div
+                  className="w-12 h-12 rounded-full border-2 border-violet-500/20 border-t-violet-400"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                />
                 <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
               </div>
             )}
 
             {retrying && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 bg-black">
-                <motion.div className="w-16 h-16 rounded-full border-[3px] border-t-violet-500 border-violet-500/15"
-                  animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }} />
-                <p className="text-white/50 text-[13px] font-['Cairo']">جاري الانتقال للسيرفر التالي…</p>
-                <motion.div className="w-32 h-0.5 bg-white/10 rounded-full overflow-hidden">
-                  <motion.div className="h-full bg-violet-500 rounded-full"
-                    initial={{ width: "0%" }} animate={{ width: "100%" }} transition={{ duration: 2, ease: "linear" }} />
-                </motion.div>
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-10">
+                <motion.div
+                  className="w-16 h-16 rounded-full border-[3px] border-violet-500/18 border-t-violet-500"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                />
+                <p className="text-white/45 text-[13px] font-['Cairo']">الانتقال للسيرفر التالي…</p>
+                <div className="w-36 h-0.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+                  <motion.div className="h-full rounded-full"
+                    style={{ background: "linear-gradient(90deg,#7c3aed,#a855f7)" }}
+                    initial={{ width: "0%" }} animate={{ width: "100%" }}
+                    transition={{ duration: 2, ease: "linear" }} />
+                </div>
               </div>
             )}
 
             {iframeErr && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-[#0a0a12] z-10">
-                <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-                  <AlertTriangle className="w-7 h-7 text-red-400/70" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 z-10"
+                style={{ background: "radial-gradient(ellipse at 50% 50%, rgba(90,10,10,0.15) 0%, rgba(0,0,0,0.97) 60%)" }}>
+                <div className="w-16 h-16 rounded-full border border-red-500/20 flex items-center justify-center"
+                  style={{ background: "rgba(239,68,68,0.07)" }}>
+                  <AlertTriangle className="w-7 h-7 text-red-400/60" />
                 </div>
                 <div className="text-center px-8">
-                  <p className="text-white/60 text-[14px] font-black font-['Cairo']">فشل تحميل المصدر</p>
-                  <p className="text-white/25 text-[11px] mt-1 font-['Cairo']">جُرّبت {retryCount.current} سيرفرات</p>
+                  <p className="text-white/55 text-[14px] font-black font-['Cairo']">فشل تحميل المصدر</p>
+                  <p className="text-white/22 text-[11px] mt-1 font-['Cairo']">جُرّبت {retryCount.current} سيرفرات</p>
                 </div>
                 <div className="flex gap-3">
                   {currentServer > 0 && (
                     <button onClick={tryPrevServer}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/55 text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl text-white/48 text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform"
+                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
                       <ChevronRight className="w-4 h-4" /> السابق
                     </button>
                   )}
                   {currentServer + 1 < servers.length && (
                     <button onClick={tryNextServer}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform"
+                      style={{ background: "rgba(124,58,237,0.9)", border: "1px solid rgba(139,92,246,0.4)" }}>
                       <RefreshCw className="w-4 h-4" /> سيرفر آخر
                     </button>
                   )}
@@ -1226,24 +1127,232 @@ function EpisodePlayer({
                 allowFullScreen
               />
             )}
-          </>
-        )}
 
-        {/* Subtitle overlay */}
-        {subState === "ready" && subRunning && (
-          <SubtitleOverlay cues={subCues} elapsed={subElapsed} />
+            {subState === "ready" && subRunning && (
+              <SubtitleOverlay cues={subCues} elapsed={subElapsed} />
+            )}
+          </>
         )}
       </div>
 
-      {/* ── Bottom bar ── */}
-      <div className="flex items-center justify-between px-4 bg-black/80 backdrop-blur border-t border-white/8 shrink-0"
-        style={{ paddingTop: 10, paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}>
+      {/* ══ FLOATING PANELS (absolute z-30) ══ */}
+
+      <AnimatePresence>
+        {showQuality && (
+          <motion.div key="qpick"
+            initial={{ opacity: 0, scale: 0.95, y: -6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -6 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-[68px] left-0 right-0 z-30 flex justify-center px-4">
+            <div className="rounded-2xl px-4 py-3 flex gap-3 shadow-2xl"
+              style={{ background: "rgba(8,8,18,0.96)", backdropFilter: "blur(24px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+              <p className="text-white/28 text-[10px] font-['Cairo'] self-center ml-2">الجودة:</p>
+              {QUALITY_LABELS.map(q => (
+                <button key={q} onClick={() => { onChangeQuality(q); setShowQuality(false); }}
+                  className="flex flex-col items-center gap-0.5 px-4 py-2.5 rounded-xl transition-all active:scale-90"
+                  style={{
+                    background: q === quality ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.05)",
+                    border: q === quality ? "1px solid rgba(139,92,246,0.48)" : "1px solid rgba(255,255,255,0.08)",
+                    color: q === quality ? "white" : "rgba(255,255,255,0.42)",
+                  }}>
+                  <span className="font-black text-[16px] font-mono">{QUALITY_SHORT[q]}</span>
+                  <span className="text-[8px] font-bold opacity-55 uppercase tracking-wider">{q.split(" ")[1]}</span>
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSubPanel && subState !== "idle" && (
+          <motion.div key="subpanel"
+            initial={{ opacity: 0, scale: 0.95, y: -6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -6 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-[68px] left-0 right-0 z-30 flex justify-center px-4">
+            <div className="rounded-2xl px-5 py-4 shadow-2xl w-full max-w-sm" dir="rtl"
+              style={{ background: "rgba(8,8,18,0.96)", backdropFilter: "blur(24px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+
+              {subState === "loading" && (
+                <div className="flex items-center gap-3">
+                  <Loader2 className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
+                  <p className="text-white/45 text-[12px] font-['Cairo']">جاري البحث عن ترجمة عربية…</p>
+                </div>
+              )}
+
+              {subState === "none" && (
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-4 h-4 text-white/18 shrink-0" />
+                  <p className="text-white/30 text-[12px] font-['Cairo']">لا توجد ترجمة لهذه الحلقة</p>
+                  <button onClick={() => setShowSubPanel(false)} className="mr-auto text-white/25 active:scale-90">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {subState === "ready" && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+                      <p className="text-white/62 text-[12px] font-['Cairo']">
+                        {subLang === "ara" ? "ترجمة عربية" : "مترجمة تلقائياً"}
+                        <span className="text-white/26 mr-1">· {subCues.length} سطر</span>
+                      </p>
+                    </div>
+                    <button onClick={() => setShowSubPanel(false)} className="text-white/26 active:scale-90">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 justify-center flex-wrap">
+                    {([-2, -0.5] as number[]).map(d => (
+                      <button key={d} onClick={() => adjustOffset(d)}
+                        className="px-3 py-1.5 rounded-lg text-white/42 text-[11px] font-bold active:scale-90 transition-transform"
+                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                        {d > 0 ? "+" : ""}{d}s
+                      </button>
+                    ))}
+
+                    {currentInfo.isHls ? (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
+                        style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.28)" }}>
+                        <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+                        <span className="text-violet-200/82 text-[11px] font-['Cairo'] font-bold">مزامنة تلقائية</span>
+                      </div>
+                    ) : !subRunning ? (
+                      <button onClick={startSubTimer}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform"
+                        style={{ background: "rgba(124,58,237,0.88)", border: "1px solid rgba(139,92,246,0.4)" }}>
+                        <Play className="w-3.5 h-3.5 fill-white" /> ابدأ الآن
+                      </button>
+                    ) : (
+                      <button onClick={pauseSubTimer}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform"
+                        style={{ background: "rgba(124,58,237,0.48)", border: "1px solid rgba(139,92,246,0.3)" }}>
+                        <Pause className="w-3.5 h-3.5 fill-white" /> إيقاف
+                      </button>
+                    )}
+
+                    {([0.5, 2] as number[]).map(d => (
+                      <button key={d} onClick={() => adjustOffset(d)}
+                        className="px-3 py-1.5 rounded-lg text-white/42 text-[11px] font-bold active:scale-90 transition-transform"
+                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                        +{d}s
+                      </button>
+                    ))}
+                  </div>
+
+                  {!currentInfo.isHls && (
+                    <p className="text-center text-white/22 text-[10px] font-['Cairo']">
+                      اضغط "ابدأ الآن" عند بداية الفيديو للمزامنة
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ══ TOP BAR OVERLAY ══ */}
+      <div
+        className="absolute top-0 left-0 right-0 flex items-center gap-3 px-4 z-20"
+        style={{
+          background: "linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 65%, transparent 100%)",
+          paddingTop: "max(14px, env(safe-area-inset-top))",
+          paddingBottom: 22,
+        }}
+      >
+        <button onClick={onBack}
+          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+          style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
+          <ChevronRight className="w-5 h-5 text-white/72" />
+        </button>
+
+        <div className="flex-1 min-w-0">
+          <p className="text-white text-[13px] font-black font-['Cairo'] truncate leading-tight">{title}</p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-white/34 text-[10px] font-['Cairo']">الحلقة {ep}</span>
+            {!allQualityIdentical && (
+              <>
+                <span className="text-white/18 text-[8px]">·</span>
+                <span className="text-violet-300/48 text-[10px] font-bold font-mono">{QUALITY_SHORT[quality]}</span>
+              </>
+            )}
+            <span className="text-white/18 text-[8px]">·</span>
+            <span className="text-white/28 text-[10px] font-['Cairo']">س{currentServer + 1}/{servers.length}</span>
+            {currentInfo.isHls && (
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded font-mono"
+                style={{ background: "rgba(124,58,237,0.2)", color: "rgba(196,181,253,0.72)", border: "1px solid rgba(124,58,237,0.22)" }}>
+                HLS
+              </span>
+            )}
+          </div>
+        </div>
+
+        <button onClick={fetchSubtitles}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold font-['Cairo'] transition-all active:scale-90 shrink-0"
+          style={{
+            background: subState === "ready" ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.07)",
+            border: `1px solid ${subState === "ready" ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.1)"}`,
+            color: subState === "ready" ? "white"
+              : subState === "loading" ? "rgba(167,139,250,0.68)"
+              : subState === "none" ? "rgba(255,255,255,0.2)"
+              : "rgba(255,255,255,0.52)",
+          }}>
+          <Subtitles className={`w-3.5 h-3.5 ${subState === "loading" ? "animate-pulse" : ""}`} />
+          <span>ترجمة</span>
+        </button>
+
+        {!allQualityIdentical && (
+          <button onClick={() => setShowQuality(s => !s)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold font-mono transition-all active:scale-90 shrink-0"
+            style={{
+              background: showQuality ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.07)",
+              border: `1px solid ${showQuality ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.1)"}`,
+              color: showQuality ? "white" : "rgba(255,255,255,0.52)",
+            }}>
+            <Settings className="w-3.5 h-3.5" />
+            {QUALITY_SHORT[quality]}
+          </button>
+        )}
+
+        {realQuality && (
+          <div className="px-2 py-1 rounded-lg shrink-0"
+            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <span className="text-[10px] font-bold font-mono text-white/36">{realQuality}</span>
+          </div>
+        )}
+
+        {!currentInfo.isHls && (
+          <button onClick={toggleFs}
+            className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
+            {fs ? <Minimize2 className="w-4 h-4 text-white/52" /> : <Maximize2 className="w-4 h-4 text-white/52" />}
+          </button>
+        )}
+      </div>
+
+      {/* ══ BOTTOM BAR OVERLAY ══ */}
+      <div
+        className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 z-20 gap-2"
+        style={{
+          background: "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 65%, transparent 100%)",
+          paddingTop: 22,
+          paddingBottom: "max(16px, env(safe-area-inset-bottom))",
+        }}
+      >
         <button onClick={onPrevEp} disabled={ep <= 1}
-          className="flex items-center gap-1 text-[12px] font-bold text-white/45 disabled:opacity-20 font-['Cairo'] active:scale-95 transition-transform">
+          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0"
+          style={{ color: "rgba(255,255,255,0.4)", opacity: ep <= 1 ? 0.18 : 1 }}>
           <ChevronRight className="w-4 h-4" /> السابقة
         </button>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto max-w-[55%]" style={{ scrollbarWidth: "none" }}>
+        <div className="flex items-center gap-1.5 overflow-x-auto flex-1 justify-center" style={{ scrollbarWidth: "none" }}>
           {servers.map((url, i) => {
             const info = getServerInfo(url, i);
             const isActive = i === currentServer;
@@ -1253,10 +1362,16 @@ function EpisodePlayer({
                 setCurrentServer(i);
                 setIframeLoaded(false); setIframeErr(false); setRetrying(false);
               }}
-                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold font-['Cairo'] whitespace-nowrap transition-all active:scale-90 shrink-0
-                  ${isActive
-                    ? info.isHls ? "bg-violet-600 text-white" : "bg-blue-600 text-white"
-                    : "bg-white/8 border border-white/12 text-white/40"}`}>
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] whitespace-nowrap transition-all active:scale-90 shrink-0"
+                style={{
+                  background: isActive
+                    ? (info.isHls ? "rgba(124,58,237,0.85)" : "rgba(37,99,235,0.85)")
+                    : "rgba(255,255,255,0.07)",
+                  border: isActive
+                    ? (info.isHls ? "1px solid rgba(139,92,246,0.42)" : "1px solid rgba(59,130,246,0.42)")
+                    : "1px solid rgba(255,255,255,0.1)",
+                  color: isActive ? "rgba(255,255,255,0.94)" : "rgba(255,255,255,0.36)",
+                }}>
                 {info.isHls
                   ? <MonitorPlay className="w-3 h-3 shrink-0" />
                   : <Tv2 className="w-3 h-3 shrink-0" />}
@@ -1267,10 +1382,12 @@ function EpisodePlayer({
         </div>
 
         <button onClick={onNextEp} disabled={ep >= totalEps}
-          className="flex items-center gap-1 text-[12px] font-bold text-white/45 disabled:opacity-20 font-['Cairo'] active:scale-95 transition-transform flex-row-reverse">
+          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0 flex-row-reverse"
+          style={{ color: "rgba(255,255,255,0.4)", opacity: ep >= totalEps ? 0.18 : 1 }}>
           <ChevronLeft className="w-4 h-4" /> التالية
         </button>
       </div>
+
     </motion.div>
   );
 }
