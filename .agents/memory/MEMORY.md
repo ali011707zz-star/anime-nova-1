@@ -10,8 +10,9 @@
 - [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
 - [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
 - [Embed-only sources pipeline](embed-only-pipeline.md) — EMBED_ONLY_HOSTS must NOT be filtered in sendSrc/anipub-stream Phase 2; they reach frontend as embed URLs, Watch.tsx KNOWN_IFRAME_HOSTS gates isPlayable, getServerInfo routes to IframePlayer
-- [AnimeX CDN CORS](animex-cdn-cors.md) — uwucdn.top blocks server IP but has CORS:* for browsers; send rawUrl+#animex tag directly to browser, no hls-proxy; Watch.tsx identifies AnimeX by #animex fragment
-- [Miruro AnimePahe pipe](miruro-animepah.md) — miruro.tv/api/secure/pipe encoded as base64url→gzip; kiwi=AnimePahe; returns uwucdn.top HLS URLs; CORS:* so send raw to browser
+- [AnimeX CDN hls-proxy](animex-cdn-cors.md) — uwucdn.top allows server requests (HTTP 200); use proxyUrl (hls-proxy) first, not rawUrl; hls-proxy rewrites AES-128 key URI + segments via seg-proxy; all confirmed 200
+- [Miruro AnimePahe broken](miruro-animepah.md) — miruro.tv API now returns {"error":"Missing or invalid JWE"} — requires JWE token; AnimePahe source completely broken until alternative found
+- [Auto-fallback HLS player](auto-fallback-hls.md) — NativeHLSPlayer has onFail prop; EpisodePlayer handleHlsFail shows retrying overlay 1.2s then advances server; mirrors IframePlayer retry logic
 - [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN blocks server IP (hls-proxy→403); raw URL sent as fallback
 - [Direct MP4 in Watch.tsx](direct-mp4-player.md) — any .mp4 URL goes to NativeHLSPlayer via video-proxy (isHls=true, isDirect=true); getServerInfo matches .mp4 pattern before generic fallback
 - [Dual stream Watch.tsx](dual-stream-watch.md) — Watch.tsx calls BOTH anipub-stream (JSON) AND sources-stream (SSE); Arabic sources only come from sources-stream; merge via useMemo into mergedServers
