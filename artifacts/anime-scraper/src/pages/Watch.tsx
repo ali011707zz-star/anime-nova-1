@@ -1458,12 +1458,20 @@ export default function WatchPage() {
         const src = JSON.parse(ev.data) as {
           url: string; directUrl?: string; qualityRank?: number; site?: string;
         };
-        /* Only add sources we can actually play natively:
+        /* Accept sources we can play — either natively or via IframePlayer:
            - directUrl set (MP4 or HLS extracted server-side)
-           - OR bare m3u8 URL */
+           - OR bare m3u8 URL
+           - OR known embed-only host URL (plays via sandboxed IframePlayer) */
         const playUrl = src.directUrl || src.url;
         if (!playUrl) return;
-        const isPlayable = !!src.directUrl || !!(playUrl.match(/\.m3u8([?#]|$)/i));
+        const KNOWN_IFRAME_HOSTS = [
+          "share4max","megamax","vidmoly","asnwish","vidbm","uptostream",
+          "playerwish","wishfast","streamvid","streamlare","anime7u","dsvplay",
+          "vidnest.fun","vkvideo","yourupload","voe.sx","dood.","videa.hu",
+          "ok.ru","odnoklassniki","dailymotion",
+        ];
+        const isKnownIframe = KNOWN_IFRAME_HOSTS.some(h => playUrl.includes(h));
+        const isPlayable = !!src.directUrl || !!(playUrl.match(/\.m3u8([?#]|$)/i)) || isKnownIframe;
         if (!isPlayable) return;
         if (seenSseUrls.current.has(playUrl)) return;
         seenSseUrls.current.add(playUrl);
