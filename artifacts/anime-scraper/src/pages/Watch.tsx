@@ -145,24 +145,75 @@ function parseSrt(srt: string): SubCue[] {
 /* ══════════════════════════════════ LOADING SCREEN ══════════ */
 function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep: number }) {
   return (
-    <div className="fixed inset-0 z-50 bg-[#09090f] flex flex-col items-center justify-center gap-5" dir="rtl">
+    <div className="fixed inset-0 z-50 overflow-hidden bg-[#07070d]" dir="rtl">
+      {/* Full-screen blurred backdrop */}
       {cover && (
-        <div className="relative">
-          <img src={cover} alt="" className="w-24 h-32 rounded-2xl object-cover opacity-60 blur-[1px]" />
-          <div className="absolute inset-0 rounded-2xl bg-gradient-to-t from-[#09090f] via-transparent to-transparent" />
+        <div className="absolute inset-0">
+          <img src={cover} alt="" className="w-full h-full object-cover scale-125 blur-3xl opacity-[0.18] saturate-150" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#07070d]/80 via-[#07070d]/40 to-[#07070d]/90" />
+          <div className="absolute inset-0 bg-[#07070d]/25" />
         </div>
       )}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-        className="text-center px-8">
-        {title && <h2 className="text-white text-[14px] font-black font-['Cairo'] mb-1">{title}</h2>}
-        <p className="text-white/35 text-[12px] font-['Cairo']">جاري تشغيل الحلقة {ep}…</p>
-      </motion.div>
-      <div className="flex items-center gap-1.5">
-        {[0,1,2,3,4].map(i => (
-          <motion.div key={i} className="w-1.5 h-1.5 rounded-full bg-violet-500"
-            animate={{ opacity:[0.2,1,0.2], scale:[0.7,1.3,0.7] }}
-            transition={{ duration: 1.3, repeat: Infinity, delay: i*0.18 }} />
-        ))}
+
+      {/* Centered content */}
+      <div className="relative h-full flex flex-col items-center justify-center gap-7 px-6">
+        {/* Large cover image */}
+        {cover ? (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.82, y: 28 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            className="relative flex-shrink-0">
+            <img
+              src={cover}
+              alt={title}
+              className="w-52 h-[296px] rounded-2xl object-cover"
+              style={{ boxShadow: "0 24px 80px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.07)" }}
+            />
+            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/[0.08] via-transparent to-transparent pointer-events-none" />
+            <div className="absolute bottom-0 left-0 right-0 h-20 rounded-b-2xl bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="w-52 h-[296px] rounded-2xl bg-white/[0.04] flex items-center justify-center"
+            style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
+            <div className="w-14 h-14 rounded-full bg-violet-500/15 flex items-center justify-center">
+              <div className="w-6 h-6 rounded-full bg-violet-500/35" />
+            </div>
+          </motion.div>
+        )}
+
+        {/* Title + episode */}
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.45 }}
+          className="text-center">
+          {title && (
+            <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-1.5"
+              style={{ textShadow: "0 2px 12px rgba(0,0,0,0.7)" }}>
+              {title}
+            </h2>
+          )}
+          <p className="text-white/38 text-[13px] font-['Cairo'] tracking-wide">الحلقة {ep}</p>
+        </motion.div>
+
+        {/* Spinning ring loader */}
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          transition={{ delay: 0.32 }}
+          className="flex flex-col items-center gap-3">
+          <div className="relative w-9 h-9">
+            <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
+            <motion.div
+              className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+          <p className="text-white/22 text-[11px] font-['Cairo'] tracking-[0.12em]">جاري التشغيل</p>
+        </motion.div>
       </div>
     </div>
   );
