@@ -2877,8 +2877,6 @@ router.get("/anime/sources-stream", async (req, res) => {
     // Filter dead hosts
     if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
     if (s.directUrl && DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
-    // Filter embed-only hosts — they can't play in the internal player
-    if (EMBED_ONLY_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
     // Per-site cap: max 3 embed-only per site (directUrls always pass through)
     if (!s.directUrl) {
       const site = s.site || "unknown";
@@ -3684,7 +3682,7 @@ router.get("/anime/anipub-stream", async (req, res) => {
     const isAllowedEmbed = (url: string) => {
       const u = url.toLowerCase();
       if (DEAD_FILE_HOSTS.some(h => u.includes(h))) return false;
-      if (EMBED_ONLY_HOSTS.some(h => u.includes(h))) return false;
+      // embed-only hosts are kept — they play via IframePlayer in the frontend
       return true;
     };
 
@@ -3701,16 +3699,10 @@ router.get("/anime/anipub-stream", async (req, res) => {
       );
       for (let i = 0; i < arabicRaw.length; i++) {
         const directUrl = extractedUrls[i];
-        // Only include the fallback embed URL if it's a reliable extractable host
-        // (vidfast, streamwish, filemoon, jawcloud etc.) — NOT blocked embeds
+        // Include the embed fallback URL for any non-dead host.
+        // Embed-only hosts (share4max, megamax, vidmoly…) play via IframePlayer.
         const fallbackUrl = arabicRaw[i].url;
-        const isReliableEmbed = (url: string) => {
-          const u = url.toLowerCase();
-          return u.includes("vidfast.co") || u.includes("streamwish") ||
-            u.includes("filemoon") || u.includes("jawcloud") ||
-            u.includes("sendvid") || u.includes("streamtape");
-        };
-        const urlToAdd = directUrl || (isReliableEmbed(fallbackUrl) ? fallbackUrl : null);
+        const urlToAdd = directUrl || fallbackUrl;
         if (urlToAdd && !result["720p HD"].includes(urlToAdd)) {
           result["720p HD"].push(urlToAdd);
         }

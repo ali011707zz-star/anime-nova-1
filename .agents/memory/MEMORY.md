@@ -9,7 +9,7 @@
 - [AniPub movie ep case](anipub-similarity.md) — when local.ep[] is empty, use local.link directly (movie has one link, not episode array)
 - [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
 - [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
-- [anipub-stream extraction filter](anipub-stream-filter.md) — EMBED_ONLY_HOSTS filtered in sendSrc AND anipub-stream Phase 2; anipub.xyz/video → megaplay.buzz (CF-protected) → filter at AniPub layer; share4max in EMBED_ONLY_HOSTS
+- [Embed-only sources pipeline](embed-only-pipeline.md) — EMBED_ONLY_HOSTS must NOT be filtered in sendSrc/anipub-stream Phase 2; they reach frontend as embed URLs, Watch.tsx KNOWN_IFRAME_HOSTS gates isPlayable, getServerInfo routes to IframePlayer
 - [AnimeX CDN CORS](animex-cdn-cors.md) — uwucdn.top blocks server IP but has CORS:* for browsers; send rawUrl+#animex tag directly to browser, no hls-proxy; Watch.tsx identifies AnimeX by #animex fragment
 - [Miruro AnimePahe pipe](miruro-animepah.md) — miruro.tv/api/secure/pipe encoded as base64url→gzip; kiwi=AnimePahe; returns uwucdn.top HLS URLs; CORS:* so send raw to browser
 - [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN blocks server IP (hls-proxy→403); raw URL sent as fallback
