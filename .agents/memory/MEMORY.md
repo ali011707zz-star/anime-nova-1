@@ -1,6 +1,8 @@
 - [ShareMax/Megamax Inertia extraction](sharmax-inertia.md) — share4max.com & megamax.me use Inertia.js; video URL requires partial reload, not HTML parsing
 - [Streamtape URL regex](streamtape-regex.md) — altRe pattern must exclude `<>` chars or `</div>` contaminates the token field
-- [Arabic source priority](source-priority.md) — shahiid=13, animelek=12, animedar=11; AnimeGG (English)=5; directUrl always wins at 14
+- [Arabic source priority](source-priority.md) — shahiid=13, animelek=12, animedar=11; akwam=11-13, AnimeGG (English)=5; directUrl always wins at 14
+- [Arabic URL in HTTP headers](arabic-url-headers.md) — Node.js undici throws "Cannot convert argument to ByteString" for non-ASCII header values; encode with url.replace(/[^\x00-\x7F]/g, c=>encodeURIComponent(c)) before Referer headers
+- [Akwam season disambiguation](akwam-season.md) — search romaji title FIRST (season-specific), then English fallback; ties sorted by lowest series ID (older=earlier season)
 - [iframe allow-popups](iframe-sandbox.md) — removing allow-popups from sandbox stops iframe from opening external tabs ("exits app")
 - [AnimePahe HLS proxy chain](animapahe-hls-chain.md) — don't unwrap animanga.fun proxy URLs; pass full URL to hls-proxy; use inner URL as base for segment resolution
 - [IP-tied MP4 proxy](ip-tied-mp4.md) — shahiid/animelek directUrls (sendvid) contain ip=34.93.51.232; video-proxy works (same server IP); always proxy, never direct

@@ -50,7 +50,7 @@ const DEAD_FILE_HOSTS = [
   "vadbam.net","vadbam.com","okfiles.com","gofile.io","uploadfiles.io","hexupload.net",
   "filerio.in","doodstream.com","dood.watch","dood.to","dood.la","dood.ws","dood.pm",
   "dooood.com","doodrive.com","megaup.net","1fichier.com",
-  "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co","workupload.com",
+  "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co","letsupload.io","workupload.com",
   "hexload.com","mp4upload.com","uqload.net","uqload.com","file-up.org",
   "mega.nz","mega.co.nz","mediafire.com",
   "drive.google","docs.google","googleapis.com/drive",
@@ -87,6 +87,7 @@ const EMBED_ONLY_HOSTS = [
   "ok.ru","odnoklassniki.ru",
   "yourupload.com",
   // embed-only — blocks server extraction
+  "voe.sx","voe.tv",
   "share4max.com","share4max.net",
   "megamax.me","megamax.net",
 ];
@@ -1987,6 +1988,256 @@ async function getAnimelekSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  AKWAM.IT scraper  (Arabic anime — direct MP4 via watch page)
+//  Search: GET /search?q={query}  →  /series/{id}/{slug}
+//  Series: GET /series/{id}/{slug}  →  /episode/{id}/{slug}/الحلقة-{N}
+//  Episode: a.link-show href → showId, input#page_id value → watchId
+//  Watch:  GET /watch/{showId}/{watchId}  →  src="...downet.net/...mp4"
+//  Note: downet.net CDN has Access-Control-Allow-Origin: *  →  direct play
+// ════════════════════════════════════════════════════════════════════
+
+const AKWAM_BASE = "https://akwam.it";
+const AKWAM_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://akwam.it/" };
+
+const akwamSlugCache = new Map<string, { id: string; slug: string } | null>();
+const akwamSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAkwam(title: string, english: string | null): Promise<{ id: string; slug: string } | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  if (akwamSlugCache.has(ck)) return akwamSlugCache.get(ck)!;
+
+  // Try romaji title FIRST (more season-specific) then English as fallback
+  for (const q of [title, english].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${AKWAM_BASE}/search?q=${encodeURIComponent(q)}`, {
+        headers: AKWAM_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      // Collect ALL matching series, sorted by score
+      const candidates: Array<{ id: string; slug: string; score: number }> = [];
+      for (const m of html.matchAll(/href="https?:\/\/akwam\.it\/series\/(\d+)\/([^"]+)"/gi)) {
+        const id = m[1];
+        const slug = m[2];
+        let label = slug;
+        try { label = decodeURIComponent(slug); } catch {}
+        // Remove Arabic season suffix and dashes for comparison
+        const clean = label.replace(/-/g, " ").replace(/\s*الموسم.*$/i, "").trim();
+        const score = Math.max(
+          similarity(clean, title),
+          english ? similarity(clean, english) : 0,
+        );
+        if (score > 0.2) candidates.push({ id, slug, score });
+      }
+      // Sort: higher score first; ties: lower ID first (older = earlier season)
+      candidates.sort((a, b) => b.score - a.score || parseInt(a.id) - parseInt(b.id));
+      if (candidates.length) {
+        const best = { id: candidates[0].id, slug: candidates[0].slug };
+        akwamSlugCache.set(ck, best);
+        return best;
+      }
+    } catch {}
+  }
+
+  akwamSlugCache.set(ck, null);
+  return null;
+}
+
+async function getAkwamSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `akwam:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = akwamSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const series = await searchAkwam(title, english);
+    if (!series) return [];
+
+    // Helper: encode non-ASCII chars in URL for use as HTTP header value
+    const toAsciiUrl = (url: string) => url.replace(/[^\x00-\x7F]/g, c => encodeURIComponent(c));
+
+    // Encode Arabic chars in slug for Node.js fetch
+    const seriesSlugEncoded = series.slug.split("/").map(p => encodeURIComponent(p)).join("/");
+    const seriesUrl = `${AKWAM_BASE}/series/${series.id}/${seriesSlugEncoded}`;
+    const sr = await fetch(seriesUrl, {
+      headers: AKWAM_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+    });
+    if (!sr.ok) { console.error(`akwam: series page ${sr.status}`); return []; }
+    const sHtml = await sr.text();
+    if (isCloudflareBlock(sHtml)) { console.error("akwam: CF block on series page"); return []; }
+
+    // Find episode link: /episode/{id}/{slug}/الحلقة-{N}
+    let epUrl: string | null = null;
+    for (const m of sHtml.matchAll(/href="(https?:\/\/akwam\.it\/episode\/[^"]+)"/gi)) {
+      const url = m[1];
+      let decoded = url;
+      try { decoded = decodeURIComponent(url); } catch {}
+      const arM = decoded.match(/الحلقة-(\d+)/);
+      if (arM && parseInt(arM[1]) === ep) { epUrl = url; break; }
+    }
+    if (!epUrl) { console.error(`akwam: ep ${ep} not found in series page (series=${series.id})`); return []; }
+
+    const er = await fetch(toAsciiUrl(epUrl), {
+      headers: { ...AKWAM_HDRS, Referer: seriesUrl },
+      signal: AbortSignal.timeout(8000), redirect: "follow",
+    });
+    if (!er.ok) { console.error(`akwam: ep page ${er.status}`); return []; }
+    const eHtml = await er.text();
+    if (isCloudflareBlock(eHtml)) { console.error("akwam: CF block on ep page"); return []; }
+
+    // Extract showId from: href="http://go.akwam.it/watch/{showId}"
+    const showM = eHtml.match(/href="https?:\/\/(?:go\.)?akwam\.it\/watch\/(\d+)"/i);
+    // Extract watchId from: id="page_id" value="{watchId}"
+    const watchM = eHtml.match(/id="page_id"[^>]*value="(\d+)"|value="(\d+)"[^>]*id="page_id"/i);
+    if (!showM || !watchM) { console.error(`akwam: showId/watchId not found. showM=${!!showM} watchM=${!!watchM}`); return []; }
+    const showId  = showM[1];
+    const watchId = watchM[1] || watchM[2];
+
+    const watchUrl = `${AKWAM_BASE}/watch/${showId}/${watchId}`;
+    const wr = await fetch(watchUrl, {
+      headers: { ...AKWAM_HDRS, Referer: toAsciiUrl(epUrl) },
+      signal: AbortSignal.timeout(8000), redirect: "follow",
+    });
+    if (!wr.ok) { console.error(`akwam: watch page ${wr.status}`); return []; }
+    const wHtml = await wr.text();
+
+    // Extract all distinct MP4 URLs: src="https://...downet.net/...mp4"
+    const sources: UnifiedSource[] = [];
+    const seenMp4 = new Set<string>();
+    for (const m of wHtml.matchAll(/src="(https?:\/\/[^"]+\.mp4[^"]*)"/gi)) {
+      const raw = m[1].replace(/#Intent.*$/, "").replace(/^https?:/, "https:");
+      if (seenMp4.has(raw)) continue; seenMp4.add(raw);
+      // Quality from filename e.g. ".HD.720p.AKWAM.mp4"
+      const qM = raw.match(/[.\-_](1080|720|480|360)[pP]/);
+      const quality = qM ? `${qM[1]}p` : "720p";
+      const qRank = quality === "1080p" ? 3 : quality === "480p" ? 1 : 2;
+      sources.push({
+        name: `أكوام · ${quality}`,
+        url: watchUrl,
+        quality,
+        qualityRank: qRank + 10,   // 11-13 range — Arabic direct source
+        site: "akwam",
+        directUrl: raw,
+        directType: "mp4",
+      });
+    }
+
+    console.log(`akwam: found ${sources.length} sources for ep ${ep}`);
+    if (sources.length) akwamSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch (e: any) { console.error("akwam scraper error:", e?.message ?? e); return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  OKANIME.XYZ scraper  (Anime — JSON API search + HTML episode)
+//  Search: GET /api/search?q={query}  →  [{name, slug, type, ...}]
+//  Episode: GET /episode/{slug}-episode-{N}  →  setServer('{url}') in HTML
+//  Sources: share4max (iframe embed) + internal videoembed pages
+// ════════════════════════════════════════════════════════════════════
+
+const OKAN_BASE = "https://ww3.okanime.xyz";
+const OKAN_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ww3.okanime.xyz/" };
+
+const okanSlugCache = new Map<string, string | null>();
+const okanSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchOkanime(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  if (okanSlugCache.has(ck)) return okanSlugCache.get(ck)!;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${OKAN_BASE}/api/search?q=${encodeURIComponent(q)}`, {
+        headers: { ...OKAN_HDRS, Accept: "application/json" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) continue;
+      const data = await r.json() as Array<{ name?: string; slug?: string }>;
+      if (!Array.isArray(data) || !data.length) continue;
+
+      let best: string | null = null;
+      let bestScore = 0;
+      for (const item of data) {
+        if (!item.slug || !item.name) continue;
+        const score = Math.max(
+          similarity(item.name, title),
+          english ? similarity(item.name, english) : 0,
+        );
+        if (score > bestScore && score > 0.2) { bestScore = score; best = item.slug; }
+      }
+      if (best) { okanSlugCache.set(ck, best); return best; }
+    } catch {}
+  }
+
+  okanSlugCache.set(ck, null);
+  return null;
+}
+
+async function getOkanimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `okan:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = okanSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await searchOkanime(title, english);
+    if (!slug) return [];
+
+    const epUrl = `${OKAN_BASE}/episode/${slug}-episode-${ep}`;
+    const er = await fetch(epUrl, {
+      headers: OKAN_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
+    });
+    if (!er.ok) return [];
+    const eHtml = await er.text();
+    if (isCloudflareBlock(eHtml)) return [];
+
+    // Extract server URLs from @click="setServer('...')" directives
+    const sources: UnifiedSource[] = [];
+    const seenUrls = new Set<string>();
+    for (const m of eHtml.matchAll(/setServer\s*\(\s*'(https?:\/\/[^']+)'\s*\)/g)) {
+      const url = m[1];
+      if (seenUrls.has(url)) continue; seenUrls.add(url);
+      if (DEAD_FILE_HOSTS.some(h => url.toLowerCase().includes(h))) continue;
+      const host = (url.split("/")[2] || "").replace(/^www\./, "");
+      sources.push({
+        name: `OkAnime · ${host}`,
+        url,
+        quality: "HD",
+        qualityRank: 2,
+        site: "okanime",
+      });
+    }
+
+    // Also extract download links from ep-link anchors (direct MP4 / different quality)
+    for (const m of eHtml.matchAll(/href="(https?:\/\/[^"]+\.mp4[^"]*)"\s[^>]*class="[^"]*ep-link/gi)) {
+      const raw = m[1].replace(/#Intent.*$/, "");
+      if (seenUrls.has(raw) || DEAD_FILE_HOSTS.some(h => raw.includes(h))) continue;
+      seenUrls.add(raw);
+      const qM = raw.match(/[.\-_](1080|720|480|360)[pP]/);
+      const quality = qM ? `${qM[1]}p` : "HD";
+      sources.push({
+        name: `OkAnime · تحميل ${quality}`,
+        url: raw,
+        quality,
+        qualityRank: qualityRank(quality) + 6,
+        site: "okanime",
+        directUrl: raw,
+        directType: "mp4",
+      });
+    }
+
+    if (sources.length) okanSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  ANIMEDAR.NET scraper  (Arabic anime — WordPress/animestream theme)
 //  Search: GET /?s={query}  →  /{slug}/
 //  Series page: /{slug}/ — <ul class="ul-server-position1"> per episode
@@ -2947,6 +3198,24 @@ router.get("/anime/sources-stream", async (req, res) => {
           if (!title || !CHROMIUM_EXEC) return;
           const WITA_MS = 55000; // browser scraper is slower
           const srcs = await race(getWitanimeSources(title, english, ep), WITA_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── Akwam.it  (عربي — MP4 مباشر من CDN downet.net) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAkwamSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+        } catch {}
+      })(),
+
+      // ── OkAnime.xyz  (أنمي — JSON API بحث + embed servers) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getOkanimeSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
         } catch {}
       })(),
