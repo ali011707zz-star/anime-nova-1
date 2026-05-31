@@ -12,7 +12,7 @@
 - [Embed-only sources pipeline](embed-only-pipeline.md) — EMBED_ONLY_HOSTS must NOT be filtered in sendSrc/anipub-stream Phase 2; they reach frontend as embed URLs, Watch.tsx KNOWN_IFRAME_HOSTS gates isPlayable, getServerInfo routes to IframePlayer
 - [AnimeX CDN hls-proxy](animex-cdn-cors.md) — uwucdn.top allows server requests (HTTP 200); use proxyUrl (hls-proxy) first, not rawUrl; hls-proxy rewrites AES-128 key URI + segments via seg-proxy; all confirmed 200
 - [Miruro AnimePahe broken](miruro-animepah.md) — miruro.tv API now returns {"error":"Missing or invalid JWE"} — requires JWE token; AnimePahe source completely broken until alternative found
-- [Auto-fallback HLS player](auto-fallback-hls.md) — NativeHLSPlayer has onFail prop; EpisodePlayer handleHlsFail shows retrying overlay 1.2s then advances server; mirrors IframePlayer retry logic
+- [Auto-fallback HLS player removed](auto-fallback-hls.md) — NativeHLSPlayer onFail prop REMOVED; no auto-advance on HLS fatal error; only manual retry button remains; IframePlayer still auto-switches on iframe error
 - [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN blocks server IP (hls-proxy→403); raw URL sent as fallback
-- [Direct MP4 in Watch.tsx](direct-mp4-player.md) — any .mp4 URL goes to NativeHLSPlayer via video-proxy (isHls=true, isDirect=true); getServerInfo matches .mp4 pattern before generic fallback
+- [Direct MP4 in Watch.tsx](direct-mp4-player.md) — AnimeGG play/ URLs skip video-proxy (CDN → vidcache.net:8161, non-standard port blocked by Replit); play DIRECT video.src in browser. Sendvid/streamtape still use video-proxy (IP-tied)
 - [Dual stream Watch.tsx](dual-stream-watch.md) — Watch.tsx calls BOTH anipub-stream (JSON) AND sources-stream (SSE); Arabic sources only come from sources-stream; merge via useMemo into mergedServers

@@ -393,12 +393,11 @@ function SubtitleOverlay({ cues, elapsed }: { cues: SubCue[]; elapsed: number })
 
 /* ══════════════════════════════════ NATIVE HLS PLAYER ═══════ */
 function NativeHLSPlayer({
-  src, onRealQuality, onTimeUpdate, onFail,
+  src, onRealQuality, onTimeUpdate,
 }: {
   src: string;
   onRealQuality?: (q: string) => void;
   onTimeUpdate?: (t: number) => void;
-  onFail?: () => void;
 }) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const hlsRef      = useRef<Hls | null>(null);
@@ -414,8 +413,6 @@ function NativeHLSPlayer({
   const [muted,        setMuted]        = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [isFs,         setIsFs]         = useState(false);
-  const [retrying,     setRetrying]     = useState(false);
-
   const touchHandledRef = useRef(false);
 
   /* ── Control visibility ── */
@@ -472,11 +469,31 @@ function NativeHLSPlayer({
 
     let m3u8Url = src;
 
-    /* ── Direct MP4 via video-proxy (streamtape, sendvid IP-tied) ── */
+    /* ── AnimeGG MP4 → CDN redirects to non-standard port (8161+); play DIRECT in browser ── */
+    if (src.includes("animegg.org/play/") || src.includes("vidcache.net")) {
+      video.src = src;
+      video.load();
+      const onMeta = () => {
+        setLoading(false);
+        video.play().catch(() => {});
+        setShowControls(true);
+        scheduleHide();
+      };
+      const onErr = () => {
+        setLoading(false);
+        setError("تعذّر تشغيل هذا المصدر مباشرةً");
+      };
+      video.addEventListener("loadedmetadata", onMeta, { once: true });
+      video.addEventListener("error", onErr, { once: true });
+      return;
+    }
+
+    /* ── Direct MP4 via video-proxy (streamtape, sendvid IP-tied URLs) ── */
     const isDirectMp4 = src.includes("streamtape.com") || src.includes("sendvid.com")
-      || (src.includes(".mp4") && !src.includes("m3u8"));
+      || src.includes("videos2.sendvid.com") || src.includes("video-proxy?");
     if (isDirectMp4) {
-      const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
+      const proxyUrl = src.includes("video-proxy?") ? src
+        : `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
       video.src = proxyUrl;
       video.load();
       const onMeta = () => {
@@ -487,11 +504,7 @@ function NativeHLSPlayer({
       };
       const onErr = () => {
         setLoading(false);
-        if (onFail) {
-          onFail();
-        } else {
-          setError("فشل تشغيل المصدر المباشر");
-        }
+        setError("فشل تشغيل المصدر المباشر");
       };
       video.addEventListener("loadedmetadata", onMeta, { once: true });
       video.addEventListener("error", onErr, { once: true });
@@ -518,8 +531,8 @@ function NativeHLSPlayer({
           return;
         }
         const data = await r.json() as { proxyUrl?: string; rawUrl?: string; quality?: string };
-        // Use proxyUrl first — hls-proxy rewrites ALL URLs (segments + AES-128 key) through
-        // seg-proxy, giving full server-side control. CDN allows server requests (HTTP 200).
+        // Use proxyUrl first — hls-proxy adds required Referer header for CDN authentication.
+        // rawUrl as fallback in case proxy is unavailable.
         const hlsUrl = data.proxyUrl || data.rawUrl;
         if (!hlsUrl) { setError("لا يوجد رابط HLS من AnimeX"); setLoading(false); return; }
         m3u8Url = hlsUrl;
@@ -553,12 +566,8 @@ function NativeHLSPlayer({
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (hlsRef.current !== hls) return; // stale instance — ignore
         if (data.fatal) {
+          setError("فشل تحميل البث — اضغط إعادة المحاولة");
           setLoading(false);
-          if (onFail) {
-            onFail();
-          } else {
-            setError("فشل تحميل البث — اضغط إعادة المحاولة");
-          }
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -568,12 +577,8 @@ function NativeHLSPlayer({
         video.play().catch(() => {});
       }, { once: true });
       video.addEventListener("error", () => {
+        setError("فشل التشغيل على هذا المتصفح");
         setLoading(false);
-        if (onFail) {
-          onFail();
-        } else {
-          setError("فشل التشغيل على هذا المتصفح");
-        }
       }, { once: true });
     } else {
       setError("المتصفح لا يدعم تشغيل HLS — جرّب Chrome أو Firefox");
@@ -659,9 +664,8 @@ function NativeHLSPlayer({
   const bufPct = duration > 0 ? (buffered  / duration) * 100 : 0;
 
   function retry() {
-    setRetrying(true);
     setError(null);
-    setTimeout(() => { setRetrying(false); loadSource(); }, 500);
+    loadSource();
   }
 
   return (
@@ -691,7 +695,7 @@ function NativeHLSPlayer({
       )}
 
       {/* ── Error state ── */}
-      {error && !retrying && (
+      {error && (
         <div
           className="absolute inset-0 flex flex-col items-center justify-center gap-5 z-20 pointer-events-auto"
           style={{ background: "radial-gradient(ellipse at 50% 50%, rgba(90,10,10,0.18) 0%, rgba(0,0,0,0.97) 65%)" }}
@@ -1038,21 +1042,6 @@ function EpisodePlayer({
     }
   }
 
-  /* Auto-fallback from NativeHLSPlayer fatal error → advance to next server */
-  function handleHlsFail() {
-    if (retryTimer.current) clearTimeout(retryTimer.current);
-    if (currentServer + 1 < servers.length) {
-      setRetrying(true);
-      retryTimer.current = setTimeout(() => {
-        setRetrying(false);
-        setCurrentServer(s => s + 1);
-        setIframeLoaded(false); setIframeErr(false);
-        retryCount.current++;
-      }, 1200);
-    } else {
-      setIframeErr(true);
-    }
-  }
   function tryPrevServer() {
     if (retryTimer.current) clearTimeout(retryTimer.current);
     if (currentServer > 0) {
@@ -1072,30 +1061,13 @@ function EpisodePlayer({
     >
       {/* ══ VIDEO FILLS ENTIRE SCREEN ══ */}
       <div className="absolute inset-0">
-        {currentInfo.isHls && retrying && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-10">
-            <motion.div
-              className="w-16 h-16 rounded-full border-[3px] border-violet-500/18 border-t-violet-500"
-              animate={{ rotate: 360 }}
-              transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-            />
-            <p className="text-white/45 text-[13px] font-['Cairo']">الانتقال للسيرفر التالي…</p>
-            <div className="w-36 h-0.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-              <motion.div className="h-full rounded-full"
-                style={{ background: "linear-gradient(90deg,#7c3aed,#a855f7)" }}
-                initial={{ width: "0%" }} animate={{ width: "100%" }}
-                transition={{ duration: 1.2, ease: "linear" }} />
-            </div>
-          </div>
-        )}
-        {currentInfo.isHls && currentUrl && !retrying && (
+        {currentInfo.isHls && currentUrl && (
           <>
             <NativeHLSPlayer
               key={`hls-${currentUrl}-${currentServer}`}
               src={currentUrl}
               onRealQuality={handleRealQuality}
               onTimeUpdate={handleHlsTime}
-              onFail={handleHlsFail}
             />
             {subState === "ready" && subCues.length > 0 && (
               <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
@@ -1105,7 +1077,7 @@ function EpisodePlayer({
 
         {!currentInfo.isHls && (
           <>
-            {!iframeLoaded && !iframeErr && !retrying && currentUrl && (
+            {!iframeLoaded && !iframeErr && currentUrl && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black pointer-events-none z-10">
                 <motion.div
                   className="w-12 h-12 rounded-full border-2 border-violet-500/20 border-t-violet-400"
@@ -1113,23 +1085,6 @@ function EpisodePlayer({
                   transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
                 />
                 <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
-              </div>
-            )}
-
-            {retrying && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black z-10">
-                <motion.div
-                  className="w-16 h-16 rounded-full border-[3px] border-violet-500/18 border-t-violet-500"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                />
-                <p className="text-white/45 text-[13px] font-['Cairo']">الانتقال للسيرفر التالي…</p>
-                <div className="w-36 h-0.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                  <motion.div className="h-full rounded-full"
-                    style={{ background: "linear-gradient(90deg,#7c3aed,#a855f7)" }}
-                    initial={{ width: "0%" }} animate={{ width: "100%" }}
-                    transition={{ duration: 2, ease: "linear" }} />
-                </div>
               </div>
             )}
 
@@ -1163,7 +1118,7 @@ function EpisodePlayer({
               </div>
             )}
 
-            {currentUrl && !retrying && !iframeErr && (
+            {currentUrl && !iframeErr && (
               <iframe
                 key={`${currentUrl}-${currentServer}`}
                 src={currentUrl}
