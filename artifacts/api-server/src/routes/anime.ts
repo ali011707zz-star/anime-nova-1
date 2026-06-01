@@ -747,6 +747,9 @@ async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
       signal: AbortSignal.timeout(5000),
       redirect: "follow",
     });
+    // Reject HTML responses — means the link expired / redirected to error page
+    const ct = r.headers.get("content-type") || "";
+    if (ct.includes("text/html")) return false;
     return r.ok || r.status === 206 || r.status === 302 || r.status === 301;
   } catch { return true; }
 }
