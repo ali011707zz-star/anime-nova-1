@@ -757,9 +757,10 @@ async function extractAndSend(
   timeoutMs = 10000,
 ): Promise<void> {
   await Promise.allSettled(sources.map(async (s) => {
-    // Already has a confirmed direct URL → send immediately
+    // Already has a confirmed direct URL → probe then send (filters dead CDN mirrors)
     if (s.directUrl) {
-      send(s);
+      const alive = await probeDirectUrl(s.directUrl, s.url);
+      if (alive) send(s);
       return;
     }
     // Bare .m3u8 URL → treat as direct HLS
@@ -1242,45 +1243,53 @@ async function getAnimePhoenixSources(
     const slug = await searchAnimePhoenix(title, english);
     if (!slug) return [];
 
-    const seriesUrl = `${APH_BASE}/animes/${slug}/`;
-    const sr = await fetch(seriesUrl, {
-      headers: APH_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
-    });
-    if (!sr.ok) return [];
-    const sHtml = await sr.text();
-    if (isCloudflareBlock(sHtml)) return [];
-
-    // Find episode page link  — patterns:
-    // /animes/{slug}/episodes/{slug}-{N}/ or /watch/{slug}-episode-{N}/
+    // Fast path: try direct episode URL first (new site structure — skips series page fetch)
     let epUrl: string | null = null;
-
-    // Pattern 1: /animes/{slug}/episodes/...
-    for (const m of sHtml.matchAll(/href="(https?:\/\/anime-phoenix\.com\/[^"]*episode[^"]*)"[^>]*/gi)) {
-      const url = m[1];
-      const numM = url.match(/[-_](\d+)\/?$/);
-      if (numM && parseInt(numM[1]) === ep) { epUrl = url; break; }
+    const directCandidates = [
+      `${APH_BASE}/episodes/${slug}-episode-${ep}`,
+      `${APH_BASE}/episodes/${slug}-episode-${String(ep).padStart(2, "0")}`,
+    ];
+    for (const u of directCandidates) {
+      const status = await safeHead(u, APH_HDRS);
+      if (status === 200 || status === 301 || status === 302) { epUrl = u; break; }
     }
 
-    // Pattern 2: numbered link matching ep
+    // Fallback: fetch series page to find episode link
     if (!epUrl) {
-      for (const m of sHtml.matchAll(/href="(https?:\/\/anime-phoenix\.com\/[^"]+)"/gi)) {
-        const url = m[1];
-        if (url === seriesUrl) continue;
-        const numM = url.match(/[-_\/](\d+)\/?(?:[?#]|$)/);
-        if (numM && parseInt(numM[1]) === ep) { epUrl = url; break; }
+      const seriesUrl = `${APH_BASE}/animes/${slug}/`;
+      const sr = await fetch(seriesUrl, {
+        headers: APH_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
+      });
+      if (sr.ok) {
+        const sHtml = await sr.text();
+        if (!isCloudflareBlock(sHtml)) {
+          // Pattern 1: episode link matching exact number
+          for (const m of sHtml.matchAll(/href="(https?:\/\/anime-phoenix\.com\/[^"]*episode[^"]*)"[^>]*/gi)) {
+            const url = m[1];
+            const numM = url.match(/[-_](\d+)\/?$/);
+            if (numM && parseInt(numM[1]) === ep) { epUrl = url; break; }
+          }
+          // Pattern 2: any numbered link
+          if (!epUrl) {
+            for (const m of sHtml.matchAll(/href="(https?:\/\/anime-phoenix\.com\/[^"]+)"/gi)) {
+              const url = m[1];
+              if (url === seriesUrl) continue;
+              const numM = url.match(/[-_\/](\d+)\/?(?:[?#]|$)/);
+              if (numM && parseInt(numM[1]) === ep) { epUrl = url; break; }
+            }
+          }
+        }
       }
     }
 
-    // Pattern 3: try direct construction (including new /episodes/{slug}-episode-{N} format)
+    // Last resort candidates
     if (!epUrl) {
-      const candidates = [
-        `${APH_BASE}/episodes/${slug}-episode-${ep}`,
-        `${APH_BASE}/episodes/${slug}-episode-${String(ep).padStart(2, "0")}`,
+      const fallbackCandidates = [
         `${APH_BASE}/animes/${slug}/episodes/${slug}-${ep}/`,
         `${APH_BASE}/watch/${slug}-episode-${ep}/`,
         `${APH_BASE}/animes/${slug}/${ep}/`,
       ];
-      for (const u of candidates) {
+      for (const u of fallbackCandidates) {
         const status = await safeHead(u, APH_HDRS);
         if (status === 200 || status === 301 || status === 302) { epUrl = u; break; }
       }
@@ -1288,7 +1297,7 @@ async function getAnimePhoenixSources(
     if (!epUrl) return [];
 
     const er = await fetch(epUrl, {
-      headers: { ...APH_HDRS, Referer: seriesUrl },
+      headers: { ...APH_HDRS, Referer: `${APH_BASE}/animes/${slug}/` },
       signal: AbortSignal.timeout(10000), redirect: "follow",
     });
     if (!er.ok) return [];
@@ -1298,10 +1307,17 @@ async function getAnimePhoenixSources(
     const videos = parseAnimePhoenixVideo(eHtml);
     if (!videos.length) return [];
 
-    const sources: UnifiedSource[] = videos.map((v, i) => {
-      const isMkv = v.url.includes(".mkv");
+    // Build sources — deduplicate CDN mirrors by file path (keep only first per unique file)
+    const seenPaths = new Set<string>();
+    const sources: UnifiedSource[] = [];
+    for (const [i, v] of videos.entries()) {
+      const filePath = v.url.includes("workers.dev")
+        ? v.url.replace(/^https?:\/\/[^/]+/, "")
+        : v.url;
+      if (seenPaths.has(filePath)) continue;
+      seenPaths.add(filePath);
       const isM3u8 = v.url.includes(".m3u8");
-      return {
+      sources.push({
         name: `فينكس · ${v.label || `سيرفر ${i + 1}`}`,
         url: v.url,
         quality: "HD",
@@ -1309,8 +1325,8 @@ async function getAnimePhoenixSources(
         site: "animephoenix",
         directUrl: v.url,
         directType: isM3u8 ? "hls" : "mp4",
-      };
-    });
+      });
+    }
 
     if (sources.length) aphSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
@@ -1339,11 +1355,13 @@ router.get("/anime/sources-stream", async (req, res) => {
 
   function sendSrc(s: UnifiedSource) {
     if (closed) return;
-    // Hard rule: only send sources that have a confirmed direct MP4/HLS URL
     if (!s.directUrl) return;
-    const key = s.directUrl;
-    if (seenUrls.has(key)) return;
     if (DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
+    // Deduplicate CDN mirrors by file path (e.g. 9 workers.dev domains, same file)
+    const key = s.directUrl.includes("workers.dev")
+      ? "cdn:" + s.directUrl.replace(/^https?:\/\/[^/]+/, "")
+      : s.directUrl;
+    if (seenUrls.has(key)) return;
     seenUrls.add(key);
     res.write(`data: ${JSON.stringify(s)}\n\n`);
   }
