@@ -1445,13 +1445,9 @@ export default function WatchPage() {
     const params = new URLSearchParams({ title: t, english: e, ep: String(ep) });
     if (animeId) params.set("anilistId", String(animeId));
 
-    /* Primary: anipub-stream (AnimeX · AnimePahe · FlixCloud) */
-    fetch(`/api/anime/anipub-stream?${params}`)
-      .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
-      .then((d: StreamData) => { setStreamData(d); setFetchDone(true); })
-      .catch(() => setFetchDone(true));
+    setFetchDone(true);
 
-    /* Secondary SSE: sources-stream (shahiid · animelek · animegg) */
+    /* SSE: sources-stream (anime-phoenix · shahiid · animelek · animedar) */
     if (sseRef.current) sseRef.current.close();
     const es = new EventSource(`/api/anime/sources-stream?${params}`);
     sseRef.current = es;
