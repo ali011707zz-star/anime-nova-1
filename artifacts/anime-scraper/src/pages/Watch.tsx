@@ -1424,6 +1424,7 @@ export default function WatchPage() {
   const [phase,        setPhase]       = useState<"loading" | "picker" | "player" | "nosrc">("loading");
   const [loadingDone,  setLoadingDone] = useState(false);
   const [fetchDone,    setFetchDone]   = useState(false);
+  const [sseDone,      setSseDone]     = useState(false);
   const fetchStarted   = useRef(false);
   const sseRef         = useRef<EventSource | null>(null);
   const seenSseUrls    = useRef(new Set<string>());
@@ -1460,27 +1461,20 @@ export default function WatchPage() {
     if (sseRef.current) sseRef.current.close();
     const es = new EventSource(`/api/anime/sources-stream?${params}`);
     sseRef.current = es;
-    const closeTimer = setTimeout(() => es.close(), 38000);
+    const closeTimer = setTimeout(() => { setSseDone(true); es.close(); }, 38000);
     es.onmessage = (ev) => {
       try {
+        if (ev.data === "[DONE]") {
+          setSseDone(true);
+          clearTimeout(closeTimer);
+          es.close();
+          return;
+        }
         const src = JSON.parse(ev.data) as {
           url: string; directUrl?: string; qualityRank?: number; site?: string;
         };
-        /* Accept sources we can play — either natively or via IframePlayer:
-           - directUrl set (MP4 or HLS extracted server-side)
-           - OR bare m3u8 URL
-           - OR known embed-only host URL (plays via sandboxed IframePlayer) */
         const playUrl = src.directUrl || src.url;
         if (!playUrl) return;
-        const KNOWN_IFRAME_HOSTS = [
-          "share4max","megamax","vidmoly","asnwish","vidbm","uptostream",
-          "playerwish","wishfast","streamvid","streamlare","anime7u","dsvplay",
-          "vidnest.fun","vkvideo","yourupload","voe.sx","dood.","videa.hu",
-          "ok.ru","odnoklassniki","dailymotion",
-        ];
-        const isKnownIframe = KNOWN_IFRAME_HOSTS.some(h => playUrl.includes(h));
-        const isPlayable = !!src.directUrl || !!(playUrl.match(/\.m3u8([?#]|$)/i)) || isKnownIframe;
-        if (!isPlayable) return;
         if (seenSseUrls.current.has(playUrl)) return;
         seenSseUrls.current.add(playUrl);
         const rank = src.qualityRank ?? 2;
@@ -1488,7 +1482,7 @@ export default function WatchPage() {
         setSseServers(prev => ({ ...prev, [tier]: [...prev[tier], playUrl] }));
       } catch {}
     };
-    es.onerror = () => { clearTimeout(closeTimer); es.close(); };
+    es.onerror = () => { clearTimeout(closeTimer); setSseDone(true); es.close(); };
   }, [ep, animeId]);
 
   /* Cleanup SSE on unmount */
@@ -1528,12 +1522,12 @@ export default function WatchPage() {
   }, []);
 
   useEffect(() => {
-    if (!loadingDone || !fetchDone) return;
+    if (!loadingDone || !fetchDone || !sseDone) return;
     const hasAny = QUALITY_LABELS.some(q =>
       (mergedServers[q]?.length || 0) > 0
     );
     setPhase(prev => prev === "player" ? prev : hasAny ? "picker" : "nosrc");
-  }, [loadingDone, fetchDone, mergedServers]);
+  }, [loadingDone, fetchDone, sseDone, mergedServers]);
 
   function goEp(n: number) {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`);
