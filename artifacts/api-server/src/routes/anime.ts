@@ -53,6 +53,8 @@ const DEAD_FILE_HOSTS = [
   "uptobox.com","uptobox.fr","upstream.to",
   "flashx.tv","gostream.site","embedrise.com",
   "megaplay.buzz",
+  "dood.wf","dood.gg","dood.li","dood.re","dood.sh","dood.cx",
+  "doodstream.io","ds2play.com","doods.pro",
 ];
 
 // ── Embed-only hosts (skip server-side extraction) ──
@@ -72,8 +74,6 @@ const EMBED_ONLY_HOSTS = [
   "ok.ru","odnoklassniki.ru",
   "yourupload.com",
   "voe.sx","voe.tv",
-  "share4max.com","share4max.net",
-  "megamax.me","megamax.net",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -754,32 +754,38 @@ async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
 async function extractAndSend(
   sources: UnifiedSource[],
   send: (s: UnifiedSource) => void,
-  timeoutMs = 8000,
+  timeoutMs = 10000,
 ): Promise<void> {
   await Promise.allSettled(sources.map(async (s) => {
+    // Already has a confirmed direct URL → send immediately
     if (s.directUrl) {
       send(s);
       return;
     }
-    if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) { send(s); return; }
+    // Bare .m3u8 URL → treat as direct HLS
     if (s.url.match(/\.m3u8([?#]|$)/i)) {
       send({ ...s, directUrl: s.url, directType: "hls" });
       return;
     }
+    // Bare .mp4 URL → treat as direct MP4
     if (s.url.match(/\.mp4([?#]|$)/i)) {
       send({ ...s, directUrl: s.url, directType: "mp4" });
       return;
     }
-    send(s);
+    // Embed-only hosts that cannot be extracted server-side → skip entirely, never send as iframe
+    if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) {
+      return;
+    }
+    // Try to extract a direct MP4/HLS URL — only send if successful
     try {
       const result = await Promise.race([
         extractVideoDeep(s.url, s.url),
         new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
       ]);
-      if (result) {
+      if (result?.url) {
         const alive = await probeDirectUrl(result.url, s.url);
         if (alive) {
-          send({ ...s, name: s.name + " ·HD", url: result.url, directUrl: result.url, directType: result.type });
+          send({ ...s, url: result.url, directUrl: result.url, directType: result.type });
         }
       }
     } catch {}
@@ -1110,11 +1116,36 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
   const hit = aphSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
 
+  // Method 1: Direct slug construction — try toSlug() variants
+  const slugCandidates: string[] = [];
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const s = toSlug(q as string);
+    if (s) slugCandidates.push(s);
+  }
+  for (const slug of slugCandidates) {
+    try {
+      const r = await fetch(`${APH_BASE}/animes/${slug}`, {
+        headers: APH_HDRS,
+        signal: AbortSignal.timeout(7000),
+        redirect: "follow",
+      });
+      if (r.ok) {
+        const html = await r.text();
+        // Confirm this is actually the series page (has episode links for this slug)
+        if (!isCloudflareBlock(html) && html.includes(`/episodes/${slug}-episode-`)) {
+          aphSlugCache.set(ck, { slug, ts: Date.now() });
+          return slug;
+        }
+      }
+    } catch {}
+  }
+
+  // Method 2: Scan the homepage / search for matching slugs from scraped links
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const r = await fetch(`${APH_BASE}/?s=${encodeURIComponent(q)}`, {
+      const r = await fetch(`${APH_BASE}/search/${encodeURIComponent((q as string).toLowerCase().replace(/\s+/g, "+"))}`, {
         headers: APH_HDRS,
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(8000),
         redirect: "follow",
       });
       if (!r.ok) continue;
@@ -1124,10 +1155,9 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
       let best: string | null = null;
       let bestScore = 0;
 
-      // Match /animes/{slug}/ links with title from nearby text
-      for (const m of html.matchAll(/href="(https?:\/\/anime-phoenix\.com\/animes\/([^/"]+)\/?)"[^>]*(?:title="([^"]*)")?/gi)) {
+      for (const m of html.matchAll(/href="(https?:\/\/anime-phoenix\.com\/animes\/([^/"]+)\/?)"/gi)) {
         const slug  = m[2];
-        const label = (m[3] || slug.replace(/-/g, " ")).trim();
+        const label = slug.replace(/-/g, " ");
         const score = Math.max(
           similarity(label, title),
           english ? similarity(label, english) : 0,
@@ -1241,9 +1271,11 @@ async function getAnimePhoenixSources(
       }
     }
 
-    // Pattern 3: try direct construction
+    // Pattern 3: try direct construction (including new /episodes/{slug}-episode-{N} format)
     if (!epUrl) {
       const candidates = [
+        `${APH_BASE}/episodes/${slug}-episode-${ep}`,
+        `${APH_BASE}/episodes/${slug}-episode-${String(ep).padStart(2, "0")}`,
         `${APH_BASE}/animes/${slug}/episodes/${slug}-${ep}/`,
         `${APH_BASE}/watch/${slug}-episode-${ep}/`,
         `${APH_BASE}/animes/${slug}/${ep}/`,
@@ -1307,23 +1339,18 @@ router.get("/anime/sources-stream", async (req, res) => {
 
   function sendSrc(s: UnifiedSource) {
     if (closed) return;
-    const key = s.directUrl || s.url;
-    if (!s.url || seenUrls.has(key)) return;
-    if (DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))) return;
-    if (s.directUrl && DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
-    if (!s.directUrl) {
-      const site = s.site || "unknown";
-      const n = siteEmbedCounts.get(site) || 0;
-      if (n >= 3) return;
-      siteEmbedCounts.set(site, n + 1);
-    }
+    // Hard rule: only send sources that have a confirmed direct MP4/HLS URL
+    if (!s.directUrl) return;
+    const key = s.directUrl;
+    if (seenUrls.has(key)) return;
+    if (DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
     seenUrls.add(key);
     res.write(`data: ${JSON.stringify(s)}\n\n`);
   }
 
   try {
-    const SCRAPER_MS = 18000;
-    const EXTRACT_MS = 6000;
+    const SCRAPER_MS = 22000;
+    const EXTRACT_MS = 10000;
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
