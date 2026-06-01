@@ -1,8 +1,8 @@
 # Nova Anime
 
-تطبيق بث أنمي عربي يجمع مصادر من 3 مصادر متوازية ويُشغّلها في مشغّل داخلي.
+تطبيق بث أنمي عربي يجمع مصادر من 4 مصادر متوازية ويُشغّلها في مشغّل داخلي.
 
-المصادر الفعّالة: **AnimeGG (MP4 مباشر)** · **shahiid-anime.net (عربي)** · **animelek.top (عربي)**
+المصادر الفعّالة: **anime-phoenix.com (MKV/MP4 مباشر)** · **shahiid-anime.net (عربي)** · **animelek.top (عربي)** · **animedar.net (عربي)**
 
 ## Run & Operate
 
@@ -16,57 +16,46 @@
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - Frontend: React + Vite + Tailwind CSS + Framer Motion
 - API: Express 5, esbuild bundle
-- No DB required — all data fetched live from AniList GraphQL + shahiid-anime.net + animegg.org
+- No DB required — all data fetched live from AniList GraphQL + 4 scraper sources
 
 ## Where things live
 
 - `artifacts/anime-scraper/src/` — React frontend
-  - `pages/Watch.tsx` — main watch page (NativeVideoPlayer + IframePlayer), CACHE_VER="v5"
-- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic (~3400 lines)
+  - `pages/Watch.tsx` — main watch page (NativeVideoPlayer + IframePlayer)
+- `artifacts/api-server/src/routes/anime.ts` — ALL scraper logic
   - Shahiid-anime.net scraper (search → seasons → episodes → AJAX servers)
-  - AnimeGG scraper (search → episode page → embed extraction → direct MP4)
   - AnimeLek.top scraper (search → series → episode → `data-embed` servers)
   - AnimeDar.net scraper (search → series page → `ul-server-position` → buildAnimestreamEmbed)
-  - AllAnime episode video sources (GraphQL → base64-decoded URLs)
+  - Anime-Phoenix.com scraper (search → episodes → `<source src>` or `data-server` base64)
   - Video extraction engine (parseVideoUrl, extractVideoDeep, etc.)
   - HLS proxy (`/api/anime/hls-proxy`, `/api/anime/seg-proxy`)
-  - Playwright browserFetch + getWitanimeSources (disabled — CF blocks headless Chrome)
-- `artifacts/api-server/bin/yt-dlp` — standalone binary (2026.03.17)
 - `scripts/src/scrapers/multi-site-scraper.ts` — original multi-site scraper prototype (not used directly)
 
 ## Architecture decisions
 
-- **Triple source**: shahiid-anime.net (Arabic) + AnimeGG (global) + animelek.top (Arabic)
-- **Parallel scraping** — all scrapers run via `Promise.allSettled` simultaneously
+- **Quad source**: anime-phoenix.com (direct MKV/MP4) + shahiid-anime.net (Arabic) + animelek.top (Arabic) + animedar.net (Arabic)
+- **Parallel scraping** — all 4 scrapers run via `Promise.allSettled` simultaneously
 - **Immediate send** — embed URLs sent immediately, deep extraction fires in background
 - **Server-side scraping** — API fetches embed pages and extracts direct HLS/MP4 URLs where possible
+- **SSE-only** — Watch.tsx uses ONLY `sources-stream` SSE endpoint (no anipub-stream)
 - **AJAX server fetch** — shahiid uses `action=codecanal_ajax_request` POST to get iframe URLs per server button
 - **extractVideoDeep** — multi-hop iframe follower → extracts real HLS m3u8 / MP4 URL
 - **p,a,c,k,e,d unpacker** — server-side JS unpacker for obfuscated player code
-- **Cloudflare detection** — only block on `"just a moment"` + `"cf_chl_"`, NOT `"challenge-platform"` or `"ray id:"`
+- **Cloudflare detection** — only block on `"just a moment"` + `"cf_chl_"`
 - **No position fallback** — if episode not found by number in slug → return null (no wrong episode)
-- **IframePlayer** — embed-only sources load in sandboxed iframe (`allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock`)
+- **IframePlayer** — embed-only sources load in sandboxed iframe
 
-## AnimeGG scraper flow
+## Anime-Phoenix.com scraper flow
 
-1. **Search**: GET `/search/?q={title}` → extract series slug from `href="/series/{slug}"` + title similarity match
-2. **Episode URL**: try `/{slug}-episode-{N}` first
-3. **Prefix fallback**: if 404/no embeds, fetch `/series/{slug}` page → extract all `/{prefix}-episode-N` patterns → try each prefix for target episode (handles cases like AoT where sub uses "shingeki-no-kyojin" vs series slug "attack-on-titan")
-4. **Embed extraction**: fetch `/embed/{id}` → parse `videoSources` JS array → extract direct MP4 URL
-5. **Labels**: first embed = "مدبلج" (dubbed), second = "مترجم" (subbed)
-
-## AnimeGG gotchas
-
-- Episode slug prefix ≠ series slug for some anime (e.g. AoT: sub at `/shingeki-no-kyojin-episode-N`)
-- Direct MP4 URL (`/play/{id}/video.mp4?for=...`) may be IP-tied → embed fallback always included
-- Typically 2 embeds per episode page (dubbed + subbed)
-- `videoSources` JS array: `var videoSources = [{file: "/play/.../video.mp4?for=...", label: "480p"}]`
-- Re-extract fresh URL on each play (for= token is CDN session-tied)
+1. **Search**: GET `/?s={title}` → parse `href="/animes/{slug}"` + title similarity match
+2. **Series**: GET `/animes/{slug}/` → find episode links (numbered)
+3. **Episode page**: fetch → parse `<source src="https://*.workers.dev/...mkv">` OR `data-server=base64` → JSON `{type:"direct", link:"..."}`
+4. **Result**: directUrl set immediately, qualityRank=3 (highest)
 
 ## Shahiid-anime.net scraper flow
 
 1. **Search**: POST `/wp-admin/admin-ajax.php` `action=data_fetch&keyword={title}` → `/series/` or `/anime/` URLs
-2. **Seasons URL**: fetch series page → find `href="https://shahiid-anime.net/seasons/{slug}/"` (skip generic nav links like `/seasons/page/2/`, `/seasons/feed/`)
+2. **Seasons URL**: fetch series page → find `href="https://shahiid-anime.net/seasons/{slug}/"` (skip nav links)
 3. **Episode list**: fetch `/seasons/{slug}/` — 20 episodes per initial load, match by number in slug
 4. **Episode page**: fetch `/episodes/{ep-slug}/` → parse `.buttosn` elements with `data-post`, `data-serv`, `data-frameserver`
 5. **Server AJAX**: POST `action=codecanal_ajax_request` → iframe HTML → extract src
@@ -83,7 +72,7 @@
 ## Shahiid critical bugs fixed
 
 - Regex `episodeses?` → `episodes(?:es)?` (was matching wrong URLs)
-- Seasons URL regex: skip nav links `/seasons/page/N/`, `/seasons/feed/` — use negative lookahead `(?!(?:page|feed|tag|category|author)/)`
+- Seasons URL regex: skip nav links `/seasons/page/N/`, `/seasons/feed/` — use negative lookahead
 
 ## Server button HTML structure
 
@@ -97,8 +86,7 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 
 ## What CAN be extracted server-side (direct URL)
 
-- **AnimeGG** — direct MP4 via `videoSources` JS array
-- **sendvid.com** — direct MP4 via parseMegamax patterns
+- **anime-phoenix.com** — direct MKV/MP4 via `<source>` tag or `data-server` base64 JSON
 - **streamtape.com** — direct MP4 via parseStreamtape
 - **streamwish / filemoon** — HLS m3u8 via parseStreamwish
 
@@ -113,24 +101,23 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 ## Dead / Blocked sites (NOT implemented)
 
 - animeblkom.net, anime3rb.com, animeiat.net — 000/403 errors
-- animephoenix.io, myanime.fan, animekayan.com — dead
-- witanime.cyou — Cloudflare challenge blocks Playwright/headless Chrome
-- anime4up.cam — JS challenge, blocks even Playwright
+- witanime.cyou — Cloudflare challenge blocks all server requests
+- anime4up.cam — JS challenge, blocks server
 - eta.animerco.org — Cloudflare managed challenge on ALL endpoints
 - anime-arabe.com — Next.js SPA + Clerk auth on all API routes
+- animegg.org — removed (English-only, non-standard CDN ports blocked by Replit)
 
 ## API Endpoints
 
-- `GET /api/anime/sources-stream?title=&english=&ep=` — SSE stream of sources (AnimeGG + Shahiid + AnimeLek)
+- `GET /api/anime/sources-stream?title=&english=&ep=` — SSE stream of sources (4 Arabic scrapers)
 - `GET /api/anime/probe?url=` — HEAD probe a direct URL
 - `GET /api/anime/extract-video?url=` — multi-hop video extraction
-- `GET /api/anime/search?q=` — AllAnime search (metadata)
-- `GET|POST /api/anime/resolve?title=` — AllAnime title resolution
 - `GET /api/anime/translate?text=&from=&to=` — Google Translate proxy
 - `GET /api/anime/test-embed?url=` — test if embed URL has video
 - `GET /api/anime/proxy-embed?url=` — server-side embed proxy with ad removal
 - `GET /api/anime/hls-proxy?url=&ref=` — HLS manifest proxy (CORS bypass)
 - `GET /api/anime/seg-proxy?url=&ref=` — HLS segment proxy
+- `GET /api/anime/video-proxy?url=&ref=` — MP4/video proxy (Range support for seeking)
 
 ## Watch page URL format
 
@@ -144,8 +131,8 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 - `data-_server_code_` and `data-is_film` are usually absent → send empty string in AJAX
 - HLS proxy rewrites segment URLs to `/api/anime/seg-proxy?...`
 - seenUrls dedup key = `src.directUrl || src.url` on both server and frontend
-- AnimeGG CDN uses non-standard ports blocked by Replit proxy → play direct in browser (isDirectPlay flag)
 - DEAD_FILE_HOSTS includes file-upload.com (returns 404 for all embeds)
+- anime-phoenix.com data-server may be plain base64 OR urlencoded+base64 — try both
 
 ## User preferences
 
