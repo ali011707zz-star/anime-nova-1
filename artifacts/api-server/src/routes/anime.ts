@@ -740,6 +740,11 @@ const SKIP_EXTRACT_HOSTS = [
 ];
 
 async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
+  // HLS m3u8 manifests: CDN servers frequently reject HEAD with HTML error pages
+  // but serve fine on GET — trust extracted m3u8 URLs without probing
+  if (url.match(/\.m3u8([?#]|$)/i)) return true;
+  // Direct MKV/MP4 on workers.dev CDN: blocks server HEAD but plays fine in browser
+  if (url.includes("workers.dev")) return true;
   try {
     const r = await fetch(url, {
       method: "HEAD",
@@ -747,49 +752,64 @@ async function probeDirectUrl(url: string, referer?: string): Promise<boolean> {
       signal: AbortSignal.timeout(5000),
       redirect: "follow",
     });
-    // Reject HTML responses — means the link expired / redirected to error page
     const ct = r.headers.get("content-type") || "";
     if (ct.includes("text/html")) return false;
-    return r.ok || r.status === 206 || r.status === 302 || r.status === 301;
+    // Accept 403/405 — CDN blocks HEAD but serves GET (URL is valid)
+    return r.ok || r.status === 206 || r.status === 302 || r.status === 301 || r.status === 403 || r.status === 405;
   } catch { return true; }
 }
 
-async function extractAndSend(
+async function extractAndCollect(
   sources: UnifiedSource[],
-  send: (s: UnifiedSource) => void,
-  timeoutMs = 10000,
+  out: UnifiedSource[],
+  seenKeys: Set<string>,
+  timeoutMs = 14000,
 ): Promise<void> {
+  function collect(s: UnifiedSource) {
+    if (!s.directUrl) return;
+    if (DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
+    const key = s.directUrl.includes("workers.dev")
+      ? "cdn:" + s.directUrl.replace(/^https?:\/\/[^/]+/, "")
+      : s.directUrl;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    out.push(s);
+  }
+
   await Promise.allSettled(sources.map(async (s) => {
-    // Already has a confirmed direct URL → probe then send (filters dead CDN mirrors)
+    // Already has directUrl (e.g. Phoenix direct MKV/MP4)
     if (s.directUrl) {
       const alive = await probeDirectUrl(s.directUrl, s.url);
-      if (alive) send(s);
+      if (alive) collect(s);
       return;
     }
-    // Bare .m3u8 URL → treat as direct HLS
+    // Bare .m3u8 → direct HLS
     if (s.url.match(/\.m3u8([?#]|$)/i)) {
-      send({ ...s, directUrl: s.url, directType: "hls" });
+      collect({ ...s, directUrl: s.url, directType: "hls" });
       return;
     }
-    // Bare .mp4 URL → treat as direct MP4
+    // Bare .mp4 → direct MP4
     if (s.url.match(/\.mp4([?#]|$)/i)) {
-      send({ ...s, directUrl: s.url, directType: "mp4" });
+      collect({ ...s, directUrl: s.url, directType: "mp4" });
       return;
     }
-    // Embed-only hosts that cannot be extracted server-side → skip entirely, never send as iframe
-    if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) {
-      return;
-    }
-    // Try to extract a direct MP4/HLS URL — only send if successful
+    // Embed-only hosts cannot be extracted server-side → skip
+    if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) return;
+
+    // Try to extract a direct MP4/HLS URL from the embed page
     try {
       const result = await Promise.race([
         extractVideoDeep(s.url, s.url),
         new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
       ]);
       if (result?.url) {
-        const alive = await probeDirectUrl(result.url, s.url);
+        // HLS m3u8: trust without probing (CDN blocks HEAD)
+        // MP4: probe to filter dead links
+        const alive = result.type === "hls"
+          ? true
+          : await probeDirectUrl(result.url, s.url);
         if (alive) {
-          send({ ...s, url: result.url, directUrl: result.url, directType: result.type });
+          collect({ ...s, url: result.url, directUrl: result.url, directType: result.type });
         }
       }
     } catch {}
@@ -1339,6 +1359,7 @@ async function getAnimePhoenixSources(
 
 // ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
+//  Collects ALL sources first, then sends them all at once (batch)
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/sources-stream", async (req, res) => {
   const title     = ((req.query.title    as string) || "").trim();
@@ -1351,29 +1372,18 @@ router.get("/anime/sources-stream", async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
-  const seenUrls = new Set<string>();
-  const siteEmbedCounts = new Map<string, number>();
   let closed = false;
   req.on("close", () => { closed = true; });
 
-  function sendSrc(s: UnifiedSource) {
-    if (closed) return;
-    if (!s.directUrl) return;
-    if (DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
-    // Deduplicate CDN mirrors by file path (e.g. 9 workers.dev domains, same file)
-    const key = s.directUrl.includes("workers.dev")
-      ? "cdn:" + s.directUrl.replace(/^https?:\/\/[^/]+/, "")
-      : s.directUrl;
-    if (seenUrls.has(key)) return;
-    seenUrls.add(key);
-    res.write(`data: ${JSON.stringify(s)}\n\n`);
-  }
-
   try {
-    const SCRAPER_MS = 22000;
-    const EXTRACT_MS = 10000;
+    const SCRAPER_MS = 18000;
+    const EXTRACT_MS = 14000;
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
+
+    // Shared collector — all 4 scrapers write into the same array
+    const collected: UnifiedSource[] = [];
+    const seenKeys = new Set<string>();
 
     await Promise.allSettled([
       // ── Anime-Phoenix.com  (مباشر MKV/MP4 عالي الجودة) ──
@@ -1381,7 +1391,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+          if (srcs.length && !closed) await extractAndCollect(srcs, collected, seenKeys, EXTRACT_MS);
         } catch {}
       })(),
 
@@ -1390,7 +1400,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+          if (srcs.length && !closed) await extractAndCollect(srcs, collected, seenKeys, EXTRACT_MS);
         } catch {}
       })(),
 
@@ -1399,7 +1409,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getAnimelekSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+          if (srcs.length && !closed) await extractAndCollect(srcs, collected, seenKeys, EXTRACT_MS);
         } catch {}
       })(),
 
@@ -1408,10 +1418,17 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getAnimadarSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndSend(srcs, sendSrc, EXTRACT_MS);
+          if (srcs.length && !closed) await extractAndCollect(srcs, collected, seenKeys, EXTRACT_MS);
         } catch {}
       })(),
     ]);
+
+    // Send all verified sources at once (batch flush)
+    if (!closed) {
+      for (const s of collected) {
+        res.write(`data: ${JSON.stringify(s)}\n\n`);
+      }
+    }
 
   } catch (e: any) {
     console.error("sources-stream error:", e?.message ?? e);
