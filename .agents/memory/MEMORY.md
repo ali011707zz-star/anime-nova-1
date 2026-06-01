@@ -18,3 +18,4 @@
 - [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN blocks server IP (hls-proxy→403); raw URL sent as fallback
 - [Direct MP4 in Watch.tsx](direct-mp4-player.md) — AnimeGG play/ URLs skip video-proxy (CDN → vidcache.net:8161, non-standard port blocked by Replit); play DIRECT video.src in browser. Sendvid/streamtape still use video-proxy (IP-tied)
 - [Dual stream Watch.tsx](dual-stream-watch.md) — Watch.tsx calls BOTH anipub-stream (JSON) AND sources-stream (SSE); Arabic sources only come from sources-stream; merge via useMemo into mergedServers
+- [Anime-Phoenix URL structure](anime-phoenix-url-structure.md) — site changed search from /?s= to /search/ (also broken); use direct slug construction /animes/{slug} instead; verify by checking for /episodes/{slug}-episode- in response (soft-404 returns homepage with 200)

@@ -75,13 +75,17 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   if (url.includes("anipub") || url.includes("gogoanime") || url.includes("gogocdn")) {
     return { label: "AniPub", sublabel: "مترجم إنجليزي", isHls: false };
   }
+  // Anime-Phoenix CDN (workers.dev CloudFlare R2 mirrors) — direct MKV/MP4
+  if (url.includes("workers.dev") && (url.includes(".mkv") || url.includes(".mp4") || url.includes("/Server/"))) {
+    return { label: "فينكس", sublabel: "عربي · جودة عالية", isHls: true, isDirect: true };
+  }
   // Direct video extracted from Arabic sources — route via video-proxy, play natively
   if (url.includes("streamtape.com") || url.includes("sendvid.com")
    || url.includes("/video-proxy?")) {
     return { label: "مصدر مباشر", sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
   }
-  // Any direct MP4 URL (e.g. AnimeGG play URLs, other direct extractions)
-  if (url.match(/\.mp4([?#]|$)/i) && !url.includes(".m3u8")) {
+  // Any direct MP4/MKV URL (e.g. AnimeGG play URLs, other direct extractions)
+  if (url.match(/\.(mp4|mkv|webm)([?#]|$)/i) && !url.includes(".m3u8")) {
     return { label: "مصدر مباشر", sublabel: "تشغيل مباشر", isHls: true, isDirect: true };
   }
   // Streamwish / Filemoon HLS extracted
@@ -356,7 +360,7 @@ function ServerPicker({
                           </p>
                           {isAnimex && (
                             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-violet-500/30 text-violet-200 border border-violet-400/25 leading-none">
-                              HLS مدمج
+                              {info.isDirect ? "MP4 مباشر" : "HLS مدمج"}
                             </span>
                           )}
                         </div>
