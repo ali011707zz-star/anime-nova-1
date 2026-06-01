@@ -1359,12 +1359,13 @@ async function getAnimePhoenixSources(
 
 // ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
-//  Collects ALL sources first, then sends them all at once (batch)
+//  Streams sources as found (keeps proxy alive), sends [DONE] at end
+//  Frontend waits for [DONE] before rendering all sources at once
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/sources-stream", async (req, res) => {
-  const title     = ((req.query.title    as string) || "").trim();
-  const english   = ((req.query.english  as string) || "").trim() || null;
-  const ep        = parseInt((req.query.ep as string) || "1");
+  const title   = ((req.query.title   as string) || "").trim();
+  const english = ((req.query.english as string) || "").trim() || null;
+  const ep      = parseInt((req.query.ep as string) || "1");
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -1372,8 +1373,26 @@ router.get("/anime/sources-stream", async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
+  const seenKeys = new Set<string>();
   let closed = false;
   req.on("close", () => { closed = true; });
+
+  // Keepalive: send SSE comment every 5 s to prevent proxy timeout
+  const keepalive = setInterval(() => {
+    if (!closed) res.write(": keepalive\n\n");
+  }, 5000);
+
+  function sendSrc(s: UnifiedSource) {
+    if (closed) return;
+    if (!s.directUrl) return;
+    if (DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
+    const key = s.directUrl.includes("workers.dev")
+      ? "cdn:" + s.directUrl.replace(/^https?:\/\/[^/]+/, "")
+      : s.directUrl;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    res.write(`data: ${JSON.stringify(s)}\n\n`);
+  }
 
   try {
     const SCRAPER_MS = 18000;
@@ -1381,17 +1400,18 @@ router.get("/anime/sources-stream", async (req, res) => {
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
-    // Shared collector — all 4 scrapers write into the same array
-    const collected: UnifiedSource[] = [];
-    const seenKeys = new Set<string>();
-
+    // All 4 scrapers run in parallel; each streams sources as extracted
     await Promise.allSettled([
       // ── Anime-Phoenix.com  (مباشر MKV/MP4 عالي الجودة) ──
       (async () => {
         try {
           if (!title) return;
           const srcs = await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndCollect(srcs, collected, seenKeys, EXTRACT_MS);
+          if (srcs.length && !closed) {
+            const buf: UnifiedSource[] = [];
+            await extractAndCollect(srcs, buf, seenKeys, EXTRACT_MS);
+            buf.forEach(s => sendSrc(s));
+          }
         } catch {}
       })(),
 
@@ -1400,7 +1420,11 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndCollect(srcs, collected, seenKeys, EXTRACT_MS);
+          if (srcs.length && !closed) {
+            const buf: UnifiedSource[] = [];
+            await extractAndCollect(srcs, buf, seenKeys, EXTRACT_MS);
+            buf.forEach(s => sendSrc(s));
+          }
         } catch {}
       })(),
 
@@ -1409,7 +1433,11 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getAnimelekSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndCollect(srcs, collected, seenKeys, EXTRACT_MS);
+          if (srcs.length && !closed) {
+            const buf: UnifiedSource[] = [];
+            await extractAndCollect(srcs, buf, seenKeys, EXTRACT_MS);
+            buf.forEach(s => sendSrc(s));
+          }
         } catch {}
       })(),
 
@@ -1418,22 +1446,20 @@ router.get("/anime/sources-stream", async (req, res) => {
         try {
           if (!title) return;
           const srcs = await race(getAnimadarSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) await extractAndCollect(srcs, collected, seenKeys, EXTRACT_MS);
+          if (srcs.length && !closed) {
+            const buf: UnifiedSource[] = [];
+            await extractAndCollect(srcs, buf, seenKeys, EXTRACT_MS);
+            buf.forEach(s => sendSrc(s));
+          }
         } catch {}
       })(),
     ]);
-
-    // Send all verified sources at once (batch flush)
-    if (!closed) {
-      for (const s of collected) {
-        res.write(`data: ${JSON.stringify(s)}\n\n`);
-      }
-    }
 
   } catch (e: any) {
     console.error("sources-stream error:", e?.message ?? e);
   }
 
+  clearInterval(keepalive);
   if (!closed) { res.write("data: [DONE]\n\n"); res.end(); }
 });
 
