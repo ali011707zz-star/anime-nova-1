@@ -783,6 +783,8 @@ async function extractAndCollect(
       if (alive) collect(s);
       return;
     }
+    // Dead file hosts → skip entirely
+    if (DEAD_FILE_HOSTS.some(h => s.url.includes(h))) return;
     // Bare .m3u8 → direct HLS
     if (s.url.match(/\.m3u8([?#]|$)/i)) {
       collect({ ...s, directUrl: s.url, directType: "hls" });
@@ -793,7 +795,12 @@ async function extractAndCollect(
       collect({ ...s, directUrl: s.url, directType: "mp4" });
       return;
     }
-    // Embed-only hosts cannot be extracted server-side → skip
+    // Embed-only hosts: cannot extract server-side, but send as iframe embed
+    if (EMBED_ONLY_HOSTS.some(h => s.url.includes(h))) {
+      collect({ ...s, directUrl: s.url });
+      return;
+    }
+    // Other skippable extraction blockers → skip
     if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) return;
 
     // Try to extract a direct MP4/HLS URL from the embed page
@@ -1373,7 +1380,8 @@ router.get("/anime/sources-stream", async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
-  const seenKeys = new Set<string>();
+  // globalSeen: cross-scraper dedup used ONLY in sendSrc (not shared with extractAndCollect)
+  const globalSeen = new Set<string>();
   let closed = false;
   req.on("close", () => { closed = true; });
 
@@ -1389,8 +1397,8 @@ router.get("/anime/sources-stream", async (req, res) => {
     const key = s.directUrl.includes("workers.dev")
       ? "cdn:" + s.directUrl.replace(/^https?:\/\/[^/]+/, "")
       : s.directUrl;
-    if (seenKeys.has(key)) return;
-    seenKeys.add(key);
+    if (globalSeen.has(key)) return;
+    globalSeen.add(key);
     res.write(`data: ${JSON.stringify(s)}\n\n`);
   }
 
@@ -1400,7 +1408,7 @@ router.get("/anime/sources-stream", async (req, res) => {
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
-    // All 4 scrapers run in parallel; each streams sources as extracted
+    // All 4 scrapers run in parallel; each uses its OWN localSeen (no cross-scraper dedup in extractAndCollect)
     await Promise.allSettled([
       // ── Anime-Phoenix.com  (مباشر MKV/MP4 عالي الجودة) ──
       (async () => {
@@ -1409,7 +1417,7 @@ router.get("/anime/sources-stream", async (req, res) => {
           const srcs = await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) {
             const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, seenKeys, EXTRACT_MS);
+            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
             buf.forEach(s => sendSrc(s));
           }
         } catch {}
@@ -1422,7 +1430,7 @@ router.get("/anime/sources-stream", async (req, res) => {
           const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) {
             const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, seenKeys, EXTRACT_MS);
+            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
             buf.forEach(s => sendSrc(s));
           }
         } catch {}
@@ -1435,7 +1443,7 @@ router.get("/anime/sources-stream", async (req, res) => {
           const srcs = await race(getAnimelekSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) {
             const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, seenKeys, EXTRACT_MS);
+            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
             buf.forEach(s => sendSrc(s));
           }
         } catch {}
@@ -1448,7 +1456,7 @@ router.get("/anime/sources-stream", async (req, res) => {
           const srcs = await race(getAnimadarSources(title, english, ep), SCRAPER_MS, []);
           if (srcs.length && !closed) {
             const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, seenKeys, EXTRACT_MS);
+            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
             buf.forEach(s => sendSrc(s));
           }
         } catch {}
