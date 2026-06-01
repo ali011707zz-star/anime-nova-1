@@ -397,11 +397,12 @@ function SubtitleOverlay({ cues, elapsed }: { cues: SubCue[]; elapsed: number })
 
 /* ══════════════════════════════════ NATIVE HLS PLAYER ═══════ */
 function NativeHLSPlayer({
-  src, onRealQuality, onTimeUpdate,
+  src, onRealQuality, onTimeUpdate, onFail,
 }: {
   src: string;
   onRealQuality?: (q: string) => void;
   onTimeUpdate?: (t: number) => void;
+  onFail?: () => void;
 }) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const hlsRef      = useRef<Hls | null>(null);
@@ -492,9 +493,10 @@ function NativeHLSPlayer({
       return;
     }
 
-    /* ── Direct MP4 via video-proxy (streamtape, sendvid IP-tied URLs) ── */
+    /* ── Direct MP4/MKV via video-proxy (streamtape, sendvid IP-tied, workers.dev CDN) ── */
     const isDirectMp4 = src.includes("streamtape.com") || src.includes("sendvid.com")
-      || src.includes("videos2.sendvid.com") || src.includes("video-proxy?");
+      || src.includes("videos2.sendvid.com") || src.includes("video-proxy?")
+      || src.includes("workers.dev");
     if (isDirectMp4) {
       const proxyUrl = src.includes("video-proxy?") ? src
         : `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
@@ -508,7 +510,8 @@ function NativeHLSPlayer({
       };
       const onErr = () => {
         setLoading(false);
-        setError("فشل تشغيل المصدر المباشر");
+        setError("فشل تشغيل المصدر — جارٍ تجربة المصدر التالي…");
+        setTimeout(() => onFail?.(), 1200);
       };
       video.addEventListener("loadedmetadata", onMeta, { once: true });
       video.addEventListener("error", onErr, { once: true });
@@ -570,8 +573,9 @@ function NativeHLSPlayer({
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (hlsRef.current !== hls) return; // stale instance — ignore
         if (data.fatal) {
-          setError("فشل تحميل البث — اضغط إعادة المحاولة");
+          setError("فشل تحميل البث — جارٍ تجربة المصدر التالي…");
           setLoading(false);
+          setTimeout(() => onFail?.(), 1500);
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -1072,6 +1076,7 @@ function EpisodePlayer({
               src={currentUrl}
               onRealQuality={handleRealQuality}
               onTimeUpdate={handleHlsTime}
+              onFail={tryNextServer}
             />
             {subState === "ready" && subCues.length > 0 && (
               <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
