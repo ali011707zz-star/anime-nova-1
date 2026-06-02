@@ -16,6 +16,10 @@
 - [AnimeX CDN hls-proxy](animex-cdn-cors.md) — uwucdn.top allows server requests (HTTP 200); use proxyUrl (hls-proxy) first, not rawUrl; hls-proxy rewrites AES-128 key URI + segments via seg-proxy; all confirmed 200
 - [Miruro AnimePahe broken](miruro-animepah.md) — miruro.tv API now returns {"error":"Missing or invalid JWE"} — requires JWE token; AnimePahe source completely broken until alternative found
 - [IframePlayer completely removed](auto-fallback-hls.md) — IframePlayer is gone; Watch.tsx always uses NativeHLSPlayer; onFail advances to next server; no iframe states/refs remain
+- [AnimeDar search URL spaces](animedar-search.md) — search must use encodeURIComponent (spaces → %20), NOT hyphen-slugified; `/search/one%20piece/` works, `/search/one-piece/` fails
+- [Anime-Phoenix x265 MKV](animephoenix-codec.md) — all files are x265/HEVC MKV; plays on Windows/Mac with HEVC decoder and Safari; Linux Chrome (Replit preview) cannot decode → shows error; video-proxy must set Accept-Ranges:bytes always
+- [Shahiid seasons/?serie= AJAX](shahiid-serie-ajax.md) — ?serie= pages load episodes via AJAX only (no links in static HTML); shahiidLoadMore must run even when links.length===0 for isSerieFilter URLs; max 10 pages for these
+- [Watch.tsx auto-pick](watch-auto-pick.md) — auto-selects best quality source immediately, skips picker screen; effect runs on [loadingDone, fetchDone, mergedServers, phase]; no picker shown when sources found
 - [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN blocks server IP (hls-proxy→403); raw URL sent as fallback
 - [Direct MP4 in Watch.tsx](direct-mp4-player.md) — AnimeGG play/ URLs skip video-proxy (CDN → vidcache.net:8161, non-standard port blocked by Replit); play DIRECT video.src in browser. Sendvid/streamtape still use video-proxy (IP-tied)
 - [SSE-only Watch.tsx](dual-stream-watch.md) — Watch.tsx uses ONLY sources-stream SSE; mergedServers = sseServers directly (no useMemo merge); picker shows immediately on first source (no 38s sseDone wait)
