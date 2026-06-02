@@ -76,6 +76,10 @@ const EMBED_ONLY_HOSTS = [
   "voe.sx","voe.tv",
   "megamax.me","megamax.io","megamax.tv",
   "share4max.com","share4max.net",
+  "embed.hamml.com",
+  "ya.anime-t.com",
+  "ya.kooora.best",
+  "play.imovietime.bond",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -342,6 +346,27 @@ function extractIframeSrc(html: string, baseUrl: string): string | null {
   return null;
 }
 
+// ── vidhls.com parser ──────────────────────────────────────────────
+// The player page includes a FirePlayer() call with the full video config inline.
+// Config has: videoUrl (relative path), videoServer (key), hostList (key→[hostname])
+// Constructed URL: https://{hostList[videoServer][0]}{videoUrl}
+function parseVidHls(html: string): { url: string; type: "hls" | "mp4" } | null {
+  const configMatch = html.match(/FirePlayer\s*\([^,]+,\s*(\{[\s\S]+?\})\s*,\s*(?:true|false)\s*\)/);
+  if (!configMatch) return null;
+  try {
+    const config = JSON.parse(configMatch[1]);
+    const videoUrl: string = config.videoUrl || "";
+    const videoServer: string = String(config.videoServer ?? "1");
+    const hostList: Record<string, string[]> = config.hostList || {};
+    const hosts: string[] = hostList[videoServer] || [];
+    if (!videoUrl || !hosts.length) return null;
+    const fullUrl = `https://${hosts[0]}${videoUrl}`;
+    return { url: fullUrl, type: "hls" };
+  } catch {
+    return null;
+  }
+}
+
 async function extractVideoDeep(
   startUrl: string,
   referer?: string,
@@ -383,6 +408,9 @@ async function extractVideoDeep(
       if (url.includes("vidbm.com") || url.includes("uptostream.com") ||
           url.includes("vidlink") || url.includes("vidhide") || url.includes("streamlare")) {
         const v = parseMegamax(html); if (v) return v;
+      }
+      if (url.includes("vidhls.com/player/")) {
+        const v = parseVidHls(html); if (v) return v;
       }
       const direct = parseVideoUrl(html);
       if (direct) return direct;
@@ -1838,6 +1866,405 @@ async function getToonStreamSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  OKANIME.XYZ scraper  (Arabic anime — عربي مترجم)
+//  Search: GET /api/search?q= → JSON [{name, slug, ...}]
+//  Episode: GET /episode/{slug}-episode-{N}
+//  Servers: Alpine.js @click="setServer('URL')" pattern
+// ════════════════════════════════════════════════════════════════════
+
+const OK_BASE = "https://ww3.okanime.xyz";
+const OK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ww3.okanime.xyz/" };
+
+const okSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const okSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchOkAnime(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = okSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(
+        `${OK_BASE}/api/search?q=${encodeURIComponent(q as string)}`,
+        { headers: { ...OK_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(8000) },
+      );
+      if (!r.ok) continue;
+      const results = await r.json() as Array<{ name: string; slug: string }>;
+      if (!Array.isArray(results) || !results.length) continue;
+
+      let best: string | null = null, bestScore = 0;
+      for (const item of results) {
+        const score = Math.max(
+          similarity(item.name || "", title),
+          english ? similarity(item.name || "", english) : 0,
+        );
+        if (score > bestScore && score > 0.3) { bestScore = score; best = item.slug; }
+      }
+      if (best) { okSlugCache.set(ck, { slug: best, ts: Date.now() }); return best; }
+    } catch {}
+  }
+
+  okSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getOkAnimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `ok:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = okSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await searchOkAnime(title, english);
+    if (!slug) return [];
+
+    const epUrl = `${OK_BASE}/episode/${slug}-episode-${ep}`;
+    const r = await fetch(epUrl, {
+      headers: OK_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (html.length < 500) return [];
+
+    // Extract Alpine.js server URLs: @click="setServer('URL')"
+    const serverUrls: string[] = [];
+    for (const m of html.matchAll(/@click="setServer\('([^']+)'\)"/g)) {
+      const url = decodeHtmlEntities(m[1].trim());
+      if (url.startsWith("http") && !serverUrls.includes(url)) serverUrls.push(url);
+    }
+    if (!serverUrls.length) return [];
+
+    const sources: UnifiedSource[] = serverUrls.map((url, i) => ({
+      name: `أوك أنمي · سيرفر ${i + 1}`,
+      url,
+      quality: "HD",
+      qualityRank: 11,
+      site: "okanime",
+    }));
+
+    okSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIME-TIME.LIVE scraper  (Arabic anime — عربي مترجم)
+//  Search: GET /?s={title} → /series/{slug}/ links
+//  Series page: → /anime/{arc-slug}/ sub-pages
+//  Arc page: buttons onclick="...iframe_area.location.href='URL'..."
+//            Button text contains: "الحلقة N" (Arabic episode number)
+// ════════════════════════════════════════════════════════════════════
+
+const ATIME_BASE = "https://anime-time.live";
+const ATIME_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime-time.live/" };
+
+const atimeSeriesCache = new Map<string, { url: string | null; ts: number }>();
+const atimeSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAnimeTime(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = atimeSeriesCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(
+        `${ATIME_BASE}/?s=${encodeURIComponent(q as string)}`,
+        { headers: ATIME_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" },
+      );
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
+
+      const candidates: Array<{ url: string; score: number }> = [];
+
+      // Match /series/ parent pages
+      for (const m of html.matchAll(/href="(https:\/\/anime-time\.live\/series\/[^"]+)"/g)) {
+        const u = m[1];
+        if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
+        const slug = decodeURIComponent(u.replace(ATIME_BASE + "/series/", "").replace(/\/$/, ""));
+        const score = Math.max(similarity(slug, title), english ? similarity(slug, english) : 0);
+        candidates.push({ url: u, score });
+      }
+
+      // Also match /anime/ arc pages directly (some anime have no /series/ parent)
+      for (const m of html.matchAll(/href="(https:\/\/anime-time\.live\/anime\/[^"]+)"/g)) {
+        const u = m[1];
+        if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
+        const slug = decodeURIComponent(u.replace(ATIME_BASE + "/anime/", "").replace(/\/$/, ""));
+        const score = Math.max(similarity(slug, title), english ? similarity(slug, english) : 0);
+        candidates.push({ url: u, score });
+      }
+
+      const best = candidates.sort((a, b) => b.score - a.score)[0];
+      if (best && best.score > 0.2) {
+        atimeSeriesCache.set(ck, { url: best.url, ts: Date.now() });
+        return best.url;
+      }
+    } catch {}
+  }
+
+  atimeSeriesCache.set(ck, { url: null, ts: Date.now() });
+  return null;
+}
+
+/** Parse episode buttons from an anime-time arc/season page → Map<epNumber, embedUrls[]> */
+function parseAtimeEpButtons(html: string): Map<number, string[]> {
+  const epMap = new Map<number, string[]>();
+  const re = /onclick="[^"]*?iframe_area\.location\.href='([^']+)'[^"]*"[^>]*>([\s\S]*?)<\/button>/gi;
+  for (const m of html.matchAll(re)) {
+    const url = m[1].trim();
+    const text = m[2].replace(/<[^>]+>/g, "").trim();
+    const numM = text.match(/(\d+)/);
+    if (!numM || !url.startsWith("http")) continue;
+    const n = parseInt(numM[1]);
+    if (!n) continue;
+    if (!epMap.has(n)) epMap.set(n, []);
+    epMap.get(n)!.push(url);
+  }
+  return epMap;
+}
+
+async function getAnimeTimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `atime:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = atimeSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const seriesUrl = await searchAnimeTime(title, english);
+    if (!seriesUrl) return [];
+
+    // If already an /anime/ arc page → use it directly; else fetch series page for arc links
+    const isArcPage = seriesUrl.includes("/anime/");
+    let arcUrls: string[] = [];
+
+    if (isArcPage) {
+      arcUrls = [seriesUrl];
+    } else {
+      const sR = await fetch(seriesUrl, {
+        headers: ATIME_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
+      });
+      if (!sR.ok) return [];
+      const seriesHtml = await sR.text();
+      if (isCloudflareBlock(seriesHtml)) return [];
+
+      for (const m of seriesHtml.matchAll(/href="(https:\/\/anime-time\.live\/anime\/[^"]+)"/g)) {
+        const u = m[1];
+        if (!arcUrls.includes(u) && !u.includes("/page/") && !u.includes("download")) {
+          arcUrls.push(u);
+        }
+      }
+    }
+
+    // Build global episode map by fetching all arc pages in parallel (up to 6)
+    const globalEpMap = new Map<number, string[]>();
+
+    await Promise.allSettled(arcUrls.slice(0, 6).map(async (arcUrl) => {
+      try {
+        const r = await fetch(arcUrl, {
+          headers: ATIME_HDRS, signal: AbortSignal.timeout(9000), redirect: "follow",
+        });
+        if (!r.ok) return;
+        const h = await r.text();
+        if (isCloudflareBlock(h)) return;
+        for (const [n, urls] of parseAtimeEpButtons(h)) {
+          if (!globalEpMap.has(n)) globalEpMap.set(n, []);
+          globalEpMap.get(n)!.push(...urls);
+        }
+      } catch {}
+    }));
+
+    const epUrls = globalEpMap.get(ep);
+    if (!epUrls || !epUrls.length) return [];
+
+    const sources: UnifiedSource[] = [...new Set(epUrls)].map((url, i) => ({
+      name: `أنمي تايم · سيرفر ${i + 1}`,
+      url,
+      quality: "HD",
+      qualityRank: 11,
+      site: "animetime",
+    }));
+
+    atimeSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  RISTOANIME.CO scraper  (Arabic anime — WordPress TopAnime theme)
+//  Search: POST /wp-content/themes/TopAnime/Ajaxt/Searching.php
+//  Series page → extract post_id + season IDs
+//  Episodes AJAX: POST /wp-content/themes/TopAnime/Ajaxt/Single/Episodes.php
+//  Episode page: ul#watch li[data-watch="IFRAME_URL"]
+// ════════════════════════════════════════════════════════════════════
+
+const RISTO_BASE = "https://ristoanime.co";
+const RISTO_AJAX = `${RISTO_BASE}/wp-content/themes/TopAnime/Ajaxt`;
+const RISTO_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ristoanime.co/" };
+
+const ristoSeriesCache = new Map<string, { url: string | null; ts: number }>();
+const ristoSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchRistoAnime(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = ristoSeriesCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${RISTO_AJAX}/Searching.php`, {
+        method: "POST",
+        body: `search=${encodeURIComponent(q as string)}`,
+        headers: {
+          ...RISTO_HDRS,
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html) || html.length < 50) continue;
+
+      const seriesUrls: Array<{ url: string; score: number }> = [];
+      for (const m of html.matchAll(/href="(https:\/\/ristoanime\.co\/series\/[^"]+)"/g)) {
+        const u = m[1];
+        const slug = decodeURIComponent(u.replace(RISTO_BASE + "/series/", "").replace(/\/$/, "")).toLowerCase();
+        const score = Math.max(
+          similarity(slug, title),
+          english ? similarity(slug, english) : 0,
+        );
+        seriesUrls.push({ url: u, score });
+      }
+
+      const best = seriesUrls.sort((a, b) => b.score - a.score)[0];
+      if (best && best.score > 0.2) {
+        ristoSeriesCache.set(ck, { url: best.url, ts: Date.now() });
+        return best.url;
+      }
+    } catch {}
+  }
+
+  ristoSeriesCache.set(ck, { url: null, ts: Date.now() });
+  return null;
+}
+
+async function getRistoAnimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `risto:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = ristoSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const seriesUrl = await searchRistoAnime(title, english);
+    if (!seriesUrl) return [];
+
+    // Fetch series page → get post_id and session cookies
+    const sR = await fetch(seriesUrl, {
+      headers: RISTO_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
+    });
+    if (!sR.ok) return [];
+    const seriesHtml = await sR.text();
+    if (isCloudflareBlock(seriesHtml)) return [];
+
+    const postIdM = seriesHtml.match(/post_id:\s*'(\d+)'/);
+    if (!postIdM) return [];
+    const postId = postIdM[1];
+
+    // Collect season IDs from the series page (WordPress category/term IDs, not sequential)
+    const seasonIds = [...seriesHtml.matchAll(/data-season="([^"]+)"/g)].map(m => m[1]);
+    const seasons = seasonIds.length ? [...new Set(seasonIds)] : ["1"];
+
+    let epUrl: string | null = null;
+
+    for (const season of seasons.slice(0, 4)) {
+      // AJAX works without session cookies
+      const eR = await fetch(`${RISTO_AJAX}/Single/Episodes.php`, {
+        method: "POST",
+        body: `season=${encodeURIComponent(season)}&post_id=${postId}`,
+        headers: {
+          ...RISTO_HDRS,
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-Requested-With": "XMLHttpRequest",
+          Referer: seriesUrl,
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!eR.ok) continue;
+      const epsHtml = await eR.text();
+      if (isCloudflareBlock(epsHtml) || epsHtml.length < 50) continue;
+
+      // Episode links are at root domain (e.g. https://ristoanime.co/انمي-dandadan-الحلقة-1-...)
+      const epLinks: string[] = [];
+      for (const m of epsHtml.matchAll(/href="(https?:\/\/ristoanime\.co\/[^"]+)"/g)) {
+        const u = m[1];
+        // Skip WP system paths, series pages, feed/tag/category
+        if (/\/(series|category|tag|wp-admin|wp-content|wp-json|feed|page)\//i.test(u)) continue;
+        if (u === RISTO_BASE + "/" || u.endsWith("/series/")) continue;
+        if (!epLinks.includes(u)) epLinks.push(u);
+      }
+      if (!epLinks.length) continue;
+
+      // Match episode by Arabic URL pattern: الحلقة-{N}- or الحلقة-{N}/
+      const byArabic = epLinks.find(u => {
+        const dec = decodeURIComponent(u);
+        return dec.includes(`الحلقة-${ep}-`) || dec.includes(`الحلقة-${ep}/`);
+      });
+      if (byArabic) { epUrl = byArabic; break; }
+
+      // Fallback: slug ends with -N/ or -0N/
+      const bySlug = epLinks.find(u => {
+        const slug = decodeURIComponent(u).toLowerCase();
+        return slug.endsWith(`-${ep}/`) || slug.endsWith(`-${String(ep).padStart(2, "0")}/`);
+      });
+      if (bySlug) { epUrl = bySlug; break; }
+
+      // Position-based fallback: list is newest-first → episode N = index (total - N)
+      const idx = epLinks.length - ep;
+      if (idx >= 0 && idx < epLinks.length) { epUrl = epLinks[idx]; break; }
+    }
+
+    if (!epUrl) return [];
+
+    // Fetch episode page → parse ul#watch li[data-watch]
+    const epR = await fetch(epUrl, {
+      headers: { ...RISTO_HDRS, Referer: seriesUrl },
+      signal: AbortSignal.timeout(10000),
+      redirect: "follow",
+    });
+    if (!epR.ok) return [];
+    const epHtml = await epR.text();
+    if (isCloudflareBlock(epHtml)) return [];
+
+    const watchUrls: string[] = [];
+    for (const m of epHtml.matchAll(/data-watch=["']([^"']+)["']/g)) {
+      const url = decodeHtmlEntities(m[1].trim());
+      if (url.startsWith("http") && !watchUrls.includes(url)) watchUrls.push(url);
+    }
+    if (!watchUrls.length) return [];
+
+    const sources: UnifiedSource[] = watchUrls.map((url, i) => ({
+      name: `ريستو أنمي · سيرفر ${i + 1}`,
+      url,
+      quality: "HD",
+      qualityRank: 11,
+      site: "ristoanime",
+    }));
+
+    ristoSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -1950,6 +2377,45 @@ router.get("/anime/sources-stream", async (req, res) => {
           if (!title) return;
           const srcs = await race(getToonStreamSources(title, english, ep), SCRAPER_MS, []);
           srcs.forEach(s => sendSrc(s));
+        } catch {}
+      })(),
+
+      // ── OkAnime.xyz  (عربي مترجم — Alpine.js servers) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getOkAnimeSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) {
+            const buf: UnifiedSource[] = [];
+            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
+            buf.forEach(s => sendSrc(s));
+          }
+        } catch {}
+      })(),
+
+      // ── Anime-time.live  (عربي مترجم — onclick buttons) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnimeTimeSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) {
+            const buf: UnifiedSource[] = [];
+            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
+            buf.forEach(s => sendSrc(s));
+          }
+        } catch {}
+      })(),
+
+      // ── RistoAnime.co  (عربي مترجم — WordPress TopAnime theme) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, []);
+          if (srcs.length && !closed) {
+            const buf: UnifiedSource[] = [];
+            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
+            buf.forEach(s => sendSrc(s));
+          }
         } catch {}
       })(),
     ]);
