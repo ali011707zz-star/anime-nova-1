@@ -652,11 +652,25 @@ function extractEpLinks(html: string): string[] {
 
 async function shahiidLoadMore(html: string, seasonsUrl: string, page: number): Promise<string[]> {
   try {
-    const nonceM = html.match(/["']misha_nonce["']\s*:\s*["']([a-f0-9]+)["']/i);
-    const queryM = html.match(/["']query["']\s*:\s*(\{[\s\S]*?\})\s*,\s*["'](?:current_page|page|nonce)/);
+    // Try "misha_nonce" key first, then "nonce" inside misha_loadmore_params JSON
+    const nonceM =
+      html.match(/["']misha_nonce["']\s*:\s*["']([a-f0-9]+)["']/i) ??
+      html.match(/"nonce"\s*:\s*"([a-f0-9]{8,12})"/i);
     if (!nonceM) return [];
     const nonce = nonceM[1];
-    const query = queryM ? queryM[1] : "{}";
+
+    // Extract WP_Query args: try "query":{...} first, then "posts":"JSON_STRING"
+    let query = "{}";
+    const queryM = html.match(/["']query["']\s*:\s*(\{[\s\S]*?\})\s*,\s*["'](?:current_page|page|nonce)/);
+    if (queryM) {
+      query = queryM[1];
+    } else {
+      // misha_loadmore_params uses "posts":"<escaped-json>" instead of "query":
+      const postsM = html.match(/"posts"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (postsM) {
+        try { query = JSON.parse(`"${postsM[1]}"`); } catch { query = postsM[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\'); }
+      }
+    }
     const fd = new URLSearchParams({
       action: "misha_loadmore",
       nonce,
@@ -1742,7 +1756,8 @@ const TOON_VIP = "https://toonstream.vip";
 const AS_CDN_B = "https://as-cdn21.top";
 const RUBY_B   = "https://rubystm.com";
 
-const toonSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const toonSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const toonSeriesCache = new Map<string, { urls: string[]; ts: number }>();
 
 async function extractAsCdn(playerUrl: string): Promise<string | null> {
   try {
@@ -1805,12 +1820,15 @@ function decodeHtmlEntities(s: string): string {
           .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 }
 
-async function getToonStreamSources(
-  title: string, english: string | null, ep: number,
-): Promise<UnifiedSource[]> {
-  const ck = `toon:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
-  const hit = toonSrcCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+/**
+ * Resolve ALL ToonStream series page URLs for a given title.
+ * Returns multiple candidates (ordered best-first) so the caller
+ * can try each until one yields working HLS sources.
+ */
+async function resolveToonSeriesUrls(title: string, english: string | null): Promise<string[]> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = toonSeriesCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.urls;
 
   const slugCandidates: string[] = [];
   for (const q of [english, title].filter(Boolean) as string[]) {
@@ -1820,90 +1838,230 @@ async function getToonStreamSources(
     if (s.startsWith("the-")) slugCandidates.push(s.slice(4));
     const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
     if (stripped !== s && stripped.length > 2) slugCandidates.push(stripped);
+    const noColon = toSlug((q as string).replace(/[:：].*/g, "").trim());
+    if (noColon && noColon !== s) slugCandidates.push(noColon);
   }
 
+  const found: string[] = [];
+  const seenUrls = new Set<string>();
+
+  function addCandidate(url: string) {
+    if (!seenUrls.has(url)) { seenUrls.add(url); found.push(url); }
+  }
+
+  // Direct slug check — collect ALL matching series pages
+  for (const slug of [...new Set(slugCandidates)]) {
+    try {
+      const r = await fetch(`${TOON_VIP}/series/${slug}/`, {
+        headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
+        signal: AbortSignal.timeout(7000), redirect: "follow",
+      });
+      if (r.ok) {
+        const html = await r.text();
+        if (html.includes("/episode/") && !html.includes("Page not found")) {
+          addCandidate(`${TOON_VIP}/series/${slug}/`);
+          // Also check for cross-domain episode links (toonstream.co slugs) that
+          // point to alternative series on toonstream.vip
+          for (const m of html.matchAll(/href="https?:\/\/toonstream\.co\/episode\/([^/"]+)-\d+x\d+\/"/gi)) {
+            // Extract series slug from episode URL: "haikyu-multi-audio-1x1" → "haikyu-multi-audio"
+            const epSlug = m[1];
+            const altSeriesSlug = epSlug.replace(/-\d+x\d+$/, "");
+            const altUrl = `${TOON_VIP}/series/${altSeriesSlug}/`;
+            if (!seenUrls.has(altUrl)) {
+              // Verify the alt series exists on toonstream.vip
+              try {
+                const rAlt = await fetch(altUrl, {
+                  headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
+                  signal: AbortSignal.timeout(5000), redirect: "follow",
+                });
+                if (rAlt.ok) {
+                  const hAlt = await rAlt.text();
+                  if (hAlt.includes("/episode/") && !hAlt.includes("Page not found")) {
+                    addCandidate(altUrl);
+                  }
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // Search /?s= — collect all matching series pages by score
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(`${TOON_VIP}/?s=${encodeURIComponent(q as string)}`, {
+        headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
+        signal: AbortSignal.timeout(10000), redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+
+      const candidates: Array<{ url: string; score: number }> = [];
+      for (const m of html.matchAll(/href="(https?:\/\/toonstream\.vip\/series\/([^/"]+)\/)"/gi)) {
+        const seriesUrl = m[1];
+        const slug = m[2];
+        const label = slug.replace(/-/g, " ");
+        const score = Math.max(
+          similarity(label, title),
+          english ? similarity(label, english) : 0,
+        );
+        if (score > 0.22) candidates.push({ url: seriesUrl, score });
+      }
+      candidates.sort((a, b) => b.score - a.score);
+      for (const c of candidates.slice(0, 4)) addCandidate(c.url);
+      if (found.length) break;
+    } catch {}
+  }
+
+  toonSeriesCache.set(ck, { urls: found, ts: Date.now() });
+  return found;
+}
+
+/** Extract the episode URL from a ToonStream episode page and pull HLS sources. */
+async function extractToonEpisodeSources(epPageUrl: string): Promise<UnifiedSource[]> {
   const sources: UnifiedSource[] = [];
+  try {
+    const r = await fetch(epPageUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
+      signal: AbortSignal.timeout(12000), redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (html.length < 500) return [];
+
+    const outerSrcs: string[] = [];
+    for (const m of html.matchAll(/data-src=["']([^"']+)["']/gi)) {
+      const decoded = decodeHtmlEntities(m[1]);
+      if (decoded.includes("toonstream.vip") && decoded.includes("trembed")) {
+        if (!outerSrcs.includes(decoded)) outerSrcs.push(decoded);
+      }
+    }
+    if (!outerSrcs.length) return [];
+
+    for (const outerSrc of outerSrcs.slice(0, 3)) {
+      try {
+        const r2 = await fetch(outerSrc, {
+          headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!r2.ok) continue;
+        const html2 = await r2.text();
+
+        const innerM = html2.match(
+          /<iframe[^>]+src=["']([^"']*(?:as-cdn21\.top|rubystm\.com)[^"']*)["']/i
+        );
+        if (!innerM) continue;
+        const playerUrl = innerM[1];
+
+        if (playerUrl.includes("as-cdn21.top")) {
+          const m3u8 = await extractAsCdn(playerUrl);
+          if (m3u8) {
+            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(playerUrl)}`;
+            sources.push({
+              name: "تون ستريم · ياباني",
+              url: playerUrl,
+              quality: "HD",
+              qualityRank: 10,
+              site: "toonstream",
+              directUrl: proxied,
+              directType: "hls",
+            });
+            if (sources.length >= 2) break;
+          }
+        } else if (playerUrl.includes("rubystm.com")) {
+          const m3u8 = await extractRubyStm(playerUrl, outerSrc);
+          if (m3u8) {
+            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(playerUrl)}`;
+            sources.push({
+              name: "تون ستريم · ياباني",
+              url: playerUrl,
+              quality: "HD",
+              qualityRank: 10,
+              site: "toonstream",
+              directUrl: proxied,
+              directType: "hls",
+            });
+            if (sources.length >= 2) break;
+          }
+        }
+      } catch {}
+      if (sources.length >= 2) break;
+    }
+  } catch {}
+  return sources;
+}
+
+async function getToonStreamSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `toon:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = toonSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  // ── Step 1: Try direct episode URL guess (fast path, works for many anime) ─
+  const slugCandidates: string[] = [];
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const s = toSlug(q as string);
+    if (!s) continue;
+    slugCandidates.push(s);
+    if (s.startsWith("the-")) slugCandidates.push(s.slice(4));
+    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
+    if (stripped !== s && stripped.length > 2) slugCandidates.push(stripped);
+    const noColon = toSlug((q as string).replace(/[:：].*/g, "").trim());
+    if (noColon && noColon !== s) slugCandidates.push(noColon);
+  }
 
   for (const baseSlug of [...new Set(slugCandidates)]) {
     const epSlug = `${baseSlug}-1x${ep}`;
     try {
       const r = await fetch(`${TOON_VIP}/episode/${epSlug}/`, {
         headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
-        signal: AbortSignal.timeout(12000),
-        redirect: "follow",
+        signal: AbortSignal.timeout(8000), redirect: "follow",
+      });
+      if (r.ok) {
+        const html = await r.text();
+        if (html.length > 500 && html.includes("trembed")) {
+          const sources = await extractToonEpisodeSources(`${TOON_VIP}/episode/${epSlug}/`);
+          if (sources.length) {
+            toonSrcCache.set(ck, { sources, ts: Date.now() });
+            return sources;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // ── Step 2: Find series page(s) via search, then pick episode by position ─
+  const seriesPageUrls = await resolveToonSeriesUrls(title, english);
+  if (!seriesPageUrls.length) return [];
+
+  for (const seriesPageUrl of seriesPageUrls) {
+    try {
+      const r = await fetch(seriesPageUrl, {
+        headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
+        signal: AbortSignal.timeout(10000), redirect: "follow",
       });
       if (!r.ok) continue;
       const html = await r.text();
-      if (html.length < 500) continue;
 
-      // data-src attributes contain HTML-encoded URLs — decode them
-      const outerSrcs: string[] = [];
-      for (const m of html.matchAll(/data-src=["']([^"']+)["']/gi)) {
-        const decoded = decodeHtmlEntities(m[1]);
-        // Only include toonstream embed URLs, avoid duplicates
-        if (decoded.includes("toonstream.vip") && decoded.includes("trembed")) {
-          outerSrcs.push(decoded);
-        }
+      // Collect ordered, deduplicated episode links (toonstream.vip only)
+      const epLinks: string[] = [];
+      for (const m of html.matchAll(/href="(https?:\/\/toonstream\.vip\/episode\/[^"]+)"/gi)) {
+        if (!epLinks.includes(m[1])) epLinks.push(m[1]);
       }
-      if (!outerSrcs.length) continue;
+      if (!epLinks.length || ep > epLinks.length) continue;
 
-      // Try first 3 servers (each is a different audio language)
-      for (const outerSrc of outerSrcs.slice(0, 3)) {
-        try {
-          const r2 = await fetch(outerSrc, {
-            headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
-            signal: AbortSignal.timeout(10000),
-          });
-          if (!r2.ok) continue;
-          const html2 = await r2.text();
-
-          // Inner iframe has direct src (not data-src)
-          const innerM = html2.match(
-            /<iframe[^>]+src=["']([^"']*(?:as-cdn21\.top|rubystm\.com)[^"']*)["']/i
-          );
-          if (!innerM) continue;
-          const playerUrl = innerM[1];
-
-          if (playerUrl.includes("as-cdn21.top")) {
-            const m3u8 = await extractAsCdn(playerUrl);
-            if (m3u8) {
-              const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(playerUrl)}`;
-              sources.push({
-                name: "تون ستريم · ياباني",
-                url: playerUrl,
-                quality: "HD",
-                qualityRank: 10,
-                site: "toonstream",
-                directUrl: proxied,
-                directType: "hls",
-              });
-              if (sources.length >= 2) break;
-            }
-          } else if (playerUrl.includes("rubystm.com")) {
-            const m3u8 = await extractRubyStm(playerUrl, outerSrc);
-            if (m3u8) {
-              const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(playerUrl)}`;
-              sources.push({
-                name: "تون ستريم · ياباني",
-                url: playerUrl,
-                quality: "HD",
-                qualityRank: 10,
-                site: "toonstream",
-                directUrl: proxied,
-                directType: "hls",
-              });
-              if (sources.length >= 2) break;
-            }
-          }
-        } catch {}
-        if (sources.length >= 2) break;
+      const epPageUrl = epLinks[ep - 1];
+      const sources = await extractToonEpisodeSources(epPageUrl);
+      if (sources.length) {
+        toonSrcCache.set(ck, { sources, ts: Date.now() });
+        return sources;
       }
     } catch {}
-    if (sources.length) break;
   }
-
-  if (sources.length) toonSrcCache.set(ck, { sources, ts: Date.now() });
-  return sources;
+  return [];
 }
 
 
@@ -1955,26 +2113,29 @@ async function searchOkAnime(title: string, english: string | null): Promise<str
     } catch {}
   }
 
-  // Method 2: HTML search page (results may be in static HTML for some queries)
+  // Method 2: JSON search API (returns [{name, slug, ...}])
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
       const r = await fetch(
-        `${OK_BASE}/?search_param=animes&q=${encodeURIComponent(q as string)}`,
+        `${OK_BASE}/api/search?q=${encodeURIComponent(q as string)}`,
         { headers: OK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" },
       );
       if (!r.ok) continue;
-      const html = await r.text();
-      if (isCloudflareBlock(html)) continue;
+      const data = await r.json() as Array<{ name?: string; slug?: string }>;
+      if (!Array.isArray(data) || !data.length) continue;
 
       let best: string | null = null, bestScore = 0;
-      for (const m of html.matchAll(/href="https?:\/\/ww3\.okanime\.xyz\/anime\/([^/"]+)"/gi)) {
-        const slug = m[1];
-        const label = slug.replace(/-/g, " ");
+      for (const item of data) {
+        if (!item.slug) continue;
+        const nameLabel = (item.name || "").toLowerCase();
+        const slugLabel = item.slug.replace(/-/g, " ");
         const score = Math.max(
-          similarity(label, title),
-          english ? similarity(label, english as string) : 0,
+          similarity(nameLabel, title),
+          english ? similarity(nameLabel, english) : 0,
+          similarity(slugLabel, title),
+          english ? similarity(slugLabel, english) : 0,
         );
-        if (score > bestScore && score > 0.25) { bestScore = score; best = slug; }
+        if (score > bestScore && score > 0.28) { bestScore = score; best = item.slug; }
       }
       if (best) { okSlugCache.set(ck, { slug: best, ts: Date.now() }); return best; }
     } catch {}
