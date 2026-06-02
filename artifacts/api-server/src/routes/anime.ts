@@ -785,9 +785,10 @@ async function extractAndCollect(
     }
     // Dead file hosts → skip entirely
     if (DEAD_FILE_HOSTS.some(h => s.url.includes(h))) return;
-    // Bare .m3u8 → direct HLS
+    // Bare .m3u8 → wrap with hls-proxy to bypass CORS restrictions
     if (s.url.match(/\.m3u8([?#]|$)/i)) {
-      collect({ ...s, directUrl: s.url, directType: "hls" });
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${encodeURIComponent(s.url)}`;
+      collect({ ...s, directUrl: proxied, directType: "hls" });
       return;
     }
     // Bare .mp4 → direct MP4
@@ -795,11 +796,8 @@ async function extractAndCollect(
       collect({ ...s, directUrl: s.url, directType: "mp4" });
       return;
     }
-    // Embed-only hosts: cannot extract server-side, but send as iframe embed
-    if (EMBED_ONLY_HOSTS.some(h => s.url.includes(h))) {
-      collect({ ...s, directUrl: s.url });
-      return;
-    }
+    // Embed-only hosts: cannot extract server-side — skip entirely (no iframe)
+    if (EMBED_ONLY_HOSTS.some(h => s.url.includes(h))) return;
     // Other skippable extraction blockers → skip
     if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) return;
 
@@ -810,13 +808,16 @@ async function extractAndCollect(
         new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
       ]);
       if (result?.url) {
-        // HLS m3u8: trust without probing (CDN blocks HEAD)
-        // MP4: probe to filter dead links
-        const alive = result.type === "hls"
-          ? true
-          : await probeDirectUrl(result.url, s.url);
-        if (alive) {
-          collect({ ...s, url: result.url, directUrl: result.url, directType: result.type });
+        if (result.type === "hls") {
+          // Wrap extracted HLS with hls-proxy to bypass CORS
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(s.url)}`;
+          collect({ ...s, url: proxied, directUrl: proxied, directType: "hls" });
+        } else {
+          // MP4: probe to filter dead links
+          const alive = await probeDirectUrl(result.url, s.url);
+          if (alive) {
+            collect({ ...s, url: result.url, directUrl: result.url, directType: "mp4" });
+          }
         }
       }
     } catch {}

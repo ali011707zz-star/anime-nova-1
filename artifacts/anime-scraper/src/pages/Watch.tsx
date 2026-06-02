@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
   ChevronRight, ChevronLeft, Play, Pause, Loader2,
@@ -54,67 +54,41 @@ const QUALITY_AR: Record<Quality, string> = {
 /* ── Server source detection ── */
 interface ServerInfo { label: string; sublabel: string; isHls: boolean; isDirect?: boolean; }
 function getServerInfo(url: string, idx: number): ServerInfo {
-  // AnimeX — raw uwucdn.top URL tagged with #animex fragment
-  if (url.includes("#animex") || url.includes("animex-player") || url.includes("animex-source")) {
-    return { label: "AnimeX", sublabel: "مترجم للعربية · HLS مباشر", isHls: true };
+  // All sources sent from the API are native-playable (no iframes)
+  // Anime-Phoenix CDN (workers.dev — direct MKV/MP4)
+  if (url.includes("workers.dev")) {
+    return { label: "فينكس", sublabel: "عربي · مباشر", isHls: true, isDirect: true };
   }
-  // AnimePahe via Miruro (uwucdn.top HLS — CORS:* open, no tag = AnimePahe)
-  if (url.includes("uwucdn.top")) {
-    return { label: "AnimePahe", sublabel: "جودة عالية · مترجم", isHls: true };
+  // hls-proxy wrapped stream (extracted from Arabic sites)
+  if (url.includes("hls-proxy")) {
+    if (url.includes("streamwish") || url.includes("filemoon") || url.includes("wishembed")) {
+      return { label: "ستريم ويش", sublabel: "عربي · HLS", isHls: true };
+    }
+    if (url.includes("shahiid") || url.includes("share4max")) {
+      return { label: "شاهيد أنمي", sublabel: "عربي · HLS", isHls: true };
+    }
+    if (url.includes("animelek") || url.includes("animedar")) {
+      return { label: "أنمي ليك", sublabel: "عربي · HLS", isHls: true };
+    }
+    return { label: `مصدر ${idx + 1}`, sublabel: "عربي · HLS", isHls: true };
   }
-  // FlixCloud via ReAnime.to — hls-proxy wrapped or raw flixcloud URL
-  if (url.includes("flixcloud") || (url.includes("hls-proxy") && url.includes("flixcloud"))) {
-    return { label: "Zoro · AniWave", sublabel: "جودة عالية · مترجم", isHls: true };
+  // Direct MP4/MKV/WebM (streamtape, sendvid, video-proxy)
+  if (url.includes("streamtape.com") || url.includes("sendvid.com") || url.includes("/video-proxy?")) {
+    return { label: "ستريم تيب", sublabel: "عربي · مباشر", isHls: true, isDirect: true };
   }
-  // AniPub — dub vs sub distinction
-  if (url.includes("anipub.xyz/video/")) {
-    if (url.endsWith("/dub")) return { label: "AniPub", sublabel: "مدبلج إنجليزي", isHls: false };
-    if (url.endsWith("/sub")) return { label: "AniPub", sublabel: "مترجم إنجليزي", isHls: false };
-    return { label: "AniPub", sublabel: "إنجليزي", isHls: false };
-  }
-  if (url.includes("anipub") || url.includes("gogoanime") || url.includes("gogocdn")) {
-    return { label: "AniPub", sublabel: "مترجم إنجليزي", isHls: false };
-  }
-  // Anime-Phoenix CDN (workers.dev CloudFlare R2 mirrors) — direct MKV/MP4
-  if (url.includes("workers.dev") && (url.includes(".mkv") || url.includes(".mp4") || url.includes("/Server/"))) {
-    return { label: "فينكس", sublabel: "عربي · جودة عالية", isHls: true, isDirect: true };
-  }
-  // Direct video extracted from Arabic sources — route via video-proxy, play natively
-  if (url.includes("streamtape.com") || url.includes("sendvid.com")
-   || url.includes("/video-proxy?")) {
-    return { label: "مصدر مباشر", sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
-  }
-  // Any direct MP4/MKV URL (e.g. AnimeGG play URLs, other direct extractions)
-  if (url.match(/\.(mp4|mkv|webm)([?#]|$)/i) && !url.includes(".m3u8")) {
+  if (url.match(/\.(mp4|mkv|webm)([?#]|$)/i)) {
     return { label: "مصدر مباشر", sublabel: "تشغيل مباشر", isHls: true, isDirect: true };
   }
-  // Streamwish / Filemoon HLS extracted
-  if (url.includes("streamwish") || url.includes("filemoon") || url.includes("animelek")
-   || url.includes("wishfast") || url.includes("playerwish") || url.includes("asnwish")
-   || url.includes("vidmoly")) {
-    const isHlsUrl = url.includes(".m3u8") || url.includes("hls-proxy");
-    return { label: "أنمي ليك", sublabel: isHlsUrl ? "عربي · جودة عالية" : "مترجم عربي", isHls: isHlsUrl };
-  }
-  // Bare m3u8 direct URL
+  // Bare m3u8
   if (url.match(/\.m3u8([?#]|$)/i)) {
     return { label: "بث مباشر", sublabel: "جودة عالية", isHls: true };
   }
-  // Generic hls-proxy fallback
-  if (url.includes("hls-player") || url.includes("hls-proxy")) {
-    return { label: "زورو · أنيويف", sublabel: "مترجم · جودة عالية", isHls: true };
+  // AnimeX
+  if (url.includes("animex-player") || url.includes("animex-source") || url.includes("#animex")) {
+    return { label: "أنمي إكس", sublabel: "عربي · HLS مباشر", isHls: true };
   }
-  // Shahiid Arabic embed hosts
-  if (url.includes("shahiid") || url.includes("share4max") || url.includes("vidbm")
-   || url.includes("uptostream") || url.includes("dood") || url.includes("voe.sx")
-   || url.includes("megamax.me") || url.includes("leech.megamax") || url.includes("videa.hu")
-   || url.includes("anime7u") || url.includes("vid4up")) {
-    return { label: "شاهد أنمي", sublabel: "مترجم عربي", isHls: false };
-  }
-  // Fallback: treat as native playable if it looks like a direct video URL
-  if (url.match(/^https?:\/\//i) && !url.includes("/embed") && !url.includes("/iframe")) {
-    return { label: `مصدر ${idx + 1}`, sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
-  }
-  return { label: `سيرفر ${idx + 1}`, sublabel: "مترجم عربي", isHls: false };
+  // Fallback — all sources are native
+  return { label: `مصدر ${idx + 1}`, sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
 }
 
 function fmtTime(s: number) {
@@ -888,15 +862,10 @@ function EpisodePlayer({
   onChangeQuality: (q: Quality) => void;
 }) {
   const [currentServer, setCurrentServer] = useState(initialServer ?? 0);
-  const [iframeLoaded, setIframeLoaded]   = useState(false);
-  const [iframeErr,    setIframeErr]      = useState(false);
-  const [retrying,     setRetrying]       = useState(false);
   const [showQuality,  setShowQuality]    = useState(false);
   const [fs,           setFs]             = useState(false);
   const [realQuality,  setRealQuality]    = useState<string | null>(null);
   const [hlsTime,      setHlsTime]        = useState(0);
-  const retryCount = useRef(0);
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstQualityMount = useRef(true);
 
   /* Detect if all quality tiers have the same server list (flat mode → hide quality picker) */
@@ -930,12 +899,7 @@ function EpisodePlayer({
   useEffect(() => {
     if (isFirstQualityMount.current) { isFirstQualityMount.current = false; return; }
     setCurrentServer(0);
-    setIframeLoaded(false);
-    setIframeErr(false);
-    setRetrying(false);
     setRealQuality(null);
-    retryCount.current = 0;
-    if (retryTimer.current) clearTimeout(retryTimer.current);
   }, [quality, servers]);
 
   /* ── Fullscreen listener ── */
@@ -1025,36 +989,17 @@ function EpisodePlayer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animeTitle, ep]);
 
-  /* ── Iframe error handling ── */
-  function handleIframeError() {
-    if (retryCount.current >= 3) { setIframeErr(true); return; }
-    retryCount.current++;
-    setRetrying(true);
-    retryTimer.current = setTimeout(() => {
-      setRetrying(false);
-      if (currentServer + 1 < servers.length) {
-        setCurrentServer(s => s + 1);
-        setIframeLoaded(false); setIframeErr(false);
-      } else {
-        setIframeErr(true);
-      }
-    }, 2000);
-  }
-
   function tryNextServer() {
-    if (retryTimer.current) clearTimeout(retryTimer.current);
     if (currentServer + 1 < servers.length) {
       setCurrentServer(s => s + 1);
-      setIframeLoaded(false); setIframeErr(false); setRetrying(false);
-      retryCount.current++;
+      setRealQuality(null);
     }
   }
 
   function tryPrevServer() {
-    if (retryTimer.current) clearTimeout(retryTimer.current);
     if (currentServer > 0) {
       setCurrentServer(s => s - 1);
-      setIframeLoaded(false); setIframeErr(false); setRetrying(false);
+      setRealQuality(null);
     }
   }
 
@@ -1069,7 +1014,7 @@ function EpisodePlayer({
     >
       {/* ══ VIDEO FILLS ENTIRE SCREEN ══ */}
       <div className="absolute inset-0">
-        {currentInfo.isHls && currentUrl && (
+        {currentUrl && (
           <>
             <NativeHLSPlayer
               key={`hls-${currentUrl}-${currentServer}`}
@@ -1080,68 +1025,6 @@ function EpisodePlayer({
             />
             {subState === "ready" && subCues.length > 0 && (
               <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
-            )}
-          </>
-        )}
-
-        {!currentInfo.isHls && (
-          <>
-            {!iframeLoaded && !iframeErr && currentUrl && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black pointer-events-none z-10">
-                <motion.div
-                  className="w-12 h-12 rounded-full border-2 border-violet-500/20 border-t-violet-400"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                />
-                <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل المشغّل…</p>
-              </div>
-            )}
-
-            {iframeErr && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 z-10"
-                style={{ background: "radial-gradient(ellipse at 50% 50%, rgba(90,10,10,0.15) 0%, rgba(0,0,0,0.97) 60%)" }}>
-                <div className="w-16 h-16 rounded-full border border-red-500/20 flex items-center justify-center"
-                  style={{ background: "rgba(239,68,68,0.07)" }}>
-                  <AlertTriangle className="w-7 h-7 text-red-400/60" />
-                </div>
-                <div className="text-center px-8">
-                  <p className="text-white/55 text-[14px] font-black font-['Cairo']">فشل تحميل المصدر</p>
-                  <p className="text-white/22 text-[11px] mt-1 font-['Cairo']">جُرّبت {retryCount.current} سيرفرات</p>
-                </div>
-                <div className="flex gap-3">
-                  {currentServer > 0 && (
-                    <button onClick={tryPrevServer}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl text-white/48 text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform"
-                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                      <ChevronRight className="w-4 h-4" /> السابق
-                    </button>
-                  )}
-                  {currentServer + 1 < servers.length && (
-                    <button onClick={tryNextServer}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform"
-                      style={{ background: "rgba(124,58,237,0.9)", border: "1px solid rgba(139,92,246,0.4)" }}>
-                      <RefreshCw className="w-4 h-4" /> سيرفر آخر
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {currentUrl && !iframeErr && (
-              <iframe
-                key={`${currentUrl}-${currentServer}`}
-                src={currentUrl}
-                className="absolute inset-0 w-full h-full border-0"
-                onLoad={() => setIframeLoaded(true)}
-                onError={handleIframeError}
-                sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock"
-                allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-                allowFullScreen
-              />
-            )}
-
-            {subState === "ready" && subRunning && (
-              <SubtitleOverlay cues={subCues} elapsed={subElapsed} />
             )}
           </>
         )}
@@ -1229,25 +1112,11 @@ function EpisodePlayer({
                       </button>
                     ))}
 
-                    {currentInfo.isHls ? (
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
-                        style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.28)" }}>
-                        <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-                        <span className="text-violet-200/82 text-[11px] font-['Cairo'] font-bold">مزامنة تلقائية</span>
-                      </div>
-                    ) : !subRunning ? (
-                      <button onClick={startSubTimer}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform"
-                        style={{ background: "rgba(124,58,237,0.88)", border: "1px solid rgba(139,92,246,0.4)" }}>
-                        <Play className="w-3.5 h-3.5 fill-white" /> ابدأ الآن
-                      </button>
-                    ) : (
-                      <button onClick={pauseSubTimer}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-[12px] font-bold font-['Cairo'] active:scale-90 transition-transform"
-                        style={{ background: "rgba(124,58,237,0.48)", border: "1px solid rgba(139,92,246,0.3)" }}>
-                        <Pause className="w-3.5 h-3.5 fill-white" /> إيقاف
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
+                      style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.28)" }}>
+                      <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+                      <span className="text-violet-200/82 text-[11px] font-['Cairo'] font-bold">مزامنة تلقائية</span>
+                    </div>
 
                     {([0.5, 2] as number[]).map(d => (
                       <button key={d} onClick={() => adjustOffset(d)}
@@ -1257,12 +1126,6 @@ function EpisodePlayer({
                       </button>
                     ))}
                   </div>
-
-                  {!currentInfo.isHls && (
-                    <p className="text-center text-white/22 text-[10px] font-['Cairo']">
-                      اضغط "ابدأ الآن" عند بداية الفيديو للمزامنة
-                    </p>
-                  )}
                 </div>
               )}
             </div>
@@ -1340,13 +1203,11 @@ function EpisodePlayer({
           </div>
         )}
 
-        {!currentInfo.isHls && (
-          <button onClick={toggleFs}
-            className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
-            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-            {fs ? <Minimize2 className="w-4 h-4 text-white/52" /> : <Maximize2 className="w-4 h-4 text-white/52" />}
-          </button>
-        )}
+        <button onClick={toggleFs}
+          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+          style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          {fs ? <Minimize2 className="w-4 h-4 text-white/52" /> : <Maximize2 className="w-4 h-4 text-white/52" />}
+        </button>
       </div>
 
       {/* ══ BOTTOM BAR OVERLAY ══ */}
@@ -1369,24 +1230,14 @@ function EpisodePlayer({
             const info = getServerInfo(url, i);
             const isActive = i === currentServer;
             return (
-              <button key={i} onClick={() => {
-                if (retryTimer.current) clearTimeout(retryTimer.current);
-                setCurrentServer(i);
-                setIframeLoaded(false); setIframeErr(false); setRetrying(false);
-              }}
+              <button key={i} onClick={() => { setCurrentServer(i); setRealQuality(null); }}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] whitespace-nowrap transition-all active:scale-90 shrink-0"
                 style={{
-                  background: isActive
-                    ? (info.isHls ? "rgba(124,58,237,0.85)" : "rgba(37,99,235,0.85)")
-                    : "rgba(255,255,255,0.07)",
-                  border: isActive
-                    ? (info.isHls ? "1px solid rgba(139,92,246,0.42)" : "1px solid rgba(59,130,246,0.42)")
-                    : "1px solid rgba(255,255,255,0.1)",
+                  background: isActive ? "rgba(124,58,237,0.85)" : "rgba(255,255,255,0.07)",
+                  border: isActive ? "1px solid rgba(139,92,246,0.42)" : "1px solid rgba(255,255,255,0.1)",
                   color: isActive ? "rgba(255,255,255,0.94)" : "rgba(255,255,255,0.36)",
                 }}>
-                {info.isHls
-                  ? <MonitorPlay className="w-3 h-3 shrink-0" />
-                  : <Tv2 className="w-3 h-3 shrink-0" />}
+                <MonitorPlay className="w-3 h-3 shrink-0" />
                 {info.label}
               </button>
             );
@@ -1417,7 +1268,6 @@ export default function WatchPage() {
   const englishParam = sp.get("english") || "";
 
   const [anime,        setAnime]       = useState<any>(null);
-  const [streamData,   setStreamData]  = useState<StreamData | null>(null);
   const [sseServers,   setSseServers]  = useState<Record<Quality, string[]>>(EMPTY_SSE);
   const [quality,      setQuality]     = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]  = useState(0);
@@ -1434,20 +1284,8 @@ export default function WatchPage() {
   const totalEps  = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
   const cover     = anime?.coverImage?.large || "";
 
-  /* Merge anipub-stream (primary) + sources-stream SSE (Arabic) into one quality map */
-  const mergedServers = useMemo<Record<Quality, string[]>>(() => {
-    const result: Record<Quality, string[]> = {
-      "1080p FHD": [...(streamData?.servers["1080p FHD"] || [])],
-      "720p HD":   [...(streamData?.servers["720p HD"]   || [])],
-      "360p SD":   [...(streamData?.servers["360p SD"]   || [])],
-    };
-    for (const q of QUALITY_LABELS) {
-      for (const url of sseServers[q]) {
-        if (!result[q].includes(url)) result[q].push(url);
-      }
-    }
-    return result;
-  }, [streamData, sseServers]);
+  /* All sources come from SSE only (no iframe/anipub sources) */
+  const mergedServers = sseServers;
 
   const doFetchServers = useCallback((t: string, e: string) => {
     if (fetchStarted.current) return;
@@ -1521,12 +1359,18 @@ export default function WatchPage() {
     }
   }, []);
 
+  /* Show picker as soon as the first source arrives — don't wait for sseDone */
+  useEffect(() => {
+    if (!loadingDone || !fetchDone) return;
+    const hasAny = QUALITY_LABELS.some(q => (mergedServers[q]?.length || 0) > 0);
+    if (hasAny) setPhase(prev => prev === "player" ? prev : "picker");
+  }, [loadingDone, fetchDone, mergedServers]);
+
+  /* Only show nosrc after SSE is fully done with no sources found */
   useEffect(() => {
     if (!loadingDone || !fetchDone || !sseDone) return;
-    const hasAny = QUALITY_LABELS.some(q =>
-      (mergedServers[q]?.length || 0) > 0
-    );
-    setPhase(prev => prev === "player" ? prev : hasAny ? "picker" : "nosrc");
+    const hasAny = QUALITY_LABELS.some(q => (mergedServers[q]?.length || 0) > 0);
+    if (!hasAny) setPhase(prev => prev === "player" ? prev : "nosrc");
   }, [loadingDone, fetchDone, sseDone, mergedServers]);
 
   function goEp(n: number) {
@@ -1546,7 +1390,7 @@ export default function WatchPage() {
   }
 
   const servers = mergedServers[quality] || [];
-  const mergedStreamData: StreamData = { servers: mergedServers, total: servers.length };
+  const streamDataForPicker: StreamData = { servers: mergedServers, total: servers.length };
 
   if (phase === "loading") return <LoadingScreen cover={cover} title={title} ep={ep} />;
   if (phase === "nosrc")   return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
@@ -1559,7 +1403,7 @@ export default function WatchPage() {
           transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
           <ServerPicker
             cover={cover} title={title} ep={ep}
-            streamData={mergedStreamData}
+            streamData={streamDataForPicker}
             onPick={handlePickServer}
             onBack={handleBack}
           />
