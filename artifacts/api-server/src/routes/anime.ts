@@ -75,6 +75,7 @@ const EMBED_ONLY_HOSTS = [
   "yourupload.com",
   "voe.sx","voe.tv",
   "megamax.me","megamax.io","megamax.tv",
+  "share4max.com","share4max.net",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -922,25 +923,38 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
     } catch {}
   }
 
-  // Search fallback
+  // Search fallback — use ?s= (standard WP search, ?search_term_string= is broken)
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const r = await fetch(`${ALK_BASE}/search/?search_term_string=${encodeURIComponent(q as string)}`, {
+      const r = await fetch(`${ALK_BASE}/search/?s=${encodeURIComponent(q as string)}`, {
         headers: ALK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
       });
       if (!r.ok) continue;
       const html = await r.text();
       if (isCloudflareBlock(html)) continue;
+      // Search page may return 404 page with no anime results
+      if (!html.includes("/anime/")) continue;
       let best: string | null = null, bestScore = 0;
       for (const m of html.matchAll(/href="https?:\/\/animelek\.top\/anime\/([^/"]+)\/?"/gi)) {
         const s = m[1];
         const label = s.replace(/-/g, " ");
         const score = Math.max(similarity(label, title), english ? similarity(label, english as string) : 0);
-        if (score > bestScore && score > 0.25) { bestScore = score; best = s; }
+        if (score > bestScore && score > 0.2) { bestScore = score; best = s; }
       }
-      if (best) {
-        alkSlugCache.set(ck, { slug: best, ts: Date.now() });
-        return best;
+      if (best && bestScore > 0.25) {
+        // Verify the found slug actually has episodes
+        try {
+          const vr = await fetch(`${ALK_BASE}/anime/${best}/`, {
+            headers: ALK_HDRS, signal: AbortSignal.timeout(5000), redirect: "follow",
+          });
+          if (vr.ok) {
+            const vhtml = await vr.text();
+            if (!isCloudflareBlock(vhtml) && vhtml.includes("/episode/")) {
+              alkSlugCache.set(ck, { slug: best, ts: Date.now() });
+              return best;
+            }
+          }
+        } catch {}
       }
     } catch {}
   }
@@ -978,9 +992,14 @@ async function getAnimelekSources(
     }
 
     if (!epUrl) {
+      const epPad = String(ep).padStart(2, "0");
       const candidates = [
         `${ALK_BASE}/episode/${slug}-${ep}-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9/`,
         `${ALK_BASE}/episode/${slug}-${ep}-الحلقة/`,
+        `${ALK_BASE}/episode/${slug}-${epPad}-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9/`,
+        `${ALK_BASE}/episode/${slug}-${epPad}-الحلقة/`,
+        `${ALK_BASE}/episode/${slug}-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9-${ep}/`,
+        `${ALK_BASE}/episode/${slug}-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9-${epPad}/`,
       ];
       for (const u of candidates) {
         try {
@@ -1222,9 +1241,19 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
   const slugCandidates: string[] = [];
   for (const q of [english, title].filter(Boolean) as string[]) {
     const s = toSlug(q as string);
-    if (s) slugCandidates.push(s);
+    if (!s) continue;
+    slugCandidates.push(s);
+    // Without "The " prefix
+    const noThe = toSlug((q as string).replace(/^the\s+/i, "").trim());
+    if (noThe && noThe !== s) slugCandidates.push(noThe);
+    // Without colon suffix (e.g. "fullmetal-alchemist" from "fullmetal-alchemist-brotherhood")
+    const noColon = toSlug((q as string).replace(/[:：].*/g, "").trim());
+    if (noColon && noColon !== s) slugCandidates.push(noColon);
+    // Without trailing season indicator
+    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
+    if (stripped !== s && stripped.length > 2) slugCandidates.push(stripped);
   }
-  for (const slug of slugCandidates) {
+  for (const slug of [...new Set(slugCandidates)]) {
     try {
       const r = await fetch(`${APH_BASE}/animes/${slug}`, {
         headers: APH_HDRS,
@@ -2292,8 +2321,8 @@ function rewriteM3u8(manifest: string, baseUrl: string, _selfBase: string, ref: 
   return manifest.split("\n").map(line => {
     const trimmed = line.trim();
     if (!trimmed) return line;
-    if (trimmed.startsWith("#EXT-X-KEY") && trimmed.includes('URI="')) {
-      return trimmed.replace(/URI="([^"]+)"/, (_, uri) => `URI="${toProxy(uri)}"`);
+    if ((trimmed.startsWith("#EXT-X-KEY") || trimmed.startsWith("#EXT-X-MEDIA") || trimmed.startsWith("#EXT-X-I-FRAME-STREAM-INF")) && trimmed.includes('URI="')) {
+      return trimmed.replace(/URI="([^"]+)"/g, (_, uri) => `URI="${toProxy(uri)}"`);
     }
     if (trimmed.startsWith("#")) return line;
     return toProxy(trimmed);
