@@ -74,6 +74,7 @@ const EMBED_ONLY_HOSTS = [
   "ok.ru","odnoklassniki.ru",
   "yourupload.com",
   "voe.sx","voe.tv",
+  "megamax.me","megamax.io","megamax.tv",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -454,6 +455,27 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
   return best;
 }
 
+async function resolveAllShahiidUrls(romaji: string, english?: string | null): Promise<string[]> {
+  const seen = new Set<string>();
+  const all: Array<{ url: string; score: number }> = [];
+
+  for (const q of [english, romaji].filter(Boolean) as string[]) {
+    const results = await searchShahiid(q);
+    for (const r of results) {
+      if (seen.has(r.url)) continue;
+      seen.add(r.url);
+      const s = Math.max(
+        similarity(r.label, romaji),
+        english ? similarity(r.label, english) : 0,
+      );
+      if (s > 0.15) all.push({ url: r.url, score: s });
+    }
+  }
+
+  all.sort((a, b) => b.score - a.score);
+  return all.map(x => x.url);
+}
+
 async function getShahiidSeasonsUrl(seriesUrl: string): Promise<string> {
   if (seriesUrl.includes("/anime/")) return seriesUrl;
   if (seriesUrl.includes("/seasonses/") || seriesUrl.includes("?serie=")) return seriesUrl;
@@ -620,9 +642,12 @@ async function findShahiidEpisodeUrl(seasonsUrl: string, epNum: number): Promise
       }
     }
 
+    // For ?serie= filtered pages, episodes load via AJAX (not in initial HTML)
+    const isSerieFilter = seasonsUrl.includes("?serie=") || seasonsUrl.includes("&serie=");
     const needsMore = !links.some(l => epNumInSlug(l, epNum));
-    if (needsMore && links.length > 0) {
-      for (let page = 2; page <= 3; page++) {
+    if (needsMore && (links.length > 0 || isSerieFilter)) {
+      const maxPages = isSerieFilter && links.length === 0 ? 10 : 3;
+      for (let page = 2; page <= maxPages; page++) {
         const moreLinks = await shahiidLoadMore(html, seasonsUrl, page);
         if (!moreLinks.length) break;
         links = [...links, ...moreLinks];
@@ -675,19 +700,22 @@ async function getShahiidSources(
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
 
   try {
-    const seriesUrl = await resolveShahiidUrl(romaji, english);
-    if (!seriesUrl) return [];
+    const candidateUrls = await resolveAllShahiidUrls(romaji, english);
+    if (!candidateUrls.length) return [];
 
-    let episodePage: string;
+    let episodePage: string | null = null;
 
-    if (seriesUrl.includes("/anime/")) {
-      episodePage = seriesUrl;
-    } else {
+    for (const seriesUrl of candidateUrls) {
+      if (seriesUrl.includes("/anime/")) {
+        episodePage = seriesUrl;
+        break;
+      }
       const seasonsUrl = await getShahiidSeasonsUrl(seriesUrl);
       const epUrl = await findShahiidEpisodeUrl(seasonsUrl, ep);
-      if (!epUrl) return [];
-      episodePage = epUrl;
+      if (epUrl) { episodePage = epUrl; break; }
     }
+
+    if (!episodePage) return [];
 
     const epR = await fetch(episodePage, {
       headers: SHAHIID_HDRS,
@@ -1036,7 +1064,8 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
 
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const r = await fetch(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, {
+      const searchTerm = encodeURIComponent(q.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim());
+      const r = await fetch(`${ADAR_BASE}/search/${searchTerm}/`, {
         headers: ADAR_HDRS,
         signal: AbortSignal.timeout(10000),
         redirect: "follow",
@@ -1163,8 +1192,8 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
       });
       if (r.ok) {
         const html = await r.text();
-        // Confirm this is actually the series page (has episode links for this slug)
-        if (!isCloudflareBlock(html) && html.includes(`/episodes/${slug}-episode-`)) {
+        // Check the slug actually appears in the page (not a soft-404 homepage redirect)
+        if (!isCloudflareBlock(html) && html.includes(slug)) {
           aphSlugCache.set(ck, { slug, ts: Date.now() });
           return slug;
         }
@@ -1858,7 +1887,8 @@ router.get("/anime/video-proxy", async (req, res) => {
       res.status(r.status);
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Headers", "Range");
-      const passHead = ["content-type","content-length","accept-ranges","cache-control"];
+      res.setHeader("Accept-Ranges", "bytes");
+      const passHead = ["content-type","content-length","cache-control"];
       for (const h of passHead) { const v = r.headers.get(h); if (v) res.setHeader(h, v); }
       res.end(); return;
     } catch { res.status(200).setHeader("Access-Control-Allow-Origin", "*").end(); return; }
@@ -1879,8 +1909,10 @@ router.get("/anime/video-proxy", async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Range");
     res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length");
+    // Always declare range support so browsers can seek without full download
+    res.setHeader("Accept-Ranges", "bytes");
 
-    const pass = ["content-length","content-range","accept-ranges","cache-control","last-modified","etag"];
+    const pass = ["content-length","content-range","cache-control","last-modified","etag"];
     for (const h of pass) { const v = r.headers.get(h); if (v) res.setHeader(h, v); }
 
     if (!r.body) { res.end(); return; }

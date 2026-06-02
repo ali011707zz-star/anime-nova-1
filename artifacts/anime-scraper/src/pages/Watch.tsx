@@ -476,17 +476,34 @@ function NativeHLSPlayer({
         : `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
       video.src = proxyUrl;
       video.load();
+      let resolved = false;
+      const cleanup = () => {
+        resolved = true;
+        clearTimeout(loadTimer);
+        video.removeEventListener("loadedmetadata", onMeta);
+        video.removeEventListener("error", onErr);
+      };
       const onMeta = () => {
+        if (resolved) return;
+        cleanup();
         setLoading(false);
         video.play().catch(() => {});
         setShowControls(true);
         scheduleHide();
       };
       const onErr = () => {
+        if (resolved) return;
+        cleanup();
         setLoading(false);
         setError("فشل تشغيل المصدر — جارٍ تجربة المصدر التالي…");
         setTimeout(() => onFail?.(), 1200);
       };
+      // Timeout: if no metadata after 25s, fail gracefully
+      const loadTimer = setTimeout(() => {
+        if (resolved) return;
+        video.src = "";
+        onErr();
+      }, 25000);
       video.addEventListener("loadedmetadata", onMeta, { once: true });
       video.addEventListener("error", onErr, { once: true });
       return;
@@ -1359,12 +1376,19 @@ export default function WatchPage() {
     }
   }, []);
 
-  /* Show picker as soon as the first source arrives — don't wait for sseDone */
+  /* Auto-pick the best source as soon as it arrives — skip picker entirely */
   useEffect(() => {
     if (!loadingDone || !fetchDone) return;
-    const hasAny = QUALITY_LABELS.some(q => (mergedServers[q]?.length || 0) > 0);
-    if (hasAny) setPhase(prev => prev === "player" ? prev : "picker");
-  }, [loadingDone, fetchDone, mergedServers]);
+    // Already in player or nosrc — don't override
+    if (phase === "player" || phase === "nosrc") return;
+    // Find the best quality tier that has sources
+    const bestQ = QUALITY_LABELS.find(q => (mergedServers[q]?.length || 0) > 0);
+    if (bestQ) {
+      setQuality(bestQ);
+      setInitialSrv(0);
+      setPhase("player");
+    }
+  }, [loadingDone, fetchDone, mergedServers, phase]);
 
   /* Only show nosrc after SSE is fully done with no sources found */
   useEffect(() => {
