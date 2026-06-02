@@ -817,6 +817,24 @@ async function extractAndCollect(
       if (alive) collect(s);
       return;
     }
+    // Special: mp4upload embed page — extract CDN URL via parseMp4Upload
+    if (/\/\/www\.mp4upload\.com\/embed-[^/]+\.html/i.test(s.url)) {
+      try {
+        const r = await fetch(s.url, {
+          headers: { "User-Agent": BROWSER_UA, "Referer": s.url },
+          signal: AbortSignal.timeout(Math.min(timeoutMs, 10000)),
+        });
+        if (r.ok) {
+          const html = await r.text();
+          const cdnUrl = parseMp4Upload(html);
+          if (cdnUrl) {
+            const alive = await probeDirectUrl(cdnUrl, s.url);
+            if (alive) collect({ ...s, url: cdnUrl, directUrl: cdnUrl, directType: "mp4" });
+          }
+        }
+      } catch {}
+      return;
+    }
     // Dead file hosts → skip entirely
     if (DEAD_FILE_HOSTS.some(h => s.url.includes(h))) return;
     // Bare .m3u8 → wrap with hls-proxy to bypass CORS restrictions
@@ -980,7 +998,9 @@ async function getAnimelekSources(
       try { rawUrl = decodeURIComponent(rawUrl); } catch {}
       rawUrl = rawUrl.replace(/&amp;/g, "&");
       if (!rawUrl.startsWith("http")) continue;
-      if (DEAD_FILE_HOSTS.some(h => rawUrl.includes(h))) continue;
+      // Allow mp4upload embed pages through — extractAndCollect handles them specially
+      const isMp4uploadEmbed = /\/\/www\.mp4upload\.com\/embed-/i.test(rawUrl);
+      if (!isMp4uploadEmbed && DEAD_FILE_HOSTS.some(h => rawUrl.includes(h))) continue;
       const host = (rawUrl.split("/")[2] || "").replace(/^www\./, "");
       if (seenHosts.has(host)) continue; seenHosts.add(host);
       const nameM = innerHtml.match(/<span[^>]*class="[^"]*server[^"]*"[^>]*>([^<]+)<\/span>/i);
@@ -1198,8 +1218,9 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
       });
       if (r.ok) {
         const html = await r.text();
-        // Check the slug actually appears in the page (not a soft-404 homepage redirect)
-        if (!isCloudflareBlock(html) && html.includes(slug)) {
+        // Verify this is a real series page (soft-404 returns homepage with 200)
+        // Must contain episode links for this specific slug
+        if (!isCloudflareBlock(html) && html.includes(`/episodes/${slug}-episode-`)) {
           aphSlugCache.set(ck, { slug, ts: Date.now() });
           return slug;
         }
