@@ -1014,6 +1014,14 @@ function EpisodePlayer({
     if (currentServer + 1 < servers.length) {
       setCurrentServer(s => s + 1);
       setRealQuality(null);
+    } else {
+      const currentTierIdx = QUALITY_LABELS.indexOf(quality);
+      for (let i = currentTierIdx + 1; i < QUALITY_LABELS.length; i++) {
+        if ((allServers[QUALITY_LABELS[i]]?.length || 0) > 0) {
+          onChangeQuality(QUALITY_LABELS[i]);
+          return;
+        }
+      }
     }
   }
 
