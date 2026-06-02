@@ -350,18 +350,52 @@ function extractIframeSrc(html: string, baseUrl: string): string | null {
 // The player page includes a FirePlayer() call with the full video config inline.
 // Config has: videoUrl (relative path), videoServer (key), hostList (key→[hostname])
 // Constructed URL: https://{hostList[videoServer][0]}{videoUrl}
-function parseVidHls(html: string): { url: string; type: "hls" | "mp4" } | null {
-  const configMatch = html.match(/FirePlayer\s*\([^,]+,\s*(\{[\s\S]+?\})\s*,\s*(?:true|false)\s*\)/);
+// Call format: FirePlayer(vhash, {config}) OR FirePlayer(vhash, {config}, true/false)
+// The site has 14 CDN servers — probes each until one returns 200.
+async function parseVidHls(
+  html: string,
+  referer?: string,
+): Promise<{ url: string; type: "hls" | "mp4" } | null> {
+  // Match the config object — third boolean arg is optional
+  const configMatch = html.match(
+    /FirePlayer\s*\([^,]+,\s*(\{[\s\S]+?\})\s*(?:,\s*(?:true|false)\s*)?\)/,
+  );
   if (!configMatch) return null;
   try {
     const config = JSON.parse(configMatch[1]);
-    const videoUrl: string = config.videoUrl || "";
+    const rawVideoUrl: string = config.videoUrl || "";
+    if (!rawVideoUrl) return null;
+    const cleanUrl = rawVideoUrl.replace(/\\\//g, "/");
+    const type: "hls" | "mp4" = cleanUrl.includes(".mp4") ? "mp4" : "hls";
     const videoServer: string = String(config.videoServer ?? "1");
     const hostList: Record<string, string[]> = config.hostList || {};
-    const hosts: string[] = hostList[videoServer] || [];
-    if (!videoUrl || !hosts.length) return null;
-    const fullUrl = `https://${hosts[0]}${videoUrl}`;
-    return { url: fullUrl, type: "hls" };
+
+    // Collect CDN hosts: selected server first, then all others
+    const seen = new Set<string>();
+    const allHosts: string[] = [];
+    for (const key of [videoServer, ...Object.keys(hostList)]) {
+      for (const h of (hostList[key] ?? [])) {
+        if (!seen.has(h)) { seen.add(h); allHosts.push(h); }
+      }
+    }
+    if (!allHosts.length) return null;
+
+    const hdrs: Record<string, string> = {
+      "User-Agent": BROWSER_UA,
+      ...(referer ? { Referer: referer } : {}),
+    };
+
+    // Probe each CDN host (max 6 attempts) for a working URL
+    for (const host of allHosts.slice(0, 6)) {
+      const fullUrl = `https://${host}${cleanUrl}`;
+      const status = await safeHead(fullUrl, hdrs);
+      if (status === 200 || status === 206 || status === 301 || status === 302) {
+        return { url: fullUrl, type };
+      }
+    }
+
+    // Fallback: return first host (may still work from browser with different IP)
+    return { url: `https://${allHosts[0]}${cleanUrl}`, type };
   } catch {
     return null;
   }
@@ -410,7 +444,7 @@ async function extractVideoDeep(
         const v = parseMegamax(html); if (v) return v;
       }
       if (url.includes("vidhls.com/player/")) {
-        const v = parseVidHls(html); if (v) return v;
+        const v = await parseVidHls(html, ref); if (v) return v;
       }
       const direct = parseVideoUrl(html);
       if (direct) return direct;
@@ -847,7 +881,7 @@ async function extractAndCollect(
       return;
     }
     // Special: mp4upload embed page — extract CDN URL via parseMp4Upload
-    if (/\/\/www\.mp4upload\.com\/embed-[^/]+\.html/i.test(s.url)) {
+    if (/\/\/(?:www\.)?mp4upload\.com\/embed-[^/]+\.html/i.test(s.url)) {
       try {
         const r = await fetch(s.url, {
           headers: { "User-Agent": BROWSER_UA, "Referer": s.url },
@@ -897,7 +931,15 @@ async function extractAndCollect(
           // MP4: probe to filter dead links
           const alive = await probeDirectUrl(result.url, s.url);
           if (alive) {
-            collect({ ...s, url: result.url, directUrl: result.url, directType: "mp4" });
+            // sendvid CDN URLs are IP-tied (contain ip=SERVER_IP in URL)
+            // Must go through video-proxy so the request comes from our server IP
+            const isIpTied = result.url.includes("sendvid.com") || result.url.includes("sendvid.net");
+            if (isIpTied) {
+              const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(s.url)}`;
+              collect({ ...s, url: proxied, directUrl: proxied, directType: "mp4" });
+            } else {
+              collect({ ...s, url: result.url, directUrl: result.url, directType: "mp4" });
+            }
           }
         }
       }
@@ -1883,23 +1925,56 @@ async function searchOkAnime(title: string, english: string | null): Promise<str
   const hit = okSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
 
+  // Build slug variants from titles (same strategy as other scrapers)
+  const slugVariants: string[] = [];
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const s = toSlug(q as string);
+    if (!s) continue;
+    slugVariants.push(s);
+    // Without trailing season indicator e.g. "-2nd-season" → "dandadan"
+    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
+    if (stripped !== s && stripped.length > 2) slugVariants.push(stripped);
+    // Without colon suffix
+    const noColon = toSlug((q as string).replace(/[:：].*/g, "").trim());
+    if (noColon && noColon !== s) slugVariants.push(noColon);
+  }
+
+  // Method 1: Direct slug check via /anime/{slug} page
+  for (const slug of [...new Set(slugVariants)]) {
+    try {
+      const r = await fetch(`${OK_BASE}/anime/${slug}`, {
+        headers: OK_HDRS, signal: AbortSignal.timeout(6000), redirect: "follow",
+      });
+      if (r.ok) {
+        const html = await r.text();
+        if (!isCloudflareBlock(html) && html.includes("/episode/")) {
+          okSlugCache.set(ck, { slug, ts: Date.now() });
+          return slug;
+        }
+      }
+    } catch {}
+  }
+
+  // Method 2: HTML search page (results may be in static HTML for some queries)
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
       const r = await fetch(
-        `${OK_BASE}/api/search?q=${encodeURIComponent(q as string)}`,
-        { headers: { ...OK_HDRS, Accept: "application/json" }, signal: AbortSignal.timeout(8000) },
+        `${OK_BASE}/?search_param=animes&q=${encodeURIComponent(q as string)}`,
+        { headers: OK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" },
       );
       if (!r.ok) continue;
-      const results = await r.json() as Array<{ name: string; slug: string }>;
-      if (!Array.isArray(results) || !results.length) continue;
+      const html = await r.text();
+      if (isCloudflareBlock(html)) continue;
 
       let best: string | null = null, bestScore = 0;
-      for (const item of results) {
+      for (const m of html.matchAll(/href="https?:\/\/ww3\.okanime\.xyz\/anime\/([^/"]+)"/gi)) {
+        const slug = m[1];
+        const label = slug.replace(/-/g, " ");
         const score = Math.max(
-          similarity(item.name || "", title),
-          english ? similarity(item.name || "", english) : 0,
+          similarity(label, title),
+          english ? similarity(label, english as string) : 0,
         );
-        if (score > bestScore && score > 0.3) { bestScore = score; best = item.slug; }
+        if (score > bestScore && score > 0.25) { bestScore = score; best = slug; }
       }
       if (best) { okSlugCache.set(ck, { slug: best, ts: Date.now() }); return best; }
     } catch {}
@@ -2086,7 +2161,7 @@ async function getAnimeTimeSources(
       name: `أنمي تايم · سيرفر ${i + 1}`,
       url,
       quality: "HD",
-      qualityRank: 11,
+      qualityRank: 2,
       site: "animetime",
     }));
 

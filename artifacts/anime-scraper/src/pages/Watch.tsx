@@ -916,12 +916,13 @@ function EpisodePlayer({
   const handleRealQuality = useCallback((q: string) => setRealQuality(q), []);
   const handleHlsTime     = useCallback((t: number) => setHlsTime(t), []);
 
-  /* ── Reset on quality/server-list change (skip first mount to preserve initialServer) ── */
+  /* ── Reset on quality tier change only — do NOT reset when new servers are appended
+     to the same tier (that would bounce back to server 0 mid-playback). ── */
   useEffect(() => {
     if (isFirstQualityMount.current) { isFirstQualityMount.current = false; return; }
     setCurrentServer(0);
     setRealQuality(null);
-  }, [quality, servers]);
+  }, [quality]);
 
   /* ── Fullscreen listener ── */
   useEffect(() => {
@@ -1307,6 +1308,8 @@ export default function WatchPage() {
   const fetchStarted   = useRef(false);
   const sseRef         = useRef<EventSource | null>(null);
   const seenSseUrls    = useRef(new Set<string>());
+  const userPicked     = useRef(false);
+  const triedTiers     = useRef(new Set<Quality>());
 
   const title     = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -1388,19 +1391,28 @@ export default function WatchPage() {
     }
   }, []);
 
-  /* Auto-pick the best source as soon as it arrives — skip picker entirely */
+  /* Auto-pick the best source as soon as it arrives — skip picker entirely.
+     If a better quality tier arrives later (e.g. rank-11 sources after rank-2),
+     upgrade automatically as long as:
+       - user hasn't manually picked a server
+       - that tier hasn't been tried and fully exhausted already */
   useEffect(() => {
     if (!loadingDone || !fetchDone) return;
-    // Already in player or nosrc — don't override
-    if (phase === "player" || phase === "nosrc") return;
-    // Find the best quality tier that has sources
-    const bestQ = QUALITY_LABELS.find(q => (mergedServers[q]?.length || 0) > 0);
-    if (bestQ) {
+    if (phase === "nosrc") return;
+    if (userPicked.current) return;
+    // Find the best quality tier that has sources and hasn't been tried yet
+    const bestQ = QUALITY_LABELS.find(
+      q => (mergedServers[q]?.length || 0) > 0 && !triedTiers.current.has(q)
+    );
+    if (!bestQ) return;
+    // Only switch if we're not in player mode yet, OR bestQ is better than current quality
+    if (phase !== "player" || QUALITY_LABELS.indexOf(bestQ) < QUALITY_LABELS.indexOf(quality)) {
+      triedTiers.current.add(bestQ);
       setQuality(bestQ);
       setInitialSrv(0);
       setPhase("player");
     }
-  }, [loadingDone, fetchDone, mergedServers, phase]);
+  }, [loadingDone, fetchDone, mergedServers, phase, quality]);
 
   /* Only show nosrc after SSE is fully done with no sources found */
   useEffect(() => {
@@ -1420,6 +1432,7 @@ export default function WatchPage() {
   function handleRefresh() { window.location.reload(); }
 
   function handlePickServer(q: Quality, idx: number) {
+    userPicked.current = true;
     setQuality(q);
     setInitialSrv(idx);
     setPhase("player");
@@ -1459,7 +1472,7 @@ export default function WatchPage() {
           title={title}
           animeTitle={animeTitle}
           cover={cover} ep={ep} totalEps={totalEps}
-          onBack={() => setPhase("picker")}
+          onBack={() => { userPicked.current = false; setPhase("picker"); }}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
           onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}

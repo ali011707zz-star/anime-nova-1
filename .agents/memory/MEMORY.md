@@ -31,3 +31,5 @@
 - [AnimeLek search URL](animelek-search.md) — correct WP search param is `?s=` not `?search_term_string=`; direct slug /anime/{slug}/ also tried; verify slug has /episode/ links before returning
 - [HLS EXT-X-MEDIA audio URI rewriting](hls-audio-rewrite.md) — rewriteM3u8 must also rewrite URI= in #EXT-X-MEDIA and #EXT-X-I-FRAME-STREAM-INF lines; without this hls.js fetches audio track sub-playlists directly from CDN causing CORS fatal error
 - [Watch.tsx cross-tier fallback](watch-cross-tier-fallback.md) — sources split across quality tiers (ToonStream=1080p FHD, Shahiid=720p HD); tryNextServer must fall back via onChangeQuality when current tier exhausted; sendvid via video-proxy confirmed 200 OK
+- [NativeVideoPlayer server reset bug](nativevideoplayer-reset.md) — useEffect([quality,servers]) resets currentServer=0 on every new SSE source → infinite error loop; fix: useEffect([quality]) ONLY
+- [anime-time qualityRank](anime-time-rank.md) — anime-time.live yaviidcdn.com HLS returns 404 from hls-proxy; keep qualityRank=2 (720p HD) not 11 (1080p FHD) to avoid blocking reliable sources like OkAnime
