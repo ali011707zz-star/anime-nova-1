@@ -40,7 +40,7 @@ const DEAD_FILE_HOSTS = [
   "filerio.in","doodstream.com","dood.watch","dood.to","dood.la","dood.ws","dood.pm",
   "dooood.com","doodrive.com","megaup.net","1fichier.com",
   "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co","letsupload.io","workupload.com",
-  "hexload.com","mp4upload.com","uqload.net","uqload.com","file-up.org",
+  "hexload.com","//www.mp4upload.com","uqload.net","uqload.com","file-up.org",
   "mega.nz","mega.co.nz","mediafire.com",
   "drive.google","docs.google","googleapis.com/drive",
   "ok.ru","odnoklassniki.ru","youtube.com","youtu.be",
@@ -220,6 +220,12 @@ function parseStreamwish(html: string): { url: string; type: "hls" | "mp4" } | n
       if (url.includes(".mp4")) return { url, type: "mp4" };
     }
   }
+  return null;
+}
+
+function parseMp4Upload(html: string): string | null {
+  const m = html.match(/\bsrc\s*:\s*["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i);
+  if (m?.[1]?.startsWith("http")) return m[1];
   return null;
 }
 
@@ -1395,6 +1401,201 @@ async function getAnimePhoenixSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  MITANIME.COM scraper  (RSC endpoint — Japanese audio + Arabic subtitles)
+// ════════════════════════════════════════════════════════════════════
+const MITANIME_BASE = "https://mitanime.com";
+const MITANIME_RSC_HDRS: Record<string, string> = {
+  "User-Agent": BROWSER_UA,
+  "Rsc": "1",
+  "Accept": "text/x-component,text/html,*/*",
+  "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+};
+
+const mitanimeSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const mitanimeSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+function parseMitanimeServers(
+  rsc: string,
+): Array<{ name: string; quality: string; url: string; isLocked: boolean }> {
+  const idx = rsc.indexOf('"servers":[');
+  if (idx === -1) return [];
+  const start = idx + '"servers":'.length;
+  let depth = 0;
+  let end = start;
+  for (let i = start; i < rsc.length; i++) {
+    if (rsc[i] === "[") depth++;
+    else if (rsc[i] === "]") { depth--; if (depth === 0) { end = i + 1; break; } }
+  }
+  try {
+    const arr = JSON.parse(rsc.slice(start, end));
+    if (Array.isArray(arr)) return arr;
+  } catch {}
+  return [];
+}
+
+async function resolveMitanimeSlug(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const cached = mitanimeSlugCache.get(ck);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.slug;
+
+  // Try slug candidates derived directly from titles
+  const candidates: string[] = [];
+  for (const t of [english, title].filter(Boolean) as string[]) {
+    const slug = toSlug(t);
+    if (slug) candidates.push(slug);
+  }
+
+  for (const slug of [...new Set(candidates)]) {
+    try {
+      const r = await fetch(`${MITANIME_BASE}/watch/${slug}/1`, {
+        headers: MITANIME_RSC_HDRS,
+        signal: AbortSignal.timeout(8000),
+        redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const text = await r.text();
+      if (text.includes('"servers":[') && !text.includes('"/_not-found"')) {
+        mitanimeSlugCache.set(ck, { slug, ts: Date.now() });
+        return slug;
+      }
+    } catch {}
+  }
+
+  // Fallback: search RSC endpoint
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    try {
+      const r = await fetch(
+        `${MITANIME_BASE}/search?q=${encodeURIComponent(q as string)}`,
+        { headers: MITANIME_RSC_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" },
+      );
+      if (!r.ok) continue;
+      const text = await r.text();
+      // Extract ASCII-only slugs (anime slugs, not Arabic genre slugs)
+      const slugsFound: string[] = [];
+      for (const m of text.matchAll(/"slug":"([a-z0-9][a-z0-9-]*)"/g)) {
+        if (/^[a-z0-9-]+$/.test(m[1]) && m[1].length > 2) slugsFound.push(m[1]);
+      }
+      const unique = [...new Set(slugsFound)];
+      // Score each slug by similarity to titles
+      let best: string | null = null;
+      let bestScore = 0;
+      for (const slug of unique) {
+        const label = slug.replace(/-/g, " ");
+        const score = Math.max(
+          similarity(label, title),
+          english ? similarity(label, english) : 0,
+        );
+        if (score > bestScore && score > 0.3) { bestScore = score; best = slug; }
+      }
+      if (best) {
+        mitanimeSlugCache.set(ck, { slug: best, ts: Date.now() });
+        return best;
+      }
+    } catch {}
+  }
+
+  mitanimeSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getMitanimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `mitanime:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = mitanimeSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const slug = await resolveMitanimeSlug(title, english);
+    if (!slug) return [];
+
+    const r = await fetch(`${MITANIME_BASE}/watch/${slug}/${ep}`, {
+      headers: MITANIME_RSC_HDRS,
+      signal: AbortSignal.timeout(10000),
+      redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const text = await r.text();
+    if (!text.includes('"servers":[')) return [];
+
+    const servers = parseMitanimeServers(text);
+    const sources: UnifiedSource[] = [];
+    const SKIP_NAMES = ["mega", "mediafire", "workupload", "gofile", "4shared",
+                        "videa", "soraplay", "drive.google"];
+
+    for (const server of servers) {
+      if (server.isLocked) continue;
+      const sUrl = server.url;
+      if (!sUrl || sUrl === "premium" || !sUrl.startsWith("http")) continue;
+      if (SKIP_NAMES.some(n => server.name.toLowerCase().includes(n))) continue;
+      if (SKIP_NAMES.some(n => sUrl.toLowerCase().includes(n))) continue;
+
+      const qRank = server.quality === "FHD" ? 12 : server.quality === "HD" ? 11 : 10;
+      const qLabel = server.quality === "FHD" ? "1080p" : server.quality === "HD" ? "720p" : "480p";
+
+      // mp4upload: fetch embed HTML and extract direct CDN URL
+      if (sUrl.includes("mp4upload.com")) {
+        try {
+          let urlObj: URL;
+          try { urlObj = new URL(sUrl); } catch { continue; }
+          const id = urlObj.pathname.replace(/^\/+/, "");
+          if (!id) continue;
+          const embedUrl = `${urlObj.origin}/embed-${id}.html`;
+          const er = await fetch(embedUrl, {
+            headers: { ...BASE_HDRS, Referer: `${MITANIME_BASE}/` },
+            signal: AbortSignal.timeout(10000),
+            redirect: "follow",
+          });
+          if (!er.ok) continue;
+          const eHtml = await er.text();
+          const cdnUrl = parseMp4Upload(eHtml);
+          if (!cdnUrl) continue;
+          sources.push({
+            name: `ميتانيمي · mp4upload · ${qLabel}`,
+            url: sUrl,
+            quality: qLabel,
+            qualityRank: qRank,
+            site: "mitanime",
+            directUrl: cdnUrl,
+            directType: "mp4",
+          });
+        } catch {}
+        continue;
+      }
+
+      // streamwish domains (hglink.to, hgcloud.to, etc.) — attempt extractVideoDeep
+      if (sUrl.includes("hglink.to") || sUrl.includes("hgcloud.to") ||
+          sUrl.includes("streamwish") || sUrl.includes("wishembed")) {
+        try {
+          const result = await Promise.race([
+            extractVideoDeep(sUrl, `${MITANIME_BASE}/`),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
+          ]);
+          if (result?.url) {
+            const directUrl = result.type === "hls"
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`
+              : result.url;
+            sources.push({
+              name: `ميتانيمي · ستريم · ${qLabel}`,
+              url: sUrl,
+              quality: qLabel,
+              qualityRank: qRank,
+              site: "mitanime",
+              directUrl,
+              directType: result.type,
+            });
+          }
+        } catch {}
+      }
+    }
+
+    if (sources.length) mitanimeSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -1489,6 +1690,15 @@ router.get("/anime/sources-stream", async (req, res) => {
             await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
             buf.forEach(s => sendSrc(s));
           }
+        } catch {}
+      })(),
+
+      // ── Mitanime.com  (ياباني + ترجمة عربية — mp4upload CDN) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getMitanimeSources(title, english, ep), SCRAPER_MS, []);
+          srcs.forEach(s => sendSrc(s));
         } catch {}
       })(),
     ]);

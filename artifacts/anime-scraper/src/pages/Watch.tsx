@@ -448,8 +448,9 @@ function NativeHLSPlayer({
 
     let m3u8Url = src;
 
-    /* ── AnimeGG MP4 → CDN redirects to non-standard port (8161+); play DIRECT in browser ── */
-    if (src.includes("animegg.org/play/") || src.includes("vidcache.net")) {
+    /* ── AnimeGG / mp4upload CDN → non-standard port; play DIRECT in browser ── */
+    if (src.includes("animegg.org/play/") || src.includes("vidcache.net") ||
+        (src.includes("mp4upload.com") && !src.includes("www.mp4upload.com"))) {
       video.src = src;
       video.load();
       const onMeta = () => {
