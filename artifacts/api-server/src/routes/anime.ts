@@ -892,8 +892,22 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
   const hit = alkSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
 
+  // Build slug variations from english + title
+  const slugVariants: string[] = [];
   for (const q of [english, title].filter(Boolean) as string[]) {
-    const slug = toSlug(q);
+    const s = toSlug(q as string);
+    if (!s) continue;
+    slugVariants.push(s);
+    // Without colon suffix (e.g. "fullmetal-alchemist-brotherhood" from "fullmetal-alchemist:-brotherhood")
+    const noColon = toSlug((q as string).replace(/[:：].*/g, "").trim());
+    if (noColon && noColon !== s) slugVariants.push(noColon);
+    // Without trailing season indicator
+    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season)$/i, "");
+    if (stripped !== s) slugVariants.push(stripped);
+  }
+
+  // Direct slug check (faster than search)
+  for (const slug of [...new Set(slugVariants)]) {
     try {
       const r = await fetch(`${ALK_BASE}/anime/${slug}/`, {
         headers: ALK_HDRS, signal: AbortSignal.timeout(6000), redirect: "follow",
@@ -908,9 +922,10 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
     } catch {}
   }
 
+  // Search fallback
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const r = await fetch(`${ALK_BASE}/search/?search_term_string=${encodeURIComponent(q)}`, {
+      const r = await fetch(`${ALK_BASE}/search/?search_term_string=${encodeURIComponent(q as string)}`, {
         headers: ALK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
       });
       if (!r.ok) continue;
@@ -920,8 +935,8 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
       for (const m of html.matchAll(/href="https?:\/\/animelek\.top\/anime\/([^/"]+)\/?"/gi)) {
         const s = m[1];
         const label = s.replace(/-/g, " ");
-        const score = Math.max(similarity(label, title), english ? similarity(label, english) : 0);
-        if (score > bestScore && score > 0.3) { bestScore = score; best = s; }
+        const score = Math.max(similarity(label, title), english ? similarity(label, english as string) : 0);
+        if (score > bestScore && score > 0.25) { bestScore = score; best = s; }
       }
       if (best) {
         alkSlugCache.set(ck, { slug: best, ts: Date.now() });
@@ -1617,6 +1632,183 @@ async function getMitanimeSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  TOONSTREAM.VIP scraper  (Japanese/multi-audio HLS)
+//  Episode slug: {anime-slug}-1x{ep}
+//  Player chain: episode page → outer server iframe → .Video iframe
+//                → as-cdn21.top (HEAD cookie + POST getVideo → m3u8)
+//                → OR rubystm.com (packed JS → m3u8)
+// ════════════════════════════════════════════════════════════════════
+
+const TOON_VIP = "https://toonstream.vip";
+const AS_CDN_B = "https://as-cdn21.top";
+const RUBY_B   = "https://rubystm.com";
+
+const toonSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function extractAsCdn(playerUrl: string): Promise<string | null> {
+  try {
+    const r1 = await fetch(playerUrl, {
+      method: "HEAD",
+      headers: { "User-Agent": BROWSER_UA },
+      signal: AbortSignal.timeout(7000),
+    });
+    const rawCookies = (r1.headers.getSetCookie?.() ?? [r1.headers.get("set-cookie") ?? ""])
+      .filter(Boolean);
+    const cook = rawCookies.map((c: string) => c.split(";")[0]).join("; ");
+    const hash = playerUrl.split("/").pop() || "";
+    if (!hash || hash.length < 5) return null;
+
+    const r2 = await fetch(`${AS_CDN_B}/player/index.php?data=${hash}&do=getVideo`, {
+      method: "POST",
+      body: JSON.stringify({ hash, r: "" }),
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+        Origin: AS_CDN_B,
+        Referer: playerUrl,
+        "User-Agent": BROWSER_UA,
+        ...(cook ? { Cookie: cook } : {}),
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r2.ok) return null;
+    const j = await r2.json() as any;
+    const url = j.securedLink || j.videoSource;
+    return (url && typeof url === "string" && url.startsWith("http")) ? url : null;
+  } catch { return null; }
+}
+
+async function extractRubyStm(playerUrl: string, referer: string): Promise<string | null> {
+  const fc = playerUrl.replace(".html", "").split("/").pop() || "";
+  if (!fc) return null;
+  try {
+    const r = await fetch(`${RUBY_B}/dl`, {
+      method: "POST",
+      body: `op=embed&file_code=${fc}&auto=1&referer=${encodeURIComponent(referer)}`,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Referer: playerUrl,
+        "User-Agent": BROWSER_UA,
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const direct = parseVideoUrl(html);
+    if (direct?.url && direct.url.includes(".m3u8")) return direct.url;
+    return null;
+  } catch { return null; }
+}
+
+/** Decode HTML entities in URLs captured from HTML attributes */
+function decodeHtmlEntities(s: string): string {
+  return s.replace(/&amp;/g, "&").replace(/&#038;/g, "&").replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+
+async function getToonStreamSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `toon:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = toonSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  const slugCandidates: string[] = [];
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const s = toSlug(q as string);
+    if (!s) continue;
+    slugCandidates.push(s);
+    if (s.startsWith("the-")) slugCandidates.push(s.slice(4));
+    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
+    if (stripped !== s && stripped.length > 2) slugCandidates.push(stripped);
+  }
+
+  const sources: UnifiedSource[] = [];
+
+  for (const baseSlug of [...new Set(slugCandidates)]) {
+    const epSlug = `${baseSlug}-1x${ep}`;
+    try {
+      const r = await fetch(`${TOON_VIP}/episode/${epSlug}/`, {
+        headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
+        signal: AbortSignal.timeout(12000),
+        redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      if (html.length < 500) continue;
+
+      // data-src attributes contain HTML-encoded URLs — decode them
+      const outerSrcs: string[] = [];
+      for (const m of html.matchAll(/data-src=["']([^"']+)["']/gi)) {
+        const decoded = decodeHtmlEntities(m[1]);
+        // Only include toonstream embed URLs, avoid duplicates
+        if (decoded.includes("toonstream.vip") && decoded.includes("trembed")) {
+          outerSrcs.push(decoded);
+        }
+      }
+      if (!outerSrcs.length) continue;
+
+      // Try first 3 servers (each is a different audio language)
+      for (const outerSrc of outerSrcs.slice(0, 3)) {
+        try {
+          const r2 = await fetch(outerSrc, {
+            headers: { "User-Agent": BROWSER_UA, Referer: TOON_VIP + "/" },
+            signal: AbortSignal.timeout(10000),
+          });
+          if (!r2.ok) continue;
+          const html2 = await r2.text();
+
+          // Inner iframe has direct src (not data-src)
+          const innerM = html2.match(
+            /<iframe[^>]+src=["']([^"']*(?:as-cdn21\.top|rubystm\.com)[^"']*)["']/i
+          );
+          if (!innerM) continue;
+          const playerUrl = innerM[1];
+
+          if (playerUrl.includes("as-cdn21.top")) {
+            const m3u8 = await extractAsCdn(playerUrl);
+            if (m3u8) {
+              const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(playerUrl)}`;
+              sources.push({
+                name: "تون ستريم · ياباني",
+                url: playerUrl,
+                quality: "HD",
+                qualityRank: 10,
+                site: "toonstream",
+                directUrl: proxied,
+                directType: "hls",
+              });
+              if (sources.length >= 2) break;
+            }
+          } else if (playerUrl.includes("rubystm.com")) {
+            const m3u8 = await extractRubyStm(playerUrl, outerSrc);
+            if (m3u8) {
+              const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(playerUrl)}`;
+              sources.push({
+                name: "تون ستريم · ياباني",
+                url: playerUrl,
+                quality: "HD",
+                qualityRank: 10,
+                site: "toonstream",
+                directUrl: proxied,
+                directType: "hls",
+              });
+              if (sources.length >= 2) break;
+            }
+          }
+        } catch {}
+        if (sources.length >= 2) break;
+      }
+    } catch {}
+    if (sources.length) break;
+  }
+
+  if (sources.length) toonSrcCache.set(ck, { sources, ts: Date.now() });
+  return sources;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -1722,6 +1914,15 @@ router.get("/anime/sources-stream", async (req, res) => {
           srcs.forEach(s => sendSrc(s));
         } catch {}
       })(),
+
+      // ── ToonStream.vip  (ياباني/متعدد اللغات — as-cdn21.top HLS) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getToonStreamSources(title, english, ep), SCRAPER_MS, []);
+          srcs.forEach(s => sendSrc(s));
+        } catch {}
+      })(),
     ]);
 
   } catch (e: any) {
@@ -1777,8 +1978,64 @@ router.get("/anime/extract-video", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
-//  Translate  GET /api/anime/translate
+//  Subtitles  GET /api/anime/subtitles?title=&ep=&season=
+//  Returns { lang: string|null, content: string|null }
+//  Uses SUBDL_API_KEY env var (free key from subdl.com)
+//  Falls back gracefully to null when no key or no subtitles found
 // ════════════════════════════════════════════════════════════════════
+const subCache = new Map<string, { lang: string | null; content: string | null; ts: number }>();
+const SUB_TTL  = 24 * 3_600_000;
+
+router.get("/anime/subtitles", async (req, res) => {
+  const title  = ((req.query.title  as string) || "").trim();
+  const ep     = parseInt((req.query.ep     as string) || "1");
+  const season = parseInt((req.query.season as string) || "1");
+  if (!title) { res.json({ lang: null, content: null }); return; }
+
+  const ck = `sub:${title.toLowerCase()}:${season}:${ep}`;
+  const cached = subCache.get(ck);
+  if (cached && Date.now() - cached.ts < SUB_TTL) {
+    res.json({ lang: cached.lang, content: cached.content }); return;
+  }
+
+  const apiKey = (process.env.SUBDL_API_KEY || "").trim();
+  if (apiKey) {
+    try {
+      const searchUrl = `https://api.subdl.com/api/v1/subtitles?api_key=${apiKey}&film_name=${encodeURIComponent(title)}&season_number=${season}&episode_number=${ep}&languages=AR&subs_per_page=5`;
+      const r = await fetch(searchUrl, {
+        headers: { "User-Agent": BROWSER_UA },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (r.ok) {
+        const data = await r.json() as any;
+        const subs: any[] = (data.subtitles || []).filter((s: any) => s.url);
+        if (subs.length) {
+          const dlPath = subs[0].url as string;
+          const dlUrl = dlPath.startsWith("http") ? dlPath : `https://dl.subdl.com${dlPath}`;
+          const sr = await fetch(dlUrl, {
+            headers: { "User-Agent": BROWSER_UA },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (sr.ok) {
+            const ct = sr.headers.get("content-type") || "";
+            if (!ct.includes("zip") && !dlUrl.endsWith(".zip")) {
+              const content = await sr.text();
+              if (content.includes("-->")) {
+                subCache.set(ck, { lang: "ara", content, ts: Date.now() });
+                res.json({ lang: "ara", content }); return;
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  subCache.set(ck, { lang: null, content: null, ts: Date.now() });
+  res.json({ lang: null, content: null });
+});
+
+
 router.get("/anime/translate", async (req, res) => {
   const text = ((req.query.text as string) || "").trim();
   const from = ((req.query.from as string) || "en").trim();

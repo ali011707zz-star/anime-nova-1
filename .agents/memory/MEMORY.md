@@ -27,3 +27,4 @@
 - [HLS proxy wrapping server-side](hls-proxy-wrapping.md) — all m3u8 URLs (bare + extractVideoDeep HLS results) wrapped with /api/anime/hls-proxy?url=...&ref=... in extractAndCollect before SSE send; client never receives raw m3u8
 - [mp4upload CDN direct play](mp4upload-cdn.md) — a*.mp4upload.com:183 CDN URLs must play DIRECT in browser (port 183 blocked from Replit); DEAD_FILE_HOSTS must use "//www.mp4upload.com" not "mp4upload.com" to pass CDN subdomain
 - [Mitanime RSC scraper](mitanime-rsc.md) — mitanime.com uses Next.js RSC; GET /watch/{slug}/{ep} with Rsc:1 header returns servers JSON; many newer anime have isLocked:true (premium); older content uses mega/drive/videa (all blocked)
+- [ToonStream as-cdn21 extraction](toonstream-extraction.md) — toonstream.vip episode page data-src uses HTML entities (&#038;→&); outer iframe trembed=N returns inner iframe with as-cdn21.top; HEAD→cookie + POST JSON {hash,r:""} → securedLink m3u8; qualityRank=10

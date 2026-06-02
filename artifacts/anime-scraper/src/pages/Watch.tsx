@@ -59,8 +59,11 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   if (url.includes("workers.dev")) {
     return { label: "فينكس", sublabel: "عربي · مباشر", isHls: true, isDirect: true };
   }
-  // hls-proxy wrapped stream (extracted from Arabic sites)
+  // hls-proxy wrapped stream (extracted from Arabic/Japanese sites)
   if (url.includes("hls-proxy")) {
+    if (url.includes("as-cdn21") || url.includes("rubystm")) {
+      return { label: "تون ستريم", sublabel: "ياباني · HLS", isHls: true };
+    }
     if (url.includes("streamwish") || url.includes("filemoon") || url.includes("wishembed")) {
       return { label: "ستريم ويش", sublabel: "عربي · HLS", isHls: true };
     }
