@@ -25,3 +25,5 @@
 - [SSE-only Watch.tsx](dual-stream-watch.md) — Watch.tsx uses ONLY sources-stream SSE; mergedServers = sseServers directly (no useMemo merge); picker shows immediately on first source (no 38s sseDone wait)
 - [Anime-Phoenix URL structure](anime-phoenix-url-structure.md) — site changed search from /?s= to /search/ (also broken); use direct slug construction /animes/{slug} instead; verify by checking for /episodes/{slug}-episode- in response (soft-404 returns homepage with 200)
 - [HLS proxy wrapping server-side](hls-proxy-wrapping.md) — all m3u8 URLs (bare + extractVideoDeep HLS results) wrapped with /api/anime/hls-proxy?url=...&ref=... in extractAndCollect before SSE send; client never receives raw m3u8
+- [mp4upload CDN direct play](mp4upload-cdn.md) — a*.mp4upload.com:183 CDN URLs must play DIRECT in browser (port 183 blocked from Replit); DEAD_FILE_HOSTS must use "//www.mp4upload.com" not "mp4upload.com" to pass CDN subdomain
+- [Mitanime RSC scraper](mitanime-rsc.md) — mitanime.com uses Next.js RSC; GET /watch/{slug}/{ep} with Rsc:1 header returns servers JSON; many newer anime have isLocked:true (premium); older content uses mega/drive/videa (all blocked)
