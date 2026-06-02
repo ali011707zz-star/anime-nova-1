@@ -11,12 +11,13 @@
 - [AniPub movie ep case](anipub-similarity.md) — when local.ep[] is empty, use local.link directly (movie has one link, not episode array)
 - [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
 - [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
-- [Embed-only sources pipeline](embed-only-pipeline.md) — extractAndCollect must set directUrl=url for EMBED_ONLY_HOSTS (not skip them); seenKeys in extractAndCollect must be LOCAL per-scraper (separate from globalSeen in sendSrc) or all sources are silently dropped
+- [Embed-only sources pipeline](embed-only-pipeline.md) — EMBED_ONLY_HOSTS are now SKIPPED entirely in extractAndCollect (user requirement: no iframes); seenKeys must be LOCAL per-scraper or all sources are silently dropped
 - [SSE proxy timeout fix](sse-proxy-timeout.md) — Vite proxy drops idle SSE connections after ~30s; fix: stream sources as found (not batch at end) + send `: keepalive` comment every 5s
 - [AnimeX CDN hls-proxy](animex-cdn-cors.md) — uwucdn.top allows server requests (HTTP 200); use proxyUrl (hls-proxy) first, not rawUrl; hls-proxy rewrites AES-128 key URI + segments via seg-proxy; all confirmed 200
 - [Miruro AnimePahe broken](miruro-animepah.md) — miruro.tv API now returns {"error":"Missing or invalid JWE"} — requires JWE token; AnimePahe source completely broken until alternative found
-- [Auto-fallback HLS player removed](auto-fallback-hls.md) — NativeHLSPlayer onFail prop REMOVED; no auto-advance on HLS fatal error; only manual retry button remains; IframePlayer still auto-switches on iframe error
+- [IframePlayer completely removed](auto-fallback-hls.md) — IframePlayer is gone; Watch.tsx always uses NativeHLSPlayer; onFail advances to next server; no iframe states/refs remain
 - [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN blocks server IP (hls-proxy→403); raw URL sent as fallback
 - [Direct MP4 in Watch.tsx](direct-mp4-player.md) — AnimeGG play/ URLs skip video-proxy (CDN → vidcache.net:8161, non-standard port blocked by Replit); play DIRECT video.src in browser. Sendvid/streamtape still use video-proxy (IP-tied)
-- [Dual stream Watch.tsx](dual-stream-watch.md) — Watch.tsx calls BOTH anipub-stream (JSON) AND sources-stream (SSE); Arabic sources only come from sources-stream; merge via useMemo into mergedServers
+- [SSE-only Watch.tsx](dual-stream-watch.md) — Watch.tsx uses ONLY sources-stream SSE; mergedServers = sseServers directly (no useMemo merge); picker shows immediately on first source (no 38s sseDone wait)
 - [Anime-Phoenix URL structure](anime-phoenix-url-structure.md) — site changed search from /?s= to /search/ (also broken); use direct slug construction /animes/{slug} instead; verify by checking for /episodes/{slug}-episode- in response (soft-404 returns homepage with 200)
+- [HLS proxy wrapping server-side](hls-proxy-wrapping.md) — all m3u8 URLs (bare + extractVideoDeep HLS results) wrapped with /api/anime/hls-proxy?url=...&ref=... in extractAndCollect before SSE send; client never receives raw m3u8
