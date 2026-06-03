@@ -647,15 +647,19 @@ function epNumInSlug(link: string, epNum: number): boolean {
   const padded3 = String(epNum).padStart(3, "0");
   const decoded = decodeURIComponent(link).toLowerCase();
   const raw = link.toLowerCase();
-  return (
-    decoded.includes(`-${padded2}-`) || decoded.includes(`-${padded3}-`) ||
-    decoded.includes(`-${epNum}-`) ||
-    raw.includes(`-${padded2}-`) || raw.includes(`-${padded3}-`) ||
-    raw.includes(`-${epNum}-`) ||
-    raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${padded2}-`) ||
-    raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${padded3}-`) ||
-    raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${epNum}-`)
-  );
+  if (decoded.includes(`-${padded2}-`) || decoded.includes(`-${padded3}-`) ||
+      decoded.includes(`-${epNum}-`) ||
+      raw.includes(`-${padded2}-`) || raw.includes(`-${padded3}-`) ||
+      raw.includes(`-${epNum}-`) ||
+      raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${padded2}-`) ||
+      raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${padded3}-`) ||
+      raw.includes(`-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-${epNum}-`)) return true;
+  // -eN or -ep-N patterns at segment boundary (e.g. s4-e6/, s4-ep-7/)
+  const epPat = new RegExp(`-ep?-?${epNum}(?:[/_.-]|$)`, "i");
+  if (epPat.test(raw) || epPat.test(decoded)) return true;
+  // URL ending in -01/ or -1/ (without anything after)
+  if (raw.endsWith(`-${padded2}/`) || raw.endsWith(`-${epNum}/`)) return true;
+  return false;
 }
 
 function extractEpLinks(html: string): string[] {
@@ -1188,7 +1192,7 @@ const ADAR_HDRS: Record<string, string> = {
 };
 
 const ADAR_DEAD_TYPES = new Set([
-  "mega","4shared","drive","ok","okru","uqload","fembed","videa",
+  "4shared","drive","ok","okru","uqload","fembed","videa",
   "doodstream","dood","waaw","facebook","dailymotion",
   "highload","sblanh","upvideo","turbobit","1fichier","solidfiles",
 ]);
@@ -1199,6 +1203,10 @@ function buildAnimestreamEmbed(type: string, data: string): string | null {
   if (!d || d.length < 3) return null;
   if (ADAR_DEAD_TYPES.has(t)) return null;
   switch (t) {
+    case "mega": {
+      if (!d.includes("#")) return null;
+      return `https://mega.nz/embed/${d}`;
+    }
     case "vidmoly":     return `https://vidmoly.biz/embed-${d}.html`;
     case "asnwish":     return `https://asnwish.com/embed/${d}`;
     case "streamwish":  return `https://streamwish.to/e/${d}`;
@@ -1324,14 +1332,17 @@ async function getAnimadarSources(
     for (const { type, data, quality } of servers) {
       const embedUrl = buildAnimestreamEmbed(type, data);
       if (!embedUrl) continue;
+      const t = type.toLowerCase();
+      const isMegaEmbed = t === "mega";
       const qRank = quality.toUpperCase().includes("FHD") ? 3
                   : quality.toUpperCase().includes("HD")  ? 2 : 1;
       sources.push({
         name: `AnimeDar · ${type.toUpperCase()} · ${quality}`,
         url: embedUrl,
         quality,
-        qualityRank: qRank,
+        qualityRank: isMegaEmbed ? 8 : qRank,
         site: "animedar",
+        isEmbed: isMegaEmbed || undefined,
       });
     }
 
