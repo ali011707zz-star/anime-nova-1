@@ -268,8 +268,6 @@ function ServerPicker({
   onNextEp: () => void;
   onPrevEp: () => void;
 }) {
-  const [probeStatus, setProbeStatus] = useState<Record<string, "checking" | "ok" | "fail">>({});
-
   /* Detect if all quality tiers have identical server lists → flat mode */
   const q1 = streamData.servers["1080p FHD"] || [];
   const q2 = streamData.servers["720p HD"]   || [];
@@ -294,16 +292,6 @@ function ServerPicker({
   );
 
   const totalCount = flatRows.length;
-
-  /* Manual probe: triggered by clicking "فحص" button per row */
-  function probeUrl(url: string) {
-    if (probeStatus[url] === "checking") return;
-    setProbeStatus(prev => ({ ...prev, [url]: "checking" }));
-    fetch(`/api/anime/probe?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(12000) })
-      .then(r => r.json())
-      .then((d: any) => setProbeStatus(prev => ({ ...prev, [url]: d.ok ? "ok" : "fail" })))
-      .catch(() => setProbeStatus(prev => ({ ...prev, [url]: "fail" })));
-  }
 
   const QUALITY_LABEL_AR: Record<Quality, string> = {
     "1080p FHD": "الجودة FHD",
@@ -382,11 +370,7 @@ function ServerPicker({
               const info    = getServerInfo(url, idx);
               const tag     = getServerTag(url);
               const isEmbed = url.includes("mega.nz/embed");
-              const probe   = isEmbed ? "embed" : probeStatus[url];
-              const isFailed = probe === "fail";
               const globalIdx = (gi === 0 ? 0 : allGroups.slice(0,gi).reduce((a,g)=>a+g.servers.length,0)) + idx;
-              const externalUrl = isEmbed ? null
-                : url.startsWith("/") ? `${window.location.origin}${url}` : url;
 
               return (
                 <motion.div key={url}
@@ -394,87 +378,31 @@ function ServerPicker({
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: Math.min(globalIdx * 0.045, 0.28), duration: 0.22, ease: "easeOut" }}
                   onClick={() => onPick(q, idx)}
-                  className={`flex items-center px-4 py-3 gap-3 cursor-pointer active:bg-white/5 transition-all
-                    ${isFailed ? "opacity-38" : ""}`}
+                  className="flex items-center px-4 py-3 gap-3 cursor-pointer active:bg-white/5 transition-all"
                   style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
 
-                  {/* Right side: probe dot + server name + sublabel */}
+                  {/* Right: server name + sublabel */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      {/* Probe status dot */}
-                      {probe === "checking" && (
-                        <Loader2 className="w-3 h-3 text-amber-400/60 animate-spin shrink-0" />
-                      )}
-                      {probe === "ok" && (
-                        <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 flex-none"
-                          style={{ boxShadow: "0 0 5px rgba(52,211,153,0.8)" }} />
-                      )}
-                      {probe === "fail" && (
-                        <div className="w-2 h-2 rounded-full bg-red-500/75 shrink-0 flex-none" />
-                      )}
-                      {probe === "embed" && (
-                        <div className="w-2 h-2 rounded-full bg-emerald-400/80 shrink-0 flex-none"
-                          style={{ boxShadow: "0 0 4px rgba(52,211,153,0.6)" }} />
-                      )}
-                      {probe === undefined && (
-                        <div className="w-2 h-2 rounded-full bg-white/15 shrink-0 flex-none" />
-                      )}
-
-                      <p className={`text-[13px] font-bold font-['Cairo'] leading-tight truncate
-                        ${isFailed ? "text-white/30" : "text-white/82"}`}>
-                        السيرفر {idx + 1} &nbsp;·&nbsp; {info.label}
-                      </p>
-                    </div>
-
-                    {/* Sublabel row */}
-                    <div className="flex items-center gap-1.5 mt-0.5 mr-4">
-                      <span className={`text-[10px] font-['Cairo'] ${isFailed ? "text-white/18" : "text-white/28"}`}>
-                        {info.sublabel}
-                      </span>
+                    <p className="text-[13px] font-bold font-['Cairo'] leading-tight truncate text-white/82">
+                      السيرفر {idx + 1} &nbsp;·&nbsp; {info.label}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[10px] font-['Cairo'] text-white/28">{info.sublabel}</span>
                       {isEmbed && (
                         <span className="text-emerald-400/55 text-[10px] font-['Cairo']">· بدون إعلانات</span>
                       )}
                     </div>
                   </div>
 
-                  {/* Left side: tag + probe button + external button */}
-                  <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
-                    {/* Format tag chip */}
-                    <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded"
-                      style={{
-                        color: isEmbed ? "rgba(52,211,153,0.65)" : "rgba(255,255,255,0.35)",
-                        background: isEmbed ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.05)",
-                        border: `1px solid ${isEmbed ? "rgba(52,211,153,0.18)" : "rgba(255,255,255,0.08)"}`,
-                      }}>
-                      {tag}
-                    </span>
-
-                    {/* Probe button (فحص) — skip for mega embeds */}
-                    {!isEmbed && (
-                      <button
-                        onClick={() => probeUrl(url)}
-                        disabled={probe === "checking"}
-                        className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-95 transition-all disabled:opacity-40 shrink-0"
-                        style={{
-                          background: probe === "ok" ? "rgba(52,211,153,0.12)" : probe === "fail" ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.06)",
-                          border: `1px solid ${probe === "ok" ? "rgba(52,211,153,0.25)" : probe === "fail" ? "rgba(239,68,68,0.22)" : "rgba(255,255,255,0.1)"}`,
-                          color: probe === "ok" ? "rgba(52,211,153,0.85)" : probe === "fail" ? "rgba(239,68,68,0.75)" : "rgba(255,255,255,0.45)",
-                        }}>
-                        {probe === "checking" ? <Loader2 className="w-3 h-3 animate-spin" /> : "فحص"}
-                      </button>
-                    )}
-
-                    {/* External player button */}
-                    {externalUrl && !isEmbed && (
-                      <button
-                        onClick={() => window.open(externalUrl, "_blank", "noopener")}
-                        title="فتح في مشغّل خارجي"
-                        className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-all"
-                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
-                        <ExternalLink className="w-3.5 h-3.5 text-white/32" />
-                      </button>
-                    )}
-                  </div>
+                  {/* Left: format tag chip */}
+                  <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                    style={{
+                      color: isEmbed ? "rgba(52,211,153,0.65)" : "rgba(255,255,255,0.35)",
+                      background: isEmbed ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.05)",
+                      border: `1px solid ${isEmbed ? "rgba(52,211,153,0.18)" : "rgba(255,255,255,0.08)"}`,
+                    }}>
+                    {tag}
+                  </span>
                 </motion.div>
               );
             })}
@@ -1554,13 +1482,11 @@ export default function WatchPage() {
   const [sseServers,   setSseServers]  = useState<Record<Quality, string[]>>(EMPTY_SSE);
   const [quality,      setQuality]     = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]  = useState(0);
-  const [phase,        setPhase]       = useState<"loading" | "picker" | "player" | "nosrc">("loading");
+  const [phase,        setPhase]       = useState<"picker" | "player" | "nosrc">("picker");
   const [sseDone,      setSseDone]     = useState(false);
   const fetchStarted   = useRef(false);
   const sseRef         = useRef<EventSource | null>(null);
   const seenSseUrls    = useRef(new Set<string>());
-  /* Buffer: collect all SSE sources here, commit to state only when [DONE] fires */
-  const sseBuf         = useRef<Record<Quality, string[]>>({ "1080p FHD": [], "720p HD": [], "360p SD": [] });
 
   const title     = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -1576,31 +1502,17 @@ export default function WatchPage() {
     const params = new URLSearchParams({ title: t, english: e, ep: String(ep) });
     if (animeId) params.set("anilistId", String(animeId));
 
-    setPhase("loading");
-
-    /* SSE: sources-stream — buffer ALL sources, commit only when done */
+    /* SSE: sources-stream — stream directly to state as each source arrives */
     if (sseRef.current) sseRef.current.close();
     const es = new EventSource(`/api/anime/sources-stream?${params}`);
     sseRef.current = es;
-
-    function commitBuffer() {
-      const buf = sseBuf.current;
-      setSseServers({ ...buf });
-      setSseDone(true);
-      setPhase(prev => {
-        if (prev === "player") return prev;
-        const hasAny = (buf["1080p FHD"].length + buf["720p HD"].length + buf["360p SD"].length) > 0;
-        return hasAny ? "picker" : "nosrc";
-      });
-      es.close();
-    }
-
-    const closeTimer = setTimeout(commitBuffer, 38000);
+    const closeTimer = setTimeout(() => { setSseDone(true); es.close(); }, 38000);
     es.onmessage = (ev) => {
       try {
         if (ev.data === "[DONE]") {
+          setSseDone(true);
           clearTimeout(closeTimer);
-          commitBuffer();
+          es.close();
           return;
         }
         const src = JSON.parse(ev.data) as {
@@ -1612,10 +1524,10 @@ export default function WatchPage() {
         seenSseUrls.current.add(playUrl);
         const rank = src.qualityRank ?? 2;
         const tier: Quality = rank >= 3 ? "1080p FHD" : rank >= 2 ? "720p HD" : "360p SD";
-        sseBuf.current[tier].push(playUrl);
+        setSseServers(prev => ({ ...prev, [tier]: [...prev[tier], playUrl] }));
       } catch {}
     };
-    es.onerror = () => { clearTimeout(closeTimer); commitBuffer(); };
+    es.onerror = () => { clearTimeout(closeTimer); setSseDone(true); es.close(); };
   }, [ep, animeId]);
 
   /* Cleanup SSE on unmount */
@@ -1649,6 +1561,12 @@ export default function WatchPage() {
     }
   }, []);
 
+  /* Show nosrc only after SSE is fully done with no sources */
+  useEffect(() => {
+    if (!sseDone) return;
+    const hasAny = QUALITY_LABELS.some(q => (mergedServers[q]?.length || 0) > 0);
+    if (!hasAny) setPhase(prev => prev === "player" ? prev : "nosrc");
+  }, [sseDone, mergedServers]);
 
   function goEp(n: number) {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`);
@@ -1670,28 +1588,6 @@ export default function WatchPage() {
   const streamDataForPicker: StreamData = { servers: mergedServers, total: servers.length };
 
   if (phase === "nosrc") return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
-
-  /* ── Loading screen: shown while SSE is collecting sources ── */
-  if (phase === "loading") {
-    return (
-      <div className="fixed inset-0 z-50 bg-[#07070e] flex flex-col items-center justify-center gap-5" dir="rtl">
-        <motion.div
-          className="w-14 h-14 rounded-full border-2 border-violet-500/20 border-t-violet-400"
-          animate={{ rotate: 360 }}
-          transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-        />
-        <div className="text-center space-y-1">
-          <p className="text-white/70 text-[15px] font-black font-['Cairo']">جارٍ جلب المصادر...</p>
-          <p className="text-white/25 text-[12px] font-['Cairo']">{title ? `${title} · الحلقة ${ep}` : `الحلقة ${ep}`}</p>
-        </div>
-        <button
-          onClick={handleBack}
-          className="mt-4 px-5 py-2 rounded-xl text-white/35 text-[12px] font-['Cairo'] active:opacity-50"
-          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
-        >رجوع</button>
-      </div>
-    );
-  }
 
   if (phase === "picker") {
     return (
