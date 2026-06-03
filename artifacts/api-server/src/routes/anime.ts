@@ -2655,23 +2655,39 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       } catch {}
     }
 
-    // ── Mega.nz embed (MALink: "fileId!decryptionKey") — بدون إعلانات ──
+    // ── Mega.nz embed (MALink: "fileId!decryptionKey") — verify file exists first ──
     const maLink = String(epData.MALink || "").trim();
     if (maLink && maLink.includes("!")) {
-      const bang = maLink.indexOf("!");
+      const bang   = maLink.indexOf("!");
       const fileId = maLink.slice(0, bang);
       const key    = maLink.slice(bang + 1);
       if (fileId && key) {
-        const embedUrl = `https://mega.nz/embed/${fileId}#${key}`;
-        sources.push({
-          name: "ميغا",
-          url: embedUrl,
-          quality: "720p",
-          qualityRank: 8,
-          site: "animeify",
-          directUrl: embedUrl,
-          isEmbed: true,
-        });
+        // Quick verify via Mega API: returns [-9] for ENOENT, [{...}] for found
+        let megaOk = false;
+        try {
+          const megaCheck = await fetch("https://g.api.mega.co.nz/cs?id=0&sid=", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify([{ a: "g", p: fileId }]),
+            signal: AbortSignal.timeout(5000),
+          });
+          const megaData = await megaCheck.json();
+          // If first element is an object (not a negative error code) → file exists
+          megaOk = Array.isArray(megaData) && megaData.length > 0 && typeof megaData[0] === "object" && megaData[0] !== null;
+        } catch { megaOk = true; } // Network error → optimistically include
+
+        if (megaOk) {
+          const embedUrl = `https://mega.nz/embed/${fileId}#${key}`;
+          sources.push({
+            name: "ميغا",
+            url: embedUrl,
+            quality: "720p",
+            qualityRank: 8,
+            site: "animeify",
+            directUrl: embedUrl,
+            isEmbed: true,
+          });
+        }
       }
     }
 
