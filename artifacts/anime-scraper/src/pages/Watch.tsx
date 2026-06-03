@@ -502,12 +502,12 @@ function NativeHLSPlayer({
         setError("فشل تشغيل المصدر — جارٍ تجربة المصدر التالي…");
         setTimeout(() => onFail?.(), 1200);
       };
-      // Timeout: if no metadata after 25s, fail gracefully
+      // Timeout: if no metadata after 9s, fail gracefully
       const loadTimer = setTimeout(() => {
         if (resolved) return;
         video.src = "";
         onErr();
-      }, 25000);
+      }, 9000);
       video.addEventListener("loadedmetadata", onMeta, { once: true });
       video.addEventListener("error", onErr, { once: true });
       return;

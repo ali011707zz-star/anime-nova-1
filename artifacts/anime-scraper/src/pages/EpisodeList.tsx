@@ -1,6 +1,6 @@
 import { useParams, useLocation } from "wouter";
-import { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronRight, Loader2, Search, Eye, EyeOff, Play, Star, MessageCircle, Send, X } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { ChevronRight, ChevronLeft, Loader2, Search, Eye, EyeOff, Play, Star, MessageCircle, Send, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface EpComment { id: string; text: string; time: string; }
@@ -27,6 +27,8 @@ function getWatched(animeId: string): Set<number> {
   catch { return new Set(); }
 }
 
+const PAGE_SIZE = 100;
+
 /* ── Episode Row ── */
 function EpisodeRow({
   n, anime, epData, animeId, watched, commentCount, onToggleWatched, onWatch, onComment
@@ -44,10 +46,7 @@ function EpisodeRow({
     : `${String(durationMin).padStart(2, "0")}:00`;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 10 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.2, delay: Math.min(n * 0.025, 0.35) }}
+    <div
       className={`flex items-center gap-3 px-4 py-3 border-b transition-all active:bg-white/5
         ${watched ? "border-white/4 bg-primary/[0.03]" : "border-white/[0.05]"}`}
     >
@@ -106,19 +105,9 @@ function EpisodeRow({
             ? "bg-primary/15 border-primary/30 text-primary"
             : "bg-white/4 border-white/8 text-white/20 hover:text-white/45"}`}
       >
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.span
-            key={watched ? "eye" : "eyeoff"}
-            initial={{ scale: 0.5, opacity: 0, rotate: -15 }}
-            animate={{ scale: 1, opacity: 1, rotate: 0 }}
-            exit={{ scale: 0.5, opacity: 0, rotate: 15 }}
-            transition={{ duration: 0.18 }}
-          >
-            {watched ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-          </motion.span>
-        </AnimatePresence>
+        {watched ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
       </motion.button>
-    </motion.div>
+    </div>
   );
 }
 
@@ -220,6 +209,7 @@ export default function EpisodeListPage() {
   const [loading, setLoading] = useState(true);
   const [epData, setEpData]   = useState<any[]>([]);
   const [search, setSearch]   = useState("");
+  const [page, setPage]       = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [activeCommentEp, setActiveCommentEp] = useState<number | null>(null);
   const [epCommentCounts, setEpCommentCounts] = useState<Record<number, number>>({});
@@ -228,6 +218,8 @@ export default function EpisodeListPage() {
     if (!params.id) return;
     setLoading(true);
     setEpData([]);
+    setPage(1);
+    setSearch("");
     setWatched(getWatched(params.id));
     setEpCommentCounts({});
     setActiveCommentEp(null);
@@ -257,9 +249,7 @@ export default function EpisodeListPage() {
     });
   }, [params.id]);
 
-  function openComment(n: number) {
-    setActiveCommentEp(n);
-  }
+  function openComment(n: number) { setActiveCommentEp(n); }
 
   function closeComment() {
     if (activeCommentEp !== null && params.id) {
@@ -277,8 +267,38 @@ export default function EpisodeListPage() {
       return next;
     });
     const t = encodeURIComponent(anime?.title?.romaji || "");
-    navigate(`/watch?anime=${params.id}&ep=${n}${t ? `&title=${t}` : ""}`);
+    const eng = encodeURIComponent(anime?.title?.english || "");
+    navigate(`/watch?anime=${params.id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}`);
   }
+
+  const total = anime ? (anime.episodes || anime.nextAiringEpisode?.episode || 12) : 0;
+  const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);
+  const watchedCount = useMemo(() => [...watched].filter(n => n >= 1 && n <= total).length, [watched, total]);
+  const pct = total > 0 ? Math.round((watchedCount / total) * 100) : 0;
+
+  const isSearching = search.trim().length > 0;
+  const searchNum = isSearching ? parseInt(search.trim()) : NaN;
+
+  const filtered = useMemo(() => {
+    if (!isSearching) return allEps;
+    return allEps.filter(n => n.toString().includes(search.trim()));
+  }, [allEps, search, isSearching]);
+
+  const totalPages = isSearching ? 1 : Math.ceil(total / PAGE_SIZE);
+  const currentPage = isSearching ? 1 : Math.min(page, totalPages);
+
+  useEffect(() => {
+    if (!isNaN(searchNum) && searchNum >= 1 && searchNum <= total) {
+      const targetPage = Math.ceil(searchNum / PAGE_SIZE);
+      setPage(targetPage);
+    }
+  }, [searchNum, total]);
+
+  const displayedEps = useMemo(() => {
+    if (isSearching) return filtered;
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return allEps.slice(start, start + PAGE_SIZE);
+  }, [allEps, filtered, isSearching, currentPage]);
 
   if (loading) return (
     <div className="bg-[#09090B] min-h-screen flex items-center justify-center">
@@ -291,16 +311,10 @@ export default function EpisodeListPage() {
     </div>
   );
 
-  const total     = anime.episodes || anime.nextAiringEpisode?.episode || 12;
-  const allEps    = Array.from({ length: total }, (_, i) => i + 1);
-  const filtered  = search ? allEps.filter(n => n.toString().includes(search.trim())) : allEps;
-  const watchedCount = [...watched].filter(n => n >= 1 && n <= total).length;
-  const pct = total > 0 ? Math.round((watchedCount / total) * 100) : 0;
-
   return (
     <main className="bg-[#09090B] min-h-screen text-white" dir="rtl">
 
-      {/* ── HERO BANNER (tall) ── */}
+      {/* ── HERO BANNER ── */}
       <div className="relative w-full overflow-hidden" style={{ height: 220 }}>
         <motion.img
           initial={{ scale: 1.08, opacity: 0 }}
@@ -313,17 +327,15 @@ export default function EpisodeListPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-[#09090B] via-[#09090B]/60 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/20 to-transparent" />
 
-        {/* Back button */}
         <button onClick={() => window.history.back()}
           className="absolute top-4 right-4 w-10 h-10 bg-black/50 backdrop-blur-md rounded-2xl flex items-center justify-center border border-white/10 active:scale-90 transition-transform">
           <ChevronRight className="w-5 h-5 text-white" />
         </button>
 
-        {/* Info overlay */}
         <div className="absolute bottom-0 right-0 left-0 px-4 pb-4">
           <div className="flex items-end gap-3">
             <img src={anime.coverImage?.large} alt=""
-              className="w-16 h-22 rounded-xl object-cover border border-white/10 shadow-xl shrink-0"
+              className="w-16 rounded-xl object-cover border border-white/10 shadow-xl shrink-0"
               style={{ height: 88 }} />
             <div className="flex-1 min-w-0 pb-1">
               <h1 className="text-base font-black font-['Cairo'] text-white line-clamp-1 drop-shadow-lg">
@@ -350,7 +362,6 @@ export default function EpisodeListPage() {
       {/* ── Sticky header + search ── */}
       <div className="sticky top-0 z-50 bg-[#09090B]/97 backdrop-blur-xl border-b border-white/6">
         <div className="flex items-center gap-3 px-4 pt-3 pb-2">
-          {/* Progress */}
           <div className="flex-1 flex items-center gap-2">
             <div className="flex-1 h-1.5 bg-white/8 rounded-full overflow-hidden">
               <motion.div
@@ -375,16 +386,27 @@ export default function EpisodeListPage() {
             />
           </div>
         </div>
+        {/* Page range label */}
+        {!isSearching && totalPages > 1 && (
+          <div className="px-4 pb-2 flex items-center justify-between">
+            <span className="text-[10px] text-white/30 font-bold font-['Cairo']">
+              الحلقات {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, total)}
+            </span>
+            <span className="text-[10px] text-white/20 font-bold">
+              صفحة {currentPage} / {totalPages}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── Episode list ── */}
-      {filtered.length === 0 ? (
+      {displayedEps.length === 0 ? (
         <div className="flex items-center justify-center py-16">
           <p className="text-white/25 text-sm font-['Cairo']">لا توجد حلقات مطابقة</p>
         </div>
       ) : (
-        <div className="pb-24">
-          {filtered.map(n => (
+        <div className="pb-4">
+          {displayedEps.map(n => (
             <EpisodeRow
               key={n} n={n} anime={anime} epData={epData}
               animeId={params.id!}
@@ -395,6 +417,47 @@ export default function EpisodeListPage() {
               onComment={openComment}
             />
           ))}
+        </div>
+      )}
+
+      {/* ── Pagination controls ── */}
+      {!isSearching && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-3 py-6 px-4 pb-28">
+          <button
+            onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo(0,0); }}
+            disabled={currentPage <= 1}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-white/6 border border-white/10 rounded-xl text-sm font-bold font-['Cairo'] disabled:opacity-30 active:scale-95 transition-transform"
+          >
+            <ChevronRight className="w-4 h-4" />
+            السابق
+          </button>
+
+          {/* Page number pills */}
+          <div className="flex items-center gap-1">
+            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+              let p: number;
+              if (totalPages <= 5) p = i + 1;
+              else if (currentPage <= 3) p = i + 1;
+              else if (currentPage >= totalPages - 2) p = totalPages - 4 + i;
+              else p = currentPage - 2 + i;
+              return (
+                <button key={p} onClick={() => { setPage(p); window.scrollTo(0,0); }}
+                  className={`w-8 h-8 rounded-lg text-xs font-black transition-all
+                    ${p === currentPage ? "bg-primary text-white" : "bg-white/6 text-white/40 hover:bg-white/10"}`}>
+                  {p}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={() => { setPage(p => Math.min(totalPages, p + 1)); window.scrollTo(0,0); }}
+            disabled={currentPage >= totalPages}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-white/6 border border-white/10 rounded-xl text-sm font-bold font-['Cairo'] disabled:opacity-30 active:scale-95 transition-transform"
+          >
+            التالي
+            <ChevronLeft className="w-4 h-4" />
+          </button>
         </div>
       )}
 
