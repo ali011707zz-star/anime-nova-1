@@ -2872,6 +2872,71 @@ router.get("/anime/sources-stream", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  fetch-source  GET /api/anime/fetch-source?site=&title=&english=&ep=
+//  Runs ONE scraper on-demand and returns its sources as JSON.
+//  Used by the two-phase picker: all scrapers shown immediately,
+//  video URL fetched only when user taps a specific source row.
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/fetch-source", async (req, res) => {
+  const site    = ((req.query.site    as string) || "").trim().toLowerCase();
+  const title   = ((req.query.title   as string) || "").trim();
+  const english = ((req.query.english as string) || "").trim() || null;
+  const ep      = parseInt((req.query.ep as string) || "1");
+
+  if (!site || !title) {
+    res.status(400).json({ error: "site and title required", sources: [] });
+    return;
+  }
+
+  const SCRAPER_MS = 18000;
+  const EXTRACT_MS = 14000;
+  const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
+    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
+
+  const seen    = new Set<string>();
+  const sources: UnifiedSource[] = [];
+
+  function collectSrc(s: UnifiedSource) {
+    if (!s.directUrl && !s.isEmbed) return;
+    const checkUrl = s.directUrl || s.url;
+    if (!s.isEmbed && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
+    const key = checkUrl.includes("workers.dev")
+      ? "cdn:" + checkUrl.replace(/^https?:\/\/[^/]+/, "")
+      : checkUrl;
+    if (seen.has(key)) return;
+    seen.add(key);
+    sources.push(s);
+  }
+
+  async function runExtract(rawSrcs: UnifiedSource[]) {
+    if (!rawSrcs.length) return;
+    const buf: UnifiedSource[] = [];
+    await extractAndCollect(rawSrcs, buf, new Set<string>(), EXTRACT_MS);
+    buf.forEach(collectSrc);
+  }
+
+  try {
+    switch (site) {
+      case "animephoenix": await runExtract(await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, [])); break;
+      case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep),      SCRAPER_MS, [])); break;
+      case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep),     SCRAPER_MS, [])); break;
+      case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep),     SCRAPER_MS, [])); break;
+      case "mitanime":    (await race(getMitanimeSources(title, english, ep),   SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "toonstream":  (await race(getToonStreamSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep),      SCRAPER_MS, [])); break;
+      case "animetime":    await runExtract(await race(getAnimeTimeSources(title, english, ep),    SCRAPER_MS, [])); break;
+      case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "animeify":    (await race(getAnimeifySources(title, english, ep),   SCRAPER_MS, [])).forEach(collectSrc); break;
+      default: break;
+    }
+    res.json({ sources });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? String(e), sources: [] });
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Probe  GET /api/anime/probe?url=
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/probe", async (req, res) => {
