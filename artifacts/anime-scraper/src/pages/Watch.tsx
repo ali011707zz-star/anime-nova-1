@@ -240,14 +240,16 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
 
 /* ══════════════════════════════════ SERVER PICKER ═══════════ */
 function ServerPicker({
-  cover, title, ep,
+  cover, title, ep, sseDone,
   streamData, onPick, onBack,
 }: {
-  cover: string; title: string; ep: number;
+  cover: string; title: string; ep: number; sseDone: boolean;
   streamData: StreamData;
   onPick: (q: Quality, idx: number) => void;
   onBack: () => void;
 }) {
+  const [probeStatus, setProbeStatus] = useState<Record<string, "checking" | "ok" | "fail">>({});
+
   /* Detect if all quality tiers have identical server lists → flat mode */
   const q1 = streamData.servers["1080p FHD"] || [];
   const q2 = streamData.servers["720p HD"]   || [];
@@ -257,7 +259,6 @@ function ServerPicker({
     q1.length === q2.length && q1.length === q3.length &&
     q1.every((u, i) => u === q2[i] && u === q3[i]);
 
-  /* In flat mode use the 1080p tier as canonical, pick quality that has any servers */
   const canonicalQ: Quality = allIdentical
     ? "1080p FHD"
     : (QUALITY_LABELS.find(q => (streamData.servers[q]?.length || 0) > 0) || "720p HD");
@@ -272,10 +273,26 @@ function ServerPicker({
     servers.forEach((url, idx) => flatRows.push({ q, url, idx, globalIdx: flatRows.length }))
   );
 
+  const totalCount = flatRows.length;
+
+  /* Auto-probe all sources as they arrive (skip mega.nz embeds — cross-origin) */
+  useEffect(() => {
+    for (const { url } of flatRows) {
+      if (url.includes("mega.nz/embed")) continue;
+      if (probeStatus[url] !== undefined) continue;
+      setProbeStatus(prev => ({ ...prev, [url]: "checking" }));
+      fetch(`/api/anime/probe?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(10000) })
+        .then(r => r.json())
+        .then((d: any) => setProbeStatus(prev => ({ ...prev, [url]: d.ok ? "ok" : "fail" })))
+        .catch(() => setProbeStatus(prev => ({ ...prev, [url]: "fail" })));
+    }
+  }, [totalCount]);
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col" dir="rtl"
       style={{ background: "radial-gradient(ellipse 90% 60% at 50% 0%, rgba(109,40,217,.18) 0%, #09090f 65%)" }}>
 
+      {/* ── Header ── */}
       <div className="flex items-center gap-3 px-4 shrink-0 z-10"
         style={{ paddingTop: "max(16px, env(safe-area-inset-top))", paddingBottom: 14 }}>
         <button onClick={onBack}
@@ -284,7 +301,18 @@ function ServerPicker({
         </button>
         <div className="flex-1 min-w-0">
           <p className="text-white text-[14px] font-black font-['Cairo'] truncate leading-tight">{title}</p>
-          <p className="text-violet-300/50 text-[11px] font-['Cairo'] font-bold mt-0.5">الحلقة {ep} · اختر المصدر</p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-violet-300/50 text-[11px] font-['Cairo'] font-bold">الحلقة {ep}</span>
+            <span className="text-white/15 text-[10px]">·</span>
+            {!sseDone ? (
+              <span className="flex items-center gap-1 text-amber-300/60 text-[11px] font-['Cairo']">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {totalCount > 0 ? `وجدنا ${totalCount} · نكمل البحث...` : "جارٍ البحث عن مصادر..."}
+              </span>
+            ) : (
+              <span className="text-white/30 text-[11px] font-['Cairo']">{totalCount} مصدر</span>
+            )}
+          </div>
         </div>
         {cover && (
           <div className="relative shrink-0">
@@ -296,74 +324,144 @@ function ServerPicker({
 
       <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mx-4 mb-1" />
 
-      <div className="flex-1 overflow-y-auto px-4 pt-3 space-y-6"
-        style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
-        {allGroups.map(({ q, servers }) => (
-          <div key={q}>
-            {/* Quality section header — hidden in flat mode */}
-            {!allIdentical && (
-              <div className="flex items-center gap-3 mb-3">
-                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/8">
-                  <span className="text-white font-black font-mono text-[16px] leading-none">{QUALITY_SHORT[q]}</span>
-                  <span className="w-px h-3.5 bg-white/15" />
-                  <span className="text-white/40 text-[10px] font-['Cairo'] font-bold">{QUALITY_AR[q]}</span>
-                </div>
-                <div className="flex-1 h-px bg-white/6" />
-                <span className="text-white/18 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
-              </div>
-            )}
+      {/* ── Source list ── */}
+      <div className="flex-1 overflow-y-auto px-4 pt-3"
+        style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}>
 
-            <div className="space-y-2.5">
-              {servers.map((url, idx) => {
-                const info = getServerInfo(url, idx);
-                const globalIdx = flatRows.findIndex(r => r.q === q && r.idx === idx);
-                const isAnimex = info.isHls;
-                return (
-                  <motion.button key={idx}
-                    initial={{ opacity: 0, y: 14 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: globalIdx * 0.055, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                    onClick={() => onPick(q, idx)}
-                    className="w-full text-right active:scale-[0.97] transition-transform"
-                  >
-                    <div className={`relative flex items-center gap-4 px-4 py-4 rounded-2xl overflow-hidden
-                      ${isAnimex
-                        ? "bg-gradient-to-l from-violet-950/70 to-[#0e0b1e] border border-violet-500/20"
-                        : "bg-white/[0.04] border border-white/8"
-                      }`}>
-                      {isAnimex && (
-                        <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full bg-violet-600/20 blur-2xl pointer-events-none" />
-                      )}
-                      <div className={`relative w-11 h-11 rounded-2xl flex items-center justify-center shrink-0
-                        ${isAnimex
-                          ? "bg-violet-600/25 border border-violet-400/30"
-                          : "bg-white/6 border border-white/10"}`}>
-                        {isAnimex
-                          ? <MonitorPlay className="w-5 h-5 text-violet-300" />
-                          : <Tv2 className="w-5 h-5 text-blue-300/80" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className={`text-[15px] font-black font-['Cairo'] leading-tight
-                            ${isAnimex ? "text-white" : "text-white/85"}`}>
-                            {info.label}
+        {/* Empty state while SSE is still fetching */}
+        {totalCount === 0 && (
+          <div className="flex flex-col items-center justify-center py-28 gap-5">
+            <div className="relative">
+              <Loader2 className="w-10 h-10 text-violet-400/40 animate-spin" />
+              <div className="absolute inset-0 rounded-full bg-violet-500/10 blur-xl" />
+            </div>
+            <p className="text-white/25 text-[13px] font-['Cairo']">يجلب المصادر من 5 مواقع...</p>
+          </div>
+        )}
+
+        <div className="space-y-6 pb-2">
+          {allGroups.map(({ q, servers }) => (
+            <div key={q}>
+              {/* Quality section header — hidden in flat mode */}
+              {!allIdentical && (
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/8">
+                    <span className="text-white font-black font-mono text-[16px] leading-none">{QUALITY_SHORT[q]}</span>
+                    <span className="w-px h-3.5 bg-white/15" />
+                    <span className="text-white/40 text-[10px] font-['Cairo'] font-bold">{QUALITY_AR[q]}</span>
+                  </div>
+                  <div className="flex-1 h-px bg-white/6" />
+                  <span className="text-white/18 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
+                </div>
+              )}
+
+              <div className="space-y-2.5">
+                {servers.map((url, idx) => {
+                  const info = getServerInfo(url, idx);
+                  const globalIdx = flatRows.findIndex(r => r.q === q && r.idx === idx);
+                  const isEmbed = url.includes("mega.nz/embed");
+                  const probe = isEmbed ? "embed" : probeStatus[url];
+                  const isFailed = probe === "fail";
+
+                  return (
+                    <motion.button key={url}
+                      initial={{ opacity: 0, y: 14 }}
+                      animate={{ opacity: isFailed ? 0.38 : 1, y: 0 }}
+                      transition={{ delay: Math.min(globalIdx * 0.05, 0.3), duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                      onClick={() => onPick(q, idx)}
+                      className="w-full text-right active:scale-[0.97] transition-transform"
+                    >
+                      <div className={`relative flex items-center gap-3.5 px-4 py-3.5 rounded-2xl overflow-hidden
+                        ${isEmbed
+                          ? "bg-gradient-to-l from-emerald-950/70 to-[#08120b] border border-emerald-500/20"
+                          : isFailed
+                            ? "bg-white/[0.025] border border-white/[0.05]"
+                            : probe === "ok"
+                              ? "bg-gradient-to-l from-violet-950/80 to-[#0c0a1a] border border-violet-500/25"
+                              : "bg-gradient-to-l from-violet-950/55 to-[#0e0b1e] border border-violet-500/15"
+                        }`}>
+
+                        {/* Glow blobs */}
+                        {isEmbed && <div className="absolute -top-5 -right-5 w-24 h-24 rounded-full bg-emerald-600/12 blur-2xl pointer-events-none" />}
+                        {!isEmbed && probe === "ok" && <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full bg-violet-600/22 blur-2xl pointer-events-none" />}
+
+                        {/* Icon */}
+                        <div className={`relative w-10 h-10 rounded-xl flex items-center justify-center shrink-0
+                          ${isEmbed
+                            ? "bg-emerald-700/25 border border-emerald-500/25"
+                            : isFailed
+                              ? "bg-white/4 border border-white/7"
+                              : "bg-violet-700/25 border border-violet-500/25"
+                          }`}>
+                          {isEmbed
+                            ? <Maximize2 className="w-4.5 h-4.5 text-emerald-300/90" />
+                            : isFailed
+                              ? <Tv2 className="w-4.5 h-4.5 text-white/20" />
+                              : <MonitorPlay className="w-4.5 h-4.5 text-violet-300/90" />
+                          }
+                        </div>
+
+                        {/* Text */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className={`text-[14px] font-black font-['Cairo'] leading-tight
+                              ${isEmbed ? "text-emerald-50/90" : isFailed ? "text-white/25" : "text-white/92"}`}>
+                              {info.label}
+                            </p>
+                            {isEmbed && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300/90 border border-emerald-400/18 leading-none">
+                                بدون إعلانات
+                              </span>
+                            )}
+                            {info.isDirect && !isEmbed && !isFailed && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-violet-500/25 text-violet-200/80 border border-violet-400/20 leading-none">
+                                مباشر
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-[11px] font-['Cairo'] mt-0.5 ${isFailed ? "text-white/15" : "text-white/32"}`}>
+                            {info.sublabel}
                           </p>
-                          {isAnimex && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-violet-500/30 text-violet-200 border border-violet-400/25 leading-none">
-                              {info.isDirect ? "MP4 مباشر" : "HLS مدمج"}
-                            </span>
+                        </div>
+
+                        {/* Probe status */}
+                        <div className="shrink-0 flex items-center gap-1.5">
+                          {probe === "checking" && (
+                            <Loader2 className="w-3.5 h-3.5 text-white/25 animate-spin" />
+                          )}
+                          {probe === "ok" && (
+                            <>
+                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+                                style={{ boxShadow: "0 0 5px rgba(52,211,153,0.85)" }} />
+                              <span className="text-emerald-400/70 text-[10px] font-['Cairo'] font-bold">يعمل</span>
+                            </>
+                          )}
+                          {probe === "fail" && (
+                            <>
+                              <div className="w-1.5 h-1.5 rounded-full bg-red-500/60" />
+                              <span className="text-red-400/45 text-[10px] font-['Cairo'] font-bold">محجوب</span>
+                            </>
+                          )}
+                          {(probe === undefined || probe === "embed") && (
+                            <ChevronLeft className={`w-4 h-4 ${isEmbed ? "text-emerald-400/35" : "text-white/18"}`} />
                           )}
                         </div>
-                        <p className="text-white/35 text-[11px] font-['Cairo'] mt-0.5">{info.sublabel}</p>
                       </div>
-                      <ChevronLeft className={`w-4 h-4 shrink-0 ${isAnimex ? "text-violet-400/60" : "text-white/20"}`} />
-                    </div>
-                  </motion.button>
-                );
-              })}
+                    </motion.button>
+                  );
+                })}
+              </div>
             </div>
+          ))}
+        </div>
+
+        {/* "Fetching more..." footer while SSE is still running */}
+        {!sseDone && totalCount > 0 && (
+          <div className="flex items-center justify-center gap-2 py-4 mt-1">
+            <Loader2 className="w-3.5 h-3.5 text-violet-400/35 animate-spin" />
+            <span className="text-white/22 text-[11px] font-['Cairo']">يجلب مصادر إضافية...</span>
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
@@ -1424,10 +1522,7 @@ export default function WatchPage() {
   const [sseDone,      setSseDone]     = useState(false);
   const fetchStarted   = useRef(false);
   const sseRef         = useRef<EventSource | null>(null);
-  const tierExhausted  = useRef(false);
   const seenSseUrls    = useRef(new Set<string>());
-  const userPicked     = useRef(false);
-  const triedTiers     = useRef(new Set<Quality>());
 
   const title     = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -1509,32 +1604,13 @@ export default function WatchPage() {
     }
   }, []);
 
-  /* Auto-pick the best source as soon as it arrives — skip picker entirely.
-     If a better quality tier arrives later (e.g. rank-11 sources after rank-2),
-     upgrade automatically as long as:
-       - user hasn't manually picked a server
-       - that tier hasn't been tried and fully exhausted already */
+  /* Switch from loading → picker once the initial loading delay passes.
+     Sources appear live in the picker as SSE events fire. */
   useEffect(() => {
     if (!loadingDone || !fetchDone) return;
-    if (phase === "nosrc") return;
-    if (userPicked.current) return;
-    // Find the best quality tier that has sources and hasn't been tried yet
-    const bestQ = QUALITY_LABELS.find(
-      q => (mergedServers[q]?.length || 0) > 0 && !triedTiers.current.has(q)
-    );
-    if (!bestQ) return;
-    // Switch if: not yet in player, OR bestQ is higher quality, OR current tier was exhausted
-    // by the player with no lower tier available (sources may have arrived since then)
-    const idx = QUALITY_LABELS.indexOf(bestQ);
-    const curIdx = QUALITY_LABELS.indexOf(quality);
-    if (phase !== "player" || idx < curIdx || tierExhausted.current) {
-      tierExhausted.current = false;
-      triedTiers.current.add(bestQ);
-      setQuality(bestQ);
-      setInitialSrv(0);
-      setPhase("player");
-    }
-  }, [loadingDone, fetchDone, mergedServers, phase, quality]);
+    if (phase === "player" || phase === "nosrc" || phase === "picker") return;
+    setPhase("picker");
+  }, [loadingDone, fetchDone, phase]);
 
   /* Only show nosrc after SSE is fully done with no sources found */
   useEffect(() => {
@@ -1554,7 +1630,6 @@ export default function WatchPage() {
   function handleRefresh() { window.location.reload(); }
 
   function handlePickServer(q: Quality, idx: number) {
-    userPicked.current = true;
     setQuality(q);
     setInitialSrv(idx);
     setPhase("player");
@@ -1573,7 +1648,7 @@ export default function WatchPage() {
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
           <ServerPicker
-            cover={cover} title={title} ep={ep}
+            cover={cover} title={title} ep={ep} sseDone={sseDone}
             streamData={streamDataForPicker}
             onPick={handlePickServer}
             onBack={handleBack}
@@ -1594,11 +1669,11 @@ export default function WatchPage() {
           title={title}
           animeTitle={animeTitle}
           cover={cover} ep={ep} totalEps={totalEps}
-          onBack={() => { userPicked.current = false; setPhase("picker"); }}
+          onBack={() => setPhase("picker")}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
-          onChangeQuality={q => { tierExhausted.current = false; setQuality(q); setInitialSrv(0); }}
-          onTierExhausted={() => { tierExhausted.current = true; }}
+          onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
+          onTierExhausted={() => setPhase("picker")}
         />
       </motion.div>
     </AnimatePresence>
