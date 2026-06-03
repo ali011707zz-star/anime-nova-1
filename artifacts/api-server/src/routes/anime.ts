@@ -100,9 +100,18 @@ function similarity(a: string, b: string) {
   a = normalize(a); b = normalize(b);
   if (a === b) return 1;
   if (a.includes(b) || b.includes(a)) return 0.85;
-  const aw = new Set(a.split(" "));
+  const aw = a.split(" ");
   const bw = b.split(" ");
-  return bw.filter(w => aw.has(w)).length / Math.max(aw.size, bw.length);
+  // Fuzzy word match: also match if one word is a prefix of the other (≥4 chars)
+  // e.g. "haikyu" matches "haikyuu", "boku" matches "bokurano"
+  const matches = bw.filter(bWord =>
+    aw.some(aWord =>
+      aWord === bWord ||
+      (aWord.length >= 4 && bWord.length >= 4 &&
+        (aWord.startsWith(bWord) || bWord.startsWith(aWord)))
+    )
+  ).length;
+  return matches / Math.max(aw.length, bw.length);
 }
 function toSlug(s: string): string {
   return s.toLowerCase()
