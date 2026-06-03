@@ -919,17 +919,20 @@ async function extractAndCollect(
   timeoutMs = 14000,
 ): Promise<void> {
   function collect(s: UnifiedSource) {
-    if (!s.directUrl) return;
-    if (DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
-    const key = s.directUrl.includes("workers.dev")
-      ? "cdn:" + s.directUrl.replace(/^https?:\/\/[^/]+/, "")
-      : s.directUrl;
+    if (!s.directUrl && !s.isEmbed) return;
+    const checkUrl = s.directUrl || s.url;
+    if (!s.isEmbed && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
+    const key = checkUrl.includes("workers.dev")
+      ? "cdn:" + checkUrl.replace(/^https?:\/\/[^/]+/, "")
+      : checkUrl;
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
     out.push(s);
   }
 
   await Promise.allSettled(sources.map(async (s) => {
+    // isEmbed sources (e.g. mega.nz/embed) pass through without extraction
+    if (s.isEmbed) { collect(s); return; }
     // Already has directUrl (e.g. Phoenix direct MKV/MP4)
     if (s.directUrl) {
       const alive = await probeDirectUrl(s.directUrl, s.url);
@@ -1236,7 +1239,7 @@ function parseAnimadarServers(
       const attrs = liM[1];
       if (!/source=["']ani["']/i.test(attrs)) continue;
       const type    = attrs.match(/\btype=["']([^"']+)["']/)?.[1]         || "";
-      const data    = attrs.match(/\bdata=["']([^"']+)["']/)?.[1]         || "";
+      const data    = attrs.match(/(?:^|\s)data=["']([^"']+)["']/)?.[1]    || "";
       const quality = attrs.match(/\bquality-data=["']([^"']+)["']/)?.[1] || "HD";
       if (type && data && data.length >= 3) servers.push({ type, data, quality });
     }
@@ -1253,6 +1256,39 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
   const SKIP_SLUGS = ["feed/", "wp-", "/page/", "genre/", "cast/", "tag/", "category/",
     "dmca", "contact", "about", "privacy", "xmlrpc", "wp-json"];
 
+  // ── Step 1: Try direct slug construction (much faster than search) ──
+  const slugCandidates: string[] = [];
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const s = toSlug(q as string);
+    if (!s) continue;
+    slugCandidates.push(s);
+    // Colon-removed join: "Re:Zero" → "ReZero" → "rezero-kara-..." (AnimeDar style)
+    const colonJoined = toSlug((q as string).replace(/[：:]/g, ""));
+    if (colonJoined && colonJoined !== s) slugCandidates.push(colonJoined);
+    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
+    if (stripped !== s && stripped.length > 2) slugCandidates.push(stripped);
+    const colonJoinedStripped = colonJoined.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
+    if (colonJoinedStripped !== colonJoined && colonJoinedStripped.length > 2) slugCandidates.push(colonJoinedStripped);
+  }
+  for (const slug of [...new Set(slugCandidates)]) {
+    try {
+      const r = await fetch(`${ADAR_BASE}/${slug}/`, {
+        headers: ADAR_HDRS,
+        signal: AbortSignal.timeout(7000),
+        redirect: "follow",
+      });
+      if (r.ok) {
+        const html = await r.text();
+        if (!isCloudflareBlock(html) && html.includes("ul-server-position")) {
+          const url = `${ADAR_BASE}/${slug}/`;
+          adarSlugCache.set(ck, { url, ts: Date.now() });
+          return url;
+        }
+      }
+    } catch {}
+  }
+
+  // ── Step 2: Fall back to search ──
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
       const r = await fetch(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, {
@@ -1267,12 +1303,16 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
       let best: string | null = null;
       let bestScore = 0;
 
-      const anchorRe = /<a\s+href="(https?:\/\/animedar\.net\/([^"#?]+))"[^>]*itemprop="url"[^>]*title="([^"]+)"/gi;
+      // Try both itemprop="url" anchors and plain article/post anchors
+      const anchorRe = /<a\s+href="(https?:\/\/animedar\.net\/([^"#?]+))"(?:[^>]*title="([^"]*)")?[^>]*>/gi;
       for (const m of html.matchAll(anchorRe)) {
         const url   = m[1];
         const slug  = m[2];
-        const label = m[3].replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim();
+        const rawLabel = m[3] || "";
         if (SKIP_SLUGS.some(s => slug.includes(s))) continue;
+        if (!slug.match(/^[a-z0-9-]+\/$/)) continue;
+        const label = rawLabel.replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim()
+          || slug.replace(/\/$/, "").replace(/-/g, " ");
         const score = Math.max(
           similarity(label, title),
           english ? similarity(label, english) : 0,
@@ -2747,8 +2787,8 @@ router.get("/anime/sources-stream", async (req, res) => {
   }
 
   try {
-    const SCRAPER_MS = 18000;
-    const EXTRACT_MS = 14000;
+    const SCRAPER_MS = 14000;
+    const EXTRACT_MS = 12000;
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
@@ -2899,8 +2939,8 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
 
-  const SCRAPER_MS = 18000;
-  const EXTRACT_MS = 14000;
+  const SCRAPER_MS = 14000;
+  const EXTRACT_MS = 12000;
   const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
     Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
