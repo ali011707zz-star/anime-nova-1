@@ -2634,6 +2634,27 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
     const sources: UnifiedSource[] = [];
 
+    // ── FileMoon (FDLink) → HLS مباشر → مشغّل داخلي بدون إعلانات ──
+    const fdLink = String(epData.FDLink || "").trim();
+    if (fdLink) {
+      const filemoonUrl = `https://filemoon.sx/e/${fdLink}`;
+      try {
+        const extracted = await extractVideoDeep(filemoonUrl, filemoonUrl, 0);
+        if (extracted?.url) {
+          const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(filemoonUrl)}`;
+          sources.push({
+            name: "فايل مون",
+            url: filemoonUrl,
+            quality: "1080p",
+            qualityRank: 9,
+            site: "animeify",
+            directUrl: proxyUrl,
+            directType: "hls",
+          });
+        }
+      } catch {}
+    }
+
     // ── Mega.nz embed (MALink: "fileId!decryptionKey") — بدون إعلانات ──
     const maLink = String(epData.MALink || "").trim();
     if (maLink && maLink.includes("!")) {
@@ -2643,7 +2664,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       if (fileId && key) {
         const embedUrl = `https://mega.nz/embed/${fileId}#${key}`;
         sources.push({
-          name: "Mega",
+          name: "ميغا",
           url: embedUrl,
           quality: "720p",
           qualityRank: 8,
