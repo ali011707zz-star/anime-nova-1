@@ -40,6 +40,40 @@ function saveHistory(id: number, title: string, cover: string, ep: number, total
 }
 
 const QUALITY_LABELS: Quality[] = ["1080p FHD", "720p HD", "360p SD"];
+
+/* ── FetchedSrc: shape returned by /api/anime/fetch-source ── */
+interface FetchedSrc {
+  url: string; directUrl?: string; qualityRank?: number;
+  name?: string; site?: string; isEmbed?: boolean;
+}
+
+/* ── All known scrapers — shown immediately in picker ── */
+const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] = [
+  { site: "animephoenix", name: "أنمي فينكس",  desc: "عربي مدبلج · مباشر",      tag: "PH" },
+  { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH" },
+  { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "AL" },
+  { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD" },
+  { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK" },
+  { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS" },
+  { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم",              tag: "AT" },
+  { site: "toonstream",   name: "تون ستريم",    desc: "ياباني مترجم",             tag: "TS" },
+  { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
+  { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "MG" },
+];
+
+type SlotStatus = "idle" | "fetching" | "ready" | "failed";
+
+function buildMerged(srcs: FetchedSrc[]): Record<Quality, string[]> {
+  const merged: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
+  srcs.forEach(s => {
+    const url = s.directUrl || s.url;
+    if (!url) return;
+    const rank = s.qualityRank ?? 2;
+    const tier: Quality = rank >= 3 ? "1080p FHD" : rank >= 2 ? "720p HD" : "360p SD";
+    if (!merged[tier].includes(url)) merged[tier].push(url);
+  });
+  return merged;
+}
 const QUALITY_SHORT: Record<Quality, string> = {
   "1080p FHD": "1080",
   "720p HD": "720",
@@ -256,93 +290,58 @@ function getServerTag(url: string): string {
   return "SRC";
 }
 
-/* ══════════════════════════════════ SERVER PICKER ═══════════ */
-function ServerPicker({
-  cover, title, ep, sseDone, totalEps,
-  streamData, onPick, onBack, onNextEp, onPrevEp,
+/* ══════════════════════════════════ SCRAPER PICKER ══════════ */
+function ScraperPicker({
+  cover, title, ep, totalEps,
+  slotStatus, slotSources,
+  onPick, onBack, onNextEp, onPrevEp,
 }: {
-  cover: string; title: string; ep: number; sseDone: boolean; totalEps: number;
-  streamData: StreamData;
-  onPick: (q: Quality, idx: number) => void;
+  cover: string; title: string; ep: number; totalEps: number;
+  slotStatus: Record<string, SlotStatus>;
+  slotSources: Record<string, FetchedSrc[]>;
+  onPick: (site: string) => void;
   onBack: () => void;
   onNextEp: () => void;
   onPrevEp: () => void;
 }) {
-  /* Detect if all quality tiers have identical server lists → flat mode */
-  const q1 = streamData.servers["1080p FHD"] || [];
-  const q2 = streamData.servers["720p HD"]   || [];
-  const q3 = streamData.servers["360p SD"]   || [];
-  const allIdentical =
-    q1.length > 0 &&
-    q1.length === q2.length && q1.length === q3.length &&
-    q1.every((u, i) => u === q2[i] && u === q3[i]);
+  /* External player overlay */
+  const [extOverlay, setExtOverlay] = useState<{ site: string; url: string } | null>(null);
 
-  const canonicalQ: Quality = allIdentical
-    ? "1080p FHD"
-    : (QUALITY_LABELS.find(q => (streamData.servers[q]?.length || 0) > 0) || "720p HD");
-
-  const allGroups = allIdentical
-    ? [{ q: canonicalQ, servers: q1 }]
-    : QUALITY_LABELS.map(q => ({ q, servers: streamData.servers[q] || [] }))
-        .filter(g => g.servers.length > 0);
-
-  const flatRows: { q: Quality; url: string; idx: number; globalIdx: number }[] = [];
-  allGroups.forEach(({ q, servers }) =>
-    servers.forEach((url, idx) => flatRows.push({ q, url, idx, globalIdx: flatRows.length }))
-  );
-
-  const totalCount = flatRows.length;
-
-  const QUALITY_LABEL_AR: Record<Quality, string> = {
-    "1080p FHD": "الجودة FHD",
-    "720p HD":   "الجودة HD",
-    "360p SD":   "الجودة SD",
-  };
+  function openExternalOverlay(site: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const srcs = slotSources[site] || [];
+    const bestSrc = srcs.slice().sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0];
+    const rawUrl = bestSrc?.directUrl || bestSrc?.url || "";
+    if (!rawUrl) return;
+    const fullUrl = rawUrl.startsWith("/") ? window.location.origin + rawUrl : rawUrl;
+    setExtOverlay({ site, url: fullUrl });
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#07070e]" dir="rtl">
 
-      {/* ── Navigation bar (matches reference: ← title → arrows) ── */}
+      {/* ── Nav bar ── */}
       <div className="flex items-center gap-0 shrink-0"
-        style={{
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-          paddingTop: "max(14px, env(safe-area-inset-top))",
-          paddingBottom: 12,
-        }}>
-        {/* Back */}
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)",
+          paddingTop: "max(14px, env(safe-area-inset-top))", paddingBottom: 12 }}>
         <button onClick={onBack}
           className="w-12 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0">
           <ChevronRight className="w-5 h-5 text-white/55" />
         </button>
-        {/* Prev episode */}
         <button onClick={onPrevEp} disabled={ep <= 1}
           className="w-10 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0 disabled:opacity-20">
           <ChevronRight className="w-4 h-4 text-white/45" />
         </button>
-
-        {/* Center: title */}
         <div className="flex-1 text-center min-w-0 px-1">
           <p className="text-white/90 text-[13px] font-black font-['Cairo'] truncate leading-tight">
             {title} · الحلقة {ep}
           </p>
-          <div className="flex items-center justify-center gap-1 mt-0.5 h-4">
-            {!sseDone ? (
-              <span className="flex items-center gap-1 text-amber-300/55 text-[10px] font-['Cairo']">
-                <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />
-                {totalCount > 0 ? `${totalCount} مصادر · يكمل البحث...` : "جارٍ جلب المصادر..."}
-              </span>
-            ) : (
-              <span className="text-white/22 text-[10px] font-['Cairo']">{totalCount} مصدر متاح</span>
-            )}
-          </div>
+          <p className="text-white/22 text-[10px] font-['Cairo'] mt-0.5">اختر مصدراً للتشغيل</p>
         </div>
-
-        {/* Next episode */}
         <button onClick={onNextEp} disabled={ep >= totalEps}
           className="w-10 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0 disabled:opacity-20">
           <ChevronLeft className="w-4 h-4 text-white/45" />
         </button>
-        {/* Cover thumbnail */}
         {cover && (
           <div className="w-12 flex justify-center shrink-0">
             <img src={cover} alt="" className="w-8 h-11 rounded-lg object-cover opacity-60" />
@@ -350,85 +349,148 @@ function ServerPicker({
         )}
       </div>
 
-      {/* ── Source list ── */}
+      {/* ── Scraper list ── */}
       <div className="flex-1 overflow-y-auto"
         style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
 
-        {allGroups.map(({ q, servers }, gi) => (
-          <div key={q}>
-            {/* Quality section divider — centered label like reference image */}
-            <div className="flex items-center gap-3 px-4 py-2.5 mt-1">
-              <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
-              <span className="text-white/38 text-[11px] font-bold font-['Cairo'] tracking-wide select-none">
-                {QUALITY_LABEL_AR[q]}
-              </span>
-              <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
-            </div>
+        {SCRAPER_DEFS.map((def, i) => {
+          const status = slotStatus[def.site] || "idle";
+          const srcs   = slotSources[def.site] || [];
+          const count  = srcs.length;
 
-            {/* Server rows */}
-            {servers.map((url, idx) => {
-              const info    = getServerInfo(url, idx);
-              const tag     = getServerTag(url);
-              const isEmbed = url.includes("mega.nz/embed");
-              const globalIdx = (gi === 0 ? 0 : allGroups.slice(0,gi).reduce((a,g)=>a+g.servers.length,0)) + idx;
+          const isFailed   = status === "failed";
+          const isFetching = status === "fetching";
+          const isReady    = status === "ready";
 
-              return (
-                <motion.div key={url}
-                  initial={{ opacity: 0, x: 8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: Math.min(globalIdx * 0.045, 0.28), duration: 0.22, ease: "easeOut" }}
-                  onClick={() => onPick(q, idx)}
-                  className="flex items-center px-4 py-3 gap-3 cursor-pointer active:bg-white/5 transition-all"
-                  style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+          return (
+            <motion.div key={def.site}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.035, duration: 0.18, ease: "easeOut" }}
+              onClick={() => !isFetching && onPick(def.site)}
+              className={`flex items-center px-4 py-3.5 gap-3 cursor-pointer transition-all
+                ${isFailed ? "opacity-40" : "active:bg-white/5"}`}
+              style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
 
-                  {/* Right: server name + sublabel */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-bold font-['Cairo'] leading-tight truncate text-white/82">
-                      السيرفر {idx + 1} &nbsp;·&nbsp; {info.label}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[10px] font-['Cairo'] text-white/28">{info.sublabel}</span>
-                      {isEmbed && (
-                        <span className="text-emerald-400/55 text-[10px] font-['Cairo']">· بدون إعلانات</span>
-                      )}
-                    </div>
-                  </div>
+              {/* Status dot */}
+              <div className="shrink-0 w-2 h-2 rounded-full"
+                style={{
+                  background: isReady ? "rgba(52,211,153,0.9)"
+                    : isFailed ? "rgba(239,68,68,0.5)"
+                    : isFetching ? "rgba(251,191,36,0.8)"
+                    : "rgba(255,255,255,0.15)",
+                  boxShadow: isReady ? "0 0 6px rgba(52,211,153,0.7)"
+                    : isFetching ? "0 0 6px rgba(251,191,36,0.6)" : "none",
+                }}
+              />
 
-                  {/* Left: format tag chip */}
-                  <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
-                    style={{
-                      color: isEmbed ? "rgba(52,211,153,0.65)" : "rgba(255,255,255,0.35)",
-                      background: isEmbed ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.05)",
-                      border: `1px solid ${isEmbed ? "rgba(52,211,153,0.18)" : "rgba(255,255,255,0.08)"}`,
-                    }}>
-                    {tag}
-                  </span>
-                </motion.div>
-              );
-            })}
-          </div>
-        ))}
+              {/* Site name + description */}
+              <div className="flex-1 min-w-0">
+                <p className={`text-[13px] font-bold font-['Cairo'] leading-tight
+                  ${isFailed ? "text-white/30" : "text-white/82"}`}>
+                  {def.name}
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-[10px] font-['Cairo'] text-white/28">{def.desc}</span>
+                  {isReady && count > 1 && (
+                    <span className="text-emerald-400/55 text-[10px] font-['Cairo']">· {count} مصادر</span>
+                  )}
+                  {isFailed && (
+                    <span className="text-white/25 text-[10px] font-['Cairo']">· غير متاح · اضغط للمحاولة</span>
+                  )}
+                </div>
+              </div>
 
-        {/* Empty / loading state — minimal, only when no sources yet */}
-        {totalCount === 0 && (
-          <div className="flex flex-col items-center py-20 gap-3">
-            {!sseDone
-              ? <><Loader2 className="w-7 h-7 text-violet-400/35 animate-spin" />
-                  <p className="text-white/22 text-[12px] font-['Cairo']">يجلب المصادر من 5 مواقع...</p></>
-              : <><AlertTriangle className="w-7 h-7 text-white/20" />
-                  <p className="text-white/22 text-[12px] font-['Cairo']">لم يُعثر على مصادر لهذه الحلقة</p></>
-            }
-          </div>
-        )}
+              {/* Right: actions */}
+              <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                {/* Tag chip */}
+                <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  style={{
+                    color: isReady ? "rgba(52,211,153,0.7)" : "rgba(255,255,255,0.3)",
+                    background: isReady ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.05)",
+                    border: `1px solid ${isReady ? "rgba(52,211,153,0.2)" : "rgba(255,255,255,0.08)"}`,
+                  }}>
+                  {def.tag}
+                </span>
 
-        {/* Subtle "fetching more" footer */}
-        {!sseDone && totalCount > 0 && (
-          <div className="flex items-center justify-center gap-1.5 py-3 opacity-50">
-            <Loader2 className="w-3 h-3 text-violet-400/60 animate-spin" />
-            <span className="text-white/30 text-[10px] font-['Cairo']">يجلب مصادر إضافية...</span>
-          </div>
-        )}
+                {/* Spinner while fetching */}
+                {isFetching && <Loader2 className="w-4 h-4 text-amber-300/60 animate-spin" />}
+
+                {/* External player button — only when ready */}
+                {isReady && (
+                  <button
+                    onClick={e => openExternalOverlay(def.site, e)}
+                    title="فتح في مشغّل خارجي"
+                    className="w-7 h-7 rounded-xl flex items-center justify-center active:scale-90 transition-all"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                    <ExternalLink className="w-3.5 h-3.5 text-white/30" />
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          );
+        })}
+
+        {/* Footer hint */}
+        <div className="py-5 text-center">
+          <p className="text-white/12 text-[10px] font-['Cairo']">اضغط على أي مصدر لجلب الرابط وتشغيل الحلقة</p>
+        </div>
       </div>
+
+      {/* ── External player overlay ── */}
+      <AnimatePresence>
+        {extOverlay && (
+          <motion.div
+            className="fixed inset-0 z-[60] flex items-end"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setExtOverlay(null)}>
+            <div className="absolute inset-0 bg-black/60" />
+            <motion.div
+              className="relative w-full rounded-t-2xl overflow-hidden"
+              initial={{ y: 80 }} animate={{ y: 0 }} exit={{ y: 80 }}
+              transition={{ type: "spring", damping: 28, stiffness: 280 }}
+              style={{ background: "#111118", border: "1px solid rgba(255,255,255,0.08)" }}
+              onClick={e => e.stopPropagation()}>
+              <div className="px-5 pt-4 pb-2">
+                <p className="text-white/60 text-[12px] font-['Cairo'] mb-3">فتح في مشغّل خارجي</p>
+                {/* MX Player */}
+                <a
+                  href={`intent:${extOverlay.url}#Intent;package=com.mxtech.videoplayer.ad;S.title=${encodeURIComponent(title)};end`}
+                  className="flex items-center gap-3 py-3 px-4 rounded-xl mb-2 active:opacity-70"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span className="text-[22px]">▶️</span>
+                  <div>
+                    <p className="text-white/80 text-[13px] font-bold font-['Cairo']">MX Player</p>
+                    <p className="text-white/30 text-[10px] font-['Cairo']">أندرويد · مشغّل فيديو</p>
+                  </div>
+                </a>
+                {/* VLC */}
+                <a
+                  href={`intent:${extOverlay.url}#Intent;package=org.videolan.vlc;S.title=${encodeURIComponent(title)};end`}
+                  className="flex items-center gap-3 py-3 px-4 rounded-xl mb-2 active:opacity-70"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span className="text-[22px]">🎬</span>
+                  <div>
+                    <p className="text-white/80 text-[13px] font-bold font-['Cairo']">VLC</p>
+                    <p className="text-white/30 text-[10px] font-['Cairo']">أندرويد / iOS · مشغّل مفتوح</p>
+                  </div>
+                </a>
+                {/* Copy URL */}
+                <button
+                  onClick={() => { navigator.clipboard?.writeText(extOverlay.url).catch(()=>{}); setExtOverlay(null); }}
+                  className="flex items-center gap-3 py-3 px-4 rounded-xl w-full active:opacity-70 mb-3"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span className="text-[22px]">📋</span>
+                  <div className="text-right">
+                    <p className="text-white/80 text-[13px] font-bold font-['Cairo']">نسخ الرابط</p>
+                    <p className="text-white/30 text-[10px] font-['Cairo']">للصق في أي مشغّل</p>
+                  </div>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1467,7 +1529,8 @@ function EpisodePlayer({
 }
 
 /* ══════════════════════════════════ WATCH PAGE ══════════════ */
-const EMPTY_SSE: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
+const EMPTY_SLOTS = (): Record<string, SlotStatus> =>
+  Object.fromEntries(SCRAPER_DEFS.map(d => [d.site, "idle" as SlotStatus]));
 
 export default function WatchPage() {
   const [, navigate] = useLocation();
@@ -1478,61 +1541,20 @@ export default function WatchPage() {
   const titleParam   = sp.get("title") || "";
   const englishParam = sp.get("english") || "";
 
-  const [anime,        setAnime]       = useState<any>(null);
-  const [sseServers,   setSseServers]  = useState<Record<Quality, string[]>>(EMPTY_SSE);
-  const [quality,      setQuality]     = useState<Quality>("720p HD");
-  const [initialSrv,   setInitialSrv]  = useState(0);
-  const [phase,        setPhase]       = useState<"picker" | "player" | "nosrc">("picker");
-  const [sseDone,      setSseDone]     = useState(false);
-  const fetchStarted   = useRef(false);
-  const sseRef         = useRef<EventSource | null>(null);
-  const seenSseUrls    = useRef(new Set<string>());
+  const [anime,        setAnime]        = useState<any>(null);
+  const [slotStatus,   setSlotStatus]   = useState<Record<string, SlotStatus>>(EMPTY_SLOTS);
+  const [slotSources,  setSlotSources]  = useState<Record<string, FetchedSrc[]>>({});
+  const [playerServers,setPlayerServers]= useState<Record<Quality, string[]>>({ "1080p FHD": [], "720p HD": [], "360p SD": [] });
+  const [quality,      setQuality]      = useState<Quality>("720p HD");
+  const [initialSrv,   setInitialSrv]   = useState(0);
+  const [phase,        setPhase]        = useState<"picker" | "player">("picker");
 
-  const title     = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
+  const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
-  const totalEps  = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
-  const cover     = anime?.coverImage?.large || "";
+  const totalEps   = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
+  const cover      = anime?.coverImage?.large || "";
 
-  /* All sources come from SSE only (no iframe/anipub sources) */
-  const mergedServers = sseServers;
-
-  const doFetchServers = useCallback((t: string, e: string) => {
-    if (fetchStarted.current) return;
-    fetchStarted.current = true;
-    const params = new URLSearchParams({ title: t, english: e, ep: String(ep) });
-    if (animeId) params.set("anilistId", String(animeId));
-
-    /* SSE: sources-stream — stream directly to state as each source arrives */
-    if (sseRef.current) sseRef.current.close();
-    const es = new EventSource(`/api/anime/sources-stream?${params}`);
-    sseRef.current = es;
-    const closeTimer = setTimeout(() => { setSseDone(true); es.close(); }, 38000);
-    es.onmessage = (ev) => {
-      try {
-        if (ev.data === "[DONE]") {
-          setSseDone(true);
-          clearTimeout(closeTimer);
-          es.close();
-          return;
-        }
-        const src = JSON.parse(ev.data) as {
-          url: string; directUrl?: string; qualityRank?: number; site?: string; isEmbed?: boolean;
-        };
-        const playUrl = src.directUrl || src.url;
-        if (!playUrl) return;
-        if (seenSseUrls.current.has(playUrl)) return;
-        seenSseUrls.current.add(playUrl);
-        const rank = src.qualityRank ?? 2;
-        const tier: Quality = rank >= 3 ? "1080p FHD" : rank >= 2 ? "720p HD" : "360p SD";
-        setSseServers(prev => ({ ...prev, [tier]: [...prev[tier], playUrl] }));
-      } catch {}
-    };
-    es.onerror = () => { clearTimeout(closeTimer); setSseDone(true); es.close(); };
-  }, [ep, animeId]);
-
-  /* Cleanup SSE on unmount */
-  useEffect(() => () => { sseRef.current?.close(); }, []);
-
+  /* Fetch AniList metadata */
   useEffect(() => {
     if (!animeId) return;
     fetch("https://graphql.anilist.co", {
@@ -1547,47 +1569,62 @@ export default function WatchPage() {
         if (d) {
           setAnime(d);
           saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0);
-          if (!fetchStarted.current) {
-            doFetchServers(d.title?.romaji || "", d.title?.english || "");
-          }
         }
       })
       .catch(() => {});
   }, [animeId]);
 
-  useEffect(() => {
-    if (titleParam || englishParam) {
-      doFetchServers(titleParam, englishParam);
-    }
-  }, []);
-
-  /* Show nosrc only after SSE is fully done with no sources */
-  useEffect(() => {
-    if (!sseDone) return;
-    const hasAny = QUALITY_LABELS.some(q => (mergedServers[q]?.length || 0) > 0);
-    if (!hasAny) setPhase(prev => prev === "player" ? prev : "nosrc");
-  }, [sseDone, mergedServers]);
-
   function goEp(n: number) {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`);
   }
 
-  /* Back: use browser history (avoids push-loop with AnimeDetail/EpisodeList) */
-  function handleBack() {
-    window.history.back();
+  function handleBack() { window.history.back(); }
+
+  /* ── Per-site on-demand fetch ── */
+  async function handleClickSite(site: string) {
+    const current = slotStatus[site];
+    if (current === "fetching") return;
+
+    /* Already fetched → play immediately */
+    if (current === "ready") {
+      const srcs   = slotSources[site] || [];
+      const merged = buildMerged(srcs);
+      setPlayerServers(merged);
+      const bestQ  = QUALITY_LABELS.find(q => merged[q].length > 0) || "720p HD";
+      setQuality(bestQ);
+      setInitialSrv(0);
+      setPhase("player");
+      return;
+    }
+
+    /* idle or failed → fetch now */
+    setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
+    try {
+      const t = anime?.title?.romaji || titleParam;
+      const e = anime?.title?.english || englishParam || "";
+      const params = new URLSearchParams({ site, title: t, english: e, ep: String(ep) });
+      const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(25000) });
+      const data = await r.json() as { sources?: FetchedSrc[] };
+      const srcs: FetchedSrc[] = data.sources || [];
+
+      if (srcs.length > 0) {
+        setSlotSources(prev => ({ ...prev, [site]: srcs }));
+        setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+        const merged = buildMerged(srcs);
+        setPlayerServers(merged);
+        const bestQ  = QUALITY_LABELS.find(q => merged[q].length > 0) || "720p HD";
+        setQuality(bestQ);
+        setInitialSrv(0);
+        setPhase("player");
+      } else {
+        setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+      }
+    } catch {
+      setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+    }
   }
-  function handleRefresh() { window.location.reload(); }
 
-  function handlePickServer(q: Quality, idx: number) {
-    setQuality(q);
-    setInitialSrv(idx);
-    setPhase("player");
-  }
-
-  const servers = mergedServers[quality] || [];
-  const streamDataForPicker: StreamData = { servers: mergedServers, total: servers.length };
-
-  if (phase === "nosrc") return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
+  const servers = playerServers[quality] || [];
 
   if (phase === "picker") {
     return (
@@ -1595,10 +1632,10 @@ export default function WatchPage() {
         <motion.div key="picker"
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
-          <ServerPicker
-            cover={cover} title={title} ep={ep} sseDone={sseDone} totalEps={totalEps}
-            streamData={streamDataForPicker}
-            onPick={handlePickServer}
+          <ScraperPicker
+            cover={cover} title={title} ep={ep} totalEps={totalEps}
+            slotStatus={slotStatus} slotSources={slotSources}
+            onPick={handleClickSite}
             onBack={handleBack}
             onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
             onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
@@ -1614,7 +1651,7 @@ export default function WatchPage() {
         <EpisodePlayer
           servers={servers}
           quality={quality}
-          allServers={mergedServers}
+          allServers={playerServers}
           initialServer={initialSrv}
           title={title}
           animeTitle={animeTitle}
