@@ -502,7 +502,7 @@ async function searchShahiid(query: string): Promise<Array<{ url: string; label:
     const html = await r.text();
     const results: Array<{ url: string; label: string }> = [];
     const seen = new Set<string>();
-    const re = /href="(https?:\/\/shahiid-anime\.net\/(?:series|anime|serieses|seasonses|seasons)\/([^/"]+)\/?)"/gi;
+    const re = /href="(https?:\/\/shahiid-anime\.net\/(?:series|anime|serieses|seasonses|seasons|seriesDubbed)\/([^/"]+)\/?)"/gi;
     for (const m of html.matchAll(re)) {
       const url = m[1].replace(/\/?$/, "/");
       if (seen.has(url)) continue;
@@ -800,7 +800,27 @@ async function getShahiidSources(
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
 
   try {
-    const candidateUrls = await resolveAllShahiidUrls(romaji, english);
+    let candidateUrls = await resolveAllShahiidUrls(romaji, english);
+
+    // Supplement with direct slug construction (covers Season 1 not returned by search)
+    const slugsToTry: string[] = [];
+    for (const q of [romaji, english].filter(Boolean) as string[]) {
+      const s = toSlug(q);
+      if (s) {
+        slugsToTry.push(s);
+        const noColon = toSlug(q.replace(/[:：].*/g, "").trim());
+        if (noColon && noColon !== s) slugsToTry.push(noColon);
+      }
+    }
+    const extraUrls: string[] = [];
+    for (const slug of [...new Set(slugsToTry)]) {
+      for (const prefix of ["seasons", "series", "serieses", "seasonses"]) {
+        const u = `${SHAHIID_BASE}/${prefix}/${slug}/`;
+        if (!candidateUrls.includes(u)) extraUrls.push(u);
+      }
+    }
+    // Put slug-constructed URLs FIRST — they're faster (skip wrong-season search hits)
+    candidateUrls = [...extraUrls, ...candidateUrls];
     if (!candidateUrls.length) return [];
 
     let episodePage: string | null = null;
@@ -1169,6 +1189,7 @@ const ADAR_HDRS: Record<string, string> = {
 const ADAR_DEAD_TYPES = new Set([
   "mega","4shared","drive","ok","okru","uqload","fembed","videa",
   "doodstream","dood","waaw","facebook","dailymotion",
+  "highload","sblanh","upvideo","turbobit","1fichier","solidfiles",
 ]);
 
 function buildAnimestreamEmbed(type: string, data: string): string | null {
@@ -1225,8 +1246,7 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
 
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const searchTerm = encodeURIComponent(q.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim());
-      const r = await fetch(`${ADAR_BASE}/search/${searchTerm}/`, {
+      const r = await fetch(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, {
         headers: ADAR_HDRS,
         signal: AbortSignal.timeout(10000),
         redirect: "follow",
@@ -2486,8 +2506,9 @@ async function getRistoAnimeSources(
 
     if (!epUrl) return [];
 
-    // Fetch episode page → parse ul#watch li[data-watch]
-    const epR = await fetch(epUrl, {
+    // Fetch episode page with ?watch=1 → server list is only in this variant
+    const watchEpUrl = epUrl + (epUrl.includes("?") ? "&" : "?") + "watch=1";
+    const epR = await fetch(watchEpUrl, {
       headers: { ...RISTO_HDRS, Referer: seriesUrl },
       signal: AbortSignal.timeout(10000),
       redirect: "follow",

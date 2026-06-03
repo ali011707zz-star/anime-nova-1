@@ -75,9 +75,18 @@ function getServerInfo(url: string, idx: number): ServerInfo {
     }
     return { label: `مصدر ${idx + 1}`, sublabel: "عربي · HLS", isHls: true };
   }
-  // Direct MP4/MKV/WebM (streamtape, sendvid, video-proxy)
-  if (url.includes("streamtape.com") || url.includes("sendvid.com") || url.includes("/video-proxy?")) {
+  // Direct MP4/MKV/WebM via video-proxy or direct CDN
+  if (url.includes("streamtape.com")) {
     return { label: "ستريم تيب", sublabel: "عربي · مباشر", isHls: true, isDirect: true };
+  }
+  if (url.includes("sendvid.com") || (url.includes("/video-proxy?") && url.includes("sendvid"))) {
+    return { label: "سيندفيد", sublabel: "عربي · مباشر", isHls: true, isDirect: true };
+  }
+  if (url.includes("mp4upload.com")) {
+    return { label: "MP4Upload", sublabel: "مباشر", isHls: true, isDirect: true };
+  }
+  if (url.includes("/video-proxy?")) {
+    return { label: "مباشر", sublabel: "عربي · مباشر", isHls: true, isDirect: true };
   }
   if (url.match(/\.(mp4|mkv|webm)([?#]|$)/i)) {
     return { label: "مصدر مباشر", sublabel: "تشغيل مباشر", isHls: true, isDirect: true };
@@ -874,13 +883,14 @@ function EpisodePlayer({
   servers, quality, allServers,
   title, cover, ep, totalEps, animeTitle,
   initialServer,
-  onBack, onNextEp, onPrevEp, onChangeQuality,
+  onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; cover: string; ep: number; totalEps: number; animeTitle: string;
   initialServer?: number;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
+  onTierExhausted?: () => void;
 }) {
   const [currentServer, setCurrentServer] = useState(initialServer ?? 0);
   const [showQuality,  setShowQuality]    = useState(false);
@@ -1023,6 +1033,8 @@ function EpisodePlayer({
           return;
         }
       }
+      // No lower tier has sources yet — signal Watch to retry when SSE delivers more
+      onTierExhausted?.();
     }
   }
 
@@ -1307,6 +1319,7 @@ export default function WatchPage() {
   const [sseDone,      setSseDone]     = useState(false);
   const fetchStarted   = useRef(false);
   const sseRef         = useRef<EventSource | null>(null);
+  const tierExhausted  = useRef(false);
   const seenSseUrls    = useRef(new Set<string>());
   const userPicked     = useRef(false);
   const triedTiers     = useRef(new Set<Quality>());
@@ -1405,8 +1418,12 @@ export default function WatchPage() {
       q => (mergedServers[q]?.length || 0) > 0 && !triedTiers.current.has(q)
     );
     if (!bestQ) return;
-    // Only switch if we're not in player mode yet, OR bestQ is better than current quality
-    if (phase !== "player" || QUALITY_LABELS.indexOf(bestQ) < QUALITY_LABELS.indexOf(quality)) {
+    // Switch if: not yet in player, OR bestQ is higher quality, OR current tier was exhausted
+    // by the player with no lower tier available (sources may have arrived since then)
+    const idx = QUALITY_LABELS.indexOf(bestQ);
+    const curIdx = QUALITY_LABELS.indexOf(quality);
+    if (phase !== "player" || idx < curIdx || tierExhausted.current) {
+      tierExhausted.current = false;
       triedTiers.current.add(bestQ);
       setQuality(bestQ);
       setInitialSrv(0);
@@ -1475,7 +1492,8 @@ export default function WatchPage() {
           onBack={() => { userPicked.current = false; setPhase("picker"); }}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
-          onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
+          onChangeQuality={q => { tierExhausted.current = false; setQuality(q); setInitialSrv(0); }}
+          onTierExhausted={() => { tierExhausted.current = true; }}
         />
       </motion.div>
     </AnimatePresence>
