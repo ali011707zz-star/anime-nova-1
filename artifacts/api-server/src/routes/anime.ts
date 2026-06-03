@@ -1001,8 +1001,16 @@ async function extractAndCollect(
             }
           }
         }
+      } else if (s.url.includes("mega.nz/embed")) {
+        // Extraction failed — mega.nz/embed is ad-free, send as sandboxed iframe fallback
+        collect({ ...s, directUrl: s.url, isEmbed: true });
       }
-    } catch {}
+    } catch {
+      // On exception: if it's a mega.nz embed, still try sending as iframe fallback
+      if (s.url.includes("mega.nz/embed")) {
+        collect({ ...s, directUrl: s.url, isEmbed: true });
+      }
+    }
   }));
 }
 
