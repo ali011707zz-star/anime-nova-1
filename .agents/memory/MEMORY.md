@@ -12,6 +12,9 @@
 - [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
 - [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
 - [Embed-only sources pipeline](embed-only-pipeline.md) — EMBED_ONLY_HOSTS are now SKIPPED entirely in extractAndCollect (user requirement: no iframes); seenKeys must be LOCAL per-scraper or all sources are silently dropped
+- [share4max NOT embed-only](sharmax-inertia.md) — share4max.com removed from EMBED_ONLY_HOSTS; extractVideoDeep already has Inertia.js extraction (parseShareMaxStreams); blocking it in EMBED_ONLY_HOSTS silently drops ALL shahiid sources
+- [parseVideoUrl unquoted key bug](parsevideo-unquoted.md) — streamwish/filemoon unpacked JS has unquoted keys (file:"url"), not "file":"url"; must include /\bfile\s*:\s*["'`]/ pattern alongside quoted-key patterns; parseStreamwish must call unpackPacked first
+- [EpisodeList hooks before returns](episodelist-hooks.md) — useMemo/useEffect hooks must be declared BEFORE any conditional returns (loading/!anime); violating this causes "rendered more hooks than previous render" crash
 - [SSE proxy timeout fix](sse-proxy-timeout.md) — Vite proxy drops idle SSE connections after ~30s; fix: stream sources as found (not batch at end) + send `: keepalive` comment every 5s
 - [AnimeX CDN hls-proxy](animex-cdn-cors.md) — uwucdn.top allows server requests (HTTP 200); use proxyUrl (hls-proxy) first, not rawUrl; hls-proxy rewrites AES-128 key URI + segments via seg-proxy; all confirmed 200
 - [Miruro AnimePahe broken](miruro-animepah.md) — miruro.tv API now returns {"error":"Missing or invalid JWE"} — requires JWE token; AnimePahe source completely broken until alternative found

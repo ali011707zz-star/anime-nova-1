@@ -75,7 +75,6 @@ const EMBED_ONLY_HOSTS = [
   "yourupload.com",
   "voe.sx","voe.tv",
   "megamax.me","megamax.io","megamax.tv",
-  "share4max.com","share4max.net",
   "embed.hamml.com",
   "ya.anime-t.com",
   "ya.kooora.best",
@@ -171,8 +170,11 @@ function parseVideoUrl(html: string): { url: string; type: "hls" | "mp4" } | nul
   ];
   for (const text of alts) {
     const m3u8Pats = [
+      // Quoted keys: "file":"url"
       /"(?:file|src|url|source|hls|videoUrl|streamUrl)"\s*:\s*"(https?:\/\/[^"\\]+\.m3u8[^"\\]*)"/i,
       /'(?:file|src|url|source)'\s*:\s*'(https?:\/\/[^'\\]+\.m3u8[^'\\]*)'/i,
+      // Unquoted keys (after JS unpacking): file:"url" or src:'url'
+      /\b(?:file|src|url|source|hls|videoUrl|streamUrl)\s*:\s*["'`](https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*)["'`]/i,
       /<source[^>]+src=["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
       /['"](https?:\/\/[^\s"'<>\\]+\.m3u8(?:\?[^\s"'<>\\]*)?)["']/i,
       /https?:\/\/[^\s"'<>\\,\)]+\.m3u8(?:\?[^\s"'<>\\,\)]*)?/i,
@@ -221,17 +223,23 @@ function parseStreamtape(html: string): { url: string; type: "mp4" } | null {
 }
 
 function parseStreamwish(html: string): { url: string; type: "hls" | "mp4" } | null {
+  const unpacked = unpackPacked(html);
+  const texts = unpacked ? [unpacked, html] : [html];
   const pats = [
-    /sources\s*:\s*\[\s*\{\s*file\s*:\s*["'](https?:\/\/[^"']+)["']/i,
-    /jwplayer\([^)]+\)\.setup\([^{]*\{[^}]*file\s*:\s*["'](https?:\/\/[^"']+)["']/i,
-    /["']file["']\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+    /sources\s*:\s*\[\s*\{[^}]*file\s*:\s*["'`](https?:\/\/[^"'`]+)["'`]/i,
+    /jwplayer\([^)]+\)\.setup\s*\([^{]*\{[^}]*file\s*:\s*["'`](https?:\/\/[^"'`]+)["'`]/i,
+    /["']file["']\s*:\s*["'`](https?:\/\/[^"'`]+\.m3u8[^"'`]*)["'`]/i,
+    /\bfile\s*:\s*["'`](https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*)["'`]/i,
+    /['"](https?:\/\/[^\s"'<>\\]+\.m3u8(?:\?[^\s"'<>\\]*)?)["']/i,
   ];
-  for (const p of pats) {
-    const m = html.match(p);
-    if (m) {
-      const url = m[1];
-      if (url.includes(".m3u8")) return { url, type: "hls" };
-      if (url.includes(".mp4")) return { url, type: "mp4" };
+  for (const text of texts) {
+    for (const p of pats) {
+      const m = text.match(p);
+      if (m) {
+        const url = m[1];
+        if (url.includes(".m3u8")) return { url, type: "hls" };
+        if (url.includes(".mp4")) return { url, type: "mp4" };
+      }
     }
   }
   return null;
