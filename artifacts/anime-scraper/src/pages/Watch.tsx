@@ -4,7 +4,7 @@ import {
   ChevronRight, ChevronLeft, Play, Pause, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
   Settings, Subtitles, MonitorPlay, Tv2, Volume2, VolumeX,
-  SkipBack, SkipForward,
+  SkipBack, SkipForward, ExternalLink,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Hls from "hls.js";
@@ -238,15 +238,35 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
   );
 }
 
+/* ══════════════════════════════════ SERVER TAG HELPER ═══════ */
+function getServerTag(url: string): string {
+  if (url.includes("mega.nz"))  return "MA";
+  if (url.includes("as-cdn21") || url.includes("rubystm")) return "TS";
+  if (url.includes("sendvid"))  return "SV";
+  if (url.includes("streamtape")) return "ST";
+  if (url.includes("streamwish") || url.includes("filemoon") || url.includes("wishembed")) return "SW";
+  if (url.includes("workers.dev")) return "PH";
+  // For proxy URLs the inner URL is percent-encoded inside the query string
+  if (url.includes("shahiid"))  return "SH";
+  if (url.includes("animelek")) return "AL";
+  if (url.includes("animedar")) return "AD";
+  if (url.includes("okcdn") || url.includes("ok.ru")) return "OK";
+  if (url.includes("hls-proxy")) return "HLS";
+  if (url.includes("video-proxy")) return "MP4";
+  return "SRC";
+}
+
 /* ══════════════════════════════════ SERVER PICKER ═══════════ */
 function ServerPicker({
-  cover, title, ep, sseDone,
-  streamData, onPick, onBack,
+  cover, title, ep, sseDone, totalEps,
+  streamData, onPick, onBack, onNextEp, onPrevEp,
 }: {
-  cover: string; title: string; ep: number; sseDone: boolean;
+  cover: string; title: string; ep: number; sseDone: boolean; totalEps: number;
   streamData: StreamData;
   onPick: (q: Quality, idx: number) => void;
   onBack: () => void;
+  onNextEp: () => void;
+  onPrevEp: () => void;
 }) {
   const [probeStatus, setProbeStatus] = useState<Record<string, "checking" | "ok" | "fail">>({});
 
@@ -288,178 +308,197 @@ function ServerPicker({
     }
   }, [totalCount]);
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col" dir="rtl"
-      style={{ background: "radial-gradient(ellipse 90% 60% at 50% 0%, rgba(109,40,217,.18) 0%, #09090f 65%)" }}>
+  const QUALITY_LABEL_AR: Record<Quality, string> = {
+    "1080p FHD": "الجودة FHD",
+    "720p HD":   "الجودة HD",
+    "360p SD":   "الجودة SD",
+  };
 
-      {/* ── Header ── */}
-      <div className="flex items-center gap-3 px-4 shrink-0 z-10"
-        style={{ paddingTop: "max(16px, env(safe-area-inset-top))", paddingBottom: 14 }}>
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#07070e]" dir="rtl">
+
+      {/* ── Navigation bar (matches reference: ← title → arrows) ── */}
+      <div className="flex items-center gap-0 shrink-0"
+        style={{
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          paddingTop: "max(14px, env(safe-area-inset-top))",
+          paddingBottom: 12,
+        }}>
+        {/* Back */}
         <button onClick={onBack}
-          className="w-10 h-10 rounded-2xl bg-white/7 border border-white/10 flex items-center justify-center active:scale-90 transition-transform shrink-0">
-          <ChevronRight className="w-5 h-5 text-white/60" />
+          className="w-12 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0">
+          <ChevronRight className="w-5 h-5 text-white/55" />
         </button>
-        <div className="flex-1 min-w-0">
-          <p className="text-white text-[14px] font-black font-['Cairo'] truncate leading-tight">{title}</p>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-violet-300/50 text-[11px] font-['Cairo'] font-bold">الحلقة {ep}</span>
-            <span className="text-white/15 text-[10px]">·</span>
+        {/* Prev episode */}
+        <button onClick={onPrevEp} disabled={ep <= 1}
+          className="w-10 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0 disabled:opacity-20">
+          <ChevronRight className="w-4 h-4 text-white/45" />
+        </button>
+
+        {/* Center: title */}
+        <div className="flex-1 text-center min-w-0 px-1">
+          <p className="text-white/90 text-[13px] font-black font-['Cairo'] truncate leading-tight">
+            {title} · الحلقة {ep}
+          </p>
+          <div className="flex items-center justify-center gap-1 mt-0.5 h-4">
             {!sseDone ? (
-              <span className="flex items-center gap-1 text-amber-300/60 text-[11px] font-['Cairo']">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                {totalCount > 0 ? `وجدنا ${totalCount} · نكمل البحث...` : "جارٍ البحث عن مصادر..."}
+              <span className="flex items-center gap-1 text-amber-300/55 text-[10px] font-['Cairo']">
+                <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />
+                {totalCount > 0 ? `${totalCount} مصادر · يكمل البحث...` : "جارٍ جلب المصادر..."}
               </span>
             ) : (
-              <span className="text-white/30 text-[11px] font-['Cairo']">{totalCount} مصدر</span>
+              <span className="text-white/22 text-[10px] font-['Cairo']">{totalCount} مصدر متاح</span>
             )}
           </div>
         </div>
+
+        {/* Next episode */}
+        <button onClick={onNextEp} disabled={ep >= totalEps}
+          className="w-10 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0 disabled:opacity-20">
+          <ChevronLeft className="w-4 h-4 text-white/45" />
+        </button>
+        {/* Cover thumbnail */}
         {cover && (
-          <div className="relative shrink-0">
-            <img src={cover} alt="" className="w-10 h-14 rounded-xl object-cover" />
-            <div className="absolute inset-0 rounded-xl ring-1 ring-white/15" />
+          <div className="w-12 flex justify-center shrink-0">
+            <img src={cover} alt="" className="w-8 h-11 rounded-lg object-cover opacity-60" />
           </div>
         )}
       </div>
 
-      <div className="h-px bg-gradient-to-r from-transparent via-white/8 to-transparent mx-4 mb-1" />
-
       {/* ── Source list ── */}
-      <div className="flex-1 overflow-y-auto px-4 pt-3"
-        style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}>
+      <div className="flex-1 overflow-y-auto"
+        style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
 
-        {/* Empty state while SSE is still fetching */}
-        {totalCount === 0 && (
-          <div className="flex flex-col items-center justify-center py-28 gap-5">
-            <div className="relative">
-              <Loader2 className="w-10 h-10 text-violet-400/40 animate-spin" />
-              <div className="absolute inset-0 rounded-full bg-violet-500/10 blur-xl" />
+        {allGroups.map(({ q, servers }, gi) => (
+          <div key={q}>
+            {/* Quality section divider — centered label like reference image */}
+            <div className="flex items-center gap-3 px-4 py-2.5 mt-1">
+              <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
+              <span className="text-white/38 text-[11px] font-bold font-['Cairo'] tracking-wide select-none">
+                {QUALITY_LABEL_AR[q]}
+              </span>
+              <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
             </div>
-            <p className="text-white/25 text-[13px] font-['Cairo']">يجلب المصادر من 5 مواقع...</p>
+
+            {/* Server rows */}
+            {servers.map((url, idx) => {
+              const info    = getServerInfo(url, idx);
+              const tag     = getServerTag(url);
+              const isEmbed = url.includes("mega.nz/embed");
+              const probe   = isEmbed ? "embed" : probeStatus[url];
+              const isFailed = probe === "fail";
+              const globalIdx = (gi === 0 ? 0 : allGroups.slice(0,gi).reduce((a,g)=>a+g.servers.length,0)) + idx;
+              const externalUrl = isEmbed ? null
+                : url.startsWith("/") ? `${window.location.origin}${url}` : url;
+
+              return (
+                <motion.div key={url}
+                  initial={{ opacity: 0, x: 8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: Math.min(globalIdx * 0.045, 0.28), duration: 0.22, ease: "easeOut" }}
+                  className={`flex items-center px-4 py-3 gap-3 transition-opacity
+                    ${isFailed ? "opacity-38" : ""}`}
+                  style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+
+                  {/* Right side: probe dot + server name + sublabel */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      {/* Probe status dot */}
+                      {probe === "checking" && (
+                        <Loader2 className="w-3 h-3 text-amber-400/60 animate-spin shrink-0" />
+                      )}
+                      {probe === "ok" && (
+                        <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 flex-none"
+                          style={{ boxShadow: "0 0 5px rgba(52,211,153,0.8)" }} />
+                      )}
+                      {probe === "fail" && (
+                        <div className="w-2 h-2 rounded-full bg-red-500/75 shrink-0 flex-none" />
+                      )}
+                      {probe === "embed" && (
+                        <div className="w-2 h-2 rounded-full bg-emerald-400/80 shrink-0 flex-none"
+                          style={{ boxShadow: "0 0 4px rgba(52,211,153,0.6)" }} />
+                      )}
+                      {probe === undefined && (
+                        <div className="w-2 h-2 rounded-full bg-white/15 shrink-0 flex-none" />
+                      )}
+
+                      <p className={`text-[13px] font-bold font-['Cairo'] leading-tight truncate
+                        ${isFailed ? "text-white/30" : "text-white/82"}`}>
+                        السيرفر {idx + 1} &nbsp;·&nbsp; {info.label}
+                      </p>
+                    </div>
+
+                    {/* Sublabel row */}
+                    <div className="flex items-center gap-1.5 mt-0.5 mr-4">
+                      <span className={`text-[10px] font-['Cairo'] ${isFailed ? "text-white/18" : "text-white/28"}`}>
+                        {info.sublabel}
+                      </span>
+                      {isEmbed && (
+                        <span className="text-emerald-400/55 text-[10px] font-['Cairo']">· بدون إعلانات</span>
+                      )}
+                      {externalUrl && !isEmbed && (
+                        <span className="text-white/18 text-[10px] font-['Cairo']">· للمشغلات الخارجية</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Left side: format tag + watch button + external button */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Format tag chip — like LB, SV, OK in reference */}
+                    <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded"
+                      style={{
+                        color: isEmbed ? "rgba(52,211,153,0.65)" : "rgba(255,255,255,0.35)",
+                        background: isEmbed ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.05)",
+                        border: `1px solid ${isEmbed ? "rgba(52,211,153,0.18)" : "rgba(255,255,255,0.08)"}`,
+                      }}>
+                      {tag}
+                    </span>
+
+                    {/* Watch button */}
+                    <button onClick={() => onPick(q, idx)}
+                      className={`px-3.5 py-1.5 rounded-xl text-[12px] font-black font-['Cairo']
+                        active:scale-95 transition-all whitespace-nowrap
+                        ${isEmbed
+                          ? "bg-emerald-600/25 border border-emerald-500/30 text-emerald-200/90 hover:bg-emerald-600/35"
+                          : "bg-[#1a6cdc]/30 border border-[#3b8ef5]/30 text-[#7ab8ff]/90 hover:bg-[#1a6cdc]/45"
+                        }`}>
+                      مشاهدة
+                    </button>
+
+                    {/* External player button (VLC / MX Player) */}
+                    {externalUrl && (
+                      <button
+                        onClick={e => { e.stopPropagation(); window.open(externalUrl, "_blank", "noopener"); }}
+                        title="فتح في مشغّل خارجي"
+                        className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-all"
+                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                        <ExternalLink className="w-3.5 h-3.5 text-white/32" />
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        ))}
+
+        {/* Empty / loading state — minimal, only when no sources yet */}
+        {totalCount === 0 && (
+          <div className="flex flex-col items-center py-20 gap-3">
+            {!sseDone
+              ? <><Loader2 className="w-7 h-7 text-violet-400/35 animate-spin" />
+                  <p className="text-white/22 text-[12px] font-['Cairo']">يجلب المصادر من 5 مواقع...</p></>
+              : <><AlertTriangle className="w-7 h-7 text-white/20" />
+                  <p className="text-white/22 text-[12px] font-['Cairo']">لم يُعثر على مصادر لهذه الحلقة</p></>
+            }
           </div>
         )}
 
-        <div className="space-y-6 pb-2">
-          {allGroups.map(({ q, servers }) => (
-            <div key={q}>
-              {/* Quality section header — hidden in flat mode */}
-              {!allIdentical && (
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/8">
-                    <span className="text-white font-black font-mono text-[16px] leading-none">{QUALITY_SHORT[q]}</span>
-                    <span className="w-px h-3.5 bg-white/15" />
-                    <span className="text-white/40 text-[10px] font-['Cairo'] font-bold">{QUALITY_AR[q]}</span>
-                  </div>
-                  <div className="flex-1 h-px bg-white/6" />
-                  <span className="text-white/18 text-[10px] font-['Cairo']">{servers.length} مصدر</span>
-                </div>
-              )}
-
-              <div className="space-y-2.5">
-                {servers.map((url, idx) => {
-                  const info = getServerInfo(url, idx);
-                  const globalIdx = flatRows.findIndex(r => r.q === q && r.idx === idx);
-                  const isEmbed = url.includes("mega.nz/embed");
-                  const probe = isEmbed ? "embed" : probeStatus[url];
-                  const isFailed = probe === "fail";
-
-                  return (
-                    <motion.button key={url}
-                      initial={{ opacity: 0, y: 14 }}
-                      animate={{ opacity: isFailed ? 0.38 : 1, y: 0 }}
-                      transition={{ delay: Math.min(globalIdx * 0.05, 0.3), duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-                      onClick={() => onPick(q, idx)}
-                      className="w-full text-right active:scale-[0.97] transition-transform"
-                    >
-                      <div className={`relative flex items-center gap-3.5 px-4 py-3.5 rounded-2xl overflow-hidden
-                        ${isEmbed
-                          ? "bg-gradient-to-l from-emerald-950/70 to-[#08120b] border border-emerald-500/20"
-                          : isFailed
-                            ? "bg-white/[0.025] border border-white/[0.05]"
-                            : probe === "ok"
-                              ? "bg-gradient-to-l from-violet-950/80 to-[#0c0a1a] border border-violet-500/25"
-                              : "bg-gradient-to-l from-violet-950/55 to-[#0e0b1e] border border-violet-500/15"
-                        }`}>
-
-                        {/* Glow blobs */}
-                        {isEmbed && <div className="absolute -top-5 -right-5 w-24 h-24 rounded-full bg-emerald-600/12 blur-2xl pointer-events-none" />}
-                        {!isEmbed && probe === "ok" && <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full bg-violet-600/22 blur-2xl pointer-events-none" />}
-
-                        {/* Icon */}
-                        <div className={`relative w-10 h-10 rounded-xl flex items-center justify-center shrink-0
-                          ${isEmbed
-                            ? "bg-emerald-700/25 border border-emerald-500/25"
-                            : isFailed
-                              ? "bg-white/4 border border-white/7"
-                              : "bg-violet-700/25 border border-violet-500/25"
-                          }`}>
-                          {isEmbed
-                            ? <Maximize2 className="w-4.5 h-4.5 text-emerald-300/90" />
-                            : isFailed
-                              ? <Tv2 className="w-4.5 h-4.5 text-white/20" />
-                              : <MonitorPlay className="w-4.5 h-4.5 text-violet-300/90" />
-                          }
-                        </div>
-
-                        {/* Text */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className={`text-[14px] font-black font-['Cairo'] leading-tight
-                              ${isEmbed ? "text-emerald-50/90" : isFailed ? "text-white/25" : "text-white/92"}`}>
-                              {info.label}
-                            </p>
-                            {isEmbed && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300/90 border border-emerald-400/18 leading-none">
-                                بدون إعلانات
-                              </span>
-                            )}
-                            {info.isDirect && !isEmbed && !isFailed && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-violet-500/25 text-violet-200/80 border border-violet-400/20 leading-none">
-                                مباشر
-                              </span>
-                            )}
-                          </div>
-                          <p className={`text-[11px] font-['Cairo'] mt-0.5 ${isFailed ? "text-white/15" : "text-white/32"}`}>
-                            {info.sublabel}
-                          </p>
-                        </div>
-
-                        {/* Probe status */}
-                        <div className="shrink-0 flex items-center gap-1.5">
-                          {probe === "checking" && (
-                            <Loader2 className="w-3.5 h-3.5 text-white/25 animate-spin" />
-                          )}
-                          {probe === "ok" && (
-                            <>
-                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400"
-                                style={{ boxShadow: "0 0 5px rgba(52,211,153,0.85)" }} />
-                              <span className="text-emerald-400/70 text-[10px] font-['Cairo'] font-bold">يعمل</span>
-                            </>
-                          )}
-                          {probe === "fail" && (
-                            <>
-                              <div className="w-1.5 h-1.5 rounded-full bg-red-500/60" />
-                              <span className="text-red-400/45 text-[10px] font-['Cairo'] font-bold">محجوب</span>
-                            </>
-                          )}
-                          {(probe === undefined || probe === "embed") && (
-                            <ChevronLeft className={`w-4 h-4 ${isEmbed ? "text-emerald-400/35" : "text-white/18"}`} />
-                          )}
-                        </div>
-                      </div>
-                    </motion.button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* "Fetching more..." footer while SSE is still running */}
+        {/* Subtle "fetching more" footer */}
         {!sseDone && totalCount > 0 && (
-          <div className="flex items-center justify-center gap-2 py-4 mt-1">
-            <Loader2 className="w-3.5 h-3.5 text-violet-400/35 animate-spin" />
-            <span className="text-white/22 text-[11px] font-['Cairo']">يجلب مصادر إضافية...</span>
+          <div className="flex items-center justify-center gap-1.5 py-3 opacity-50">
+            <Loader2 className="w-3 h-3 text-violet-400/60 animate-spin" />
+            <span className="text-white/30 text-[10px] font-['Cairo']">يجلب مصادر إضافية...</span>
           </div>
         )}
       </div>
@@ -1516,8 +1555,8 @@ export default function WatchPage() {
   const [sseServers,   setSseServers]  = useState<Record<Quality, string[]>>(EMPTY_SSE);
   const [quality,      setQuality]     = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]  = useState(0);
-  const [phase,        setPhase]       = useState<"loading" | "picker" | "player" | "nosrc">("loading");
-  const [loadingDone,  setLoadingDone] = useState(false);
+  const [phase,        setPhase]       = useState<"loading" | "picker" | "player" | "nosrc">("picker");
+  const [loadingDone,  setLoadingDone] = useState(true);
   const [fetchDone,    setFetchDone]   = useState(false);
   const [sseDone,      setSseDone]     = useState(false);
   const fetchStarted   = useRef(false);
@@ -1638,7 +1677,7 @@ export default function WatchPage() {
   const servers = mergedServers[quality] || [];
   const streamDataForPicker: StreamData = { servers: mergedServers, total: servers.length };
 
-  if (phase === "loading") return <LoadingScreen cover={cover} title={title} ep={ep} />;
+  /* loading phase removed — picker shows immediately with empty state while SSE loads */
   if (phase === "nosrc")   return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
 
   if (phase === "picker") {
@@ -1648,10 +1687,12 @@ export default function WatchPage() {
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
           <ServerPicker
-            cover={cover} title={title} ep={ep} sseDone={sseDone}
+            cover={cover} title={title} ep={ep} sseDone={sseDone} totalEps={totalEps}
             streamData={streamDataForPicker}
             onPick={handlePickServer}
             onBack={handleBack}
+            onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
+            onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
           />
         </motion.div>
       </AnimatePresence>
