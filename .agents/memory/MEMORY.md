@@ -18,7 +18,8 @@
 - [SSE proxy timeout fix](sse-proxy-timeout.md) — Vite proxy drops idle SSE connections after ~30s; fix: stream sources as found (not batch at end) + send `: keepalive` comment every 5s
 - [AnimeX CDN hls-proxy](animex-cdn-cors.md) — uwucdn.top allows server requests (HTTP 200); use proxyUrl (hls-proxy) first, not rawUrl; hls-proxy rewrites AES-128 key URI + segments via seg-proxy; all confirmed 200
 - [Miruro AnimePahe broken](miruro-animepah.md) — miruro.tv API now returns {"error":"Missing or invalid JWE"} — requires JWE token; AnimePahe source completely broken until alternative found
-- [IframePlayer completely removed](auto-fallback-hls.md) — IframePlayer is gone; Watch.tsx always uses NativeHLSPlayer; onFail advances to next server; no iframe states/refs remain
+- [IframePlayer / MegaEmbedPlayer](auto-fallback-hls.md) — IframePlayer gone; NativeHLSPlayer default; MegaEmbedPlayer added for mega.nz/embed URLs (sandboxed iframe, no allow-popups)
+- [Animeify.net embed source](animeify-embed.md) — animeify API (api.ani-cli-arabic.dev/credentials) → MALink "fileId!key" → mega.nz/embed; isEmbed=true flag bypasses DEAD_FILE_HOSTS in sendSrc; qualityRank=8
 - [AnimeDar search URL spaces](animedar-search.md) — search must use encodeURIComponent (spaces → %20), NOT hyphen-slugified; `/search/one%20piece/` works, `/search/one-piece/` fails
 - [Anime-Phoenix x265 MKV](animephoenix-codec.md) — all files are x265/HEVC MKV; plays on Windows/Mac with HEVC decoder and Safari; Linux Chrome (Replit preview) cannot decode → shows error; video-proxy must set Accept-Ranges:bytes always
 - [Shahiid seasons/?serie= AJAX](shahiid-serie-ajax.md) — ?serie= pages load episodes via AJAX only (no links in static HTML); shahiidLoadMore must run even when links.length===0 for isSerieFilter URLs; max 10 pages for these

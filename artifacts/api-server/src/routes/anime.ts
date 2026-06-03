@@ -879,6 +879,7 @@ async function getShahiidSources(
 interface UnifiedSource {
   name: string; url: string; quality: string; qualityRank: number; site: string;
   directUrl?: string; directType?: "hls" | "mp4";
+  isEmbed?: boolean;
 }
 
 const SKIP_EXTRACT_HOSTS = [
@@ -2539,6 +2540,126 @@ async function getRistoAnimeSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  Animeify.net scraper (animeify API → Mega.nz embed بدون إعلانات)
+// ════════════════════════════════════════════════════════════════════
+let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
+const ANIMEIFY_CREDS_TTL = 6 * 3_600_000;
+
+async function getAnimeifyCreds(): Promise<{ base: string; token: string } | null> {
+  if (_animeifyCreds && Date.now() - _animeifyCreds.ts < ANIMEIFY_CREDS_TTL) {
+    return { base: _animeifyCreds.base, token: _animeifyCreds.token };
+  }
+  try {
+    const r = await fetch("https://api.ani-cli-arabic.dev/credentials", {
+      headers: { "X-Auth-Key": "6rK9z0XyW8vQ3J7pL2mN4sB1tH5gD0fA", "User-Agent": "AniCliAr/2.0" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as Record<string, string>;
+    const base = String(data.ANI_CLI_AR_API_BASE || "");
+    const token = String(data.ANI_CLI_AR_TOKEN || "");
+    if (!base || !token) return null;
+    _animeifyCreds = { base, token, ts: Date.now() };
+    return { base, token };
+  } catch { return null; }
+}
+
+async function getAnimeifySources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  try {
+    const creds = await getAnimeifyCreds();
+    if (!creds) return [];
+    const { base, token } = creds;
+
+    // Search with both titles; pick best match across SERIES + MOVIE
+    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    let best: { score: number; item: any } = { score: 0, item: null };
+
+    for (const q of queries) {
+      for (const type of ["SERIES", "MOVIE"]) {
+        try {
+          const body = new URLSearchParams({
+            UserId: "0", Language: "English", FilterType: "SEARCH",
+            FilterData: q, Type: type, From: "0", Token: token,
+          });
+          const r = await fetch(base + "anime/load_anime_list_v2.php", {
+            method: "POST", body,
+            headers: { "User-Agent": "AniCliAr/2.0" },
+            signal: AbortSignal.timeout(10000),
+          });
+          if (!r.ok) continue;
+          const data = await r.json() as any[];
+          if (!Array.isArray(data)) continue;
+          for (const item of data) {
+            const enTitle = String(item.EN_Title || "");
+            const s = Math.max(
+              similarity(q, enTitle),
+              similarity(title, enTitle),
+              english ? similarity(english, enTitle) : 0,
+            );
+            if (s > best.score) best = { score: s, item: { ...item, _type: type } };
+          }
+        } catch {}
+      }
+    }
+
+    if (!best.item || best.score < 0.35) return [];
+
+    const animeId: string = String(best.item.AnimeId);
+    const animeType: string = best.item._type || "SERIES";
+
+    // Get episode list
+    const epsRes = await fetch(base + "episodes/load_episodes.php", {
+      method: "POST",
+      body: new URLSearchParams({ AnimeID: animeId, Token: token }),
+      headers: { "User-Agent": "AniCliAr/2.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!epsRes.ok) return [];
+    const epsData = await epsRes.json() as any[];
+    if (!Array.isArray(epsData) || !epsData.length) return [];
+
+    const epItem = epsData.find(e => Math.abs(parseFloat(String(e.Episode || 0)) - ep) < 0.5);
+    if (!epItem) return [];
+
+    // Get streaming servers for this episode
+    const srvRes = await fetch(base + "anime/load_servers.php", {
+      method: "POST",
+      body: new URLSearchParams({ UserId: "0", AnimeId: animeId, Episode: String(epItem.Episode), AnimeType: animeType, Token: token }),
+      headers: { "User-Agent": "AniCliAr/2.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!srvRes.ok) return [];
+    const srvData = await srvRes.json() as any;
+    const epData = srvData.CurrentEpisode || epItem;
+
+    const sources: UnifiedSource[] = [];
+
+    // ── Mega.nz embed (MALink: "fileId!decryptionKey") — بدون إعلانات ──
+    const maLink = String(epData.MALink || "").trim();
+    if (maLink && maLink.includes("!")) {
+      const bang = maLink.indexOf("!");
+      const fileId = maLink.slice(0, bang);
+      const key    = maLink.slice(bang + 1);
+      if (fileId && key) {
+        const embedUrl = `https://mega.nz/embed/${fileId}#${key}`;
+        sources.push({
+          name: "Mega",
+          url: embedUrl,
+          quality: "720p",
+          qualityRank: 8,
+          site: "animeify",
+          directUrl: embedUrl,
+          isEmbed: true,
+        });
+      }
+    }
+
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -2566,11 +2687,12 @@ router.get("/anime/sources-stream", async (req, res) => {
 
   function sendSrc(s: UnifiedSource) {
     if (closed) return;
-    if (!s.directUrl) return;
-    if (DEAD_FILE_HOSTS.some(h => s.directUrl!.toLowerCase().includes(h))) return;
-    const key = s.directUrl.includes("workers.dev")
-      ? "cdn:" + s.directUrl.replace(/^https?:\/\/[^/]+/, "")
-      : s.directUrl;
+    if (!s.directUrl && !s.isEmbed) return;
+    const checkUrl = s.directUrl || s.url;
+    if (!s.isEmbed && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
+    const key = checkUrl.includes("workers.dev")
+      ? "cdn:" + checkUrl.replace(/^https?:\/\/[^/]+/, "")
+      : checkUrl;
     if (globalSeen.has(key)) return;
     globalSeen.add(key);
     res.write(`data: ${JSON.stringify(s)}\n\n`);
@@ -2690,6 +2812,15 @@ router.get("/anime/sources-stream", async (req, res) => {
             await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
             buf.forEach(s => sendSrc(s));
           }
+        } catch {}
+      })(),
+
+      // ── Animeify.net  (Mega.nz embed — بدون إعلانات، يبقى داخل التطبيق) ──
+      (async () => {
+        try {
+          if (!title) return;
+          const srcs = await race(getAnimeifySources(title, english, ep), SCRAPER_MS, []);
+          srcs.forEach(s => sendSrc(s));
         } catch {}
       })(),
     ]);

@@ -99,6 +99,10 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   if (url.includes("animex-player") || url.includes("animex-source") || url.includes("#animex")) {
     return { label: "أنمي إكس", sublabel: "عربي · HLS مباشر", isHls: true };
   }
+  // Mega.nz embed (animeify — no ads, stays in app)
+  if (url.includes("mega.nz/embed")) {
+    return { label: "ميغا", sublabel: "عربي · مباشر", isHls: false, isDirect: false };
+  }
   // Fallback — all sources are native
   return { label: `مصدر ${idx + 1}`, sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
 }
@@ -878,6 +882,93 @@ function NativeHLSPlayer({
   );
 }
 
+/* ══════════════════════════════════ MEGA EMBED PLAYER ══════ */
+function MegaEmbedPlayer({
+  src, ep, totalEps, title, onBack, onNextEp, onPrevEp,
+}: {
+  src: string; ep: number; totalEps: number; title: string;
+  onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
+}) {
+  const [isFs, setIsFs] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const fn = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", fn);
+    return () => document.removeEventListener("fullscreenchange", fn);
+  }, []);
+
+  function toggleFs() {
+    const el = containerRef.current;
+    if (!el) return;
+    !document.fullscreenElement
+      ? el.requestFullscreen?.().catch(() => {})
+      : document.exitFullscreen?.().catch(() => {});
+  }
+
+  return (
+    <motion.div
+      ref={containerRef}
+      className="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      dir="rtl"
+    >
+      {/* ── Top bar ── */}
+      <div className="flex items-center gap-3 px-4 pt-safe pt-4 pb-2 shrink-0"
+        style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.82) 0%, transparent 100%)" }}>
+        <button onClick={onBack}
+          className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-all shrink-0"
+          style={{ border: "1px solid rgba(255,255,255,0.1)" }}>
+          <ChevronRight className="w-5 h-5 text-white/80" />
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-white/85 text-[13px] font-bold font-['Cairo'] truncate">{title}</p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</span>
+            <span className="text-white/20 text-[10px]">·</span>
+            <span className="text-emerald-400/70 text-[10px] font-bold font-['Cairo']">ميغا · بدون إعلانات</span>
+          </div>
+        </div>
+        <button onClick={toggleFs}
+          className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-all shrink-0"
+          style={{ border: "1px solid rgba(255,255,255,0.1)" }}>
+          {isFs ? <Minimize2 className="w-4 h-4 text-white/70" /> : <Maximize2 className="w-4 h-4 text-white/70" />}
+        </button>
+      </div>
+
+      {/* ── Mega iframe (sandboxed — cannot open new tabs or navigate away) ── */}
+      <div className="flex-1 relative min-h-0">
+        <iframe
+          key={src}
+          src={src}
+          className="absolute inset-0 w-full h-full border-0 bg-black"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+          allow="fullscreen; autoplay"
+          title={`${title} - الحلقة ${ep}`}
+        />
+      </div>
+
+      {/* ── Bottom nav ── */}
+      <div className="flex items-center justify-between px-5 py-3 shrink-0"
+        style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.82) 0%, transparent 100%)" }}>
+        <button onClick={onPrevEp} disabled={ep <= 1}
+          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all"
+          style={{ color: ep <= 1 ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)" }}>
+          <ChevronRight className="w-4 h-4" /> السابقة
+        </button>
+        <span className="text-white/25 text-[11px] font-['Cairo']">{ep} / {totalEps}</span>
+        <button onClick={onNextEp} disabled={ep >= totalEps}
+          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all flex-row-reverse"
+          style={{ color: ep >= totalEps ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)" }}>
+          <ChevronLeft className="w-4 h-4" /> التالية
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+
 /* ══════════════════════════════════ EPISODE PLAYER ═════════ */
 function EpisodePlayer({
   servers, quality, allServers,
@@ -1043,6 +1134,20 @@ function EpisodePlayer({
       setCurrentServer(s => s - 1);
       setRealQuality(null);
     }
+  }
+
+  /* ── Mega.nz embed → render dedicated player (iframe sandboxed, no ads, no exit) ── */
+  if (currentUrl && currentUrl.includes("mega.nz/embed")) {
+    return (
+      <AnimatePresence mode="wait">
+        <MegaEmbedPlayer
+          key={currentUrl}
+          src={currentUrl}
+          ep={ep} totalEps={totalEps} title={title}
+          onBack={onBack} onNextEp={onNextEp} onPrevEp={onPrevEp}
+        />
+      </AnimatePresence>
+    );
   }
 
   return (
