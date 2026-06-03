@@ -295,18 +295,15 @@ function ServerPicker({
 
   const totalCount = flatRows.length;
 
-  /* Auto-probe all sources as they arrive (skip mega.nz embeds — cross-origin) */
-  useEffect(() => {
-    for (const { url } of flatRows) {
-      if (url.includes("mega.nz/embed")) continue;
-      if (probeStatus[url] !== undefined) continue;
-      setProbeStatus(prev => ({ ...prev, [url]: "checking" }));
-      fetch(`/api/anime/probe?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(10000) })
-        .then(r => r.json())
-        .then((d: any) => setProbeStatus(prev => ({ ...prev, [url]: d.ok ? "ok" : "fail" })))
-        .catch(() => setProbeStatus(prev => ({ ...prev, [url]: "fail" })));
-    }
-  }, [totalCount]);
+  /* Manual probe: triggered by clicking "فحص" button per row */
+  function probeUrl(url: string) {
+    if (probeStatus[url] === "checking") return;
+    setProbeStatus(prev => ({ ...prev, [url]: "checking" }));
+    fetch(`/api/anime/probe?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(12000) })
+      .then(r => r.json())
+      .then((d: any) => setProbeStatus(prev => ({ ...prev, [url]: d.ok ? "ok" : "fail" })))
+      .catch(() => setProbeStatus(prev => ({ ...prev, [url]: "fail" })));
+  }
 
   const QUALITY_LABEL_AR: Record<Quality, string> = {
     "1080p FHD": "الجودة FHD",
@@ -396,7 +393,8 @@ function ServerPicker({
                   initial={{ opacity: 0, x: 8 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: Math.min(globalIdx * 0.045, 0.28), duration: 0.22, ease: "easeOut" }}
-                  className={`flex items-center px-4 py-3 gap-3 transition-opacity
+                  onClick={() => onPick(q, idx)}
+                  className={`flex items-center px-4 py-3 gap-3 cursor-pointer active:bg-white/5 transition-all
                     ${isFailed ? "opacity-38" : ""}`}
                   style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
 
@@ -436,15 +434,12 @@ function ServerPicker({
                       {isEmbed && (
                         <span className="text-emerald-400/55 text-[10px] font-['Cairo']">· بدون إعلانات</span>
                       )}
-                      {externalUrl && !isEmbed && (
-                        <span className="text-white/18 text-[10px] font-['Cairo']">· للمشغلات الخارجية</span>
-                      )}
                     </div>
                   </div>
 
-                  {/* Left side: format tag + watch button + external button */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {/* Format tag chip — like LB, SV, OK in reference */}
+                  {/* Left side: tag + probe button + external button */}
+                  <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                    {/* Format tag chip */}
                     <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded"
                       style={{
                         color: isEmbed ? "rgba(52,211,153,0.65)" : "rgba(255,255,255,0.35)",
@@ -454,21 +449,25 @@ function ServerPicker({
                       {tag}
                     </span>
 
-                    {/* Watch button */}
-                    <button onClick={() => onPick(q, idx)}
-                      className={`px-3.5 py-1.5 rounded-xl text-[12px] font-black font-['Cairo']
-                        active:scale-95 transition-all whitespace-nowrap
-                        ${isEmbed
-                          ? "bg-emerald-600/25 border border-emerald-500/30 text-emerald-200/90 hover:bg-emerald-600/35"
-                          : "bg-[#1a6cdc]/30 border border-[#3b8ef5]/30 text-[#7ab8ff]/90 hover:bg-[#1a6cdc]/45"
-                        }`}>
-                      مشاهدة
-                    </button>
-
-                    {/* External player button (VLC / MX Player) */}
-                    {externalUrl && (
+                    {/* Probe button (فحص) — skip for mega embeds */}
+                    {!isEmbed && (
                       <button
-                        onClick={e => { e.stopPropagation(); window.open(externalUrl, "_blank", "noopener"); }}
+                        onClick={() => probeUrl(url)}
+                        disabled={probe === "checking"}
+                        className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-95 transition-all disabled:opacity-40 shrink-0"
+                        style={{
+                          background: probe === "ok" ? "rgba(52,211,153,0.12)" : probe === "fail" ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.06)",
+                          border: `1px solid ${probe === "ok" ? "rgba(52,211,153,0.25)" : probe === "fail" ? "rgba(239,68,68,0.22)" : "rgba(255,255,255,0.1)"}`,
+                          color: probe === "ok" ? "rgba(52,211,153,0.85)" : probe === "fail" ? "rgba(239,68,68,0.75)" : "rgba(255,255,255,0.45)",
+                        }}>
+                        {probe === "checking" ? <Loader2 className="w-3 h-3 animate-spin" /> : "فحص"}
+                      </button>
+                    )}
+
+                    {/* External player button */}
+                    {externalUrl && !isEmbed && (
+                      <button
+                        onClick={() => window.open(externalUrl, "_blank", "noopener")}
                         title="فتح في مشغّل خارجي"
                         className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-all"
                         style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
@@ -1555,13 +1554,13 @@ export default function WatchPage() {
   const [sseServers,   setSseServers]  = useState<Record<Quality, string[]>>(EMPTY_SSE);
   const [quality,      setQuality]     = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]  = useState(0);
-  const [phase,        setPhase]       = useState<"loading" | "picker" | "player" | "nosrc">("picker");
-  const [loadingDone,  setLoadingDone] = useState(true);
-  const [fetchDone,    setFetchDone]   = useState(false);
+  const [phase,        setPhase]       = useState<"loading" | "picker" | "player" | "nosrc">("loading");
   const [sseDone,      setSseDone]     = useState(false);
   const fetchStarted   = useRef(false);
   const sseRef         = useRef<EventSource | null>(null);
   const seenSseUrls    = useRef(new Set<string>());
+  /* Buffer: collect all SSE sources here, commit to state only when [DONE] fires */
+  const sseBuf         = useRef<Record<Quality, string[]>>({ "1080p FHD": [], "720p HD": [], "360p SD": [] });
 
   const title     = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -1577,23 +1576,35 @@ export default function WatchPage() {
     const params = new URLSearchParams({ title: t, english: e, ep: String(ep) });
     if (animeId) params.set("anilistId", String(animeId));
 
-    setFetchDone(true);
+    setPhase("loading");
 
-    /* SSE: sources-stream (anime-phoenix · shahiid · animelek · animedar) */
+    /* SSE: sources-stream — buffer ALL sources, commit only when done */
     if (sseRef.current) sseRef.current.close();
     const es = new EventSource(`/api/anime/sources-stream?${params}`);
     sseRef.current = es;
-    const closeTimer = setTimeout(() => { setSseDone(true); es.close(); }, 38000);
+
+    function commitBuffer() {
+      const buf = sseBuf.current;
+      setSseServers({ ...buf });
+      setSseDone(true);
+      setPhase(prev => {
+        if (prev === "player") return prev;
+        const hasAny = (buf["1080p FHD"].length + buf["720p HD"].length + buf["360p SD"].length) > 0;
+        return hasAny ? "picker" : "nosrc";
+      });
+      es.close();
+    }
+
+    const closeTimer = setTimeout(commitBuffer, 38000);
     es.onmessage = (ev) => {
       try {
         if (ev.data === "[DONE]") {
-          setSseDone(true);
           clearTimeout(closeTimer);
-          es.close();
+          commitBuffer();
           return;
         }
         const src = JSON.parse(ev.data) as {
-          url: string; directUrl?: string; qualityRank?: number; site?: string;
+          url: string; directUrl?: string; qualityRank?: number; site?: string; isEmbed?: boolean;
         };
         const playUrl = src.directUrl || src.url;
         if (!playUrl) return;
@@ -1601,19 +1612,14 @@ export default function WatchPage() {
         seenSseUrls.current.add(playUrl);
         const rank = src.qualityRank ?? 2;
         const tier: Quality = rank >= 3 ? "1080p FHD" : rank >= 2 ? "720p HD" : "360p SD";
-        setSseServers(prev => ({ ...prev, [tier]: [...prev[tier], playUrl] }));
+        sseBuf.current[tier].push(playUrl);
       } catch {}
     };
-    es.onerror = () => { clearTimeout(closeTimer); setSseDone(true); es.close(); };
+    es.onerror = () => { clearTimeout(closeTimer); commitBuffer(); };
   }, [ep, animeId]);
 
   /* Cleanup SSE on unmount */
   useEffect(() => () => { sseRef.current?.close(); }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => setLoadingDone(true), 300);
-    return () => clearTimeout(t);
-  }, []);
 
   useEffect(() => {
     if (!animeId) return;
@@ -1643,20 +1649,6 @@ export default function WatchPage() {
     }
   }, []);
 
-  /* Switch from loading → picker once the initial loading delay passes.
-     Sources appear live in the picker as SSE events fire. */
-  useEffect(() => {
-    if (!loadingDone || !fetchDone) return;
-    if (phase === "player" || phase === "nosrc" || phase === "picker") return;
-    setPhase("picker");
-  }, [loadingDone, fetchDone, phase]);
-
-  /* Only show nosrc after SSE is fully done with no sources found */
-  useEffect(() => {
-    if (!loadingDone || !fetchDone || !sseDone) return;
-    const hasAny = QUALITY_LABELS.some(q => (mergedServers[q]?.length || 0) > 0);
-    if (!hasAny) setPhase(prev => prev === "player" ? prev : "nosrc");
-  }, [loadingDone, fetchDone, sseDone, mergedServers]);
 
   function goEp(n: number) {
     navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`);
@@ -1677,8 +1669,29 @@ export default function WatchPage() {
   const servers = mergedServers[quality] || [];
   const streamDataForPicker: StreamData = { servers: mergedServers, total: servers.length };
 
-  /* loading phase removed — picker shows immediately with empty state while SSE loads */
-  if (phase === "nosrc")   return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
+  if (phase === "nosrc") return <NoSources onRefresh={handleRefresh} onBack={handleBack} />;
+
+  /* ── Loading screen: shown while SSE is collecting sources ── */
+  if (phase === "loading") {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#07070e] flex flex-col items-center justify-center gap-5" dir="rtl">
+        <motion.div
+          className="w-14 h-14 rounded-full border-2 border-violet-500/20 border-t-violet-400"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+        />
+        <div className="text-center space-y-1">
+          <p className="text-white/70 text-[15px] font-black font-['Cairo']">جارٍ جلب المصادر...</p>
+          <p className="text-white/25 text-[12px] font-['Cairo']">{title ? `${title} · الحلقة ${ep}` : `الحلقة ${ep}`}</p>
+        </div>
+        <button
+          onClick={handleBack}
+          className="mt-4 px-5 py-2 rounded-xl text-white/35 text-[12px] font-['Cairo'] active:opacity-50"
+          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+        >رجوع</button>
+      </div>
+    );
+  }
 
   if (phase === "picker") {
     return (
