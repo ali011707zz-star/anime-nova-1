@@ -66,6 +66,10 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekDragging = useRef(false);
 
+  /* ── Stable onFail ref — keeps latest callback without re-creating loadSource ── */
+  const onFailRef    = useRef(onFail);
+  onFailRef.current  = onFail;   // always up-to-date, no useEffect needed
+
   /* ── onFail guard refs (initialized before state so stable across renders) ── */
   const failFiredRef  = useRef(false);
   const failTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -98,15 +102,16 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
   const [isLongPressing, setIsLongPressing] = useState(false);
   const [showSpeedMenu,  setShowSpeedMenu]  = useState(false);
 
-  /* ── onFail: fire at most once per src mount, with 600ms delay + spinner ── */
+  /* ── onFail: stable identity (empty deps) — reads onFailRef so never stale ── */
   const fireOnFail = useCallback(() => {
     if (failFiredRef.current) return;
     failFiredRef.current = true;
     setLoading(true);
     setError(null);
     if (failTimerRef.current) clearTimeout(failTimerRef.current);
-    failTimerRef.current = setTimeout(() => { onFail?.(); }, 600);
-  }, [onFail]);
+    failTimerRef.current = setTimeout(() => { onFailRef.current?.(); }, 600);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); /* intentionally empty — onFailRef.current is always up-to-date */
 
   /* ── Control auto-hide ── */
   const scheduleHide = useCallback(() => {
