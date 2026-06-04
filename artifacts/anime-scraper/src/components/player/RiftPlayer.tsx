@@ -421,15 +421,25 @@ export default function RiftPlayer({
   /* ══════════════════════════════════════════════════
      RENDER
   ══════════════════════════════════════════════════ */
-  /* Portrait rotation style — rotates the player 90° to show landscape layout on portrait screens */
+  /*
+   * Portrait rotation — rotates the player 90° clockwise so landscape controls
+   * fill the portrait screen correctly.
+   *
+   * Math: box is 100vh × 100vw (wider than tall in portrait).
+   * Its center must land at viewport center.
+   * top = 50vh − 50vw  (center_y − half_own_height)
+   * left = 50vw − 50vh (center_x − half_own_width)
+   * Then rotate(90deg) around the box center → fills portrait screen.
+   */
   const portraitStyle: React.CSSProperties = isPortrait ? {
     position: "fixed",
     width: "100vh",
     height: "100vw",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%) rotate(90deg)",
+    top: "calc(50vh - 50vw)",
+    left: "calc(50vw - 50vh)",
+    transform: "rotate(90deg)",
     transformOrigin: "center center",
+    zIndex: 60,
   } : {
     position: "absolute",
     inset: 0,
@@ -818,18 +828,37 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* ─ Center: play/pause — absolutely centered ─ */}
-                  <div className="absolute left-1/2 -translate-x-1/2">
+                  {/* ─ Center: [◄10] [⏸] [10►] — absolutely centered ─ */}
+                  <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
+                    {/* Rewind 10s */}
+                    <button
+                      onClick={() => { skip(-10); showControls(); }}
+                      className="relative w-10 h-10 flex items-center justify-center active:scale-85 transition-transform">
+                      <RotateCcw className="w-[22px] h-[22px] text-white/55" strokeWidth={1.8} />
+                      <span className="absolute font-mono font-black text-white/55 leading-none"
+                        style={{ fontSize: 7, bottom: 7 }}>10</span>
+                    </button>
+
+                    {/* Play/Pause */}
                     <button onClick={togglePlay}
-                      className="w-[46px] h-[46px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                      style={{ background: "rgba(255,255,255,0.10)", border: "1.5px solid rgba(255,255,255,0.28)" }}>
+                      className="w-[48px] h-[48px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                      style={{ background: "rgba(255,255,255,0.11)", border: "1.5px solid rgba(255,255,255,0.30)" }}>
                       {playing
                         ? <Pause className="w-5 h-5 text-white fill-white" />
                         : <Play className="w-5 h-5 text-white fill-white ml-0.5" />}
                     </button>
+
+                    {/* Forward 10s */}
+                    <button
+                      onClick={() => { skip(10); showControls(); }}
+                      className="relative w-10 h-10 flex items-center justify-center active:scale-85 transition-transform">
+                      <RotateCw className="w-[22px] h-[22px] text-white/55" strokeWidth={1.8} />
+                      <span className="absolute font-mono font-black text-white/55 leading-none"
+                        style={{ fontSize: 7, bottom: 7 }}>10</span>
+                    </button>
                   </div>
 
-                  {/* ─ Right group: Volume · Lock · Fullscreen (pushed to end) ─ */}
+                  {/* ─ Right group: Volume · Lock · Fullscreen ─ */}
                   <div className="flex items-center gap-0.5 ml-auto">
                     <button onClick={toggleMute}
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
@@ -841,11 +870,16 @@ export default function RiftPlayer({
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       <Lock className="w-[17px] h-[17px] text-white/45" />
                     </button>
+                    {/* Fullscreen — prominent with label */}
                     <button onClick={toggleFs}
-                      className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                      className="flex flex-col items-center justify-center gap-[3px] w-12 h-11 rounded-xl active:bg-white/10 transition-colors">
                       {isFs
-                        ? <Minimize2 className="w-[19px] h-[19px] text-white/60" />
-                        : <Maximize2 className="w-[19px] h-[19px] text-white/60" />}
+                        ? <Minimize2 className="w-[18px] h-[18px] text-white/65" />
+                        : <Maximize2 className="w-[18px] h-[18px] text-white/65" />}
+                      <span className="font-['Cairo'] font-black text-white/32 leading-none"
+                        style={{ fontSize: 8 }}>
+                        {isFs ? "تصغير" : "تكبير"}
+                      </span>
                     </button>
                   </div>
                 </div>
