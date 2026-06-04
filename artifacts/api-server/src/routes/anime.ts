@@ -1001,13 +1001,20 @@ async function extractAndCollect(
             }
           }
         }
-      } else if (s.url.includes("mega.nz/embed")) {
-        // Extraction failed — mega.nz/embed is ad-free, send as sandboxed iframe fallback
-        collect({ ...s, directUrl: s.url, isEmbed: true });
+      } else {
+        // Extraction failed — try as sandboxed iframe fallback for any embed URL
+        // that isn't in a known ad-heavy / dead-host list
+        const isSafeEmbed = !DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))
+          && !EMBED_ONLY_HOSTS.some(h => s.url.includes(h));
+        if (isSafeEmbed) {
+          collect({ ...s, directUrl: s.url, isEmbed: true });
+        }
       }
     } catch {
-      // On exception: if it's a mega.nz embed, still try sending as iframe fallback
-      if (s.url.includes("mega.nz/embed")) {
+      // On exception: still try iframe fallback for safe embed URLs
+      const isSafeEmbed = !DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))
+        && !EMBED_ONLY_HOSTS.some(h => s.url.includes(h));
+      if (isSafeEmbed) {
         collect({ ...s, directUrl: s.url, isEmbed: true });
       }
     }
@@ -1312,18 +1319,26 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
       let bestScore = 0;
 
       // Try both itemprop="url" anchors and plain article/post anchors
+      // Note: AnimeDar now uses Arabic percent-encoded slugs (e.g. /انمي-ون-بيس-مترجم/)
       const anchorRe = /<a\s+href="(https?:\/\/animedar\.net\/([^"#?]+))"(?:[^>]*title="([^"]*)")?[^>]*>/gi;
       for (const m of html.matchAll(anchorRe)) {
-        const url   = m[1];
-        const slug  = m[2];
+        const url      = m[1];
+        const slug     = m[2];
         const rawLabel = m[3] || "";
-        if (SKIP_SLUGS.some(s => slug.includes(s))) continue;
-        if (!slug.match(/^[a-z0-9-]+\/$/)) continue;
+        if (SKIP_SLUGS.some(s => slug.includes(s) || decodeURIComponent(slug).includes(s))) continue;
+        // Decode percent-encoded slug (supports Arabic URLs like /انمي-ون-بيس-مترجم/)
+        let slugDecoded = slug;
+        try { slugDecoded = decodeURIComponent(slug); } catch {}
+        // Extract ASCII portion of decoded slug for similarity matching
+        const slugAscii = slugDecoded.replace(/-/g, " ").replace(/[^\x00-\x7F]/g, " ").replace(/\s+/g, " ").trim();
         const label = rawLabel.replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim()
-          || slug.replace(/\/$/, "").replace(/-/g, " ");
+          || slugAscii
+          || slugDecoded.replace(/-/g, " ");
         const score = Math.max(
           similarity(label, title),
           english ? similarity(label, english) : 0,
+          slugAscii ? similarity(slugAscii, title) : 0,
+          slugAscii && english ? similarity(slugAscii, english) : 0,
         );
         if (score > bestScore && score > 0.2) { bestScore = score; best = url.replace(/\/?$/, "/"); }
       }

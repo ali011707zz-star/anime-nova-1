@@ -85,9 +85,36 @@ const QUALITY_AR: Record<Quality, string> = {
   "360p SD": "دقة متوسطة",
 };
 
+/* ── Detect embed-type URLs (must render in sandboxed iframe, not native video) ── */
+function isIframeUrl(url: string): boolean {
+  if (!url || url.startsWith("/")) return false;        // our proxy endpoints start with /
+  if (url.includes("workers.dev")) return false;        // Anime-Phoenix CDN (direct video)
+  if (url.includes("streamtape.com")) return false;     // direct MP4
+  if (url.includes("sendvid.com")) return false;        // direct MP4
+  if (url.match(/\.(m3u8|mp4|mkv|webm|ts)([?#]|$)/i)) return false; // video file
+  return url.startsWith("https://");                    // external embed page
+}
+
+function getEmbedLabel(url: string): string {
+  if (url.includes("mega.nz"))          return "ميغا";
+  if (url.includes("mega.co.nz"))       return "ميغا";
+  if (url.includes("filemoon"))         return "فايل مون";
+  if (url.includes("streamwish"))       return "ستريم ويش";
+  if (url.includes("vidhide"))          return "فيد هايد";
+  if (url.includes("share4max"))        return "شير ماكس";
+  if (url.includes("streamlare"))       return "ستريم لير";
+  if (url.includes("asnwish"))          return "فيديو";
+  if (url.includes("vidmoly"))          return "فيدمولي";
+  return "فيديو";
+}
+
 /* ── Server source detection ── */
 interface ServerInfo { label: string; sublabel: string; isHls: boolean; isDirect?: boolean; }
 function getServerInfo(url: string, idx: number): ServerInfo {
+  // Embed-type URLs → shown in sandboxed iframe
+  if (isIframeUrl(url)) {
+    return { label: getEmbedLabel(url), sublabel: "داخل التطبيق", isHls: false };
+  }
   // All sources sent from the API are native-playable (no iframes)
   // Anime-Phoenix CDN (workers.dev — direct MKV/MP4)
   if (url.includes("workers.dev")) {
@@ -1053,7 +1080,7 @@ function MegaEmbedPlayer({
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</span>
             <span className="text-white/20 text-[10px]">·</span>
-            <span className="text-emerald-400/70 text-[10px] font-bold font-['Cairo']">ميغا · بدون إعلانات</span>
+            <span className="text-emerald-400/70 text-[10px] font-bold font-['Cairo']">{getEmbedLabel(src)} · داخل التطبيق</span>
           </div>
         </div>
         <button onClick={toggleFs}
@@ -1262,8 +1289,8 @@ function EpisodePlayer({
     }
   }
 
-  /* ── Mega.nz embed → render dedicated player (iframe sandboxed, no ads, no exit) ── */
-  if (currentUrl && currentUrl.includes("mega.nz/embed")) {
+  /* ── Embed-type URL → render sandboxed iframe player (mega, filemoon, streamwish, etc.) ── */
+  if (currentUrl && isIframeUrl(currentUrl)) {
     return (
       <AnimatePresence mode="wait">
         <MegaEmbedPlayer
