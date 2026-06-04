@@ -1231,16 +1231,16 @@ function buildAnimestreamEmbed(type: string, data: string): string | null {
   if (ADAR_DEAD_TYPES.has(t)) return null;
   switch (t) {
     case "mega": {
-      if (!d.includes("#")) return null;
       // Full URL already (starts with https)
       if (d.startsWith("https://mega.nz/embed") || d.startsWith("https://mega.co.nz/embed")) return d;
       // Protocol-relative: "//mega.nz/embed#!..." → "https://mega.nz/embed#!..."
       if (d.startsWith("//mega.nz") || d.startsWith("//mega.co.nz")) return "https:" + d;
       // Truncated scheme: ":/mega.nz/embed#!..." (https was stripped, leaving colon+1-slash)
       if (d.startsWith(":/mega.nz") || d.startsWith(":/mega.co.nz")) return "https://" + d.slice(2);
-      // Old-style mega format "!fileId!key" (hash-bang format, no slash in path)
+      // Old-style hash-bang "!fileId!key" — no # in this format, must check before the # guard
       if (d.startsWith("!")) return `https://mega.nz/embed#${d}`;
-      // Standard format: "fileId#key"
+      // Standard format: "fileId#key" — requires a # separator
+      if (!d.includes("#")) return null;
       return `https://mega.nz/embed/${d}`;
     }
     case "vidmoly":     return `https://vidmoly.biz/embed-${d}.html`;
@@ -2760,7 +2760,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
     if (fdLink) {
       const filemoonUrl = `https://filemoon.sx/e/${fdLink}`;
       try {
-        const extracted = await extractVideoDeep(filemoonUrl, filemoonUrl, 0);
+        const extracted = await extractVideoDeep(filemoonUrl, filemoonUrl);
         if (extracted?.url) {
           const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(filemoonUrl)}`;
           sources.push({

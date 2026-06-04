@@ -298,12 +298,12 @@ class StoryScraper extends BaseScraper {
       $('.ep-item').each((_, el) => {
         const $el = $(el);
         const epNum =
-          parseInt($el.find('.ep-num').text().match(/\d+/)?.[0]) || 0;
+          parseInt($el.find('.ep-num').text().match(/\d+/)?.[0] ?? "0") || 0;
         const videoLinks: VideoLink[] = [];
 
         $el.find('.server-option').each((__, linkEl) => {
           const $link = $(linkEl);
-          const quality = $link.data('quality') || 'SD';
+          const quality = String($link.data('quality') || 'SD');
           videoLinks.push({
             server: 'قصة عشق',
             name: `قصة عشق - ${quality}`,
@@ -384,7 +384,7 @@ class AnimePhoenixScraper extends BaseScraper {
 
       $('.episodes-list .ep-item').each((_, el) => {
         const $el = $(el);
-        const epNum = parseInt($el.data('episode')) || 0;
+        const epNum = parseInt(String($el.data('episode') ?? 0)) || 0;
         const videoLinks: VideoLink[] = [];
 
         $el.find('[data-server]').each((__, linkEl) => {
@@ -606,7 +606,7 @@ export class MultiSiteScraperManager {
     const promises = Object.entries(this.scrapers).map(([key, scraper]) =>
       (scraper as any)
         .searchAnime(query)
-        .then((res) => {
+        .then((res: any[]) => {
           results[key] = res;
         })
         .catch(() => {
