@@ -569,14 +569,16 @@ function ScraperPicker({
           </div>
         )}
 
-        {/* Empty state */}
-        {!hasSources && notReadySites.every(d => slotStatus[d.site] === "idle") && (
+        {/* Empty state — shown while all sites are still fetching on mount */}
+        {!hasSources && notReadySites.some(d => slotStatus[d.site] === "fetching") && (
           <div className="flex flex-col items-center justify-center py-16 gap-4 px-8">
-            <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center">
-              <MonitorPlay className="w-6 h-6 text-white/18" />
-            </div>
+            <motion.div
+              className="w-10 h-10 rounded-full border-2 border-violet-500/20 border-t-violet-400"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+            />
             <div className="text-center">
-              <p className="text-white/40 text-[14px] font-black font-['Cairo']">اضغط على أي مصدر لجلبه</p>
+              <p className="text-white/40 text-[14px] font-black font-['Cairo']">جاري البحث عن مصادر…</p>
               <p className="text-white/18 text-[11px] font-['Cairo'] mt-1">ستظهر المصادر المتاحة هنا تلقائياً</p>
             </div>
           </div>
@@ -813,6 +815,29 @@ function EpisodePlayer({
           onBack={onBack} onNextEp={onNextEp} onPrevEp={onPrevEp}
         />
       </AnimatePresence>
+    );
+  }
+
+  /* ── Blank-screen guard: if no URL at all, show error ── */
+  if (!currentUrl) {
+    return (
+      <motion.div
+        className="fixed inset-0 z-50 bg-[#09090f] flex flex-col items-center justify-center gap-5"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+        dir="rtl"
+      >
+        <div className="w-14 h-14 rounded-2xl bg-white/4 border border-white/7 flex items-center justify-center">
+          <AlertTriangle className="w-6 h-6 text-white/20" />
+        </div>
+        <div className="text-center">
+          <p className="text-white/55 text-[14px] font-black font-['Cairo']">تعذّر تشغيل المصدر</p>
+          <p className="text-white/25 text-[12px] mt-1 font-['Cairo']">لا يوجد رابط فيديو صالح</p>
+        </div>
+        <button onClick={onBack}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 text-white text-[13px] font-bold font-['Cairo'] active:scale-95 transition-transform">
+          <ChevronRight className="w-4 h-4" /> العودة للمصادر
+        </button>
+      </motion.div>
     );
   }
 
@@ -1087,6 +1112,8 @@ export default function WatchPage() {
   const [initialSrv,   setInitialSrv]   = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
 
+  const autoFetchedRef = useRef(false);
+
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
   const totalEps   = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
@@ -1118,16 +1145,23 @@ export default function WatchPage() {
 
   function handleBack() { window.history.back(); }
 
-  /* ── Per-site on-demand fetch (no auto-play) ── */
-  async function handleFetchSite(site: string) {
-    const current = slotStatus[site];
-    if (current === "fetching" || current === "ready") return;
+  /* ── Track in-flight fetches to prevent duplicate calls ── */
+  const inFlightRef = useRef<Set<string>>(new Set());
 
+  /* ── Per-site on-demand fetch ── */
+  async function handleFetchSite(site: string) {
+    /* Guard: skip if already fetching or ready (check both state snapshot and in-flight ref) */
+    if (inFlightRef.current.has(site)) return;
+    if (slotStatus[site] === "fetching" || slotStatus[site] === "ready") return;
+
+    inFlightRef.current.add(site);
     setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
+
+    const resolvedTitle   = anime?.title?.romaji   || titleParam;
+    const resolvedEnglish = anime?.title?.english  || englishParam || "";
+
     try {
-      const t = anime?.title?.romaji || titleParam;
-      const e = anime?.title?.english || englishParam || "";
-      const params = new URLSearchParams({ site, title: t, english: e, ep: String(ep) });
+      const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep) });
       const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(25000) });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
@@ -1140,8 +1174,49 @@ export default function WatchPage() {
       }
     } catch {
       setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+    } finally {
+      inFlightRef.current.delete(site);
     }
   }
+
+  /* ── Auto-fetch all sites on mount ── */
+  useEffect(() => {
+    if (autoFetchedRef.current) return;
+    if (!titleParam) return;
+    autoFetchedRef.current = true;
+    SCRAPER_DEFS.forEach((def, i) => {
+      setTimeout(() => {
+        /* Pass title params directly to avoid stale anime state at mount time */
+        (async () => {
+          if (inFlightRef.current.has(def.site)) return;
+          inFlightRef.current.add(def.site);
+          setSlotStatus(prev => ({ ...prev, [def.site]: "fetching" }));
+          try {
+            const params = new URLSearchParams({
+              site:    def.site,
+              title:   titleParam,
+              english: englishParam || "",
+              ep:      String(ep),
+            });
+            const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(25000) });
+            const data = await r.json() as { sources?: FetchedSrc[] };
+            const srcs: FetchedSrc[] = data.sources || [];
+            if (srcs.length > 0) {
+              setSlotSources(prev => ({ ...prev, [def.site]: srcs }));
+              setSlotStatus(prev => ({ ...prev, [def.site]: "ready" }));
+            } else {
+              setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
+            }
+          } catch {
+            setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
+          } finally {
+            inFlightRef.current.delete(def.site);
+          }
+        })();
+      }, i * 300);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── Play a specific source directly ── */
   function handlePlaySrc(src: FetchedSrc) {
