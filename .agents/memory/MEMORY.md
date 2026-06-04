@@ -26,7 +26,11 @@
 - [AnimeDar MEGA truncated scheme](animedar-mega-scheme.md) — some AnimeDar episodes store mega data as `:/mega.nz/embed#!...` (https stripped to colon+1-slash); fix: `"https://" + d.slice(2)`; other episodes use standard `fileId#key` format
 - [AnimeDar colon-slug](animedar-colon-slug.md) — "Re:Zero" → toSlug → `re-zero-...` but AnimeDar uses `rezero-...`; add colonJoined variant: `toSlug(q.replace(/[：:]/g, ""))` to slug candidates
 - [Anime-Phoenix x265 MKV](animephoenix-codec.md) — all files are x265/HEVC MKV; plays on Windows/Mac with HEVC decoder and Safari; Linux Chrome (Replit preview) cannot decode → shows error; video-proxy must set Accept-Ranges:bytes always
-- [Shahiid seasons/?serie= AJAX](shahiid-serie-ajax.md) — ?serie= pages load episodes via AJAX only (no links in static HTML); shahiidLoadMore must run even when links.length===0 for isSerieFilter URLs; max 10 pages for these
+- [Shahiid seasons/?serie= AJAX](shahiid-serie-ajax.md) — ?serie= pages load seasons via JS only (misha_loadmore returns 0, paged= also fails); only works for anime with direct /seasons/{slug}/ URLs
+- [mega.nz embed ordering in extractAndCollect](mega-embed-ordering.md) — mega.nz/embed MUST be checked BEFORE DEAD_FILE_HOSTS (mega.nz is in that list); same for vidmoly
+- [asciiSimilarity for mixed Arabic-English slugs](ascii-similarity.md) — slugs like "انمي-ون-بيس-one-piece-hg" score=0 with similarity(); asciiSimilarity() strips non-ASCII first; used in AnimeTime, RistoAnime
+- [MitAnime non-standard port MP4](mitanime-nonstd-port.md) — vidcache.net:8161 URLs blocked by Replit browser; detect :\d{4,5}/ and route through video-proxy server-side
+- [AnimeDar mega embed needs directUrl](animedar-mega-directurl.md) — AnimeDar mega sources set isEmbed:true but must also set directUrl:embedUrl so Watch.tsx MegaEmbedPlayer receives the URL
 - [Watch.tsx source picker first](watch-auto-pick.md) — picker shown FIRST (not auto-play); sources appear live as SSE fires; probe runs per-URL; user clicks card → player opens
 - [FlixCloud decrypt TypeScript](flixcloud-decrypt.md) — reanime.to/api/flix/{anilistId}/{ep} → flixcloud embeds; WASM+PBKDF2+AES-256-CBC decrypt ported to TS; CDN blocks server IP (hls-proxy→403); raw URL sent as fallback
 - [Direct MP4 in Watch.tsx](direct-mp4-player.md) — AnimeGG play/ URLs skip video-proxy (CDN → vidcache.net:8161, non-standard port blocked by Replit); play DIRECT video.src in browser. Sendvid/streamtape still use video-proxy (IP-tied)
