@@ -1038,7 +1038,10 @@ function EpisodePlayer({
               onTimeUpdate={handleHlsTime}
               onFail={tryNextServer}
               topSlot={topSlot}
-              bottomSlot={bottomSlot}
+              ep={ep}
+              totalEps={totalEps}
+              onPrevEp={onPrevEp}
+              onNextEp={onNextEp}
             />
             {subState === "ready" && subCues.length > 0 && (
               <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
