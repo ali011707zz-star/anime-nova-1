@@ -1,11 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Palette, Bell, BellOff, Globe, Home, Monitor,
-  Moon, Zap, Sun, ChevronRight, Check, Tv, Layers,
-  Info, Shield, Star,
+  ChevronRight, Check, Tv, Layers,
+  Info, Shield, Star, LogIn, LogOut, User,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "wouter";
+import { useAuth } from "@/lib/auth-context";
+import { AuthModal } from "@/pages/Auth";
 
 const THEMES = [
   { id: "dark",    label: "داكن",       sub: "الإعداد الافتراضي", color: "#1C1C22", border: "#3F3F46" },
@@ -78,6 +80,8 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 }
 
 export default function Settings() {
+  const { user, signOut } = useAuth();
+  const [showAuth, setShowAuth] = useState(false);
   const [theme, setTheme]   = useState(() => localStorage.getItem("pref-theme") || "dark");
   const [notifs, setNotifs] = useState(() => localStorage.getItem("pref-notifs") !== "false");
   const [autoMark, setAutoMark] = useState(() => localStorage.getItem("pref-automark") !== "false");
@@ -252,6 +256,46 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* Account */}
+      <SectionTitle title="الحساب" />
+      <div className="mx-4 bg-[#111116] border border-white/6 rounded-2xl overflow-hidden">
+        {user ? (
+          <div className="divide-y divide-white/5">
+            <div className="flex items-center gap-3 p-4">
+              <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-black text-sm shrink-0">
+                {user.email?.[0]?.toUpperCase() ?? "؟"}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-white/85 font-['Cairo']">مسجّل الدخول</p>
+                <p className="text-[10px] text-white/35 font-['Cairo'] truncate">{user.email}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => signOut()}
+              className="w-full flex items-center gap-3 p-4 text-red-400 hover:bg-red-500/5 transition-colors active:scale-[0.98]"
+            >
+              <div className="w-9 h-9 rounded-xl bg-red-500/10 border border-red-500/15 flex items-center justify-center shrink-0">
+                <LogOut className="w-4 h-4 text-red-400" />
+              </div>
+              <span className="text-sm font-bold font-['Cairo']">تسجيل الخروج</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowAuth(true)}
+            className="w-full flex items-center gap-3 p-4 hover:bg-white/3 transition-colors active:scale-[0.98]"
+          >
+            <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center shrink-0">
+              <LogIn className="w-4 h-4 text-primary" />
+            </div>
+            <div className="text-right">
+              <p className="text-sm font-bold text-white/85 font-['Cairo']">تسجيل الدخول</p>
+              <p className="text-[10px] text-white/35 font-['Cairo']">احفظ تاريخك وقائمتك عبر الأجهزة</p>
+            </div>
+          </button>
+        )}
+      </div>
+
       {/* About */}
       <SectionTitle title="عن التطبيق" />
       <div className="mx-4 bg-[#111116] border border-white/6 rounded-2xl overflow-hidden divide-y divide-white/5">
@@ -275,6 +319,10 @@ export default function Settings() {
           مسح سجل المشاهدة
         </button>
       </div>
+
+      <AnimatePresence>
+        {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+      </AnimatePresence>
     </main>
   );
 }

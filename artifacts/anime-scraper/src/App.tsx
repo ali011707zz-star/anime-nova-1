@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Header } from "@/components/layout/Header";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { AuthProvider } from "@/lib/auth-context";
 import Home from "@/pages/Home";
 const AnimeDetail = lazy(() => import("@/pages/AnimeDetail"));
 const EpisodeList = lazy(() => import("@/pages/EpisodeList"));
@@ -89,10 +90,12 @@ function App() {
   }, []);
 
   return (
-    <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-      <Router onMenuClick={() => setSidebarOpen(true)} />
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-    </WouterRouter>
+    <AuthProvider>
+      <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+        <Router onMenuClick={() => setSidebarOpen(true)} />
+        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      </WouterRouter>
+    </AuthProvider>
   );
 }
 

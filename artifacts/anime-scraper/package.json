@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.107.0",
     "hls.js": "^1.6.16",
     "react-player": "^3.4.0"
   }
