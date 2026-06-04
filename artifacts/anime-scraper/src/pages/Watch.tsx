@@ -63,13 +63,23 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
 
+function getSrcQualityTier(src: FetchedSrc): Quality {
+  const name = (src.name || "").toLowerCase();
+  if (name.includes("1080") || name.includes("fhd")) return "1080p FHD";
+  if (name.includes("480") || name.includes("360") || name.includes(" sd")) return "360p SD";
+  if (name.includes("720") || name.includes(" hd")) return "720p HD";
+  const rank = src.qualityRank ?? 2;
+  if (rank >= 12) return "1080p FHD";
+  if (rank >= 9) return "720p HD";
+  return "360p SD";
+}
+
 function buildMerged(srcs: FetchedSrc[]): Record<Quality, string[]> {
   const merged: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
   srcs.forEach(s => {
     const url = s.directUrl || s.url;
     if (!url) return;
-    const rank = s.qualityRank ?? 2;
-    const tier: Quality = rank >= 3 ? "1080p FHD" : rank >= 2 ? "720p HD" : "360p SD";
+    const tier = getSrcQualityTier(s);
     if (!merged[tier].includes(url)) merged[tier].push(url);
   });
   return merged;
@@ -299,50 +309,166 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
   );
 }
 
-/* ══════════════════════════════════ SERVER TAG HELPER ═══════ */
-function getServerTag(url: string): string {
-  if (url.includes("mega.nz"))  return "MA";
-  if (url.includes("as-cdn21") || url.includes("rubystm")) return "TS";
-  if (url.includes("sendvid"))  return "SV";
-  if (url.includes("streamtape")) return "ST";
-  if (url.includes("streamwish") || url.includes("filemoon") || url.includes("wishembed")) return "SW";
-  if (url.includes("workers.dev")) return "PH";
-  // For proxy URLs the inner URL is percent-encoded inside the query string
-  if (url.includes("shahiid"))  return "SH";
-  if (url.includes("animelek")) return "AL";
-  if (url.includes("animedar")) return "AD";
-  if (url.includes("okcdn") || url.includes("ok.ru")) return "OK";
-  if (url.includes("hls-proxy")) return "HLS";
-  if (url.includes("video-proxy")) return "MP4";
-  return "SRC";
+/* ══════════════════════════════════ SOURCE DISPLAY HELPERS ══ */
+function getCdnDisplayName(url: string): string {
+  if (!url) return "مصدر";
+  const u = url.toLowerCase();
+  if (u.includes("mega.nz") || u.includes("mega.co.nz")) return "Mega NZ";
+  if (u.includes("workers.dev")) return "Phoenix CDN";
+  if (u.includes("filemoon")) return "FileMoon";
+  if (u.includes("streamwish") || u.includes("wishembed") || u.includes("hglink") || u.includes("hgcloud")) return "StreamWish";
+  if (u.includes("vidhide")) return "VidHide";
+  if (u.includes("streamtape")) return "StreamTape";
+  if (u.includes("sendvid")) return "SendVid";
+  if (u.includes("mp4upload")) return "MP4Upload";
+  if (u.includes("vidmoly")) return "VidMoly";
+  if (u.includes("as-cdn21") || u.includes("rubystm")) return "AS-CDN";
+  if (u.includes("dood") || u.includes("ds2play")) return "DoodStream";
+  if (u.includes("hls-proxy")) return "HLS بث";
+  if (u.includes("video-proxy")) return "مباشر MP4";
+  if (u.match(/\.(mp4|mkv|webm)([?#]|$)/i)) return "مباشر";
+  if (u.match(/\.m3u8([?#]|$)/i)) return "HLS";
+  return "مصدر";
+}
+
+const SITE_SHORT: Record<string, string> = {
+  animephoenix: "فينكس", shahiid: "شاهيد", animelek: "أنمي ليك",
+  animedar: "أنمي دار", okanime: "أوك أنمي", ristoanime: "ريستو",
+  animetime: "أنمي تايم", toonstream: "تون ستريم", mitanime: "ميتا أنمي", animeify: "أنمي فاي",
+};
+
+const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string; icon: string }> = {
+  "1080p FHD": { dot: "#fbbf24", badge: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.26)", text: "rgba(253,224,71,0.95)", icon: "rgba(251,191,36,0.72)" },
+  "720p HD":   { dot: "#34d399", badge: "rgba(52,211,153,0.09)", border: "rgba(52,211,153,0.24)", text: "rgba(110,231,183,0.92)", icon: "rgba(52,211,153,0.68)" },
+  "360p SD":   { dot: "#94a3b8", badge: "rgba(148,163,184,0.07)", border: "rgba(148,163,184,0.16)", text: "rgba(148,163,184,0.70)", icon: "rgba(148,163,184,0.55)" },
+};
+const Q_LABEL: Record<Quality, string> = {
+  "1080p FHD": "جودة عالية جداً · FHD 1080",
+  "720p HD":   "جودة عالية · HD 720",
+  "360p SD":   "جودة متوسطة · SD 360",
+};
+const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
+
+/* ══════════════════════════════════ EXTERNAL PLAYER SHEET ═══ */
+function ExternalSheet({
+  src, title, onClose,
+}: { src: FetchedSrc; title: string; onClose: () => void }) {
+  const rawUrl = src.directUrl || src.url;
+  const fullUrl = rawUrl.startsWith("/") ? window.location.origin + rawUrl : rawUrl;
+  const isEmbed = !!src.isEmbed;
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[60] flex items-end"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}>
+      <div className="absolute inset-0 bg-black/65" />
+      <motion.div
+        className="relative w-full rounded-t-2xl overflow-hidden"
+        initial={{ y: 90 }} animate={{ y: 0 }} exit={{ y: 90 }}
+        transition={{ type: "spring", damping: 26, stiffness: 260 }}
+        style={{ background: "#0e0e18", border: "1px solid rgba(255,255,255,0.09)" }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-9 h-1 rounded-full bg-white/15" />
+        </div>
+
+        <div className="px-5 pt-2 pb-5">
+          <p className="text-white/45 text-[11px] font-['Cairo'] mb-1">
+            {getCdnDisplayName(fullUrl)} · {SITE_SHORT[src.site || ""] || ""}
+          </p>
+          <p className="text-white/70 text-[13px] font-black font-['Cairo'] mb-4">فتح في مشغّل خارجي</p>
+
+          {isEmbed ? (
+            /* Embed sources — can't be opened in external players */
+            <div className="flex items-start gap-3 py-4 px-4 rounded-2xl mb-3"
+              style={{ background: "rgba(124,58,237,0.10)", border: "1px solid rgba(124,58,237,0.22)" }}>
+              <Tv2 className="w-4 h-4 text-violet-400/70 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-violet-200/75 text-[12px] font-bold font-['Cairo']">مشغّل داخل التطبيق</p>
+                <p className="text-violet-300/40 text-[10px] font-['Cairo'] mt-0.5 leading-relaxed">
+                  هذا المصدر يعمل فقط داخل التطبيق عبر مشغّل مدمج.<br/>لا يمكن فتحه في مشغّل خارجي.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <a href={`intent:${fullUrl}#Intent;package=com.mxtech.videoplayer.ad;S.title=${encodeURIComponent(title)};end`}
+                className="flex items-center gap-3 py-3.5 px-4 rounded-2xl mb-2.5 active:opacity-70"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                <span className="text-[20px]">▶️</span>
+                <div>
+                  <p className="text-white/80 text-[13px] font-bold font-['Cairo']">MX Player</p>
+                  <p className="text-white/28 text-[10px] font-['Cairo']">أندرويد · مشغّل فيديو</p>
+                </div>
+              </a>
+              <a href={`intent:${fullUrl}#Intent;package=org.videolan.vlc;S.title=${encodeURIComponent(title)};end`}
+                className="flex items-center gap-3 py-3.5 px-4 rounded-2xl mb-2.5 active:opacity-70"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                <span className="text-[20px]">🎬</span>
+                <div>
+                  <p className="text-white/80 text-[13px] font-bold font-['Cairo']">VLC</p>
+                  <p className="text-white/28 text-[10px] font-['Cairo']">أندرويد / iOS · مفتوح المصدر</p>
+                </div>
+              </a>
+              <button
+                onClick={() => { navigator.clipboard?.writeText(fullUrl).catch(() => {}); onClose(); }}
+                className="flex items-center gap-3 py-3.5 px-4 rounded-2xl w-full active:opacity-70 mb-2.5"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                <span className="text-[20px]">📋</span>
+                <div className="text-right">
+                  <p className="text-white/80 text-[13px] font-bold font-['Cairo']">نسخ الرابط</p>
+                  <p className="text-white/28 text-[10px] font-['Cairo']">للصق في أي مشغّل</p>
+                </div>
+              </button>
+            </>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
 }
 
 /* ══════════════════════════════════ SCRAPER PICKER ══════════ */
 function ScraperPicker({
   cover, title, ep, totalEps,
   slotStatus, slotSources,
-  onPick, onBack, onNextEp, onPrevEp,
+  onFetchSite, onPlaySrc,
+  onBack, onNextEp, onPrevEp,
 }: {
   cover: string; title: string; ep: number; totalEps: number;
   slotStatus: Record<string, SlotStatus>;
   slotSources: Record<string, FetchedSrc[]>;
-  onPick: (site: string) => void;
-  onBack: () => void;
-  onNextEp: () => void;
-  onPrevEp: () => void;
+  onFetchSite: (site: string) => void;
+  onPlaySrc: (src: FetchedSrc) => void;
+  onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
 }) {
-  /* External player overlay */
-  const [extOverlay, setExtOverlay] = useState<{ site: string; url: string } | null>(null);
+  const [extSheet, setExtSheet] = useState<FetchedSrc | null>(null);
 
-  function openExternalOverlay(site: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    const srcs = slotSources[site] || [];
-    const bestSrc = srcs.slice().sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0];
-    const rawUrl = bestSrc?.directUrl || bestSrc?.url || "";
-    if (!rawUrl) return;
-    const fullUrl = rawUrl.startsWith("/") ? window.location.origin + rawUrl : rawUrl;
-    setExtOverlay({ site, url: fullUrl });
+  /* Flatten + deduplicate all fetched sources */
+  const allFlat: FetchedSrc[] = [];
+  const seenKeys = new Set<string>();
+  for (const srcs of Object.values(slotSources)) {
+    for (const s of srcs) {
+      const key = s.directUrl || s.url;
+      if (!key || seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      allFlat.push(s);
+    }
   }
+  allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+
+  const byQuality: Record<Quality, FetchedSrc[]> = {
+    "1080p FHD": allFlat.filter(s => getSrcQualityTier(s) === "1080p FHD"),
+    "720p HD":   allFlat.filter(s => getSrcQualityTier(s) === "720p HD"),
+    "360p SD":   allFlat.filter(s => getSrcQualityTier(s) === "360p SD"),
+  };
+  const hasSources = allFlat.length > 0;
+
+  /* Sites not yet ready */
+  const notReadySites = SCRAPER_DEFS.filter(d => slotStatus[d.site] !== "ready");
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#07070e]" dir="rtl">
@@ -363,7 +489,9 @@ function ScraperPicker({
           <p className="text-white/90 text-[13px] font-black font-['Cairo'] truncate leading-tight">
             {title} · الحلقة {ep}
           </p>
-          <p className="text-white/22 text-[10px] font-['Cairo'] mt-0.5">اختر مصدراً للتشغيل</p>
+          <p className="text-white/22 text-[10px] font-['Cairo'] mt-0.5">
+            {hasSources ? `${allFlat.length} مصدر متاح` : "اختر مصدراً للتشغيل"}
+          </p>
         </div>
         <button onClick={onNextEp} disabled={ep >= totalEps}
           className="w-10 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0 disabled:opacity-20">
@@ -376,146 +504,175 @@ function ScraperPicker({
         )}
       </div>
 
-      {/* ── Scraper list ── */}
+      {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto"
-        style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
+        style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}>
 
-        {SCRAPER_DEFS.map((def, i) => {
-          const status = slotStatus[def.site] || "idle";
-          const srcs   = slotSources[def.site] || [];
-          const count  = srcs.length;
-
-          const isFailed   = status === "failed";
-          const isFetching = status === "fetching";
-          const isReady    = status === "ready";
-
+        {/* ── Quality sections with source cards ── */}
+        {QUALITY_LABELS.map(q => {
+          const srcs = byQuality[q];
+          if (!srcs.length) return null;
+          const qs = QUALITY_STYLE[q];
           return (
-            <motion.div key={def.site}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.035, duration: 0.18, ease: "easeOut" }}
-              onClick={() => !isFetching && onPick(def.site)}
-              className={`flex items-center px-4 py-3.5 gap-3 cursor-pointer transition-all
-                ${isFailed ? "opacity-40" : "active:bg-white/5"}`}
-              style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-
-              {/* Status dot */}
-              <div className="shrink-0 w-2 h-2 rounded-full"
-                style={{
-                  background: isReady ? "rgba(52,211,153,0.9)"
-                    : isFailed ? "rgba(239,68,68,0.5)"
-                    : isFetching ? "rgba(251,191,36,0.8)"
-                    : "rgba(255,255,255,0.15)",
-                  boxShadow: isReady ? "0 0 6px rgba(52,211,153,0.7)"
-                    : isFetching ? "0 0 6px rgba(251,191,36,0.6)" : "none",
-                }}
-              />
-
-              {/* Site name + description */}
-              <div className="flex-1 min-w-0">
-                <p className={`text-[13px] font-bold font-['Cairo'] leading-tight
-                  ${isFailed ? "text-white/30" : "text-white/82"}`}>
-                  {def.name}
-                </p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[10px] font-['Cairo'] text-white/28">{def.desc}</span>
-                  {isReady && count > 1 && (
-                    <span className="text-emerald-400/55 text-[10px] font-['Cairo']">· {count} مصادر</span>
-                  )}
-                  {isFailed && (
-                    <span className="text-white/25 text-[10px] font-['Cairo']">· غير متاح · اضغط للمحاولة</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Right: actions */}
-              <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
-                {/* Tag chip */}
-                <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded"
-                  style={{
-                    color: isReady ? "rgba(52,211,153,0.7)" : "rgba(255,255,255,0.3)",
-                    background: isReady ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.05)",
-                    border: `1px solid ${isReady ? "rgba(52,211,153,0.2)" : "rgba(255,255,255,0.08)"}`,
-                  }}>
-                  {def.tag}
+            <div key={q} className="mt-4">
+              {/* Section header */}
+              <div className="flex items-center gap-2 px-4 mb-1.5">
+                <div className="w-2 h-2 rounded-full shrink-0"
+                  style={{ background: qs.dot, boxShadow: `0 0 7px ${qs.dot}99` }} />
+                <span className="text-[11px] font-bold font-['Cairo'] tracking-wide flex-1"
+                  style={{ color: qs.text }}>{Q_LABEL[q]}</span>
+                <span className="font-mono text-[9px] font-black px-1.5 py-0.5 rounded-md"
+                  style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
+                  {Q_SHORT[q]}
                 </span>
-
-                {/* Spinner while fetching */}
-                {isFetching && <Loader2 className="w-4 h-4 text-amber-300/60 animate-spin" />}
-
-                {/* External player button — only when ready */}
-                {isReady && (
-                  <button
-                    onClick={e => openExternalOverlay(def.site, e)}
-                    title="فتح في مشغّل خارجي"
-                    className="w-7 h-7 rounded-xl flex items-center justify-center active:scale-90 transition-all"
-                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
-                    <ExternalLink className="w-3.5 h-3.5 text-white/30" />
-                  </button>
-                )}
               </div>
-            </motion.div>
+
+              {/* Source cards */}
+              {srcs.map((src, i) => {
+                const url     = src.directUrl || src.url;
+                const cdn     = getCdnDisplayName(url);
+                const site    = SITE_SHORT[src.site || ""] || src.site || "";
+                const isEmbed = !!src.isEmbed;
+                const isHls   = url.includes("hls-proxy") || url.includes(".m3u8");
+                return (
+                  <motion.div key={`${src.site}-${i}-${url.slice(-20)}`}
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.04, duration: 0.18 }}>
+                    <div className="flex items-center px-4 py-2.5 gap-3"
+                      style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+
+                      {/* CDN icon */}
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                        style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
+                        {isEmbed
+                          ? <Tv2 className="w-[17px] h-[17px]" style={{ color: qs.icon }} />
+                          : <MonitorPlay className="w-[17px] h-[17px]" style={{ color: qs.icon }} />}
+                      </div>
+
+                      {/* Name block */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-white/88 text-[14px] font-black font-['Cairo'] leading-tight">{cdn}</span>
+                          {isHls && !isEmbed && (
+                            <span className="font-mono text-[8px] font-black px-1 py-0.5 rounded"
+                              style={{ background: "rgba(124,58,237,0.18)", color: "rgba(196,181,253,0.72)", border: "1px solid rgba(124,58,237,0.22)" }}>
+                              HLS
+                            </span>
+                          )}
+                          {isEmbed && (
+                            <span className="font-mono text-[8px] font-black px-1 py-0.5 rounded"
+                              style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.75)", border: "1px solid rgba(52,211,153,0.20)" }}>
+                              EMBED
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-white/28 text-[11px] font-['Cairo'] mt-0.5 leading-none">{site}</p>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {/* External sheet trigger */}
+                        <button
+                          onClick={e => { e.stopPropagation(); setExtSheet(src); }}
+                          className="w-7 h-7 rounded-xl flex items-center justify-center active:scale-90 transition-all"
+                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                          <ExternalLink className="w-3.5 h-3.5 text-white/28" />
+                        </button>
+
+                        {/* Watch Now */}
+                        <div className="flex flex-col items-end gap-0.5">
+                          <button
+                            onClick={() => onPlaySrc(src)}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl active:scale-95 transition-all"
+                            style={{
+                              background: "linear-gradient(135deg, rgba(139,92,246,0.92), rgba(109,40,217,0.95))",
+                              border: "1px solid rgba(167,139,250,0.30)",
+                              boxShadow: "0 2px 12px rgba(124,58,237,0.35)",
+                            }}>
+                            <Play className="w-3 h-3 text-white fill-white" />
+                            <span className="text-white text-[12px] font-black font-['Cairo']">مشاهدة الآن</span>
+                          </button>
+                          {isEmbed && (
+                            <p className="text-white/22 text-[9px] font-['Cairo'] leading-none">يعمل داخل التطبيق</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
           );
         })}
 
-        {/* Footer hint */}
-        <div className="py-5 text-center">
-          <p className="text-white/12 text-[10px] font-['Cairo']">اضغط على أي مصدر لجلب الرابط وتشغيل الحلقة</p>
+        {/* ── Pending / loading sites ── */}
+        {notReadySites.length > 0 && (
+          <div className={hasSources ? "mt-6 border-t border-white/[0.05] pt-4" : "mt-2"}>
+            {hasSources && (
+              <div className="flex items-center gap-2 px-4 mb-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-white/14 shrink-0" />
+                <span className="text-[11px] font-['Cairo'] text-white/26">مصادر إضافية</span>
+              </div>
+            )}
+            {notReadySites.map((def, i) => {
+              const status     = slotStatus[def.site] || "idle";
+              const isFetching = status === "fetching";
+              const isFailed   = status === "failed";
+              return (
+                <motion.div key={def.site}
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03, duration: 0.16 }}
+                  onClick={() => !isFetching && onFetchSite(def.site)}
+                  className={`flex items-center px-4 py-3 gap-3 cursor-pointer transition-all
+                    ${isFailed ? "opacity-35" : "active:bg-white/[0.04]"}`}
+                  style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+
+                  <div className="w-1.5 h-1.5 rounded-full shrink-0"
+                    style={{
+                      background: isFailed ? "rgba(239,68,68,0.45)"
+                        : isFetching ? "rgba(251,191,36,0.75)"
+                        : "rgba(255,255,255,0.14)",
+                      boxShadow: isFetching ? "0 0 5px rgba(251,191,36,0.5)" : "none",
+                    }} />
+
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-[13px] font-bold font-['Cairo'] ${isFailed ? "text-white/26" : "text-white/55"}`}>
+                      {def.name}
+                    </span>
+                    <span className={`text-[10px] font-['Cairo'] mr-2 ${isFailed ? "text-white/20" : "text-white/22"}`}>
+                      {isFetching ? "· جاري الجلب..." : isFailed ? "· غير متاح · اضغط للمحاولة" : `· ${def.desc}`}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
+                      style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                      {def.tag}
+                    </span>
+                    {isFetching
+                      ? <Loader2 className="w-3.5 h-3.5 text-amber-300/55 animate-spin" />
+                      : <span className="text-[10px] text-white/18 font-['Cairo']">اضغط</span>}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="py-6 text-center">
+          <p className="text-white/10 text-[10px] font-['Cairo']">
+            {hasSources ? "اضغط «مشاهدة الآن» لتشغيل أي مصدر مباشرة" : "اضغط على أي مصدر أدناه لجلبه"}
+          </p>
         </div>
       </div>
 
-      {/* ── External player overlay ── */}
+      {/* ── External player sheet ── */}
       <AnimatePresence>
-        {extOverlay && (
-          <motion.div
-            className="fixed inset-0 z-[60] flex items-end"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={() => setExtOverlay(null)}>
-            <div className="absolute inset-0 bg-black/60" />
-            <motion.div
-              className="relative w-full rounded-t-2xl overflow-hidden"
-              initial={{ y: 80 }} animate={{ y: 0 }} exit={{ y: 80 }}
-              transition={{ type: "spring", damping: 28, stiffness: 280 }}
-              style={{ background: "#111118", border: "1px solid rgba(255,255,255,0.08)" }}
-              onClick={e => e.stopPropagation()}>
-              <div className="px-5 pt-4 pb-2">
-                <p className="text-white/60 text-[12px] font-['Cairo'] mb-3">فتح في مشغّل خارجي</p>
-                {/* MX Player */}
-                <a
-                  href={`intent:${extOverlay.url}#Intent;package=com.mxtech.videoplayer.ad;S.title=${encodeURIComponent(title)};end`}
-                  className="flex items-center gap-3 py-3 px-4 rounded-xl mb-2 active:opacity-70"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <span className="text-[22px]">▶️</span>
-                  <div>
-                    <p className="text-white/80 text-[13px] font-bold font-['Cairo']">MX Player</p>
-                    <p className="text-white/30 text-[10px] font-['Cairo']">أندرويد · مشغّل فيديو</p>
-                  </div>
-                </a>
-                {/* VLC */}
-                <a
-                  href={`intent:${extOverlay.url}#Intent;package=org.videolan.vlc;S.title=${encodeURIComponent(title)};end`}
-                  className="flex items-center gap-3 py-3 px-4 rounded-xl mb-2 active:opacity-70"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <span className="text-[22px]">🎬</span>
-                  <div>
-                    <p className="text-white/80 text-[13px] font-bold font-['Cairo']">VLC</p>
-                    <p className="text-white/30 text-[10px] font-['Cairo']">أندرويد / iOS · مشغّل مفتوح</p>
-                  </div>
-                </a>
-                {/* Copy URL */}
-                <button
-                  onClick={() => { navigator.clipboard?.writeText(extOverlay.url).catch(()=>{}); setExtOverlay(null); }}
-                  className="flex items-center gap-3 py-3 px-4 rounded-xl w-full active:opacity-70 mb-3"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <span className="text-[22px]">📋</span>
-                  <div className="text-right">
-                    <p className="text-white/80 text-[13px] font-bold font-['Cairo']">نسخ الرابط</p>
-                    <p className="text-white/30 text-[10px] font-['Cairo']">للصق في أي مشغّل</p>
-                  </div>
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
+        {extSheet && (
+          <ExternalSheet src={extSheet} title={title} onClose={() => setExtSheet(null)} />
         )}
       </AnimatePresence>
     </div>
@@ -1607,24 +1764,11 @@ export default function WatchPage() {
 
   function handleBack() { window.history.back(); }
 
-  /* ── Per-site on-demand fetch ── */
-  async function handleClickSite(site: string) {
+  /* ── Per-site on-demand fetch (no auto-play) ── */
+  async function handleFetchSite(site: string) {
     const current = slotStatus[site];
-    if (current === "fetching") return;
+    if (current === "fetching" || current === "ready") return;
 
-    /* Already fetched → play immediately */
-    if (current === "ready") {
-      const srcs   = slotSources[site] || [];
-      const merged = buildMerged(srcs);
-      setPlayerServers(merged);
-      const bestQ  = QUALITY_LABELS.find(q => merged[q].length > 0) || "720p HD";
-      setQuality(bestQ);
-      setInitialSrv(0);
-      setPhase("player");
-      return;
-    }
-
-    /* idle or failed → fetch now */
     setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
     try {
       const t = anime?.title?.romaji || titleParam;
@@ -1637,18 +1781,24 @@ export default function WatchPage() {
       if (srcs.length > 0) {
         setSlotSources(prev => ({ ...prev, [site]: srcs }));
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-        const merged = buildMerged(srcs);
-        setPlayerServers(merged);
-        const bestQ  = QUALITY_LABELS.find(q => merged[q].length > 0) || "720p HD";
-        setQuality(bestQ);
-        setInitialSrv(0);
-        setPhase("player");
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
     } catch {
       setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
     }
+  }
+
+  /* ── Play a specific source directly ── */
+  function handlePlaySrc(src: FetchedSrc) {
+    const url  = src.directUrl || src.url;
+    const tier = getSrcQualityTier(src);
+    const servers: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
+    servers[tier] = [url];
+    setPlayerServers(servers);
+    setQuality(tier);
+    setInitialSrv(0);
+    setPhase("player");
   }
 
   const servers = playerServers[quality] || [];
@@ -1662,7 +1812,8 @@ export default function WatchPage() {
           <ScraperPicker
             cover={cover} title={title} ep={ep} totalEps={totalEps}
             slotStatus={slotStatus} slotSources={slotSources}
-            onPick={handleClickSite}
+            onFetchSite={handleFetchSite}
+            onPlaySrc={handlePlaySrc}
             onBack={handleBack}
             onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
             onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
