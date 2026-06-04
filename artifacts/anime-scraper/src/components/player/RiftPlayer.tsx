@@ -592,70 +592,70 @@ export default function RiftPlayer({
               onClick={e => { e.stopPropagation(); togglePlay(); }}
             >
 
-              {/* ════ TOP BAR — title LEFT · buttons RIGHT (LTR layout) ════ */}
+              {/* ════ TOP BAR — title LEFT · buttons RIGHT ════ */}
               <div
                 className="shrink-0 pointer-events-auto"
                 dir="ltr"
                 style={{
-                  background: "linear-gradient(180deg, rgba(0,0,0,0.90) 0%, rgba(0,0,0,0.45) 70%, transparent 100%)",
+                  background: "linear-gradient(180deg, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.55) 72%, transparent 100%)",
                   paddingTop: "max(14px, env(safe-area-inset-top))",
-                  paddingBottom: 18,
-                  paddingLeft: 16,
-                  paddingRight: 16,
+                  paddingBottom: 20,
+                  paddingLeft: 14,
+                  paddingRight: 14,
                 }}
                 onClick={e => e.stopPropagation()}
               >
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center justify-between gap-3">
 
-                  {/* LEFT: title + info (أنيق كما في الصورة المرجعية) */}
-                  <div className="flex-1 min-w-0" dir="rtl">
-                    <h1 className="text-white text-[15px] font-black font-['Cairo'] leading-snug"
-                      style={{ textShadow: "0 1px 10px rgba(0,0,0,0.80)" }}>
-                      {title || "مشغّل نوفا"}
-                    </h1>
-                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                      {qualityLabel && (
-                        <span className="text-violet-300/80 text-[11px] font-black font-mono">{qualityLabel}P</span>
-                      )}
-                      {qualityLabel && <span className="text-white/20 text-[9px]">•</span>}
-                      {isHls && (
-                        <>
-                          <span className="text-violet-300/60 text-[10px] font-bold font-mono">HLS</span>
-                          <span className="text-white/20 text-[9px]">•</span>
-                        </>
-                      )}
-                      <span className="text-white/55 text-[11px] font-['Cairo']">الحلقة {ep}</span>
-                      {serverCount > 1 && (
-                        <>
-                          <span className="text-white/20 text-[9px]">•</span>
-                          <span className="text-white/35 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount} سيرفر</span>
-                        </>
-                      )}
+                  {/* LEFT: accent bar + title block */}
+                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                    {/* Vertical accent line */}
+                    <div className="w-[3px] h-[38px] rounded-full shrink-0"
+                      style={{ background: "linear-gradient(180deg, #ef4444 0%, rgba(239,68,68,0.15) 100%)" }} />
+                    <div className="min-w-0" dir="rtl">
+                      <h1
+                        className="text-white text-[14px] font-black font-['Cairo'] leading-tight truncate"
+                        style={{ textShadow: "0 1px 12px rgba(0,0,0,0.90)" }}>
+                        {title || "مشغّل نوفا"}
+                      </h1>
+                      <div className="flex items-center gap-1.5 mt-[3px] flex-wrap">
+                        <span className="text-white/45 text-[10px] font-['Cairo']">الحلقة {ep}</span>
+                        {qualityLabel && (
+                          <>
+                            <span className="text-white/18 text-[8px]">•</span>
+                            <span
+                              className="px-1.5 py-0.5 rounded font-mono text-[9px] font-black"
+                              style={{ background: "rgba(239,68,68,0.18)", color: "rgba(252,165,165,0.85)", border: "1px solid rgba(239,68,68,0.28)" }}>
+                              {qualityLabel}P
+                            </span>
+                          </>
+                        )}
+                        {serverCount > 1 && (
+                          <>
+                            <span className="text-white/18 text-[8px]">•</span>
+                            <span className="text-white/28 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
 
                   {/* RIGHT: action buttons — screenshot · flip · close */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {/* Screenshot */}
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <button onClick={takeScreenshot}
-                      title="لقطة شاشة"
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(8px)" }}>
-                      <Camera className="w-[17px] h-[17px] text-white/75" />
+                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.13)", backdropFilter: "blur(10px)" }}>
+                      <Camera className="w-[16px] h-[16px] text-white/65" />
                     </button>
-                    {/* Flip/Rotate screen */}
                     <button onClick={toggleFs}
-                      title="تبديل وضعية الشاشة"
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(139,92,246,0.20)", border: "1px solid rgba(139,92,246,0.35)", backdropFilter: "blur(8px)" }}>
-                      <FlipScreenIcon className="w-[18px] h-[18px] text-violet-300/90" />
+                      style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(139,92,246,0.30)", backdropFilter: "blur(10px)" }}>
+                      <FlipScreenIcon className="w-[17px] h-[17px] text-violet-300/80" />
                     </button>
-                    {/* Close */}
                     <button onClick={onBack}
-                      title="خروج"
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.28)", backdropFilter: "blur(8px)" }}>
-                      <X className="w-[17px] h-[17px] text-red-400/85" />
+                      style={{ background: "rgba(239,68,68,0.14)", border: "1px solid rgba(239,68,68,0.26)", backdropFilter: "blur(10px)" }}>
+                      <X className="w-[16px] h-[16px] text-red-400/80" />
                     </button>
                   </div>
                 </div>
@@ -750,26 +750,33 @@ export default function RiftPlayer({
                   </div>
                 </div>
 
-                {/* ── Controls row — uniform 44px touch targets, elegant spacing ── */}
+                {/* ── Controls row — uniform icons, balanced layout ── */}
                 <div
-                  className="flex items-center justify-between px-4 pt-2"
-                  style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
+                  className="flex items-center justify-between px-3 pt-2"
+                  style={{ paddingBottom: "max(14px, env(safe-area-inset-bottom))" }}
                 >
                   {/* ─ Left group: Zoom · Speed ─ */}
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5">
                     {/* Zoom */}
                     <button onClick={() => setIsZoomed(z => !z)}
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {isZoomed
-                        ? <ScanLine className="w-5 h-5 text-violet-300/90" />
-                        : <Scan className="w-5 h-5 text-white/50" />}
+                        ? <ScanLine className="w-[19px] h-[19px] text-violet-300/90" />
+                        : <Scan className="w-[19px] h-[19px] text-white/45" />}
                     </button>
-                    {/* Speed */}
+                    {/* Speed — pill badge style, uniform height */}
                     <div className="relative">
                       <button onClick={() => { setShowSpeed(s => !s); showControls(); }}
-                        className="flex items-center gap-0.5 h-11 px-3 rounded-xl active:bg-white/10 transition-colors">
-                        <span className="text-white/55 text-[12px] font-black font-mono">×{speed}</span>
-                        <ChevronDown className="w-3 h-3 text-white/25 ml-0.5" />
+                        className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                        <span
+                          className="px-2 py-[3px] rounded-lg font-mono text-[11px] font-black leading-none"
+                          style={{
+                            background: speed !== 1 ? "rgba(239,68,68,0.18)" : "rgba(255,255,255,0.07)",
+                            color: speed !== 1 ? "#f87171" : "rgba(255,255,255,0.45)",
+                            border: speed !== 1 ? "1px solid rgba(239,68,68,0.28)" : "1px solid rgba(255,255,255,0.10)",
+                          }}>
+                          ×{speed}
+                        </span>
                       </button>
                       <AnimatePresence>
                         {showSpeed && (
@@ -800,41 +807,41 @@ export default function RiftPlayer({
 
                   {/* ─ Center: play/pause ─ */}
                   <button onClick={togglePlay}
-                    className="w-12 h-12 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                    style={{ background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.28)" }}>
+                    className="w-[46px] h-[46px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                    style={{ background: "rgba(255,255,255,0.09)", border: "1.5px solid rgba(255,255,255,0.26)" }}>
                     {playing
                       ? <Pause className="w-5 h-5 text-white fill-white" />
                       : <Play className="w-5 h-5 text-white fill-white ml-0.5" />}
                   </button>
 
                   {/* ─ Right group: Volume · Download · Lock · Fullscreen ─ */}
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5">
                     {/* Volume */}
                     <button onClick={toggleMute}
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {muted || volume === 0
-                        ? <VolumeX className="w-5 h-5 text-white/50" />
-                        : <Volume2 className="w-5 h-5 text-white/50" />}
+                        ? <VolumeX className="w-[19px] h-[19px] text-white/45" />
+                        : <Volume2 className="w-[19px] h-[19px] text-white/45" />}
                     </button>
                     {/* Download — only shown if downloadUrl available */}
                     {downloadUrl && (
                       <a href={downloadUrl} download target="_blank" rel="noreferrer"
                         onClick={e => e.stopPropagation()}
                         className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
-                        <Download className="w-5 h-5 text-emerald-400/75" />
+                        <Download className="w-[19px] h-[19px] text-emerald-400/70" />
                       </a>
                     )}
                     {/* Lock */}
                     <button onClick={() => setIsLocked(true)}
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
-                      <Lock className="w-[18px] h-[18px] text-white/50" />
+                      <Lock className="w-[17px] h-[17px] text-white/45" />
                     </button>
                     {/* Fullscreen */}
                     <button onClick={toggleFs}
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {isFs
-                        ? <Minimize2 className="w-5 h-5 text-white/65" />
-                        : <Maximize2 className="w-5 h-5 text-white/65" />}
+                        ? <Minimize2 className="w-[19px] h-[19px] text-white/60" />
+                        : <Maximize2 className="w-[19px] h-[19px] text-white/60" />}
                     </button>
                   </div>
                 </div>

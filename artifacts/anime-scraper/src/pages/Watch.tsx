@@ -343,62 +343,65 @@ function WatchLoadingModal({ onClose }: { onClose?: () => void }) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
-      style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(18px)" }}
+      transition={{ duration: 0.25 }}
+      style={{ background: "rgba(0,0,0,0.80)", backdropFilter: "blur(22px)" }}
     >
       <motion.div
-        className="relative flex flex-col items-center gap-7 px-10 py-10 rounded-3xl"
-        initial={{ scale: 0.78, opacity: 0, y: 30 }}
+        className="relative flex flex-col items-center rounded-[28px] overflow-hidden"
+        initial={{ scale: 0.82, opacity: 0, y: 28 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.85, opacity: 0, y: 20 }}
-        transition={{ type: "spring", stiffness: 320, damping: 28 }}
+        exit={{ scale: 0.88, opacity: 0, y: 16 }}
+        transition={{ type: "spring", stiffness: 300, damping: 26 }}
         style={{
-          background: "rgba(10,10,22,0.95)",
-          border: "1px solid rgba(139,92,246,0.22)",
-          boxShadow: "0 0 80px rgba(109,40,217,0.18), 0 25px 60px rgba(0,0,0,0.55)",
+          width: 260,
+          background: "rgba(8,8,20,0.98)",
+          border: "1px solid rgba(139,92,246,0.20)",
+          boxShadow: "0 0 100px rgba(109,40,217,0.22), 0 30px 70px rgba(0,0,0,0.70)",
         }}
       >
-        {/* Ripple rings */}
-        {[0, 1, 2].map(i => (
-          <motion.div
-            key={i}
-            className="absolute rounded-full"
-            style={{ border: "1.5px solid rgba(139,92,246,0.35)" }}
-            initial={{ width: 80, height: 80, opacity: 0.7 }}
-            animate={{ width: 80 + (i + 1) * 38, height: 80 + (i + 1) * 38, opacity: 0 }}
-            transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.55, ease: "easeOut" }}
+        {/* ── Gojo image — hero section ── */}
+        <div className="relative w-full overflow-hidden" style={{ height: 280 }}>
+          <img
+            src={gojoImg}
+            alt="غوجو ساتورو"
+            className="w-full h-full object-cover object-top"
           />
-        ))}
+          {/* Bottom gradient fade */}
+          <div className="absolute inset-x-0 bottom-0 h-20"
+            style={{ background: "linear-gradient(0deg, rgba(8,8,20,0.98) 0%, transparent 100%)" }} />
+          {/* Subtle top gradient */}
+          <div className="absolute inset-x-0 top-0 h-12"
+            style={{ background: "linear-gradient(180deg, rgba(8,8,20,0.60) 0%, transparent 100%)" }} />
+          {/* Scan-line shimmer */}
+          <motion.div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background: "linear-gradient(180deg, transparent 0%, rgba(139,92,246,0.06) 50%, transparent 100%)",
+              backgroundSize: "100% 40px",
+            }}
+            animate={{ backgroundPositionY: ["0px", "280px"] }}
+            transition={{ duration: 2.2, repeat: Infinity, ease: "linear" }}
+          />
+        </div>
 
-        {/* Character avatar */}
-        <motion.div
-          className="relative w-24 h-24 rounded-full overflow-hidden shrink-0 z-10"
-          style={{
-            border: "3px solid rgba(139,92,246,0.55)",
-            boxShadow: "0 0 0 5px rgba(109,40,217,0.14), 0 8px 32px rgba(109,40,217,0.35)",
-          }}
-          animate={{ scale: [1, 1.04, 1] }}
-          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-        >
-          <img src={gojoImg} alt="تحميل" className="w-full h-full object-cover" />
-        </motion.div>
-
-        {/* Text */}
-        <div className="flex flex-col items-center gap-2 z-10" dir="rtl">
-          <p className="text-white text-[16px] font-black font-['Cairo']">لحظة من فضلك</p>
-          <p className="text-white/45 text-[13px] font-['Cairo'] text-center leading-relaxed">
-            نحن نجهّز الفيديو
+        {/* ── Text + loader ── */}
+        <div className="flex flex-col items-center gap-3 px-6 pt-1 pb-7 w-full" dir="rtl">
+          <p className="text-white text-[17px] font-black font-['Cairo'] tracking-wide">
+            لحظة من فضلك
           </p>
-          {/* Animated dots */}
-          <div className="flex items-center gap-1.5 mt-1">
-            {[0, 1, 2].map(i => (
-              <motion.div
-                key={i}
-                className="w-1.5 h-1.5 rounded-full bg-violet-400"
-                animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1.2, 0.8] }}
-                transition={{ duration: 1, repeat: Infinity, delay: i * 0.2, ease: "easeInOut" }}
-              />
-            ))}
+          <p className="text-white/40 text-[12px] font-['Cairo'] text-center leading-relaxed">
+            نحن نجهّز الفيديو لك
+          </p>
+
+          {/* Progress bar */}
+          <div className="w-full h-[3px] rounded-full mt-1 overflow-hidden"
+            style={{ background: "rgba(255,255,255,0.08)" }}>
+            <motion.div
+              className="h-full rounded-full"
+              style={{ background: "linear-gradient(90deg, #7c3aed, #ef4444, #7c3aed)", backgroundSize: "200% 100%" }}
+              animate={{ backgroundPositionX: ["0%", "200%"] }}
+              transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }}
+            />
           </div>
         </div>
 
@@ -406,9 +409,9 @@ function WatchLoadingModal({ onClose }: { onClose?: () => void }) {
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute top-3.5 left-3.5 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.10)" }}>
-            <X className="w-3.5 h-3.5 text-white/40" />
+            className="absolute top-3 left-3 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform z-20"
+            style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(8px)" }}>
+            <X className="w-3.5 h-3.5 text-white/50" />
           </button>
         )}
       </motion.div>
