@@ -2655,7 +2655,8 @@ async function getRistoAnimeSources(
 //  Animeify.net scraper (ani-cli-arabic API → FileMoon HLS + MediaFire MP4 + Mega embed)
 // ════════════════════════════════════════════════════════════════════
 let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
-const ANIMEIFY_CREDS_TTL = 60 * 60_000; // 1 hour — refresh frequently
+let _animeifyFallbackCreds: { base: string; token: string } | null = null; // last known good
+const ANIMEIFY_CREDS_TTL = 60 * 60_000; // 1 hour
 
 function invalidateAnimeifyCreds() { _animeifyCreds = null; }
 
@@ -2668,14 +2669,24 @@ async function getAnimeifyCreds(force = false): Promise<{ base: string; token: s
       headers: { "X-Auth-Key": "6rK9z0XyW8vQ3J7pL2mN4sB1tH5gD0fA", "User-Agent": "AniCliAr/2.0" },
       signal: AbortSignal.timeout(8000),
     });
-    if (!r.ok) { invalidateAnimeifyCreds(); return null; }
+    if (!r.ok) {
+      invalidateAnimeifyCreds();
+      return _animeifyFallbackCreds; // use last known good if server down
+    }
     const data = await r.json() as Record<string, string>;
     const base = String(data.ANI_CLI_AR_API_BASE || "");
     const token = String(data.ANI_CLI_AR_TOKEN || "");
-    if (!base || !token) { invalidateAnimeifyCreds(); return null; }
+    if (!base || !token) {
+      invalidateAnimeifyCreds();
+      return _animeifyFallbackCreds;
+    }
     _animeifyCreds = { base, token, ts: Date.now() };
+    _animeifyFallbackCreds = { base, token }; // persist as last known good
     return { base, token };
-  } catch { invalidateAnimeifyCreds(); return null; }
+  } catch {
+    invalidateAnimeifyCreds();
+    return _animeifyFallbackCreds; // fallback on network error
+  }
 }
 
 /** Fetch a URL with the animeify API token; auto-refresh on 401/403 and retry once */
@@ -2702,14 +2713,22 @@ async function extractMediafireDirect(serverId: string): Promise<string | null> 
   try {
     const url = serverId.startsWith("http") ? serverId : `https://www.mediafire.com/file/${serverId}`;
     const r = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" },
       signal: AbortSignal.timeout(10000),
       redirect: "follow",
     });
     if (!r.ok) return null;
     const html = await r.text();
-    const m = /(https:\/\/download\d*[^"' \n<]+)/.exec(html);
-    return m?.[1]?.replace(/&amp;/g, "&") || null;
+    // Try multiple patterns — MediaFire changes their HTML periodically
+    const raw =
+      (/(https:\/\/download\d*\.mediafire\.com\/[^"' \n<>]+)/.exec(html))?.[1] ||
+      (/(https:\/\/download[^"' \n<>]*mediafire[^"' \n<>]+\.(?:mp4|mkv|avi|mov|webm)[^"' \n<>]*)/.exec(html))?.[1] ||
+      (/id="downloadButton"[^>]*href="([^"]+)"/.exec(html))?.[1] ||
+      (/aria-label="[Dd]ownload [Ff]ile"[^>]*href="([^"]+)"/.exec(html))?.[1] ||
+      (/class="[^"]*download[^"]*"[^>]*href="(https:\/\/[^"]+)"/.exec(html))?.[1] ||
+      (/(https:\/\/download\d*[^"' \n<>]+)/.exec(html))?.[1] ||
+      null;
+    return raw?.replace(/&amp;/g, "&") || null;
   } catch { return null; }
 }
 

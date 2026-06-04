@@ -1362,8 +1362,11 @@ export default function WatchPage() {
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
-  const totalEps   = anime?.episodes ||
-    (anime?.nextAiringEpisode?.episode ? anime.nextAiringEpisode.episode - 1 : 999);
+  const totalEps   = (anime?.episodes ?? 0) > 0
+    ? (anime!.episodes as number)
+    : (anime?.nextAiringEpisode?.episode ?? 0) > 0
+      ? anime!.nextAiringEpisode!.episode - 1
+      : 999;
   const cover      = anime?.coverImage?.extraLarge || anime?.coverImage?.large || "";
 
   /* Episode title from AniList streamingEpisodes */
