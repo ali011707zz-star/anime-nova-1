@@ -10,7 +10,7 @@
  * ─ دعم HLS + MP4 + video-proxy
  */
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -37,6 +37,8 @@ interface Props {
   onRealQuality?: (q: string) => void;
   onTimeUpdate?: (t: number) => void;
   onFail?: () => void;
+  topSlot?: ReactNode;
+  bottomSlot?: ReactNode;
 }
 
 type GestureType = "none" | "seek" | "volume" | "brightness";
@@ -56,7 +58,7 @@ interface GestureFeedback {
 }
 
 /* ─────────────────────── component ─────────────────────── */
-export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail }: Props) {
+export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, topSlot, bottomSlot }: Props) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const hlsRef      = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -670,11 +672,18 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail }:
               className="absolute inset-0 z-20 flex flex-col pointer-events-none"
               style={{
                 background: [
-                  "linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0)   22%)",
-                  "linear-gradient(to top,   rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.45) 30%, rgba(0,0,0,0) 60%)",
+                  "linear-gradient(to bottom, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0) 28%)",
+                  "linear-gradient(to top,   rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 32%, rgba(0,0,0,0) 62%)",
                 ].join(", "),
               }}
             >
+              {/* ── TOP SLOT (back btn, title, quality, subtitle — injected from parent) ── */}
+              {topSlot && (
+                <div className="pointer-events-auto shrink-0">
+                  {topSlot}
+                </div>
+              )}
+
               {/* ── CENTER CONTROLS ── */}
               <div className="flex-1 flex items-center justify-between px-8 pointer-events-auto">
                 {/* ← -10s */}
@@ -845,6 +854,13 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail }:
                       : <Maximize2 className="w-4 h-4 text-white/55" />}
                   </button>
                 </div>
+
+                {/* ── BOTTOM SLOT (ep nav + server tabs — injected from parent) ── */}
+                {bottomSlot && (
+                  <div className="pointer-events-auto mt-1">
+                    {bottomSlot}
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
