@@ -1,11 +1,11 @@
 /**
- * RiftPlayer v4 — تصميم مطابق لـ WITanime / Anime Rift
+ * RiftPlayer v5 — تصميم عصري أنيق
  *
  * Layout:
- *  TOP:    [العنوان • الحلقة • الجودة]          [📷] [⟲] [✕]
+ *  TOP:    [العنوان • الحلقة • الجودة]          [📷] [⟲] [✕]  (title LEFT · buttons RIGHT)
  *  CENTER: ↺10       ⏸(دائرة كبيرة)        ↻10
- *  BOTTOM: progress bar (أحمر + برتقالي)
- *          [⏮] [🔲] [×N] [↺10] [⏸] [↻10] [🔒] [⛶] [⏭]
+ *  BOTTOM: progress bar
+ *          [🔲] [×N] | ⏸ | [🔊] [🔒] [⛶]
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -15,7 +15,7 @@ import {
   Play, Pause, Volume2, VolumeX,
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
   RotateCcw, RotateCw, Sun, Lock, Unlock,
-  Scan, ScanLine, Camera, X, SkipBack, SkipForward,
+  Scan, ScanLine, Camera, X, Download,
   ChevronDown, Zap,
 } from "lucide-react";
 
@@ -31,15 +31,18 @@ function fmtTime(s: number) {
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
-/* Custom screen-rotation SVG icon */
-function RotateScreenIcon({ className }: { className?: string }) {
+/* Modern flip/rotate screen icon */
+function FlipScreenIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
       strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <rect x="5" y="2" width="14" height="20" rx="2" />
-      <path d="M9 21h6" />
-      <path d="M16 7.5A4.5 4.5 0 0 0 8 10" />
-      <path d="M8 8l0 2 2 0" />
+      {/* Phone outline */}
+      <rect x="7" y="1" width="10" height="16" rx="2" />
+      {/* Rotation arrow */}
+      <path d="M4 10c0-3.31 2.69-6 6-6" />
+      <polyline points="2 8 4 10 6 8" />
+      <path d="M20 14c0 3.31-2.69 6-6 6" />
+      <polyline points="18 16 20 14 22 16" />
     </svg>
   );
 }
@@ -54,13 +57,13 @@ interface Props {
   isHls?: boolean;
   serverCount?: number;
   serverIndex?: number;
+  downloadUrl?: string;
   onBack?: () => void;
   onPrevEp?: () => void;
   onNextEp?: () => void;
   onRealQuality?: (q: string) => void;
   onTimeUpdate?: (t: number) => void;
   onFail?: () => void;
-  /* legacy compat — ignored */
   topSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
 }
@@ -79,6 +82,7 @@ export default function RiftPlayer({
   isHls = false,
   serverCount = 1,
   serverIndex = 0,
+  downloadUrl,
   onBack,
   onPrevEp,
   onNextEp,
@@ -588,64 +592,70 @@ export default function RiftPlayer({
               onClick={e => { e.stopPropagation(); togglePlay(); }}
             >
 
-              {/* ════ TOP BAR ════ */}
+              {/* ════ TOP BAR — title LEFT · buttons RIGHT (LTR layout) ════ */}
               <div
                 className="shrink-0 pointer-events-auto"
+                dir="ltr"
                 style={{
-                  background: "linear-gradient(180deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.50) 65%, transparent 100%)",
+                  background: "linear-gradient(180deg, rgba(0,0,0,0.90) 0%, rgba(0,0,0,0.45) 70%, transparent 100%)",
                   paddingTop: "max(14px, env(safe-area-inset-top))",
-                  paddingBottom: 16,
+                  paddingBottom: 18,
                   paddingLeft: 16,
                   paddingRight: 16,
                 }}
                 onClick={e => e.stopPropagation()}
               >
-                <div className="flex items-start justify-between gap-3">
-                  {/* LEFT: title + info */}
-                  <div className="flex-1 min-w-0">
-                    <h1 className="text-white text-[15px] font-black font-['Cairo'] leading-snug" style={{ textShadow: "0 1px 8px rgba(0,0,0,0.70)" }}>
+                <div className="flex items-start justify-between gap-4">
+
+                  {/* LEFT: title + info (أنيق كما في الصورة المرجعية) */}
+                  <div className="flex-1 min-w-0" dir="rtl">
+                    <h1 className="text-white text-[15px] font-black font-['Cairo'] leading-snug"
+                      style={{ textShadow: "0 1px 10px rgba(0,0,0,0.80)" }}>
                       {title || "مشغّل نوفا"}
                     </h1>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       {qualityLabel && (
-                        <span className="text-white/65 text-[11px] font-bold font-mono">{qualityLabel}P</span>
+                        <span className="text-violet-300/80 text-[11px] font-black font-mono">{qualityLabel}P</span>
                       )}
+                      {qualityLabel && <span className="text-white/20 text-[9px]">•</span>}
                       {isHls && (
                         <>
-                          <span className="text-white/30 text-[10px]">•</span>
-                          <span className="text-violet-300/70 text-[10px] font-bold font-mono">HLS</span>
+                          <span className="text-violet-300/60 text-[10px] font-bold font-mono">HLS</span>
+                          <span className="text-white/20 text-[9px]">•</span>
                         </>
                       )}
-                      <span className="text-white/30 text-[10px]">•</span>
                       <span className="text-white/55 text-[11px] font-['Cairo']">الحلقة {ep}</span>
                       {serverCount > 1 && (
                         <>
-                          <span className="text-white/30 text-[10px]">•</span>
-                          <span className="text-white/38 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount} سيرفر</span>
+                          <span className="text-white/20 text-[9px]">•</span>
+                          <span className="text-white/35 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount} سيرفر</span>
                         </>
                       )}
                     </div>
                   </div>
 
-                  {/* RIGHT: screenshot + rotate + close */}
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  {/* RIGHT: action buttons — screenshot · flip · close */}
+                  <div className="flex items-center gap-2 shrink-0">
                     {/* Screenshot */}
                     <button onClick={takeScreenshot}
-                      className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                      style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
-                      <Camera className="w-4 h-4 text-white/80" />
+                      title="لقطة شاشة"
+                      className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(8px)" }}>
+                      <Camera className="w-[17px] h-[17px] text-white/75" />
                     </button>
-                    {/* Rotate */}
+                    {/* Flip/Rotate screen */}
                     <button onClick={toggleFs}
-                      className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                      style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
-                      <RotateScreenIcon className="w-[18px] h-[18px] text-white/80" />
+                      title="تبديل وضعية الشاشة"
+                      className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(139,92,246,0.20)", border: "1px solid rgba(139,92,246,0.35)", backdropFilter: "blur(8px)" }}>
+                      <FlipScreenIcon className="w-[18px] h-[18px] text-violet-300/90" />
                     </button>
                     {/* Close */}
                     <button onClick={onBack}
-                      className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                      style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
-                      <X className="w-4.5 h-4.5 text-white/80" />
+                      title="خروج"
+                      className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.28)", backdropFilter: "blur(8px)" }}>
+                      <X className="w-[17px] h-[17px] text-red-400/85" />
                     </button>
                   </div>
                 </div>
@@ -654,7 +664,7 @@ export default function RiftPlayer({
               {/* ════ CENTER CONTROLS (↺10  ⏸  ↻10) ════ */}
               <div className="flex-1 flex items-center justify-center pointer-events-auto"
                 onClick={e => e.stopPropagation()}>
-                <div className="flex items-center gap-10">
+                <div className="flex items-center gap-12">
 
                   {/* Back 10s */}
                   <button onClick={() => { skip(-10); showControls(); }}
@@ -701,13 +711,13 @@ export default function RiftPlayer({
               {/* ════ BOTTOM SECTION ════ */}
               <div
                 className="shrink-0 pointer-events-auto"
-                style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.94) 0%, rgba(0,0,0,0.60) 70%, transparent 100%)" }}
+                style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.55) 75%, transparent 100%)" }}
                 onClick={e => e.stopPropagation()}
               >
                 {/* Progress bar */}
-                <div className="px-4 pt-1 pb-0.5">
+                <div className="px-5 pt-2 pb-1">
                   {/* Time row */}
-                  <div className="flex items-center justify-between mb-2.5 px-0.5" dir="ltr">
+                  <div className="flex items-center justify-between mb-3 px-0.5" dir="ltr">
                     <span className="text-white/70 text-[12px] font-bold font-mono">{fmtTime(currentTime)}</span>
                     <span className="text-white/35 text-[12px] font-mono">{fmtTime(duration)}</span>
                   </div>
@@ -724,15 +734,11 @@ export default function RiftPlayer({
                     onTouchStart={e => { e.stopPropagation(); setPrgHover(true); }}
                     onTouchEnd={() => setPrgHover(false)}
                   >
-                    {/* Base */}
                     <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }} />
-                    {/* Buffered — orange */}
                     <div className="absolute top-0 left-0 h-full rounded-full"
                       style={{ width: `${bufPct}%`, background: "rgba(234,179,8,0.55)", transition: "width 0.3s" }} />
-                    {/* Played — red */}
                     <div className="absolute top-0 left-0 h-full rounded-full"
                       style={{ width: `${pct}%`, background: "#ef4444", transition: seekDrag.current ? "none" : "width 0.1s" }} />
-                    {/* Thumb — red dot */}
                     <div className="absolute top-1/2 -translate-y-1/2 rounded-full"
                       style={{
                         left: `calc(${pct}% - ${prgHover ? 7 : 5}px)`,
@@ -744,33 +750,26 @@ export default function RiftPlayer({
                   </div>
                 </div>
 
-                {/* Controls row */}
+                {/* ── Controls row — uniform 44px touch targets, elegant spacing ── */}
                 <div
-                  className="flex items-center justify-between px-3 pt-1.5"
-                  style={{ paddingBottom: "max(14px, env(safe-area-inset-bottom))" }}
+                  className="flex items-center justify-between px-4 pt-2"
+                  style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
                 >
-                  {/* ─ Left group ─ */}
-                  <div className="flex items-center gap-0.5">
-                    {/* Prev episode */}
-                    <button onClick={() => onPrevEp?.()}
-                      disabled={ep <= 1}
-                      className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10 transition-colors"
-                      style={{ opacity: ep <= 1 ? 0.22 : 0.75 }}>
-                      <SkipBack className="w-5 h-5 text-white fill-white" />
-                    </button>
+                  {/* ─ Left group: Zoom · Speed ─ */}
+                  <div className="flex items-center gap-1">
                     {/* Zoom */}
                     <button onClick={() => setIsZoomed(z => !z)}
-                      className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10 transition-colors">
+                      className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {isZoomed
-                        ? <ScanLine className="w-[19px] h-[19px] text-violet-300/85" />
-                        : <Scan className="w-[19px] h-[19px] text-white/55" />}
+                        ? <ScanLine className="w-5 h-5 text-violet-300/90" />
+                        : <Scan className="w-5 h-5 text-white/50" />}
                     </button>
                     {/* Speed */}
                     <div className="relative">
                       <button onClick={() => { setShowSpeed(s => !s); showControls(); }}
-                        className="flex items-center gap-0.5 h-10 px-2.5 rounded-full active:bg-white/10 transition-colors">
-                        <span className="text-white/60 text-[12px] font-black font-mono">×{speed}</span>
-                        <ChevronDown className="w-3 h-3 text-white/30" />
+                        className="flex items-center gap-0.5 h-11 px-3 rounded-xl active:bg-white/10 transition-colors">
+                        <span className="text-white/55 text-[12px] font-black font-mono">×{speed}</span>
+                        <ChevronDown className="w-3 h-3 text-white/25 ml-0.5" />
                       </button>
                       <AnimatePresence>
                         {showSpeed && (
@@ -799,42 +798,43 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* ─ Center: play/pause circle ─ */}
+                  {/* ─ Center: play/pause ─ */}
                   <button onClick={togglePlay}
                     className="w-12 h-12 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                    style={{ background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.30)" }}>
+                    style={{ background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.28)" }}>
                     {playing
                       ? <Pause className="w-5 h-5 text-white fill-white" />
                       : <Play className="w-5 h-5 text-white fill-white ml-0.5" />}
                   </button>
 
-                  {/* ─ Right group ─ */}
-                  <div className="flex items-center gap-0.5">
+                  {/* ─ Right group: Volume · Download · Lock · Fullscreen ─ */}
+                  <div className="flex items-center gap-1">
                     {/* Volume */}
                     <button onClick={toggleMute}
-                      className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10 transition-colors">
+                      className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {muted || volume === 0
-                        ? <VolumeX className="w-[19px] h-[19px] text-white/55" />
-                        : <Volume2 className="w-[19px] h-[19px] text-white/55" />}
+                        ? <VolumeX className="w-5 h-5 text-white/50" />
+                        : <Volume2 className="w-5 h-5 text-white/50" />}
                     </button>
+                    {/* Download — only shown if downloadUrl available */}
+                    {downloadUrl && (
+                      <a href={downloadUrl} download target="_blank" rel="noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                        <Download className="w-5 h-5 text-emerald-400/75" />
+                      </a>
+                    )}
                     {/* Lock */}
                     <button onClick={() => setIsLocked(true)}
-                      className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10 transition-colors">
-                      <Lock className="w-[18px] h-[18px] text-white/55" />
-                    </button>
-                    {/* Next episode */}
-                    <button onClick={() => onNextEp?.()}
-                      disabled={ep >= totalEps}
-                      className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10 transition-colors"
-                      style={{ opacity: ep >= totalEps ? 0.22 : 0.75 }}>
-                      <SkipForward className="w-5 h-5 text-white fill-white" />
+                      className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                      <Lock className="w-[18px] h-[18px] text-white/50" />
                     </button>
                     {/* Fullscreen */}
                     <button onClick={toggleFs}
-                      className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10 transition-colors">
+                      className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {isFs
-                        ? <Minimize2 className="w-[19px] h-[19px] text-white/70" />
-                        : <Maximize2 className="w-[19px] h-[19px] text-white/70" />}
+                        ? <Minimize2 className="w-5 h-5 text-white/65" />
+                        : <Maximize2 className="w-5 h-5 text-white/65" />}
                     </button>
                   </div>
                 </div>
