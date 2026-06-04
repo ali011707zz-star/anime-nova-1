@@ -3,10 +3,11 @@ import { useLocation } from "wouter";
 import {
   ChevronRight, ChevronLeft, Play, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
-  Settings, Subtitles, MonitorPlay, Tv2,
+  Settings, Subtitles, MonitorPlay, Tv2, Download,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
+import gojoImg from "/gojo-loading.png";
 
 /* ══════════════════════════════════ ANILIST ══════════════════ */
 const ANILIST_Q = `query ($id: Int) {
@@ -333,6 +334,100 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
   );
 }
 
+/* ══════════════════════════════════ LOADING MODAL ═══════════ */
+function WatchLoadingModal({ onClose }: { onClose?: () => void }) {
+  return (
+    <motion.div
+      key="watch-loading-modal"
+      className="fixed inset-0 z-[999] flex items-center justify-center"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(18px)" }}
+    >
+      <motion.div
+        className="relative flex flex-col items-center gap-7 px-10 py-10 rounded-3xl"
+        initial={{ scale: 0.78, opacity: 0, y: 30 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.85, opacity: 0, y: 20 }}
+        transition={{ type: "spring", stiffness: 320, damping: 28 }}
+        style={{
+          background: "rgba(10,10,22,0.95)",
+          border: "1px solid rgba(139,92,246,0.22)",
+          boxShadow: "0 0 80px rgba(109,40,217,0.18), 0 25px 60px rgba(0,0,0,0.55)",
+        }}
+      >
+        {/* Ripple rings */}
+        {[0, 1, 2].map(i => (
+          <motion.div
+            key={i}
+            className="absolute rounded-full"
+            style={{ border: "1.5px solid rgba(139,92,246,0.35)" }}
+            initial={{ width: 80, height: 80, opacity: 0.7 }}
+            animate={{ width: 80 + (i + 1) * 38, height: 80 + (i + 1) * 38, opacity: 0 }}
+            transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.55, ease: "easeOut" }}
+          />
+        ))}
+
+        {/* Character avatar */}
+        <motion.div
+          className="relative w-24 h-24 rounded-full overflow-hidden shrink-0 z-10"
+          style={{
+            border: "3px solid rgba(139,92,246,0.55)",
+            boxShadow: "0 0 0 5px rgba(109,40,217,0.14), 0 8px 32px rgba(109,40,217,0.35)",
+          }}
+          animate={{ scale: [1, 1.04, 1] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <img src={gojoImg} alt="تحميل" className="w-full h-full object-cover" />
+        </motion.div>
+
+        {/* Text */}
+        <div className="flex flex-col items-center gap-2 z-10" dir="rtl">
+          <p className="text-white text-[16px] font-black font-['Cairo']">لحظة من فضلك</p>
+          <p className="text-white/45 text-[13px] font-['Cairo'] text-center leading-relaxed">
+            نحن نجهّز الفيديو
+          </p>
+          {/* Animated dots */}
+          <div className="flex items-center gap-1.5 mt-1">
+            {[0, 1, 2].map(i => (
+              <motion.div
+                key={i}
+                className="w-1.5 h-1.5 rounded-full bg-violet-400"
+                animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1.2, 0.8] }}
+                transition={{ duration: 1, repeat: Infinity, delay: i * 0.2, ease: "easeInOut" }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Close button */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-3.5 left-3.5 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.10)" }}>
+            <X className="w-3.5 h-3.5 text-white/40" />
+          </button>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/* ── Helper: is a directUrl downloadable (non-HLS MP4)? ── */
+function getDownloadUrl(src: FetchedSrc): string | null {
+  const url = src.directUrl || src.url || "";
+  if (!url) return null;
+  if (url.includes(".m3u8") || url.includes("hls-proxy")) return null;
+  if (url.includes("workers.dev") || url.match(/\.(mp4|mkv|webm)([?#]|$)/i)) {
+    return `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(url)}&dl=1`;
+  }
+  if (url.includes("video-proxy?")) return url.replace("video-proxy?", "video-proxy?dl=1&");
+  return null;
+}
+
 /* ══════════════════════════════════ SOURCE DISPLAY HELPERS ══ */
 function getCdnDisplayName(url: string): string {
   if (!url) return "مصدر";
@@ -537,16 +632,35 @@ function ScraperPicker({
                         </div>
                       </div>
 
-                      {/* Right: play button */}
-                      <div
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl shrink-0 active:scale-95 transition-transform"
-                        style={{
-                          background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))",
-                          border: "1px solid rgba(167,139,250,0.25)",
-                          boxShadow: "0 2px 14px rgba(109,40,217,0.30)",
-                        }}>
-                        <Play className="w-3.5 h-3.5 text-white fill-white" />
-                        <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
+                      {/* Right: download + play buttons */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {/* Download button — only for direct MP4 */}
+                        {getDownloadUrl(src) && (
+                          <a
+                            href={getDownloadUrl(src)!}
+                            download
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                            style={{
+                              background: "rgba(52,211,153,0.10)",
+                              border: "1px solid rgba(52,211,153,0.28)",
+                            }}>
+                            <Download className="w-4 h-4 text-emerald-400/85" />
+                          </a>
+                        )}
+                        {/* Play button */}
+                        <div
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl active:scale-95 transition-transform"
+                          style={{
+                            background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))",
+                            border: "1px solid rgba(167,139,250,0.25)",
+                            boxShadow: "0 2px 14px rgba(109,40,217,0.30)",
+                          }}>
+                          <Play className="w-3.5 h-3.5 text-white fill-white" />
+                          <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
+                        </div>
                       </div>
                     </div>
                   </motion.div>
@@ -734,12 +848,12 @@ function MegaEmbedPlayer({
 function EpisodePlayer({
   servers, quality, allServers,
   title, cover, ep, totalEps, animeTitle,
-  initialServer,
+  initialServer, downloadUrl,
   onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; cover: string; ep: number; totalEps: number; animeTitle: string;
-  initialServer?: number;
+  initialServer?: number; downloadUrl?: string;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
   onTierExhausted?: () => void;
@@ -1041,6 +1155,7 @@ function EpisodePlayer({
               isHls={currentInfo.isHls}
               serverCount={servers.length}
               serverIndex={currentServer}
+              downloadUrl={downloadUrl}
               onBack={onBack}
               onPrevEp={onPrevEp}
               onNextEp={onNextEp}
@@ -1166,6 +1281,9 @@ export default function WatchPage() {
   const [quality,      setQuality]      = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]   = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
+  const [showLoading,  setShowLoading]  = useState(false);
+  const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
+  const loadingTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const autoFetchedRef = useRef(false);
 
@@ -1274,7 +1392,7 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Play a specific source — pass ALL available sources so player can fallback ── */
+  /* ── Play a specific source — show loading modal then switch to player ── */
   function handlePlaySrc(src: FetchedSrc) {
     const clickedUrl  = src.directUrl || src.url;
     const clickedTier = getSrcQualityTier(src);
@@ -1303,31 +1421,54 @@ export default function WatchPage() {
       if (!servers[tier].includes(u)) servers[tier].push(u);
     }
 
+    /* Store download URL for player */
+    setPlayerDlUrl(getDownloadUrl(src) || undefined);
     setPlayerServers(servers);
     setQuality(clickedTier);
     setInitialSrv(0);
-    setPhase("player");
+
+    /* Show animated loading modal for ~1.6s then open player */
+    setShowLoading(true);
+    if (loadingTimer.current) clearTimeout(loadingTimer.current);
+    loadingTimer.current = setTimeout(() => {
+      setShowLoading(false);
+      setPhase("player");
+    }, 1600);
   }
 
   const servers = playerServers[quality] || [];
 
   if (phase === "picker") {
     return (
-      <AnimatePresence mode="wait">
-        <motion.div key="picker"
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
-          transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
-          <ScraperPicker
-            cover={cover} title={title} ep={ep} totalEps={totalEps}
-            slotStatus={slotStatus} slotSources={slotSources}
-            onFetchSite={handleFetchSite}
-            onPlaySrc={handlePlaySrc}
-            onBack={handleBack}
-            onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
-            onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
-          />
-        </motion.div>
-      </AnimatePresence>
+      <>
+        <AnimatePresence mode="wait">
+          <motion.div key="picker"
+            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
+            <ScraperPicker
+              cover={cover} title={title} ep={ep} totalEps={totalEps}
+              slotStatus={slotStatus} slotSources={slotSources}
+              onFetchSite={handleFetchSite}
+              onPlaySrc={handlePlaySrc}
+              onBack={handleBack}
+              onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
+              onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
+            />
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Loading modal — shown on top of picker when user clicks play */}
+        <AnimatePresence>
+          {showLoading && (
+            <WatchLoadingModal
+              onClose={() => {
+                if (loadingTimer.current) clearTimeout(loadingTimer.current);
+                setShowLoading(false);
+              }}
+            />
+          )}
+        </AnimatePresence>
+      </>
     );
   }
 
@@ -1342,6 +1483,7 @@ export default function WatchPage() {
           title={title}
           animeTitle={animeTitle}
           cover={cover} ep={ep} totalEps={totalEps}
+          downloadUrl={playerDlUrl}
           onBack={() => setPhase("picker")}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
