@@ -929,7 +929,8 @@ async function extractAndCollect(
   function collect(s: UnifiedSource) {
     if (!s.directUrl && !s.isEmbed) return;
     const checkUrl = s.directUrl || s.url;
-    if (!s.isEmbed && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
+    const isOwnProxy = checkUrl.startsWith("/api/");
+    if (!s.isEmbed && !isOwnProxy && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
     const key = checkUrl.includes("workers.dev")
       ? "cdn:" + checkUrl.replace(/^https?:\/\/[^/]+/, "")
       : checkUrl;
@@ -2799,6 +2800,33 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       });
     }));
 
+    // ── SendVid (SVLink) → MP4 مباشر عبر video-proxy بدون إعلانات ──
+    const svLink = String(epData.SVLink || "").trim();
+    if (svLink) {
+      const sendvidUrl = `https://sendvid.com/embed/${svLink}`;
+      try {
+        const svHtml = await (await fetch(sendvidUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(8000),
+        })).text();
+        const mp4Match = svHtml.match(/"(https:\/\/[^"]+\.mp4[^"]*)"/) ||
+                         svHtml.match(/src\s*:\s*"(https:\/\/[^"]+\.mp4[^"]*)"/);
+        if (mp4Match) {
+          const directMp4 = mp4Match[1];
+          const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(directMp4)}&ref=${encodeURIComponent(sendvidUrl)}`;
+          sources.push({
+            name: "سيندفيد · HD",
+            url: sendvidUrl,
+            quality: "HD",
+            qualityRank: 9,
+            site: "animeify",
+            directUrl: proxyUrl,
+            directType: "mp4",
+          });
+        }
+      } catch {}
+    }
+
     // ── Mega.nz embed (MALink: "fileId!decryptionKey") — fallback embed بدون إعلانات ──
     const maLink = String(epData.MALink || "").trim();
     if (maLink && maLink.includes("!")) {
@@ -2807,16 +2835,17 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       const key    = maLink.slice(bang + 1);
       if (fileId && key) {
         // Quick verify via Mega API: returns [-9] for ENOENT, [{...}] for found
-        let megaOk = false;
+        let megaOk = true;
         try {
-          const megaCheck = await fetch("https://g.api.mega.co.nz/cs?id=0&sid=", {
+          const megaCheck = await fetch("https://g.api.mega.co.nz/cs?id=0", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify([{ a: "g", p: fileId }]),
             signal: AbortSignal.timeout(5000),
           });
           const megaData = await megaCheck.json();
-          megaOk = Array.isArray(megaData) && megaData.length > 0 && typeof megaData[0] === "object" && megaData[0] !== null;
+          // -9 = ENOENT (file deleted); any other response means file accessible
+          megaOk = !(Array.isArray(megaData) && megaData[0] === -9);
         } catch { megaOk = true; }
 
         if (megaOk) {
@@ -2869,7 +2898,8 @@ router.get("/anime/sources-stream", async (req, res) => {
     if (closed) return;
     if (!s.directUrl && !s.isEmbed) return;
     const checkUrl = s.directUrl || s.url;
-    if (!s.isEmbed && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
+    const isOwnProxy = checkUrl.startsWith("/api/");
+    if (!s.isEmbed && !isOwnProxy && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
     const key = checkUrl.includes("workers.dev")
       ? "cdn:" + checkUrl.replace(/^https?:\/\/[^/]+/, "")
       : checkUrl;
@@ -3042,7 +3072,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   function collectSrc(s: UnifiedSource) {
     if (!s.directUrl && !s.isEmbed) return;
     const checkUrl = s.directUrl || s.url;
-    if (!s.isEmbed && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
+    const isOwnProxy = checkUrl.startsWith("/api/");
+    if (!s.isEmbed && !isOwnProxy && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
     const key = checkUrl.includes("workers.dev")
       ? "cdn:" + checkUrl.replace(/^https?:\/\/[^/]+/, "")
       : checkUrl;
