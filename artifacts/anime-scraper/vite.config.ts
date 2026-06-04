@@ -13,10 +13,6 @@ const basePath = process.env.BASE_PATH;
 if (!basePath) throw new Error("BASE_PATH environment variable is required but was not provided.");
 
 export default defineConfig(async ({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
-  const supabaseUrl  = process.env.SUPABASE_URL  || env.SUPABASE_URL  || "";
-  const supabaseAnon = process.env.SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || "";
-
   return {
     base: basePath,
     plugins: [
@@ -57,10 +53,6 @@ export default defineConfig(async ({ mode }) => {
           secure: false,
         },
       },
-    },
-    define: {
-      "import.meta.env.VITE_SUPABASE_URL":      JSON.stringify(supabaseUrl),
-      "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(supabaseAnon),
     },
     preview: {
       port,
