@@ -1,0 +1,860 @@
+/**
+ * RiftPlayer — مشغّل داخلي متقدم مستوحى من Anime Rift
+ *
+ * المميزات:
+ * ─ إيماءات السحب: يسار/يمين = تقديم/إرجاع | يسار أعلى/أسفل = السطوع | يمين أعلى/أسفل = الصوت
+ * ─ نقرة مزدوجة: يمين +10s | يسار -10s (مع حلقة متحركة)
+ * ─ ضغط مطوّل: تشغيل 2× (يعود للسرعة الطبيعية عند الرفع)
+ * ─ مؤشرات مرئية: شريط صوت / سطوع / معاينة التقديم
+ * ─ قائمة سرعة: 0.5× إلى 2×
+ * ─ دعم HLS + MP4 + video-proxy
+ */
+
+import { useState, useRef, useEffect, useCallback } from "react";
+import Hls from "hls.js";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
+  Maximize2, Minimize2, Gauge, AlertTriangle, RefreshCw,
+  Sun, ChevronDown,
+} from "lucide-react";
+
+/* ─────────────────────── helpers ─────────────────────── */
+function fmtTime(s: number) {
+  if (!isFinite(s) || s < 0) return "0:00";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+/* ─────────────────────── types ─────────────────────── */
+interface Props {
+  src: string;
+  onRealQuality?: (q: string) => void;
+  onTimeUpdate?: (t: number) => void;
+  onFail?: () => void;
+}
+
+type GestureType = "none" | "seek" | "volume" | "brightness";
+
+interface GestureState {
+  active: GestureType;
+  startX: number;
+  startY: number;
+  lastY: number;
+  startValue: number; /* seek: startCurrentTime; vol/bright: start 0-1 */
+}
+
+interface GestureFeedback {
+  type: "volume" | "brightness" | "seek";
+  value: number;   /* vol/bright: 0-1; seek: target seconds */
+  delta?: number;  /* seek: seconds delta for display */
+}
+
+/* ─────────────────────── component ─────────────────────── */
+export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail }: Props) {
+  const videoRef    = useRef<HTMLVideoElement>(null);
+  const hlsRef      = useRef<Hls | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekDragging = useRef(false);
+
+  /* Gesture refs */
+  const gestureRef      = useRef<GestureState>({ active: "none", startX: 0, startY: 0, lastY: 0, startValue: 0 });
+  const lastTapRef      = useRef<{ time: number; side: "left" | "right" } | null>(null);
+  const longPressTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevSpeedRef    = useRef(1);
+  const touchMoved      = useRef(false);
+  const GESTURE_THRESHOLD = 12;
+
+  /* Player state */
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState<string | null>(null);
+  const [isPlaying,    setIsPlaying]    = useState(false);
+  const [currentTime,  setCurrentTime]  = useState(0);
+  const [duration,     setDuration]     = useState(0);
+  const [buffered,     setBuffered]     = useState(0);
+  const [muted,        setMuted]        = useState(false);
+  const [volume,       setVolume]       = useState(1);
+  const [brightness,   setBrightness]   = useState(1);
+  const [speed,        setSpeed]        = useState(1);
+  const [showControls, setShowControls] = useState(true);
+  const [isFs,         setIsFs]         = useState(false);
+
+  /* Feedback state */
+  const [feedback,       setFeedback]       = useState<GestureFeedback | null>(null);
+  const [doubleTap,      setDoubleTap]      = useState<{ side: "left" | "right"; id: number } | null>(null);
+  const [isLongPressing, setIsLongPressing] = useState(false);
+  const [showSpeedMenu,  setShowSpeedMenu]  = useState(false);
+
+  /* ── Control auto-hide ── */
+  const scheduleHide = useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setShowControls(false), 4500);
+  }, []);
+
+  const showCtrl = useCallback(() => {
+    setShowControls(true);
+    scheduleHide();
+  }, [scheduleHide]);
+
+  /* ── Fullscreen ── */
+  useEffect(() => {
+    const fn = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", fn);
+    return () => document.removeEventListener("fullscreenchange", fn);
+  }, []);
+
+  function toggleFs() {
+    const el = containerRef.current;
+    if (!el) return;
+    !document.fullscreenElement
+      ? el.requestFullscreen?.().catch(() => {})
+      : document.exitFullscreen?.().catch(() => {});
+  }
+
+  /* ── Source loading (same engine as NativeHLSPlayer) ── */
+  const loadSource = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    video.src = "";
+    setLoading(true);
+    setError(null);
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPlaying(false);
+
+    let m3u8Url = src;
+
+    /* AnimeGG / mp4upload CDN non-standard port → play direct */
+    if (src.includes("animegg.org/play/") || src.includes("vidcache.net") ||
+        (src.includes("mp4upload.com") && !src.includes("www.mp4upload.com"))) {
+      video.src = src;
+      video.load();
+      const onMeta = () => { setLoading(false); video.play().catch(() => {}); showCtrl(); };
+      const onErr  = () => { setLoading(false); setError("تعذّر تشغيل هذا المصدر مباشرةً"); };
+      video.addEventListener("loadedmetadata", onMeta, { once: true });
+      video.addEventListener("error", onErr, { once: true });
+      return;
+    }
+
+    /* Direct MP4/MKV via video-proxy */
+    const isDirectMp4 = src.includes("streamtape.com") || src.includes("sendvid.com")
+      || src.includes("videos2.sendvid.com") || src.includes("video-proxy?")
+      || src.includes("workers.dev");
+    if (isDirectMp4) {
+      const proxyUrl = src.includes("video-proxy?") ? src
+        : `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
+      video.src = proxyUrl;
+      video.load();
+      let resolved = false;
+      const cleanup = () => { resolved = true; clearTimeout(loadTimer); video.removeEventListener("loadedmetadata", onMeta); video.removeEventListener("error", onErr); };
+      const onMeta = () => { if (resolved) return; cleanup(); setLoading(false); video.play().catch(() => {}); showCtrl(); };
+      const onErr  = () => { if (resolved) return; cleanup(); setLoading(false); setError("فشل تشغيل المصدر — جارٍ تجربة المصدر التالي…"); setTimeout(() => onFail?.(), 1200); };
+      const loadTimer = setTimeout(() => { if (resolved) return; video.src = ""; onErr(); }, 9000);
+      video.addEventListener("loadedmetadata", onMeta, { once: true });
+      video.addEventListener("error", onErr, { once: true });
+      return;
+    }
+
+    /* animex-player → fetch animex-source */
+    if (src.includes("/animex-player")) {
+      try {
+        const qs = src.includes("?") ? src.split("?")[1] : "";
+        const params = new URLSearchParams(qs);
+        params.set("_t", String(Date.now()));
+        const r = await fetch(`/api/anime/animex-source?${params}`, { cache: "no-store", signal: AbortSignal.timeout(18000) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); setError((d as any).error || `فشل جلب المصدر (${r.status})`); setLoading(false); return; }
+        const data = await r.json() as { proxyUrl?: string; rawUrl?: string; quality?: string };
+        const hlsUrl = data.proxyUrl || data.rawUrl;
+        if (!hlsUrl) { setError("لا يوجد رابط HLS من AnimeX"); setLoading(false); return; }
+        m3u8Url = hlsUrl;
+        if (data.quality && onRealQuality) onRealQuality(data.quality);
+      } catch { setError("خطأ في الاتصال بخادم AnimeX"); setLoading(false); return; }
+    }
+
+    /* HLS via hls.js or native */
+    if (Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: false, lowLatencyMode: false, maxBufferLength: 30, xhrSetup(xhr) { xhr.withCredentials = false; } });
+      hlsRef.current = hls;
+      hls.loadSource(m3u8Url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (hlsRef.current !== hls) return;
+        setError(null); setLoading(false);
+        video.play().catch(() => {}); showCtrl();
+      });
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (hlsRef.current !== hls) return;
+        if (data.fatal) { setError("فشل تحميل البث — جارٍ تجربة المصدر التالي…"); setLoading(false); setTimeout(() => onFail?.(), 1500); }
+      });
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = m3u8Url;
+      video.addEventListener("loadedmetadata", () => { setLoading(false); video.play().catch(() => {}); }, { once: true });
+      video.addEventListener("error", () => { setError("فشل التشغيل على هذا المتصفح"); setLoading(false); }, { once: true });
+    } else {
+      setError("المتصفح لا يدعم تشغيل HLS — جرّب Chrome أو Firefox");
+      setLoading(false);
+    }
+  }, [src, onRealQuality, onFail, showCtrl]);
+
+  useEffect(() => {
+    loadSource();
+    return () => {
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    };
+  }, [loadSource]);
+
+  /* ── Video event listeners ── */
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onPlay    = () => setIsPlaying(true);
+    const onPause   = () => setIsPlaying(false);
+    const onTime    = () => {
+      setCurrentTime(video.currentTime);
+      if (video.buffered.length > 0) setBuffered(video.buffered.end(video.buffered.length - 1));
+      onTimeUpdate?.(video.currentTime);
+    };
+    const onLoaded  = () => setDuration(video.duration);
+    const onWaiting = () => setLoading(true);
+    const onPlaying = () => setLoading(false);
+    video.addEventListener("play",           onPlay);
+    video.addEventListener("pause",          onPause);
+    video.addEventListener("timeupdate",     onTime);
+    video.addEventListener("durationchange", onLoaded);
+    video.addEventListener("waiting",        onWaiting);
+    video.addEventListener("playing",        onPlaying);
+    return () => {
+      video.removeEventListener("play",           onPlay);
+      video.removeEventListener("pause",          onPause);
+      video.removeEventListener("timeupdate",     onTime);
+      video.removeEventListener("durationchange", onLoaded);
+      video.removeEventListener("waiting",        onWaiting);
+      video.removeEventListener("playing",        onPlaying);
+    };
+  }, [onTimeUpdate]);
+
+  /* ── Basic controls ── */
+  function togglePlay() {
+    const v = videoRef.current;
+    if (!v) return;
+    v.paused ? v.play().catch(() => {}) : v.pause();
+    showCtrl();
+  }
+  function toggleMute() {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setMuted(v.muted);
+  }
+  function skipSeconds(delta: number) {
+    const v = videoRef.current;
+    if (!v || !duration) return;
+    v.currentTime = Math.max(0, Math.min(duration, v.currentTime + delta));
+    setCurrentTime(v.currentTime);
+  }
+  function changeSpeed(s: number) {
+    setSpeed(s);
+    if (videoRef.current) videoRef.current.playbackRate = s;
+    setShowSpeedMenu(false);
+    showCtrl();
+  }
+  function seekToFrac(frac: number) {
+    const v = videoRef.current;
+    if (!v || !duration) return;
+    const t = Math.max(0, Math.min(1, frac)) * duration;
+    v.currentTime = t;
+    setCurrentTime(t);
+  }
+
+  /* ── Progress bar (mouse) ── */
+  function handleProgressClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    const bar = progressRef.current;
+    if (!bar) return;
+    const rect = bar.getBoundingClientRect();
+    seekToFrac((e.clientX - rect.left) / rect.width);
+  }
+  function handleProgressMouseDown(e: React.MouseEvent) {
+    e.stopPropagation();
+    seekDragging.current = true;
+    const onMove = (ev: MouseEvent) => {
+      const bar = progressRef.current;
+      if (!bar) return;
+      const rect = bar.getBoundingClientRect();
+      seekToFrac((ev.clientX - rect.left) / rect.width);
+    };
+    const onUp = () => { seekDragging.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  /* ══════════════════════ TOUCH GESTURES ══════════════════════ */
+
+  function onTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+    touchMoved.current = false;
+    const t = e.touches[0];
+    gestureRef.current = { active: "none", startX: t.clientX, startY: t.clientY, lastY: t.clientY, startValue: 0 };
+
+    /* Long-press → 2× speed */
+    longPressTimer.current = setTimeout(() => {
+      touchMoved.current = true; // prevent tap handler
+      prevSpeedRef.current = videoRef.current?.playbackRate ?? 1;
+      if (videoRef.current) videoRef.current.playbackRate = 2;
+      setIsLongPressing(true);
+      setFeedback(null);
+    }, 500);
+  }
+
+  function onTouchMove(e: React.TouchEvent<HTMLDivElement>) {
+    const t = e.touches[0];
+    const g = gestureRef.current;
+    const dx = t.clientX - g.startX;
+    const dy = t.clientY - g.startY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    /* Cancel long press on movement */
+    if (dist > 8 && longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (isLongPressing) return; // long-press active — ignore swipes
+
+    /* Commit gesture type once threshold is crossed */
+    if (g.active === "none" && dist > GESTURE_THRESHOLD) {
+      touchMoved.current = true;
+      const containerW = e.currentTarget.clientWidth;
+      if (Math.abs(dx) > Math.abs(dy) * 1.4) {
+        g.active = "seek";
+        g.startValue = videoRef.current?.currentTime ?? 0;
+      } else {
+        g.active = t.clientX > containerW / 2 ? "volume" : "brightness";
+        g.startValue = g.active === "volume" ? volume : brightness;
+        g.lastY = t.clientY;
+      }
+    }
+
+    if (g.active === "seek") {
+      /* Map swipe distance → seconds (full width = ±90s, max 120s) */
+      const containerW = e.currentTarget.clientWidth;
+      const maxDelta = Math.min(duration * 0.5, 120);
+      const delta = (dx / containerW) * maxDelta;
+      const target = Math.max(0, Math.min(duration, g.startValue + delta));
+      setFeedback({ type: "seek", value: target, delta });
+    } else if (g.active === "volume") {
+      const deltaY = g.lastY - t.clientY;
+      g.lastY = t.clientY;
+      const newVol = Math.max(0, Math.min(1, volume + deltaY / 180));
+      setVolume(newVol);
+      if (videoRef.current) { videoRef.current.volume = newVol; videoRef.current.muted = false; setMuted(false); }
+      setFeedback({ type: "volume", value: newVol });
+    } else if (g.active === "brightness") {
+      const deltaY = g.lastY - t.clientY;
+      g.lastY = t.clientY;
+      const newBright = Math.max(0.1, Math.min(2, brightness + deltaY / 180));
+      setBrightness(newBright);
+      setFeedback({ type: "brightness", value: newBright / 2 }); // 0-1 for display
+    }
+  }
+
+  function onTouchEnd(e: React.TouchEvent<HTMLDivElement>) {
+    /* Cancel long press */
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+
+    /* Release long press */
+    if (isLongPressing) {
+      if (videoRef.current) videoRef.current.playbackRate = prevSpeedRef.current;
+      setIsLongPressing(false);
+      setFeedback(null);
+      return;
+    }
+
+    const g = gestureRef.current;
+
+    /* Commit seek */
+    if (g.active === "seek") {
+      if (feedback?.type === "seek" && videoRef.current) {
+        videoRef.current.currentTime = feedback.value;
+        setCurrentTime(feedback.value);
+      }
+      setTimeout(() => setFeedback(null), 200);
+      gestureRef.current.active = "none";
+      return;
+    }
+    if (g.active !== "none") {
+      setTimeout(() => setFeedback(null), 800);
+      gestureRef.current.active = "none";
+      return;
+    }
+
+    /* ── TAP logic (no gesture was committed) ── */
+    if (touchMoved.current) return;
+    const touch = e.changedTouches[0];
+    const containerW = e.currentTarget.clientWidth;
+    const side: "left" | "right" = touch.clientX < containerW / 2 ? "left" : "right";
+    const now = Date.now();
+    const DOUBLE_MS = 300;
+
+    if (lastTapRef.current && now - lastTapRef.current.time < DOUBLE_MS && lastTapRef.current.side === side) {
+      /* Double tap → skip */
+      const delta = side === "right" ? 10 : -10;
+      skipSeconds(delta);
+      setDoubleTap({ side, id: now });
+      setTimeout(() => setDoubleTap(null), 700);
+      lastTapRef.current = null;
+      showCtrl();
+    } else {
+      lastTapRef.current = { time: now, side };
+      /* Single tap → toggle controls */
+      setShowControls(p => {
+        const next = !p;
+        if (next) scheduleHide();
+        return next;
+      });
+    }
+  }
+
+  /* ── Mouse move (desktop) ── */
+  function onMouseMove() {
+    showCtrl();
+  }
+
+  const pct    = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const bufPct = duration > 0 ? (buffered  / duration) * 100 : 0;
+
+  /* ─────────────────────────────────── RENDER ─────────────────────────────── */
+  return (
+    <div
+      ref={containerRef}
+      data-hls-container
+      className="relative w-full h-full bg-black overflow-hidden select-none"
+      style={{ cursor: showControls ? "default" : "none" }}
+      onMouseMove={onMouseMove}
+    >
+      {/* ═══ VIDEO ═══ */}
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain"
+        playsInline
+        preload="metadata"
+        style={{ filter: brightness !== 1 ? `brightness(${brightness})` : undefined }}
+      />
+
+      {/* ═══ GESTURE + UI LAYER ═══ */}
+      <div
+        className="absolute inset-0 z-10"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
+        {/* ── Loading ── */}
+        <AnimatePresence>
+          {loading && !error && (
+            <motion.div
+              key="loader"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none z-20"
+            >
+              <motion.div
+                className="w-12 h-12 rounded-full border-2 border-violet-500/20 border-t-violet-400"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Error ── */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              key="error"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-20 pointer-events-auto"
+              style={{ background: "radial-gradient(ellipse at 50% 50%, rgba(90,10,10,0.18) 0%, rgba(0,0,0,0.97) 65%)" }}
+            >
+              <div className="w-16 h-16 rounded-full border border-red-500/20 flex items-center justify-center"
+                style={{ background: "rgba(239,68,68,0.07)" }}>
+                <AlertTriangle className="w-7 h-7 text-red-400/60" />
+              </div>
+              <div className="text-center px-10">
+                <p className="text-white/65 text-[15px] font-black font-['Cairo']">تعذّر تحميل الفيديو</p>
+                <p className="text-white/28 text-[11px] mt-1.5 font-['Cairo'] leading-relaxed">{error}</p>
+              </div>
+              <button
+                onClick={() => { setError(null); loadSource(); }}
+                className="flex items-center gap-2 px-6 py-3 rounded-2xl text-white/75 text-[13px] font-bold font-['Cairo'] active:scale-95 transition-all"
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.13)" }}
+              >
+                <RefreshCw className="w-4 h-4" /> إعادة المحاولة
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ════════════ GESTURE FEEDBACK ════════════ */}
+
+        {/* Volume indicator (right side) */}
+        <AnimatePresence>
+          {feedback?.type === "volume" && (
+            <motion.div
+              key="vol-ind"
+              initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
+              className="absolute right-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 pointer-events-none"
+            >
+              {/* Vertical bar */}
+              <div className="relative w-1.5 rounded-full overflow-hidden"
+                style={{ height: 130, background: "rgba(255,255,255,0.18)" }}>
+                <motion.div
+                  className="absolute bottom-0 left-0 right-0 rounded-full"
+                  style={{
+                    height: `${feedback.value * 100}%`,
+                    background: "linear-gradient(180deg, #a78bfa 0%, #7c3aed 100%)",
+                  }}
+                  animate={{ height: `${feedback.value * 100}%` }}
+                  transition={{ duration: 0.05 }}
+                />
+              </div>
+              {/* Icon + value */}
+              <div className="flex flex-col items-center gap-1 px-3 py-2 rounded-2xl"
+                style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                {feedback.value === 0
+                  ? <VolumeX className="w-4 h-4 text-violet-300" />
+                  : <Volume2 className="w-4 h-4 text-violet-300" />}
+                <span className="text-white text-[11px] font-bold font-mono">{Math.round(feedback.value * 100)}%</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Brightness indicator (left side) */}
+        <AnimatePresence>
+          {feedback?.type === "brightness" && (
+            <motion.div
+              key="bright-ind"
+              initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
+              className="absolute left-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 pointer-events-none"
+            >
+              <div className="relative w-1.5 rounded-full overflow-hidden"
+                style={{ height: 130, background: "rgba(255,255,255,0.18)" }}>
+                <motion.div
+                  className="absolute bottom-0 left-0 right-0 rounded-full"
+                  style={{
+                    height: `${feedback.value * 100}%`,
+                    background: "linear-gradient(180deg, #fde68a 0%, #f59e0b 100%)",
+                  }}
+                  animate={{ height: `${feedback.value * 100}%` }}
+                  transition={{ duration: 0.05 }}
+                />
+              </div>
+              <div className="flex flex-col items-center gap-1 px-3 py-2 rounded-2xl"
+                style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                <Sun className="w-4 h-4 text-amber-300" />
+                <span className="text-white text-[11px] font-bold font-mono">{Math.round(feedback.value * 100)}%</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Seek preview (center) */}
+        <AnimatePresence>
+          {feedback?.type === "seek" && (
+            <motion.div
+              key="seek-ind"
+              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+              className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2 z-30 pointer-events-none"
+            >
+              <div className="px-5 py-3 rounded-2xl flex flex-col items-center gap-1"
+                style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.12)" }}>
+                {/* Delta badge */}
+                <div className="flex items-center gap-1.5">
+                  {(feedback.delta ?? 0) >= 0
+                    ? <SkipForward className="w-4 h-4 text-violet-300" />
+                    : <SkipBack className="w-4 h-4 text-violet-300" />}
+                  <span className="text-violet-200 text-[18px] font-black font-mono">
+                    {(feedback.delta ?? 0) >= 0 ? "+" : ""}{Math.round(feedback.delta ?? 0)}s
+                  </span>
+                </div>
+                {/* Target time */}
+                <span className="text-white/55 text-[12px] font-mono">{fmtTime(feedback.value)} / {fmtTime(duration)}</span>
+                {/* Mini progress bar */}
+                <div className="w-40 mt-1 rounded-full overflow-hidden" style={{ height: 3, background: "rgba(255,255,255,0.15)" }}>
+                  <div className="h-full rounded-full"
+                    style={{ width: `${duration > 0 ? (feedback.value / duration) * 100 : 0}%`, background: "linear-gradient(90deg,#7c3aed,#c084fc)" }} />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Long-press speed badge */}
+        <AnimatePresence>
+          {isLongPressing && (
+            <motion.div
+              key="speed-badge"
+              initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}
+              className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-center z-30 pointer-events-none"
+            >
+              <div className="flex items-center gap-2 px-5 py-3 rounded-2xl"
+                style={{ background: "rgba(124,58,237,0.88)", backdropFilter: "blur(16px)", border: "1px solid rgba(196,181,253,0.3)" }}>
+                <Gauge className="w-5 h-5 text-white" />
+                <span className="text-white text-[15px] font-black font-['Cairo']">تشغيل سريع ×2</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Double-tap ripple animations */}
+        <AnimatePresence>
+          {doubleTap && (
+            <motion.div
+              key={`dtap-${doubleTap.id}`}
+              className="absolute inset-0 pointer-events-none z-25 flex items-center"
+              style={{ justifyContent: doubleTap.side === "left" ? "flex-start" : "flex-end" }}
+            >
+              <div
+                className="relative flex items-center justify-center"
+                style={{
+                  width: "45%",
+                  height: "100%",
+                  background: doubleTap.side === "right"
+                    ? "linear-gradient(to right, transparent 0%, rgba(124,58,237,0.12) 100%)"
+                    : "linear-gradient(to left,  transparent 0%, rgba(124,58,237,0.12) 100%)",
+                }}
+              >
+                {/* Ripple circles */}
+                {[0, 1, 2].map(i => (
+                  <motion.div
+                    key={i}
+                    className="absolute rounded-full border border-white/25"
+                    style={{ width: 60 + i * 30, height: 60 + i * 30 }}
+                    initial={{ opacity: 0.8, scale: 0.5 }}
+                    animate={{ opacity: 0, scale: 1.6 }}
+                    transition={{ duration: 0.55, delay: i * 0.08, ease: "easeOut" }}
+                  />
+                ))}
+                {/* Skip label */}
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col items-center gap-1"
+                >
+                  {doubleTap.side === "right"
+                    ? <SkipForward className="w-8 h-8 text-white drop-shadow-lg" />
+                    : <SkipBack    className="w-8 h-8 text-white drop-shadow-lg" />}
+                  <span className="text-white text-[13px] font-black font-mono drop-shadow-lg">
+                    {doubleTap.side === "right" ? "+10s" : "-10s"}
+                  </span>
+                </motion.div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ════════════ CONTROLS OVERLAY ════════════ */}
+        <AnimatePresence>
+          {showControls && !loading && !error && (
+            <motion.div
+              key="ctrl-overlay"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="absolute inset-0 z-20 flex flex-col pointer-events-none"
+              style={{
+                background: [
+                  "linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0)   22%)",
+                  "linear-gradient(to top,   rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.45) 30%, rgba(0,0,0,0) 60%)",
+                ].join(", "),
+              }}
+            >
+              {/* ── CENTER CONTROLS ── */}
+              <div className="flex-1 flex items-center justify-between px-8 pointer-events-auto">
+                {/* ← -10s */}
+                <button
+                  onClick={e => { e.stopPropagation(); skipSeconds(-10); setDoubleTap({ side: "left", id: Date.now() }); setTimeout(() => setDoubleTap(null), 700); }}
+                  className="flex flex-col items-center gap-1.5 active:scale-90 transition-transform"
+                >
+                  <div className="flex items-center justify-center rounded-full"
+                    style={{ width: 54, height: 54, background: "rgba(0,0,0,0.28)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)" }}>
+                    <SkipBack className="w-6 h-6 text-white/85" />
+                  </div>
+                  <span className="text-white/42 text-[10px] font-bold font-mono tracking-widest">-10</span>
+                </button>
+
+                {/* ▶/⏸ */}
+                <button
+                  onClick={e => { e.stopPropagation(); togglePlay(); }}
+                  className="active:scale-90 transition-transform"
+                >
+                  <div className="flex items-center justify-center rounded-full shadow-2xl"
+                    style={{
+                      width: 72, height: 72,
+                      background: "rgba(255,255,255,0.13)",
+                      backdropFilter: "blur(20px) saturate(160%)",
+                      border: "1.5px solid rgba(255,255,255,0.25)",
+                      boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                    }}>
+                    {isPlaying
+                      ? <Pause className="w-7 h-7 text-white fill-white" />
+                      : <Play  className="w-7 h-7 text-white fill-white ml-1" />}
+                  </div>
+                </button>
+
+                {/* → +10s */}
+                <button
+                  onClick={e => { e.stopPropagation(); skipSeconds(10); setDoubleTap({ side: "right", id: Date.now() }); setTimeout(() => setDoubleTap(null), 700); }}
+                  className="flex flex-col items-center gap-1.5 active:scale-90 transition-transform"
+                >
+                  <div className="flex items-center justify-center rounded-full"
+                    style={{ width: 54, height: 54, background: "rgba(0,0,0,0.28)", backdropFilter: "blur(10px)", border: "1px solid rgba(255,255,255,0.14)" }}>
+                    <SkipForward className="w-6 h-6 text-white/85" />
+                  </div>
+                  <span className="text-white/42 text-[10px] font-bold font-mono tracking-widest">+10</span>
+                </button>
+              </div>
+
+              {/* ── BOTTOM CONTROLS ── */}
+              <div className="pointer-events-auto px-4 pb-3 space-y-2"
+                onTouchStart={e => e.stopPropagation()}
+                onMouseDown={e => e.stopPropagation()}
+              >
+                {/* Progress bar */}
+                <div
+                  ref={progressRef}
+                  className="relative flex items-center cursor-pointer group"
+                  style={{ height: 36, touchAction: "none" }}
+                  onClick={handleProgressClick}
+                  onMouseDown={handleProgressMouseDown}
+                >
+                  {/* Track */}
+                  <div className="relative w-full rounded-full overflow-hidden"
+                    style={{ height: 4, background: "rgba(255,255,255,0.16)" }}>
+                    {/* Buffer */}
+                    <div className="absolute inset-y-0 left-0 rounded-full"
+                      style={{ width: `${bufPct}%`, background: "rgba(255,255,255,0.24)" }} />
+                    {/* Progress */}
+                    <div className="absolute inset-y-0 left-0 rounded-full"
+                      style={{ width: `${pct}%`, background: "linear-gradient(90deg, #7c3aed 0%, #c084fc 100%)" }} />
+                  </div>
+                  {/* Thumb */}
+                  <div className="absolute rounded-full bg-white shadow-lg"
+                    style={{
+                      width: 15, height: 15,
+                      left: `${pct}%`,
+                      top: "50%",
+                      transform: "translate(-50%,-50%)",
+                      boxShadow: "0 0 0 3px rgba(167,139,250,0.4), 0 2px 8px rgba(0,0,0,0.6)",
+                    }}
+                  />
+                </div>
+
+                {/* Controls row */}
+                <div className="flex items-center gap-2">
+                  {/* Play/Pause */}
+                  <button
+                    onClick={e => { e.stopPropagation(); togglePlay(); }}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                    style={{ background: "rgba(255,255,255,0.1)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.12)" }}
+                  >
+                    {isPlaying
+                      ? <Pause className="w-4 h-4 text-white fill-white" />
+                      : <Play  className="w-4 h-4 text-white fill-white" />}
+                  </button>
+
+                  {/* Time */}
+                  <span className="text-white/75 text-[11px] font-mono tabular-nums font-semibold shrink-0 tracking-tight">
+                    {fmtTime(currentTime)} / {fmtTime(duration)}
+                  </span>
+
+                  <div className="flex-1" />
+
+                  {/* Speed button */}
+                  <div className="relative">
+                    <button
+                      onClick={e => { e.stopPropagation(); setShowSpeedMenu(s => !s); }}
+                      className="flex items-center gap-1 px-2.5 h-9 rounded-xl active:scale-90 transition-transform shrink-0"
+                      style={{
+                        background: speed !== 1 ? "rgba(124,58,237,0.75)" : "rgba(255,255,255,0.08)",
+                        border: speed !== 1 ? "1px solid rgba(139,92,246,0.4)" : "1px solid rgba(255,255,255,0.1)",
+                      }}
+                    >
+                      <Gauge className="w-3.5 h-3.5 text-white/70" />
+                      <span className="text-[11px] font-bold font-mono text-white/80">{speed}×</span>
+                    </button>
+
+                    {/* Speed menu */}
+                    <AnimatePresence>
+                      {showSpeedMenu && (
+                        <motion.div
+                          key="speed-menu"
+                          initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                          transition={{ duration: 0.14 }}
+                          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 rounded-2xl overflow-hidden z-40"
+                          style={{ background: "rgba(8,8,20,0.96)", backdropFilter: "blur(24px)", border: "1px solid rgba(255,255,255,0.1)", minWidth: 80 }}
+                          onMouseDown={e => e.stopPropagation()}
+                        >
+                          <p className="text-white/28 text-[9px] font-bold font-['Cairo'] text-center pt-2.5 pb-1 tracking-wider">السرعة</p>
+                          {SPEEDS.map(s => (
+                            <button
+                              key={s}
+                              onClick={e => { e.stopPropagation(); changeSpeed(s); }}
+                              className="w-full px-4 py-2.5 flex items-center justify-between gap-3 text-[12px] font-bold font-mono transition-all active:scale-95"
+                              style={{
+                                background: s === speed ? "rgba(124,58,237,0.72)" : "transparent",
+                                color: s === speed ? "white" : "rgba(255,255,255,0.5)",
+                              }}
+                            >
+                              <span>{s}×</span>
+                              {s === 1 && <span className="text-[9px] opacity-50 font-['Cairo']">عادي</span>}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Volume / mute */}
+                  <button
+                    onClick={e => { e.stopPropagation(); toggleMute(); }}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                    style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    {muted || volume === 0
+                      ? <VolumeX className="w-4 h-4 text-white/55" />
+                      : <Volume2 className="w-4 h-4 text-white/55" />}
+                  </button>
+
+                  {/* Fullscreen */}
+                  <button
+                    onClick={e => { e.stopPropagation(); toggleFs(); }}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                    style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    {isFs
+                      ? <Minimize2 className="w-4 h-4 text-white/55" />
+                      : <Maximize2 className="w-4 h-4 text-white/55" />}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Close speed menu on outside tap */}
+        {showSpeedMenu && (
+          <div className="absolute inset-0 z-[39]" onClick={() => setShowSpeedMenu(false)} />
+        )}
+      </div>
+    </div>
+  );
+}
