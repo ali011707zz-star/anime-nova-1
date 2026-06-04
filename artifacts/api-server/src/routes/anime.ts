@@ -502,7 +502,7 @@ async function searchShahiid(query: string): Promise<Array<{ url: string; label:
     const html = await r.text();
     const results: Array<{ url: string; label: string }> = [];
     const seen = new Set<string>();
-    const re = /href="(https?:\/\/shahiid-anime\.net\/(?:series|anime|serieses|seasonses|seasons|seriesDubbed)\/([^/"]+)\/?)"/gi;
+    const re = /href="(https?:\/\/shahiid-anime\.net\/(?:series|anime|serieses|seasonses|seasons)\/([^/"]+)\/?)"/gi;
     for (const m of html.matchAll(re)) {
       const url = m[1].replace(/\/?$/, "/");
       if (seen.has(url)) continue;
@@ -558,7 +558,13 @@ async function resolveAllShahiidUrls(romaji: string, english?: string | null): P
     }
   }
 
-  all.sort((a, b) => b.score - a.score);
+  // Sort: higher score first, then prefer seasons/seasonses URLs (fastest to find episodes)
+  all.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const aIsSeason = a.url.includes("/seasons") ? 1 : 0;
+    const bIsSeason = b.url.includes("/seasons") ? 1 : 0;
+    return bIsSeason - aIsSeason;
+  });
   return all.map(x => x.url);
 }
 
@@ -823,8 +829,10 @@ async function getShahiidSources(
         if (!candidateUrls.includes(u)) extraUrls.push(u);
       }
     }
-    // Put slug-constructed URLs FIRST — they're faster (skip wrong-season search hits)
-    candidateUrls = [...extraUrls, ...candidateUrls];
+    // Search results FIRST (already sorted: seasons > series by score), slug URLs as fallback
+    // Rationale: slug-constructed URLs often 404 for non-ASCII anime titles (Arabic slugs),
+    // wasting serial time before the correct search result URL is even attempted.
+    candidateUrls = [...candidateUrls, ...extraUrls];
     if (!candidateUrls.length) return [];
 
     let episodePage: string | null = null;
@@ -1223,6 +1231,15 @@ function buildAnimestreamEmbed(type: string, data: string): string | null {
   switch (t) {
     case "mega": {
       if (!d.includes("#")) return null;
+      // Full URL already (starts with https)
+      if (d.startsWith("https://mega.nz/embed") || d.startsWith("https://mega.co.nz/embed")) return d;
+      // Protocol-relative: "//mega.nz/embed#!..." → "https://mega.nz/embed#!..."
+      if (d.startsWith("//mega.nz") || d.startsWith("//mega.co.nz")) return "https:" + d;
+      // Truncated scheme: ":/mega.nz/embed#!..." (https was stripped, leaving colon+1-slash)
+      if (d.startsWith(":/mega.nz") || d.startsWith(":/mega.co.nz")) return "https://" + d.slice(2);
+      // Old-style mega format "!fileId!key" (hash-bang format, no slash in path)
+      if (d.startsWith("!")) return `https://mega.nz/embed#${d}`;
+      // Standard format: "fileId#key"
       return `https://mega.nz/embed/${d}`;
     }
     case "vidmoly":     return `https://vidmoly.biz/embed-${d}.html`;

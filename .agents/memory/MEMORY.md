@@ -22,6 +22,7 @@
 - [Animeify.net embed source](animeify-embed.md) — animeify API (api.ani-cli-arabic.dev/credentials) → MALink "fileId!key" → mega.nz/embed; isEmbed=true flag bypasses DEAD_FILE_HOSTS in sendSrc; qualityRank=8
 - [AnimeDar search URL spaces](animedar-search.md) — search must use encodeURIComponent (spaces → %20), NOT hyphen-slugified; `/search/one%20piece/` works, `/search/one-piece/` fails
 - [AnimeDar data-attr regex bug](animedar-data-attr.md) — `\bdata=` matches `quality-data=` (word boundary on `-`); must use `(?:^|\s)data=` to match only the standalone data attribute
+- [AnimeDar MEGA truncated scheme](animedar-mega-scheme.md) — some AnimeDar episodes store mega data as `:/mega.nz/embed#!...` (https stripped to colon+1-slash); fix: `"https://" + d.slice(2)`; other episodes use standard `fileId#key` format
 - [AnimeDar colon-slug](animedar-colon-slug.md) — "Re:Zero" → toSlug → `re-zero-...` but AnimeDar uses `rezero-...`; add colonJoined variant: `toSlug(q.replace(/[：:]/g, ""))` to slug candidates
 - [Anime-Phoenix x265 MKV](animephoenix-codec.md) — all files are x265/HEVC MKV; plays on Windows/Mac with HEVC decoder and Safari; Linux Chrome (Replit preview) cannot decode → shows error; video-proxy must set Accept-Ranges:bytes always
 - [Shahiid seasons/?serie= AJAX](shahiid-serie-ajax.md) — ?serie= pages load episodes via AJAX only (no links in static HTML); shahiidLoadMore must run even when links.length===0 for isSerieFilter URLs; max 10 pages for these
