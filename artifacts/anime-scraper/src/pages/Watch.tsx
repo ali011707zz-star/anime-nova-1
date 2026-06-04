@@ -364,8 +364,8 @@ function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: 
             <img
               src={cover}
               alt={title || "أنمي"}
-              className="w-full h-full object-cover object-center"
-              style={{ filter: "brightness(0.88)" }}
+              className="w-full h-full object-cover object-top"
+              style={{ filter: "brightness(0.92) saturate(1.05)" }}
             />
           ) : (
             /* fallback gradient when no cover available */
@@ -549,13 +549,22 @@ function ScraperPicker({
         )}
 
         <div className="flex-1 min-w-0 px-2">
-          <p className="text-white/88 text-[13px] font-black font-['Cairo'] truncate leading-tight">
+          <p className="text-white font-black text-[15px] font-['Cairo'] truncate leading-tight"
+            style={{ textShadow: "0 1px 8px rgba(0,0,0,0.6)" }}>
             {title}
           </p>
-          <p className="text-white/32 text-[11px] font-['Cairo'] mt-0.5">
-            الحلقة {ep}
-            {hasSources && <span className="text-white/18"> · {allFlat.length} مصدر</span>}
-          </p>
+          <div className="flex items-center gap-1.5 mt-[5px] flex-wrap">
+            <span className="px-2 py-[3px] rounded-full text-[10px] font-black font-['Cairo']"
+              style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.32)", color: "rgba(196,181,253,0.92)" }}>
+              الحلقة {ep}
+            </span>
+            {hasSources && (
+              <span className="px-2 py-[3px] rounded-full text-[10px] font-black font-['Cairo']"
+                style={{ background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.26)", color: "rgba(110,231,183,0.82)" }}>
+                {displaySources.length} مصدر
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
@@ -709,7 +718,7 @@ function ScraperPicker({
           </div>
         )}
 
-        {/* Empty state — shown while all sites are still fetching on mount */}
+        {/* Empty state — still fetching */}
         {!hasSources && notReadySites.some(d => slotStatus[d.site] === "fetching") && (
           <div className="flex flex-col items-center justify-center py-16 gap-4 px-8">
             <motion.div
@@ -722,6 +731,40 @@ function ScraperPicker({
               <p className="text-white/18 text-[11px] font-['Cairo'] mt-1">ستظهر المصادر المتاحة هنا تلقائياً</p>
             </div>
           </div>
+        )}
+
+        {/* Empty state — all scrapers done, nothing found (episode ahead of sources) */}
+        {!hasSources &&
+          SCRAPER_DEFS.some(d => slotStatus[d.site] !== "idle") &&
+          !SCRAPER_DEFS.some(d => slotStatus[d.site] === "fetching") && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="flex flex-col items-center justify-center py-14 gap-5 px-8">
+            {/* Icon */}
+            <div className="w-16 h-16 rounded-3xl flex items-center justify-center"
+              style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)" }}>
+              <AlertTriangle className="w-7 h-7 text-red-400/60" />
+            </div>
+            {/* Text */}
+            <div className="text-center flex flex-col gap-2">
+              <p className="text-white/70 text-[16px] font-black font-['Cairo']">
+                الحلقة {ep} غير متوفرة بعد
+              </p>
+              <p className="text-white/28 text-[12px] font-['Cairo'] leading-relaxed">
+                المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.
+              </p>
+            </div>
+            {/* Go to previous episode */}
+            {ep > 1 && (
+              <button onClick={onPrevEp}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.30)", color: "rgba(196,181,253,0.90)" }}>
+                <ChevronRight className="w-4 h-4" />
+                جرّب الحلقة {ep - 1}
+              </button>
+            )}
+          </motion.div>
         )}
       </div>
     </div>
@@ -1123,7 +1166,7 @@ function EpisodePlayer({
 
   return (
     <motion.div id="nova-player"
-      className="fixed inset-0 z-50 bg-black overflow-hidden"
+      className="fixed inset-0 z-50 bg-black"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -1280,7 +1323,7 @@ export default function WatchPage() {
   const animeTitle = title;
   const totalEps   = anime?.episodes ||
     (anime?.nextAiringEpisode?.episode ? anime.nextAiringEpisode.episode - 1 : 999);
-  const cover      = anime?.coverImage?.large || "";
+  const cover      = anime?.coverImage?.extraLarge || anime?.coverImage?.large || "";
 
   /* Fetch AniList metadata */
   useEffect(() => {
