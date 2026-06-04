@@ -58,15 +58,15 @@ const DEAD_FILE_HOSTS = [
 ];
 
 // ── Embed-only hosts (skip server-side extraction) ──
+// Hosts allowed as sandboxed iframe embed (vidmoly has Cloudflare Turnstile — can't extract server-side)
+const VIDMOLY_HOSTS = ["vidmoly.biz","vidmoly.to","vidmoly.net"];
+
+// Hosts that cannot be extracted AND are NOT allowed as embed → skip entirely
 const EMBED_ONLY_HOSTS = [
   "vidbm.com","vidbm.me","uptostream.com",
   "playerwish.com","wishfast.top",
   "streamvid.net","streamlare.com",
-  "vidmoly.biz","vidmoly.to","vidmoly.net",
   "asnwish.com",
-  "vidnest.fun",
-  "anime7u.com",
-  "dsvplay.com",
   "uqload.is","uqload.co","uqload.com",
   "dailymotion.com",
   "videa.hu",
@@ -75,10 +75,6 @@ const EMBED_ONLY_HOSTS = [
   "yourupload.com",
   "voe.sx","voe.tv",
   "megamax.me","megamax.io","megamax.tv",
-  "embed.hamml.com",
-  "ya.anime-t.com",
-  "ya.kooora.best",
-  "play.imovietime.bond",
 ];
 
 const CLOUDFLARE_PATTERNS = ["just a moment", "cf_chl_"];
@@ -979,11 +975,16 @@ async function extractAndCollect(
       collect({ ...s, directUrl: s.url, directType: "mp4" });
       return;
     }
-    // Embed-only hosts: skip expensive extraction, send directly as sandboxed iframe embed
-    if (EMBED_ONLY_HOSTS.some(h => s.url.includes(h))) {
-      if (s.url.startsWith("https://")) collect({ ...s, directUrl: s.url, isEmbed: true });
-      return;
+    // mega.nz/embed → allowed as sandboxed iframe (user-approved)
+    if (s.url.includes("mega.nz/embed") || s.url.includes("mega.co.nz/embed")) {
+      collect({ ...s, directUrl: s.url, isEmbed: true }); return;
     }
+    // Vidmoly → allowed as sandboxed iframe (Cloudflare Turnstile blocks server-side extraction)
+    if (VIDMOLY_HOSTS.some(h => s.url.includes(h))) {
+      collect({ ...s, directUrl: s.url, isEmbed: true }); return;
+    }
+    // Known un-extractable hosts (social media, junk CDNs) → skip entirely (no embed)
+    if (EMBED_ONLY_HOSTS.some(h => s.url.includes(h))) return;
     // Other skippable extraction blockers (drive.google, mega.nz plain, etc.) → skip entirely
     if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) return;
 
@@ -1013,18 +1014,10 @@ async function extractAndCollect(
             }
           }
         }
-      } else {
-        // Extraction failed — fall back to sandboxed iframe embed for any https:// embed URL
-        // The MegaEmbedPlayer in Watch.tsx handles all iframe sources safely inside the app
-        if (s.url.startsWith("https://")) {
-          collect({ ...s, directUrl: s.url, isEmbed: true });
-        }
       }
+      // Extraction failed → drop (only mega.nz/embed and vidmoly allowed as iframes)
     } catch {
-      // On exception: fall back to sandboxed iframe embed for any https:// embed URL
-      if (s.url.startsWith("https://")) {
-        collect({ ...s, directUrl: s.url, isEmbed: true });
-      }
+      // Exception during extraction → drop
     }
   }));
 }
@@ -1485,36 +1478,43 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
     } catch {}
   }
 
-  // Method 2: Scan the homepage / search for matching slugs from scraped links
+  // Method 2 + 3: Search using /search/ then /?s= query params
   for (const q of [english, title].filter(Boolean) as string[]) {
-    try {
-      const r = await fetch(`${APH_BASE}/search/${encodeURIComponent((q as string).toLowerCase().replace(/\s+/g, "+"))}`, {
-        headers: APH_HDRS,
-        signal: AbortSignal.timeout(8000),
-        redirect: "follow",
-      });
-      if (!r.ok) continue;
-      const html = await r.text();
-      if (isCloudflareBlock(html)) continue;
+    for (const searchUrl of [
+      `${APH_BASE}/search/${encodeURIComponent((q as string).toLowerCase().replace(/\s+/g, "+"))}`,
+      `${APH_BASE}/?s=${encodeURIComponent(q as string)}`,
+    ]) {
+      try {
+        const r = await fetch(searchUrl, {
+          headers: APH_HDRS,
+          signal: AbortSignal.timeout(8000),
+          redirect: "follow",
+        });
+        if (!r.ok) continue;
+        const html = await r.text();
+        if (isCloudflareBlock(html)) continue;
+        // Skip if redirected to homepage (no search results)
+        if (html.includes('<div class="home-slider"') && !html.includes("/animes/")) continue;
 
-      let best: string | null = null;
-      let bestScore = 0;
+        let best: string | null = null;
+        let bestScore = 0;
 
-      for (const m of html.matchAll(/href="(https?:\/\/anime-phoenix\.com\/animes\/([^/"]+)\/?)"/gi)) {
-        const slug  = m[2];
-        const label = slug.replace(/-/g, " ");
-        const score = Math.max(
-          similarity(label, title),
-          english ? similarity(label, english) : 0,
-        );
-        if (score > bestScore && score > 0.25) { bestScore = score; best = slug; }
-      }
+        for (const m of html.matchAll(/href="(https?:\/\/anime-phoenix\.com\/animes\/([^/"]+)\/?)"/gi)) {
+          const slug  = m[2];
+          const label = slug.replace(/-/g, " ");
+          const score = Math.max(
+            similarity(label, title),
+            english ? similarity(label, english) : 0,
+          );
+          if (score > bestScore && score > 0.25) { bestScore = score; best = slug; }
+        }
 
-      if (best) {
-        aphSlugCache.set(ck, { slug: best, ts: Date.now() });
-        return best;
-      }
-    } catch {}
+        if (best) {
+          aphSlugCache.set(ck, { slug: best, ts: Date.now() });
+          return best;
+        }
+      } catch {}
+    }
   }
 
   aphSlugCache.set(ck, { slug: null, ts: Date.now() });
@@ -1798,15 +1798,15 @@ async function getMitanimeSources(
 
     const servers = parseMitanimeServers(text);
     const sources: UnifiedSource[] = [];
-    const SKIP_NAMES = ["mega", "mediafire", "workupload", "gofile", "4shared",
-                        "videa", "soraplay", "drive.google"];
+    // Skip file-hosting/download sites (not streamable embeds)
+    const SKIP_URL_FRAGMENTS = ["mediafire.com","workupload","gofile.io","4shared.com",
+                                "drive.google","videa.hu","soraplay"];
 
     for (const server of servers) {
       if (server.isLocked) continue;
       const sUrl = server.url;
       if (!sUrl || sUrl === "premium" || !sUrl.startsWith("http")) continue;
-      if (SKIP_NAMES.some(n => server.name.toLowerCase().includes(n))) continue;
-      if (SKIP_NAMES.some(n => sUrl.toLowerCase().includes(n))) continue;
+      if (SKIP_URL_FRAGMENTS.some(n => sUrl.toLowerCase().includes(n))) continue;
 
       const qRank = server.quality === "FHD" ? 12 : server.quality === "HD" ? 11 : 10;
       const qLabel = server.quality === "FHD" ? "1080p" : server.quality === "HD" ? "720p" : "480p";
@@ -1841,30 +1841,41 @@ async function getMitanimeSources(
         continue;
       }
 
-      // streamwish domains (hglink.to, hgcloud.to, etc.) — attempt extractVideoDeep
-      if (sUrl.includes("hglink.to") || sUrl.includes("hgcloud.to") ||
-          sUrl.includes("streamwish") || sUrl.includes("wishembed")) {
-        try {
-          const result = await Promise.race([
-            extractVideoDeep(sUrl, `${MITANIME_BASE}/`),
-            new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
-          ]);
-          if (result?.url) {
-            const directUrl = result.type === "hls"
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`
-              : result.url;
-            sources.push({
-              name: `ميتانيمي · ستريم · ${qLabel}`,
-              url: sUrl,
-              quality: qLabel,
-              qualityRank: qRank,
-              site: "mitanime",
-              directUrl,
-              directType: result.type,
-            });
-          }
-        } catch {}
+      // mega.nz/embed → allowed as isEmbed directly
+      if (sUrl.includes("mega.nz/embed") || sUrl.includes("mega.co.nz/embed")) {
+        sources.push({
+          name: `ميتانيمي · ميغا · ${qLabel}`,
+          url: sUrl,
+          quality: qLabel,
+          qualityRank: qRank,
+          site: "mitanime",
+          directUrl: sUrl,
+          isEmbed: true,
+        });
+        continue;
       }
+
+      // All other embed hosts — attempt extractVideoDeep (streamwish, filemoon, vidhide, etc.)
+      try {
+        const result = await Promise.race([
+          extractVideoDeep(sUrl, `${MITANIME_BASE}/`),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
+        ]);
+        if (result?.url) {
+          const directUrl = result.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`
+            : result.url;
+          sources.push({
+            name: `ميتانيمي · ستريم · ${qLabel}`,
+            url: sUrl,
+            quality: qLabel,
+            qualityRank: qRank,
+            site: "mitanime",
+            directUrl,
+            directType: result.type,
+          });
+        }
+      } catch {}
     }
 
     if (sources.length) mitanimeSrcCache.set(ck, { sources, ts: Date.now() });
@@ -2201,8 +2212,15 @@ async function getToonStreamSources(
 //  Servers: Alpine.js @click="setServer('URL')" pattern
 // ════════════════════════════════════════════════════════════════════
 
-const OK_BASE = "https://ww3.okanime.xyz";
-const OK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ww3.okanime.xyz/" };
+const OK_DOMAINS = [
+  "https://ww3.okanime.xyz",
+  "https://ww4.okanime.xyz",
+  "https://ww1.okanime.xyz",
+  "https://ww2.okanime.xyz",
+  "https://okanime.xyz",
+];
+let OK_BASE = OK_DOMAINS[0];
+const OK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: `${OK_BASE}/` };
 
 const okSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const okSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
@@ -2226,28 +2244,47 @@ async function searchOkAnime(title: string, english: string | null): Promise<str
     if (noColon && noColon !== s) slugVariants.push(noColon);
   }
 
-  // Method 1: Direct slug check via /anime/{slug} page
-  for (const slug of [...new Set(slugVariants)]) {
-    try {
-      const r = await fetch(`${OK_BASE}/anime/${slug}`, {
-        headers: OK_HDRS, signal: AbortSignal.timeout(6000), redirect: "follow",
-      });
-      if (r.ok) {
-        const html = await r.text();
-        if (!isCloudflareBlock(html) && html.includes("/episode/")) {
-          okSlugCache.set(ck, { slug, ts: Date.now() });
-          return slug;
-        }
-      }
-    } catch {}
+  // Resolve the active OkAnime domain (try all variants)
+  async function resolveOkBase(): Promise<string> {
+    for (const domain of OK_DOMAINS) {
+      try {
+        const r = await fetch(`${domain}/api/search?q=naruto`, {
+          headers: { ...BASE_HDRS, Referer: `${domain}/` },
+          signal: AbortSignal.timeout(5000), redirect: "follow",
+        });
+        if (r.ok) { OK_BASE = domain; return domain; }
+      } catch {}
+    }
+    return OK_BASE;
   }
 
-  // Method 2: JSON search API (returns [{name, slug, ...}])
+  // Method 1: Direct slug check via /anime/{slug} page (try all domains)
+  for (const slug of [...new Set(slugVariants)]) {
+    for (const domain of OK_DOMAINS) {
+      try {
+        const r = await fetch(`${domain}/anime/${slug}`, {
+          headers: { ...BASE_HDRS, Referer: `${domain}/` },
+          signal: AbortSignal.timeout(6000), redirect: "follow",
+        });
+        if (r.ok) {
+          const html = await r.text();
+          if (!isCloudflareBlock(html) && html.includes("/episode/")) {
+            OK_BASE = domain;
+            okSlugCache.set(ck, { slug, ts: Date.now() });
+            return slug;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // Method 2: JSON search API (try all domains)
+  const activeBase = await resolveOkBase();
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
       const r = await fetch(
-        `${OK_BASE}/api/search?q=${encodeURIComponent(q as string)}`,
-        { headers: OK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" },
+        `${activeBase}/api/search?q=${encodeURIComponent(q as string)}`,
+        { headers: { ...BASE_HDRS, Referer: `${activeBase}/` }, signal: AbortSignal.timeout(8000), redirect: "follow" },
       );
       if (!r.ok) continue;
       const data = await r.json() as Array<{ name?: string; slug?: string }>;
@@ -2285,11 +2322,20 @@ async function getOkAnimeSources(
     const slug = await searchOkAnime(title, english);
     if (!slug) return [];
 
-    const epUrl = `${OK_BASE}/episode/${slug}-episode-${ep}`;
-    const r = await fetch(epUrl, {
-      headers: OK_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
-    });
-    if (!r.ok) return [];
+    // Try padded and non-padded episode number variants, across active domain
+    let r: Response | null = null;
+    for (const epCandidate of [
+      `${OK_BASE}/episode/${slug}-episode-${ep}`,
+      `${OK_BASE}/episode/${slug}-episode-${String(ep).padStart(2, "0")}`,
+    ]) {
+      try {
+        const tryR = await fetch(epCandidate, {
+          headers: { ...BASE_HDRS, Referer: `${OK_BASE}/` }, signal: AbortSignal.timeout(10000), redirect: "follow",
+        });
+        if (tryR.ok) { r = tryR; break; }
+      } catch {}
+    }
+    if (!r) return [];
     const html = await r.text();
     if (html.length < 500) return [];
 
@@ -2379,17 +2425,38 @@ async function searchAnimeTime(title: string, english: string | null): Promise<s
 /** Parse episode buttons from an anime-time arc/season page → Map<epNumber, embedUrls[]> */
 function parseAtimeEpButtons(html: string): Map<number, string[]> {
   const epMap = new Map<number, string[]>();
-  const re = /onclick="[^"]*?iframe_area\.location\.href='([^']+)'[^"]*"[^>]*>([\s\S]*?)<\/button>/gi;
-  for (const m of html.matchAll(re)) {
-    const url = m[1].trim();
-    const text = m[2].replace(/<[^>]+>/g, "").trim();
+
+  function addEntry(url: string, text: string) {
+    if (!url.startsWith("http")) return;
     const numM = text.match(/(\d+)/);
-    if (!numM || !url.startsWith("http")) continue;
+    if (!numM) return;
     const n = parseInt(numM[1]);
-    if (!n) continue;
+    if (!n) return;
     if (!epMap.has(n)) epMap.set(n, []);
-    epMap.get(n)!.push(url);
+    const arr = epMap.get(n)!;
+    if (!arr.includes(url)) arr.push(url);
   }
+
+  // Pattern 1: onclick="...iframe_area.location.href='URL'..."
+  const re1 = /onclick="[^"]*?iframe_area\.location\.href='([^']+)'[^"]*"[^>]*>([\s\S]*?)<\/button>/gi;
+  for (const m of html.matchAll(re1)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
+
+  // Pattern 2: data-src="URL" on button/a tags with episode text
+  const re2 = /<(?:button|a)[^>]+data-src="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/(?:button|a)>/gi;
+  for (const m of html.matchAll(re2)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
+
+  // Pattern 3: data-url="URL" on button/a tags
+  const re3 = /<(?:button|a)[^>]+data-url="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/(?:button|a)>/gi;
+  for (const m of html.matchAll(re3)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
+
+  // Pattern 4: data-embed="URL" on button/a tags
+  const re4 = /<(?:button|a)[^>]+data-embed="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/(?:button|a)>/gi;
+  for (const m of html.matchAll(re4)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
+
+  // Pattern 5: setServer('URL') in onclick (OkAnime-style buttons on atime)
+  const re5 = /onclick="[^"]*?setServer\('(https?:\/\/[^']+)'\)[^"]*"[^>]*>([\s\S]*?)<\/(?:button|a)>/gi;
+  for (const m of html.matchAll(re5)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
+
   return epMap;
 }
 
@@ -2591,9 +2658,7 @@ async function getRistoAnimeSources(
       });
       if (bySlug) { epUrl = bySlug; break; }
 
-      // Position-based fallback: list is newest-first → episode N = index (total - N)
-      const idx = epLinks.length - ep;
-      if (idx >= 0 && idx < epLinks.length) { epUrl = epLinks[idx]; break; }
+      // No position-based fallback: wrong episodes are worse than no source
     }
 
     if (!epUrl) return [];
