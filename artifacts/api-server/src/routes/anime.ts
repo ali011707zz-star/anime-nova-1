@@ -2631,13 +2631,15 @@ async function getRistoAnimeSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  Animeify.net scraper (animeify API → Mega.nz embed بدون إعلانات)
+//  Animeify.net scraper (ani-cli-arabic API → FileMoon HLS + MediaFire MP4 + Mega embed)
 // ════════════════════════════════════════════════════════════════════
 let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
-const ANIMEIFY_CREDS_TTL = 6 * 3_600_000;
+const ANIMEIFY_CREDS_TTL = 60 * 60_000; // 1 hour — refresh frequently
 
-async function getAnimeifyCreds(): Promise<{ base: string; token: string } | null> {
-  if (_animeifyCreds && Date.now() - _animeifyCreds.ts < ANIMEIFY_CREDS_TTL) {
+function invalidateAnimeifyCreds() { _animeifyCreds = null; }
+
+async function getAnimeifyCreds(force = false): Promise<{ base: string; token: string } | null> {
+  if (!force && _animeifyCreds && Date.now() - _animeifyCreds.ts < ANIMEIFY_CREDS_TTL) {
     return { base: _animeifyCreds.base, token: _animeifyCreds.token };
   }
   try {
@@ -2645,13 +2647,48 @@ async function getAnimeifyCreds(): Promise<{ base: string; token: string } | nul
       headers: { "X-Auth-Key": "6rK9z0XyW8vQ3J7pL2mN4sB1tH5gD0fA", "User-Agent": "AniCliAr/2.0" },
       signal: AbortSignal.timeout(8000),
     });
-    if (!r.ok) return null;
+    if (!r.ok) { invalidateAnimeifyCreds(); return null; }
     const data = await r.json() as Record<string, string>;
     const base = String(data.ANI_CLI_AR_API_BASE || "");
     const token = String(data.ANI_CLI_AR_TOKEN || "");
-    if (!base || !token) return null;
+    if (!base || !token) { invalidateAnimeifyCreds(); return null; }
     _animeifyCreds = { base, token, ts: Date.now() };
     return { base, token };
+  } catch { invalidateAnimeifyCreds(); return null; }
+}
+
+/** Fetch a URL with the animeify API token; auto-refresh on 401/403 and retry once */
+async function animeifyPost(base: string, token: string, path: string, body: URLSearchParams): Promise<Response | null> {
+  const doFetch = (tok: string) => fetch(base + path, {
+    method: "POST",
+    body: new URLSearchParams([...body.entries(), ["Token", tok]]),
+    headers: { "User-Agent": "AniCliAr/2.0" },
+    signal: AbortSignal.timeout(10000),
+  });
+  let r = await doFetch(token);
+  if (r.status === 401 || r.status === 403) {
+    // Token expired — force-refresh and retry once
+    invalidateAnimeifyCreds();
+    const fresh = await getAnimeifyCreds(true);
+    if (!fresh) return null;
+    r = await doFetch(fresh.token);
+  }
+  return r.ok ? r : null;
+}
+
+/** Extract a direct MediaFire download link from a serverId or full URL */
+async function extractMediafireDirect(serverId: string): Promise<string | null> {
+  try {
+    const url = serverId.startsWith("http") ? serverId : `https://www.mediafire.com/file/${serverId}`;
+    const r = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+      redirect: "follow",
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const m = /(https:\/\/download\d*[^"' \n<]+)/.exec(html);
+    return m?.[1]?.replace(/&amp;/g, "&") || null;
   } catch { return null; }
 }
 
@@ -2659,7 +2696,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
   try {
     const creds = await getAnimeifyCreds();
     if (!creds) return [];
-    const { base, token } = creds;
+    let { base, token } = creds;
 
     // Search with both titles; pick best match across SERIES + MOVIE
     const queries = [...new Set([english, title].filter(Boolean) as string[])];
@@ -2670,14 +2707,10 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
         try {
           const body = new URLSearchParams({
             UserId: "0", Language: "English", FilterType: "SEARCH",
-            FilterData: q, Type: type, From: "0", Token: token,
+            FilterData: q, Type: type, From: "0",
           });
-          const r = await fetch(base + "anime/load_anime_list_v2.php", {
-            method: "POST", body,
-            headers: { "User-Agent": "AniCliAr/2.0" },
-            signal: AbortSignal.timeout(10000),
-          });
-          if (!r.ok) continue;
+          const r = await animeifyPost(base, token, "anime/load_anime_list_v2.php", body);
+          if (!r) continue;
           const data = await r.json() as any[];
           if (!Array.isArray(data)) continue;
           for (const item of data) {
@@ -2698,14 +2731,14 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
     const animeId: string = String(best.item.AnimeId);
     const animeType: string = best.item._type || "SERIES";
 
+    // Refresh creds in case animeifyPost rotated the token
+    const latestCreds = await getAnimeifyCreds();
+    if (latestCreds) { base = latestCreds.base; token = latestCreds.token; }
+
     // Get episode list
-    const epsRes = await fetch(base + "episodes/load_episodes.php", {
-      method: "POST",
-      body: new URLSearchParams({ AnimeID: animeId, Token: token }),
-      headers: { "User-Agent": "AniCliAr/2.0" },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!epsRes.ok) return [];
+    const epsRes = await animeifyPost(base, token, "episodes/load_episodes.php",
+      new URLSearchParams({ AnimeID: animeId }));
+    if (!epsRes) return [];
     const epsData = await epsRes.json() as any[];
     if (!Array.isArray(epsData) || !epsData.length) return [];
 
@@ -2713,13 +2746,9 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
     if (!epItem) return [];
 
     // Get streaming servers for this episode
-    const srvRes = await fetch(base + "anime/load_servers.php", {
-      method: "POST",
-      body: new URLSearchParams({ UserId: "0", AnimeId: animeId, Episode: String(epItem.Episode), AnimeType: animeType, Token: token }),
-      headers: { "User-Agent": "AniCliAr/2.0" },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!srvRes.ok) return [];
+    const srvRes = await animeifyPost(base, token, "anime/load_servers.php",
+      new URLSearchParams({ UserId: "0", AnimeId: animeId, Episode: String(epItem.Episode), AnimeType: animeType }));
+    if (!srvRes) return [];
     const srvData = await srvRes.json() as any;
     const epData = srvData.CurrentEpisode || epItem;
 
@@ -2734,10 +2763,10 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
         if (extracted?.url) {
           const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(filemoonUrl)}`;
           sources.push({
-            name: "فايل مون",
+            name: "فايل مون · 1080p",
             url: filemoonUrl,
-            quality: "1080p",
-            qualityRank: 9,
+            quality: "FHD",
+            qualityRank: 11,
             site: "animeify",
             directUrl: proxyUrl,
             directType: "hls",
@@ -2746,7 +2775,31 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       } catch {}
     }
 
-    // ── Mega.nz embed (MALink: "fileId!decryptionKey") — verify file exists first ──
+    // ── MediaFire MP4 (FRFhdQ=1080p, FRLink=720p, FRLowQ=480p) → مشغّل داخلي مباشر ──
+    const mfSlots = [
+      { key: "FRFhdQ", label: "ميديافاير · FHD", quality: "FHD", qualityRank: 10 },
+      { key: "FRLink",  label: "ميديافاير · HD",  quality: "HD",  qualityRank: 9  },
+      { key: "FRLowQ", label: "ميديافاير · SD",  quality: "SD",  qualityRank: 5  },
+    ] as const;
+
+    await Promise.all(mfSlots.map(async ({ key, label, quality, qualityRank }) => {
+      const serverId = String((epData as any)[key] || "").trim();
+      if (!serverId) return;
+      const directMp4 = await extractMediafireDirect(serverId);
+      if (!directMp4) return;
+      const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(directMp4)}&ref=https://www.mediafire.com/`;
+      sources.push({
+        name: label,
+        url: directMp4,
+        quality,
+        qualityRank,
+        site: "animeify",
+        directUrl: proxyUrl,
+        directType: "mp4",
+      });
+    }));
+
+    // ── Mega.nz embed (MALink: "fileId!decryptionKey") — fallback embed بدون إعلانات ──
     const maLink = String(epData.MALink || "").trim();
     if (maLink && maLink.includes("!")) {
       const bang   = maLink.indexOf("!");
@@ -2763,16 +2816,15 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             signal: AbortSignal.timeout(5000),
           });
           const megaData = await megaCheck.json();
-          // If first element is an object (not a negative error code) → file exists
           megaOk = Array.isArray(megaData) && megaData.length > 0 && typeof megaData[0] === "object" && megaData[0] !== null;
-        } catch { megaOk = true; } // Network error → optimistically include
+        } catch { megaOk = true; }
 
         if (megaOk) {
           const embedUrl = `https://mega.nz/embed/${fileId}#${key}`;
           sources.push({
-            name: "ميغا",
+            name: "ميغا · embed",
             url: embedUrl,
-            quality: "720p",
+            quality: "HD",
             qualityRank: 8,
             site: "animeify",
             directUrl: embedUrl,
