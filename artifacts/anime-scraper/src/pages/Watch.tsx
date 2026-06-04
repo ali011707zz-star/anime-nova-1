@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, ChevronLeft, Play, Pause, Loader2,
+  ChevronRight, ChevronLeft, Play, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
-  Settings, Subtitles, MonitorPlay, Tv2, Volume2, VolumeX,
-  SkipBack, SkipForward, ExternalLink,
+  Settings, Subtitles, MonitorPlay, Tv2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
@@ -349,88 +348,6 @@ const Q_LABEL: Record<Quality, string> = {
 };
 const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
 
-/* ══════════════════════════════════ EXTERNAL PLAYER SHEET ═══ */
-function ExternalSheet({
-  src, title, onClose,
-}: { src: FetchedSrc; title: string; onClose: () => void }) {
-  const rawUrl = src.directUrl || src.url;
-  const fullUrl = rawUrl.startsWith("/") ? window.location.origin + rawUrl : rawUrl;
-  const isEmbed = !!src.isEmbed;
-
-  return (
-    <motion.div
-      className="fixed inset-0 z-[60] flex items-end"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      onClick={onClose}>
-      <div className="absolute inset-0 bg-black/65" />
-      <motion.div
-        className="relative w-full rounded-t-2xl overflow-hidden"
-        initial={{ y: 90 }} animate={{ y: 0 }} exit={{ y: 90 }}
-        transition={{ type: "spring", damping: 26, stiffness: 260 }}
-        style={{ background: "#0e0e18", border: "1px solid rgba(255,255,255,0.09)" }}
-        onClick={e => e.stopPropagation()}>
-
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-1">
-          <div className="w-9 h-1 rounded-full bg-white/15" />
-        </div>
-
-        <div className="px-5 pt-2 pb-5">
-          <p className="text-white/45 text-[11px] font-['Cairo'] mb-1">
-            {getCdnDisplayName(fullUrl)} · {SITE_SHORT[src.site || ""] || ""}
-          </p>
-          <p className="text-white/70 text-[13px] font-black font-['Cairo'] mb-4">فتح في مشغّل خارجي</p>
-
-          {isEmbed ? (
-            /* Embed sources — can't be opened in external players */
-            <div className="flex items-start gap-3 py-4 px-4 rounded-2xl mb-3"
-              style={{ background: "rgba(124,58,237,0.10)", border: "1px solid rgba(124,58,237,0.22)" }}>
-              <Tv2 className="w-4 h-4 text-violet-400/70 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-violet-200/75 text-[12px] font-bold font-['Cairo']">مشغّل داخل التطبيق</p>
-                <p className="text-violet-300/40 text-[10px] font-['Cairo'] mt-0.5 leading-relaxed">
-                  هذا المصدر يعمل فقط داخل التطبيق عبر مشغّل مدمج.<br/>لا يمكن فتحه في مشغّل خارجي.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <>
-              <a href={`intent:${fullUrl}#Intent;package=com.mxtech.videoplayer.ad;S.title=${encodeURIComponent(title)};end`}
-                className="flex items-center gap-3 py-3.5 px-4 rounded-2xl mb-2.5 active:opacity-70"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
-                <span className="text-[20px]">▶️</span>
-                <div>
-                  <p className="text-white/80 text-[13px] font-bold font-['Cairo']">MX Player</p>
-                  <p className="text-white/28 text-[10px] font-['Cairo']">أندرويد · مشغّل فيديو</p>
-                </div>
-              </a>
-              <a href={`intent:${fullUrl}#Intent;package=org.videolan.vlc;S.title=${encodeURIComponent(title)};end`}
-                className="flex items-center gap-3 py-3.5 px-4 rounded-2xl mb-2.5 active:opacity-70"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
-                <span className="text-[20px]">🎬</span>
-                <div>
-                  <p className="text-white/80 text-[13px] font-bold font-['Cairo']">VLC</p>
-                  <p className="text-white/28 text-[10px] font-['Cairo']">أندرويد / iOS · مفتوح المصدر</p>
-                </div>
-              </a>
-              <button
-                onClick={() => { navigator.clipboard?.writeText(fullUrl).catch(() => {}); onClose(); }}
-                className="flex items-center gap-3 py-3.5 px-4 rounded-2xl w-full active:opacity-70 mb-2.5"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
-                <span className="text-[20px]">📋</span>
-                <div className="text-right">
-                  <p className="text-white/80 text-[13px] font-bold font-['Cairo']">نسخ الرابط</p>
-                  <p className="text-white/28 text-[10px] font-['Cairo']">للصق في أي مشغّل</p>
-                </div>
-              </button>
-            </>
-          )}
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
 /* ══════════════════════════════════ SCRAPER PICKER ══════════ */
 function ScraperPicker({
   cover, title, ep, totalEps,
@@ -445,8 +362,6 @@ function ScraperPicker({
   onPlaySrc: (src: FetchedSrc) => void;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
 }) {
-  const [extSheet, setExtSheet] = useState<FetchedSrc | null>(null);
-
   /* Flatten + deduplicate all fetched sources */
   const allFlat: FetchedSrc[] = [];
   const seenKeys = new Set<string>();
@@ -471,42 +386,51 @@ function ScraperPicker({
   const notReadySites = SCRAPER_DEFS.filter(d => slotStatus[d.site] !== "ready");
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#07070e]" dir="rtl">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#06060c]" dir="rtl">
 
       {/* ── Nav bar ── */}
-      <div className="flex items-center gap-0 shrink-0"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.06)",
-          paddingTop: "max(14px, env(safe-area-inset-top))", paddingBottom: 12 }}>
+      <div className="flex items-center shrink-0"
+        style={{
+          borderBottom: "1px solid rgba(255,255,255,0.05)",
+          paddingTop: "max(16px, env(safe-area-inset-top))",
+          paddingBottom: 14,
+          paddingRight: 4,
+          paddingLeft: 14,
+        }}>
         <button onClick={onBack}
-          className="w-12 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0">
+          className="w-10 h-10 flex items-center justify-center active:opacity-50 shrink-0">
           <ChevronRight className="w-5 h-5 text-white/55" />
         </button>
-        <button onClick={onPrevEp} disabled={ep <= 1}
-          className="w-10 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0 disabled:opacity-20">
-          <ChevronRight className="w-4 h-4 text-white/45" />
-        </button>
-        <div className="flex-1 text-center min-w-0 px-1">
-          <p className="text-white/90 text-[13px] font-black font-['Cairo'] truncate leading-tight">
-            {title} · الحلقة {ep}
+
+        {cover && (
+          <img src={cover} alt="" className="w-7 h-9 rounded-lg object-cover opacity-55 shrink-0 ml-1" />
+        )}
+
+        <div className="flex-1 min-w-0 px-2">
+          <p className="text-white/88 text-[13px] font-black font-['Cairo'] truncate leading-tight">
+            {title}
           </p>
-          <p className="text-white/22 text-[10px] font-['Cairo'] mt-0.5">
-            {hasSources ? `${allFlat.length} مصدر متاح` : "اختر مصدراً للتشغيل"}
+          <p className="text-white/32 text-[11px] font-['Cairo'] mt-0.5">
+            الحلقة {ep}
+            {hasSources && <span className="text-white/18"> · {allFlat.length} مصدر</span>}
           </p>
         </div>
-        <button onClick={onNextEp} disabled={ep >= totalEps}
-          className="w-10 h-10 flex items-center justify-center active:opacity-50 transition-opacity shrink-0 disabled:opacity-20">
-          <ChevronLeft className="w-4 h-4 text-white/45" />
-        </button>
-        {cover && (
-          <div className="w-12 flex justify-center shrink-0">
-            <img src={cover} alt="" className="w-8 h-11 rounded-lg object-cover opacity-60" />
-          </div>
-        )}
+
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={onPrevEp} disabled={ep <= 1}
+            className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/[0.06] disabled:opacity-20 transition-all">
+            <ChevronRight className="w-4 h-4 text-white/40" />
+          </button>
+          <button onClick={onNextEp} disabled={ep >= totalEps}
+            className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/[0.06] disabled:opacity-20 transition-all">
+            <ChevronLeft className="w-4 h-4 text-white/40" />
+          </button>
+        </div>
       </div>
 
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto"
-        style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}>
+        style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
         {/* ── Quality sections with source cards ── */}
         {QUALITY_LABELS.map(q => {
@@ -514,89 +438,78 @@ function ScraperPicker({
           if (!srcs.length) return null;
           const qs = QUALITY_STYLE[q];
           return (
-            <div key={q} className="mt-4">
+            <div key={q}>
               {/* Section header */}
-              <div className="flex items-center gap-2 px-4 mb-1.5">
-                <div className="w-2 h-2 rounded-full shrink-0"
-                  style={{ background: qs.dot, boxShadow: `0 0 7px ${qs.dot}99` }} />
-                <span className="text-[11px] font-bold font-['Cairo'] tracking-wide flex-1"
+              <div className="flex items-center gap-2 px-4 pt-5 pb-2">
+                <div className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ background: qs.dot, boxShadow: `0 0 6px ${qs.dot}bb` }} />
+                <span className="text-[10px] font-bold font-['Cairo'] tracking-wider uppercase flex-1"
                   style={{ color: qs.text }}>{Q_LABEL[q]}</span>
-                <span className="font-mono text-[9px] font-black px-1.5 py-0.5 rounded-md"
+                <span className="font-mono text-[8px] font-black px-1.5 py-0.5 rounded"
                   style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
                   {Q_SHORT[q]}
                 </span>
               </div>
 
-              {/* Source cards */}
+              {/* Source cards — Anime Rift style */}
               {srcs.map((src, i) => {
                 const url     = src.directUrl || src.url;
                 const cdn     = getCdnDisplayName(url);
                 const site    = SITE_SHORT[src.site || ""] || src.site || "";
                 const isEmbed = !!src.isEmbed;
-                const isHls   = url.includes("hls-proxy") || url.includes(".m3u8");
+                const tag     = SCRAPER_DEFS.find(d => d.site === src.site)?.tag || "??";
                 return (
                   <motion.div key={`${src.site}-${i}-${url.slice(-20)}`}
-                    initial={{ opacity: 0, y: 5 }}
+                    initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.04, duration: 0.18 }}>
-                    <div className="flex items-center px-4 py-2.5 gap-3"
-                      style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
 
-                      {/* CDN icon */}
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                    <div
+                      className="flex items-center px-4 py-3.5 gap-3.5 active:bg-white/[0.03] transition-colors cursor-pointer"
+                      style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+                      onClick={() => onPlaySrc(src)}>
+
+                      {/* Left: source type icon */}
+                      <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
                         style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
                         {isEmbed
-                          ? <Tv2 className="w-[17px] h-[17px]" style={{ color: qs.icon }} />
-                          : <MonitorPlay className="w-[17px] h-[17px]" style={{ color: qs.icon }} />}
+                          ? <Tv2 className="w-[18px] h-[18px]" style={{ color: qs.icon }} />
+                          : <MonitorPlay className="w-[18px] h-[18px]" style={{ color: qs.icon }} />}
                       </div>
 
-                      {/* Name block */}
+                      {/* Middle: name + meta */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-white/88 text-[14px] font-black font-['Cairo'] leading-tight">{cdn}</span>
-                          {isHls && !isEmbed && (
-                            <span className="font-mono text-[8px] font-black px-1 py-0.5 rounded"
-                              style={{ background: "rgba(124,58,237,0.18)", color: "rgba(196,181,253,0.72)", border: "1px solid rgba(124,58,237,0.22)" }}>
-                              HLS
-                            </span>
+                        <p className="text-white/90 text-[14px] font-black font-['Cairo'] leading-tight">{cdn}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          {site && (
+                            <span className="text-white/36 text-[11px] font-['Cairo']">{site}</span>
                           )}
+                          {site && (
+                            <span className="text-white/14 text-[9px]">·</span>
+                          )}
+                          <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
+                            style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                            {tag}
+                          </span>
                           {isEmbed && (
-                            <span className="font-mono text-[8px] font-black px-1 py-0.5 rounded"
-                              style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.75)", border: "1px solid rgba(52,211,153,0.20)" }}>
-                              EMBED
+                            <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
+                              style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.70)", border: "1px solid rgba(52,211,153,0.18)" }}>
+                              مدمج
                             </span>
                           )}
                         </div>
-                        <p className="text-white/28 text-[11px] font-['Cairo'] mt-0.5 leading-none">{site}</p>
                       </div>
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-2 shrink-0">
-                        {/* External sheet trigger */}
-                        <button
-                          onClick={e => { e.stopPropagation(); setExtSheet(src); }}
-                          className="w-7 h-7 rounded-xl flex items-center justify-center active:scale-90 transition-all"
-                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
-                          <ExternalLink className="w-3.5 h-3.5 text-white/28" />
-                        </button>
-
-                        {/* Watch Now */}
-                        <div className="flex flex-col items-end gap-0.5">
-                          <button
-                            onClick={() => onPlaySrc(src)}
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl active:scale-95 transition-all"
-                            style={{
-                              background: "linear-gradient(135deg, rgba(139,92,246,0.92), rgba(109,40,217,0.95))",
-                              border: "1px solid rgba(167,139,250,0.30)",
-                              boxShadow: "0 2px 12px rgba(124,58,237,0.35)",
-                            }}>
-                            <Play className="w-3 h-3 text-white fill-white" />
-                            <span className="text-white text-[12px] font-black font-['Cairo']">مشاهدة الآن</span>
-                          </button>
-                          {isEmbed && (
-                            <p className="text-white/22 text-[9px] font-['Cairo'] leading-none">يعمل داخل التطبيق</p>
-                          )}
-                        </div>
+                      {/* Right: play button */}
+                      <div
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl shrink-0 active:scale-95 transition-transform"
+                        style={{
+                          background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))",
+                          border: "1px solid rgba(167,139,250,0.25)",
+                          boxShadow: "0 2px 14px rgba(109,40,217,0.30)",
+                        }}>
+                        <Play className="w-3.5 h-3.5 text-white fill-white" />
+                        <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
                       </div>
                     </div>
                   </motion.div>
@@ -608,11 +521,10 @@ function ScraperPicker({
 
         {/* ── Pending / loading sites ── */}
         {notReadySites.length > 0 && (
-          <div className={hasSources ? "mt-6 border-t border-white/[0.05] pt-4" : "mt-2"}>
+          <div className={hasSources ? "mt-5 pt-3 border-t border-white/[0.04]" : "mt-1"}>
             {hasSources && (
-              <div className="flex items-center gap-2 px-4 mb-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-white/14 shrink-0" />
-                <span className="text-[11px] font-['Cairo'] text-white/26">مصادر إضافية</span>
+              <div className="px-4 pb-2">
+                <span className="text-[10px] font-['Cairo'] text-white/22 tracking-wider">مصادر أخرى</span>
               </div>
             )}
             {notReadySites.map((def, i) => {
@@ -621,39 +533,35 @@ function ScraperPicker({
               const isFailed   = status === "failed";
               return (
                 <motion.div key={def.site}
-                  initial={{ opacity: 0, y: 5 }}
+                  initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.03, duration: 0.16 }}
                   onClick={() => !isFetching && onFetchSite(def.site)}
-                  className={`flex items-center px-4 py-3 gap-3 cursor-pointer transition-all
-                    ${isFailed ? "opacity-35" : "active:bg-white/[0.04]"}`}
+                  className={`flex items-center px-4 py-3.5 gap-3.5 cursor-pointer transition-all
+                    ${isFailed ? "opacity-30" : "active:bg-white/[0.03]"}`}
                   style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
 
-                  <div className="w-1.5 h-1.5 rounded-full shrink-0"
-                    style={{
-                      background: isFailed ? "rgba(239,68,68,0.45)"
-                        : isFetching ? "rgba(251,191,36,0.75)"
-                        : "rgba(255,255,255,0.14)",
-                      boxShadow: isFetching ? "0 0 5px rgba(251,191,36,0.5)" : "none",
-                    }} />
-
-                  <div className="flex-1 min-w-0">
-                    <span className={`text-[13px] font-bold font-['Cairo'] ${isFailed ? "text-white/26" : "text-white/55"}`}>
-                      {def.name}
-                    </span>
-                    <span className={`text-[10px] font-['Cairo'] mr-2 ${isFailed ? "text-white/20" : "text-white/22"}`}>
-                      {isFetching ? "· جاري الجلب..." : isFailed ? "· غير متاح · اضغط للمحاولة" : `· ${def.desc}`}
-                    </span>
+                  {/* Site tag badge */}
+                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <span className="font-mono text-[10px] font-black text-white/28">{def.tag}</span>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
-                      style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                      {def.tag}
-                    </span>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[13px] font-bold font-['Cairo'] ${isFailed ? "text-white/25" : "text-white/50"}`}>
+                      {def.name}
+                    </p>
+                    <p className={`text-[10px] font-['Cairo'] mt-0.5 ${isFailed ? "text-white/18" : "text-white/22"}`}>
+                      {isFetching ? "جاري الجلب..." : isFailed ? "غير متاح · اضغط للمحاولة" : def.desc}
+                    </p>
+                  </div>
+
+                  <div className="shrink-0">
                     {isFetching
-                      ? <Loader2 className="w-3.5 h-3.5 text-amber-300/55 animate-spin" />
-                      : <span className="text-[10px] text-white/18 font-['Cairo']">اضغط</span>}
+                      ? <Loader2 className="w-4 h-4 text-amber-300/50 animate-spin" />
+                      : <span className="text-[10px] text-white/18 font-['Cairo']">
+                          {isFailed ? "إعادة" : "جلب"}
+                        </span>}
                   </div>
                 </motion.div>
               );
@@ -661,20 +569,19 @@ function ScraperPicker({
           </div>
         )}
 
-        {/* Footer */}
-        <div className="py-6 text-center">
-          <p className="text-white/10 text-[10px] font-['Cairo']">
-            {hasSources ? "اضغط «مشاهدة الآن» لتشغيل أي مصدر مباشرة" : "اضغط على أي مصدر أدناه لجلبه"}
-          </p>
-        </div>
-      </div>
-
-      {/* ── External player sheet ── */}
-      <AnimatePresence>
-        {extSheet && (
-          <ExternalSheet src={extSheet} title={title} onClose={() => setExtSheet(null)} />
+        {/* Empty state */}
+        {!hasSources && notReadySites.every(d => slotStatus[d.site] === "idle") && (
+          <div className="flex flex-col items-center justify-center py-16 gap-4 px-8">
+            <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center">
+              <MonitorPlay className="w-6 h-6 text-white/18" />
+            </div>
+            <div className="text-center">
+              <p className="text-white/40 text-[14px] font-black font-['Cairo']">اضغط على أي مصدر لجلبه</p>
+              <p className="text-white/18 text-[11px] font-['Cairo'] mt-1">ستظهر المصادر المتاحة هنا تلقائياً</p>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
+      </div>
     </div>
   );
 }
@@ -684,7 +591,7 @@ function SubtitleOverlay({ cues, elapsed }: { cues: SubCue[]; elapsed: number })
   const current = cues.find(c => elapsed >= c.start && elapsed <= c.end);
   if (!current) return null;
   return (
-    <div className="absolute bottom-16 left-0 right-0 flex justify-center px-4 z-20 pointer-events-none">
+    <div className="absolute bottom-44 left-0 right-0 flex justify-center px-4 z-30 pointer-events-none">
       <div className="bg-black/80 backdrop-blur-sm rounded-xl px-4 py-2 max-w-[90%] text-center">
         <p className="text-white font-['Cairo'] text-[14px] font-semibold leading-relaxed"
           dir="rtl" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>
@@ -800,7 +707,6 @@ function EpisodePlayer({
 }) {
   const [currentServer, setCurrentServer] = useState(initialServer ?? 0);
   const [showQuality,  setShowQuality]    = useState(false);
-  const [fs,           setFs]             = useState(false);
   const [realQuality,  setRealQuality]    = useState<string | null>(null);
   const [hlsTime,      setHlsTime]        = useState(0);
   const isFirstQualityMount = useRef(true);
@@ -818,73 +724,26 @@ function EpisodePlayer({
   const [subState,    setSubState]    = useState<"idle"|"loading"|"ready"|"none">("idle");
   const [subCues,     setSubCues]     = useState<SubCue[]>([]);
   const [subLang,     setSubLang]     = useState<string | null>(null);
-  const [subRunning,  setSubRunning]  = useState(false);
-  const [subElapsed,  setSubElapsed]  = useState(0);
   const [subOffset,   setSubOffset]   = useState(0);
-  const subStartedAt  = useRef<number | null>(null);
-  const subTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showSubPanel, setShowSubPanel] = useState(false);
 
-  const currentUrl = servers[currentServer] || "";
+  const currentUrl  = servers[currentServer] || "";
   const currentInfo = getServerInfo(currentUrl, currentServer);
 
-  /* ── Stable HLS callbacks — must not recreate on every render or HLS restarts ── */
+  /* ── Stable HLS callbacks ── */
   const handleRealQuality = useCallback((q: string) => setRealQuality(q), []);
   const handleHlsTime     = useCallback((t: number) => setHlsTime(t), []);
 
-  /* ── Reset on quality tier change only — do NOT reset when new servers are appended
-     to the same tier (that would bounce back to server 0 mid-playback). ── */
+  /* ── Reset on quality tier change only ── */
   useEffect(() => {
     if (isFirstQualityMount.current) { isFirstQualityMount.current = false; return; }
     setCurrentServer(0);
     setRealQuality(null);
   }, [quality]);
 
-  /* ── Fullscreen listener ── */
-  useEffect(() => {
-    const fn = () => setFs(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", fn);
-    return () => document.removeEventListener("fullscreenchange", fn);
-  }, []);
-
-  function toggleFs() {
-    const el = document.getElementById("nova-player");
-    if (!el) return;
-    !document.fullscreenElement
-      ? el.requestFullscreen?.().catch(() => {})
-      : document.exitFullscreen?.().catch(() => {});
-  }
-
-  /* ── Subtitle timer ── */
-  useEffect(() => {
-    if (subTimerRef.current) clearInterval(subTimerRef.current);
-    if (subRunning && subStartedAt.current !== null) {
-      subTimerRef.current = setInterval(() => {
-        const e = (Date.now() - subStartedAt.current!) / 1000 + subOffset;
-        setSubElapsed(e);
-      }, 200);
-    }
-    return () => { if (subTimerRef.current) clearInterval(subTimerRef.current); };
-  }, [subRunning, subOffset]);
-
-  function startSubTimer() {
-    subStartedAt.current = Date.now() - subOffset * 1000;
-    setSubRunning(true);
-  }
-  function pauseSubTimer() { setSubRunning(false); }
-  function adjustOffset(delta: number) {
-    setSubOffset(o => {
-      const newOff = o + delta;
-      if (subStartedAt.current !== null) {
-        subStartedAt.current = Date.now() - newOff * 1000;
-      }
-      return newOff;
-    });
-  }
-
   /* ── Fetch subtitles ── */
   async function fetchSubtitles() {
-    if (subState === "loading" || subState === "ready") return;
+    if (subState === "loading" || subState === "ready") { setShowSubPanel(p => !p); return; }
     setSubState("loading");
     setShowSubPanel(true);
     try {
@@ -898,13 +757,14 @@ function EpisodePlayer({
       setSubCues(cues);
       setSubLang(d.lang);
       setSubState("ready");
-      setShowSubPanel(true);
-    } catch {
-      setSubState("none");
-    }
+    } catch { setSubState("none"); }
   }
 
-  /* ── Auto-load subtitles on mount (silent — no panel popup until ready) ── */
+  function adjustOffset(delta: number) {
+    setSubOffset(o => o + delta);
+  }
+
+  /* ── Auto-load subtitles on mount ── */
   useEffect(() => {
     const t = setTimeout(async () => {
       if (subState !== "idle") return;
@@ -920,7 +780,6 @@ function EpisodePlayer({
         setSubCues(cues);
         setSubLang(d.lang);
         setSubState("ready");
-        // Silently activate subtitles — panel stays hidden unless user opens it
       } catch { setSubState("none"); }
     }, 1800);
     return () => clearTimeout(t);
@@ -939,19 +798,11 @@ function EpisodePlayer({
           return;
         }
       }
-      // No lower tier has sources yet — signal Watch to retry when SSE delivers more
       onTierExhausted?.();
     }
   }
 
-  function tryPrevServer() {
-    if (currentServer > 0) {
-      setCurrentServer(s => s - 1);
-      setRealQuality(null);
-    }
-  }
-
-  /* ── Embed-type URL → render sandboxed iframe player (mega, filemoon, streamwish, etc.) ── */
+  /* ── Embed-type URL → sandboxed iframe player ── */
   if (currentUrl && isIframeUrl(currentUrl)) {
     return (
       <AnimatePresence mode="wait">
@@ -965,6 +816,136 @@ function EpisodePlayer({
     );
   }
 
+  /* ── Build top slot: back button + title + quality + subtitle ── */
+  const topSlot = (
+    <div
+      className="flex items-center gap-2 px-3 shrink-0"
+      style={{
+        paddingTop: "max(14px, env(safe-area-inset-top))",
+        paddingBottom: 12,
+      }}
+    >
+      {/* Back */}
+      <button
+        onClick={onBack}
+        className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+        style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.13)" }}>
+        <ChevronRight className="w-5 h-5 text-white/80" />
+      </button>
+
+      {/* Title */}
+      <div className="flex-1 min-w-0">
+        <p className="text-white text-[13px] font-black font-['Cairo'] truncate leading-tight">{title}</p>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="text-white/38 text-[10px] font-['Cairo']">الحلقة {ep}</span>
+          {servers.length > 1 && (
+            <>
+              <span className="text-white/18 text-[8px]">·</span>
+              <span className="text-white/28 text-[10px] font-['Cairo']">سيرفر {currentServer + 1}/{servers.length}</span>
+            </>
+          )}
+          {!allQualityIdentical && (
+            <>
+              <span className="text-white/18 text-[8px]">·</span>
+              <span className="text-violet-300/55 text-[10px] font-bold font-mono">{QUALITY_SHORT[quality]}</span>
+            </>
+          )}
+          {currentInfo.isHls && (
+            <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
+              style={{ background: "rgba(124,58,237,0.22)", color: "rgba(196,181,253,0.80)", border: "1px solid rgba(124,58,237,0.28)" }}>
+              HLS
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Subtitle */}
+      <button
+        onClick={fetchSubtitles}
+        className="flex items-center gap-1 px-2.5 py-2 rounded-xl transition-all active:scale-90 shrink-0"
+        style={{
+          background: subState === "ready" ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.08)",
+          border: `1px solid ${subState === "ready" ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.11)"}`,
+          color: subState === "ready" ? "white"
+            : subState === "loading" ? "rgba(167,139,250,0.70)"
+            : subState === "none" ? "rgba(255,255,255,0.22)"
+            : "rgba(255,255,255,0.55)",
+        }}>
+        <Subtitles className={`w-3.5 h-3.5 ${subState === "loading" ? "animate-pulse" : ""}`} />
+      </button>
+
+      {/* Quality picker */}
+      {!allQualityIdentical && (
+        <button
+          onClick={() => setShowQuality(s => !s)}
+          className="flex items-center gap-1 px-2.5 py-2 rounded-xl font-mono transition-all active:scale-90 shrink-0"
+          style={{
+            background: showQuality ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.08)",
+            border: `1px solid ${showQuality ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.11)"}`,
+            color: showQuality ? "white" : "rgba(255,255,255,0.55)",
+          }}>
+          <Settings className="w-3.5 h-3.5" />
+          <span className="text-[10px] font-bold">{QUALITY_SHORT[quality]}</span>
+        </button>
+      )}
+
+      {realQuality && (
+        <div className="px-2 py-1 rounded-lg shrink-0"
+          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <span className="text-[9px] font-bold font-mono text-white/32">{realQuality}</span>
+        </div>
+      )}
+    </div>
+  );
+
+  /* ── Build bottom slot: ep nav + server tabs ── */
+  const bottomSlot = (
+    <div
+      className="flex items-center justify-between px-3 gap-2"
+      style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+
+      {/* Prev ep */}
+      <button
+        onClick={onPrevEp}
+        disabled={ep <= 1}
+        className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0"
+        style={{ color: "rgba(255,255,255,0.42)", opacity: ep <= 1 ? 0.18 : 1 }}>
+        <ChevronRight className="w-4 h-4" />السابقة
+      </button>
+
+      {/* Server tabs */}
+      <div className="flex items-center gap-1.5 overflow-x-auto flex-1 justify-center" style={{ scrollbarWidth: "none" }}>
+        {servers.map((url, i) => {
+          const info = getServerInfo(url, i);
+          const isActive = i === currentServer;
+          return (
+            <button
+              key={i}
+              onClick={() => { setCurrentServer(i); setRealQuality(null); }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] whitespace-nowrap transition-all active:scale-90 shrink-0"
+              style={{
+                background: isActive ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.08)",
+                border: isActive ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.10)",
+                color: isActive ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.38)",
+              }}>
+              <MonitorPlay className="w-3 h-3 shrink-0" />
+              {info.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Next ep */}
+      <button
+        onClick={onNextEp}
+        disabled={ep >= totalEps}
+        className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0 flex-row-reverse"
+        style={{ color: "rgba(255,255,255,0.42)", opacity: ep >= totalEps ? 0.18 : 1 }}>
+        <ChevronLeft className="w-4 h-4" />التالية
+      </button>
+    </div>
+  );
+
   return (
     <motion.div id="nova-player"
       className="fixed inset-0 z-50 bg-black overflow-hidden"
@@ -974,7 +955,7 @@ function EpisodePlayer({
       transition={{ duration: 0.2 }}
       dir="rtl"
     >
-      {/* ══ VIDEO FILLS ENTIRE SCREEN ══ */}
+      {/* ══ VIDEO + RIFT PLAYER (fills screen) ══ */}
       <div className="absolute inset-0">
         {currentUrl && (
           <>
@@ -984,6 +965,8 @@ function EpisodePlayer({
               onRealQuality={handleRealQuality}
               onTimeUpdate={handleHlsTime}
               onFail={tryNextServer}
+              topSlot={topSlot}
+              bottomSlot={bottomSlot}
             />
             {subState === "ready" && subCues.length > 0 && (
               <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
@@ -992,29 +975,29 @@ function EpisodePlayer({
         )}
       </div>
 
-      {/* ══ FLOATING PANELS (absolute z-30) ══ */}
+      {/* ══ FLOATING PANELS (z-40, shown on top of RiftPlayer overlay) ══ */}
 
       <AnimatePresence>
         {showQuality && (
           <motion.div key="qpick"
-            initial={{ opacity: 0, scale: 0.95, y: -6 }}
+            initial={{ opacity: 0, scale: 0.95, y: -8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -6 }}
+            exit={{ opacity: 0, scale: 0.95, y: -8 }}
             transition={{ duration: 0.15 }}
-            className="absolute top-[68px] left-0 right-0 z-30 flex justify-center px-4">
+            className="absolute top-[72px] left-0 right-0 z-40 flex justify-center px-4">
             <div className="rounded-2xl px-4 py-3 flex gap-3 shadow-2xl"
-              style={{ background: "rgba(8,8,18,0.96)", backdropFilter: "blur(24px)", border: "1px solid rgba(255,255,255,0.1)" }}>
-              <p className="text-white/28 text-[10px] font-['Cairo'] self-center ml-2">الجودة:</p>
+              style={{ background: "rgba(8,8,20,0.97)", backdropFilter: "blur(28px)", border: "1px solid rgba(255,255,255,0.10)" }}>
+              <p className="text-white/25 text-[10px] font-['Cairo'] self-center ml-2">الجودة:</p>
               {QUALITY_LABELS.map(q => (
                 <button key={q} onClick={() => { onChangeQuality(q); setShowQuality(false); }}
                   className="flex flex-col items-center gap-0.5 px-4 py-2.5 rounded-xl transition-all active:scale-90"
                   style={{
-                    background: q === quality ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.05)",
-                    border: q === quality ? "1px solid rgba(139,92,246,0.48)" : "1px solid rgba(255,255,255,0.08)",
-                    color: q === quality ? "white" : "rgba(255,255,255,0.42)",
+                    background: q === quality ? "rgba(124,58,237,0.90)" : "rgba(255,255,255,0.05)",
+                    border: q === quality ? "1px solid rgba(139,92,246,0.50)" : "1px solid rgba(255,255,255,0.07)",
+                    color: q === quality ? "white" : "rgba(255,255,255,0.38)",
                   }}>
                   <span className="font-black text-[16px] font-mono">{QUALITY_SHORT[q]}</span>
-                  <span className="text-[8px] font-bold opacity-55 uppercase tracking-wider">{q.split(" ")[1]}</span>
+                  <span className="text-[8px] font-bold opacity-50 uppercase tracking-wider">{q.split(" ")[1]}</span>
                 </button>
               ))}
             </div>
@@ -1025,13 +1008,13 @@ function EpisodePlayer({
       <AnimatePresence>
         {showSubPanel && subState !== "idle" && (
           <motion.div key="subpanel"
-            initial={{ opacity: 0, scale: 0.95, y: -6 }}
+            initial={{ opacity: 0, scale: 0.95, y: -8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -6 }}
+            exit={{ opacity: 0, scale: 0.95, y: -8 }}
             transition={{ duration: 0.15 }}
-            className="absolute top-[68px] left-0 right-0 z-30 flex justify-center px-4">
+            className="absolute top-[72px] left-0 right-0 z-40 flex justify-center px-4">
             <div className="rounded-2xl px-5 py-4 shadow-2xl w-full max-w-sm" dir="rtl"
-              style={{ background: "rgba(8,8,18,0.96)", backdropFilter: "blur(24px)", border: "1px solid rgba(255,255,255,0.1)" }}>
+              style={{ background: "rgba(8,8,20,0.97)", backdropFilter: "blur(28px)", border: "1px solid rgba(255,255,255,0.10)" }}>
 
               {subState === "loading" && (
                 <div className="flex items-center gap-3">
@@ -1055,36 +1038,21 @@ function EpisodePlayer({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-                      <p className="text-white/62 text-[12px] font-['Cairo']">
+                      <p className="text-white/60 text-[12px] font-['Cairo']">
                         {subLang === "ara" ? "ترجمة عربية" : "مترجمة تلقائياً"}
-                        <span className="text-white/26 mr-1">· {subCues.length} سطر</span>
+                        <span className="text-white/24 mr-1">· {subCues.length} سطر</span>
                       </p>
                     </div>
                     <button onClick={() => setShowSubPanel(false)} className="text-white/26 active:scale-90">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-
                   <div className="flex items-center gap-2 justify-center flex-wrap">
-                    {([-2, -0.5] as number[]).map(d => (
+                    {([-2, -0.5, 0.5, 2] as number[]).map(d => (
                       <button key={d} onClick={() => adjustOffset(d)}
                         className="px-3 py-1.5 rounded-lg text-white/42 text-[11px] font-bold active:scale-90 transition-transform"
                         style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
                         {d > 0 ? "+" : ""}{d}s
-                      </button>
-                    ))}
-
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
-                      style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.28)" }}>
-                      <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-                      <span className="text-violet-200/82 text-[11px] font-['Cairo'] font-bold">مزامنة تلقائية</span>
-                    </div>
-
-                    {([0.5, 2] as number[]).map(d => (
-                      <button key={d} onClick={() => adjustOffset(d)}
-                        className="px-3 py-1.5 rounded-lg text-white/42 text-[11px] font-bold active:scale-90 transition-transform"
-                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                        +{d}s
                       </button>
                     ))}
                   </div>
@@ -1094,125 +1062,6 @@ function EpisodePlayer({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* ══ TOP BAR OVERLAY ══ */}
-      <div
-        className="absolute top-0 left-0 right-0 flex items-center gap-3 px-4 z-20"
-        style={{
-          background: "linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 65%, transparent 100%)",
-          paddingTop: "max(14px, env(safe-area-inset-top))",
-          paddingBottom: 22,
-        }}
-      >
-        <button onClick={onBack}
-          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
-          style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
-          <ChevronRight className="w-5 h-5 text-white/72" />
-        </button>
-
-        <div className="flex-1 min-w-0">
-          <p className="text-white text-[13px] font-black font-['Cairo'] truncate leading-tight">{title}</p>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-white/34 text-[10px] font-['Cairo']">الحلقة {ep}</span>
-            {!allQualityIdentical && (
-              <>
-                <span className="text-white/18 text-[8px]">·</span>
-                <span className="text-violet-300/48 text-[10px] font-bold font-mono">{QUALITY_SHORT[quality]}</span>
-              </>
-            )}
-            <span className="text-white/18 text-[8px]">·</span>
-            <span className="text-white/28 text-[10px] font-['Cairo']">س{currentServer + 1}/{servers.length}</span>
-            {currentInfo.isHls && (
-              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded font-mono"
-                style={{ background: "rgba(124,58,237,0.2)", color: "rgba(196,181,253,0.72)", border: "1px solid rgba(124,58,237,0.22)" }}>
-                HLS
-              </span>
-            )}
-          </div>
-        </div>
-
-        <button onClick={fetchSubtitles}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold font-['Cairo'] transition-all active:scale-90 shrink-0"
-          style={{
-            background: subState === "ready" ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.07)",
-            border: `1px solid ${subState === "ready" ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.1)"}`,
-            color: subState === "ready" ? "white"
-              : subState === "loading" ? "rgba(167,139,250,0.68)"
-              : subState === "none" ? "rgba(255,255,255,0.2)"
-              : "rgba(255,255,255,0.52)",
-          }}>
-          <Subtitles className={`w-3.5 h-3.5 ${subState === "loading" ? "animate-pulse" : ""}`} />
-          <span>ترجمة</span>
-        </button>
-
-        {!allQualityIdentical && (
-          <button onClick={() => setShowQuality(s => !s)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold font-mono transition-all active:scale-90 shrink-0"
-            style={{
-              background: showQuality ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.07)",
-              border: `1px solid ${showQuality ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.1)"}`,
-              color: showQuality ? "white" : "rgba(255,255,255,0.52)",
-            }}>
-            <Settings className="w-3.5 h-3.5" />
-            {QUALITY_SHORT[quality]}
-          </button>
-        )}
-
-        {realQuality && (
-          <div className="px-2 py-1 rounded-lg shrink-0"
-            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-            <span className="text-[10px] font-bold font-mono text-white/36">{realQuality}</span>
-          </div>
-        )}
-
-        <button onClick={toggleFs}
-          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
-          style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
-          {fs ? <Minimize2 className="w-4 h-4 text-white/52" /> : <Maximize2 className="w-4 h-4 text-white/52" />}
-        </button>
-      </div>
-
-      {/* ══ BOTTOM BAR OVERLAY ══ */}
-      <div
-        className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-4 z-20 gap-2"
-        style={{
-          background: "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 65%, transparent 100%)",
-          paddingTop: 22,
-          paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-        }}
-      >
-        <button onClick={onPrevEp} disabled={ep <= 1}
-          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0"
-          style={{ color: "rgba(255,255,255,0.4)", opacity: ep <= 1 ? 0.18 : 1 }}>
-          <ChevronRight className="w-4 h-4" /> السابقة
-        </button>
-
-        <div className="flex items-center gap-1.5 overflow-x-auto flex-1 justify-center" style={{ scrollbarWidth: "none" }}>
-          {servers.map((url, i) => {
-            const info = getServerInfo(url, i);
-            const isActive = i === currentServer;
-            return (
-              <button key={i} onClick={() => { setCurrentServer(i); setRealQuality(null); }}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] whitespace-nowrap transition-all active:scale-90 shrink-0"
-                style={{
-                  background: isActive ? "rgba(124,58,237,0.85)" : "rgba(255,255,255,0.07)",
-                  border: isActive ? "1px solid rgba(139,92,246,0.42)" : "1px solid rgba(255,255,255,0.1)",
-                  color: isActive ? "rgba(255,255,255,0.94)" : "rgba(255,255,255,0.36)",
-                }}>
-                <MonitorPlay className="w-3 h-3 shrink-0" />
-                {info.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <button onClick={onNextEp} disabled={ep >= totalEps}
-          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0 flex-row-reverse"
-          style={{ color: "rgba(255,255,255,0.4)", opacity: ep >= totalEps ? 0.18 : 1 }}>
-          <ChevronLeft className="w-4 h-4" /> التالية
-        </button>
-      </div>
-
     </motion.div>
   );
 }
