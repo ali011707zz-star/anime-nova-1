@@ -19,7 +19,8 @@
 - [AnimeX CDN hls-proxy](animex-cdn-cors.md) — uwucdn.top allows server requests (HTTP 200); use proxyUrl (hls-proxy) first, not rawUrl; hls-proxy rewrites AES-128 key URI + segments via seg-proxy; all confirmed 200
 - [Miruro AnimePahe broken](miruro-animepah.md) — miruro.tv API now returns {"error":"Missing or invalid JWE"} — requires JWE token; AnimePahe source completely broken until alternative found
 - [IframePlayer / MegaEmbedPlayer](auto-fallback-hls.md) — IframePlayer gone; NativeHLSPlayer default; MegaEmbedPlayer added for mega.nz/embed URLs (sandboxed iframe, no allow-popups)
-- [Animeify.net embed source](animeify-embed.md) — animeify API (api.ani-cli-arabic.dev/credentials) → MALink "fileId!key" → mega.nz/embed; isEmbed=true flag bypasses DEAD_FILE_HOSTS in sendSrc; qualityRank=8
+- [Animeify 5 sources](animeify-embed.md) — FRFhdQ/FRLink/FRLowQ→MediaFire MP4 via video-proxy; SVLink→SendVid MP4 via video-proxy; MALink→mega.nz/embed; FDLink→filemoon (blocked server-side); OK.ru skipped (ads)
+- [Proxy URL DEAD_FILE_HOSTS false block](proxy-deadhosts.md) — collect/sendSrc/collectSrc checks checkUrl.includes(host) but checkUrl may be /api/anime/video-proxy?url=...mediafire.com... causing false block; fix: skip check when checkUrl.startsWith("/api/")
 - [AnimeDar search URL spaces](animedar-search.md) — search must use encodeURIComponent (spaces → %20), NOT hyphen-slugified; `/search/one%20piece/` works, `/search/one-piece/` fails
 - [AnimeDar data-attr regex bug](animedar-data-attr.md) — `\bdata=` matches `quality-data=` (word boundary on `-`); must use `(?:^|\s)data=` to match only the standalone data attribute
 - [AnimeDar MEGA truncated scheme](animedar-mega-scheme.md) — some AnimeDar episodes store mega data as `:/mega.nz/embed#!...` (https stripped to colon+1-slash); fix: `"https://" + d.slice(2)`; other episodes use standard `fileId#key` format
