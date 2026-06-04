@@ -66,6 +66,10 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekDragging = useRef(false);
 
+  /* ── onFail guard refs (initialized before state so stable across renders) ── */
+  const failFiredRef  = useRef(false);
+  const failTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   /* Gesture refs */
   const gestureRef      = useRef<GestureState>({ active: "none", startX: 0, startY: 0, lastY: 0, startValue: 0 });
   const lastTapRef      = useRef<{ time: number; side: "left" | "right" } | null>(null);
@@ -93,6 +97,16 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
   const [doubleTap,      setDoubleTap]      = useState<{ side: "left" | "right"; id: number } | null>(null);
   const [isLongPressing, setIsLongPressing] = useState(false);
   const [showSpeedMenu,  setShowSpeedMenu]  = useState(false);
+
+  /* ── onFail: fire at most once per src mount, with 600ms delay + spinner ── */
+  const fireOnFail = useCallback(() => {
+    if (failFiredRef.current) return;
+    failFiredRef.current = true;
+    setLoading(true);
+    setError(null);
+    if (failTimerRef.current) clearTimeout(failTimerRef.current);
+    failTimerRef.current = setTimeout(() => { onFail?.(); }, 600);
+  }, [onFail]);
 
   /* ── Control auto-hide ── */
   const scheduleHide = useCallback(() => {
@@ -135,12 +149,16 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
 
     let m3u8Url = src;
 
+    /* Reset fail guard when loading new source */
+    failFiredRef.current = false;
+    if (failTimerRef.current) { clearTimeout(failTimerRef.current); failTimerRef.current = null; }
+
     /* AnimeGG CDN non-standard port → play direct */
     if (src.includes("animegg.org/play/") || src.includes("vidcache.net")) {
       video.src = src;
       video.load();
       const onMeta = () => { setLoading(false); video.play().catch(() => {}); showCtrl(); };
-      const onErr  = () => { setLoading(false); onFail?.(); };
+      const onErr  = () => { fireOnFail(); };
       video.addEventListener("loadedmetadata", onMeta, { once: true });
       video.addEventListener("error", onErr, { once: true });
       return;
@@ -158,7 +176,7 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
       let resolved = false;
       const cleanup = () => { resolved = true; clearTimeout(loadTimer); video.removeEventListener("loadedmetadata", onMeta); video.removeEventListener("error", onErr); };
       const onMeta = () => { if (resolved) return; cleanup(); setLoading(false); video.play().catch(() => {}); showCtrl(); };
-      const onErr  = () => { if (resolved) return; cleanup(); setLoading(false); onFail?.(); };
+      const onErr  = () => { if (resolved) return; cleanup(); fireOnFail(); };
       const loadTimer = setTimeout(() => { if (resolved) return; video.src = ""; onErr(); }, 9000);
       video.addEventListener("loadedmetadata", onMeta, { once: true });
       video.addEventListener("error", onErr, { once: true });
@@ -194,7 +212,7 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (hlsRef.current !== hls) return;
-        if (data.fatal) { setLoading(false); onFail?.(); }
+        if (data.fatal) { fireOnFail(); }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = m3u8Url;
@@ -204,13 +222,14 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
       setError("المتصفح لا يدعم تشغيل HLS — جرّب Chrome أو Firefox");
       setLoading(false);
     }
-  }, [src, onRealQuality, onFail, showCtrl]);
+  }, [src, onRealQuality, fireOnFail, showCtrl]);
 
   useEffect(() => {
     loadSource();
     return () => {
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      if (failTimerRef.current) clearTimeout(failTimerRef.current);
     };
   }, [loadSource]);
 
