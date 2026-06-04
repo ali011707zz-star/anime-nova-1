@@ -15,6 +15,7 @@ const ANILIST_Q = `query ($id: Int) {
     episodes coverImage { large extraLarge }
     nextAiringEpisode { episode }
     bannerImage genres
+    streamingEpisodes { title episode }
   }
 }`;
 
@@ -338,93 +339,132 @@ function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: 
   return (
     <motion.div
       key="watch-loading-modal"
-      className="fixed inset-0 z-[999] flex items-center justify-center"
+      className="fixed inset-0 z-[999] overflow-hidden"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.25 }}
-      style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(24px)" }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
     >
-      <motion.div
-        className="relative flex flex-col items-center rounded-[28px] overflow-hidden"
-        initial={{ scale: 0.82, opacity: 0, y: 28 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.88, opacity: 0, y: 16 }}
-        transition={{ type: "spring", stiffness: 300, damping: 26 }}
-        style={{
-          width: 260,
-          background: "rgba(8,8,20,0.98)",
-          border: "1px solid rgba(139,92,246,0.22)",
-          boxShadow: "0 0 100px rgba(109,40,217,0.28), 0 30px 70px rgba(0,0,0,0.75)",
-        }}
-      >
-        {/* ── Anime cover — cinematic hero ── */}
-        <div className="relative w-full overflow-hidden" style={{ height: 260 }}>
+      {/* Full-screen blurred cover background */}
+      <div className="absolute inset-0">
+        {cover ? (
+          <motion.img
+            src={cover}
+            alt=""
+            className="w-full h-full object-cover"
+            style={{ filter: "blur(48px) brightness(0.22) saturate(1.8)" }}
+            initial={{ scale: 1.08, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+          />
+        ) : (
+          <div className="w-full h-full" style={{ background: "radial-gradient(ellipse at 50% 40%, #1a0b3d 0%, #07070d 70%)" }} />
+        )}
+        <div className="absolute inset-0" style={{ background: "rgba(5,5,14,0.72)" }} />
+      </div>
+
+      {/* Centered content */}
+      <div className="relative h-full flex flex-col items-center justify-center gap-0">
+        {/* Cover card with play icon */}
+        <motion.div
+          className="relative mb-7"
+          initial={{ opacity: 0, y: 36, scale: 0.88 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.05 }}
+        >
+          {/* Glow ring */}
+          <motion.div
+            className="absolute -inset-3 rounded-[28px] pointer-events-none"
+            style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.22) 0%, transparent 70%)" }}
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+          />
           {cover ? (
             <img
               src={cover}
               alt={title || "أنمي"}
-              className="w-full h-full object-cover object-top"
-              style={{ filter: "brightness(0.92) saturate(1.05)" }}
+              className="w-44 h-[248px] rounded-2xl object-cover object-top"
+              style={{ boxShadow: "0 32px 80px rgba(0,0,0,0.92), 0 0 0 1px rgba(255,255,255,0.09)" }}
             />
           ) : (
-            /* fallback gradient when no cover available */
-            <div className="w-full h-full flex items-center justify-center"
-              style={{ background: "linear-gradient(135deg, #0f0b1f 0%, #1a0b2e 50%, #0c1230 100%)" }}>
-              <Play className="w-14 h-14 text-violet-400/40 fill-violet-400/25" />
+            <div className="w-44 h-[248px] rounded-2xl flex items-center justify-center"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 60px rgba(0,0,0,0.80)" }}>
+              <Play className="w-14 h-14 text-violet-400/30 fill-violet-400/20" />
             </div>
           )}
-          {/* Cinematic bottom fade */}
-          <div className="absolute inset-x-0 bottom-0 h-28"
-            style={{ background: "linear-gradient(0deg, rgba(8,8,20,1) 0%, rgba(8,8,20,0.60) 55%, transparent 100%)" }} />
-          {/* Top safe gradient */}
-          <div className="absolute inset-x-0 top-0 h-14"
-            style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.55) 0%, transparent 100%)" }} />
-          {/* Animated violet shimmer */}
+          {/* Play button overlay */}
           <motion.div
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background: "linear-gradient(180deg, transparent 0%, rgba(139,92,246,0.07) 50%, transparent 100%)",
-              backgroundSize: "100% 50px",
-            }}
-            animate={{ backgroundPositionY: ["0px", "260px"] }}
-            transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
-          />
-          {/* Title overlay */}
-          {title && (
-            <div className="absolute bottom-3 inset-x-0 px-5" dir="rtl">
-              <p className="text-white text-[13px] font-black font-['Cairo'] leading-snug drop-shadow-xl truncate">
-                {title}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* ── Loading indicator ── */}
-        <div className="flex flex-col items-center gap-3 px-6 pt-3 pb-6 w-full" dir="rtl">
-          <p className="text-white/80 text-[15px] font-black font-['Cairo']">جاري التحميل…</p>
-          {/* Animated progress bar */}
-          <div className="w-full h-[3px] rounded-full overflow-hidden"
-            style={{ background: "rgba(255,255,255,0.07)" }}>
+            className="absolute inset-0 flex items-center justify-center"
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.28, duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+          >
             <motion.div
-              className="h-full rounded-full"
-              style={{ background: "linear-gradient(90deg, #7c3aed, #a78bfa, #7c3aed)", backgroundSize: "200% 100%" }}
-              animate={{ backgroundPositionX: ["0%", "200%"] }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-            />
-          </div>
-        </div>
+              className="w-[60px] h-[60px] rounded-full flex items-center justify-center"
+              style={{
+                background: "rgba(109,40,217,0.82)",
+                backdropFilter: "blur(12px)",
+                border: "2px solid rgba(167,139,250,0.40)",
+                boxShadow: "0 0 40px rgba(109,40,217,0.55), 0 8px 24px rgba(0,0,0,0.60)",
+              }}
+              animate={{ scale: [1, 1.08, 1] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <Play className="w-7 h-7 text-white fill-white ml-1" />
+            </motion.div>
+          </motion.div>
+          {/* Bottom fade on cover */}
+          <div className="absolute bottom-0 left-0 right-0 h-16 rounded-b-2xl pointer-events-none"
+            style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.55) 0%, transparent 100%)" }} />
+        </motion.div>
 
-        {/* Close button */}
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="absolute top-3 left-3 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform z-20"
-            style={{ background: "rgba(0,0,0,0.60)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(8px)" }}>
-            <X className="w-3.5 h-3.5 text-white/50" />
-          </button>
-        )}
-      </motion.div>
+        {/* Title + status */}
+        <motion.div
+          className="text-center px-8"
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18, duration: 0.42 }}
+        >
+          {title && (
+            <p className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-2 drop-shadow-xl">
+              {title}
+            </p>
+          )}
+          <p className="text-white/35 text-[12px] font-['Cairo'] tracking-[0.10em]">جاري تحميل الحلقة</p>
+        </motion.div>
+
+        {/* Animated loading dots */}
+        <motion.div
+          className="flex items-center gap-2 mt-6"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.35 }}
+        >
+          {[0, 1, 2, 3].map(i => (
+            <motion.div
+              key={i}
+              className="rounded-full"
+              style={{ width: i === 1 || i === 2 ? 8 : 5, height: i === 1 || i === 2 ? 8 : 5, background: i === 1 || i === 2 ? "rgba(139,92,246,0.85)" : "rgba(139,92,246,0.35)" }}
+              animate={{ scale: [1, 1.6, 1], opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
+            />
+          ))}
+        </motion.div>
+      </div>
+
+      {/* Close button */}
+      {onClose && (
+        <motion.button
+          onClick={onClose}
+          className="absolute top-4 right-4 w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform z-20"
+          style={{ background: "rgba(0,0,0,0.50)", border: "1px solid rgba(255,255,255,0.13)", backdropFilter: "blur(12px)" }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+        >
+          <X className="w-4 h-4 text-white/55" />
+        </motion.button>
+      )}
     </motion.div>
   );
 }
@@ -879,12 +919,12 @@ function MegaEmbedPlayer({
 /* ══════════════════════════════════ EPISODE PLAYER ═════════ */
 function EpisodePlayer({
   servers, quality, allServers,
-  title, cover, ep, totalEps, animeTitle,
+  title, epTitle, cover, ep, totalEps, animeTitle,
   initialServer, downloadUrl,
   onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
-  title: string; cover: string; ep: number; totalEps: number; animeTitle: string;
+  title: string; epTitle?: string; cover: string; ep: number; totalEps: number; animeTitle: string;
   initialServer?: number; downloadUrl?: string;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
@@ -1181,6 +1221,7 @@ function EpisodePlayer({
               key={`hls-${currentUrl}-${currentServer}`}
               src={currentUrl}
               title={title}
+              epTitle={epTitle}
               ep={ep}
               totalEps={totalEps}
               qualityLabel={QUALITY_SHORT[quality]}
@@ -1324,6 +1365,20 @@ export default function WatchPage() {
   const totalEps   = anime?.episodes ||
     (anime?.nextAiringEpisode?.episode ? anime.nextAiringEpisode.episode - 1 : 999);
   const cover      = anime?.coverImage?.extraLarge || anime?.coverImage?.large || "";
+
+  /* Episode title from AniList streamingEpisodes */
+  const epTitle: string = (() => {
+    const eps: Array<{ title?: string; episode?: string }> = anime?.streamingEpisodes || [];
+    if (!eps.length) return "";
+    const found = eps.find(e => {
+      const n = parseInt(e.episode || "");
+      return !isNaN(n) && n === ep;
+    });
+    const raw = found?.title || eps[ep - 1]?.title || "";
+    if (!raw) return "";
+    // Strip "Episode N - " prefix that AniList sometimes prepends
+    return raw.replace(/^Episode\s+\d+\s*[-:–]\s*/i, "").trim();
+  })();
 
   /* Fetch AniList metadata */
   useEffect(() => {
@@ -1517,6 +1572,7 @@ export default function WatchPage() {
           allServers={playerServers}
           initialServer={initialSrv}
           title={title}
+          epTitle={epTitle}
           animeTitle={animeTitle}
           cover={cover} ep={ep} totalEps={totalEps}
           downloadUrl={playerDlUrl}

@@ -51,6 +51,7 @@ function FlipScreenIcon({ className }: { className?: string }) {
 interface Props {
   src: string;
   title?: string;
+  epTitle?: string;
   ep?: number;
   totalEps?: number;
   qualityLabel?: string;
@@ -76,6 +77,7 @@ interface GF { type: "volume" | "brightness" | "seek"; value: number; delta?: nu
 export default function RiftPlayer({
   src,
   title = "",
+  epTitle = "",
   ep = 1,
   totalEps = 999,
   qualityLabel = "",
@@ -364,7 +366,9 @@ export default function RiftPlayer({
     if (longPress) return;
     if (g.active === "none" && dist > G_THRESH) {
       moved.current = true;
-      const cW = e.currentTarget.clientWidth;
+      // In portrait mode, clientWidth returns the pre-rotation size (screen height in pixels)
+      // which is larger than the actual visual width. Use window.innerWidth for accurate split.
+      const cW = isPortrait ? window.innerWidth : e.currentTarget.clientWidth;
       if (Math.abs(dx) > Math.abs(dy) * 1.4) {
         g.active = "seek"; g.startValue = videoRef.current?.currentTime ?? 0;
       } else {
@@ -374,8 +378,9 @@ export default function RiftPlayer({
       }
     }
     if (g.active === "seek") {
+      const visW = isPortrait ? window.innerWidth : e.currentTarget.clientWidth;
       const maxD = Math.min(duration * 0.5, 120);
-      const delta = (dx / e.currentTarget.clientWidth) * maxD;
+      const delta = (dx / visW) * maxD;
       setFeedback({ type: "seek", value: Math.max(0, Math.min(duration, g.startValue + delta)), delta });
     } else if (g.active === "volume") {
       const dY = g.lastY - t.clientY; g.lastY = t.clientY;
@@ -403,7 +408,10 @@ export default function RiftPlayer({
     if (g.active !== "none") { setTimeout(() => setFeedback(null), 800); gestRef.current.active = "none"; return; }
     if (moved.current) return;
     const touch = e.changedTouches[0];
-    const side: "L" | "R" = touch.clientX < e.currentTarget.clientWidth / 2 ? "L" : "R";
+    // In portrait mode, clientWidth is the pre-rotation element size (screen height in px),
+    // which is larger than the visual screen width. Use window.innerWidth for accurate L/R split.
+    const visW = isPortrait ? window.innerWidth : e.currentTarget.clientWidth;
+    const side: "L" | "R" = touch.clientX < visW / 2 ? "L" : "R";
     const now = Date.now();
     if (lastTap.current && now - lastTap.current.time < 300 && lastTap.current.side === side) {
       togglePlay();
@@ -648,6 +656,12 @@ export default function RiftPlayer({
                       style={{ fontSize: 16, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
                       {title || "Nova Player"}
                     </h1>
+                    {epTitle && (
+                      <p className="text-violet-300/70 text-[11px] font-['Cairo'] font-bold truncate leading-tight mt-[2px]"
+                        style={{ textShadow: "0 1px 8px rgba(0,0,0,0.90)" }}>
+                        {epTitle}
+                      </p>
+                    )}
                     <div className="flex items-center gap-1.5 mt-[4px] flex-wrap" dir="rtl">
                       {qualityLabel && (
                         <span className="text-amber-300/80 text-[11px] font-black font-mono">{qualityLabel}P</span>
@@ -775,13 +789,13 @@ export default function RiftPlayer({
                   </div>
                 </div>
 
-                {/* ── Controls row — truly centered play, equal icon buttons ── */}
+                {/* ── Controls row — 3-column flex (no absolute positioning) ── */}
                 <div
-                  className="relative flex items-center px-2 pt-2"
+                  className="flex items-center px-2 pt-2"
                   style={{ paddingBottom: "max(14px, env(safe-area-inset-bottom))" }}
                 >
-                  {/* ─ Left group: Zoom · Speed ─ */}
-                  <div className="flex items-center gap-0.5">
+                  {/* ─ Left group: Zoom · Speed ─ flex-1 */}
+                  <div className="flex-1 flex items-center gap-0.5">
                     <button onClick={() => setIsZoomed(z => !z)}
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {isZoomed
@@ -828,8 +842,8 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* ─ Center: [◄10] [⏸] [10►] — absolutely centered ─ */}
-                  <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
+                  {/* ─ Center: [◄10] [⏸] [10►] — naturally centered ─ */}
+                  <div className="flex items-center gap-3 mx-1 shrink-0">
                     {/* Rewind 10s */}
                     <button
                       onClick={() => { skip(-10); showControls(); }}
@@ -858,8 +872,8 @@ export default function RiftPlayer({
                     </button>
                   </div>
 
-                  {/* ─ Right group: Volume · Lock · Fullscreen ─ */}
-                  <div className="flex items-center gap-0.5 ml-auto">
+                  {/* ─ Right group: Volume · Lock · Fullscreen ─ flex-1 justify-end */}
+                  <div className="flex-1 flex items-center gap-0.5 justify-end">
                     <button onClick={toggleMute}
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {muted || volume === 0
