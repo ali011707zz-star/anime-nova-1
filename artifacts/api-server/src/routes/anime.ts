@@ -979,9 +979,12 @@ async function extractAndCollect(
       collect({ ...s, directUrl: s.url, directType: "mp4" });
       return;
     }
-    // Embed-only hosts: cannot extract server-side — skip entirely (no iframe)
-    if (EMBED_ONLY_HOSTS.some(h => s.url.includes(h))) return;
-    // Other skippable extraction blockers → skip
+    // Embed-only hosts: skip expensive extraction, send directly as sandboxed iframe embed
+    if (EMBED_ONLY_HOSTS.some(h => s.url.includes(h))) {
+      if (s.url.startsWith("https://")) collect({ ...s, directUrl: s.url, isEmbed: true });
+      return;
+    }
+    // Other skippable extraction blockers (drive.google, mega.nz plain, etc.) → skip entirely
     if (SKIP_EXTRACT_HOSTS.some(h => s.url.includes(h))) return;
 
     // Try to extract a direct MP4/HLS URL from the embed page
@@ -1011,19 +1014,15 @@ async function extractAndCollect(
           }
         }
       } else {
-        // Extraction failed — iframe fallback ONLY for confirmed ad-free embed hosts:
-        //   mega.nz/embed      → Mega file storage player, zero ads
-        //   mega.co.nz/embed   → same service, alternate TLD
-        //   share4max.com/iframe/ → shahiid-anime's own clean player (Histats analytics only, no ad networks)
-        const AD_FREE_EMBED_PATTERNS = ["mega.nz/embed", "mega.co.nz/embed", "share4max.com/iframe/"];
-        if (AD_FREE_EMBED_PATTERNS.some(p => s.url.includes(p))) {
+        // Extraction failed — fall back to sandboxed iframe embed for any https:// embed URL
+        // The MegaEmbedPlayer in Watch.tsx handles all iframe sources safely inside the app
+        if (s.url.startsWith("https://")) {
           collect({ ...s, directUrl: s.url, isEmbed: true });
         }
       }
     } catch {
-      // On exception: iframe fallback only for confirmed ad-free hosts
-      const AD_FREE_EMBED_PATTERNS = ["mega.nz/embed", "mega.co.nz/embed", "share4max.com/iframe/"];
-      if (AD_FREE_EMBED_PATTERNS.some(p => s.url.includes(p))) {
+      // On exception: fall back to sandboxed iframe embed for any https:// embed URL
+      if (s.url.startsWith("https://")) {
         collect({ ...s, directUrl: s.url, isEmbed: true });
       }
     }

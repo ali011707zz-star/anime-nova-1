@@ -151,7 +151,7 @@ export default function AnimeDetail() {
     <main className="bg-[#09090B] min-h-screen pb-32 text-white" dir="rtl">
 
       {/* ── Hero Banner ── */}
-      <div className="relative w-full overflow-hidden" style={{ height: 280 }}>
+      <div className="relative w-full overflow-hidden" style={{ height: 240 }}>
         <img
           src={anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large}
           alt="" className="w-full h-full object-cover"
@@ -180,7 +180,7 @@ export default function AnimeDetail() {
         {/* Cover */}
         <div className="relative shrink-0">
           <div className="absolute inset-0 rounded-2xl blur-xl scale-95 translate-y-2 opacity-60" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }} />
-          <div className="relative w-[108px] h-[156px] rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/80">
+          <div className="relative w-[90px] h-[130px] rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/80">
             <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" />
           </div>
           {/* Format pill */}
@@ -256,11 +256,11 @@ export default function AnimeDetail() {
         <Link href={`/episodes/${params.id}`}>
           <motion.button
             whileTap={{ scale: 0.97 }}
-            className="w-full h-14 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-base font-['Cairo'] text-white"
+            className="w-full h-12 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-sm font-['Cairo'] text-white"
             style={{ background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)", boxShadow: "0 8px 32px rgba(109,40,217,0.45)" }}
           >
-            <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-              <Play className="w-4 h-4 fill-white text-white" />
+            <div className="w-7 h-7 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+              <Play className="w-3.5 h-3.5 fill-white text-white" />
             </div>
             مشاهدة الأنمي
           </motion.button>
@@ -270,20 +270,20 @@ export default function AnimeDetail() {
           <motion.button
             whileTap={{ scale: 0.97 }}
             onClick={toggleSave}
-            className={`w-14 h-12 rounded-2xl flex flex-col items-center justify-center gap-0.5 border transition-all font-['Cairo'] shrink-0
+            className={`w-12 h-11 rounded-2xl flex flex-col items-center justify-center gap-0.5 border transition-all font-['Cairo'] shrink-0
               ${saved
                 ? "bg-primary/15 border-primary/30 text-primary"
                 : "bg-[#18181B] border-white/7 text-white/50"}`}
           >
-            <Bookmark className={`w-4 h-4 transition-all ${saved ? "fill-current" : ""}`} />
+            <Bookmark className={`w-3.5 h-3.5 transition-all ${saved ? "fill-current" : ""}`} />
             <span className="text-[8px] font-black">{saved ? "محفوظ" : "حفظ"}</span>
           </motion.button>
           <motion.button
             whileTap={{ scale: 0.97 }}
             onClick={() => setShowComments(true)}
-            className="flex-1 h-12 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold font-['Cairo'] text-white/70"
+            className="flex-1 h-11 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold font-['Cairo'] text-white/70"
           >
-            <MessageCircle className="w-4 h-4 text-primary" />
+            <MessageCircle className="w-3.5 h-3.5 text-primary" />
             التعليقات
             {comments.length > 0 && (
               <span className="bg-primary/20 text-primary text-[9px] font-black px-1.5 py-0.5 rounded-full">{comments.length}</span>
@@ -346,12 +346,12 @@ export default function AnimeDetail() {
               <motion.div
                 key={e.node.id}
                 whileTap={{ scale: 0.95 }}
-                className="shrink-0 w-[52px] text-center"
+                className="shrink-0 w-[44px] text-center"
               >
                 <div className="relative">
                   <img
                     src={e.node.image.large} alt=""
-                    className="w-[52px] h-[52px] rounded-xl object-cover border border-white/8 mb-1"
+                    className="w-[44px] h-[44px] rounded-xl object-cover border border-white/8 mb-1"
                   />
                 </div>
                 <p className="text-[8px] text-white/45 font-bold truncate leading-tight">{e.node.name.full}</p>

@@ -47,38 +47,38 @@ function EpisodeRow({
 
   return (
     <div
-      className={`flex items-center gap-3 px-4 py-3 border-b transition-all active:bg-white/5
+      className={`flex items-center gap-2.5 px-3 py-2.5 border-b transition-all active:bg-white/5
         ${watched ? "border-white/4 bg-primary/[0.03]" : "border-white/[0.05]"}`}
     >
       {/* Thumbnail */}
       <button onClick={() => onWatch(n)}
-        className="relative shrink-0 w-[108px] h-[61px] rounded-2xl overflow-hidden bg-[#1C1C22] border border-white/8 active:scale-95 transition-transform">
+        className="relative shrink-0 w-[86px] h-[49px] rounded-xl overflow-hidden bg-[#1C1C22] border border-white/8 active:scale-95 transition-transform">
         <img src={thumb} alt="" className="w-full h-full object-cover"
           loading="lazy"
           onError={e => { (e.target as HTMLImageElement).src = anime?.coverImage?.large || ""; }} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
-        <div className="absolute bottom-1 left-1 bg-black/75 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md">
+        <div className="absolute bottom-1 left-1 bg-black/75 text-white text-[8px] font-black px-1 py-0.5 rounded-md">
           {dur}
         </div>
         <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black/20">
-          <div className="w-8 h-8 bg-primary/90 rounded-full flex items-center justify-center shadow-lg">
-            <Play className="w-3.5 h-3.5 fill-white text-white" />
+          <div className="w-6 h-6 bg-primary/90 rounded-full flex items-center justify-center shadow-lg">
+            <Play className="w-3 h-3 fill-white text-white" />
           </div>
         </div>
         {watched && (
-          <div className="absolute inset-0 border-2 border-primary/40 rounded-2xl" />
+          <div className="absolute inset-0 border-2 border-primary/40 rounded-xl" />
         )}
       </button>
 
       {/* Info */}
       <button onClick={() => onWatch(n)} className="flex-1 min-w-0 text-right">
-        <p className={`text-sm font-black font-['Cairo'] ${watched ? "text-primary/80" : "text-white/90"}`}>
+        <p className={`text-[13px] font-black font-['Cairo'] ${watched ? "text-primary/80" : "text-white/90"}`}>
           الحلقة {n}
         </p>
         {epTitle ? (
-          <p className="text-[10px] text-white/35 font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed">{epTitle}</p>
+          <p className="text-[9px] text-white/35 font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed">{epTitle}</p>
         ) : (
-          <p className="text-[10px] text-white/20 font-['Cairo'] mt-0.5 line-clamp-1">{anime?.title?.romaji}</p>
+          <p className="text-[9px] text-white/20 font-['Cairo'] mt-0.5 line-clamp-1">{anime?.title?.romaji}</p>
         )}
       </button>
 
@@ -86,11 +86,11 @@ function EpisodeRow({
       <motion.button
         onClick={e => { e.stopPropagation(); onComment(n); }}
         whileTap={{ scale: 0.82 }}
-        className="shrink-0 w-9 h-9 rounded-xl flex flex-col items-center justify-center border border-white/8 bg-white/4 text-white/30 relative"
+        className="shrink-0 w-7 h-7 rounded-lg flex flex-col items-center justify-center border border-white/8 bg-white/4 text-white/30 relative"
       >
-        <MessageCircle className="w-4 h-4" />
+        <MessageCircle className="w-3.5 h-3.5" />
         {commentCount > 0 && (
-          <span className="absolute -top-1 -left-1 min-w-[14px] h-[14px] bg-primary rounded-full text-[8px] font-black text-white flex items-center justify-center px-0.5">
+          <span className="absolute -top-1 -left-1 min-w-[13px] h-[13px] bg-primary rounded-full text-[7px] font-black text-white flex items-center justify-center px-0.5">
             {commentCount}
           </span>
         )}
@@ -100,12 +100,12 @@ function EpisodeRow({
       <motion.button
         onClick={e => { e.stopPropagation(); onToggleWatched(n); }}
         whileTap={{ scale: 0.82 }}
-        className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center border transition-all
+        className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center border transition-all
           ${watched
             ? "bg-primary/15 border-primary/30 text-primary"
             : "bg-white/4 border-white/8 text-white/20 hover:text-white/45"}`}
       >
-        {watched ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+        {watched ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
       </motion.button>
     </div>
   );
