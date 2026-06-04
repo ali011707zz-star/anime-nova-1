@@ -135,13 +135,12 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
 
     let m3u8Url = src;
 
-    /* AnimeGG / mp4upload CDN non-standard port → play direct */
-    if (src.includes("animegg.org/play/") || src.includes("vidcache.net") ||
-        (src.includes("mp4upload.com") && !src.includes("www.mp4upload.com"))) {
+    /* AnimeGG CDN non-standard port → play direct */
+    if (src.includes("animegg.org/play/") || src.includes("vidcache.net")) {
       video.src = src;
       video.load();
       const onMeta = () => { setLoading(false); video.play().catch(() => {}); showCtrl(); };
-      const onErr  = () => { setLoading(false); setError("تعذّر تشغيل هذا المصدر مباشرةً"); };
+      const onErr  = () => { setLoading(false); onFail?.(); };
       video.addEventListener("loadedmetadata", onMeta, { once: true });
       video.addEventListener("error", onErr, { once: true });
       return;
@@ -159,7 +158,7 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
       let resolved = false;
       const cleanup = () => { resolved = true; clearTimeout(loadTimer); video.removeEventListener("loadedmetadata", onMeta); video.removeEventListener("error", onErr); };
       const onMeta = () => { if (resolved) return; cleanup(); setLoading(false); video.play().catch(() => {}); showCtrl(); };
-      const onErr  = () => { if (resolved) return; cleanup(); setLoading(false); setError("فشل تشغيل المصدر — جارٍ تجربة المصدر التالي…"); setTimeout(() => onFail?.(), 1200); };
+      const onErr  = () => { if (resolved) return; cleanup(); setLoading(false); onFail?.(); };
       const loadTimer = setTimeout(() => { if (resolved) return; video.src = ""; onErr(); }, 9000);
       video.addEventListener("loadedmetadata", onMeta, { once: true });
       video.addEventListener("error", onErr, { once: true });
@@ -195,7 +194,7 @@ export default function RiftPlayer({ src, onRealQuality, onTimeUpdate, onFail, t
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (hlsRef.current !== hls) return;
-        if (data.fatal) { setError("فشل تحميل البث — جارٍ تجربة المصدر التالي…"); setLoading(false); setTimeout(() => onFail?.(), 1500); }
+        if (data.fatal) { setLoading(false); onFail?.(); }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = m3u8Url;
