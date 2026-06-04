@@ -1,4 +1,10 @@
 import { Router } from "express";
+import {
+  makeSourceCacheKey,
+  getFromSourceCache,
+  setSourceCache,
+  shouldRefreshCache,
+} from "../lib/sourceCache.js";
 
 const router = Router();
 
@@ -2928,125 +2934,66 @@ router.get("/anime/sources-stream", async (req, res) => {
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
-    // All 4 scrapers run in parallel; each uses its OWN localSeen (no cross-scraper dedup in extractAndCollect)
+    // ── مساعد: كاشط بـ cache + extractAndCollect ──
+    async function scrapeCached(
+      site: string,
+      scrape: () => Promise<UnifiedSource[]>,
+      useExtract = true,
+    ) {
+      if (!title || closed) return;
+      const cKey = makeSourceCacheKey(site, title, ep);
+      const hit  = await getFromSourceCache(cKey);
+
+      if (hit) {
+        // ✅ تقديم من الـ Cache فوراً (< 5ms)
+        hit.sources.forEach(s => sendSrc(s));
+
+        // تجديد خلفي إذا اقترب الانتهاء
+        if (shouldRefreshCache(hit.expiresAt)) {
+          setImmediate(async () => {
+            try {
+              const srcs = await race(scrape(), SCRAPER_MS, []);
+              if (!srcs.length) return;
+              if (useExtract) {
+                const buf: UnifiedSource[] = [];
+                await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
+                if (buf.length) await setSourceCache(cKey, site, buf);
+              } else {
+                await setSourceCache(cKey, site, srcs);
+              }
+            } catch {}
+          });
+        }
+        return; // لا حاجة للكشط
+      }
+
+      // ❌ لا يوجد cache → اكشط
+      const srcs = await race(scrape(), SCRAPER_MS, []);
+      if (!srcs.length) return;
+
+      if (useExtract) {
+        const buf: UnifiedSource[] = [];
+        await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
+        if (!closed) buf.forEach(s => sendSrc(s));
+        if (buf.length) await setSourceCache(cKey, site, buf);
+      } else {
+        if (!closed) srcs.forEach(s => sendSrc(s));
+        await setSourceCache(cKey, site, srcs);
+      }
+    }
+
+    // جميع الكاشطات تعمل بالتوازي
     await Promise.allSettled([
-      // ── Anime-Phoenix.com  (مباشر MKV/MP4 عالي الجودة) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) {
-            const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-            buf.forEach(s => sendSrc(s));
-          }
-        } catch {}
-      })(),
-
-      // ── Shahiid-anime.net  (عربي مدبلج + مترجم) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getShahiidSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) {
-            const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-            buf.forEach(s => sendSrc(s));
-          }
-        } catch {}
-      })(),
-
-      // ── AnimeLek.top  (عربي — streamwish/filemoon) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimelekSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) {
-            const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-            buf.forEach(s => sendSrc(s));
-          }
-        } catch {}
-      })(),
-
-      // ── AnimeDar.net  (عربي — WordPress/animestream) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimadarSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) {
-            const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-            buf.forEach(s => sendSrc(s));
-          }
-        } catch {}
-      })(),
-
-      // ── Mitanime.com  (ياباني + ترجمة عربية — mp4upload CDN) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getMitanimeSources(title, english, ep), SCRAPER_MS, []);
-          srcs.forEach(s => sendSrc(s));
-        } catch {}
-      })(),
-
-      // ── ToonStream.vip  (ياباني/متعدد اللغات — as-cdn21.top HLS) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getToonStreamSources(title, english, ep), SCRAPER_MS, []);
-          srcs.forEach(s => sendSrc(s));
-        } catch {}
-      })(),
-
-      // ── OkAnime.xyz  (عربي مترجم — Alpine.js servers) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getOkAnimeSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) {
-            const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-            buf.forEach(s => sendSrc(s));
-          }
-        } catch {}
-      })(),
-
-      // ── Anime-time.live  (عربي مترجم — onclick buttons) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimeTimeSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) {
-            const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-            buf.forEach(s => sendSrc(s));
-          }
-        } catch {}
-      })(),
-
-      // ── RistoAnime.co  (عربي مترجم — WordPress TopAnime theme) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, []);
-          if (srcs.length && !closed) {
-            const buf: UnifiedSource[] = [];
-            await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-            buf.forEach(s => sendSrc(s));
-          }
-        } catch {}
-      })(),
-
-      // ── Animeify.net  (Mega.nz embed — بدون إعلانات، يبقى داخل التطبيق) ──
-      (async () => {
-        try {
-          if (!title) return;
-          const srcs = await race(getAnimeifySources(title, english, ep), SCRAPER_MS, []);
-          srcs.forEach(s => sendSrc(s));
-        } catch {}
-      })(),
+      scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
+      scrapeCached("shahiid",      () => getShahiidSources(title, english, ep)),
+      scrapeCached("animelek",     () => getAnimelekSources(title, english, ep)),
+      scrapeCached("animedar",     () => getAnimadarSources(title, english, ep)),
+      scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
+      scrapeCached("toonstream",   () => getToonStreamSources(title, english, ep), false),
+      scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep)),
+      scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep)),
+      scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
+      scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
     ]);
 
   } catch (e: any) {
