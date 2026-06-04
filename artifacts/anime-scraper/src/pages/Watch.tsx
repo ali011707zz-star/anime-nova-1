@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
-import gojoImg from "/gojo-loading.png";
+import gojoImg from "/gojo-satoru.png";
 
 /* ══════════════════════════════════ ANILIST ══════════════════ */
 const ANILIST_Q = `query ($id: Int) {
