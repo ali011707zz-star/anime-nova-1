@@ -63,13 +63,15 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
 
 function getSrcQualityTier(src: FetchedSrc): Quality {
+  /* qualityRank is the authoritative source — set by scraper with real video info */
+  const rank = src.qualityRank ?? 0;
+  if (rank >= 12) return "1080p FHD";
+  if (rank >= 9)  return "720p HD";
+  if (rank >= 7)  return "360p SD";
+  /* Only fall back to name when rank is unset/generic (rank < 7) */
   const name = (src.name || "").toLowerCase();
   if (name.includes("1080") || name.includes("fhd")) return "1080p FHD";
-  if (name.includes("480") || name.includes("360") || name.includes(" sd")) return "360p SD";
-  if (name.includes("720") || name.includes(" hd")) return "720p HD";
-  const rank = src.qualityRank ?? 2;
-  if (rank >= 12) return "1080p FHD";
-  if (rank >= 9) return "720p HD";
+  if (name.includes("720")  || name.includes("hd"))  return "720p HD";
   return "360p SD";
 }
 
@@ -824,14 +826,14 @@ function EpisodePlayer({
   }, [animeTitle, ep]);
 
   const lastSwitchRef = useRef(0);
-  function tryNextServer() {
-    /* Throttle: ignore if last switch was < 400ms ago (prevents rapid-fire cycling) */
+  const tryNextServer = useCallback(() => {
+    /* Throttle: ignore if last switch was < 400ms ago */
     const now = Date.now();
     if (now - lastSwitchRef.current < 400) return;
     lastSwitchRef.current = now;
 
     if (currentServer + 1 < servers.length) {
-      setCurrentServer(s => s + 1);
+      setCurrentServer(currentServer + 1);
       setRealQuality(null);
     } else {
       const currentTierIdx = QUALITY_LABELS.indexOf(quality);
@@ -843,7 +845,11 @@ function EpisodePlayer({
       }
       onTierExhausted?.();
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentServer, servers.length, quality, allServers, onChangeQuality, onTierExhausted]);
+  /* Note: tryNextServer changes when currentServer changes, but that's fine —
+     RiftPlayer's fireOnFail reads onFailRef.current (stable ref), so loadSource
+     never re-fires from identity changes here. */
 
   /* ── Embed-type URL → sandboxed iframe player ── */
   if (currentUrl && isIframeUrl(currentUrl)) {
@@ -1227,6 +1233,7 @@ export default function WatchPage() {
     autoFetchedRef.current = true;
     SCRAPER_DEFS.forEach((def, i) => {
       setTimeout(() => {
+        /* stagger 50ms per scraper so network isn't flooded */
         /* Pass title params directly to avoid stale anime state at mount time */
         (async () => {
           if (inFlightRef.current.has(def.site)) return;
@@ -1254,19 +1261,42 @@ export default function WatchPage() {
             inFlightRef.current.delete(def.site);
           }
         })();
-      }, i * 300);
+      }, i * 50);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Play a specific source directly ── */
+  /* ── Play a specific source — pass ALL available sources so player can fallback ── */
   function handlePlaySrc(src: FetchedSrc) {
-    const url  = src.directUrl || src.url;
-    const tier = getSrcQualityTier(src);
+    const clickedUrl  = src.directUrl || src.url;
+    const clickedTier = getSrcQualityTier(src);
+
+    /* Build flat deduplicated list from all slot sources (same filter as picker) */
+    const allFlat: FetchedSrc[] = [];
+    const seenKeys = new Set<string>();
+    for (const srcs of Object.values(slotSources)) {
+      for (const s of srcs) {
+        if (!shouldShowSrc(s)) continue;
+        const key = s.directUrl || s.url;
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        allFlat.push(s);
+      }
+    }
+    allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+
+    /* Put clicked URL first in its tier, others after */
     const servers: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
-    servers[tier] = [url];
+    servers[clickedTier].push(clickedUrl);
+    for (const s of allFlat) {
+      const u = s.directUrl || s.url;
+      if (!u || u === clickedUrl) continue;
+      const tier = getSrcQualityTier(s);
+      if (!servers[tier].includes(u)) servers[tier].push(u);
+    }
+
     setPlayerServers(servers);
-    setQuality(tier);
+    setQuality(clickedTier);
     setInitialSrv(0);
     setPhase("player");
   }
