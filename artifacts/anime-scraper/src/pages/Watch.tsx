@@ -1034,14 +1034,19 @@ function EpisodePlayer({
             <RiftPlayer
               key={`hls-${currentUrl}-${currentServer}`}
               src={currentUrl}
+              title={title}
+              ep={ep}
+              totalEps={totalEps}
+              qualityLabel={QUALITY_SHORT[quality]}
+              isHls={currentInfo.isHls}
+              serverCount={servers.length}
+              serverIndex={currentServer}
+              onBack={onBack}
+              onPrevEp={onPrevEp}
+              onNextEp={onNextEp}
               onRealQuality={handleRealQuality}
               onTimeUpdate={handleHlsTime}
               onFail={tryNextServer}
-              topSlot={topSlot}
-              ep={ep}
-              totalEps={totalEps}
-              onPrevEp={onPrevEp}
-              onNextEp={onNextEp}
             />
             {subState === "ready" && subCues.length > 0 && (
               <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
