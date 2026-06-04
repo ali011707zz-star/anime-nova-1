@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
-import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star } from "lucide-react";
+import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, LogIn } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
+import { loadWatchHistory, loadSavedIds, unsaveAnime } from "@/lib/db";
 import { motion } from "framer-motion";
 
 const ANIME_QUERY = `
@@ -49,6 +51,7 @@ function progressPct(elapsed: number): number {
 }
 
 export default function Library() {
+  const { user } = useAuth();
   const [tab, setTab] = useState<"saved" | "history">("history");
   const [savedAnime, setSavedAnime] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
@@ -56,30 +59,39 @@ export default function Library() {
   const [sortBy, setSortBy] = useState<"name" | "date" | "score">("date");
 
   useEffect(() => {
-    const savedIds: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
-    const hist: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
-    setHistory(hist);
+    let cancelled = false;
+    async function load() {
+      // Load history
+      const hist = await loadWatchHistory(user?.id ?? null);
+      if (!cancelled) setHistory(hist);
 
-    if (savedIds.length === 0) { setSavedAnime([]); return; }
-    setLoading(true);
-    fetch("https://graphql.anilist.co", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: savedIds } }),
-    })
-      .then(r => r.json())
-      .then(d => setSavedAnime(d.data?.Page?.media || []))
-      .finally(() => setLoading(false));
-  }, []);
+      // Load saved IDs
+      const savedIds = await loadSavedIds(user?.id ?? null);
+      if (savedIds.length === 0) { if (!cancelled) setSavedAnime([]); return; }
+      if (!cancelled) setLoading(true);
+      try {
+        const r = await fetch("https://graphql.anilist.co", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: savedIds } }),
+        });
+        const d = await r.json();
+        if (!cancelled) setSavedAnime(d.data?.Page?.media || []);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   const removeFromSaved = (id: number) => {
-    const savedIds: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
-    localStorage.setItem("savedAnime", JSON.stringify(savedIds.filter(i => i !== id)));
+    unsaveAnime(user?.id ?? null, id);
     setSavedAnime(prev => prev.filter(a => a.id !== id));
   };
 
   const removeHistory = (id: number, ep: number) => {
-    const h = history.filter(x => !(x.id === id && x.ep === ep));
+    const h = history.filter((x: any) => !(x.id === id && x.ep === ep));
     localStorage.setItem("watch-history", JSON.stringify(h));
     setHistory(h);
   };

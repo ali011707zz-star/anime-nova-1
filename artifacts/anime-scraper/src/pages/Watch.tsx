@@ -36,6 +36,16 @@ function saveHistory(id: number, title: string, cover: string, ep: number, total
        ...h.filter(x => !(x.id === id && x.ep === ep))].slice(0, 60)
     ));
   } catch {}
+  // Supabase async save (non-blocking)
+  import("@/lib/auth-context").then(m => {
+    // We can't use hooks here — read the session directly from supabase
+    import("@/lib/supabase").then(({ supabase, upsertWatchHistory }) => {
+      supabase.auth.getUser().then(({ data }) => {
+        const uid = data?.user?.id;
+        if (uid) upsertWatchHistory(uid, id, ep, 0, 0, false).catch(() => {});
+      });
+    });
+  }).catch(() => {});
 }
 
 const QUALITY_LABELS: Quality[] = ["1080p FHD", "720p HD", "360p SD"];
