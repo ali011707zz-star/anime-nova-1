@@ -114,6 +114,16 @@ function similarity(a: string, b: string) {
   ).length;
   return matches / Math.max(aw.length, bw.length);
 }
+
+/**
+ * Similarity that works for mixed Arabic-English slug strings.
+ * Replaces non-ASCII chars and hyphens with spaces before comparing,
+ * so "انمي-ون-بيس-one-piece-hg" → "one piece hg" which matches "One Piece".
+ */
+function asciiSimilarity(a: string, b: string): number {
+  const toAscii = (s: string) => s.replace(/[^\x00-\x7F]/g, " ").replace(/-/g, " ");
+  return similarity(toAscii(a), b);
+}
 function toSlug(s: string): string {
   return s.toLowerCase()
     .replace(/[^\w\s-]/g, " ").trim()
@@ -767,6 +777,34 @@ async function findShahiidEpisodeUrl(seasonsUrl: string, epNum: number): Promise
       }
     }
 
+    // Fallback for ?serie= pages where misha_loadmore fails (empty query → no results):
+    // try WP paged pagination: ?serie=N&paged=M which works for query-filtered pages
+    if (isSerieFilter && !links.some(l => epNumInSlug(l, epNum))) {
+      const serieBase = seasonsUrl.split("?")[0].replace(/\/?$/, "/");
+      const serieParam = seasonsUrl.match(/[?&]serie=(\d+)/)?.[1];
+      if (serieParam) {
+        const epsPerPage = 20;
+        const startPage = Math.max(1, Math.floor((epNum - 1) / epsPerPage) + 1);
+        for (let p = startPage; p <= startPage + 3; p++) {
+          try {
+            const pagedUrl = `${serieBase}?serie=${serieParam}&paged=${p}`;
+            const pr = await fetch(pagedUrl, {
+              headers: SHAHIID_HDRS,
+              signal: AbortSignal.timeout(8000),
+              redirect: "follow",
+            });
+            if (!pr.ok) break;
+            const pHtml = await pr.text();
+            if (isCloudflareBlock(pHtml)) break;
+            const pLinks = extractEpLinks(pHtml);
+            if (!pLinks.length) break;
+            links = [...links, ...pLinks];
+            if (links.some(l => epNumInSlug(l, epNum))) break;
+          } catch { break; }
+        }
+      }
+    }
+
     if (!links.length) { shahiidEpUrlCache.set(epCacheKey, { url: null, ts: Date.now() }); return null; }
 
     for (const link of links) {
@@ -950,6 +988,16 @@ async function extractAndCollect(
       if (alive) collect(s);
       return;
     }
+    // mega.nz/embed → allowed as sandboxed iframe (MUST be before DEAD_FILE_HOSTS since
+    // "mega.nz" appears in that list but /embed/ URLs are safe to show in a sandboxed iframe)
+    if (s.url.includes("mega.nz/embed") || s.url.includes("mega.co.nz/embed")) {
+      collect({ ...s, directUrl: s.url, isEmbed: true }); return;
+    }
+    // Vidmoly → allowed as sandboxed iframe (Cloudflare Turnstile blocks server-side extraction)
+    // Must also be before DEAD_FILE_HOSTS in case any vidmoly domain lands there
+    if (VIDMOLY_HOSTS.some(h => s.url.includes(h))) {
+      collect({ ...s, directUrl: s.url, isEmbed: true }); return;
+    }
     // Dead file hosts → skip entirely
     if (DEAD_FILE_HOSTS.some(h => s.url.includes(h))) return;
     // Bare .m3u8 → wrap with hls-proxy to bypass CORS restrictions
@@ -962,14 +1010,6 @@ async function extractAndCollect(
     if (s.url.match(/\.mp4([?#]|$)/i)) {
       collect({ ...s, directUrl: s.url, directType: "mp4" });
       return;
-    }
-    // mega.nz/embed → allowed as sandboxed iframe (user-approved)
-    if (s.url.includes("mega.nz/embed") || s.url.includes("mega.co.nz/embed")) {
-      collect({ ...s, directUrl: s.url, isEmbed: true }); return;
-    }
-    // Vidmoly → allowed as sandboxed iframe (Cloudflare Turnstile blocks server-side extraction)
-    if (VIDMOLY_HOSTS.some(h => s.url.includes(h))) {
-      collect({ ...s, directUrl: s.url, isEmbed: true }); return;
     }
     // Known un-extractable hosts (social media, junk CDNs) → skip entirely (no embed)
     if (EMBED_ONLY_HOSTS.some(h => s.url.includes(h))) return;
@@ -1401,6 +1441,7 @@ async function getAnimadarSources(
         quality,
         qualityRank: isMegaEmbed ? 8 : qRank,
         site: "animedar",
+        directUrl: isMegaEmbed ? embedUrl : undefined,
         isEmbed: isMegaEmbed || undefined,
       });
     }
@@ -1818,9 +1859,18 @@ async function getMitanimeSources(
           new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
         ]);
         if (result?.url) {
-          const directUrl = result.type === "hls"
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`
-            : result.url;
+          let directUrl: string;
+          if (result.type === "hls") {
+            directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`;
+          } else {
+            // MP4: check for non-standard ports (e.g. vidcache.net:8161) which are blocked by Replit.
+            // Route through video-proxy so the request comes from our server which has no port restrictions.
+            const hasNonStdPort = /:\d{4,5}\//.test(result.url) &&
+              !/:(80|443|8080|8443)\//.test(result.url);
+            directUrl = hasNonStdPort
+              ? `/api/anime/video-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`
+              : result.url;
+          }
           sources.push({
             name: `ميتانيمي · ستريم · ${qLabel}`,
             url: sUrl,
@@ -2353,7 +2403,12 @@ async function searchAnimeTime(title: string, english: string | null): Promise<s
         const u = m[1];
         if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
         const slug = decodeURIComponent(u.replace(ATIME_BASE + "/series/", "").replace(/\/$/, ""));
-        const score = Math.max(similarity(slug, title), english ? similarity(slug, english) : 0);
+        // Use both regular + ASCII-only similarity to handle mixed Arabic-English slugs
+        // e.g. "أنمي-one-piece-مترجم-الموسم-الثالث-عشر" → asciiSimilarity extracts "one piece" first
+        const score = Math.max(
+          similarity(slug, title), english ? similarity(slug, english) : 0,
+          asciiSimilarity(slug, title), english ? asciiSimilarity(slug, english) : 0,
+        );
         candidates.push({ url: u, score });
       }
 
@@ -2362,7 +2417,10 @@ async function searchAnimeTime(title: string, english: string | null): Promise<s
         const u = m[1];
         if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
         const slug = decodeURIComponent(u.replace(ATIME_BASE + "/anime/", "").replace(/\/$/, ""));
-        const score = Math.max(similarity(slug, title), english ? similarity(slug, english) : 0);
+        const score = Math.max(
+          similarity(slug, title), english ? similarity(slug, english) : 0,
+          asciiSimilarity(slug, title), english ? asciiSimilarity(slug, english) : 0,
+        );
         candidates.push({ url: u, score });
       }
 
@@ -2524,9 +2582,13 @@ async function searchRistoAnime(title: string, english: string | null): Promise<
       for (const m of html.matchAll(/href="(https:\/\/ristoanime\.co\/series\/[^"]+)"/g)) {
         const u = m[1];
         const slug = decodeURIComponent(u.replace(RISTO_BASE + "/series/", "").replace(/\/$/, "")).toLowerCase();
+        // Use both regular + ASCII-only similarity to handle mixed Arabic-English slugs
+        // e.g. "انمي-ون-بيس-one-piece-hg" → asciiSimilarity extracts "one piece hg" first
         const score = Math.max(
           similarity(slug, title),
           english ? similarity(slug, english) : 0,
+          asciiSimilarity(slug, title),
+          english ? asciiSimilarity(slug, english) : 0,
         );
         seriesUrls.push({ url: u, score });
       }
