@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
-import gojoImg from "/gojo-satoru.png";
 
 /* ══════════════════════════════════ ANILIST ══════════════════ */
 const ANILIST_Q = `query ($id: Int) {
@@ -335,7 +334,7 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
 }
 
 /* ══════════════════════════════════ LOADING MODAL ═══════════ */
-function WatchLoadingModal({ onClose }: { onClose?: () => void }) {
+function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: string; onClose?: () => void }) {
   return (
     <motion.div
       key="watch-loading-modal"
@@ -344,7 +343,7 @@ function WatchLoadingModal({ onClose }: { onClose?: () => void }) {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.25 }}
-      style={{ background: "rgba(0,0,0,0.80)", backdropFilter: "blur(22px)" }}
+      style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(24px)" }}
     >
       <motion.div
         className="relative flex flex-col items-center rounded-[28px] overflow-hidden"
@@ -355,52 +354,63 @@ function WatchLoadingModal({ onClose }: { onClose?: () => void }) {
         style={{
           width: 260,
           background: "rgba(8,8,20,0.98)",
-          border: "1px solid rgba(139,92,246,0.20)",
-          boxShadow: "0 0 100px rgba(109,40,217,0.22), 0 30px 70px rgba(0,0,0,0.70)",
+          border: "1px solid rgba(139,92,246,0.22)",
+          boxShadow: "0 0 100px rgba(109,40,217,0.28), 0 30px 70px rgba(0,0,0,0.75)",
         }}
       >
-        {/* ── Gojo image — hero section ── */}
-        <div className="relative w-full overflow-hidden" style={{ height: 280 }}>
-          <img
-            src={gojoImg}
-            alt="غوجو ساتورو"
-            className="w-full h-full object-cover object-top"
-          />
-          {/* Bottom gradient fade */}
-          <div className="absolute inset-x-0 bottom-0 h-20"
-            style={{ background: "linear-gradient(0deg, rgba(8,8,20,0.98) 0%, transparent 100%)" }} />
-          {/* Subtle top gradient */}
-          <div className="absolute inset-x-0 top-0 h-12"
-            style={{ background: "linear-gradient(180deg, rgba(8,8,20,0.60) 0%, transparent 100%)" }} />
-          {/* Scan-line shimmer */}
+        {/* ── Anime cover — cinematic hero ── */}
+        <div className="relative w-full overflow-hidden" style={{ height: 260 }}>
+          {cover ? (
+            <img
+              src={cover}
+              alt={title || "أنمي"}
+              className="w-full h-full object-cover object-center"
+              style={{ filter: "brightness(0.88)" }}
+            />
+          ) : (
+            /* fallback gradient when no cover available */
+            <div className="w-full h-full flex items-center justify-center"
+              style={{ background: "linear-gradient(135deg, #0f0b1f 0%, #1a0b2e 50%, #0c1230 100%)" }}>
+              <Play className="w-14 h-14 text-violet-400/40 fill-violet-400/25" />
+            </div>
+          )}
+          {/* Cinematic bottom fade */}
+          <div className="absolute inset-x-0 bottom-0 h-28"
+            style={{ background: "linear-gradient(0deg, rgba(8,8,20,1) 0%, rgba(8,8,20,0.60) 55%, transparent 100%)" }} />
+          {/* Top safe gradient */}
+          <div className="absolute inset-x-0 top-0 h-14"
+            style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.55) 0%, transparent 100%)" }} />
+          {/* Animated violet shimmer */}
           <motion.div
             className="absolute inset-0 pointer-events-none"
             style={{
-              background: "linear-gradient(180deg, transparent 0%, rgba(139,92,246,0.06) 50%, transparent 100%)",
-              backgroundSize: "100% 40px",
+              background: "linear-gradient(180deg, transparent 0%, rgba(139,92,246,0.07) 50%, transparent 100%)",
+              backgroundSize: "100% 50px",
             }}
-            animate={{ backgroundPositionY: ["0px", "280px"] }}
-            transition={{ duration: 2.2, repeat: Infinity, ease: "linear" }}
+            animate={{ backgroundPositionY: ["0px", "260px"] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
           />
+          {/* Title overlay */}
+          {title && (
+            <div className="absolute bottom-3 inset-x-0 px-5" dir="rtl">
+              <p className="text-white text-[13px] font-black font-['Cairo'] leading-snug drop-shadow-xl truncate">
+                {title}
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* ── Text + loader ── */}
-        <div className="flex flex-col items-center gap-3 px-6 pt-1 pb-7 w-full" dir="rtl">
-          <p className="text-white text-[17px] font-black font-['Cairo'] tracking-wide">
-            لحظة من فضلك
-          </p>
-          <p className="text-white/40 text-[12px] font-['Cairo'] text-center leading-relaxed">
-            نحن نجهّز الفيديو لك
-          </p>
-
-          {/* Progress bar */}
-          <div className="w-full h-[3px] rounded-full mt-1 overflow-hidden"
-            style={{ background: "rgba(255,255,255,0.08)" }}>
+        {/* ── Loading indicator ── */}
+        <div className="flex flex-col items-center gap-3 px-6 pt-3 pb-6 w-full" dir="rtl">
+          <p className="text-white/80 text-[15px] font-black font-['Cairo']">جاري التحميل…</p>
+          {/* Animated progress bar */}
+          <div className="w-full h-[3px] rounded-full overflow-hidden"
+            style={{ background: "rgba(255,255,255,0.07)" }}>
             <motion.div
               className="h-full rounded-full"
-              style={{ background: "linear-gradient(90deg, #7c3aed, #ef4444, #7c3aed)", backgroundSize: "200% 100%" }}
+              style={{ background: "linear-gradient(90deg, #7c3aed, #a78bfa, #7c3aed)", backgroundSize: "200% 100%" }}
               animate={{ backgroundPositionX: ["0%", "200%"] }}
-              transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
             />
           </div>
         </div>
@@ -410,7 +420,7 @@ function WatchLoadingModal({ onClose }: { onClose?: () => void }) {
           <button
             onClick={onClose}
             className="absolute top-3 left-3 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform z-20"
-            style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(8px)" }}>
+            style={{ background: "rgba(0,0,0,0.60)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(8px)" }}>
             <X className="w-3.5 h-3.5 text-white/50" />
           </button>
         )}
@@ -499,23 +509,20 @@ function ScraperPicker({
   }
   allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
 
-  /* Per-quality CDN-host dedup — keep at most 2 sources per CDN per tier */
+  /* CDN-host dedup — keep at most 1 source per CDN (no duplicates) */
   function deduplicateByHost(srcs: FetchedSrc[]): FetchedSrc[] {
     const hostCount: Record<string, number> = {};
     return srcs.filter(s => {
       const url  = s.directUrl || s.url || "";
       const host = normCdnHost(url);
       hostCount[host] = (hostCount[host] || 0) + 1;
-      return hostCount[host] <= 2;
+      return hostCount[host] <= 1;
     });
   }
 
-  const byQuality: Record<Quality, FetchedSrc[]> = {
-    "1080p FHD": deduplicateByHost(allFlat.filter(s => getSrcQualityTier(s) === "1080p FHD")),
-    "720p HD":   deduplicateByHost(allFlat.filter(s => getSrcQualityTier(s) === "720p HD")),
-    "360p SD":   deduplicateByHost(allFlat.filter(s => getSrcQualityTier(s) === "360p SD")),
-  };
-  const hasSources = allFlat.length > 0;
+  /* Single flat deduplicated list sorted by qualityRank desc */
+  const displaySources = deduplicateByHost(allFlat);
+  const hasSources = displaySources.length > 0;
 
   /* Sites not yet ready */
   const notReadySites = SCRAPER_DEFS.filter(d => slotStatus[d.site] !== "ready");
@@ -567,111 +574,90 @@ function ScraperPicker({
       <div className="flex-1 overflow-y-auto"
         style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
-        {/* ── Quality sections with source cards ── */}
-        {QUALITY_LABELS.map(q => {
-          const srcs = byQuality[q];
-          if (!srcs.length) return null;
-          const qs = QUALITY_STYLE[q];
-          return (
-            <div key={q}>
-              {/* Section header */}
-              <div className="flex items-center gap-2 px-4 pt-5 pb-2">
-                <div className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ background: qs.dot, boxShadow: `0 0 6px ${qs.dot}bb` }} />
-                <span className="text-[10px] font-bold font-['Cairo'] tracking-wider uppercase flex-1"
-                  style={{ color: qs.text }}>{Q_LABEL[q]}</span>
-                <span className="font-mono text-[8px] font-black px-1.5 py-0.5 rounded"
-                  style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
-                  {Q_SHORT[q]}
-                </span>
-              </div>
+        {/* ── Flat source list — sorted by priority, 1 per CDN ── */}
+        {displaySources.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 px-4 pt-5 pb-2">
+              <div className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ background: "#34d399", boxShadow: "0 0 6px #34d39988" }} />
+              <span className="text-[10px] font-bold font-['Cairo'] tracking-wider"
+                style={{ color: "rgba(110,231,183,0.85)" }}>المصادر المتاحة</span>
+              <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
+                style={{ background: "rgba(52,211,153,0.09)", border: "1px solid rgba(52,211,153,0.22)", color: "rgba(110,231,183,0.68)" }}>
+                {displaySources.length}
+              </span>
+            </div>
 
-              {/* Source cards — Anime Rift style */}
-              {srcs.map((src, i) => {
-                const url     = src.directUrl || src.url;
-                const cdn     = getCdnDisplayName(url);
-                const site    = SITE_SHORT[src.site || ""] || src.site || "";
-                const isEmbed = !!src.isEmbed;
-                const tag     = SCRAPER_DEFS.find(d => d.site === src.site)?.tag || "??";
-                return (
-                  <motion.div key={`${src.site}-${i}-${url.slice(-20)}`}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.04, duration: 0.18 }}>
+            {displaySources.map((src, i) => {
+              const url     = src.directUrl || src.url;
+              const cdn     = getCdnDisplayName(url);
+              const site    = SITE_SHORT[src.site || ""] || src.site || "";
+              const isEmbed = !!src.isEmbed;
+              const tag     = SCRAPER_DEFS.find(d => d.site === src.site)?.tag || "??";
+              const q       = getSrcQualityTier(src);
+              const qs      = QUALITY_STYLE[q];
+              return (
+                <motion.div key={`${src.site}-${i}-${url.slice(-20)}`}
+                  initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.04, duration: 0.18 }}>
+                  <div
+                    className="flex items-center px-4 py-3.5 gap-3.5 active:bg-white/[0.03] transition-colors cursor-pointer"
+                    style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+                    onClick={() => onPlaySrc(src)}>
 
-                    <div
-                      className="flex items-center px-4 py-3.5 gap-3.5 active:bg-white/[0.03] transition-colors cursor-pointer"
-                      style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
-                      onClick={() => onPlaySrc(src)}>
+                    {/* Left: quality-tinted icon */}
+                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+                      style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
+                      {isEmbed
+                        ? <Tv2 className="w-[18px] h-[18px]" style={{ color: qs.icon }} />
+                        : <MonitorPlay className="w-[18px] h-[18px]" style={{ color: qs.icon }} />}
+                    </div>
 
-                      {/* Left: source type icon */}
-                      <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
-                        style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
-                        {isEmbed
-                          ? <Tv2 className="w-[18px] h-[18px]" style={{ color: qs.icon }} />
-                          : <MonitorPlay className="w-[18px] h-[18px]" style={{ color: qs.icon }} />}
-                      </div>
-
-                      {/* Middle: name + meta */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white/90 text-[14px] font-black font-['Cairo'] leading-tight">{cdn}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                          {site && (
-                            <span className="text-white/36 text-[11px] font-['Cairo']">{site}</span>
-                          )}
-                          {site && (
-                            <span className="text-white/14 text-[9px]">·</span>
-                          )}
+                    {/* Middle: name + meta */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white/90 text-[14px] font-black font-['Cairo'] leading-tight">{cdn}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        {site && <span className="text-white/36 text-[11px] font-['Cairo']">{site}</span>}
+                        {site && <span className="text-white/14 text-[9px]">·</span>}
+                        <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
+                          style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                          {tag}
+                        </span>
+                        {isEmbed && (
                           <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
-                            style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                            {tag}
+                            style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.70)", border: "1px solid rgba(52,211,153,0.18)" }}>
+                            مدمج
                           </span>
-                          {isEmbed && (
-                            <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
-                              style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.70)", border: "1px solid rgba(52,211,153,0.18)" }}>
-                              مدمج
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Right: download + play buttons */}
-                      <div className="flex items-center gap-2 shrink-0">
-                        {/* Download button — only for direct MP4 */}
-                        {getDownloadUrl(src) && (
-                          <a
-                            href={getDownloadUrl(src)!}
-                            download
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
-                            style={{
-                              background: "rgba(52,211,153,0.10)",
-                              border: "1px solid rgba(52,211,153,0.28)",
-                            }}>
-                            <Download className="w-4 h-4 text-emerald-400/85" />
-                          </a>
                         )}
-                        {/* Play button */}
-                        <div
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl active:scale-95 transition-transform"
-                          style={{
-                            background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))",
-                            border: "1px solid rgba(167,139,250,0.25)",
-                            boxShadow: "0 2px 14px rgba(109,40,217,0.30)",
-                          }}>
-                          <Play className="w-3.5 h-3.5 text-white fill-white" />
-                          <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
-                        </div>
                       </div>
                     </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          );
-        })}
+
+                    {/* Right: priority badge + download + play */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-mono text-[8px] font-bold px-1.5 py-0.5 rounded"
+                        style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
+                        {Q_SHORT[q]}
+                      </span>
+                      {getDownloadUrl(src) && (
+                        <a href={getDownloadUrl(src)!} download target="_blank" rel="noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                          style={{ background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.28)" }}>
+                          <Download className="w-4 h-4 text-emerald-400/85" />
+                        </a>
+                      )}
+                      <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl active:scale-95 transition-transform"
+                        style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 14px rgba(109,40,217,0.30)" }}>
+                        <Play className="w-3.5 h-3.5 text-white fill-white" />
+                        <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
 
         {/* ── Pending / loading sites ── */}
         {notReadySites.length > 0 && (
@@ -1292,7 +1278,8 @@ export default function WatchPage() {
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
-  const totalEps   = anime?.episodes || anime?.nextAiringEpisode?.episode || 999;
+  const totalEps   = anime?.episodes ||
+    (anime?.nextAiringEpisode?.episode ? anime.nextAiringEpisode.episode - 1 : 999);
   const cover      = anime?.coverImage?.large || "";
 
   /* Fetch AniList metadata */
@@ -1316,7 +1303,8 @@ export default function WatchPage() {
   }, [animeId]);
 
   function goEp(n: number) {
-    navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`);
+    /* Use full navigation — wouter only tracks pathname, not search; useRef params won't update otherwise */
+    window.location.href = `/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`;
   }
 
   function handleBack() { window.history.back(); }
@@ -1464,6 +1452,8 @@ export default function WatchPage() {
         <AnimatePresence>
           {showLoading && (
             <WatchLoadingModal
+              cover={cover}
+              title={title}
               onClose={() => {
                 if (loadingTimer.current) clearTimeout(loadingTimer.current);
                 setShowLoading(false);

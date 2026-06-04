@@ -8,7 +8,7 @@
  *          [🔲] [×N] | ⏸ | [🔊] [🔒] [⛶]
  */
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -107,6 +107,9 @@ export default function RiftPlayer({
   const moved        = useRef(false);
   const G_THRESH     = 12;
 
+  const [isPortrait,   setIsPortrait]   = useState(
+    typeof window !== "undefined" && window.innerHeight > window.innerWidth
+  );
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
   const [playing,      setPlaying]      = useState(false);
@@ -136,6 +139,17 @@ export default function RiftPlayer({
     lock();
     return () => {
       try { (screen.orientation as any).unlock(); } catch {}
+    };
+  }, []);
+
+  /* ── Portrait detection ── */
+  useEffect(() => {
+    const check = () => setIsPortrait(window.innerHeight > window.innerWidth);
+    window.addEventListener("resize", check);
+    window.addEventListener("orientationchange", check);
+    return () => {
+      window.removeEventListener("resize", check);
+      window.removeEventListener("orientationchange", check);
     };
   }, []);
 
@@ -407,12 +421,26 @@ export default function RiftPlayer({
   /* ══════════════════════════════════════════════════
      RENDER
   ══════════════════════════════════════════════════ */
+  /* Portrait rotation style — rotates the player 90° to show landscape layout on portrait screens */
+  const portraitStyle: React.CSSProperties = isPortrait ? {
+    position: "fixed",
+    width: "100vh",
+    height: "100vw",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%) rotate(90deg)",
+    transformOrigin: "center center",
+  } : {
+    position: "absolute",
+    inset: 0,
+  };
+
   return (
     <div
       ref={containerRef}
       data-hls-container
-      className="relative w-full h-full bg-black overflow-hidden select-none"
-      style={{ cursor: showCtrl ? "default" : "none" }}
+      className="bg-black overflow-hidden select-none"
+      style={{ cursor: showCtrl ? "default" : "none", ...portraitStyle }}
       onMouseMove={() => { if (!isLocked) showControls(); }}
     >
       {/* ══ VIDEO ══ */}
@@ -603,29 +631,28 @@ export default function RiftPlayer({
               >
                 <div className="flex items-start justify-between gap-3">
 
-                  {/* LEFT: title block — clean 2-line style */}
+                  {/* LEFT: title block — 2-line compact style */}
                   <div className="flex-1 min-w-0">
                     <h1
                       className="text-white font-black leading-snug truncate"
-                      style={{ fontSize: 17, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
+                      style={{ fontSize: 16, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
                       {title || "Nova Player"}
                     </h1>
-                    <div className="flex items-center gap-2 mt-[5px]" dir="rtl">
+                    <div className="flex items-center gap-1.5 mt-[4px] flex-wrap" dir="rtl">
                       {qualityLabel && (
-                        <span className="text-white/70 text-[12px] font-bold font-mono">{qualityLabel}P</span>
+                        <span className="text-amber-300/80 text-[11px] font-black font-mono">{qualityLabel}P</span>
                       )}
-                      {qualityLabel && <span className="text-white/25 text-[10px]">•</span>}
-                      <span className="text-white/55 text-[12px] font-['Cairo']">العربية</span>
-                      <span className="text-white/25 text-[10px]">•</span>
-                      <span className="text-white/55 text-[12px] font-['Cairo']">مترجم</span>
-                      <span className="text-white/25 text-[10px]">•</span>
-                      <span className="text-white/55 text-[12px] font-['Cairo']">الحلقة {ep}</span>
+                      {qualityLabel && <span className="text-white/20 text-[9px]">•</span>}
+                      <span className="text-white/50 text-[11px] font-['Cairo']">الحلقة {ep}</span>
+                      <span className="text-white/20 text-[9px]">•</span>
+                      <span className="text-white/40 text-[11px] font-['Cairo']">عربي مترجم</span>
+                      {serverCount > 1 && (
+                        <>
+                          <span className="text-white/20 text-[9px]">•</span>
+                          <span className="text-white/28 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount}</span>
+                        </>
+                      )}
                     </div>
-                    {serverCount > 1 && (
-                      <p className="text-white/25 text-[10px] font-['Cairo'] mt-0.5" dir="rtl">
-                        {serverIndex + 1}/{serverCount} سيرفر
-                      </p>
-                    )}
                   </div>
 
                   {/* RIGHT: action buttons */}
