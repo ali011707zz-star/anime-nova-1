@@ -40,7 +40,7 @@ const DEAD_FILE_HOSTS = [
   "filerio.in","doodstream.com","dood.watch","dood.to","dood.la","dood.ws","dood.pm",
   "dooood.com","doodrive.com","megaup.net","1fichier.com",
   "bayfiles.com","uploadhaven.com","tusfiles.com","letsupload.co","letsupload.io","workupload.com",
-  "hexload.com","//www.mp4upload.com","uqload.net","uqload.com","file-up.org",
+  "hexload.com","mp4upload.com","uqload.net","uqload.com","file-up.org",
   "mega.nz","mega.co.nz","mediafire.com",
   "drive.google","docs.google","googleapis.com/drive",
   "ok.ru","odnoklassniki.ru","youtube.com","youtu.be",
@@ -944,24 +944,6 @@ async function extractAndCollect(
       if (alive) collect(s);
       return;
     }
-    // Special: mp4upload embed page — extract CDN URL via parseMp4Upload
-    if (/\/\/(?:www\.)?mp4upload\.com\/embed-[^/]+\.html/i.test(s.url)) {
-      try {
-        const r = await fetch(s.url, {
-          headers: { "User-Agent": BROWSER_UA, "Referer": s.url },
-          signal: AbortSignal.timeout(Math.min(timeoutMs, 10000)),
-        });
-        if (r.ok) {
-          const html = await r.text();
-          const cdnUrl = parseMp4Upload(html);
-          if (cdnUrl) {
-            const alive = await probeDirectUrl(cdnUrl, s.url);
-            if (alive) collect({ ...s, url: cdnUrl, directUrl: cdnUrl, directType: "mp4" });
-          }
-        }
-      } catch {}
-      return;
-    }
     // Dead file hosts → skip entirely
     if (DEAD_FILE_HOSTS.some(h => s.url.includes(h))) return;
     // Bare .m3u8 → wrap with hls-proxy to bypass CORS restrictions
@@ -1177,9 +1159,7 @@ async function getAnimelekSources(
       try { rawUrl = decodeURIComponent(rawUrl); } catch {}
       rawUrl = rawUrl.replace(/&amp;/g, "&");
       if (!rawUrl.startsWith("http")) continue;
-      // Allow mp4upload embed pages through — extractAndCollect handles them specially
-      const isMp4uploadEmbed = /\/\/www\.mp4upload\.com\/embed-/i.test(rawUrl);
-      if (!isMp4uploadEmbed && DEAD_FILE_HOSTS.some(h => rawUrl.includes(h))) continue;
+      if (DEAD_FILE_HOSTS.some(h => rawUrl.includes(h))) continue;
       const host = (rawUrl.split("/")[2] || "").replace(/^www\./, "");
       if (seenHosts.has(host)) continue; seenHosts.add(host);
       const nameM = innerHtml.match(/<span[^>]*class="[^"]*server[^"]*"[^>]*>([^<]+)<\/span>/i);
@@ -1810,36 +1790,6 @@ async function getMitanimeSources(
 
       const qRank = server.quality === "FHD" ? 12 : server.quality === "HD" ? 11 : 10;
       const qLabel = server.quality === "FHD" ? "1080p" : server.quality === "HD" ? "720p" : "480p";
-
-      // mp4upload: fetch embed HTML and extract direct CDN URL
-      if (sUrl.includes("mp4upload.com")) {
-        try {
-          let urlObj: URL;
-          try { urlObj = new URL(sUrl); } catch { continue; }
-          const id = urlObj.pathname.replace(/^\/+/, "");
-          if (!id) continue;
-          const embedUrl = `${urlObj.origin}/embed-${id}.html`;
-          const er = await fetch(embedUrl, {
-            headers: { ...BASE_HDRS, Referer: `${MITANIME_BASE}/` },
-            signal: AbortSignal.timeout(10000),
-            redirect: "follow",
-          });
-          if (!er.ok) continue;
-          const eHtml = await er.text();
-          const cdnUrl = parseMp4Upload(eHtml);
-          if (!cdnUrl) continue;
-          sources.push({
-            name: `ميتانيمي · mp4upload · ${qLabel}`,
-            url: sUrl,
-            quality: qLabel,
-            qualityRank: qRank,
-            site: "mitanime",
-            directUrl: cdnUrl,
-            directType: "mp4",
-          });
-        } catch {}
-        continue;
-      }
 
       // mega.nz/embed → allowed as isEmbed directly
       if (sUrl.includes("mega.nz/embed") || sUrl.includes("mega.co.nz/embed")) {

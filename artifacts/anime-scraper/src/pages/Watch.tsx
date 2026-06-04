@@ -94,6 +94,29 @@ const QUALITY_AR: Record<Quality, string> = {
   "360p SD": "دقة متوسطة",
 };
 
+/* ── Filter: sources to show in the picker ── */
+function shouldShowSrc(src: FetchedSrc): boolean {
+  const url = (src.directUrl || src.url || "").toLowerCase();
+  // Remove mp4upload entirely (HEVC codec — audio plays but video fails on Linux Chrome)
+  if (url.includes("mp4upload")) return false;
+  // For embed sources, only allow mega.nz and vidmoly
+  if (src.isEmbed) {
+    return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
+  }
+  return true;
+}
+
+/* ── Normalise CDN hostname for deduplication ── */
+function normCdnHost(url: string): string {
+  if (!url) return "";
+  try {
+    const base = url.startsWith("/") ? "https://x.com" + url : url;
+    const host = new URL(base).hostname.replace(/^www\./, "");
+    // collapse CDN subdomains like a1.mp4upload.com → mp4upload.com
+    return host.replace(/^[a-z]\d*\./, "");
+  } catch { return url.slice(0, 40); }
+}
+
 /* ── Detect embed-type URLs (must render in sandboxed iframe, not native video) ── */
 function isIframeUrl(url: string): boolean {
   if (!url || url.startsWith("/")) return false;        // our proxy endpoints start with /
@@ -362,11 +385,12 @@ function ScraperPicker({
   onPlaySrc: (src: FetchedSrc) => void;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
 }) {
-  /* Flatten + deduplicate all fetched sources */
+  /* Flatten + filter + deduplicate all fetched sources */
   const allFlat: FetchedSrc[] = [];
-  const seenKeys = new Set<string>();
+  const seenKeys  = new Set<string>();  // exact URL dedup
   for (const srcs of Object.values(slotSources)) {
     for (const s of srcs) {
+      if (!shouldShowSrc(s)) continue;
       const key = s.directUrl || s.url;
       if (!key || seenKeys.has(key)) continue;
       seenKeys.add(key);
@@ -375,10 +399,21 @@ function ScraperPicker({
   }
   allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
 
+  /* Per-quality CDN-host dedup — keep at most 2 sources per CDN per tier */
+  function deduplicateByHost(srcs: FetchedSrc[]): FetchedSrc[] {
+    const hostCount: Record<string, number> = {};
+    return srcs.filter(s => {
+      const url  = s.directUrl || s.url || "";
+      const host = normCdnHost(url);
+      hostCount[host] = (hostCount[host] || 0) + 1;
+      return hostCount[host] <= 2;
+    });
+  }
+
   const byQuality: Record<Quality, FetchedSrc[]> = {
-    "1080p FHD": allFlat.filter(s => getSrcQualityTier(s) === "1080p FHD"),
-    "720p HD":   allFlat.filter(s => getSrcQualityTier(s) === "720p HD"),
-    "360p SD":   allFlat.filter(s => getSrcQualityTier(s) === "360p SD"),
+    "1080p FHD": deduplicateByHost(allFlat.filter(s => getSrcQualityTier(s) === "1080p FHD")),
+    "720p HD":   deduplicateByHost(allFlat.filter(s => getSrcQualityTier(s) === "720p HD")),
+    "360p SD":   deduplicateByHost(allFlat.filter(s => getSrcQualityTier(s) === "360p SD")),
   };
   const hasSources = allFlat.length > 0;
 
