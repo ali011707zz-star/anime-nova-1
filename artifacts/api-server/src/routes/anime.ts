@@ -1002,19 +1002,16 @@ async function extractAndCollect(
           }
         }
       } else {
-        // Extraction failed — try as sandboxed iframe fallback for any embed URL
-        // that isn't in a known ad-heavy / dead-host list
-        const isSafeEmbed = !DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))
-          && !EMBED_ONLY_HOSTS.some(h => s.url.includes(h));
-        if (isSafeEmbed) {
+        // Extraction failed — iframe fallback ONLY for confirmed ad-free embed hosts
+        const AD_FREE_EMBED_PATTERNS = ["mega.nz/embed", "mega.co.nz/embed"];
+        if (AD_FREE_EMBED_PATTERNS.some(p => s.url.includes(p))) {
           collect({ ...s, directUrl: s.url, isEmbed: true });
         }
       }
     } catch {
-      // On exception: still try iframe fallback for safe embed URLs
-      const isSafeEmbed = !DEAD_FILE_HOSTS.some(h => s.url.toLowerCase().includes(h))
-        && !EMBED_ONLY_HOSTS.some(h => s.url.includes(h));
-      if (isSafeEmbed) {
+      // On exception: iframe fallback only for confirmed ad-free hosts
+      const AD_FREE_EMBED_PATTERNS = ["mega.nz/embed", "mega.co.nz/embed"];
+      if (AD_FREE_EMBED_PATTERNS.some(p => s.url.includes(p))) {
         collect({ ...s, directUrl: s.url, isEmbed: true });
       }
     }
