@@ -629,7 +629,7 @@ export default function RiftPlayer({
           {showCtrl && !error && !isLocked && (
             <motion.div key="ctrl"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.16 }}
+              transition={{ duration: 0.28, ease: "easeInOut" }}
               className="absolute inset-0 flex flex-col pointer-events-none"
               onClick={e => { e.stopPropagation(); togglePlay(); }}
             >
@@ -662,17 +662,19 @@ export default function RiftPlayer({
                         {epTitle}
                       </p>
                     )}
-                    <div className="flex items-center gap-1.5 mt-[4px] flex-wrap" dir="rtl">
-                      {qualityLabel && (
-                        <span className="text-amber-300/80 text-[11px] font-black font-mono">{qualityLabel}P</span>
-                      )}
-                      {qualityLabel && <span className="text-white/20 text-[9px]">•</span>}
+                    <div className="flex items-center gap-1.5 mt-[5px] flex-wrap">
                       <span className="text-white/50 text-[11px] font-['Cairo']">الحلقة {ep}</span>
-                      <span className="text-white/20 text-[9px]">•</span>
-                      <span className="text-white/40 text-[11px] font-['Cairo']">عربي مترجم</span>
+                      {qualityLabel && (
+                        <>
+                          <span className="text-white/18 text-[9px]">•</span>
+                          <span className="text-amber-300/80 text-[11px] font-black font-mono">{qualityLabel}P</span>
+                        </>
+                      )}
+                      <span className="text-white/18 text-[9px]">•</span>
+                      <span className="text-white/38 text-[11px] font-['Cairo']">عربي مترجم</span>
                       {serverCount > 1 && (
                         <>
-                          <span className="text-white/20 text-[9px]">•</span>
+                          <span className="text-white/18 text-[9px]">•</span>
                           <span className="text-white/28 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount}</span>
                         </>
                       )}
@@ -842,33 +844,33 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* ─ Center: [◄10] [⏸] [10►] — naturally centered ─ */}
-                  <div className="flex items-center gap-3 mx-1 shrink-0">
+                  {/* ─ Center: [◄10] [⏸] [10►] ─ */}
+                  <div className="flex items-center gap-2 mx-2 shrink-0">
                     {/* Rewind 10s */}
                     <button
                       onClick={() => { skip(-10); showControls(); }}
-                      className="relative w-10 h-10 flex items-center justify-center active:scale-85 transition-transform">
-                      <RotateCcw className="w-[22px] h-[22px] text-white/55" strokeWidth={1.8} />
-                      <span className="absolute font-mono font-black text-white/55 leading-none"
-                        style={{ fontSize: 7, bottom: 7 }}>10</span>
+                      className="flex flex-col items-center justify-center gap-[3px] px-3 py-2 rounded-2xl active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.13)" }}>
+                      <RotateCcw className="w-[18px] h-[18px] text-white/70" strokeWidth={1.9} />
+                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
 
                     {/* Play/Pause */}
                     <button onClick={togglePlay}
-                      className="w-[48px] h-[48px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                      style={{ background: "rgba(255,255,255,0.11)", border: "1.5px solid rgba(255,255,255,0.30)" }}>
+                      className="w-[44px] h-[44px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                      style={{ background: "rgba(255,255,255,0.12)", border: "1.5px solid rgba(255,255,255,0.32)", boxShadow: "0 2px 12px rgba(0,0,0,0.40)" }}>
                       {playing
-                        ? <Pause className="w-5 h-5 text-white fill-white" />
-                        : <Play className="w-5 h-5 text-white fill-white ml-0.5" />}
+                        ? <Pause className="w-[18px] h-[18px] text-white fill-white" />
+                        : <Play className="w-[18px] h-[18px] text-white fill-white ml-0.5" />}
                     </button>
 
                     {/* Forward 10s */}
                     <button
                       onClick={() => { skip(10); showControls(); }}
-                      className="relative w-10 h-10 flex items-center justify-center active:scale-85 transition-transform">
-                      <RotateCw className="w-[22px] h-[22px] text-white/55" strokeWidth={1.8} />
-                      <span className="absolute font-mono font-black text-white/55 leading-none"
-                        style={{ fontSize: 7, bottom: 7 }}>10</span>
+                      className="flex flex-col items-center justify-center gap-[3px] px-3 py-2 rounded-2xl active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.13)" }}>
+                      <RotateCw className="w-[18px] h-[18px] text-white/70" strokeWidth={1.9} />
+                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
                   </div>
 

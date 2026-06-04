@@ -347,19 +347,15 @@ function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: 
     >
       {/* Full-screen blurred cover background */}
       <div className="absolute inset-0">
-        {cover ? (
-          <motion.img
-            src={cover}
-            alt=""
-            className="w-full h-full object-cover"
-            style={{ filter: "blur(48px) brightness(0.22) saturate(1.8)" }}
-            initial={{ scale: 1.08, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
-          />
-        ) : (
-          <div className="w-full h-full" style={{ background: "radial-gradient(ellipse at 50% 40%, #1a0b3d 0%, #07070d 70%)" }} />
-        )}
+        <motion.img
+          src={cover || "/gojo-satoru.png"}
+          alt=""
+          className="w-full h-full object-cover"
+          style={{ filter: "blur(48px) brightness(0.22) saturate(1.8)" }}
+          initial={{ scale: 1.08, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+        />
         <div className="absolute inset-0" style={{ background: "rgba(5,5,14,0.72)" }} />
       </div>
 
@@ -387,10 +383,20 @@ function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: 
               style={{ boxShadow: "0 32px 80px rgba(0,0,0,0.92), 0 0 0 1px rgba(255,255,255,0.09)" }}
             />
           ) : (
-            <div className="w-44 h-[248px] rounded-2xl flex items-center justify-center"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 60px rgba(0,0,0,0.80)" }}>
-              <Play className="w-14 h-14 text-violet-400/30 fill-violet-400/20" />
-            </div>
+            <motion.div
+              className="w-44 h-[248px] rounded-2xl overflow-hidden relative"
+              style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.90), 0 0 0 1px rgba(255,255,255,0.09)" }}>
+              <motion.img
+                src="/gojo-satoru.png"
+                alt="Gojo Satoru"
+                className="w-full h-full object-cover object-top"
+                initial={{ scale: 1.18 }}
+                animate={{ scale: [1.18, 1.04, 1.1] }}
+                transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-br from-violet-900/20 via-transparent to-transparent" />
+            </motion.div>
           )}
           {/* Play button overlay */}
           <motion.div
@@ -607,14 +613,18 @@ function ScraperPicker({
           </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button onClick={onPrevEp} disabled={ep <= 1}
-            className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/[0.06] disabled:opacity-20 transition-all">
-            <ChevronRight className="w-4 h-4 text-white/40" />
+            className="flex items-center gap-1 px-3 py-2 rounded-xl transition-all active:scale-90 disabled:opacity-20"
+            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.10)" }}>
+            <ChevronRight className="w-3.5 h-3.5 text-white/60" />
+            <span className="text-white/55 text-[10px] font-bold font-['Cairo'] leading-none">السابقة</span>
           </button>
           <button onClick={onNextEp} disabled={ep >= totalEps}
-            className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/[0.06] disabled:opacity-20 transition-all">
-            <ChevronLeft className="w-4 h-4 text-white/40" />
+            className="flex items-center gap-1 px-3 py-2 rounded-xl transition-all active:scale-90 disabled:opacity-20"
+            style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.28)" }}>
+            <span className="text-violet-300/80 text-[10px] font-bold font-['Cairo'] leading-none">التالية</span>
+            <ChevronLeft className="w-3.5 h-3.5 text-violet-300/70" />
           </button>
         </div>
       </div>
@@ -1408,7 +1418,13 @@ export default function WatchPage() {
     window.location.href = `/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`;
   }
 
-  function handleBack() { window.history.back(); }
+  function handleBack() {
+    if (animeId) {
+      navigate(`/anime/${animeId}`);
+    } else {
+      window.history.back();
+    }
+  }
 
   /* ── Track in-flight fetches to prevent duplicate calls ── */
   const inFlightRef = useRef<Set<string>>(new Set());
