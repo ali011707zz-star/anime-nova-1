@@ -823,7 +823,13 @@ function EpisodePlayer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animeTitle, ep]);
 
+  const lastSwitchRef = useRef(0);
   function tryNextServer() {
+    /* Throttle: ignore if last switch was < 400ms ago (prevents rapid-fire cycling) */
+    const now = Date.now();
+    if (now - lastSwitchRef.current < 400) return;
+    lastSwitchRef.current = now;
+
     if (currentServer + 1 < servers.length) {
       setCurrentServer(s => s + 1);
       setRealQuality(null);
