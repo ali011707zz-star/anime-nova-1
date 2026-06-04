@@ -1002,15 +1002,18 @@ async function extractAndCollect(
           }
         }
       } else {
-        // Extraction failed — iframe fallback ONLY for confirmed ad-free embed hosts
-        const AD_FREE_EMBED_PATTERNS = ["mega.nz/embed", "mega.co.nz/embed"];
+        // Extraction failed — iframe fallback ONLY for confirmed ad-free embed hosts:
+        //   mega.nz/embed      → Mega file storage player, zero ads
+        //   mega.co.nz/embed   → same service, alternate TLD
+        //   share4max.com/iframe/ → shahiid-anime's own clean player (Histats analytics only, no ad networks)
+        const AD_FREE_EMBED_PATTERNS = ["mega.nz/embed", "mega.co.nz/embed", "share4max.com/iframe/"];
         if (AD_FREE_EMBED_PATTERNS.some(p => s.url.includes(p))) {
           collect({ ...s, directUrl: s.url, isEmbed: true });
         }
       }
     } catch {
       // On exception: iframe fallback only for confirmed ad-free hosts
-      const AD_FREE_EMBED_PATTERNS = ["mega.nz/embed", "mega.co.nz/embed"];
+      const AD_FREE_EMBED_PATTERNS = ["mega.nz/embed", "mega.co.nz/embed", "share4max.com/iframe/"];
       if (AD_FREE_EMBED_PATTERNS.some(p => s.url.includes(p))) {
         collect({ ...s, directUrl: s.url, isEmbed: true });
       }
