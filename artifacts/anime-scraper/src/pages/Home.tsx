@@ -3,21 +3,25 @@ import { Link } from "wouter";
 import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const GENRES_AR: { ar: string; en: string; color: string; img: string }[] = [
-  { ar: "الكل",       en: "",              color: "#8B5CF6", img: "" },
-  { ar: "أكشن",       en: "Action",        color: "#EF4444", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21459-D0xCKHUZEyb7.jpg" },
-  { ar: "مغامرة",     en: "Adventure",     color: "#F97316", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20958-HuFJyr54Mmir.jpg" },
-  { ar: "كوميدي",     en: "Comedy",        color: "#EAB308", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21202-ikxsGi8iT7nT.jpg" },
-  { ar: "دراما",      en: "Drama",         color: "#8B5CF6", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx9253-p1zPHMVEpIPK.jpg" },
-  { ar: "فانتازيا",   en: "Fantasy",       color: "#06B6D4", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1CTc93blC.jpg" },
-  { ar: "خيال علمي",  en: "Sci-Fi",        color: "#3B82F6", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx5114-KJTQz9AIjCPt.jpg" },
-  { ar: "رياضة",      en: "Sports",        color: "#10B981", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx124194-cPPdxkFEeWC7.jpg" },
-  { ar: "رومانسي",    en: "Romance",       color: "#EC4899", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108465-RFpDKe2CyAqF.jpg" },
-  { ar: "إيسيكاي",    en: "Isekai",        color: "#059669", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108632-rvzNqs1QMgPE.jpg" },
-  { ar: "نفسي",       en: "Psychological", color: "#7C3AED", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx31646-OFBpV5ftOkL3.jpg" },
-  { ar: "رعب",        en: "Horror",        color: "#6B7280", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx98478-m14Pk2KuLIeR.jpg" },
-  { ar: "غموض",       en: "Mystery",       color: "#64748B", img: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx100388-JVD9ATSnHHWg.jpg" },
+const GENRES_AR: { ar: string; en: string; color: string; animeId: number }[] = [
+  { ar: "الكل",       en: "",              color: "#8B5CF6", animeId: 0      },
+  { ar: "أكشن",       en: "Action",        color: "#EF4444", animeId: 21459  },
+  { ar: "مغامرة",     en: "Adventure",     color: "#F97316", animeId: 113415 },
+  { ar: "كوميدي",     en: "Comedy",        color: "#EAB308", animeId: 21202  },
+  { ar: "دراما",      en: "Drama",         color: "#8B5CF6", animeId: 9253   },
+  { ar: "فانتازيا",   en: "Fantasy",       color: "#06B6D4", animeId: 101922 },
+  { ar: "خيال علمي",  en: "Sci-Fi",        color: "#3B82F6", animeId: 5114   },
+  { ar: "رياضة",      en: "Sports",        color: "#10B981", animeId: 124194 },
+  { ar: "رومانسي",    en: "Romance",       color: "#EC4899", animeId: 101921 },
+  { ar: "إيسيكاي",    en: "Isekai",        color: "#059669", animeId: 108632 },
+  { ar: "نفسي",       en: "Psychological", color: "#7C3AED", animeId: 31646  },
+  { ar: "رعب",        en: "Horror",        color: "#6B7280", animeId: 98478  },
+  { ar: "غموض",       en: "Mystery",       color: "#64748B", animeId: 100388 },
 ];
+
+function genreImg(animeId: number) {
+  return animeId ? `https://img.anili.st/media/${animeId}` : "";
+}
 
 function buildPopularQuery(genre: string) {
   const gf = genre ? `, genre: "${genre}"` : "";
@@ -42,7 +46,7 @@ const RECENT_QUERY = `query ($page: Int, $perPage: Int) {
 }`;
 
 const TRENDING_QUERY = `query {
-  Page(perPage: 12) {
+  Page(perPage: 16) {
     media(type: ANIME, sort: TRENDING_DESC, countryOfOrigin: "JP", status: RELEASING) {
       id title { romaji } coverImage { large } averageScore episodes nextAiringEpisode { episode }
     }
@@ -50,7 +54,7 @@ const TRENDING_QUERY = `query {
 }`;
 
 const MOVIES_QUERY = `query {
-  Page(perPage: 12) {
+  Page(perPage: 16) {
     media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP") {
       id title { romaji } coverImage { large } averageScore
     }
@@ -58,9 +62,25 @@ const MOVIES_QUERY = `query {
 }`;
 
 const TOP_RATED_QUERY = `query {
-  Page(perPage: 12) {
+  Page(perPage: 16) {
     media(type: ANIME, sort: SCORE_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE], averageScore_greater: 75) {
       id title { romaji } coverImage { large } averageScore episodes format
+    }
+  }
+}`;
+
+const SEASON_QUERY = `query {
+  Page(perPage: 16) {
+    media(type: ANIME, season: SPRING, seasonYear: 2026, sort: POPULARITY_DESC, format_in: [TV, ONA], countryOfOrigin: "JP") {
+      id title { romaji } coverImage { large } averageScore nextAiringEpisode { episode }
+    }
+  }
+}`;
+
+const NEW_SEASON_QUERY = `query {
+  Page(perPage: 16) {
+    media(type: ANIME, sort: START_DATE_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], status_in: [RELEASING, NOT_YET_RELEASED]) {
+      id title { romaji } coverImage { large } averageScore nextAiringEpisode { episode } startDate { year month }
     }
   }
 }`;
@@ -100,6 +120,8 @@ export default function Home() {
   const [trending, setTrending]   = useState<any[]>([]);
   const [movies, setMovies]       = useState<any[]>([]);
   const [topRated, setTopRated]   = useState<any[]>([]);
+  const [seasonal, setSeasonal]   = useState<any[]>([]);
+  const [newSeason, setNewSeason] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [genreLoading, setGenreLoading] = useState(false);
   const [page, setPage]           = useState(1);
@@ -140,12 +162,14 @@ export default function Home() {
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [pop, rec, trend, mov, top] = await Promise.all([
+      const [pop, rec, trend, mov, top, seas, newS] = await Promise.all([
         fetch$(buildPopularQuery(""), { page: 1, perPage: 12 }),
-        fetch$(RECENT_QUERY, { page: 1, perPage: 8 }),
+        fetch$(RECENT_QUERY, { page: 1, perPage: 16 }),
         fetch$(TRENDING_QUERY),
         fetch$(MOVIES_QUERY),
         fetch$(TOP_RATED_QUERY),
+        fetch$(SEASON_QUERY),
+        fetch$(NEW_SEASON_QUERY),
       ]);
       setPopular(pop?.media || []);
       setHasMore(pop?.pageInfo?.hasNextPage ?? false);
@@ -153,6 +177,8 @@ export default function Home() {
       setTrending(trend?.media || []);
       setMovies(mov?.media || []);
       setTopRated(top?.media || []);
+      setSeasonal(seas?.media || []);
+      setNewSeason(newS?.media || []);
       const heroes = (pop?.media || []).filter((a: any) => a.bannerImage);
       setHero(heroes[0] || pop?.media?.[0]);
       setLoading(false);
@@ -485,12 +511,11 @@ export default function Home() {
                 }`}
               style={{ minWidth: g.en ? 80 : 58, height: 56 }}
             >
-              {g.img && (
+              {g.animeId > 0 && (
                 <img
-                  src={g.img}
+                  src={genreImg(g.animeId)}
                   alt=""
                   className="absolute inset-0 w-full h-full object-cover"
-                  crossOrigin="anonymous"
                   onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
                 />
               )}
@@ -499,13 +524,13 @@ export default function Home() {
                 style={{
                   background: selectedGenre === g.en
                     ? `linear-gradient(135deg, ${g.color}EE, ${g.color}99)`
-                    : g.img
+                    : g.animeId > 0
                       ? "linear-gradient(135deg, rgba(0,0,0,0.7), rgba(0,0,0,0.5))"
                       : `linear-gradient(135deg, ${g.color}33, ${g.color}11)`,
                 }}
               />
               <span className={`relative z-10 font-black text-[11px] font-['Cairo'] px-3 flex items-center justify-center h-full
-                ${selectedGenre === g.en ? "text-white" : g.img ? "text-white/85" : `text-white/55`}`}>
+                ${selectedGenre === g.en ? "text-white" : g.animeId > 0 ? "text-white/85" : `text-white/55`}`}>
                 {g.ar}
               </span>
             </motion.button>
@@ -513,7 +538,46 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── Trending — Now Airing ── */}
+      {/* ── موسم الربيع 2026 ── */}
+      {seasonal.length > 0 && !selectedGenre && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#06B6D4,#0284C7)" }}>
+                <Star className="w-3.5 h-3.5 text-white fill-white" />
+              </div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white">موسم الربيع 2026</h2>
+            </div>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+            {seasonal.map(anime => (
+              <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/88 via-black/10 to-transparent" />
+                    {anime.averageScore && (
+                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
+                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                      </div>
+                    )}
+                    {anime.nextAiringEpisode && (
+                      <div className="absolute top-2 left-2 bg-emerald-500 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
+                        حلقة {anime.nextAiringEpisode.episode}
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Trending — يُبث الآن ── */}
       {trending.length > 0 && !selectedGenre && (
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
@@ -532,18 +596,18 @@ export default function Home() {
           <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
             {trending.map((anime, i) => (
               <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[120px] cursor-pointer">
-                  <div className="relative w-[120px] h-[168px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
                     <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
                     <div className="absolute top-2 right-2 w-6 h-6 rounded-xl flex items-center justify-center text-[9px] font-black text-white shadow-lg" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>{i + 1}</div>
                     {anime.nextAiringEpisode && (
-                      <div className="absolute bottom-8 left-2 bg-emerald-500 text-white text-[7px] px-2 py-0.5 rounded-full font-black shadow-md shadow-emerald-500/40">
+                      <div className="absolute top-2 left-2 bg-emerald-500 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
                         حلقة {anime.nextAiringEpisode.episode}
                       </div>
                     )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                      <p className="text-[9px] text-white/85 font-bold truncate">{anime.title?.romaji}</p>
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
+                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
                     </div>
                   </div>
                 </motion.div>
@@ -553,10 +617,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── Latest Releases ── */}
+      {/* ── آخر الإصدارات (Recent) ── */}
       {recent.length > 0 && !selectedGenre && (
-        <div className="mt-6 px-4">
-          <div className="flex items-center justify-between mb-3">
+        <div className="mt-6">
+          <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#10B981,#059669)" }}>
                 <Clock className="w-3.5 h-3.5 text-white" />
@@ -569,20 +633,64 @@ export default function Home() {
               </button>
             </Link>
           </div>
-          <div className="grid grid-cols-4 gap-2">
-            {recent.slice(0, 8).map(anime => (
+          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+            {recent.map(anime => (
               <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.91 }} className="cursor-pointer">
-                  <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-md shadow-black/40">
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
                     <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
                     {anime.nextAiringEpisode && (
-                      <div className="absolute bottom-1 left-1 right-1 bg-emerald-500 text-white text-[6.5px] text-center py-0.5 rounded-md font-black shadow-sm">
+                      <div className="absolute top-2 left-2 bg-emerald-500 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black shadow-md shadow-emerald-500/40">
                         حلقة {anime.nextAiringEpisode.episode}
                       </div>
                     )}
-                    <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-1" style={{ display: anime.nextAiringEpisode ? 'none' : 'block' }}>
-                      <p className="text-[8px] text-white/80 truncate font-bold">{anime.title?.romaji}</p>
+                    {anime.averageScore && (
+                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
+                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
+                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── رائج الآن (New Season Upcoming) ── */}
+      {newSeason.length > 0 && !selectedGenre && (
+        <div className="mt-6">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#F97316,#EA580C)" }}>
+                <TrendingUp className="w-3.5 h-3.5 text-white" />
+              </div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white">رائج الآن</h2>
+            </div>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+            {newSeason.map(anime => (
+              <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
+                    {anime.nextAiringEpisode && (
+                      <div className="absolute top-2 left-2 bg-orange-500 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
+                        حلقة {anime.nextAiringEpisode.episode}
+                      </div>
+                    )}
+                    {anime.averageScore && (
+                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
+                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
+                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
                     </div>
                   </div>
                 </motion.div>
@@ -607,19 +715,19 @@ export default function Home() {
           <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
             {topRated.map((anime, i) => (
               <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
-                  <div className="relative w-[110px] h-[154px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
                     <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                    <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
+                    <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
                       <Star className="w-1.5 h-1.5 fill-current" /> {anime.averageScore ? (anime.averageScore / 10).toFixed(1) : "—"}
                     </div>
                     {anime.format === "MOVIE" && (
                       <div className="absolute top-2 left-2 bg-primary text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-primary/50">فيلم</div>
                     )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
                       <div className="text-[7.5px] text-yellow-400/60 font-black font-mono mb-0.5">#{i + 1}</div>
-                      <p className="text-[9px] text-white/85 font-bold truncate leading-tight">{anime.title?.romaji}</p>
+                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
                     </div>
                   </div>
                 </motion.div>
@@ -643,18 +751,18 @@ export default function Home() {
           <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
             {movies.map(anime => (
               <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
-                  <div className="relative w-[110px] h-[154px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
                     <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
                     <div className="absolute top-2 left-2 bg-blue-500 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-blue-500/50">فيلم</div>
                     {anime.averageScore && (
-                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[8px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
+                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
                         <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
                       </div>
                     )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                      <p className="text-[9px] text-white/85 font-bold truncate leading-tight">{anime.title?.romaji}</p>
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
+                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
                     </div>
                   </div>
                 </motion.div>

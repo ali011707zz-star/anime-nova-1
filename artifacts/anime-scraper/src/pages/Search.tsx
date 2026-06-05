@@ -2,14 +2,24 @@ import { useState, useEffect } from 'react';
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react';
 import AnimeCard from '@/components/anime/AnimeCard';
 
-const SEARCH_QUERY = `
+const SORT_OPTIONS = [
+  { label: "الأشهر",      value: "POPULARITY_DESC" },
+  { label: "الأعلى تقييماً", value: "SCORE_DESC" },
+  { label: "الأحدث",     value: "START_DATE_DESC" },
+  { label: "الأقدم",     value: "START_DATE" },
+];
+
+function buildSearchQuery(sort: string) {
+  const sortArr = sort ? `[SEARCH_MATCH, ${sort}]` : "[SEARCH_MATCH, POPULARITY_DESC]";
+  return `
 query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
+    media(search: $search, type: ANIME, sort: ${sortArr}) {
       id title { romaji english native } coverImage { large } averageScore episodes format
     }
   }
 }`;
+}
 
 // Arabic → English common transliterations for better search accuracy
 const AR_TO_EN: Record<string, string> = {
@@ -40,6 +50,7 @@ export default function Search() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sort, setSort] = useState('POPULARITY_DESC');
   const [history, setHistory] = useState<string[]>(() => JSON.parse(localStorage.getItem('searchHistory') || '[]'));
 
   useEffect(() => {
@@ -51,7 +62,7 @@ export default function Search() {
         const res = await fetch('https://graphql.anilist.co', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: SEARCH_QUERY, variables: { search: searchTerm, page: 1, perPage: 24 } }),
+          body: JSON.stringify({ query: buildSearchQuery(sort), variables: { search: searchTerm, page: 1, perPage: 24 } }),
         });
         const json = await res.json();
         setResults(json.data?.Page?.media || []);
@@ -63,7 +74,7 @@ export default function Search() {
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, sort]);
 
   return (
     <main className="bg-[#0A0A0F] min-h-screen text-white pb-24" dir="rtl">
@@ -84,6 +95,23 @@ export default function Search() {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Sort chips */}
+      <div className="flex gap-2 overflow-x-auto px-4 pb-3" style={{ scrollbarWidth: "none" }}>
+        {SORT_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => setSort(opt.value)}
+            className={`shrink-0 text-[11px] font-black font-['Cairo'] px-3 py-1.5 rounded-xl border transition-all active:scale-95 ${
+              sort === opt.value
+                ? "bg-primary text-white border-primary shadow-md shadow-primary/30"
+                : "bg-[#18181B] text-[#A1A1AA] border-white/5 hover:border-white/15"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
 
       {loading && <div className="flex items-center justify-center py-10"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>}

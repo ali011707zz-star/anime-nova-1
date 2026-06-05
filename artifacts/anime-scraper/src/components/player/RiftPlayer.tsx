@@ -1011,25 +1011,23 @@ export default function RiftPlayer({
                   </div>
 
                   {/* Center: ←10  ⏸  10→ */}
-                  <div className="flex items-center gap-4 flex-1 justify-center">
+                  <div className="flex items-center gap-5 flex-1 justify-center">
                     <button onClick={() => { skip(-10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[3px] px-3.5 py-2.5 rounded-2xl active:scale-90 transition-all duration-150"
-                      style={GLASS_BTN_SM}>
-                      <RotateCcw className="w-[17px] h-[17px] text-white/70" strokeWidth={1.9} />
-                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
+                      className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150">
+                      <RotateCcw className="w-[18px] h-[18px] text-white/75" strokeWidth={1.9} />
+                      <span className="font-mono font-black text-white/50 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
                     <button onClick={togglePlay}
-                      className="w-[46px] h-[46px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                      style={{ ...GLASS_BTN, border: "1.5px solid rgba(255,255,255,0.35)", boxShadow: "0 2px 16px rgba(0,0,0,0.40)" }}>
+                      className="w-[50px] h-[50px] rounded-full flex items-center justify-center active:scale-90 transition-transform shadow-lg"
+                      style={{ background: "rgba(139,92,246,0.90)", boxShadow: "0 4px 20px rgba(139,92,246,0.45)" }}>
                       {playing
-                        ? <Pause className="w-[19px] h-[19px] text-white fill-white" />
-                        : <Play  className="w-[19px] h-[19px] text-white fill-white ml-0.5" />}
+                        ? <Pause className="w-[21px] h-[21px] text-white fill-white" />
+                        : <Play  className="w-[21px] h-[21px] text-white fill-white ml-0.5" />}
                     </button>
                     <button onClick={() => { skip(10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[3px] px-3.5 py-2.5 rounded-2xl active:scale-90 transition-all duration-150"
-                      style={GLASS_BTN_SM}>
-                      <RotateCw className="w-[17px] h-[17px] text-white/70" strokeWidth={1.9} />
-                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
+                      className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150">
+                      <RotateCw className="w-[18px] h-[18px] text-white/75" strokeWidth={1.9} />
+                      <span className="font-mono font-black text-white/50 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
                   </div>
 
