@@ -27,6 +27,13 @@ interface StreamData {
   animeId?: number;
 }
 interface SubCue { start: number; end: number; text: string }
+interface SubSettings {
+  fontSize: number;     // 13 | 16 | 20 | 24
+  color: string;        // css color
+  bgOpacity: number;    // 0 | 0.55 | 0.82
+  bold: boolean;
+}
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 16, color: "#ffffff", bgOpacity: 0.82, bold: true };
 
 /* ══════════════════════════════════ HELPERS ══════════════════ */
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
@@ -834,25 +841,6 @@ function ScraperPicker({
   );
 }
 
-/* ══════════════════════════════════ SUBTITLE OVERLAY ════════ */
-function SubtitleOverlay({ cues, elapsed }: { cues: SubCue[]; elapsed: number }) {
-  const current = cues.find(c => elapsed >= c.start && elapsed <= c.end);
-  if (!current) return null;
-  return (
-    /* fixed + z-[65]: stays above RiftPlayer's portrait fixed z-60 layer */
-    <div className="fixed bottom-28 left-0 right-0 flex justify-center px-5 z-[65] pointer-events-none">
-      <div className="max-w-[88%] text-center px-4 py-2 rounded-2xl"
-        style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 2px 16px rgba(0,0,0,0.70)" }}>
-        <p className="text-white font-['Cairo'] text-[15px] font-bold leading-relaxed"
-          dir="rtl" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.95)" }}>
-          {current.text}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-
 
 /* ══════════════════════════════════ MEGA EMBED PLAYER ══════ */
 function MegaEmbedPlayer({
@@ -971,11 +959,12 @@ function EpisodePlayer({
     q1.every((u, i) => u === q2[i] && u === q3[i]);
 
   /* ── Subtitle state ── */
-  const [subState,    setSubState]    = useState<"idle"|"loading"|"ready"|"none">("idle");
-  const [subCues,     setSubCues]     = useState<SubCue[]>([]);
-  const [subLang,     setSubLang]     = useState<string | null>(null);
-  const [subOffset,   setSubOffset]   = useState(0);
+  const [subState,     setSubState]    = useState<"idle"|"loading"|"ready"|"none">("idle");
+  const [subCues,      setSubCues]     = useState<SubCue[]>([]);
+  const [subLang,      setSubLang]     = useState<string | null>(null);
+  const [subOffset,    setSubOffset]   = useState(0);
   const [showSubPanel, setShowSubPanel] = useState(false);
+  const [subSettings,  setSubSettings] = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
 
   const currentUrl  = servers[currentServer] || "";
   const currentInfo = getServerInfo(currentUrl, currentServer);
@@ -1307,6 +1296,9 @@ function EpisodePlayer({
               serverCount={servers.length}
               serverIndex={currentServer}
               downloadUrl={downloadUrl}
+              subCues={subState === "ready" && subCues.length > 0 ? subCues : undefined}
+              subElapsed={hlsTime + subOffset}
+              subSettings={subSettings}
               onBack={onBack}
               onPrevEp={onPrevEp}
               onNextEp={onNextEp}
@@ -1314,9 +1306,6 @@ function EpisodePlayer({
               onTimeUpdate={handleHlsTime}
               onFail={tryNextServer}
             />
-            {subState === "ready" && subCues.length > 0 && (
-              <SubtitleOverlay cues={subCues} elapsed={hlsTime + subOffset} />
-            )}
           </>
         )}
       </div>
@@ -1382,7 +1371,9 @@ function EpisodePlayer({
               )}
 
               {subState === "ready" && (
-                <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-4">
+
+                  {/* ── Header ── */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
@@ -1395,15 +1386,113 @@ function EpisodePlayer({
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="flex items-center gap-2 justify-center flex-wrap">
-                    {([-2, -0.5, 0.5, 2] as number[]).map(d => (
-                      <button key={d} onClick={() => adjustOffset(d)}
-                        className="px-3 py-1.5 rounded-lg text-white/42 text-[11px] font-bold active:scale-90 transition-transform"
-                        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                        {d > 0 ? "+" : ""}{d}s
-                      </button>
-                    ))}
+
+                  {/* ── Font size ── */}
+                  <div>
+                    <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">حجم الخط</p>
+                    <div className="flex gap-2">
+                      {([13, 16, 20, 24] as number[]).map(sz => (
+                        <button key={sz} onClick={() => setSubSettings(s => ({ ...s, fontSize: sz }))}
+                          className="flex-1 py-2 rounded-xl font-bold font-['Cairo'] transition-all active:scale-90"
+                          style={{
+                            fontSize: sz > 18 ? sz * 0.65 : sz * 0.75,
+                            background: subSettings.fontSize === sz ? "rgba(139,92,246,0.25)" : "rgba(255,255,255,0.05)",
+                            border: subSettings.fontSize === sz ? "1px solid rgba(139,92,246,0.50)" : "1px solid rgba(255,255,255,0.08)",
+                            color: subSettings.fontSize === sz ? "#c4b5fd" : "rgba(255,255,255,0.40)",
+                          }}>
+                          {sz === 13 ? "ص" : sz === 16 ? "م" : sz === 20 ? "ك" : "ع"}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* ── Color ── */}
+                  <div>
+                    <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">لون النص</p>
+                    <div className="flex gap-2">
+                      {([
+                        { v: "#ffffff", label: "أبيض" },
+                        { v: "#fde047", label: "ذهبي" },
+                        { v: "#67e8f9", label: "سماوي" },
+                        { v: "#86efac", label: "أخضر" },
+                        { v: "#fca5a5", label: "وردي" },
+                      ] as { v: string; label: string }[]).map(({ v, label }) => (
+                        <button key={v} onClick={() => setSubSettings(s => ({ ...s, color: v }))}
+                          className="flex-1 flex flex-col items-center gap-1 py-1.5 rounded-xl transition-all active:scale-90"
+                          style={{
+                            background: subSettings.color === v ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.03)",
+                            border: subSettings.color === v ? "1.5px solid rgba(255,255,255,0.35)" : "1px solid rgba(255,255,255,0.08)",
+                          }}>
+                          <div className="w-4 h-4 rounded-full" style={{ background: v, boxShadow: "0 1px 6px rgba(0,0,0,0.60)" }} />
+                          <span className="text-[9px] font-['Cairo']" style={{ color: subSettings.color === v ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.25)" }}>{label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ── Background + Bold ── */}
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">خلفية</p>
+                      <div className="flex gap-1.5">
+                        {([
+                          { v: 0.82, label: "مظلل" },
+                          { v: 0.45, label: "خفيف" },
+                          { v: 0,    label: "بلا" },
+                        ] as { v: number; label: string }[]).map(({ v, label }) => (
+                          <button key={v} onClick={() => setSubSettings(s => ({ ...s, bgOpacity: v }))}
+                            className="flex-1 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] transition-all active:scale-90"
+                            style={{
+                              background: subSettings.bgOpacity === v ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
+                              border: subSettings.bgOpacity === v ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
+                              color: subSettings.bgOpacity === v ? "#c4b5fd" : "rgba(255,255,255,0.35)",
+                            }}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">سمك</p>
+                      <button onClick={() => setSubSettings(s => ({ ...s, bold: !s.bold }))}
+                        className="w-full px-3 py-1.5 rounded-xl text-[12px] transition-all active:scale-90"
+                        style={{
+                          fontWeight: subSettings.bold ? 700 : 400,
+                          background: subSettings.bold ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
+                          border: subSettings.bold ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
+                          color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.35)",
+                        }}>
+                        {subSettings.bold ? "عريض" : "عادي"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* ── Offset ── */}
+                  <div>
+                    <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">إزاحة التوقيت</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {([-2, -0.5, 0.5, 2] as number[]).map(d => (
+                        <button key={d} onClick={() => adjustOffset(d)}
+                          className="flex-1 py-1.5 rounded-xl text-white/40 text-[11px] font-bold active:scale-90 transition-transform"
+                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                          {d > 0 ? "+" : ""}{d}s
+                        </button>
+                      ))}
+                      {subOffset !== 0 && (
+                        <button onClick={() => setSubOffset(0)}
+                          className="px-2 py-1.5 rounded-xl text-white/25 text-[10px] active:scale-90 transition-transform"
+                          style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)" }}>
+                          صفر
+                        </button>
+                      )}
+                    </div>
+                    {subOffset !== 0 && (
+                      <p className="text-center text-violet-300/50 text-[10px] font-mono mt-1">
+                        {subOffset > 0 ? "+" : ""}{subOffset.toFixed(1)}s
+                      </p>
+                    )}
+                  </div>
+
                 </div>
               )}
             </div>
