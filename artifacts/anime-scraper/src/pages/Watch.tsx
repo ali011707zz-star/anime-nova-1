@@ -687,13 +687,15 @@ function ScraperPicker({
   };
 
   /* ── While ANY scraper is still running: show full-screen loading poster ── */
+  const readyCount = SCRAPER_DEFS.filter(d => slotStatus[d.site] === "ready").length;
+
   if (!allDone) {
     return (
       <div className="fixed inset-0 z-50 overflow-hidden bg-[#07070d]" dir="rtl">
         {cover && (
           <div className="absolute inset-0">
-            <img src={cover} alt="" className="w-full h-full object-cover scale-125 blur-3xl opacity-[0.15] saturate-150" />
-            <div className="absolute inset-0 bg-gradient-to-b from-[#07070d]/85 via-[#07070d]/50 to-[#07070d]/92" />
+            <img src={cover} alt="" className="w-full h-full object-cover scale-125 blur-3xl opacity-[0.18] saturate-150" />
+            <div className="absolute inset-0 bg-gradient-to-b from-[#07070d]/90 via-[#07070d]/55 to-[#07070d]/95" />
           </div>
         )}
         {/* Back button */}
@@ -704,33 +706,48 @@ function ScraperPicker({
         </button>
 
         {/* Center content */}
-        <div className="relative h-full flex flex-col items-center justify-center gap-7 px-6">
-          {/* Cover poster */}
+        <div className="relative h-full flex flex-col items-center justify-center gap-6 px-6">
+          {/* Cover poster with floating animation */}
           {cover ? (
             <motion.div
-              initial={{ opacity: 0, scale: 0.85, y: 24 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+              initial={{ opacity: 0, scale: 0.82, y: 28 }}
+              animate={{ opacity: 1, scale: 1, y: [0, -6, 0] }}
+              transition={{
+                opacity: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+                scale:   { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+                y: { duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: 0.5 },
+              }}
               className="relative shrink-0">
-              {/* Glow */}
+              {/* Glow ring — pulses */}
               <motion.div
-                className="absolute -inset-4 rounded-[28px] pointer-events-none"
-                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.28) 0%, transparent 68%)" }}
-                animate={{ opacity: [0.5, 1, 0.5] }}
-                transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+                className="absolute -inset-5 rounded-[32px] pointer-events-none"
+                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.32) 0%, transparent 65%)" }}
+                animate={{ opacity: [0.4, 1, 0.4], scale: [0.95, 1.05, 0.95] }}
+                transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+              />
+              {/* Rotating border */}
+              <motion.div
+                className="absolute -inset-[3px] rounded-[21px] pointer-events-none"
+                style={{
+                  background: "conic-gradient(from 0deg, rgba(139,92,246,0.70) 0deg, rgba(167,139,250,0.15) 120deg, rgba(139,92,246,0.70) 360deg)",
+                  mask: "radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 3px))",
+                  WebkitMask: "radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 3px))",
+                }}
+                animate={{ rotate: 360 }}
+                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
               />
               <img
                 src={cover} alt={title}
-                className="w-48 h-[272px] rounded-2xl object-cover"
+                className="w-44 h-[250px] rounded-2xl object-cover"
                 style={{ boxShadow: "0 28px 72px rgba(0,0,0,0.88), 0 0 0 1px rgba(255,255,255,0.08)" }}
               />
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/[0.07] via-transparent to-transparent pointer-events-none" />
-              <div className="absolute bottom-0 left-0 right-0 h-20 rounded-b-2xl bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/[0.06] via-transparent to-transparent pointer-events-none" />
+              <div className="absolute bottom-0 left-0 right-0 h-20 rounded-b-2xl bg-gradient-to-t from-black/50 to-transparent pointer-events-none" />
             </motion.div>
           ) : (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              className="w-48 h-[272px] rounded-2xl bg-white/[0.03] flex items-center justify-center"
+              className="w-44 h-[250px] rounded-2xl bg-white/[0.03] flex items-center justify-center"
               style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
               <div className="w-16 h-16 rounded-full bg-violet-500/15 flex items-center justify-center">
                 <div className="w-7 h-7 rounded-full bg-violet-500/35" />
@@ -740,33 +757,81 @@ function ScraperPicker({
 
           {/* Title + episode */}
           <motion.div
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.18, duration: 0.4 }}
+            transition={{ delay: 0.18, duration: 0.38 }}
             className="text-center">
             {title && (
-              <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-1.5"
+              <h2 className="text-white text-[17px] font-black font-['Cairo'] leading-tight mb-1"
                 style={{ textShadow: "0 2px 14px rgba(0,0,0,0.75)" }}>
                 {title}
               </h2>
             )}
-            <p className="text-white/35 text-[13px] font-['Cairo'] tracking-wide">الحلقة {ep}</p>
+            <p className="text-white/35 text-[12px] font-['Cairo'] tracking-wide">الحلقة {ep}</p>
           </motion.div>
 
-          {/* Spinner + text */}
+          {/* Search progress bar */}
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            transition={{ delay: 0.30 }}
-            className="flex flex-col items-center gap-3">
-            <div className="relative w-9 h-9">
-              <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
+            transition={{ delay: 0.28 }}
+            className="w-full max-w-xs flex flex-col items-center gap-3">
+            {/* Progress bar */}
+            <div className="w-full h-[3px] rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.07)" }}>
               <motion.div
-                className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+                className="h-full rounded-full"
+                style={{ background: "linear-gradient(90deg, rgba(109,40,217,0.9) 0%, rgba(167,139,250,1) 100%)" }}
+                initial={{ width: "0%" }}
+                animate={{ width: `${Math.max(6, (readyCount / SCRAPER_DEFS.length) * 100)}%` }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
               />
             </div>
-            <p className="text-white/22 text-[11px] font-['Cairo'] tracking-[0.12em]">جاري تشغيل الحلقة</p>
+            {/* Live scraper chips */}
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {SCRAPER_DEFS.map((def, i) => {
+                const st = slotStatus[def.site];
+                const isActive  = st === "fetching" || st === "idle";
+                const isReady   = st === "ready";
+                const isFailed  = st === "failed";
+                return (
+                  <motion.div
+                    key={def.site}
+                    initial={{ opacity: 0, scale: 0.75 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: i * 0.04, duration: 0.25 }}
+                    className="flex items-center gap-1 px-2 py-[3px] rounded-full"
+                    style={{
+                      background: isReady
+                        ? "rgba(34,197,94,0.14)"
+                        : isFailed
+                          ? "rgba(239,68,68,0.09)"
+                          : "rgba(139,92,246,0.12)",
+                      border: isReady
+                        ? "1px solid rgba(34,197,94,0.28)"
+                        : isFailed
+                          ? "1px solid rgba(239,68,68,0.20)"
+                          : "1px solid rgba(139,92,246,0.22)",
+                    }}
+                  >
+                    {isActive && (
+                      <motion.div
+                        className="w-1.5 h-1.5 rounded-full bg-violet-400"
+                        animate={{ opacity: [1, 0.3, 1] }}
+                        transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.15 }}
+                      />
+                    )}
+                    {isReady  && <div className="w-1.5 h-1.5 rounded-full bg-green-400/80" />}
+                    {isFailed && <div className="w-1.5 h-1.5 rounded-full bg-red-400/50" />}
+                    <span className="text-[9.5px] font-black font-['Cairo']"
+                      style={{ color: isReady ? "rgba(134,239,172,0.90)" : isFailed ? "rgba(252,165,165,0.55)" : "rgba(196,181,253,0.75)" }}>
+                      {def.name}
+                    </span>
+                  </motion.div>
+                );
+              })}
+            </div>
+            <p className="text-white/20 text-[10px] font-['Cairo'] tracking-[0.08em]">
+              {readyCount > 0 ? `وُجد ${readyCount} مصدر · جاري البحث...` : "جاري البحث في المصادر..."}
+            </p>
           </motion.div>
         </div>
       </div>
@@ -1080,13 +1145,28 @@ function EpisodePlayer({
         return 0;
       };
 
-      // If source has a subtitle VTT/SRT URL (e.g. kawaii), translate it to Arabic
+      // If source has a subtitle VTT/SRT URL (e.g. kawaii), auto-translate to Arabic
       if (subtitleUrl) {
-        // 1️⃣ Try Arabic machine translation
+        // 1️⃣ Immediately fetch raw English subtitle and show it so viewer isn't waiting
+        let engCues: SubCue[] = [];
+        try {
+          const r2 = await fetch(subtitleUrl, { signal: AbortSignal.timeout(10000) });
+          if (r2.ok) {
+            const text = await r2.text();
+            engCues = parseSrt(text);
+            if (engCues.length) {
+              setSubCues(engCues);
+              setSubLang("eng");
+              setSubState("ready");
+            }
+          }
+        } catch { /* fall through */ }
+
+        // 2️⃣ Translate to Arabic in background — replace English cues when done
         try {
           const r = await fetch(
             `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
-            { signal: AbortSignal.timeout(35000) },
+            { signal: AbortSignal.timeout(60000) },
           );
           if (r.ok) {
             const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
@@ -1105,24 +1185,13 @@ function EpisodePlayer({
               }
             }
           }
-        } catch { /* fall through to English fallback */ }
+        } catch { /* keep English if translation fails */ }
 
-        // 2️⃣ English fallback — fetch VTT directly and display as-is
-        try {
-          const r2 = await fetch(subtitleUrl, { signal: AbortSignal.timeout(10000) });
-          if (r2.ok) {
-            const text = await r2.text();
-            const cues = parseSrt(text);
-            if (cues.length) {
-              setSubCues(cues);
-              setSubLang("eng");
-              setSubState("ready");
-              return;
-            }
-          }
-        } catch { /* fall through to subtitle API */ }
+        // If we already showed English cues above, we're done
+        if (engCues.length) return;
       }
 
+      // Subtitle API fallback (SUBDL Arabic lookup)
       try {
         const params = new URLSearchParams({ title: animeTitle, ep: String(ep) });
         const r = await fetch(`/api/anime/subtitles?${params}`);
@@ -1135,7 +1204,7 @@ function EpisodePlayer({
         setSubLang(d.lang);
         setSubState("ready");
       } catch { setSubState("none"); }
-    }, 1800);
+    }, 500);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animeTitle, ep, subtitleUrl]);
@@ -1810,13 +1879,13 @@ export default function WatchPage() {
     setQuality(clickedTier);
     setInitialSrv(0);
 
-    /* Show animated loading modal for ~1.6s then open player */
+    /* Show animated loading modal for ~700ms then open player */
     setShowLoading(true);
     if (loadingTimer.current) clearTimeout(loadingTimer.current);
     loadingTimer.current = setTimeout(() => {
       setShowLoading(false);
       setPhase("player");
-    }, 1600);
+    }, 700);
   }
 
   const servers = playerServers[quality] || [];

@@ -448,8 +448,9 @@ export default function RiftPlayer({
       }
       setFeedback({ type: "seek", value: Math.max(0, Math.min(duration, g.startValue + delta)), delta });
     } else if (g.active === "volume") {
-      // Swipe UP (decreasing clientY) = positive dV = increase volume
-      const dV = isPortrait ? (g.lastX - t.clientX) : (g.lastY - t.clientY);
+      // Portrait (CSS-rotated 90° CW): player-up = screen-right = clientX increases → positive dV
+      // Landscape: player-up = screen-up = clientY decreases → g.lastY - t.clientY is positive
+      const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
       // Use videoRef.current.volume for freshest value (avoids stale React state)
       const curVol = videoRef.current?.volume ?? volumeRef.current;
@@ -459,8 +460,8 @@ export default function RiftPlayer({
       if (videoRef.current) { videoRef.current.volume = nV; videoRef.current.muted = false; setMuted(false); }
       setFeedback({ type: "volume", value: nV });
     } else if (g.active === "brightness") {
-      // Swipe UP (decreasing clientY) = positive dV = increase brightness
-      const dV = isPortrait ? (g.lastX - t.clientX) : (g.lastY - t.clientY);
+      // Same directional fix as volume
+      const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
       const nB = Math.max(0.1, Math.min(2.5, brightnessRef.current + dV / 150));
       brightnessRef.current = nB;
