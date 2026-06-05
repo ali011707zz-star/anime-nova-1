@@ -1,7 +1,37 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, TrendingUp, Clock, Star, Zap, ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { Play, Loader2, ChevronDown, Clock, Star, ChevronLeft, ChevronRight, Info, Flame, Radio, Film, RotateCw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+
+/* ── Continue Watching helpers ── */
+interface WatchHistoryItem {
+  id: number;
+  title: string;
+  cover: string;
+  ep: number;
+  totalEps: number;
+  date: string;
+}
+interface ContinueItem extends WatchHistoryItem {
+  watchTimeSec: number;
+}
+function fmtMinute(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+function loadContinueWatching(): ContinueItem[] {
+  try {
+    const h: WatchHistoryItem[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
+    return h
+      .map(item => {
+        const t = parseFloat(localStorage.getItem(`wp-${item.id}-${item.ep}`) || "0") || 0;
+        return { ...item, watchTimeSec: t };
+      })
+      .filter(item => item.watchTimeSec > 30)
+      .slice(0, 8);
+  } catch { return []; }
+}
 
 const GENRES_AR: { ar: string; en: string; color: string; animeId: number }[] = [
   { ar: "الكل",       en: "",              color: "#8B5CF6", animeId: 0      },
@@ -159,11 +189,26 @@ export default function Home() {
     return (await r.json()).data?.Page;
   };
 
+  const [continueWatching, setContinueWatching] = useState<ContinueItem[]>([]);
+
+  /* Load continue-watching from localStorage (fast, synchronous) */
+  useEffect(() => {
+    setContinueWatching(loadContinueWatching());
+  }, []);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [pop, rec, trend, mov, top, seas, newS] = await Promise.all([
-        fetch$(buildPopularQuery(""), { page: 1, perPage: 12 }),
+      /* ── Step 1: load popular first — shows hero + grid immediately ── */
+      const pop = await fetch$(buildPopularQuery(""), { page: 1, perPage: 12 });
+      setPopular(pop?.media || []);
+      setHasMore(pop?.pageInfo?.hasNextPage ?? false);
+      const heroes = (pop?.media || []).filter((a: any) => a.bannerImage);
+      setHero(heroes[0] || pop?.media?.[0]);
+      setLoading(false); /* ← hero + popular visible now, rest loads below */
+
+      /* ── Step 2: remaining 6 queries fire in parallel (non-blocking) ── */
+      const [rec, trend, mov, top, seas, newS] = await Promise.all([
         fetch$(RECENT_QUERY, { page: 1, perPage: 16 }),
         fetch$(TRENDING_QUERY),
         fetch$(MOVIES_QUERY),
@@ -171,17 +216,12 @@ export default function Home() {
         fetch$(SEASON_QUERY),
         fetch$(NEW_SEASON_QUERY),
       ]);
-      setPopular(pop?.media || []);
-      setHasMore(pop?.pageInfo?.hasNextPage ?? false);
       setRecent(rec?.media || []);
       setTrending(trend?.media || []);
       setMovies(mov?.media || []);
       setTopRated(top?.media || []);
       setSeasonal(seas?.media || []);
       setNewSeason(newS?.media || []);
-      const heroes = (pop?.media || []).filter((a: any) => a.bannerImage);
-      setHero(heroes[0] || pop?.media?.[0]);
-      setLoading(false);
     }
     load();
   }, []);
@@ -423,7 +463,7 @@ export default function Home() {
                     <img
                       src={hero.coverImage?.extraLarge || hero.coverImage?.large}
                       alt={hero.title?.romaji}
-                      className="w-full h-full object-contain"
+                      className="w-full h-full object-cover"
                       draggable={false}
                     />
                     {/* Poster shimmer */}
@@ -538,6 +578,52 @@ export default function Home() {
         </div>
       </div>
 
+      {/* ── تابع المشاهدة (Continue Watching) ── */}
+      {continueWatching.length > 0 && !selectedGenre && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>
+                <RotateCw className="w-3.5 h-3.5 text-white" />
+              </div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white">تابع المشاهدة</h2>
+            </div>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+            {continueWatching.map(item => {
+              const progressPct = Math.min(100, Math.round((item.watchTimeSec / (24 * 60)) * 100));
+              return (
+                <Link key={`${item.id}-${item.ep}`} href={`/watch?anime=${item.id}&ep=${item.ep}&title=${encodeURIComponent(item.title)}`}>
+                  <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                    <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                      {item.cover
+                        ? <img src={item.cover} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        : <div className="w-full h-full bg-violet-900/20" />}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/20 to-transparent" />
+                      {/* Episode badge */}
+                      <div className="absolute top-2 right-2 bg-violet-600 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
+                        ح {item.ep}
+                      </div>
+                      {/* Resume time badge */}
+                      <div className="absolute top-2 left-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-white/70 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-white/10">
+                        {fmtMinute(item.watchTimeSec)}
+                      </div>
+                      {/* Progress bar */}
+                      <div className="absolute bottom-10 left-2 right-2 h-0.5 rounded-full bg-white/15 overflow-hidden">
+                        <div className="h-full rounded-full bg-violet-500" style={{ width: `${progressPct}%` }} />
+                      </div>
+                      <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
+                        <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{item.title}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── موسم الربيع 2026 ── */}
       {seasonal.length > 0 && !selectedGenre && (
         <div className="mt-5">
@@ -583,7 +669,7 @@ export default function Home() {
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>
-                <Zap className="w-3.5 h-3.5 text-white fill-white" />
+                <Radio className="w-3.5 h-3.5 text-white" />
               </div>
               <h2 className="text-[13px] font-black font-['Cairo'] text-white">يُبث الآن</h2>
             </div>
@@ -667,7 +753,7 @@ export default function Home() {
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#F97316,#EA580C)" }}>
-                <TrendingUp className="w-3.5 h-3.5 text-white" />
+                <Flame className="w-3.5 h-3.5 text-white fill-orange-200" />
               </div>
               <h2 className="text-[13px] font-black font-['Cairo'] text-white">رائج الآن</h2>
             </div>
@@ -743,7 +829,7 @@ export default function Home() {
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#3B82F6,#1D4ED8)" }}>
-                <Play className="w-3.5 h-3.5 text-white fill-white" />
+                <Film className="w-3.5 h-3.5 text-white" />
               </div>
               <h2 className="text-[13px] font-black font-['Cairo'] text-white">أفلام أنمي</h2>
             </div>
@@ -776,7 +862,7 @@ export default function Home() {
       <div className="mt-6 px-4">
         <div className="flex items-center gap-2 mb-3">
           <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#EF4444,#DC2626)" }}>
-            <TrendingUp className="w-3.5 h-3.5 text-white" />
+            <Flame className="w-3.5 h-3.5 text-white fill-red-200" />
           </div>
           <h2 className="text-[13px] font-black font-['Cairo'] text-white">
             {selectedGenre
