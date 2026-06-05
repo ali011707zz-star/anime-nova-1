@@ -3924,20 +3924,25 @@ function parseVttCues(text: string): Array<{ timing: string; rawText: string }> 
   return cues;
 }
 
-/** Translate a batch of texts with Google Translate (unofficial gtx endpoint) */
+/** Translate a batch of texts with Google Translate (unofficial gtx endpoint).
+ *  Uses newline as separator — preserved reliably by gtx even across languages. */
 async function translateBatchGtx(texts: string[], from: string, to: string): Promise<string[]> {
-  const SEP = " |||SEP||| ";
+  // Use a unique ASCII sentinel unlikely to appear in subtitle text
+  const SEP = "\n||||\n";
   const joined = texts.join(SEP);
   try {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(joined)}`;
-    const r = await fetch(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10000) });
+    const r = await fetch(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(12000) });
     if (!r.ok) return texts;
     const data = await r.json() as any;
     const translated: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || joined;
-    // Split on separator — tolerate minor whitespace drift from translator
-    const parts = translated.split(/\s*\|\|\|SEP\|\|\|\s*/);
-    if (parts.length !== texts.length) return texts; // mismatch → return originals
-    return parts.map(p => p.trim());
+    // Split on sentinel — tolerate extra whitespace from translator
+    const parts = translated.split(/\n\|\|\|\|\n/);
+    if (parts.length === texts.length) return parts.map(p => p.trim());
+    // Fallback: try splitting on just newlines (gtx sometimes drops sentinel chars)
+    const byNewline = translated.split("\n").filter(l => l.trim());
+    if (byNewline.length === texts.length) return byNewline.map(p => p.trim());
+    return texts; // total mismatch → return originals unchanged
   } catch { return texts; }
 }
 
@@ -3957,7 +3962,12 @@ router.get("/anime/translate-vtt", async (req, res) => {
 
   try {
     const r = await fetch(url, {
-      headers: { ...BASE_HDRS, Accept: "text/vtt,text/plain,*/*" },
+      headers: {
+        ...BASE_HDRS,
+        Accept: "text/vtt,text/plain,*/*",
+        Referer: (() => { try { return new URL(url).origin + "/"; } catch { return url; } })(),
+        Origin:  (() => { try { return new URL(url).origin; } catch { return ""; } })(),
+      },
       signal: AbortSignal.timeout(12000),
     });
     if (!r.ok) { res.status(502).json({ error: `Subtitle fetch failed: ${r.status}` }); return; }
@@ -3965,8 +3975,8 @@ router.get("/anime/translate-vtt", async (req, res) => {
     const cues = parseVttCues(vttText);
     if (!cues.length) { res.json({ cues: [] }); return; }
 
-    // Translate in batches of 20 cues
-    const BATCH = 20;
+    // Translate in batches of 40 cues for efficiency
+    const BATCH = 40;
     const translatedTexts: string[] = [];
     for (let i = 0; i < cues.length; i += BATCH) {
       const batch = cues.slice(i, i + BATCH).map(c => c.rawText);

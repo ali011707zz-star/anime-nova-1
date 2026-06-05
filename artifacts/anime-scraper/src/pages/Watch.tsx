@@ -828,10 +828,12 @@ function SubtitleOverlay({ cues, elapsed }: { cues: SubCue[]; elapsed: number })
   const current = cues.find(c => elapsed >= c.start && elapsed <= c.end);
   if (!current) return null;
   return (
-    <div className="absolute bottom-44 left-0 right-0 flex justify-center px-4 z-30 pointer-events-none">
-      <div className="bg-black/80 backdrop-blur-sm rounded-xl px-4 py-2 max-w-[90%] text-center">
-        <p className="text-white font-['Cairo'] text-[14px] font-semibold leading-relaxed"
-          dir="rtl" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.9)" }}>
+    /* fixed + z-[65]: stays above RiftPlayer's portrait fixed z-60 layer */
+    <div className="fixed bottom-28 left-0 right-0 flex justify-center px-5 z-[65] pointer-events-none">
+      <div className="max-w-[88%] text-center px-4 py-2 rounded-2xl"
+        style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 2px 16px rgba(0,0,0,0.70)" }}>
+        <p className="text-white font-['Cairo'] text-[15px] font-bold leading-relaxed"
+          dir="rtl" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.95)" }}>
           {current.text}
         </p>
       </div>
@@ -1007,30 +1009,51 @@ function EpisodePlayer({
       if (subState !== "idle") return;
       setSubState("loading");
 
+      // Helper: parse HH:MM:SS.mmm or MM:SS.mmm → seconds
+      const toSec = (ts: string): number => {
+        const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
+        if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
+        const m2 = ts.match(/(\d{1,2}):(\d{2})[,.](\d{3})/);
+        if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
+        return 0;
+      };
+
       // If source has a subtitle VTT/SRT URL (e.g. kawaii), translate it to Arabic
       if (subtitleUrl) {
+        // 1️⃣ Try Arabic machine translation
         try {
-          const apiUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`;
-          const r = await fetch(apiUrl, { signal: AbortSignal.timeout(30000) });
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-          if (d.cues?.length) {
-            const toSec = (ts: string): number => {
-              const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
-              if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
-              const m2 = ts.match(/(\d{2}):(\d{2})[,.](\d{3})/);
-              if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
-              return 0;
-            };
-            const arCues: SubCue[] = d.cues
-              .map(c => {
-                const parts = c.timing.split("-->").map(s => s.trim());
-                return { start: toSec(parts[0] || ""), end: toSec(parts[1] || ""), text: c.text };
-              })
-              .filter(c => c.start < c.end && c.text.trim());
-            if (arCues.length) {
-              setSubCues(arCues);
-              setSubLang("ara");
+          const r = await fetch(
+            `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
+            { signal: AbortSignal.timeout(35000) },
+          );
+          if (r.ok) {
+            const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+            if (d.cues?.length) {
+              const arCues: SubCue[] = d.cues
+                .map(c => {
+                  const pts = c.timing.split("-->").map(s => s.trim());
+                  return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
+                })
+                .filter(c => c.start < c.end && c.text.trim());
+              if (arCues.length) {
+                setSubCues(arCues);
+                setSubLang("ara");
+                setSubState("ready");
+                return;
+              }
+            }
+          }
+        } catch { /* fall through to English fallback */ }
+
+        // 2️⃣ English fallback — fetch VTT directly and display as-is
+        try {
+          const r2 = await fetch(subtitleUrl, { signal: AbortSignal.timeout(10000) });
+          if (r2.ok) {
+            const text = await r2.text();
+            const cues = parseSrt(text);
+            if (cues.length) {
+              setSubCues(cues);
+              setSubLang("eng");
               setSubState("ready");
               return;
             }
@@ -1426,9 +1449,24 @@ export default function WatchPage() {
     });
     const raw = found?.title || eps[ep - 1]?.title || "";
     if (!raw) return "";
-    // Strip "Episode N - " prefix that AniList sometimes prepends
     return raw.replace(/^Episode\s+\d+\s*[-:–]\s*/i, "").trim();
   })();
+
+  /* Arabic episode title — translated via server proxy */
+  const [arEpTitle, setArEpTitle] = useState<string>("");
+  useEffect(() => {
+    setArEpTitle("");
+    if (!epTitle) return;
+    const ctrl = new AbortController();
+    fetch(`/api/anime/translate?text=${encodeURIComponent(epTitle)}&from=en&to=ar`, { signal: ctrl.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then((d: any) => {
+        const t = d?.translated?.trim();
+        if (t && t !== epTitle) setArEpTitle(t);
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [epTitle]);
 
   /* Fetch AniList metadata */
   useEffect(() => {
@@ -1630,7 +1668,7 @@ export default function WatchPage() {
           allServers={playerServers}
           initialServer={initialSrv}
           title={title}
-          epTitle={epTitle}
+          epTitle={arEpTitle || epTitle}
           animeTitle={animeTitle}
           cover={cover} ep={ep} totalEps={totalEps}
           downloadUrl={playerDlUrl}
