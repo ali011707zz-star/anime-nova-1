@@ -1685,8 +1685,11 @@ export default function WatchPage() {
   }
 
   function handleBack() {
-    // Always go back in browser history — never push a new entry (causes infinite loop)
-    window.history.back();
+    if (animeId) {
+      navigate(`/anime/${animeId}`);
+    } else {
+      navigate("/");
+    }
   }
 
   /* ── Track in-flight fetches to prevent duplicate calls ── */
