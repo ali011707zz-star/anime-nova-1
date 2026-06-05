@@ -1046,6 +1046,13 @@ function EpisodePlayer({
     setSubOffset(o => o + delta);
   }
 
+  /* ── Reset subState to idle when subtitleUrl changes (e.g. switching to kawaii source) ── */
+  useEffect(() => {
+    setSubState("idle");
+    setSubCues([]);
+    setSubLang(null);
+  }, [subtitleUrl]);
+
   /* ── Auto-load subtitles on mount ── */
   useEffect(() => {
     const t = setTimeout(async () => {
