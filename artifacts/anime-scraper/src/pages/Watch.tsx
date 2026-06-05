@@ -1007,20 +1007,35 @@ function EpisodePlayer({
       if (subState !== "idle") return;
       setSubState("loading");
 
-      // If source provided a direct subtitle VTT/SRT URL (e.g. kawaii), use it first
+      // If source has a subtitle VTT/SRT URL (e.g. kawaii), translate it to Arabic
       if (subtitleUrl) {
         try {
-          const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(8000) });
+          const apiUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`;
+          const r = await fetch(apiUrl, { signal: AbortSignal.timeout(30000) });
           if (!r.ok) throw new Error("HTTP " + r.status);
-          const text = await r.text();
-          const cues = parseSrt(text);
-          if (cues.length) {
-            setSubCues(cues);
-            setSubLang("eng");
-            setSubState("ready");
-            return;
+          const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+          if (d.cues?.length) {
+            const toSec = (ts: string): number => {
+              const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
+              if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
+              const m2 = ts.match(/(\d{2}):(\d{2})[,.](\d{3})/);
+              if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
+              return 0;
+            };
+            const arCues: SubCue[] = d.cues
+              .map(c => {
+                const parts = c.timing.split("-->").map(s => s.trim());
+                return { start: toSec(parts[0] || ""), end: toSec(parts[1] || ""), text: c.text };
+              })
+              .filter(c => c.start < c.end && c.text.trim());
+            if (arCues.length) {
+              setSubCues(arCues);
+              setSubLang("ara");
+              setSubState("ready");
+              return;
+            }
           }
-        } catch { /* fall through to API */ }
+        } catch { /* fall through to subtitle API */ }
       }
 
       try {
@@ -1316,7 +1331,9 @@ function EpisodePlayer({
               {subState === "loading" && (
                 <div className="flex items-center gap-3">
                   <Loader2 className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
-                  <p className="text-white/45 text-[12px] font-['Cairo']">جاري البحث عن ترجمة عربية…</p>
+                  <p className="text-white/45 text-[12px] font-['Cairo']">
+                    {subtitleUrl ? "جاري ترجمة الترجمة إلى العربية…" : "جاري البحث عن ترجمة عربية…"}
+                  </p>
                 </div>
               )}
 
