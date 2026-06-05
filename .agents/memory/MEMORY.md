@@ -47,3 +47,4 @@
 - [Watch.tsx cross-tier fallback](watch-cross-tier-fallback.md) — tierExhausted ref + onTierExhausted callback lets auto-pick rescue when lower-tier sources arrive after upper tier fails; akwam.to uses FingerprintJS (cannot scrape server-side)
 - [NativeVideoPlayer server reset bug](nativevideoplayer-reset.md) — useEffect([quality,servers]) resets currentServer=0 on every new SSE source → infinite error loop; fix: useEffect([quality]) ONLY
 - [anime-time qualityRank](anime-time-rank.md) — anime-time.live yaviidcdn.com HLS returns 404 from hls-proxy; keep qualityRank=2 (720p HD) not 11 (1080p FHD) to avoid blocking reliable sources like OkAnime
+- [Anime4up URL construction](anime4up-url.md) — w1.anime4up.rest: series page shows only 48 recent eps; old-format URL /episode/{romaji-slug}-الحلقة-{N}/ works for ALL episodes (1–1100+); extract romaji slug from old-format visible eps or derive from english title
