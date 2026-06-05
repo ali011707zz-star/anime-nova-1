@@ -1086,9 +1086,16 @@ async function extractAndCollect(
       ]);
       if (result?.url) {
         if (result.type === "hls") {
-          // Wrap extracted HLS with hls-proxy to bypass CORS
-          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(s.url)}`;
-          collect({ ...s, url: proxied, directUrl: proxied, directType: "hls" });
+          // Some CDNs block Replit server IP but allow direct browser HLS.js access — skip proxy
+          const NO_HLS_PROXY_HOSTS = ["yaviidcdn.com", "vidcache.net"];
+          const skipProxy = NO_HLS_PROXY_HOSTS.some(h => result.url.includes(h));
+          if (skipProxy) {
+            collect({ ...s, url: result.url, directUrl: result.url, directType: "hls" });
+          } else {
+            // Wrap extracted HLS with hls-proxy to bypass CORS
+            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(s.url)}`;
+            collect({ ...s, url: proxied, directUrl: proxied, directType: "hls" });
+          }
         } else {
           // MP4: probe to filter dead links
           const alive = await probeDirectUrl(result.url, s.url);
@@ -3616,8 +3623,8 @@ router.get("/anime/sources-stream", async (req, res) => {
   }
 
   try {
-    const SCRAPER_MS = 14000;
-    const EXTRACT_MS = 12000;
+    const SCRAPER_MS = 20000;
+    const EXTRACT_MS = 15000;
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
@@ -3714,8 +3721,8 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
 
-  const SCRAPER_MS = 14000;
-  const EXTRACT_MS = 12000;
+  const SCRAPER_MS = 20000;
+  const EXTRACT_MS = 15000;
   const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
     Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
