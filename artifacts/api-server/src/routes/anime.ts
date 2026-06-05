@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { execSync } from "child_process";
 import {
   makeSourceCacheKey,
   getFromSourceCache,
@@ -89,6 +90,122 @@ function isCloudflareBlock(html: string): boolean {
   const lower = html.toLowerCase();
   return CLOUDFLARE_PATTERNS.some(p => lower.includes(p));
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  Playwright CF-bypass — warm CF cookies once per origin, reuse for
+//  all subsequent fetch calls during the session (22-min TTL)
+// ════════════════════════════════════════════════════════════════════
+let _chromiumPath: string | undefined;
+function findChromium(): string {
+  if (_chromiumPath) return _chromiumPath;
+  try {
+    const p = execSync("which chromium 2>/dev/null", { encoding: "utf8" }).trim();
+    if (p) return (_chromiumPath = p);
+  } catch {}
+  try {
+    const p = execSync("ls /nix/store/*/bin/chromium 2>/dev/null | head -1",
+      { encoding: "utf8", shell: "/bin/sh" }).trim();
+    if (p) return (_chromiumPath = p);
+  } catch {}
+  return (_chromiumPath = "chromium");
+}
+
+const cfSessionCache = new Map<string, { cookies: string; ts: number }>();
+const CF_SESSION_TTL = 22 * 60_000; // 22 minutes
+
+/** Launch Playwright to bypass CF JS challenge and cache cookies for origin */
+async function bypassCf(origin: string): Promise<boolean> {
+  try {
+    const pw = await import("playwright-core");
+    const browser = await (pw as any).chromium.launch({
+      executablePath: findChromium(),
+      headless: true,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage", "--disable-gpu",
+        "--disable-software-rasterizer",
+      ],
+    });
+    try {
+      const ctx = await browser.newContext({
+        userAgent: BROWSER_UA,
+        viewport: { width: 1280, height: 720 },
+      });
+      const page = await ctx.newPage();
+      await page.goto(origin + "/", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForFunction(
+        "!document.title.toLowerCase().includes('just a moment')",
+        { timeout: 20000 }
+      ).catch(() => {});
+      await page.waitForTimeout(2000);
+      const cookies = await ctx.cookies();
+      const cookieStr = (cookies as any[]).map((c: any) => `${c.name}=${c.value}`).join("; ");
+      cfSessionCache.set(origin, { cookies: cookieStr, ts: Date.now() });
+      return true;
+    } finally {
+      await browser.close();
+    }
+  } catch (e) {
+    console.error("[bypassCf] error for", origin, ":", (e as Error).message?.slice(0, 120));
+    return false;
+  }
+}
+
+/** Fetch a page on a CF-protected origin using cached session cookies */
+async function cfGet(url: string, extraHdrs: Record<string, string> = {}): Promise<string | null> {
+  let origin: string;
+  try { origin = new URL(url).origin; } catch { return null; }
+
+  // Ensure we have a live session
+  const cached = cfSessionCache.get(origin);
+  if (!cached || Date.now() - cached.ts >= CF_SESSION_TTL) {
+    if (!await bypassCf(origin)) return null;
+  }
+
+  const session = cfSessionCache.get(origin);
+  if (!session) return null;
+
+  const doFetch = async (cookieStr: string) => {
+    const r = await fetch(url, {
+      headers: { ...BASE_HDRS, Cookie: cookieStr, Referer: origin + "/", ...extraHdrs },
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    return isCloudflareBlock(html) ? null : html;
+  };
+
+  let html = await doFetch(session.cookies);
+  if (html === null) {
+    // Cookies may have expired early — refresh
+    cfSessionCache.delete(origin);
+    if (!await bypassCf(origin)) return null;
+    const fresh = cfSessionCache.get(origin);
+    if (!fresh) return null;
+    html = await doFetch(fresh.cookies);
+  }
+  return html;
+}
+
+// Pre-warm CF sessions 30s after server start (non-blocking)
+setTimeout(() => {
+  const warm = async () => {
+    try { await bypassCf("https://witanime.life"); } catch {}
+    try { await bypassCf("https://anime3rb.com"); } catch {}
+  };
+  warm().catch(() => {});
+}, 30_000);
+
+// Refresh every 20 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [origin, session] of cfSessionCache) {
+    if (now - session.ts > CF_SESSION_TTL - 2 * 60_000) {
+      bypassCf(origin).catch(() => {});
+    }
+  }
+}, 20 * 60_000).unref();
 
 // ════════════════════════════════════════════════════════════════════
 //  UTILITIES
@@ -201,6 +318,7 @@ function parseVideoUrl(html: string): { url: string; type: "hls" | "mp4" } | nul
     const mp4Pats = [
       /"(?:file|src|url|source|videoUrl|mp4)"\s*:\s*"(https?:\/\/[^"\\]+\.mp4[^"\\]*)"/i,
       /'(?:file|src|url|source)'\s*:\s*'(https?:\/\/[^'\\]+\.mp4[^'\\]*)'/i,
+      /\b(?:file|src|url|source|videoUrl|mp4)\s*:\s*["'`](https?:\/\/[^"'`\s]+\.mp4[^"'`\s]*)["'`]/i,
       /<source[^>]+src=["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i,
       /['"](https?:\/\/[^\s"'<>\\]+\.mp4(?:\?[^\s"'<>\\]*)?)["']/i,
     ];
@@ -212,6 +330,31 @@ function parseVideoUrl(html: string): { url: string; type: "hls" | "mp4" } | nul
             !url.match(/\/(ads?|banner|track|pixel|promo|thumb|poster)\//i)) {
           return { url, type: "mp4" };
         }
+      }
+    }
+    // DASH manifests (.mpd)
+    const mpdPats = [
+      /"(?:file|src|url|source|dash|mpd)[^"]*"\s*:\s*"(https?:\/\/[^"\\]+\.mpd[^"\\]*)"/i,
+      /\b(?:file|src|url|dash|mpd)\s*:\s*["'`](https?:\/\/[^"'`\s]+\.mpd[^"'`\s]*)["'`]/i,
+      /['"](https?:\/\/[^\s"'<>\\]+\.mpd(?:\?[^\s"'<>\\]*)?)["']/i,
+    ];
+    for (const p of mpdPats) {
+      const m = text.match(p);
+      if (m) {
+        const url = (m[1] || m[0]).replace(/[\\,;\)\s]+$/, "");
+        if (url.startsWith("http") && url.length > 20) return { url, type: "mp4" }; // treat as mp4 stream
+      }
+    }
+    // WebM
+    const webmPats = [
+      /"(?:file|src|url|source)[^"]*"\s*:\s*"(https?:\/\/[^"\\]+\.webm[^"\\]*)"/i,
+      /['"](https?:\/\/[^\s"'<>\\]+\.webm(?:\?[^\s"'<>\\]*)?)["']/i,
+    ];
+    for (const p of webmPats) {
+      const m = text.match(p);
+      if (m) {
+        const url = (m[1] || m[0]).replace(/[\\,;\)\s]+$/, "");
+        if (url.startsWith("http") && url.length > 20) return { url, type: "mp4" };
       }
     }
   }
@@ -3132,6 +3275,418 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
 
 // ════════════════════════════════════════════════════════════════════
+//  WITANIME.LIFE scraper  (CF-protected Arabic WordPress anime site)
+//  Uses Playwright-cached CF cookies → regular fetch for all pages
+//  Search: WP AJAX action=data_fetch OR /?s=
+//  Series page: /anime/{slug}/ → episode links
+//  Episode page: server buttons with AJAX or data-* attrs → embed → extract
+// ════════════════════════════════════════════════════════════════════
+const WITANIME_BASE  = "https://witanime.life";
+const WITANIME_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: WITANIME_BASE + "/" };
+
+const witaSeriesCache = new Map<string, { url: string | null; ts: number }>();
+const witaSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchWitanime(query: string): Promise<string | null> {
+  // Try WP AJAX search first (faster)
+  try {
+    const cfSession = cfSessionCache.get(WITANIME_BASE);
+    const hdrs: Record<string, string> = {
+      ...WITANIME_HDRS,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(cfSession ? { Cookie: cfSession.cookies } : {}),
+    };
+    const r = await fetch(`${WITANIME_BASE}/wp-admin/admin-ajax.php`, {
+      method: "POST",
+      headers: hdrs,
+      body: new URLSearchParams({ action: "data_fetch", keyword: query }).toString(),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (r.ok) {
+      const html = await r.text();
+      if (!isCloudflareBlock(html) && html.includes("/anime/")) {
+        const best = findBestLink(html, query, /href="(https?:\/\/witanime\.life\/anime\/([^/"]+)\/?)"[^>]*>[\s\S]{0,300}?<h\d[^>]*>([^<]{1,80})<\/h\d>/gi, 1, 3);
+        if (best) return best;
+        // Simple href parse
+        const m = html.match(/href="(https?:\/\/witanime\.life\/anime\/[^/"]+\/?)"/)
+        if (m) return m[1];
+      }
+    }
+  } catch {}
+
+  // Fallback: GET search page via CF bypass
+  const html = await cfGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`);
+  if (!html) return null;
+  const re = /href="(https?:\/\/witanime\.life\/anime\/([^/"]+)\/?)"/gi;
+  const candidates: Array<{ url: string; score: number }> = [];
+  for (const m of html.matchAll(re)) {
+    const slug = decodeURIComponent(m[2]).replace(/-/g, " ");
+    const score = Math.max(similarity(slug, query), asciiSimilarity(m[2], query));
+    candidates.push({ url: m[1], score });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.score > 0.1 ? candidates[0].url : null;
+}
+
+/** Generic helper: find best-matching href from html */
+function findBestLink(
+  html: string, query: string,
+  re: RegExp, hrefGroup: number, labelGroup: number,
+): string | null {
+  let best: { url: string; score: number } | null = null;
+  for (const m of html.matchAll(re)) {
+    const label = m[labelGroup]?.replace(/<[^>]+>/g, "").trim() || "";
+    const score = Math.max(similarity(label, query), asciiSimilarity(label, query));
+    if (!best || score > best.score) best = { url: m[hrefGroup], score };
+  }
+  return best && best.score > 0.1 ? best.url : null;
+}
+
+/** Extract episode URL from a witanime series page */
+async function findWitaEpisodeUrl(seriesUrl: string, ep: number): Promise<string | null> {
+  const html = await cfGet(seriesUrl);
+  if (!html) return null;
+  // Episode links: /ep/{slug}-N/ or /episode/{slug}-episode-N/ or /watch/{slug}/N/
+  const patterns = [
+    /href="(https?:\/\/witanime\.life\/ep\/([^/"]+)\/?)"[^>]*>([\s\S]{0,100}?الحلقة[\s\S]{0,20}?(\d+)[\s\S]{0,10}?)<\/a>/gi,
+    /href="(https?:\/\/witanime\.life\/(?:ep|episode|watch)\/[^"]+\/?)"[^>]*>/gi,
+  ];
+  // First try structured match with episode number
+  for (const m of html.matchAll(patterns[0])) {
+    if (parseInt(m[4] || "0") === ep) return m[1];
+  }
+  // Fallback: any ep link that contains the episode number in the slug
+  for (const m of html.matchAll(patterns[1])) {
+    const slug = decodeURIComponent(m[1]);
+    if (slug.match(new RegExp(`[/-]0*${ep}[/-]?$`)) || slug.endsWith(`-${ep}/`) || slug.endsWith(`/${ep}`)) {
+      return m[1];
+    }
+  }
+  return null;
+}
+
+/** Fetch server embed URLs from a witanime episode page (various WP theme patterns) */
+async function fetchWitaServerUrls(epUrl: string): Promise<string[]> {
+  const html = await cfGet(epUrl);
+  if (!html) return [];
+  const urls: string[] = [];
+  const seen = new Set<string>();
+
+  const addUrl = (u: string) => {
+    if (!u || !u.startsWith("http") || seen.has(u)) return;
+    seen.add(u); urls.push(u);
+  };
+
+  // Pattern A: data-src="URL" on server buttons
+  for (const m of html.matchAll(/data-src="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
+  // Pattern B: data-url="URL" or data-embed="URL"
+  for (const m of html.matchAll(/data-(?:url|embed)="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
+  // Pattern C: iframe src directly
+  for (const m of html.matchAll(/<iframe[^>]+src="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
+  // Pattern D: onclick="...window.location='URL'..." or similar
+  for (const m of html.matchAll(/onclick="[^"]*(?:location\.href|src)\s*=\s*'(https?:\/\/[^']+)'/gi)) addUrl(m[1]);
+  // Pattern E: WP AJAX server buttons (post_id + nonce) — decode and POST
+  if (!urls.length) {
+    const nonce = html.match(/["']nonce["']\s*:\s*["']([a-f0-9]{10,})["']/)?.[1]
+      || html.match(/nonce['"]\s*:\s*['"]([a-f0-9]+)['"]/)?.[1] || "";
+    const postId = html.match(/["']post["']\s*:\s*["']?(\d+)["']?/)?.[1]
+      || html.match(/post_id\s*=\s*(\d+)/)?.[1] || "";
+    if (nonce && postId) {
+      const cfSession = cfSessionCache.get(WITANIME_BASE);
+      const cookieHdr = cfSession ? { Cookie: cfSession.cookies } : {};
+      try {
+        const r = await fetch(`${WITANIME_BASE}/wp-admin/admin-ajax.php`, {
+          method: "POST",
+          headers: { ...WITANIME_HDRS, "Content-Type": "application/x-www-form-urlencoded", ...cookieHdr },
+          body: new URLSearchParams({ action: "anime_get_servers", post_id: postId, nonce }).toString(),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (r.ok) {
+          const data = await r.text();
+          for (const m of data.matchAll(/(https?:\/\/[^"'<>\s]+)/g)) addUrl(m[1]);
+        }
+      } catch {}
+    }
+  }
+  return urls;
+}
+
+async function getWitanimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `wita:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = witaSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    // Try both title and english title for search
+    let seriesUrl: string | null = null;
+    const sCacheKey = (title + "|" + (english || "")).toLowerCase();
+    const sHit = witaSeriesCache.get(sCacheKey);
+    if (sHit && Date.now() - sHit.ts < SRC_TTL) {
+      seriesUrl = sHit.url;
+    } else {
+      for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
+        seriesUrl = await searchWitanime(q);
+        if (seriesUrl) break;
+      }
+      witaSeriesCache.set(sCacheKey, { url: seriesUrl, ts: Date.now() });
+    }
+    if (!seriesUrl) return [];
+
+    const epUrl = await findWitaEpisodeUrl(seriesUrl, ep);
+    if (!epUrl) return [];
+
+    const serverUrls = await fetchWitaServerUrls(epUrl);
+    if (!serverUrls.length) return [];
+
+    const sources: UnifiedSource[] = serverUrls.map((url, i) => ({
+      name: `ويتأنمي · سيرفر ${i + 1}`,
+      url,
+      quality: "HD",
+      qualityRank: 9,
+      site: "witanime",
+    }));
+
+    witaSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIME3RB.COM scraper  (CF-protected Arabic WordPress anime site)
+//  Same Playwright cookie strategy as witanime.life
+//  Search: /?s={query} or AJAX
+//  Episode URL patterns vary by theme
+// ════════════════════════════════════════════════════════════════════
+const A3RB_BASE  = "https://anime3rb.com";
+const A3RB_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: A3RB_BASE + "/" };
+
+const a3rbSeriesCache = new Map<string, { url: string | null; ts: number }>();
+const a3rbSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAnime3rb(query: string): Promise<string | null> {
+  const html = await cfGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`);
+  if (!html) return null;
+
+  const candidates: Array<{ url: string; score: number }> = [];
+  // Pattern: series/anime pages with slug in URL
+  for (const re of [
+    /href="(https?:\/\/anime3rb\.com\/(?:anime|series)\/([^/"]+)\/?)"/gi,
+    /href="(https?:\/\/anime3rb\.com\/(?:manga|watch|show)\/([^/"]+)\/?)"/gi,
+  ]) {
+    for (const m of html.matchAll(re)) {
+      if (m[2].includes("/page/") || m[2].includes("/feed/")) continue;
+      const slug = decodeURIComponent(m[2]).replace(/-/g, " ");
+      const score = Math.max(similarity(slug, query), asciiSimilarity(m[2], query));
+      candidates.push({ url: m[1], score });
+    }
+  }
+  if (!candidates.length) {
+    // Broad match: any link with title-like text near it
+    for (const m of html.matchAll(/href="(https?:\/\/anime3rb\.com\/[^"]+)"[^>]*>([^<]{3,60})<\/a>/gi)) {
+      const label = m[2].trim();
+      const score = Math.max(similarity(label, query), asciiSimilarity(label, query));
+      if (score > 0.25) candidates.push({ url: m[1], score });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.score > 0.1 ? candidates[0].url : null;
+}
+
+async function getAnime3rbSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `a3rb:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = a3rbSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    let seriesUrl: string | null = null;
+    const sCacheKey = (title + "|" + (english || "")).toLowerCase();
+    const sHit = a3rbSeriesCache.get(sCacheKey);
+    if (sHit && Date.now() - sHit.ts < SRC_TTL) {
+      seriesUrl = sHit.url;
+    } else {
+      for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
+        seriesUrl = await searchAnime3rb(q);
+        if (seriesUrl) break;
+      }
+      a3rbSeriesCache.set(sCacheKey, { url: seriesUrl, ts: Date.now() });
+    }
+    if (!seriesUrl) return [];
+
+    // Fetch series page → find episode link
+    const seriesHtml = await cfGet(seriesUrl);
+    if (!seriesHtml) return [];
+
+    // Find episode link by number
+    let epUrl: string | null = null;
+    const epPatterns = [
+      /href="(https?:\/\/anime3rb\.com\/(?:episode|ep|watch)\/([^/"]+)\/?)"/gi,
+      /href="(https?:\/\/anime3rb\.com\/[^"]+(?:episode|ep|الحلقة)[^"]+)"/gi,
+    ];
+    for (const re of epPatterns) {
+      for (const m of seriesHtml.matchAll(re)) {
+        const slug = decodeURIComponent(m[1]);
+        if (slug.match(new RegExp(`[-/]0*${ep}[-/]?$`)) || slug.endsWith(`-${ep}/`) || slug.includes(`الحلقة-${ep}`)) {
+          epUrl = m[1]; break;
+        }
+      }
+      if (epUrl) break;
+    }
+    if (!epUrl) return [];
+
+    // Fetch episode page via CF bypass
+    const epHtml = await cfGet(epUrl);
+    if (!epHtml) return [];
+
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    const addUrl = (u: string) => { if (u?.startsWith("http") && !seen.has(u)) { seen.add(u); urls.push(u); } };
+
+    for (const m of epHtml.matchAll(/data-(?:src|url|embed)="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
+    for (const m of epHtml.matchAll(/<iframe[^>]+src="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
+    for (const m of epHtml.matchAll(/"(?:file|src|url)"\s*:\s*"(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
+
+    if (!urls.length) return [];
+
+    const sources: UnifiedSource[] = urls.map((url, i) => ({
+      name: `أنمي 3رب · سيرفر ${i + 1}`,
+      url,
+      quality: "HD",
+      qualityRank: 9,
+      site: "anime3rb",
+    }));
+
+    a3rbSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  KAWAII-ANIME.COM scraper  (Next.js Arabic anime — no CF)
+//  Accessible directly; uses Playwright for JS-rendered search results
+//  and network interception to capture m3u8/mp4 URLs from watch page
+// ════════════════════════════════════════════════════════════════════
+const KAWAII_BASE = "https://www.kawaii-anime.com";
+const kawaiiSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getKawaiiAnimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `kawaii:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = kawaiiSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const pw = await import("playwright-core");
+    const browser = await (pw as any).chromium.launch({
+      executablePath: findChromium(),
+      headless: true,
+      args: ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu"],
+    });
+
+    const capturedUrls: string[] = [];
+    const capturedM3u8: string[] = [];
+
+    try {
+      const ctx = await browser.newContext({ userAgent: BROWSER_UA, viewport: { width: 1280, height: 720 } });
+
+      // Intercept video/playlist requests
+      await ctx.route("**/*", async (route: any) => {
+        const url: string = route.request().url();
+        if (url.match(/\.(m3u8|mpd)(\?|$)/i) && !url.includes("/ad")) {
+          if (!capturedM3u8.includes(url)) capturedM3u8.push(url);
+        } else if (url.match(/\.(mp4|webm)(\?|$)/i) && !url.includes("thumb") && !url.includes("poster")) {
+          if (!capturedUrls.includes(url)) capturedUrls.push(url);
+        }
+        await route.continue();
+      });
+
+      const page = await ctx.newPage();
+
+      // 1. Search for anime
+      const query = english || title;
+      await page.goto(`${KAWAII_BASE}/search?q=${encodeURIComponent(query)}`, {
+        waitUntil: "networkidle",
+        timeout: 25000,
+      });
+
+      // 2. Find best matching anime slug from search results
+      const animeSlug: string | null = await page.evaluate(
+        ([t, e]: [string, string | null]) => {
+          // Look for anime cards (runs in browser context)
+          // @ts-ignore - browser globals available in page.evaluate context
+          const cards = document.querySelectorAll("a[href*='/anime/']") as any[];
+          let best: string | null = null;
+          let bestScore = 0;
+          for (const card of cards) {
+            const href: string = card.href || "";
+            if (!href.includes("/anime/")) continue;
+            const slug: string = href.split("/anime/")[1]?.replace(/\//g, "") || "";
+            const cardTitle: string = card.querySelector("h2,h3,h4,[class*='title'],[class*='name']")?.textContent?.trim() || slug.replace(/-/g, " ");
+            const checkAgainst = ([t, e] as Array<string | null>).filter(Boolean) as string[];
+            const score = checkAgainst.reduce((mx: number, q: string) => {
+              const qL = q.toLowerCase();
+              const tL = cardTitle.toLowerCase();
+              if (tL === qL) return Math.max(mx, 1);
+              if (tL.includes(qL) || qL.includes(tL)) return Math.max(mx, 0.85);
+              const tw = tL.split(/\s+/);
+              const qw = qL.split(/\s+/);
+              const matches = qw.filter((w: string) => tw.some((t2: string) => t2 === w || (t2.length >= 4 && w.length >= 4 && (t2.startsWith(w) || w.startsWith(t2))))).length;
+              return Math.max(mx, matches / Math.max(tw.length, qw.length));
+            }, 0);
+            if (score > bestScore) { bestScore = score; best = slug; }
+          }
+          return bestScore > 0.25 ? best : null;
+        },
+        [title, english] as [string, string | null],
+      );
+
+      if (!animeSlug) return [];
+
+      // 3. Navigate to watch page
+      await page.goto(`${KAWAII_BASE}/watch/${animeSlug}/${ep}`, {
+        waitUntil: "networkidle",
+        timeout: 25000,
+      });
+
+      // Wait extra for video sources to load
+      await page.waitForTimeout(4000);
+
+      // 4. Try to find video URLs from page source
+      const pageContent = await page.content();
+      const v = parseVideoUrl(pageContent);
+      if (v) capturedUrls.push(v.url);
+
+    } finally {
+      await browser.close();
+    }
+
+    const allUrls = [...capturedM3u8.map(u => ({ u, isHls: true })), ...capturedUrls.map(u => ({ u, isHls: false }))];
+    if (!allUrls.length) return [];
+
+    const sources: UnifiedSource[] = allUrls.slice(0, 4).map(({ u, isHls }, i) => ({
+      name: `كواي أنمي · ${isHls ? "HLS" : "MP4"} ${i + 1}`,
+      url: u,
+      quality: "HD",
+      qualityRank: 9,
+      site: "kawaii",
+      directUrl: isHls ? `/api/anime/hls-proxy?url=${encodeURIComponent(u)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}` : `/api/anime/video-proxy?url=${encodeURIComponent(u)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`,
+      directType: isHls ? "hls" : "mp4",
+    }));
+
+    kawaiiSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -3238,6 +3793,9 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
       scrapeCached("anime4up",     () => getAnime4upSources(title, english, ep)),
+      scrapeCached("witanime",     () => getWitanimeSources(title, english, ep)),
+      scrapeCached("anime3rb",     () => getAnime3rbSources(title, english, ep)),
+      scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep), false),
     ]);
 
   } catch (e: any) {
@@ -3307,6 +3865,9 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),   SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anime4up":     await runExtract(await race(getAnime4upSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
     res.json({ sources });
