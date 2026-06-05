@@ -115,6 +115,17 @@ function shouldShowSrc(src: FetchedSrc): boolean {
 function normCdnHost(url: string): string {
   if (!url) return "";
   try {
+    // For our proxy URLs (/api/anime/hls-proxy, /api/anime/video-proxy, etc.)
+    // extract the INNER CDN hostname so proxy sources aren't all collapsed to "x.com"
+    if (url.startsWith("/api/anime/")) {
+      const inner = new URL("https://x.com" + url).searchParams.get("url") || "";
+      if (inner) {
+        const h = new URL(inner).hostname.replace(/^www\./, "");
+        return h.replace(/^[a-z]\d*\./, "");
+      }
+      // Unknown proxy path — use the path as unique key
+      return url.split("?")[0];
+    }
     const base = url.startsWith("/") ? "https://x.com" + url : url;
     const host = new URL(base).hostname.replace(/^www\./, "");
     // collapse CDN subdomains like a1.mp4upload.com → mp4upload.com
@@ -1494,11 +1505,8 @@ export default function WatchPage() {
   }
 
   function handleBack() {
-    if (animeId) {
-      navigate(`/anime/${animeId}`);
-    } else {
-      window.history.back();
-    }
+    // Always go back in browser history — never push a new entry (causes infinite loop)
+    window.history.back();
   }
 
   /* ── Track in-flight fetches to prevent duplicate calls ── */
