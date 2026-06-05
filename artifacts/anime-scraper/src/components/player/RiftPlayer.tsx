@@ -77,11 +77,14 @@ interface Props {
   subEnabled?: boolean;
   onSubtitleClick?: () => void;
   onSubSettingsChange?: (s: SubSettings) => void;
+  skipIntro?: { start: number; end: number };
+  skipOutro?: { start: number; end: number };
   onBack?: () => void;
   onPrevEp?: () => void;
   onNextEp?: () => void;
   onRealQuality?: (q: string) => void;
   onTimeUpdate?: (t: number) => void;
+  onDuration?: (d: number) => void;
   onFail?: () => void;
   topSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
@@ -125,7 +128,8 @@ export default function RiftPlayer({
   qualityLabel = "", isHls = false, serverCount = 1, serverIndex = 0,
   downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
   onSubtitleClick, onSubSettingsChange,
-  onBack, onPrevEp, onNextEp, onRealQuality, onTimeUpdate, onFail,
+  skipIntro, skipOutro,
+  onBack, onPrevEp, onNextEp, onRealQuality, onTimeUpdate, onDuration, onFail,
 }: Props) {
 
   const videoRef     = useRef<HTMLVideoElement>(null);
@@ -335,7 +339,7 @@ export default function RiftPlayer({
       if (v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1));
       onTimeUpdate?.(v.currentTime);
     };
-    const onDur   = () => setDuration(v.duration);
+    const onDur   = () => { setDuration(v.duration); if (v.duration > 0) onDuration?.(v.duration); };
     const onWait  = () => setLoading(true);
     const onPlay2 = () => setLoading(false);
     v.addEventListener("play", onPlay); v.addEventListener("pause", onPause);
@@ -393,15 +397,26 @@ export default function RiftPlayer({
   }
 
   /* ── progress bar ── */
+  function calcSeekFrac(clientX: number, clientY: number, r: DOMRect): number {
+    /* When player is CSS-rotated 90°CW (portrait lock), the progress bar is
+       physically vertical on screen: top = 0%, bottom = 100% */
+    if (isPortrait) return Math.max(0, Math.min(1, (clientY - r.top) / r.height));
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  }
   function handlePrgClick(e: React.MouseEvent) {
     e.stopPropagation();
     const bar = progressRef.current; if (!bar) return;
-    const r = bar.getBoundingClientRect();
-    seekFrac((e.clientX - r.left) / r.width);
+    seekFrac(calcSeekFrac(e.clientX, e.clientY, bar.getBoundingClientRect()));
   }
   function handlePrgDown(e: React.MouseEvent) {
     e.stopPropagation(); seekDrag.current = true;
-    const onMv = (ev: MouseEvent) => { const bar = progressRef.current; if (!bar) return; const r = bar.getBoundingClientRect(); seekFrac((ev.clientX - r.left) / r.width); };
+    const portrait = isPortrait;
+    const onMv = (ev: MouseEvent) => {
+      const bar = progressRef.current; if (!bar) return;
+      const r = bar.getBoundingClientRect();
+      if (portrait) seekFrac(Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height)));
+      else           seekFrac(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)));
+    };
     const onUp = () => { seekDrag.current = false; window.removeEventListener("mousemove", onMv); window.removeEventListener("mouseup", onUp); };
     window.addEventListener("mousemove", onMv); window.addEventListener("mouseup", onUp);
   }
@@ -516,9 +531,13 @@ export default function RiftPlayer({
   const pct    = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufPct = duration > 0 ? (buffered   / duration) * 100 : 0;
 
-  /* ── Skip intro/outro visibility ── */
-  const showSkipIntro = duration > 300 && currentTime >= 62 && currentTime <= 148;
-  const showSkipOutro = duration > 0 && currentTime >= duration - 200 && currentTime <= duration - 12;
+  /* ── Skip intro/outro visibility (AniSkip API or heuristic fallback) ── */
+  const showSkipIntro = skipIntro
+    ? currentTime >= skipIntro.start && currentTime <= skipIntro.end
+    : duration > 300 && currentTime >= 62 && currentTime <= 148;
+  const showSkipOutro = skipOutro
+    ? currentTime >= skipOutro.start && currentTime <= skipOutro.end
+    : duration > 0 && currentTime >= duration - 200 && currentTime <= duration - 12;
 
   /* ── portrait style ── */
   const portraitStyle: React.CSSProperties = isPortrait ? {
@@ -940,7 +959,10 @@ export default function RiftPlayer({
                   <div className="flex justify-end px-5 pb-2 pointer-events-auto">
                     {showSkipIntro && (
                       <button
-                        onClick={() => { seekFrac(148 / duration); showControls(); }}
+                        onClick={() => {
+                          const skipTo = skipIntro ? skipIntro.end : 148;
+                          seekFrac(skipTo / duration); showControls();
+                        }}
                         className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
                         style={{ background: "rgba(139,92,246,0.88)", border: "1px solid rgba(167,139,250,0.45)", color: "white", boxShadow: "0 4px 16px rgba(139,92,246,0.40)" }}>
                         تخطي المقدمة ←
@@ -976,13 +998,13 @@ export default function RiftPlayer({
                       e.stopPropagation(); e.preventDefault();
                       touchScrubbing.current = true; setPrgHover(true);
                       const r = e.currentTarget.getBoundingClientRect();
-                      seekFrac((e.touches[0].clientX - r.left) / r.width);
+                      seekFrac(calcSeekFrac(e.touches[0].clientX, e.touches[0].clientY, r));
                     }}
                     onTouchMove={e => {
                       e.stopPropagation(); e.preventDefault();
                       if (!touchScrubbing.current) return;
                       const r = e.currentTarget.getBoundingClientRect();
-                      seekFrac((e.touches[0].clientX - r.left) / r.width);
+                      seekFrac(calcSeekFrac(e.touches[0].clientX, e.touches[0].clientY, r));
                     }}
                     onTouchEnd={e => { e.stopPropagation(); touchScrubbing.current = false; setPrgHover(false); }}
                   >

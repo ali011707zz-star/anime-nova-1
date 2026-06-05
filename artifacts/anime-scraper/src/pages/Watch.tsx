@@ -21,6 +21,10 @@ const ANILIST_Q = `query ($id: Int) {
 
 /* ══════════════════════════════════ TYPES ════════════════════ */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
+interface SkipTimes {
+  op?: { start: number; end: number };
+  ed?: { start: number; end: number };
+}
 interface StreamData {
   servers: Record<Quality, string[]>;
   total: number;
@@ -975,13 +979,13 @@ function MegaEmbedPlayer({
 function EpisodePlayer({
   servers, quality, allServers,
   title, epTitle, cover, ep, totalEps, animeTitle, animeId,
-  initialServer, downloadUrl, subtitleUrl,
+  initialServer, downloadUrl, subtitleUrl, skipTimes,
   onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; epTitle?: string; cover: string; ep: number; totalEps: number; animeTitle: string;
   animeId: number;
-  initialServer?: number; downloadUrl?: string; subtitleUrl?: string;
+  initialServer?: number; downloadUrl?: string; subtitleUrl?: string; skipTimes?: SkipTimes;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
   onTierExhausted?: () => void;
@@ -1371,6 +1375,8 @@ function EpisodePlayer({
               subElapsed={hlsTime + subOffset}
               subSettings={subSettings}
               subEnabled={subState === "ready"}
+              skipIntro={skipTimes?.op}
+              skipOutro={skipTimes?.ed}
               onSubtitleClick={fetchSubtitles}
               onSubSettingsChange={s => setSubSettings(s)}
               onBack={onBack}
@@ -1614,6 +1620,7 @@ export default function WatchPage() {
   const englishParam = sp.get("english") || "";
 
   const [anime,        setAnime]        = useState<any>(null);
+  const [skipTimes,    setSkipTimes]    = useState<SkipTimes>({});
   const [slotStatus,   setSlotStatus]   = useState<Record<string, SlotStatus>>(EMPTY_SLOTS);
   const [slotSources,  setSlotSources]  = useState<Record<string, FetchedSrc[]>>({});
   const [playerServers,setPlayerServers]= useState<Record<Quality, string[]>>({ "1080p FHD": [], "720p HD": [], "360p SD": [] });
@@ -1681,10 +1688,28 @@ export default function WatchPage() {
         if (d) {
           setAnime(d);
           saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0);
+          /* ── Fetch AniSkip timestamps using MAL ID ── */
+          if (d.idMal) {
+            fetch(`https://api.aniskip.com/v2/skip-times/${d.idMal}/${ep}?types[]=op&types[]=ed&episodeLength=0`, {
+              signal: AbortSignal.timeout(6000),
+            })
+              .then(r => r.ok ? r.json() : null)
+              .then((data: any) => {
+                if (!data?.found) return;
+                const st: SkipTimes = {};
+                for (const result of (data.results || [])) {
+                  const iv = result.interval;
+                  if (result.skipType === "op") st.op = { start: iv.startTime, end: iv.endTime };
+                  if (result.skipType === "ed") st.ed = { start: iv.startTime, end: iv.endTime };
+                }
+                setSkipTimes(st);
+              })
+              .catch(() => {});
+          }
         }
       })
       .catch(() => {});
-  }, [animeId]);
+  }, [animeId, ep]);
 
   function goEp(n: number) {
     /* Use full navigation — wouter only tracks pathname, not search; useRef params won't update otherwise */
@@ -1860,6 +1885,7 @@ export default function WatchPage() {
           cover={cover} ep={ep} totalEps={totalEps}
           downloadUrl={playerDlUrl}
           subtitleUrl={playerSubUrl}
+          skipTimes={skipTimes}
           onBack={() => setPhase("picker")}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
