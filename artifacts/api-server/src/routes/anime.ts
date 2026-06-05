@@ -1024,6 +1024,11 @@ async function extractAndCollect(
 ): Promise<void> {
   function collect(s: UnifiedSource) {
     if (!s.directUrl && !s.isEmbed) return;
+    // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
+    if (s.isEmbed) {
+      const eu = (s.directUrl || s.url).toLowerCase();
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h))) return;
+    }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
     if (!s.isEmbed && !isOwnProxy && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
@@ -3478,148 +3483,48 @@ async function getAnime3rbSources(
 
 // ════════════════════════════════════════════════════════════════════
 //  KAWAII-ANIME.COM scraper  (Next.js Arabic anime — no CF)
-//  Accessible directly; uses Playwright for JS-rendered search results
-//  and network interception to capture m3u8/mp4 URLs from watch page
+//  API: GET /api/watch?anilistId={id}&ep={ep}
+//  Returns sources from video.kawaii-anime.com CDN (CORS *, Range: bytes)
+//  AniList ID used directly — no slug lookup needed
 // ════════════════════════════════════════════════════════════════════
 const KAWAII_BASE = "https://www.kawaii-anime.com";
-const kawaiiSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
-
-// ── kawaii-anime.com search cache (slug → title map built from HTML)
-const kawaiiSlugCache = new Map<string, { slug: string | null; ts: number }>();
-
-/** Try to find anime slug by fetching kawaii-anime.com/search HTML (server-rendered list) */
-async function searchKawaii(query: string): Promise<string | null> {
-  const ck = query.toLowerCase();
-  const hit = kawaiiSlugCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
-
-  // kawaii-anime.com is Next.js App Router — search uses useSearchParams (client-side).
-  // Try the RSC stream endpoint: adding Rsc:1 header makes Next.js return a streamed RSC payload
-  // that sometimes includes pre-rendered item list HTML in the component stream.
-  for (const q of [query]) {
-    try {
-      const r = await fetch(`${KAWAII_BASE}/search?q=${encodeURIComponent(q)}`, {
-        headers: {
-          ...BASE_HDRS,
-          Accept: "text/x-component, text/html",
-          Rsc: "1",
-          "Next-Router-State-Tree": '["",[]]',
-          "Next-Router-Prefetch": "1",
-        },
-        signal: AbortSignal.timeout(10000),
-        redirect: "follow",
-      });
-      if (!r.ok) continue;
-      const body = await r.text();
-      if (isCloudflareBlock(body)) continue;
-
-      // Extract /anime/{slug} hrefs from RSC payload
-      const candidates: Array<{ slug: string; score: number }> = [];
-      const re = /\/anime\/([a-z0-9][a-z0-9-]{2,80})/gi;
-      const seen = new Set<string>();
-      for (const m of body.matchAll(re)) {
-        const slug = m[1];
-        if (seen.has(slug)) continue;
-        seen.add(slug);
-        const label = slug.replace(/-/g, " ");
-        const score = Math.max(
-          similarity(label, q.toLowerCase()),
-          asciiSimilarity(slug, q),
-        );
-        candidates.push({ slug, score });
-      }
-      candidates.sort((a, b) => b.score - a.score);
-      if (candidates[0]?.score > 0.2) {
-        const slug = candidates[0].slug;
-        kawaiiSlugCache.set(ck, { slug, ts: Date.now() });
-        return slug;
-      }
-    } catch {}
-  }
-
-  kawaiiSlugCache.set(ck, { slug: null, ts: Date.now() });
-  return null;
-}
 
 async function getKawaiiAnimeSources(
-  title: string, english: string | null, ep: number,
+  _title: string, _english: string | null, ep: number, anilistId?: number,
 ): Promise<UnifiedSource[]> {
-  const ck = `kawaii:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
-  const hit = kawaiiSrcCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
-
+  if (!anilistId) return [];
   try {
-    // 1. Find anime slug
-    let slug: string | null = null;
-    for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
-      slug = await searchKawaii(q);
-      if (slug) break;
-    }
-
-    // Fallback: try constructing slug from title
-    if (!slug) {
-      const derived = (english || title).toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ").trim()
-        .replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-      if (derived.length >= 3) slug = derived;
-    }
-    if (!slug) return [];
-
-    // 2. Fetch watch page — Next.js SSR may include embedded player data
-    const watchUrl = `${KAWAII_BASE}/watch/${slug}/${ep}`;
-    const r = await fetch(watchUrl, {
-      headers: { ...BASE_HDRS, Accept: "text/html", "accept-language": "ar,en-US;q=0.9" },
-      signal: AbortSignal.timeout(12000),
-      redirect: "follow",
+    const apiUrl = `${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`;
+    const r = await fetch(apiUrl, {
+      headers: {
+        ...BASE_HDRS,
+        Accept: "application/json",
+        Referer: KAWAII_BASE + "/",
+      },
+      signal: AbortSignal.timeout(10000),
     });
     if (!r.ok) return [];
-    const html = await r.text();
-    if (isCloudflareBlock(html)) return [];
-
-    // 3. Parse video URLs from server-rendered HTML / embedded JSON
-    const sources: UnifiedSource[] = [];
-    const seen = new Set<string>();
-    const addSrc = (url: string, isHls: boolean, label: string) => {
-      if (!url || seen.has(url)) return;
-      seen.add(url);
-      sources.push({
-        name: label,
-        url,
-        quality: "HD",
-        qualityRank: 9,
-        site: "kawaii",
-        directUrl: isHls
-          ? `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`
-          : `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`,
-        directType: isHls ? "hls" : "mp4",
-      });
+    const data = await r.json() as {
+      sources?: Array<{ url: string; quality?: string; isM3U8?: boolean; type?: string }>;
     };
+    if (!data.sources?.length) return [];
 
-    // HLS playlists
-    for (const m of html.matchAll(/["'`](https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*)["'`]/gi))
-      addSrc(m[1], true, `كواي أنمي · HLS ${sources.length + 1}`);
-
-    // MP4 / video files
-    for (const m of html.matchAll(/["'`](https?:\/\/[^"'`\s]+\.mp4[^"'`\s]*)["'`]/gi)) {
-      if (!m[1].match(/\/(thumb|poster|preview|ads?)\//i)) addSrc(m[1], false, `كواي أنمي · MP4 ${sources.length + 1}`);
-    }
-
-    // Embed iframes from known video hosts
-    for (const m of html.matchAll(/<iframe[^>]+src=["'](https?:\/\/[^"']+)["']/gi)) {
-      const embedUrl = m[1];
-      const v = parseVideoUrl(embedUrl);
-      if (v) addSrc(v.url, v.type === "hls", `كواي أنمي · embed ${sources.length + 1}`);
-    }
-
-    // Generic parseVideoUrl on full page
-    if (!sources.length) {
-      const v = parseVideoUrl(html);
-      if (v) addSrc(v.url, v.type === "hls", `كواي أنمي · فيديو`);
-    }
-
-    if (!sources.length) return [];
-    kawaiiSrcCache.set(ck, { sources, ts: Date.now() });
-    return sources;
+    return data.sources.map((src) => {
+      const isHls = src.isM3U8 === true || src.type === "hls";
+      // Direct MP4: CORS *, no auth, range-supported — no proxy needed
+      const directUrl = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`
+        : src.url;
+      return {
+        name: `كواي أنمي · ${src.quality || "1080p"}`,
+        url: src.url,
+        quality: src.quality || "1080p",
+        qualityRank: 14,
+        site: "kawaii",
+        directUrl,
+        directType: isHls ? "hls" : "mp4",
+      } as UnifiedSource;
+    });
   } catch { return []; }
 }
 
@@ -3630,9 +3535,10 @@ async function getKawaiiAnimeSources(
 //  Frontend waits for [DONE] before rendering all sources at once
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/sources-stream", async (req, res) => {
-  const title   = ((req.query.title   as string) || "").trim();
-  const english = ((req.query.english as string) || "").trim() || null;
-  const ep      = parseInt((req.query.ep as string) || "1");
+  const title     = ((req.query.title   as string) || "").trim();
+  const english   = ((req.query.english as string) || "").trim() || null;
+  const ep        = parseInt((req.query.ep    as string) || "1");
+  const anilistId = parseInt((req.query.anime as string) || "0") || undefined;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -3653,6 +3559,11 @@ router.get("/anime/sources-stream", async (req, res) => {
   function sendSrc(s: UnifiedSource) {
     if (closed) return;
     if (!s.directUrl && !s.isEmbed) return;
+    // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
+    if (s.isEmbed) {
+      const eu = (s.directUrl || s.url).toLowerCase();
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h))) return;
+    }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
     if (!s.isEmbed && !isOwnProxy && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
@@ -3733,7 +3644,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("anime4up",     () => getAnime4upSources(title, english, ep)),
       scrapeCached("witanime",     () => getWitanimeSources(title, english, ep)),
       scrapeCached("anime3rb",     () => getAnime3rbSources(title, english, ep)),
-      scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep), false),
+      scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
     ]);
 
   } catch (e: any) {
@@ -3752,10 +3663,11 @@ router.get("/anime/sources-stream", async (req, res) => {
 //  video URL fetched only when user taps a specific source row.
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/fetch-source", async (req, res) => {
-  const site    = ((req.query.site    as string) || "").trim().toLowerCase();
-  const title   = ((req.query.title   as string) || "").trim();
-  const english = ((req.query.english as string) || "").trim() || null;
-  const ep      = parseInt((req.query.ep as string) || "1");
+  const site      = ((req.query.site    as string) || "").trim().toLowerCase();
+  const title     = ((req.query.title   as string) || "").trim();
+  const english   = ((req.query.english as string) || "").trim() || null;
+  const ep        = parseInt((req.query.ep    as string) || "1");
+  const anilistId = parseInt((req.query.anime as string) || "0") || undefined;
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
@@ -3772,6 +3684,11 @@ router.get("/anime/fetch-source", async (req, res) => {
 
   function collectSrc(s: UnifiedSource) {
     if (!s.directUrl && !s.isEmbed) return;
+    // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
+    if (s.isEmbed) {
+      const eu = (s.directUrl || s.url).toLowerCase();
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h))) return;
+    }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
     if (!s.isEmbed && !isOwnProxy && DEAD_FILE_HOSTS.some(h => checkUrl.toLowerCase().includes(h))) return;
@@ -3805,7 +3722,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anime4up":     await runExtract(await race(getAnime4upSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
     res.json({ sources });

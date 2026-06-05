@@ -49,3 +49,6 @@
 - [NativeVideoPlayer server reset bug](nativevideoplayer-reset.md) — useEffect([quality,servers]) resets currentServer=0 on every new SSE source → infinite error loop; fix: useEffect([quality]) ONLY
 - [anime-time qualityRank](anime-time-rank.md) — anime-time.live yaviidcdn.com HLS returns 404 from hls-proxy; keep qualityRank=2 (720p HD) not 11 (1080p FHD) to avoid blocking reliable sources like OkAnime
 - [Anime4up URL construction](anime4up-url.md) — w1.anime4up.rest: series page shows only 48 recent eps; old-format URL /episode/{romaji-slug}-الحلقة-{N}/ works for ALL episodes (1–1100+); extract romaji slug from old-format visible eps or derive from english title
+- [kawaii-anime.com API](kawaii-api.md) — uses AniList IDs natively; GET /api/watch?anilistId={id}&ep={N} → {sources:[{url,quality,isM3U8,type}]}; CDN video.kawaii-anime.com: CORS *, no auth, range-bytes; pass anilistId from req.query.anime
+- [witanime/anime3rb CF block](witanime-cf.md) — witanime.life and anime3rb.com: CF Managed Challenge blocks ALL datacenter IPs (Replit included); no server-side bypass without headless browser; return empty arrays silently
+- [iframe policy mega+vidmoly only](iframe-policy.md) — sendSrc, collectSrc, and collect in extractAndCollect all filter isEmbed: only mega.nz/mega.co.nz and VIDMOLY_HOSTS pass; all other isEmbed sources dropped

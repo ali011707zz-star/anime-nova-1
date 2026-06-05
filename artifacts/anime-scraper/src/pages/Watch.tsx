@@ -1442,7 +1442,7 @@ export default function WatchPage() {
     const resolvedEnglish = anime?.title?.english  || englishParam || "";
 
     try {
-      const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep) });
+      const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0) });
       const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(25000) });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
@@ -1479,6 +1479,7 @@ export default function WatchPage() {
               title:   titleParam,
               english: englishParam || "",
               ep:      String(ep),
+              anime:   String(animeId || 0),
             });
             const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(25000) });
             const data = await r.json() as { sources?: FetchedSrc[] };
