@@ -29,10 +29,10 @@ function fmtTime(s: number) {
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
-function FlipScreenIcon({ className }: { className?: string }) {
+function FlipScreenIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"
-      strokeLinecap="round" strokeLinejoin="round" className={className}>
+      strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
       <rect x="7" y="1" width="10" height="16" rx="2" />
       <path d="M4 10c0-3.31 2.69-6 6-6" />
       <polyline points="2 8 4 10 6 8" />
@@ -623,24 +623,23 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── lock badge ── */}
-        {isLocked && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[45] flex items-center gap-2 px-4 py-2 rounded-full pointer-events-none"
-            style={{ background: GLASS_PANEL, border: "1px solid rgba(251,191,36,0.40)", backdropFilter: GLASS_BLUR, boxShadow: "0 2px 16px rgba(0,0,0,0.60)" }}>
-            <Lock className="w-3.5 h-3.5 text-amber-300" />
-            <span className="text-amber-200/90 text-[12px] font-black font-['Cairo']">الشاشة مقفلة</span>
-          </div>
-        )}
-
-        {/* ── unlock button ── */}
+        {/* ── lock badge + unlock — both follow showCtrl ── */}
         <AnimatePresence>
-          {isLocked && (
-            <motion.div key="locked" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 z-40 flex items-center justify-center pointer-events-auto"
+          {isLocked && showCtrl && (
+            <motion.div key="lock-ui" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 z-40 flex flex-col items-center pointer-events-auto"
+              style={{ paddingTop: "max(20px, env(safe-area-inset-top))" }}
               onClick={e => e.stopPropagation()}>
+              {/* badge at top */}
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full"
+                style={{ background: "rgba(0,0,0,0.60)", border: "1px solid rgba(251,191,36,0.35)", backdropFilter: "blur(12px)" }}>
+                <Lock className="w-3.5 h-3.5 text-amber-300" />
+                <span className="text-amber-200/90 text-[12px] font-black font-['Cairo']">الشاشة مقفلة</span>
+              </div>
+              {/* unlock button below */}
               <button onClick={() => setIsLocked(false)}
-                className="flex items-center gap-2.5 px-6 py-3 rounded-2xl active:scale-90 transition-transform"
-                style={{ background: GLASS_PANEL, border: "1.5px solid rgba(251,191,36,0.50)", backdropFilter: GLASS_BLUR, boxShadow: "0 4px 24px rgba(0,0,0,0.60)" }}>
+                className="mt-4 flex items-center gap-2.5 px-6 py-3 rounded-2xl active:scale-90 transition-transform"
+                style={{ background: "rgba(0,0,0,0.65)", border: "1.5px solid rgba(251,191,36,0.45)", backdropFilter: "blur(14px)" }}>
                 <Unlock className="w-5 h-5 text-amber-300" />
                 <span className="text-amber-100 text-[14px] font-black font-['Cairo']">اضغط لفتح القفل</span>
               </button>
@@ -664,15 +663,15 @@ export default function RiftPlayer({
                 className="shrink-0 pointer-events-auto"
                 dir="ltr"
                 style={{
-                  background: `linear-gradient(180deg, ${GLASS_PANEL} 0%, rgba(0,0,0,0.18) 80%, transparent 100%)`,
-                  backdropFilter: GLASS_BLUR,
+                  background: `linear-gradient(180deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.28) 70%, transparent 100%)`,
                   paddingTop: "max(16px, env(safe-area-inset-top))",
-                  paddingBottom: 20,
+                  paddingBottom: 22,
                   paddingLeft: 14,
                   paddingRight: 14,
-                  borderBottom: `1px solid ${GLASS_BORDER}`,
                 }}
                 onClick={e => e.stopPropagation()}
+                onTouchStart={e => e.stopPropagation()}
+                onTouchEnd={e => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between gap-3">
                   {/* LEFT: title block */}
@@ -713,93 +712,79 @@ export default function RiftPlayer({
                       <button onClick={onSubtitleClick}
                         className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
                         style={subEnabled
-                          ? { background: "rgba(139,92,246,0.35)", border: "1px solid rgba(139,92,246,0.60)", backdropFilter: "blur(14px)" }
-                          : GLASS_BTN}>
-                        {/* CC icon */}
+                          ? { background: "rgba(139,92,246,0.35)", border: "1px solid rgba(139,92,246,0.55)" }
+                          : { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
                           strokeLinecap="round" strokeLinejoin="round" className="w-[15px] h-[15px]"
                           style={{ color: subEnabled ? "#c4b5fd" : "rgba(255,255,255,0.65)" }}>
                           <rect x="2" y="5" width="20" height="14" rx="3" />
-                          <path d="M8 12c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1" />
-                          <path d="M13 12c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1" />
-                          <path d="M7 10h2.5" />
-                          <path d="M12 10h2.5" />
+                          <path d="M7 10h2.5M7 14h2.5" />
+                          <path d="M12 10h2.5M12 14h2.5" />
                         </svg>
                       </button>
                     )}
+                    {/* Flip screen button — restored at top bar */}
+                    <button onClick={toggleRotation}
+                      className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
+                      style={isPortrait
+                        ? { background: "rgba(139,92,246,0.30)", border: "1px solid rgba(139,92,246,0.55)" }
+                        : { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
+                      <FlipScreenIcon className="w-[16px] h-[16px]"
+                        style={{ color: isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
+                    </button>
                     <button onClick={takeScreenshot}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                      style={GLASS_BTN}>
+                      style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
                       <Camera className="w-[15px] h-[15px] text-white/65" />
                     </button>
                     <button onClick={onBack}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(239,68,68,0.14)", border: "1px solid rgba(239,68,68,0.28)", backdropFilter: "blur(14px)" }}>
+                      style={{ background: "rgba(239,68,68,0.14)", border: "1px solid rgba(239,68,68,0.28)" }}>
                       <X className="w-[15px] h-[15px] text-red-400/80" />
                     </button>
                   </div>
                 </div>
               </div>
 
-              {/* ════ CENTER CONTROLS ════ */}
-              <div className="flex-1 flex items-center justify-center pointer-events-auto"
-                onClick={e => e.stopPropagation()}>
-                <div className="flex items-center" style={{ gap: 48 }}>
-
-                  {/* Rewind 10s */}
-                  <button onClick={() => { skip(-10); showControls(); }}
-                    className="relative flex items-center justify-center active:scale-90 transition-transform"
-                    style={{ width: 56, height: 56 }}>
-                    <RotateCcw className="w-14 h-14 text-white/80" strokeWidth={1.3} />
-                    <span className="absolute text-white font-black font-mono leading-none" style={{ fontSize: 13, marginTop: 2 }}>10</span>
-                  </button>
-
-                  {/* Play / Pause */}
-                  <button onClick={togglePlay}
-                    className="flex items-center justify-center active:scale-90 transition-transform"
-                    style={{
-                      width: 72, height: 72, borderRadius: "50%",
-                      background: GLASS_PANEL,
-                      border: "2px solid rgba(255,255,255,0.55)",
-                      backdropFilter: GLASS_BLUR,
-                      boxShadow: "0 8px 32px rgba(0,0,0,0.50), 0 0 0 6px rgba(255,255,255,0.04)",
-                    }}>
-                    <AnimatePresence mode="wait">
-                      {loading && !error ? (
-                        <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
-                          <div className="w-6 h-6 rounded-full border-2 border-white/25 border-t-white/80 animate-spin" />
-                        </motion.div>
-                      ) : playing ? (
-                        <motion.div key="p" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
-                          <Pause className="w-7 h-7 text-white fill-white" />
-                        </motion.div>
-                      ) : (
-                        <motion.div key="pl" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
-                          <Play className="w-7 h-7 text-white fill-white ml-1" />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </button>
-
-                  {/* Forward 10s */}
-                  <button onClick={() => { skip(10); showControls(); }}
-                    className="relative flex items-center justify-center active:scale-90 transition-transform"
-                    style={{ width: 56, height: 56 }}>
-                    <RotateCw className="w-14 h-14 text-white/80" strokeWidth={1.3} />
-                    <span className="absolute text-white font-black font-mono leading-none" style={{ fontSize: 13, marginTop: 2 }}>10</span>
-                  </button>
-                </div>
+              {/* ════ CENTER — big play/pause only ════ */}
+              <div className="flex-1 flex items-center justify-center pointer-events-none">
+                <button onClick={togglePlay}
+                  onTouchStart={e => e.stopPropagation()}
+                  onTouchEnd={e => e.stopPropagation()}
+                  className="flex items-center justify-center active:scale-90 transition-transform pointer-events-auto"
+                  style={{
+                    width: 72, height: 72, borderRadius: "50%",
+                    background: "rgba(0,0,0,0.52)",
+                    border: "2px solid rgba(255,255,255,0.50)",
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.55), 0 0 0 6px rgba(255,255,255,0.04)",
+                  }}>
+                  <AnimatePresence mode="wait">
+                    {loading && !error ? (
+                      <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
+                        <div className="w-6 h-6 rounded-full border-2 border-white/25 border-t-white/80 animate-spin" />
+                      </motion.div>
+                    ) : playing ? (
+                      <motion.div key="p" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
+                        <Pause className="w-7 h-7 text-white fill-white" />
+                      </motion.div>
+                    ) : (
+                      <motion.div key="pl" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
+                        <Play className="w-7 h-7 text-white fill-white ml-1" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </button>
               </div>
 
               {/* ════ BOTTOM SECTION — glass ════ */}
               <div
                 className="shrink-0 pointer-events-auto"
                 style={{
-                  background: `linear-gradient(0deg, ${GLASS_PANEL} 0%, rgba(0,0,0,0.18) 80%, transparent 100%)`,
-                  backdropFilter: GLASS_BLUR,
-                  borderTop: `1px solid ${GLASS_BORDER}`,
+                  background: `linear-gradient(0deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.28) 70%, transparent 100%)`,
                 }}
                 onClick={e => e.stopPropagation()}
+                onTouchStart={e => e.stopPropagation()}
+                onTouchEnd={e => e.stopPropagation()}
               >
                 {/* ── Progress bar ── */}
                 <div className="px-5 pt-3 pb-1">
@@ -861,11 +846,11 @@ export default function RiftPlayer({
                         className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                         <span className="px-2 py-[3px] rounded-lg font-mono text-[11px] font-black leading-none"
                           style={{
-                            background: speed !== 1 ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.07)",
-                            color: speed !== 1 ? "#c4b5fd" : "rgba(255,255,255,0.45)",
-                            border: speed !== 1 ? "1px solid rgba(139,92,246,0.35)" : "1px solid rgba(255,255,255,0.10)",
+                            background: (longPress || speed !== 1) ? "rgba(251,191,36,0.22)" : "rgba(255,255,255,0.07)",
+                            color: (longPress || speed !== 1) ? "#fde68a" : "rgba(255,255,255,0.45)",
+                            border: (longPress || speed !== 1) ? "1px solid rgba(251,191,36,0.40)" : "1px solid rgba(255,255,255,0.10)",
                           }}>
-                          ×{speed}
+                          ×{longPress ? 2 : speed}
                         </span>
                       </button>
                       <AnimatePresence>
@@ -931,19 +916,17 @@ export default function RiftPlayer({
                       className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       <Lock className="w-[16px] h-[16px] text-white/45" />
                     </button>
-                    <button onClick={isPortrait ? toggleRotation : toggleFs}
+                    <button onClick={toggleFs}
                       className="flex items-center gap-1.5 px-2.5 h-9 rounded-xl active:scale-90 transition-all duration-150"
                       style={isFs
-                        ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)", backdropFilter: "blur(14px)" }
+                        ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)" }
                         : GLASS_BTN_SM}>
-                      {isPortrait
-                        ? <Maximize2 className="w-4 h-4 text-white/80" />
-                        : isFs
-                          ? <Minimize2 className="w-4 h-4 text-violet-300" />
-                          : <Maximize2 className="w-4 h-4 text-white/80" />}
+                      {isFs
+                        ? <Minimize2 className="w-4 h-4 text-violet-300" />
+                        : <Maximize2 className="w-4 h-4 text-white/80" />}
                       <span className="font-['Cairo'] font-black leading-none"
                         style={{ fontSize: 10, color: isFs ? "rgba(196,181,253,0.90)" : "rgba(255,255,255,0.60)" }}>
-                        {isPortrait ? "أفقي" : isFs ? "تصغير" : "ملء"}
+                        {isFs ? "تصغير" : "ملء"}
                       </span>
                     </button>
                   </div>
