@@ -974,12 +974,13 @@ function MegaEmbedPlayer({
 /* ══════════════════════════════════ EPISODE PLAYER ═════════ */
 function EpisodePlayer({
   servers, quality, allServers,
-  title, epTitle, cover, ep, totalEps, animeTitle,
+  title, epTitle, cover, ep, totalEps, animeTitle, animeId,
   initialServer, downloadUrl, subtitleUrl,
   onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; epTitle?: string; cover: string; ep: number; totalEps: number; animeTitle: string;
+  animeId: number;
   initialServer?: number; downloadUrl?: string; subtitleUrl?: string;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
@@ -990,6 +991,13 @@ function EpisodePlayer({
   const [realQuality,  setRealQuality]    = useState<string | null>(null);
   const [hlsTime,      setHlsTime]        = useState(0);
   const isFirstQualityMount = useRef(true);
+
+  /* ── Watch progress: save/resume ── */
+  const progressKey = `wp-${animeId}-${ep}`;
+  const [resumeTime] = useState(() => {
+    try { return parseFloat(localStorage.getItem(progressKey) || "0") || 0; } catch { return 0; }
+  });
+  const lastSaveTs = useRef(0);
 
   /* Detect if all quality tiers have the same server list (flat mode → hide quality picker) */
   const q1 = allServers["1080p FHD"] || [];
@@ -1013,7 +1021,15 @@ function EpisodePlayer({
 
   /* ── Stable HLS callbacks ── */
   const handleRealQuality = useCallback((q: string) => setRealQuality(q), []);
-  const handleHlsTime     = useCallback((t: number) => setHlsTime(t), []);
+  const handleHlsTime = useCallback((t: number) => {
+    setHlsTime(t);
+    const now = Date.now();
+    if (t > 60 && now - lastSaveTs.current > 5000) {
+      lastSaveTs.current = now;
+      try { localStorage.setItem(progressKey, String(Math.floor(t))); } catch {}
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progressKey]);
 
   /* ── Reset on quality tier change only ── */
   useEffect(() => {
@@ -1350,6 +1366,7 @@ function EpisodePlayer({
               serverCount={servers.length}
               serverIndex={currentServer}
               downloadUrl={downloadUrl}
+              resumeTime={resumeTime > 10 ? resumeTime : undefined}
               subCues={subState === "ready" && subCues.length > 0 ? subCues : undefined}
               subElapsed={hlsTime + subOffset}
               subSettings={subSettings}
@@ -1839,6 +1856,7 @@ export default function WatchPage() {
           title={title}
           epTitle={arEpTitle || epTitle}
           animeTitle={animeTitle}
+          animeId={animeId}
           cover={cover} ep={ep} totalEps={totalEps}
           downloadUrl={playerDlUrl}
           subtitleUrl={playerSubUrl}
