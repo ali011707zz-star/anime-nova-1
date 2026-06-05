@@ -3901,6 +3901,27 @@ router.get("/anime/translate", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  proxy-text  GET /api/anime/proxy-text?url=
+//  Fetches a text file (VTT/SRT/plain) server-side and returns body
+//  Used for fetching subtitle files that block browser CORS requests
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/proxy-text", async (req, res) => {
+  const url = String(req.query.url || "");
+  if (!url.startsWith("http")) { res.status(400).json({ error: "bad url" }); return; }
+  try {
+    const r = await cfGet(url, { headers: { Accept: "text/plain,text/vtt,*/*" } });
+    if (!r.ok) { res.status(502).json({ error: `upstream ${r.status}` }); return; }
+    const text = await r.text();
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(text);
+  } catch (e: any) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════
 //  translate-vtt  GET /api/anime/translate-vtt?url=&from=en&to=ar
 //  Fetches a VTT/SRT subtitle file and returns translated cue array
 // ════════════════════════════════════════════════════════════════════
