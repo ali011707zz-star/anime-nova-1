@@ -722,7 +722,6 @@ export default function RiftPlayer({
                       background: "rgba(0,0,0,0.52)",
                       border: "2px solid rgba(255,255,255,0.50)",
                       backdropFilter: "blur(10px)",
-                      boxShadow: "0 0 0 5px rgba(255,255,255,0.06)",
                     }}>
                     <AnimatePresence mode="wait">
                       {loading && !error ? (
@@ -899,15 +898,17 @@ export default function RiftPlayer({
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       <Lock className="w-[17px] h-[17px] text-white/45" />
                     </button>
-                    {/* Fullscreen — prominent with label */}
-                    <button onClick={toggleFs}
+                    {/* Fullscreen — portrait: rotate to landscape (CSS); landscape: native fullscreen */}
+                    <button onClick={isPortrait ? toggleRotation : toggleFs}
                       className="flex flex-col items-center justify-center gap-[3px] w-12 h-11 rounded-xl active:bg-white/10 transition-colors">
-                      {isFs
-                        ? <Minimize2 className="w-[18px] h-[18px] text-white/65" />
-                        : <Maximize2 className="w-[18px] h-[18px] text-white/65" />}
+                      {isPortrait
+                        ? <Maximize2 className="w-[18px] h-[18px] text-white/65" />
+                        : isFs
+                          ? <Minimize2 className="w-[18px] h-[18px] text-white/65" />
+                          : <Maximize2 className="w-[18px] h-[18px] text-white/65" />}
                       <span className="font-['Cairo'] font-black text-white/32 leading-none"
                         style={{ fontSize: 8 }}>
-                        {isFs ? "تصغير" : "تكبير"}
+                        {isPortrait ? "أفقي" : isFs ? "تصغير" : "تكبير"}
                       </span>
                     </button>
                   </div>

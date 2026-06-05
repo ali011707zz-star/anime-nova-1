@@ -3558,7 +3558,7 @@ async function getKawaiiAnimeSources(
         name: `كواي أنمي · ${src.quality || "1080p"} · إنجليزي`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 9,
+        qualityRank: 7,
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
@@ -3890,6 +3890,100 @@ router.get("/anime/translate", async (req, res) => {
     translateCache.set(cacheKey, translated);
     res.json({ translated });
   } catch { res.json({ translated: text }); }
+});
+
+
+// ════════════════════════════════════════════════════════════════════
+//  translate-vtt  GET /api/anime/translate-vtt?url=&from=en&to=ar
+//  Fetches a VTT/SRT subtitle file and returns translated cue array
+// ════════════════════════════════════════════════════════════════════
+
+/** Parse a VTT or SRT file into timing + plain-text pairs */
+function parseVttCues(text: string): Array<{ timing: string; rawText: string }> {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const blocks = normalized.split(/\n{2,}/);
+  const cues: Array<{ timing: string; rawText: string }> = [];
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (!trimmed || /^WEBVTT|^NOTE|^STYLE/.test(trimmed)) continue;
+    const lines = trimmed.split("\n");
+    const timingIdx = lines.findIndex(l => l.includes("-->"));
+    if (timingIdx === -1) continue;
+    // Keep only the timestamp part (drop VTT cue settings like "align:start")
+    const timingFull = lines[timingIdx];
+    const timing = timingFull.split("-->").map(s => s.trim().split(/\s/)[0]).join(" --> ");
+    const rawText = lines
+      .slice(timingIdx + 1)
+      .join(" ")
+      .replace(/<[^>]+>/g, "")    // strip HTML/VTT tags
+      .replace(/\{[^}]+\}/g, "")  // strip ASS/SSA tags
+      .trim();
+    if (!rawText) continue;
+    cues.push({ timing, rawText });
+  }
+  return cues;
+}
+
+/** Translate a batch of texts with Google Translate (unofficial gtx endpoint) */
+async function translateBatchGtx(texts: string[], from: string, to: string): Promise<string[]> {
+  const SEP = " |||SEP||| ";
+  const joined = texts.join(SEP);
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(joined)}`;
+    const r = await fetch(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return texts;
+    const data = await r.json() as any;
+    const translated: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || joined;
+    // Split on separator — tolerate minor whitespace drift from translator
+    const parts = translated.split(/\s*\|\|\|SEP\|\|\|\s*/);
+    if (parts.length !== texts.length) return texts; // mismatch → return originals
+    return parts.map(p => p.trim());
+  } catch { return texts; }
+}
+
+const translateVttCache = new Map<string, { cues: Array<{ timing: string; text: string }>; ts: number }>();
+
+router.get("/anime/translate-vtt", async (req, res) => {
+  const url  = ((req.query.url  as string) || "").trim();
+  const from = ((req.query.from as string) || "en").trim();
+  const to   = ((req.query.to   as string) || "ar").trim();
+  if (!url) { res.status(400).json({ error: "url required" }); return; }
+
+  const cacheKey = `${from}→${to}:${url}`;
+  const cached = translateVttCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 3_600_000) {
+    res.json({ cues: cached.cues }); return;
+  }
+
+  try {
+    const r = await fetch(url, {
+      headers: { ...BASE_HDRS, Accept: "text/vtt,text/plain,*/*" },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) { res.status(502).json({ error: `Subtitle fetch failed: ${r.status}` }); return; }
+    const vttText = await r.text();
+    const cues = parseVttCues(vttText);
+    if (!cues.length) { res.json({ cues: [] }); return; }
+
+    // Translate in batches of 20 cues
+    const BATCH = 20;
+    const translatedTexts: string[] = [];
+    for (let i = 0; i < cues.length; i += BATCH) {
+      const batch = cues.slice(i, i + BATCH).map(c => c.rawText);
+      const trans = await translateBatchGtx(batch, from, to);
+      translatedTexts.push(...trans);
+    }
+
+    const result = cues.map((c, i) => ({
+      timing: c.timing,
+      text: translatedTexts[i] ?? c.rawText,
+    }));
+
+    translateVttCache.set(cacheKey, { cues: result, ts: Date.now() });
+    res.json({ cues: result });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "Translation failed" });
+  }
 });
 
 
