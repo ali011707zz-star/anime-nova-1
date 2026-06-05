@@ -606,18 +606,29 @@ export default function RiftPlayer({
         </AnimatePresence>
 
         {/* ════════════════════════════════════════
-            LOCKED STATE
+            LOCKED STATE — always-visible badge + unlock button
         ════════════════════════════════════════ */}
+
+        {/* Persistent lock badge — top-center, always shown while locked */}
+        {isLocked && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[45] flex items-center gap-2 px-4 py-2 rounded-full pointer-events-none"
+            style={{ background: "rgba(0,0,0,0.80)", border: "1px solid rgba(251,191,36,0.40)", backdropFilter: "blur(14px)", boxShadow: "0 2px 16px rgba(0,0,0,0.60)" }}>
+            <Lock className="w-3.5 h-3.5 text-amber-300" />
+            <span className="text-amber-200/90 text-[12px] font-black font-['Cairo']">الشاشة مقفلة</span>
+          </div>
+        )}
+
+        {/* Unlock button — tap to unlock */}
         <AnimatePresence>
           {isLocked && (
             <motion.div key="locked" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 z-40 flex items-center justify-end pr-6 pointer-events-auto"
+              className="absolute inset-0 z-40 flex items-center justify-center pointer-events-auto"
               onClick={e => e.stopPropagation()}>
               <button onClick={() => setIsLocked(false)}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-full active:scale-90 transition-transform"
-                style={{ background: "rgba(0,0,0,0.70)", border: "1px solid rgba(255,255,255,0.22)", backdropFilter: "blur(10px)" }}>
-                <Unlock className="w-4 h-4 text-white/80" />
-                <span className="text-white/70 text-[12px] font-bold font-['Cairo']">فتح القفل</span>
+                className="flex items-center gap-2.5 px-6 py-3 rounded-2xl active:scale-90 transition-transform"
+                style={{ background: "rgba(15,15,15,0.85)", border: "1.5px solid rgba(251,191,36,0.50)", backdropFilter: "blur(16px)", boxShadow: "0 4px 24px rgba(0,0,0,0.60)" }}>
+                <Unlock className="w-5 h-5 text-amber-300" />
+                <span className="text-amber-100 text-[14px] font-black font-['Cairo']">اضغط لفتح القفل</span>
               </button>
             </motion.div>
           )}
@@ -857,7 +868,7 @@ export default function RiftPlayer({
                   </div>
 
                   {/* ─ Center: [◄10] [⏸] [10►] ─ */}
-                  <div className="flex items-center gap-2 mx-2 shrink-0">
+                  <div className="flex items-center gap-3 mx-5 shrink-0">
                     {/* Rewind 10s */}
                     <button
                       onClick={() => { skip(-10); showControls(); }}
@@ -898,17 +909,18 @@ export default function RiftPlayer({
                       className="w-11 h-11 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       <Lock className="w-[17px] h-[17px] text-white/45" />
                     </button>
-                    {/* Fullscreen — portrait: rotate to landscape (CSS); landscape: native fullscreen */}
+                    {/* Fullscreen — portrait: rotate to landscape; landscape: native fullscreen */}
                     <button onClick={isPortrait ? toggleRotation : toggleFs}
-                      className="flex flex-col items-center justify-center gap-[3px] w-12 h-11 rounded-xl active:bg-white/10 transition-colors">
+                      className="flex items-center gap-1.5 px-2.5 h-9 rounded-xl active:scale-90 transition-all duration-150"
+                      style={{ background: isFs ? "rgba(251,191,36,0.18)" : "rgba(255,255,255,0.10)", border: `1px solid ${isFs ? "rgba(251,191,36,0.45)" : "rgba(255,255,255,0.20)"}` }}>
                       {isPortrait
-                        ? <Maximize2 className="w-[18px] h-[18px] text-white/65" />
+                        ? <Maximize2 className="w-4 h-4 text-white/80" />
                         : isFs
-                          ? <Minimize2 className="w-[18px] h-[18px] text-white/65" />
-                          : <Maximize2 className="w-[18px] h-[18px] text-white/65" />}
-                      <span className="font-['Cairo'] font-black text-white/32 leading-none"
-                        style={{ fontSize: 8 }}>
-                        {isPortrait ? "أفقي" : isFs ? "تصغير" : "تكبير"}
+                          ? <Minimize2 className="w-4 h-4 text-amber-300" />
+                          : <Maximize2 className="w-4 h-4 text-white/80" />}
+                      <span className="font-['Cairo'] font-black leading-none"
+                        style={{ fontSize: 10, color: isFs ? "rgba(251,191,36,0.90)" : "rgba(255,255,255,0.60)" }}>
+                        {isPortrait ? "أفقي" : isFs ? "تصغير" : "ملء"}
                       </span>
                     </button>
                   </div>
