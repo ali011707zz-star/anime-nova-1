@@ -31,15 +31,16 @@ const PAGE_SIZE = 100;
 
 /* ── Episode Row ── */
 function EpisodeRow({
-  n, anime, epData, animeId, watched, commentCount, onToggleWatched, onWatch, onComment
+  n, anime, epData, animeId, watched, commentCount, arEpTitle, onToggleWatched, onWatch, onComment
 }: {
   n: number; anime: any; epData: any; animeId: string;
-  watched: boolean; commentCount: number;
+  watched: boolean; commentCount: number; arEpTitle?: string;
   onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
 }) {
   const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
   const epTitle = ep?.title || ep?.title_romanji || null;
+  const displayTitle = arEpTitle || epTitle;
   const durationMin = anime?.duration || 24;
   const dur = durationMin >= 60
     ? `${Math.floor(durationMin / 60)}:${String(durationMin % 60).padStart(2, "0")}:00`
@@ -75,8 +76,10 @@ function EpisodeRow({
         <p className={`text-[13px] font-black font-['Cairo'] ${watched ? "text-primary/80" : "text-white/90"}`}>
           الحلقة {n}
         </p>
-        {epTitle ? (
-          <p className="text-[9px] text-white/35 font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed">{epTitle}</p>
+        {displayTitle ? (
+          <p className={`text-[9px] font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed ${arEpTitle ? "text-white/45" : "text-white/30"}`} dir="auto">
+            {displayTitle}
+          </p>
         ) : (
           <p className="text-[9px] text-white/20 font-['Cairo'] mt-0.5 line-clamp-1">{anime?.title?.romaji}</p>
         )}
@@ -213,6 +216,8 @@ export default function EpisodeListPage() {
   const [watched, setWatched] = useState<Set<number>>(new Set());
   const [activeCommentEp, setActiveCommentEp] = useState<number | null>(null);
   const [epCommentCounts, setEpCommentCounts] = useState<Record<number, number>>({});
+  const [arEpTitles, setArEpTitles] = useState<Record<number, string>>({});
+  const translateCtrl = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!params.id) return;
@@ -223,6 +228,7 @@ export default function EpisodeListPage() {
     setWatched(getWatched(params.id));
     setEpCommentCounts({});
     setActiveCommentEp(null);
+    setArEpTitles({});
 
     fetch("https://graphql.anilist.co", {
       method: "POST",
@@ -299,6 +305,61 @@ export default function EpisodeListPage() {
     const start = (currentPage - 1) * PAGE_SIZE;
     return allEps.slice(start, start + PAGE_SIZE);
   }, [allEps, filtered, isSearching, currentPage]);
+
+  /* ── Load cached Arabic titles + translate missing ones per page ── */
+  useEffect(() => {
+    if (!params.id || !displayedEps.length) return;
+
+    // 1. Load already-cached titles from localStorage
+    const cached: Record<number, string> = {};
+    for (const n of displayedEps) {
+      const v = localStorage.getItem(`ep-title-ar-${params.id}-${n}`);
+      if (v) cached[n] = v;
+    }
+    if (Object.keys(cached).length > 0) {
+      setArEpTitles(prev => ({ ...prev, ...cached }));
+    }
+
+    // 2. Collect untranslated English titles for batch translation
+    const toTranslate: { n: number; title: string }[] = [];
+    for (const n of displayedEps) {
+      if (cached[n]) continue; // already have Arabic
+      // Get English title from Jikan epData
+      const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
+      const engTitle = ep?.title || ep?.title_romanji || null;
+      if (engTitle) toTranslate.push({ n, title: engTitle });
+    }
+    if (!toTranslate.length) return;
+
+    // 3. Batch-translate (join with separator, translate once, split back)
+    if (translateCtrl.current) translateCtrl.current.abort();
+    const ctrl = new AbortController();
+    translateCtrl.current = ctrl;
+
+    const SEP = "\n§§§\n";
+    const combined = toTranslate.map(t => t.title).join(SEP);
+    fetch(`/api/anime/translate?text=${encodeURIComponent(combined)}&from=en&to=ar`, { signal: ctrl.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then((d: any) => {
+        if (!d?.translated) return;
+        const parts: string[] = d.translated.split(/\n§§§\n|\n§§§|\n ---§§§--- \n/);
+        const updates: Record<number, string> = {};
+        toTranslate.forEach((t, i) => {
+          const ar = parts[i]?.trim();
+          if (ar && ar.length > 1 && ar !== t.title) {
+            localStorage.setItem(`ep-title-ar-${params.id}-${t.n}`, ar);
+            updates[t.n] = ar;
+          }
+        });
+        if (Object.keys(updates).length > 0) {
+          setArEpTitles(prev => ({ ...prev, ...updates }));
+        }
+      })
+      .catch(() => {});
+
+    return () => ctrl.abort();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayedEps, epData, params.id]);
 
   if (loading) return (
     <div className="bg-[#09090B] min-h-screen flex items-center justify-center">
@@ -412,6 +473,7 @@ export default function EpisodeListPage() {
               animeId={params.id!}
               watched={watched.has(n)}
               commentCount={epCommentCounts[n] ?? getEpComments(params.id!, n).length}
+              arEpTitle={arEpTitles[n]}
               onToggleWatched={toggleWatched}
               onWatch={watchEp}
               onComment={openComment}

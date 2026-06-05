@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import {
   ChevronRight, Play, Star, Bookmark, X,
-  Loader2, Calendar, Tv, Clock, Users, ChevronDown,
+  Calendar, Tv, Clock, Users, ChevronDown,
   MessageCircle, Send, Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -20,6 +20,12 @@ query ($id: Int) {
     characters(perPage: 8, sort: [ROLE, RELEVANCE]) {
       edges { node { id name { full } image { large } } }
     }
+    relations {
+      edges {
+        relationType
+        node { id title { romaji } coverImage { large } format averageScore type }
+      }
+    }
     recommendations(perPage: 6, sort: [RATING_DESC]) {
       nodes {
         mediaRecommendation {
@@ -29,6 +35,13 @@ query ($id: Int) {
     }
   }
 }`;
+
+const REL_TYPE: Record<string, string> = {
+  SEQUEL: "تكملة", PREQUEL: "مقدمة", SIDE_STORY: "قصة جانبية",
+  PARENT: "أصل", SPIN_OFF: "فرع", ALTERNATIVE: "بديل",
+  ADAPTATION: "تكيّف", SUMMARY: "ملخص",
+};
+const REL_SHOW = new Set(["SEQUEL", "PREQUEL", "SIDE_STORY", "SPIN_OFF", "PARENT", "ALTERNATIVE"]);
 
 const STATUS: Record<string, { label: string; color: string }> = {
   RELEASING:        { label: "يُبث الآن",  color: "text-emerald-400 bg-emerald-500/15 border-emerald-500/25" },
@@ -64,7 +77,6 @@ export default function AnimeDetail() {
   const [newComment, setNewComment]   = useState("");
   const [saved, setSaved]             = useState(false);
   const [descAr, setDescAr]           = useState<string | null>(null);
-  const [translating, setTranslating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -91,7 +103,6 @@ export default function AnimeDetail() {
         .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
         .replace(/\s+/g," ").trim();
       const raw = stripped.substring(0, 480);
-      setTranslating(true);
       (async () => {
         try {
           const r = await fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}`);
@@ -101,7 +112,6 @@ export default function AnimeDetail() {
             localStorage.setItem(`desc-ar-${params.id}`, d.translated);
           } else { setDescAr(stripped); }
         } catch { setDescAr(stripped); }
-        finally { setTranslating(false); }
       })();
     }).finally(() => setLoading(false));
   }, [params.id]);
@@ -294,24 +304,9 @@ export default function AnimeDetail() {
 
       {/* ── Synopsis ── */}
       <div className="mt-7 px-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-1 h-5 bg-primary rounded-full" />
-            <h2 className="text-[15px] font-black font-['Cairo']">القصة</h2>
-          </div>
-          <div className="flex items-center gap-2">
-            {translating && (
-              <div className="flex items-center gap-1.5 text-primary/60">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span className="text-[9px] font-['Cairo']">جارٍ الترجمة</span>
-              </div>
-            )}
-            {descAr && !translating && (
-              <span className="text-[8px] bg-emerald-500/12 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded-lg font-black flex items-center gap-1">
-                <Sparkles className="w-2.5 h-2.5" /> مُترجم
-              </span>
-            )}
-          </div>
+        <div className="flex items-center mb-3">
+          <div className="w-1 h-5 bg-primary rounded-full ml-2" />
+          <h2 className="text-[15px] font-black font-['Cairo']">القصة</h2>
         </div>
         <div className="bg-[#111116] border border-white/6 rounded-2xl p-4 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-primary/3 rounded-full blur-3xl pointer-events-none" />
@@ -360,6 +355,61 @@ export default function AnimeDetail() {
           </div>
         </div>
       )}
+
+      {/* ── Related Anime ── */}
+      {(() => {
+        const related = (anime.relations?.edges ?? []).filter(
+          (e: any) => REL_SHOW.has(e.relationType) && e.node?.type === "ANIME"
+        );
+        if (!related.length) return null;
+        return (
+          <div className="mt-7 px-4">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-1 h-5 bg-primary rounded-full" />
+              <h2 className="text-[15px] font-black font-['Cairo']">ذات صلة</h2>
+            </div>
+            <div className="flex flex-col gap-3">
+              {related.map((e: any) => {
+                const node = e.node;
+                const relLabel = REL_TYPE[e.relationType] || e.relationType;
+                return (
+                  <Link key={node.id} href={`/anime/${node.id}`}>
+                    <motion.div
+                      whileTap={{ scale: 0.97 }}
+                      className="flex items-center gap-3 bg-[#111116] border border-white/6 rounded-2xl p-3 active:bg-white/5 cursor-pointer"
+                    >
+                      <img
+                        src={node.coverImage?.large} alt=""
+                        className="w-12 h-16 rounded-xl object-cover border border-white/8 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] font-black font-['Cairo'] text-white line-clamp-2 leading-snug">
+                          {node.title?.romaji}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <span className="text-[8px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20">
+                            {relLabel}
+                          </span>
+                          {node.format && (
+                            <span className="text-[8px] text-white/30 font-bold uppercase">{node.format}</span>
+                          )}
+                          {node.averageScore && (
+                            <span className="text-[8px] text-yellow-400 font-bold flex items-center gap-0.5">
+                              <Star className="w-2 h-2 fill-current" />
+                              {(node.averageScore / 10).toFixed(1)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-white/20 shrink-0" />
+                    </motion.div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Recommendations ── */}
       {anime.recommendations?.nodes?.filter((n: any) => n.mediaRecommendation).length > 0 && (
