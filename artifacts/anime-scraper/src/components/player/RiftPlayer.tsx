@@ -1,10 +1,5 @@
 /**
- * GLASSY PLAYER v4 — مشغل أنمي زجاجي فاخر
- *
- * اللمس المفرد  : إظهار / إخفاء أزرار التحكم
- * نقر مزدوج يسار : −10 ثانية
- * نقر مزدوج يمين : +10 ثانية
- * ضغط طويل      : سرعة ×2
+ * GLASSY PLAYER v5 — مشغل أنمي زجاجي فاخر
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
@@ -15,6 +10,7 @@ import {
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
   RotateCcw, RotateCw, Sun, Lock, Unlock,
   Scan, ScanLine, Camera, X, Zap,
+  ChevronDown,
 } from "lucide-react";
 
 /* ─────────────────────────────────────── helpers ─── */
@@ -42,14 +38,25 @@ function FlipScreenIcon({ className, style }: { className?: string; style?: Reac
   );
 }
 
+function SubtitleIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
+      <rect x="2" y="5" width="20" height="14" rx="3" />
+      <path d="M7 10h2.5M7 14h2.5" />
+      <path d="M12 10h2.5M12 14h2.5" />
+    </svg>
+  );
+}
+
 /* ─────────────────────────────────────── types ──── */
 export interface SubCue { start: number; end: number; text: string }
 export interface SubSettings {
-  fontSize: number;                         // 13 | 16 | 20 | 24
-  color: string;                            // css color string
-  bgOpacity: number;                        // 0 | 0.45 | 0.82
+  fontSize: number;
+  color: string;
+  bgOpacity: number;
   bold: boolean;
-  position: "top" | "center" | "bottom";   // subtitle placement
+  position: "top" | "center" | "bottom";
 }
 
 interface Props {
@@ -63,12 +70,12 @@ interface Props {
   serverCount?: number;
   serverIndex?: number;
   downloadUrl?: string;
-  /* subtitle passthrough */
   subCues?: SubCue[];
   subElapsed?: number;
   subSettings?: SubSettings;
   subEnabled?: boolean;
   onSubtitleClick?: () => void;
+  onSubSettingsChange?: (s: SubSettings) => void;
   onBack?: () => void;
   onPrevEp?: () => void;
   onNextEp?: () => void;
@@ -84,18 +91,39 @@ interface GS { active: GT; startX: number; startY: number; lastY: number; startV
 interface GF { type: "volume" | "brightness" | "seek"; value: number; delta?: number; }
 
 /* ── glass style tokens ── */
-const GLASS_PANEL  = "rgba(0,0,0,0.42)";
+const GLASS_PANEL  = "rgba(0,0,0,0.55)";
 const GLASS_BLUR   = "blur(28px) saturate(180%)";
 const GLASS_BORDER = "rgba(255,255,255,0.10)";
 const GLASS_BTN    = { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)", backdropFilter: "blur(14px)" };
 const GLASS_BTN_SM = { background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(14px)" };
+
+const FONT_SIZES = [
+  { sz: 13, label: "ص", name: "صغير" },
+  { sz: 16, label: "م", name: "متوسط" },
+  { sz: 20, label: "ك", name: "كبير" },
+  { sz: 24, label: "ع", name: "عملاق" },
+];
+
+const SUB_COLORS = [
+  { v: "#ffffff", label: "أبيض" },
+  { v: "#fde047", label: "ذهبي" },
+  { v: "#67e8f9", label: "سماوي" },
+  { v: "#86efac", label: "أخضر" },
+  { v: "#fca5a5", label: "وردي" },
+];
+
+const SUB_POSITIONS = [
+  { v: "top"    as const, label: "أعلى",  icon: "↑" },
+  { v: "center" as const, label: "وسط",   icon: "⊡" },
+  { v: "bottom" as const, label: "أسفل",  icon: "↓" },
+];
 
 /* ─────────────────────────────────────── component ─ */
 export default function RiftPlayer({
   src, title = "", epTitle = "", ep = 1, totalEps = 999,
   qualityLabel = "", isHls = false, serverCount = 1, serverIndex = 0,
   downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
-  onSubtitleClick,
+  onSubtitleClick, onSubSettingsChange,
   onBack, onPrevEp, onNextEp, onRealQuality, onTimeUpdate, onFail,
 }: Props) {
 
@@ -112,7 +140,6 @@ export default function RiftPlayer({
   const lastTap      = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const longTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSpeed    = useRef(1);
-  /* prevents synthetic mousemove after touch from re-showing controls */
   const lastTouchTs  = useRef(0);
   const moved        = useRef(false);
   const G_THRESH     = 12;
@@ -135,11 +162,17 @@ export default function RiftPlayer({
   const [isZoomed,        setIsZoomed]        = useState(false);
   const [isLocked,        setIsLocked]        = useState(false);
   const [showSpeed,       setShowSpeed]       = useState(false);
+  const [showSubMenu,     setShowSubMenu]      = useState(false);
   const [prgHover,        setPrgHover]        = useState(false);
   const [feedback,        setFeedback]        = useState<GF | null>(null);
   const [dblTap,          setDblTap]          = useState<{ side: "L" | "R"; id: number; secs: number } | null>(null);
   const [longPress,       setLongPress]       = useState(false);
   const [screenshotFlash, setScreenshotFlash] = useState(false);
+
+  /* ── auto-close sub menu when controls hide ── */
+  useEffect(() => {
+    if (!showCtrl) setShowSubMenu(false);
+  }, [showCtrl]);
 
   /* ── orientation lock ── */
   useEffect(() => {
@@ -337,6 +370,12 @@ export default function RiftPlayer({
     } catch {}
   }
 
+  /* ── subtitle settings helper ── */
+  function updateSub(patch: Partial<SubSettings>) {
+    if (!subSettings || !onSubSettingsChange) return;
+    onSubSettingsChange({ ...subSettings, ...patch });
+  }
+
   /* ── progress bar ── */
   function handlePrgClick(e: React.MouseEvent) {
     e.stopPropagation();
@@ -420,7 +459,6 @@ export default function RiftPlayer({
     const now = Date.now();
 
     if (lastTap.current && now - lastTap.current.time < 300 && lastTap.current.side === side) {
-      /* ── DOUBLE TAP: seek ±10s ── */
       const delta = side === "R" ? 10 : -10;
       skip(delta);
       setDblTap({ side, id: now, secs: Math.abs(delta) });
@@ -428,7 +466,6 @@ export default function RiftPlayer({
       lastTap.current = null;
       showControls();
     } else {
-      /* ── SINGLE TAP: toggle controls ── */
       lastTap.current = { time: now, side };
       setShowCtrl(p => { const n = !p; if (n) schedHide(); return n; });
     }
@@ -451,7 +488,7 @@ export default function RiftPlayer({
   function subPositionStyle(pos: "top" | "center" | "bottom", ctrlVisible: boolean): React.CSSProperties {
     if (pos === "center") return { top: "50%", transform: "translateY(-50%)", bottom: "auto" };
     if (pos === "top")    return { top: ctrlVisible ? 90 : 20, bottom: "auto", transform: "none" };
-    /* bottom */          return { bottom: ctrlVisible ? 118 : 20, top: "auto", transform: "none" };
+                          return { bottom: ctrlVisible ? 118 : 20, top: "auto", transform: "none" };
   }
 
   return (
@@ -468,7 +505,10 @@ export default function RiftPlayer({
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full"
-        style={{ objectFit: isZoomed ? "cover" : "contain", filter: brightness !== 1 ? `brightness(${brightness})` : undefined }}
+        style={{
+          objectFit: isZoomed ? "contain" : "cover",
+          filter: brightness !== 1 ? `brightness(${brightness})` : undefined,
+        }}
         playsInline preload="metadata"
       />
 
@@ -518,7 +558,6 @@ export default function RiftPlayer({
               exit={{ opacity: 0 }}
               transition={{ duration: 0.5 }}
             >
-              {/* ripple circle */}
               <motion.div
                 className="absolute rounded-full"
                 style={{
@@ -533,7 +572,6 @@ export default function RiftPlayer({
                 animate={{ scale: 2.2, opacity: 0 }}
                 transition={{ duration: 0.65, ease: "easeOut" }}
               />
-              {/* label */}
               <div
                 className="absolute flex flex-col items-center gap-1"
                 style={{
@@ -623,32 +661,74 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── lock badge + unlock — both follow showCtrl ── */}
+        {/* ════════════════════════════════════════
+            LOCK SCREEN — elegant centered design
+        ════════════════════════════════════════ */}
         <AnimatePresence>
           {isLocked && showCtrl && (
-            <motion.div key="lock-ui" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 z-40 flex flex-col items-center pointer-events-auto"
-              style={{ paddingTop: "max(20px, env(safe-area-inset-top))" }}
-              onClick={e => e.stopPropagation()}>
-              {/* badge at top */}
-              <div className="flex items-center gap-2 px-4 py-2 rounded-full"
-                style={{ background: "rgba(0,0,0,0.60)", border: "1px solid rgba(251,191,36,0.35)", backdropFilter: "blur(12px)" }}>
-                <Lock className="w-3.5 h-3.5 text-amber-300" />
-                <span className="text-amber-200/90 text-[12px] font-black font-['Cairo']">الشاشة مقفلة</span>
-              </div>
-              {/* unlock button below */}
-              <button onClick={() => setIsLocked(false)}
-                className="mt-4 flex items-center gap-2.5 px-6 py-3 rounded-2xl active:scale-90 transition-transform"
-                style={{ background: "rgba(0,0,0,0.65)", border: "1.5px solid rgba(251,191,36,0.45)", backdropFilter: "blur(14px)" }}>
-                <Unlock className="w-5 h-5 text-amber-300" />
-                <span className="text-amber-100 text-[14px] font-black font-['Cairo']">اضغط لفتح القفل</span>
-              </button>
+            <motion.div
+              key="lock-ui"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-40 flex items-center justify-center pointer-events-auto"
+              onClick={e => e.stopPropagation()}
+            >
+              <motion.div
+                initial={{ scale: 0.85, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.85, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-col items-center gap-5 px-10 py-8 rounded-[28px]"
+                style={{
+                  background: "rgba(0,0,0,0.72)",
+                  backdropFilter: "blur(32px) saturate(180%)",
+                  border: "1px solid rgba(251,191,36,0.20)",
+                  boxShadow: "0 24px 64px rgba(0,0,0,0.60), 0 0 0 1px rgba(251,191,36,0.08)",
+                }}
+              >
+                {/* Lock icon */}
+                <div className="flex flex-col items-center gap-3">
+                  <motion.div
+                    className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                    style={{
+                      background: "rgba(251,191,36,0.12)",
+                      border: "1.5px solid rgba(251,191,36,0.30)",
+                    }}
+                    animate={{ scale: [1, 1.05, 1] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                  >
+                    <Lock className="w-7 h-7 text-amber-300" strokeWidth={1.8} />
+                  </motion.div>
+                  <span className="text-amber-200/90 text-[14px] font-black font-['Cairo'] tracking-wide">
+                    الشاشة مقفلة
+                  </span>
+                </div>
+
+                {/* Divider */}
+                <div className="w-full h-px" style={{ background: "rgba(255,255,255,0.06)" }} />
+
+                {/* Unlock button */}
+                <button
+                  onClick={() => setIsLocked(false)}
+                  className="flex items-center gap-3 px-6 py-3 rounded-2xl active:scale-95 transition-transform"
+                  style={{
+                    background: "rgba(251,191,36,0.15)",
+                    border: "1.5px solid rgba(251,191,36,0.35)",
+                  }}
+                >
+                  <Unlock className="w-5 h-5 text-amber-300" strokeWidth={1.8} />
+                  <span className="text-amber-100 text-[13px] font-black font-['Cairo']">
+                    اضغط لفتح القفل
+                  </span>
+                </button>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
         {/* ════════════════════════════════════════
-            MAIN CONTROLS — GLASSY v4
+            MAIN CONTROLS — GLASSY v5
         ════════════════════════════════════════ */}
         <AnimatePresence>
           {showCtrl && !error && !isLocked && (
@@ -658,7 +738,7 @@ export default function RiftPlayer({
               className="absolute inset-0 flex flex-col pointer-events-none"
             >
 
-              {/* ════ TOP BAR — glass ════ */}
+              {/* ════ TOP BAR ════ */}
               <div
                 className="shrink-0 pointer-events-auto"
                 dir="ltr"
@@ -707,23 +787,33 @@ export default function RiftPlayer({
 
                   {/* RIGHT: action buttons */}
                   <div className="flex items-center gap-2 shrink-0">
-                    {/* Subtitle / CC button */}
+                    {/* Subtitle / CC button — opens inline settings menu */}
                     {onSubtitleClick && (
-                      <button onClick={onSubtitleClick}
-                        className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                        style={subEnabled
-                          ? { background: "rgba(139,92,246,0.35)", border: "1px solid rgba(139,92,246,0.55)" }
-                          : { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-                          strokeLinecap="round" strokeLinejoin="round" className="w-[15px] h-[15px]"
-                          style={{ color: subEnabled ? "#c4b5fd" : "rgba(255,255,255,0.65)" }}>
-                          <rect x="2" y="5" width="20" height="14" rx="3" />
-                          <path d="M7 10h2.5M7 14h2.5" />
-                          <path d="M12 10h2.5M12 14h2.5" />
-                        </svg>
+                      <button
+                        onClick={() => {
+                          if (subEnabled) {
+                            setShowSubMenu(m => !m);
+                          } else {
+                            onSubtitleClick();
+                            setShowSubMenu(true);
+                          }
+                        }}
+                        className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150 relative"
+                        style={showSubMenu
+                          ? { background: "rgba(139,92,246,0.45)", border: "1px solid rgba(139,92,246,0.70)" }
+                          : subEnabled
+                          ? { background: "rgba(139,92,246,0.30)", border: "1px solid rgba(139,92,246,0.50)" }
+                          : { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }
+                        }
+                      >
+                        <SubtitleIcon className="w-[15px] h-[15px]"
+                          style={{ color: (subEnabled || showSubMenu) ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
+                        {showSubMenu && (
+                          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-violet-400" />
+                        )}
                       </button>
                     )}
-                    {/* Flip screen button — restored at top bar */}
+                    {/* Flip screen */}
                     <button onClick={toggleRotation}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
                       style={isPortrait
@@ -732,11 +822,13 @@ export default function RiftPlayer({
                       <FlipScreenIcon className="w-[16px] h-[16px]"
                         style={{ color: isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
                     </button>
+                    {/* Screenshot */}
                     <button onClick={takeScreenshot}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }}>
                       <Camera className="w-[15px] h-[15px] text-white/65" />
                     </button>
+                    {/* Close */}
                     <button onClick={onBack}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(239,68,68,0.14)", border: "1px solid rgba(239,68,68,0.28)" }}>
@@ -746,7 +838,7 @@ export default function RiftPlayer({
                 </div>
               </div>
 
-              {/* ════ CENTER — big play/pause only ════ */}
+              {/* ════ CENTER ════ */}
               <div className="flex-1 flex items-center justify-center pointer-events-none">
                 <button onClick={togglePlay}
                   onTouchStart={e => e.stopPropagation()}
@@ -776,12 +868,10 @@ export default function RiftPlayer({
                 </button>
               </div>
 
-              {/* ════ BOTTOM SECTION — glass ════ */}
+              {/* ════ BOTTOM SECTION ════ */}
               <div
                 className="shrink-0 pointer-events-auto"
-                style={{
-                  background: `linear-gradient(0deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.28) 70%, transparent 100%)`,
-                }}
+                style={{ background: `linear-gradient(0deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.28) 70%, transparent 100%)` }}
                 onClick={e => e.stopPropagation()}
                 onTouchStart={e => e.stopPropagation()}
                 onTouchEnd={e => e.stopPropagation()}
@@ -830,20 +920,26 @@ export default function RiftPlayer({
 
                 {/* ── Controls row ── */}
                 <div
-                  className="flex items-center px-2 pt-1"
-                  style={{ paddingBottom: "max(14px, env(safe-area-inset-bottom))" }}
+                  className="flex items-center px-3 pt-2"
+                  style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
                 >
                   {/* Left: zoom · speed */}
-                  <div className="flex-1 flex items-center gap-1">
-                    <button onClick={() => setIsZoomed(z => !z)}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Zoom toggle */}
+                    <button
+                      onClick={() => setIsZoomed(z => !z)}
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors"
+                      title={isZoomed ? "ملء الشاشة" : "عرض كامل"}
+                    >
                       {isZoomed
-                        ? <ScanLine className="w-[18px] h-[18px] text-violet-300/90" />
-                        : <Scan className="w-[18px] h-[18px] text-white/45" />}
+                        ? <Scan    className="w-[17px] h-[17px] text-violet-300/80" />
+                        : <ScanLine className="w-[17px] h-[17px] text-white/40" />}
                     </button>
+
+                    {/* Speed */}
                     <div className="relative">
                       <button onClick={() => { setShowSpeed(s => !s); showControls(); }}
-                        className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                        className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                         <span className="px-2 py-[3px] rounded-lg font-mono text-[11px] font-black leading-none"
                           style={{
                             background: (longPress || speed !== 1) ? "rgba(251,191,36,0.22)" : "rgba(255,255,255,0.07)",
@@ -882,22 +978,22 @@ export default function RiftPlayer({
                   </div>
 
                   {/* Center: ←10  ⏸  10→ */}
-                  <div className="flex items-center gap-3 mx-4 shrink-0">
+                  <div className="flex items-center gap-4 flex-1 justify-center">
                     <button onClick={() => { skip(-10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[3px] px-3 py-2 rounded-2xl active:scale-90 transition-all duration-150"
+                      className="flex flex-col items-center justify-center gap-[3px] px-3.5 py-2.5 rounded-2xl active:scale-90 transition-all duration-150"
                       style={GLASS_BTN_SM}>
                       <RotateCcw className="w-[17px] h-[17px] text-white/70" strokeWidth={1.9} />
                       <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
                     <button onClick={togglePlay}
-                      className="w-[44px] h-[44px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                      className="w-[46px] h-[46px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
                       style={{ ...GLASS_BTN, border: "1.5px solid rgba(255,255,255,0.35)", boxShadow: "0 2px 16px rgba(0,0,0,0.40)" }}>
                       {playing
-                        ? <Pause className="w-[18px] h-[18px] text-white fill-white" />
-                        : <Play className="w-[18px] h-[18px] text-white fill-white ml-0.5" />}
+                        ? <Pause className="w-[19px] h-[19px] text-white fill-white" />
+                        : <Play  className="w-[19px] h-[19px] text-white fill-white ml-0.5" />}
                     </button>
                     <button onClick={() => { skip(10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[3px] px-3 py-2 rounded-2xl active:scale-90 transition-all duration-150"
+                      className="flex flex-col items-center justify-center gap-[3px] px-3.5 py-2.5 rounded-2xl active:scale-90 transition-all duration-150"
                       style={GLASS_BTN_SM}>
                       <RotateCw className="w-[17px] h-[17px] text-white/70" strokeWidth={1.9} />
                       <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
@@ -905,29 +1001,25 @@ export default function RiftPlayer({
                   </div>
 
                   {/* Right: volume · lock · fullscreen */}
-                  <div className="flex-1 flex items-center gap-1 justify-end">
+                  <div className="flex items-center gap-2 shrink-0">
                     <button onClick={toggleMute}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       {muted || volume === 0
                         ? <VolumeX className="w-[18px] h-[18px] text-white/45" />
                         : <Volume2 className="w-[18px] h-[18px] text-white/45" />}
                     </button>
                     <button onClick={() => setIsLocked(true)}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       <Lock className="w-[16px] h-[16px] text-white/45" />
                     </button>
                     <button onClick={toggleFs}
-                      className="flex items-center gap-1.5 px-2.5 h-9 rounded-xl active:scale-90 transition-all duration-150"
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
                       style={isFs
-                        ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)" }
+                        ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)", borderRadius: 12 }
                         : GLASS_BTN_SM}>
                       {isFs
-                        ? <Minimize2 className="w-4 h-4 text-violet-300" />
-                        : <Maximize2 className="w-4 h-4 text-white/80" />}
-                      <span className="font-['Cairo'] font-black leading-none"
-                        style={{ fontSize: 10, color: isFs ? "rgba(196,181,253,0.90)" : "rgba(255,255,255,0.60)" }}>
-                        {isFs ? "تصغير" : "ملء"}
-                      </span>
+                        ? <Minimize2 className="w-[17px] h-[17px] text-violet-300" />
+                        : <Maximize2 className="w-[17px] h-[17px] text-white/60" />}
                     </button>
                   </div>
                 </div>
@@ -937,11 +1029,215 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
+        {/* ════════════════════════════════════════
+            SUBTITLE SETTINGS MENU — inline dropdown
+        ════════════════════════════════════════ */}
+        <AnimatePresence>
+          {showSubMenu && showCtrl && !error && !isLocked && (
+            <motion.div
+              key="submenu"
+              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="absolute z-50 pointer-events-auto"
+              dir="rtl"
+              style={{
+                top: 76,
+                right: 14,
+                width: 252,
+                background: "rgba(6,6,18,0.94)",
+                backdropFilter: "blur(32px) saturate(200%)",
+                border: "1px solid rgba(255,255,255,0.10)",
+                borderRadius: 20,
+                padding: "14px 14px 16px",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.72)",
+              }}
+              onClick={e => e.stopPropagation()}
+              onTouchStart={e => e.stopPropagation()}
+              onTouchEnd={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <SubtitleIcon className="w-3.5 h-3.5 text-violet-400" />
+                  <span className="text-white/70 text-[12px] font-black font-['Cairo']">إعدادات الترجمة</span>
+                </div>
+                <button onClick={() => setShowSubMenu(false)}
+                  className="w-6 h-6 rounded-full flex items-center justify-center active:bg-white/10 transition-colors">
+                  <X className="w-3.5 h-3.5 text-white/35" />
+                </button>
+              </div>
+
+              {/* Not loaded yet */}
+              {!subEnabled && (
+                <div className="flex flex-col items-center gap-3 py-3">
+                  <p className="text-white/30 text-[11px] font-['Cairo'] text-center">
+                    الترجمة غير محملة بعد
+                  </p>
+                  <button
+                    onClick={() => { onSubtitleClick?.(); }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                    style={{ background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.40)", color: "#c4b5fd" }}
+                  >
+                    <SubtitleIcon className="w-3.5 h-3.5" />
+                    تحميل الترجمة
+                  </button>
+                </div>
+              )}
+
+              {/* Settings when loaded */}
+              {subEnabled && subSettings && onSubSettingsChange && (
+                <div className="flex flex-col gap-3.5">
+
+                  {/* Font size */}
+                  <div>
+                    <p className="text-white/28 text-[9px] font-['Cairo'] font-bold uppercase tracking-widest mb-2">حجم الخط</p>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {FONT_SIZES.map(({ sz, label, name }) => (
+                        <button
+                          key={sz}
+                          onClick={() => updateSub({ fontSize: sz })}
+                          className="flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all active:scale-90"
+                          style={{
+                            background: subSettings.fontSize === sz
+                              ? "rgba(139,92,246,0.28)" : "rgba(255,255,255,0.05)",
+                            border: subSettings.fontSize === sz
+                              ? "1px solid rgba(139,92,246,0.55)" : "1px solid rgba(255,255,255,0.07)",
+                          }}
+                        >
+                          <span
+                            className="font-black font-['Cairo'] leading-none"
+                            style={{
+                              fontSize: sz > 18 ? sz * 0.62 : sz * 0.72,
+                              color: subSettings.fontSize === sz ? "#c4b5fd" : "rgba(255,255,255,0.38)",
+                            }}
+                          >{label}</span>
+                          <span className="text-[8px] font-['Cairo']"
+                            style={{ color: subSettings.fontSize === sz ? "rgba(196,181,253,0.65)" : "rgba(255,255,255,0.22)" }}>
+                            {name}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Text color */}
+                  <div>
+                    <p className="text-white/28 text-[9px] font-['Cairo'] font-bold uppercase tracking-widest mb-2">لون النص</p>
+                    <div className="flex gap-1.5">
+                      {SUB_COLORS.map(({ v, label }) => (
+                        <button
+                          key={v}
+                          onClick={() => updateSub({ color: v })}
+                          className="flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl transition-all active:scale-90"
+                          style={{
+                            background: subSettings.color === v ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.03)",
+                            border: subSettings.color === v ? "1.5px solid rgba(255,255,255,0.35)" : "1px solid rgba(255,255,255,0.07)",
+                          }}
+                        >
+                          <div className="w-3.5 h-3.5 rounded-full" style={{ background: v, boxShadow: "0 1px 4px rgba(0,0,0,0.6)" }} />
+                          <span className="text-[8px] font-['Cairo']"
+                            style={{ color: subSettings.color === v ? "rgba(255,255,255,0.60)" : "rgba(255,255,255,0.22)" }}>
+                            {label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Background */}
+                  <div>
+                    <p className="text-white/28 text-[9px] font-['Cairo'] font-bold uppercase tracking-widest mb-2">خلفية النص</p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {([
+                        { v: 0,    label: "بلا لون",  icon: "○" },
+                        { v: 0.45, label: "خفيف",    icon: "◑" },
+                        { v: 0.82, label: "مظلل",    icon: "●" },
+                      ] as { v: number; label: string; icon: string }[]).map(({ v, label, icon }) => (
+                        <button
+                          key={v}
+                          onClick={() => updateSub({ bgOpacity: v })}
+                          className="flex flex-col items-center gap-1 py-2 rounded-xl transition-all active:scale-90"
+                          style={{
+                            background: subSettings.bgOpacity === v
+                              ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.04)",
+                            border: subSettings.bgOpacity === v
+                              ? "1px solid rgba(139,92,246,0.50)" : "1px solid rgba(255,255,255,0.07)",
+                          }}
+                        >
+                          <span className="text-[14px]"
+                            style={{ color: subSettings.bgOpacity === v ? "#c4b5fd" : "rgba(255,255,255,0.28)" }}>
+                            {icon}
+                          </span>
+                          <span className="text-[9px] font-bold font-['Cairo']"
+                            style={{ color: subSettings.bgOpacity === v ? "#c4b5fd" : "rgba(255,255,255,0.28)" }}>
+                            {label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Position */}
+                  <div>
+                    <p className="text-white/28 text-[9px] font-['Cairo'] font-bold uppercase tracking-widest mb-2">موضع الترجمة</p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {SUB_POSITIONS.map(({ v, label, icon }) => (
+                        <button
+                          key={v}
+                          onClick={() => updateSub({ position: v })}
+                          className="flex flex-col items-center gap-1 py-2.5 rounded-xl transition-all active:scale-90"
+                          style={{
+                            background: subSettings.position === v
+                              ? "rgba(139,92,246,0.25)" : "rgba(255,255,255,0.04)",
+                            border: subSettings.position === v
+                              ? "1px solid rgba(139,92,246,0.50)" : "1px solid rgba(255,255,255,0.07)",
+                          }}
+                        >
+                          <span className="text-[13px] font-bold"
+                            style={{ color: subSettings.position === v ? "#c4b5fd" : "rgba(255,255,255,0.30)" }}>
+                            {icon}
+                          </span>
+                          <span className="text-[10px] font-black font-['Cairo']"
+                            style={{ color: subSettings.position === v ? "#c4b5fd" : "rgba(255,255,255,0.35)" }}>
+                            {label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Bold toggle */}
+                  <button
+                    onClick={() => updateSub({ bold: !subSettings.bold })}
+                    className="w-full py-2 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
+                    style={{
+                      background: subSettings.bold ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
+                      border: subSettings.bold ? "1px solid rgba(139,92,246,0.40)" : "1px solid rgba(255,255,255,0.07)",
+                    }}
+                  >
+                    <span
+                      className="font-['Cairo'] text-[12px]"
+                      style={{
+                        fontWeight: subSettings.bold ? 700 : 400,
+                        color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.35)",
+                      }}
+                    >
+                      {subSettings.bold ? "نص عريض ✓" : "نص عادي"}
+                    </span>
+                  </button>
+
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
       </div>
 
       {/* ════════════════════════════════════════
-          SUBTITLE OVERLAY — sibling of touch layer,
-          so z-index works correctly in native fullscreen
+          SUBTITLE OVERLAY
       ════════════════════════════════════════ */}
       {subCues && subSettings && subActive && (
         <div

@@ -34,7 +34,7 @@ interface SubSettings {
   bold: boolean;
   position: "top" | "center" | "bottom";  // subtitle placement
 }
-const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 16, color: "#ffffff", bgOpacity: 0.82, bold: true, position: "bottom" };
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 16, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
 
 /* ══════════════════════════════════ HELPERS ══════════════════ */
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
@@ -1302,6 +1302,7 @@ function EpisodePlayer({
               subSettings={subSettings}
               subEnabled={subState === "ready"}
               onSubtitleClick={fetchSubtitles}
+              onSubSettingsChange={s => setSubSettings(s)}
               onBack={onBack}
               onPrevEp={onPrevEp}
               onNextEp={onNextEp}
