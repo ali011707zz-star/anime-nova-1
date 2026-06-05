@@ -356,7 +356,7 @@ function NoSources({ onRefresh, onBack }: { onRefresh: () => void; onBack: () =>
 }
 
 /* ══════════════════════════════════ LOADING MODAL ═══════════ */
-function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: string; onClose?: () => void }) {
+function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: string; title?: string; ep?: number; epTitle?: string; onClose?: () => void }) {
   return (
     <motion.div
       key="watch-loading-modal"
@@ -452,7 +452,7 @@ function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: 
             style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.55) 0%, transparent 100%)" }} />
         </motion.div>
 
-        {/* Title + status */}
+        {/* Title + episode + status */}
         <motion.div
           className="text-center px-8"
           initial={{ opacity: 0, y: 14 }}
@@ -460,11 +460,22 @@ function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: 
           transition={{ delay: 0.18, duration: 0.42 }}
         >
           {title && (
-            <p className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-2 drop-shadow-xl">
+            <p className="text-white text-[17px] font-black font-['Cairo'] leading-tight mb-1.5 drop-shadow-xl">
               {title}
             </p>
           )}
-          <p className="text-white/35 text-[12px] font-['Cairo'] tracking-[0.10em]">جاري تحميل الحلقة</p>
+          {ep && (
+            <div className="flex items-center justify-center gap-2 mb-1.5">
+              <span className="text-white/55 text-[12px] font-bold font-['Cairo']">الحلقة {ep}</span>
+              {epTitle && (
+                <>
+                  <span className="text-white/18 text-[10px]">·</span>
+                  <span className="text-violet-300/70 text-[11px] font-bold font-['Cairo'] line-clamp-1 max-w-[180px]">{epTitle}</span>
+                </>
+              )}
+            </div>
+          )}
+          <p className="text-white/28 text-[11px] font-['Cairo'] tracking-[0.10em]">جاري تحميل الحلقة…</p>
         </motion.div>
 
         {/* Animated loading dots */}
@@ -1832,6 +1843,8 @@ export default function WatchPage() {
             <WatchLoadingModal
               cover={cover}
               title={title}
+              ep={ep}
+              epTitle={arEpTitle || epTitle}
               onClose={() => {
                 if (loadingTimer.current) clearTimeout(loadingTimer.current);
                 setShowLoading(false);

@@ -137,6 +137,8 @@ export default function RiftPlayer({
   const failFired    = useRef(false);
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, lastX: 0, startValue: 0 });
+  const volumeRef     = useRef(1);
+  const brightnessRef = useRef(1);
   const lastTap      = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const longTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSpeed    = useRef(1);
@@ -446,17 +448,22 @@ export default function RiftPlayer({
       }
       setFeedback({ type: "seek", value: Math.max(0, Math.min(duration, g.startValue + delta)), delta });
     } else if (g.active === "volume") {
-      // Portrait: left = "up" on rotated player; Landscape: up = decrease Y
+      // Swipe UP (decreasing clientY) = positive dV = increase volume
       const dV = isPortrait ? (g.lastX - t.clientX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
-      const nV = Math.max(0, Math.min(1, volume + dV / 180));
+      // Use videoRef.current.volume for freshest value (avoids stale React state)
+      const curVol = videoRef.current?.volume ?? volumeRef.current;
+      const nV = Math.max(0, Math.min(1, curVol + dV / 150));
+      volumeRef.current = nV;
       setVolume(nV);
       if (videoRef.current) { videoRef.current.volume = nV; videoRef.current.muted = false; setMuted(false); }
       setFeedback({ type: "volume", value: nV });
     } else if (g.active === "brightness") {
+      // Swipe UP (decreasing clientY) = positive dV = increase brightness
       const dV = isPortrait ? (g.lastX - t.clientX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
-      const nB = Math.max(0.1, Math.min(2, brightness + dV / 180));
+      const nB = Math.max(0.1, Math.min(2.5, brightnessRef.current + dV / 150));
+      brightnessRef.current = nB;
       setBrightness(nB); setFeedback({ type: "brightness", value: nB / 2 });
     }
   }
@@ -526,22 +533,13 @@ export default function RiftPlayer({
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full"
-        style={{ objectFit: isZoomed ? "cover" : "contain" }}
+        style={{
+          objectFit: isZoomed ? "cover" : "contain",
+          filter: brightness !== 1 ? `brightness(${brightness.toFixed(2)})` : undefined,
+          transition: "filter 0.06s",
+        }}
         playsInline preload="metadata"
       />
-
-      {/* ── Brightness overlay (filter-style: doesn't affect actual video output) ── */}
-      {brightness !== 1 && (
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            zIndex: 5,
-            background: brightness < 1
-              ? `rgba(0,0,0,${((1 - brightness) * 0.92).toFixed(2)})`
-              : `rgba(255,255,255,${((brightness - 1) * 0.45).toFixed(2)})`,
-          }}
-        />
-      )}
 
       {/* ── screenshot flash ── */}
       <AnimatePresence>
