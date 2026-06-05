@@ -3924,46 +3924,44 @@ function parseVttCues(text: string): Array<{ timing: string; rawText: string }> 
   return cues;
 }
 
-/** Translate a batch of texts using MyMemory API (free, no key needed, reliable).
- *  Processes all chunks in parallel for maximum speed.
- *  MyMemory: https://api.mymemory.translated.net — 10k words/day free */
+/** Translate a batch of texts using Google Translate unofficial API (gtx).
+ *  Fast, high quality Arabic translation, no rate limits in practice.
+ *  Groups cues into chunks and processes 4 chunks in parallel. */
 async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
-  const CHUNK = 5; // 5 cues per request (≈250 chars, safe within MyMemory limit)
+  const CHUNK = 8; // 8 cues per request — safe under URL length limits
 
   const chunks: string[][] = [];
   for (let i = 0; i < texts.length; i += CHUNK) {
     chunks.push(texts.slice(i, i + CHUNK));
   }
 
-  // Run all chunks in parallel for speed
-  const settled = await Promise.allSettled(
-    chunks.map(async (chunk): Promise<string[]> => {
-      const joined = chunk.join("\n");
-      try {
-        // MyMemory: free, no key, good Arabic quality
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(joined)}&langpair=${from}|${to}&de=nova.anime.app@pm.me`;
-        const r = await fetch(url, {
-          headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!r.ok) return chunk;
-        const d = await r.json() as any;
-        const translated: string = d.responseData?.translatedText || "";
-        if (!translated) return chunk;
-        // MyMemory preserves newlines well
-        const parts = translated.split(/\n+/).map((p: string) => p.trim()).filter(Boolean);
-        if (parts.length === chunk.length) return parts;
-        // Slight line count drift → distribute best-effort
-        if (parts.length > 0) return chunk.map((_, i) => parts[Math.min(i, parts.length - 1)] || chunk[i]);
-        return chunk;
-      } catch { return chunk; }
-    }),
-  );
+  const PARALLEL = 4;
+  const results: string[] = new Array(texts.length).fill("");
 
-  const results: string[] = [];
-  settled.forEach((r, i) => {
-    results.push(...(r.status === "fulfilled" ? r.value : chunks[i]));
-  });
+  for (let i = 0; i < chunks.length; i += PARALLEL) {
+    const batch = chunks.slice(i, i + PARALLEL);
+    await Promise.allSettled(
+      batch.map(async (chunk, batchIdx) => {
+        const start = (i + batchIdx) * CHUNK;
+        const joined = chunk.join("\n\n");
+        try {
+          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(joined)}`;
+          const r = await fetch(url, {
+            headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+            signal: AbortSignal.timeout(12000),
+          });
+          if (!r.ok) { chunk.forEach((t, j) => { results[start + j] = t; }); return; }
+          const data = await r.json() as any;
+          const translated: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || "";
+          if (!translated) { chunk.forEach((t, j) => { results[start + j] = t; }); return; }
+          const parts = translated.split(/\n\n+/).map((p: string) => p.trim()).filter(Boolean);
+          chunk.forEach((t, j) => { results[start + j] = parts[j]?.trim() || t; });
+        } catch {
+          chunk.forEach((t, j) => { results[start + j] = t; });
+        }
+      }),
+    );
+  }
   return results;
 }
 
