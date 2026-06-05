@@ -87,7 +87,7 @@ interface Props {
 }
 
 type GT = "none" | "seek" | "volume" | "brightness";
-interface GS { active: GT; startX: number; startY: number; lastY: number; startValue: number; }
+interface GS { active: GT; startX: number; startY: number; lastY: number; lastX: number; startValue: number; }
 interface GF { type: "volume" | "brightness" | "seek"; value: number; delta?: number; }
 
 /* ── glass style tokens ── */
@@ -136,7 +136,7 @@ export default function RiftPlayer({
   const onFailRef    = useRef(onFail); onFailRef.current = onFail;
   const failFired    = useRef(false);
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, startValue: 0 });
+  const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, lastX: 0, startValue: 0 });
   const lastTap      = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const longTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSpeed    = useRef(1);
@@ -397,7 +397,7 @@ export default function RiftPlayer({
     lastTouchTs.current = Date.now();
     moved.current = false;
     const t = e.touches[0];
-    gestRef.current = { active: "none", startX: t.clientX, startY: t.clientY, lastY: t.clientY, startValue: 0 };
+    gestRef.current = { active: "none", startX: t.clientX, startY: t.clientY, lastY: t.clientY, lastX: t.clientX, startValue: 0 };
     longTimer.current = setTimeout(() => {
       moved.current = true;
       prevSpeed.current = videoRef.current?.playbackRate ?? 1;
@@ -414,29 +414,49 @@ export default function RiftPlayer({
     if (longPress) return;
     if (g.active === "none" && dist > G_THRESH) {
       moved.current = true;
-      const cW = isPortrait ? window.innerWidth : e.currentTarget.clientWidth;
-      if (Math.abs(dx) > Math.abs(dy) * 1.4) {
-        g.active = "seek"; g.startValue = videoRef.current?.currentTime ?? 0;
+      if (isPortrait) {
+        // Player rotated 90deg CW: horizontal on player = vertical on screen; left/right zone = top/bottom screen
+        if (Math.abs(dy) > Math.abs(dx) * 1.4) {
+          g.active = "seek"; g.startValue = videoRef.current?.currentTime ?? 0;
+        } else {
+          // Bottom half of screen = right side of rotated player = volume
+          g.active = t.clientY > window.innerHeight / 2 ? "volume" : "brightness";
+          g.startValue = g.active === "volume" ? volume : brightness;
+          g.lastX = t.clientX;
+        }
       } else {
-        g.active = t.clientX > cW / 2 ? "volume" : "brightness";
-        g.startValue = g.active === "volume" ? volume : brightness;
-        g.lastY = t.clientY;
+        const cW = e.currentTarget.clientWidth;
+        if (Math.abs(dx) > Math.abs(dy) * 1.4) {
+          g.active = "seek"; g.startValue = videoRef.current?.currentTime ?? 0;
+        } else {
+          g.active = t.clientX > cW / 2 ? "volume" : "brightness";
+          g.startValue = g.active === "volume" ? volume : brightness;
+          g.lastY = t.clientY;
+        }
       }
     }
     if (g.active === "seek") {
-      const visW = isPortrait ? window.innerWidth : e.currentTarget.clientWidth;
       const maxD = Math.min(duration * 0.5, 120);
-      const delta = (dx / visW) * maxD;
+      let delta: number;
+      if (isPortrait) {
+        // Vertical screen movement = horizontal player movement (down = forward)
+        delta = (dy / window.innerHeight) * maxD;
+      } else {
+        delta = (dx / e.currentTarget.clientWidth) * maxD;
+      }
       setFeedback({ type: "seek", value: Math.max(0, Math.min(duration, g.startValue + delta)), delta });
     } else if (g.active === "volume") {
-      const dY = g.lastY - t.clientY; g.lastY = t.clientY;
-      const nV = Math.max(0, Math.min(1, volume + dY / 180));
+      // Portrait: left = "up" on rotated player; Landscape: up = decrease Y
+      const dV = isPortrait ? (g.lastX - t.clientX) : (g.lastY - t.clientY);
+      if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
+      const nV = Math.max(0, Math.min(1, volume + dV / 180));
       setVolume(nV);
       if (videoRef.current) { videoRef.current.volume = nV; videoRef.current.muted = false; setMuted(false); }
       setFeedback({ type: "volume", value: nV });
     } else if (g.active === "brightness") {
-      const dY = g.lastY - t.clientY; g.lastY = t.clientY;
-      const nB = Math.max(0.1, Math.min(2, brightness + dY / 180));
+      const dV = isPortrait ? (g.lastX - t.clientX) : (g.lastY - t.clientY);
+      if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
+      const nB = Math.max(0.1, Math.min(2, brightness + dV / 180));
       setBrightness(nB); setFeedback({ type: "brightness", value: nB / 2 });
     }
   }
@@ -506,12 +526,22 @@ export default function RiftPlayer({
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full"
-        style={{
-          objectFit: isZoomed ? "cover" : "contain",
-          filter: brightness !== 1 ? `brightness(${brightness})` : undefined,
-        }}
+        style={{ objectFit: isZoomed ? "cover" : "contain" }}
         playsInline preload="metadata"
       />
+
+      {/* ── Brightness overlay (filter-style: doesn't affect actual video output) ── */}
+      {brightness !== 1 && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            zIndex: 5,
+            background: brightness < 1
+              ? `rgba(0,0,0,${((1 - brightness) * 0.92).toFixed(2)})`
+              : `rgba(255,255,255,${((brightness - 1) * 0.45).toFixed(2)})`,
+          }}
+        />
+      )}
 
       {/* ── screenshot flash ── */}
       <AnimatePresence>

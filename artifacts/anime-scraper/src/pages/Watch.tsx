@@ -368,15 +368,20 @@ function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: 
     >
       {/* Full-screen blurred cover background */}
       <div className="absolute inset-0">
-        <motion.img
-          src={cover || "/gojo-satoru.png"}
-          alt=""
-          className="w-full h-full object-cover"
-          style={{ filter: "blur(48px) brightness(0.22) saturate(1.8)" }}
-          initial={{ scale: 1.08, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
-        />
+        {cover ? (
+          <motion.img
+            src={cover}
+            alt=""
+            className="w-full h-full object-cover"
+            style={{ filter: "blur(48px) brightness(0.22) saturate(1.8)" }}
+            initial={{ scale: 1.08, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+          />
+        ) : (
+          <div className="absolute inset-0"
+            style={{ background: "radial-gradient(ellipse at 50% 30%, rgba(88,28,135,0.35) 0%, transparent 70%)" }} />
+        )}
         <div className="absolute inset-0" style={{ background: "rgba(5,5,14,0.72)" }} />
       </div>
 
@@ -405,18 +410,20 @@ function WatchLoadingModal({ cover, title, onClose }: { cover?: string; title?: 
             />
           ) : (
             <motion.div
-              className="w-44 h-[248px] rounded-2xl overflow-hidden relative"
-              style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.90), 0 0 0 1px rgba(255,255,255,0.09)" }}>
-              <motion.img
-                src="/gojo-satoru.png"
-                alt="Gojo Satoru"
-                className="w-full h-full object-cover object-top"
-                initial={{ scale: 1.18 }}
-                animate={{ scale: [1.18, 1.04, 1.1] }}
-                transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+              className="w-44 h-[248px] rounded-2xl overflow-hidden relative flex items-center justify-center"
+              style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.90), 0 0 0 1px rgba(255,255,255,0.09)", background: "rgba(30,10,60,0.95)" }}>
+              <motion.div
+                className="absolute inset-0 opacity-40"
+                style={{ background: "radial-gradient(ellipse at 50% 30%, rgba(139,92,246,0.55) 0%, transparent 65%)" }}
+                animate={{ opacity: [0.3, 0.55, 0.3] }}
+                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
-              <div className="absolute inset-0 bg-gradient-to-br from-violet-900/20 via-transparent to-transparent" />
+              <div className="relative z-10 flex flex-col items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
+                  style={{ background: "rgba(139,92,246,0.20)", border: "1px solid rgba(139,92,246,0.35)" }}>
+                  <Play className="w-6 h-6 text-violet-300 fill-violet-300 ml-0.5" />
+                </div>
+              </div>
             </motion.div>
           )}
           {/* Play button overlay */}
@@ -549,6 +556,71 @@ const Q_LABEL: Record<Quality, string> = {
 const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
 
 /* ══════════════════════════════════ SCRAPER PICKER ══════════ */
+const QUALITY_TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
+
+function SourceRow({ src, idx, onPlaySrc }: { src: FetchedSrc; idx: number; onPlaySrc: (s: FetchedSrc) => void }) {
+  const url     = src.directUrl || src.url;
+  const cdn     = getCdnDisplayName(url);
+  const site    = SITE_SHORT[src.site || ""] || src.site || "";
+  const isEmbed = !!src.isEmbed;
+  const tag     = SCRAPER_DEFS.find(d => d.site === src.site)?.tag || "??";
+  const q       = getSrcQualityTier(src);
+  const qs      = QUALITY_STYLE[q];
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(idx * 0.04, 0.28), duration: 0.18 }}>
+      <div
+        className="flex items-center px-4 py-3.5 gap-3.5 active:bg-white/[0.03] transition-colors cursor-pointer"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+        onClick={() => onPlaySrc(src)}>
+        <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+          style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
+          {isEmbed
+            ? <Tv2 className="w-[18px] h-[18px]" style={{ color: qs.icon }} />
+            : <MonitorPlay className="w-[18px] h-[18px]" style={{ color: qs.icon }} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-white/90 text-[14px] font-black font-['Cairo'] leading-tight">{cdn}</p>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            {site && <span className="text-white/36 text-[11px] font-['Cairo']">{site}</span>}
+            {site && <span className="text-white/14 text-[9px]">·</span>}
+            <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
+              style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              {tag}
+            </span>
+            {isEmbed && (
+              <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
+                style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.70)", border: "1px solid rgba(52,211,153,0.18)" }}>
+                مدمج
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="font-mono text-[8px] font-bold px-1.5 py-0.5 rounded"
+            style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
+            {Q_SHORT[q]}
+          </span>
+          {getDownloadUrl(src) && (
+            <a href={getDownloadUrl(src)!} download target="_blank" rel="noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+              style={{ background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.28)" }}>
+              <Download className="w-4 h-4 text-emerald-400/85" />
+            </a>
+          )}
+          <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl active:scale-95 transition-transform"
+            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 14px rgba(109,40,217,0.30)" }}>
+            <Play className="w-3.5 h-3.5 text-white fill-white" />
+            <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 function ScraperPicker({
   cover, title, ep, totalEps,
   slotStatus, slotSources,
@@ -562,9 +634,14 @@ function ScraperPicker({
   onPlaySrc: (src: FetchedSrc) => void;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
 }) {
+  /* Check if all scrapers have finished (ready or failed) */
+  const allDone = SCRAPER_DEFS.every(d =>
+    slotStatus[d.site] === "ready" || slotStatus[d.site] === "failed"
+  );
+
   /* Flatten + filter + deduplicate all fetched sources */
   const allFlat: FetchedSrc[] = [];
-  const seenKeys  = new Set<string>();  // exact URL dedup
+  const seenKeys = new Set<string>();
   for (const srcs of Object.values(slotSources)) {
     for (const s of srcs) {
       if (!shouldShowSrc(s)) continue;
@@ -574,20 +651,119 @@ function ScraperPicker({
       allFlat.push(s);
     }
   }
-  allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
 
-  /* Smart dedup: max 2 sources per CDN host (prevents explosion after removing dedup) */
+  /* Sort: quality tier first (FHD > HD > SD), then by rank within tier */
+  allFlat.sort((a, b) => {
+    const tA = QUALITY_TIER_RANK[getSrcQualityTier(a)];
+    const tB = QUALITY_TIER_RANK[getSrcQualityTier(b)];
+    if (tA !== tB) return tB - tA;
+    return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
+  });
+
+  /* Smart dedup: max 2 sources per CDN host */
   const hostCount: Record<string, number> = {};
   const displaySources = allFlat.filter(s => {
-    const url  = s.directUrl || s.url || "";
-    const host = normCdnHost(url);
+    const host = normCdnHost(s.directUrl || s.url || "");
     hostCount[host] = (hostCount[host] || 0) + 1;
     return hostCount[host] <= 2;
   });
-  const hasSources = displaySources.length > 0;
 
-  /* Sites not yet ready */
-  const notReadySites = SCRAPER_DEFS.filter(d => slotStatus[d.site] !== "ready");
+  /* Group by quality tier */
+  const grouped: Record<Quality, FetchedSrc[]> = {
+    "1080p FHD": displaySources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
+    "720p HD":   displaySources.filter(s => getSrcQualityTier(s) === "720p HD"),
+    "360p SD":   displaySources.filter(s => getSrcQualityTier(s) === "360p SD"),
+  };
+
+  /* ── While ANY scraper is still running: show full-screen loading poster ── */
+  if (!allDone) {
+    return (
+      <div className="fixed inset-0 z-50 overflow-hidden bg-[#07070d]" dir="rtl">
+        {cover && (
+          <div className="absolute inset-0">
+            <img src={cover} alt="" className="w-full h-full object-cover scale-125 blur-3xl opacity-[0.15] saturate-150" />
+            <div className="absolute inset-0 bg-gradient-to-b from-[#07070d]/85 via-[#07070d]/50 to-[#07070d]/92" />
+          </div>
+        )}
+        {/* Back button */}
+        <button onClick={onBack}
+          className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+          style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
+          <ChevronRight className="w-5 h-5 text-white/60" />
+        </button>
+
+        {/* Center content */}
+        <div className="relative h-full flex flex-col items-center justify-center gap-7 px-6">
+          {/* Cover poster */}
+          {cover ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+              className="relative shrink-0">
+              {/* Glow */}
+              <motion.div
+                className="absolute -inset-4 rounded-[28px] pointer-events-none"
+                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.28) 0%, transparent 68%)" }}
+                animate={{ opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+              />
+              <img
+                src={cover} alt={title}
+                className="w-48 h-[272px] rounded-2xl object-cover"
+                style={{ boxShadow: "0 28px 72px rgba(0,0,0,0.88), 0 0 0 1px rgba(255,255,255,0.08)" }}
+              />
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/[0.07] via-transparent to-transparent pointer-events-none" />
+              <div className="absolute bottom-0 left-0 right-0 h-20 rounded-b-2xl bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
+            </motion.div>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="w-48 h-[272px] rounded-2xl bg-white/[0.03] flex items-center justify-center"
+              style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
+              <div className="w-16 h-16 rounded-full bg-violet-500/15 flex items-center justify-center">
+                <div className="w-7 h-7 rounded-full bg-violet-500/35" />
+              </div>
+            </motion.div>
+          )}
+
+          {/* Title + episode */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.18, duration: 0.4 }}
+            className="text-center">
+            {title && (
+              <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-1.5"
+                style={{ textShadow: "0 2px 14px rgba(0,0,0,0.75)" }}>
+                {title}
+              </h2>
+            )}
+            <p className="text-white/35 text-[13px] font-['Cairo'] tracking-wide">الحلقة {ep}</p>
+          </motion.div>
+
+          {/* Spinner + text */}
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            transition={{ delay: 0.30 }}
+            className="flex flex-col items-center gap-3">
+            <div className="relative w-9 h-9">
+              <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
+              <motion.div
+                className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+              />
+            </div>
+            <p className="text-white/22 text-[11px] font-['Cairo'] tracking-[0.12em]">جاري تشغيل الحلقة</p>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── All scrapers done: show results ── */
+  const hasSources = displaySources.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#06060c]" dir="rtl">
@@ -645,174 +821,54 @@ function ScraperPicker({
         </div>
       </div>
 
-      {/* ── Scrollable content ── */}
+      {/* ── Scrollable source list ── */}
       <div className="flex-1 overflow-y-auto"
         style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
-        {/* ── Flat source list — sorted by priority, 1 per CDN ── */}
-        {displaySources.length > 0 && (
-          <div>
-            <div className="flex items-center gap-2 px-4 pt-5 pb-2">
-              <div className="w-1.5 h-1.5 rounded-full shrink-0"
-                style={{ background: "#34d399", boxShadow: "0 0 6px #34d39988" }} />
-              <span className="text-[10px] font-bold font-['Cairo'] tracking-wider"
-                style={{ color: "rgba(110,231,183,0.85)" }}>المصادر المتاحة</span>
-              <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
-                style={{ background: "rgba(52,211,153,0.09)", border: "1px solid rgba(52,211,153,0.22)", color: "rgba(110,231,183,0.68)" }}>
-                {displaySources.length}
-              </span>
-            </div>
-
-            {displaySources.map((src, i) => {
-              const url     = src.directUrl || src.url;
-              const cdn     = getCdnDisplayName(url);
-              const site    = SITE_SHORT[src.site || ""] || src.site || "";
-              const isEmbed = !!src.isEmbed;
-              const tag     = SCRAPER_DEFS.find(d => d.site === src.site)?.tag || "??";
-              const q       = getSrcQualityTier(src);
-              const qs      = QUALITY_STYLE[q];
+        {hasSources ? (
+          <>
+            {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
+              const srcs = grouped[q];
+              if (!srcs.length) return null;
+              const qs = QUALITY_STYLE[q];
+              let rowIdx = 0;
+              for (const prevQ of ["1080p FHD", "720p HD", "360p SD"] as Quality[]) {
+                if (prevQ === q) break;
+                rowIdx += grouped[prevQ].length;
+              }
               return (
-                <motion.div key={`${src.site}-${url.slice(-32)}`}
-                  initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(i * 0.04, 0.3), duration: 0.18 }}>
-                  <div
-                    className="flex items-center px-4 py-3.5 gap-3.5 active:bg-white/[0.03] transition-colors cursor-pointer"
-                    style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
-                    onClick={() => onPlaySrc(src)}>
-
-                    {/* Left: quality-tinted icon */}
-                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
-                      style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
-                      {isEmbed
-                        ? <Tv2 className="w-[18px] h-[18px]" style={{ color: qs.icon }} />
-                        : <MonitorPlay className="w-[18px] h-[18px]" style={{ color: qs.icon }} />}
-                    </div>
-
-                    {/* Middle: name + meta */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white/90 text-[14px] font-black font-['Cairo'] leading-tight">{cdn}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                        {site && <span className="text-white/36 text-[11px] font-['Cairo']">{site}</span>}
-                        {site && <span className="text-white/14 text-[9px]">·</span>}
-                        <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
-                          style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                          {tag}
-                        </span>
-                        {isEmbed && (
-                          <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
-                            style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.70)", border: "1px solid rgba(52,211,153,0.18)" }}>
-                            مدمج
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Right: priority badge + download + play */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-mono text-[8px] font-bold px-1.5 py-0.5 rounded"
-                        style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
-                        {Q_SHORT[q]}
-                      </span>
-                      {getDownloadUrl(src) && (
-                        <a href={getDownloadUrl(src)!} download target="_blank" rel="noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
-                          style={{ background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.28)" }}>
-                          <Download className="w-4 h-4 text-emerald-400/85" />
-                        </a>
-                      )}
-                      <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl active:scale-95 transition-transform"
-                        style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 14px rgba(109,40,217,0.30)" }}>
-                        <Play className="w-3.5 h-3.5 text-white fill-white" />
-                        <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
-                      </div>
-                    </div>
+                <div key={q}>
+                  {/* Quality group header */}
+                  <div className="flex items-center gap-2 px-4 pt-5 pb-2">
+                    <div className="w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{ background: qs.dot, boxShadow: `0 0 6px ${qs.dot}88` }} />
+                    <span className="text-[10px] font-bold font-['Cairo'] tracking-wider"
+                      style={{ color: qs.text }}>
+                      {Q_LABEL[q]}
+                    </span>
+                    <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
+                      style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
+                      {srcs.length}
+                    </span>
                   </div>
-                </motion.div>
+                  {srcs.map((src, i) => (
+                    <SourceRow key={`${src.site}-${(src.directUrl || src.url).slice(-32)}`}
+                      src={src} idx={rowIdx + i} onPlaySrc={onPlaySrc} />
+                  ))}
+                </div>
               );
             })}
-          </div>
-        )}
-
-        {/* ── Pending / loading sites ── */}
-        {notReadySites.length > 0 && (
-          <div className={hasSources ? "mt-5 pt-3 border-t border-white/[0.04]" : "mt-1"}>
-            {hasSources && (
-              <div className="px-4 pb-2">
-                <span className="text-[10px] font-['Cairo'] text-white/22 tracking-wider">مصادر أخرى</span>
-              </div>
-            )}
-            {notReadySites.map((def, i) => {
-              const status     = slotStatus[def.site] || "idle";
-              const isFetching = status === "fetching";
-              const isFailed   = status === "failed";
-              return (
-                <motion.div key={def.site}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.03, duration: 0.16 }}
-                  onClick={() => !isFetching && onFetchSite(def.site)}
-                  className={`flex items-center px-4 py-3.5 gap-3.5 cursor-pointer transition-all
-                    ${isFailed ? "opacity-30" : "active:bg-white/[0.03]"}`}
-                  style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-
-                  {/* Site tag badge */}
-                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
-                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                    <span className="font-mono text-[10px] font-black text-white/28">{def.tag}</span>
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-[13px] font-bold font-['Cairo'] ${isFailed ? "text-white/25" : "text-white/50"}`}>
-                      {def.name}
-                    </p>
-                    <p className={`text-[10px] font-['Cairo'] mt-0.5 ${isFailed ? "text-white/18" : "text-white/22"}`}>
-                      {isFetching ? "جاري الجلب..." : isFailed ? "غير متاح · اضغط للمحاولة" : def.desc}
-                    </p>
-                  </div>
-
-                  <div className="shrink-0">
-                    {isFetching
-                      ? <Loader2 className="w-4 h-4 text-amber-300/50 animate-spin" />
-                      : <span className="text-[10px] text-white/18 font-['Cairo']">
-                          {isFailed ? "إعادة" : "جلب"}
-                        </span>}
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Empty state — still fetching */}
-        {!hasSources && notReadySites.some(d => slotStatus[d.site] === "fetching") && (
-          <div className="flex flex-col items-center justify-center py-16 gap-4 px-8">
-            <motion.div
-              className="w-10 h-10 rounded-full border-2 border-violet-500/20 border-t-violet-400"
-              animate={{ rotate: 360 }}
-              transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-            />
-            <div className="text-center">
-              <p className="text-white/40 text-[14px] font-black font-['Cairo']">جاري البحث عن مصادر…</p>
-              <p className="text-white/18 text-[11px] font-['Cairo'] mt-1">ستظهر المصادر المتاحة هنا تلقائياً</p>
-            </div>
-          </div>
-        )}
-
-        {/* Empty state — all scrapers done, nothing found (episode ahead of sources) */}
-        {!hasSources &&
-          SCRAPER_DEFS.some(d => slotStatus[d.site] !== "idle") &&
-          !SCRAPER_DEFS.some(d => slotStatus[d.site] === "fetching") && (
+          </>
+        ) : (
+          /* No sources found after all scrapers done */
           <motion.div
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
             className="flex flex-col items-center justify-center py-14 gap-5 px-8">
-            {/* Icon */}
             <div className="w-16 h-16 rounded-3xl flex items-center justify-center"
               style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)" }}>
               <AlertTriangle className="w-7 h-7 text-red-400/60" />
             </div>
-            {/* Text */}
             <div className="text-center flex flex-col gap-2">
               <p className="text-white/70 text-[16px] font-black font-['Cairo']">
                 الحلقة {ep} غير متوفرة بعد
@@ -821,7 +877,6 @@ function ScraperPicker({
                 المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.
               </p>
             </div>
-            {/* Go to previous episode */}
             {ep > 1 && (
               <button onClick={onPrevEp}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
