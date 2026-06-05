@@ -70,6 +70,7 @@ interface Props {
   serverCount?: number;
   serverIndex?: number;
   downloadUrl?: string;
+  resumeTime?: number;
   subCues?: SubCue[];
   subElapsed?: number;
   subSettings?: SubSettings;
@@ -120,7 +121,7 @@ const SUB_POSITIONS = [
 
 /* ─────────────────────────────────────── component ─ */
 export default function RiftPlayer({
-  src, title = "", epTitle = "", ep = 1, totalEps = 999,
+  src, title = "", epTitle = "", ep = 1, totalEps = 999, resumeTime = 0,
   qualityLabel = "", isHls = false, serverCount = 1, serverIndex = 0,
   downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
   onSubtitleClick, onSubSettingsChange,
@@ -133,6 +134,8 @@ export default function RiftPlayer({
   const progressRef  = useRef<HTMLDivElement>(null);
   const hideRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekDrag     = useRef(false);
+  const touchScrubbing = useRef(false);
+  const resumedRef   = useRef(false);
   const onFailRef    = useRef(onFail); onFailRef.current = onFail;
   const failFired    = useRef(false);
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -312,6 +315,16 @@ export default function RiftPlayer({
       if (failTimer.current) clearTimeout(failTimer.current);
     };
   }, [loadSource]);
+
+  /* ── Resume: seek to saved position once duration is known ── */
+  useEffect(() => {
+    if (resumedRef.current || !resumeTime || resumeTime < 5 || !duration || duration < 30) return;
+    if (resumeTime >= duration - 10) return; // too close to end, start fresh
+    const v = videoRef.current; if (!v) return;
+    v.currentTime = resumeTime;
+    setCurrentTime(resumeTime);
+    resumedRef.current = true;
+  }, [duration, resumeTime]);
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
@@ -502,6 +515,10 @@ export default function RiftPlayer({
 
   const pct    = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufPct = duration > 0 ? (buffered   / duration) * 100 : 0;
+
+  /* ── Skip intro/outro visibility ── */
+  const showSkipIntro = duration > 300 && currentTime >= 62 && currentTime <= 148;
+  const showSkipOutro = duration > 0 && currentTime >= duration - 200 && currentTime <= duration - 12;
 
   /* ── portrait style ── */
   const portraitStyle: React.CSSProperties = isPortrait ? {
@@ -918,44 +935,81 @@ export default function RiftPlayer({
                 onTouchStart={e => e.stopPropagation()}
                 onTouchEnd={e => e.stopPropagation()}
               >
+                {/* ── Skip intro / outro ── */}
+                {showCtrl && (showSkipIntro || showSkipOutro) && (
+                  <div className="flex justify-end px-5 pb-2 pointer-events-auto">
+                    {showSkipIntro && (
+                      <button
+                        onClick={() => { seekFrac(148 / duration); showControls(); }}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                        style={{ background: "rgba(139,92,246,0.88)", border: "1px solid rgba(167,139,250,0.45)", color: "white", boxShadow: "0 4px 16px rgba(139,92,246,0.40)" }}>
+                        تخطي المقدمة ←
+                      </button>
+                    )}
+                    {showSkipOutro && !showSkipIntro && (
+                      <button
+                        onClick={() => onNextEp?.()}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                        style={{ background: "rgba(20,20,45,0.90)", border: "1px solid rgba(139,92,246,0.40)", color: "rgba(167,139,250,0.95)", boxShadow: "0 4px 16px rgba(0,0,0,0.50)" }}>
+                        الحلقة التالية ←
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {/* ── Progress bar ── */}
-                <div className="px-5 pt-3 pb-1">
-                  <div className="flex items-center justify-between mb-2.5 px-0.5" dir="ltr">
+                <div className="px-5 pt-1 pb-1">
+                  <div className="flex items-center justify-between mb-1 px-0.5" dir="ltr">
                     <span className="text-white/70 text-[12px] font-bold font-mono">{fmtTime(currentTime)}</span>
                     <span className="text-white/35 text-[12px] font-mono">{fmtTime(duration)}</span>
                   </div>
+                  {/* 36px touch target — visual bar centered inside */}
                   <div
                     ref={progressRef}
-                    className="relative w-full cursor-pointer"
-                    style={{ height: prgHover ? 7 : 4, transition: "height 0.15s ease" }}
+                    className="relative w-full cursor-pointer select-none"
+                    style={{ height: 36, display: "flex", alignItems: "center", touchAction: "none", userSelect: "none" }}
                     onClick={handlePrgClick}
                     onMouseDown={handlePrgDown}
                     onMouseEnter={() => setPrgHover(true)}
-                    onMouseLeave={() => setPrgHover(false)}
+                    onMouseLeave={() => { if (!touchScrubbing.current) setPrgHover(false); }}
                     onTouchStart={e => {
-                      e.stopPropagation(); setPrgHover(true);
-                      const bar = progressRef.current; if (!bar) return;
-                      const r = bar.getBoundingClientRect(); seekFrac((e.touches[0].clientX - r.left) / r.width);
+                      e.stopPropagation(); e.preventDefault();
+                      touchScrubbing.current = true; setPrgHover(true);
+                      const r = e.currentTarget.getBoundingClientRect();
+                      seekFrac((e.touches[0].clientX - r.left) / r.width);
                     }}
                     onTouchMove={e => {
-                      e.stopPropagation();
-                      const bar = progressRef.current; if (!bar) return;
-                      const r = bar.getBoundingClientRect(); seekFrac((e.touches[0].clientX - r.left) / r.width);
+                      e.stopPropagation(); e.preventDefault();
+                      if (!touchScrubbing.current) return;
+                      const r = e.currentTarget.getBoundingClientRect();
+                      seekFrac((e.touches[0].clientX - r.left) / r.width);
                     }}
-                    onTouchEnd={e => { e.stopPropagation(); setPrgHover(false); }}
+                    onTouchEnd={e => { e.stopPropagation(); touchScrubbing.current = false; setPrgHover(false); }}
                   >
-                    <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }} />
-                    <div className="absolute top-0 left-0 h-full rounded-full"
-                      style={{ width: `${bufPct}%`, background: "rgba(139,92,246,0.35)", transition: "width 0.3s" }} />
-                    <div className="absolute top-0 left-0 h-full rounded-full"
-                      style={{ width: `${pct}%`, background: "linear-gradient(90deg, #8b5cf6, #a78bfa)", transition: seekDrag.current ? "none" : "width 0.1s" }} />
-                    <div className="absolute top-1/2 -translate-y-1/2 rounded-full"
+                    {/* Visual track */}
+                    <div className="absolute left-0 right-0 rounded-full overflow-hidden pointer-events-none"
+                      style={{ height: prgHover ? 7 : 4, transition: "height 0.15s ease" }}>
+                      <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.18)" }} />
+                      <div className="absolute top-0 left-0 h-full"
+                        style={{ width: `${bufPct}%`, background: "rgba(139,92,246,0.35)", transition: "width 0.3s" }} />
+                      <div className="absolute top-0 left-0 h-full"
+                        style={{
+                          width: `${pct}%`,
+                          background: "linear-gradient(90deg, #8b5cf6, #a78bfa)",
+                          transition: (seekDrag.current || touchScrubbing.current) ? "none" : "width 0.1s",
+                        }} />
+                    </div>
+                    {/* Thumb */}
+                    <div className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
                       style={{
-                        left: `calc(${pct}% - ${prgHover ? 7 : 5}px)`,
-                        width: prgHover ? 14 : 10, height: prgHover ? 14 : 10,
+                        left: `calc(${pct}% - ${prgHover ? 9 : 5}px)`,
+                        width:  prgHover ? 18 : 10,
+                        height: prgHover ? 18 : 10,
                         background: "#a78bfa",
-                        boxShadow: "0 0 0 3px rgba(167,139,250,0.30), 0 1px 6px rgba(0,0,0,0.60)",
-                        transition: "left 0.1s, width 0.15s, height 0.15s",
+                        boxShadow: prgHover
+                          ? "0 0 0 4px rgba(167,139,250,0.28), 0 2px 8px rgba(0,0,0,0.70)"
+                          : "0 0 0 2px rgba(167,139,250,0.20), 0 1px 4px rgba(0,0,0,0.55)",
+                        transition: (seekDrag.current || touchScrubbing.current) ? "none" : "left 0.1s, width 0.12s, height 0.12s",
                       }} />
                   </div>
                 </div>
