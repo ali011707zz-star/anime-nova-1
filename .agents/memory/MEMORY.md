@@ -1,3 +1,4 @@
+- [Playwright kills Replit workflows](playwright-replit-kill.md) — pkill -9 -f chromium in workflow command kills Replit's own browser processes; Playwright too heavy for inline scraping; use cfGet (HTTP+headers) instead
 - [ShareMax/Megamax Inertia extraction](sharmax-inertia.md) — share4max.com & megamax.me use Inertia.js; video URL requires partial reload, not HTML parsing
 - [Streamtape URL regex](streamtape-regex.md) — altRe pattern must exclude `<>` chars or `</div>` contaminates the token field
 - [Arabic source priority](source-priority.md) — shahiid=13, animelek=12, animedar=11; akwam=11-13, AnimeGG (English)=5; directUrl always wins at 14

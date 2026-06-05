@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { execSync } from "child_process";
 import {
   makeSourceCacheKey,
   getFromSourceCache,
@@ -92,120 +91,34 @@ function isCloudflareBlock(html: string): boolean {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  Playwright CF-bypass — warm CF cookies once per origin, reuse for
-//  all subsequent fetch calls during the session (22-min TTL)
+//  cfGet — attempt fetch with browser-like headers (best-effort CF bypass)
+//  Works on sites where CF JS challenge is not triggered server-side.
+//  Returns null if Cloudflare blocks the request.
 // ════════════════════════════════════════════════════════════════════
-let _chromiumPath: string | undefined;
-function findChromium(): string {
-  if (_chromiumPath) return _chromiumPath;
-  try {
-    const p = execSync("which chromium 2>/dev/null", { encoding: "utf8" }).trim();
-    if (p) return (_chromiumPath = p);
-  } catch {}
-  try {
-    const p = execSync("ls /nix/store/*/bin/chromium 2>/dev/null | head -1",
-      { encoding: "utf8", shell: "/bin/sh" }).trim();
-    if (p) return (_chromiumPath = p);
-  } catch {}
-  return (_chromiumPath = "chromium");
-}
+const CF_BROWSER_HDRS: Record<string, string> = {
+  "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "sec-fetch-dest": "document",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-site": "none",
+  "sec-fetch-user": "?1",
+  "upgrade-insecure-requests": "1",
+  "accept-language": "ar,en-US;q=0.9,en;q=0.8",
+};
 
-const cfSessionCache = new Map<string, { cookies: string; ts: number }>();
-const CF_SESSION_TTL = 22 * 60_000; // 22 minutes
-
-/** Launch Playwright to bypass CF JS challenge and cache cookies for origin */
-async function bypassCf(origin: string): Promise<boolean> {
-  try {
-    const pw = await import("playwright-core");
-    const browser = await (pw as any).chromium.launch({
-      executablePath: findChromium(),
-      headless: true,
-      args: [
-        "--no-sandbox", "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage", "--disable-gpu",
-        "--disable-software-rasterizer",
-      ],
-    });
-    try {
-      const ctx = await browser.newContext({
-        userAgent: BROWSER_UA,
-        viewport: { width: 1280, height: 720 },
-      });
-      const page = await ctx.newPage();
-      await page.goto(origin + "/", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForFunction(
-        "!document.title.toLowerCase().includes('just a moment')",
-        { timeout: 20000 }
-      ).catch(() => {});
-      await page.waitForTimeout(2000);
-      const cookies = await ctx.cookies();
-      const cookieStr = (cookies as any[]).map((c: any) => `${c.name}=${c.value}`).join("; ");
-      cfSessionCache.set(origin, { cookies: cookieStr, ts: Date.now() });
-      return true;
-    } finally {
-      await browser.close();
-    }
-  } catch (e) {
-    console.error("[bypassCf] error for", origin, ":", (e as Error).message?.slice(0, 120));
-    return false;
-  }
-}
-
-/** Fetch a page on a CF-protected origin using cached session cookies */
 async function cfGet(url: string, extraHdrs: Record<string, string> = {}): Promise<string | null> {
-  let origin: string;
-  try { origin = new URL(url).origin; } catch { return null; }
-
-  // Ensure we have a live session
-  const cached = cfSessionCache.get(origin);
-  if (!cached || Date.now() - cached.ts >= CF_SESSION_TTL) {
-    if (!await bypassCf(origin)) return null;
-  }
-
-  const session = cfSessionCache.get(origin);
-  if (!session) return null;
-
-  const doFetch = async (cookieStr: string) => {
+  try {
     const r = await fetch(url, {
-      headers: { ...BASE_HDRS, Cookie: cookieStr, Referer: origin + "/", ...extraHdrs },
+      headers: { ...BASE_HDRS, ...CF_BROWSER_HDRS, ...extraHdrs },
       signal: AbortSignal.timeout(12000),
       redirect: "follow",
     });
     if (!r.ok) return null;
     const html = await r.text();
     return isCloudflareBlock(html) ? null : html;
-  };
-
-  let html = await doFetch(session.cookies);
-  if (html === null) {
-    // Cookies may have expired early — refresh
-    cfSessionCache.delete(origin);
-    if (!await bypassCf(origin)) return null;
-    const fresh = cfSessionCache.get(origin);
-    if (!fresh) return null;
-    html = await doFetch(fresh.cookies);
-  }
-  return html;
+  } catch { return null; }
 }
-
-// Pre-warm CF sessions 30s after server start (non-blocking)
-setTimeout(() => {
-  const warm = async () => {
-    try { await bypassCf("https://witanime.life"); } catch {}
-    try { await bypassCf("https://anime3rb.com"); } catch {}
-  };
-  warm().catch(() => {});
-}, 30_000);
-
-// Refresh every 20 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [origin, session] of cfSessionCache) {
-    if (now - session.ts > CF_SESSION_TTL - 2 * 60_000) {
-      bypassCf(origin).catch(() => {});
-    }
-  }
-}, 20 * 60_000).unref();
 
 // ════════════════════════════════════════════════════════════════════
 //  UTILITIES
@@ -3290,12 +3203,10 @@ const witaSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }
 async function searchWitanime(query: string): Promise<string | null> {
   // Try WP AJAX search first (faster)
   try {
-    const cfSession = cfSessionCache.get(WITANIME_BASE);
     const hdrs: Record<string, string> = {
       ...WITANIME_HDRS,
       "Content-Type": "application/x-www-form-urlencoded",
       "X-Requested-With": "XMLHttpRequest",
-      ...(cfSession ? { Cookie: cfSession.cookies } : {}),
     };
     const r = await fetch(`${WITANIME_BASE}/wp-admin/admin-ajax.php`, {
       method: "POST",
@@ -3393,12 +3304,10 @@ async function fetchWitaServerUrls(epUrl: string): Promise<string[]> {
     const postId = html.match(/["']post["']\s*:\s*["']?(\d+)["']?/)?.[1]
       || html.match(/post_id\s*=\s*(\d+)/)?.[1] || "";
     if (nonce && postId) {
-      const cfSession = cfSessionCache.get(WITANIME_BASE);
-      const cookieHdr = cfSession ? { Cookie: cfSession.cookies } : {};
       try {
         const r = await fetch(`${WITANIME_BASE}/wp-admin/admin-ajax.php`, {
           method: "POST",
-          headers: { ...WITANIME_HDRS, "Content-Type": "application/x-www-form-urlencoded", ...cookieHdr },
+          headers: { ...WITANIME_HDRS, "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ action: "anime_get_servers", post_id: postId, nonce }).toString(),
           signal: AbortSignal.timeout(10000),
         });
@@ -3575,6 +3484,63 @@ async function getAnime3rbSources(
 const KAWAII_BASE = "https://www.kawaii-anime.com";
 const kawaiiSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
+// ── kawaii-anime.com search cache (slug → title map built from HTML)
+const kawaiiSlugCache = new Map<string, { slug: string | null; ts: number }>();
+
+/** Try to find anime slug by fetching kawaii-anime.com/search HTML (server-rendered list) */
+async function searchKawaii(query: string): Promise<string | null> {
+  const ck = query.toLowerCase();
+  const hit = kawaiiSlugCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
+
+  // kawaii-anime.com is Next.js App Router — search uses useSearchParams (client-side).
+  // Try the RSC stream endpoint: adding Rsc:1 header makes Next.js return a streamed RSC payload
+  // that sometimes includes pre-rendered item list HTML in the component stream.
+  for (const q of [query]) {
+    try {
+      const r = await fetch(`${KAWAII_BASE}/search?q=${encodeURIComponent(q)}`, {
+        headers: {
+          ...BASE_HDRS,
+          Accept: "text/x-component, text/html",
+          Rsc: "1",
+          "Next-Router-State-Tree": '["",[]]',
+          "Next-Router-Prefetch": "1",
+        },
+        signal: AbortSignal.timeout(10000),
+        redirect: "follow",
+      });
+      if (!r.ok) continue;
+      const body = await r.text();
+      if (isCloudflareBlock(body)) continue;
+
+      // Extract /anime/{slug} hrefs from RSC payload
+      const candidates: Array<{ slug: string; score: number }> = [];
+      const re = /\/anime\/([a-z0-9][a-z0-9-]{2,80})/gi;
+      const seen = new Set<string>();
+      for (const m of body.matchAll(re)) {
+        const slug = m[1];
+        if (seen.has(slug)) continue;
+        seen.add(slug);
+        const label = slug.replace(/-/g, " ");
+        const score = Math.max(
+          similarity(label, q.toLowerCase()),
+          asciiSimilarity(slug, q),
+        );
+        candidates.push({ slug, score });
+      }
+      candidates.sort((a, b) => b.score - a.score);
+      if (candidates[0]?.score > 0.2) {
+        const slug = candidates[0].slug;
+        kawaiiSlugCache.set(ck, { slug, ts: Date.now() });
+        return slug;
+      }
+    } catch {}
+  }
+
+  kawaiiSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
 async function getKawaiiAnimeSources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
@@ -3583,103 +3549,75 @@ async function getKawaiiAnimeSources(
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    const pw = await import("playwright-core");
-    const browser = await (pw as any).chromium.launch({
-      executablePath: findChromium(),
-      headless: true,
-      args: ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu"],
-    });
-
-    const capturedUrls: string[] = [];
-    const capturedM3u8: string[] = [];
-
-    try {
-      const ctx = await browser.newContext({ userAgent: BROWSER_UA, viewport: { width: 1280, height: 720 } });
-
-      // Intercept video/playlist requests
-      await ctx.route("**/*", async (route: any) => {
-        const url: string = route.request().url();
-        if (url.match(/\.(m3u8|mpd)(\?|$)/i) && !url.includes("/ad")) {
-          if (!capturedM3u8.includes(url)) capturedM3u8.push(url);
-        } else if (url.match(/\.(mp4|webm)(\?|$)/i) && !url.includes("thumb") && !url.includes("poster")) {
-          if (!capturedUrls.includes(url)) capturedUrls.push(url);
-        }
-        await route.continue();
-      });
-
-      const page = await ctx.newPage();
-
-      // 1. Search for anime
-      const query = english || title;
-      await page.goto(`${KAWAII_BASE}/search?q=${encodeURIComponent(query)}`, {
-        waitUntil: "networkidle",
-        timeout: 25000,
-      });
-
-      // 2. Find best matching anime slug from search results
-      const animeSlug: string | null = await page.evaluate(
-        ([t, e]: [string, string | null]) => {
-          // Look for anime cards (runs in browser context)
-          // @ts-ignore - browser globals available in page.evaluate context
-          const cards = document.querySelectorAll("a[href*='/anime/']") as any[];
-          let best: string | null = null;
-          let bestScore = 0;
-          for (const card of cards) {
-            const href: string = card.href || "";
-            if (!href.includes("/anime/")) continue;
-            const slug: string = href.split("/anime/")[1]?.replace(/\//g, "") || "";
-            const cardTitle: string = card.querySelector("h2,h3,h4,[class*='title'],[class*='name']")?.textContent?.trim() || slug.replace(/-/g, " ");
-            const checkAgainst = ([t, e] as Array<string | null>).filter(Boolean) as string[];
-            const score = checkAgainst.reduce((mx: number, q: string) => {
-              const qL = q.toLowerCase();
-              const tL = cardTitle.toLowerCase();
-              if (tL === qL) return Math.max(mx, 1);
-              if (tL.includes(qL) || qL.includes(tL)) return Math.max(mx, 0.85);
-              const tw = tL.split(/\s+/);
-              const qw = qL.split(/\s+/);
-              const matches = qw.filter((w: string) => tw.some((t2: string) => t2 === w || (t2.length >= 4 && w.length >= 4 && (t2.startsWith(w) || w.startsWith(t2))))).length;
-              return Math.max(mx, matches / Math.max(tw.length, qw.length));
-            }, 0);
-            if (score > bestScore) { bestScore = score; best = slug; }
-          }
-          return bestScore > 0.25 ? best : null;
-        },
-        [title, english] as [string, string | null],
-      );
-
-      if (!animeSlug) return [];
-
-      // 3. Navigate to watch page
-      await page.goto(`${KAWAII_BASE}/watch/${animeSlug}/${ep}`, {
-        waitUntil: "networkidle",
-        timeout: 25000,
-      });
-
-      // Wait extra for video sources to load
-      await page.waitForTimeout(4000);
-
-      // 4. Try to find video URLs from page source
-      const pageContent = await page.content();
-      const v = parseVideoUrl(pageContent);
-      if (v) capturedUrls.push(v.url);
-
-    } finally {
-      await browser.close();
+    // 1. Find anime slug
+    let slug: string | null = null;
+    for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
+      slug = await searchKawaii(q);
+      if (slug) break;
     }
 
-    const allUrls = [...capturedM3u8.map(u => ({ u, isHls: true })), ...capturedUrls.map(u => ({ u, isHls: false }))];
-    if (!allUrls.length) return [];
+    // Fallback: try constructing slug from title
+    if (!slug) {
+      const derived = (english || title).toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ").trim()
+        .replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      if (derived.length >= 3) slug = derived;
+    }
+    if (!slug) return [];
 
-    const sources: UnifiedSource[] = allUrls.slice(0, 4).map(({ u, isHls }, i) => ({
-      name: `كواي أنمي · ${isHls ? "HLS" : "MP4"} ${i + 1}`,
-      url: u,
-      quality: "HD",
-      qualityRank: 9,
-      site: "kawaii",
-      directUrl: isHls ? `/api/anime/hls-proxy?url=${encodeURIComponent(u)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}` : `/api/anime/video-proxy?url=${encodeURIComponent(u)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`,
-      directType: isHls ? "hls" : "mp4",
-    }));
+    // 2. Fetch watch page — Next.js SSR may include embedded player data
+    const watchUrl = `${KAWAII_BASE}/watch/${slug}/${ep}`;
+    const r = await fetch(watchUrl, {
+      headers: { ...BASE_HDRS, Accept: "text/html", "accept-language": "ar,en-US;q=0.9" },
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
 
+    // 3. Parse video URLs from server-rendered HTML / embedded JSON
+    const sources: UnifiedSource[] = [];
+    const seen = new Set<string>();
+    const addSrc = (url: string, isHls: boolean, label: string) => {
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      sources.push({
+        name: label,
+        url,
+        quality: "HD",
+        qualityRank: 9,
+        site: "kawaii",
+        directUrl: isHls
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`
+          : `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`,
+        directType: isHls ? "hls" : "mp4",
+      });
+    };
+
+    // HLS playlists
+    for (const m of html.matchAll(/["'`](https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*)["'`]/gi))
+      addSrc(m[1], true, `كواي أنمي · HLS ${sources.length + 1}`);
+
+    // MP4 / video files
+    for (const m of html.matchAll(/["'`](https?:\/\/[^"'`\s]+\.mp4[^"'`\s]*)["'`]/gi)) {
+      if (!m[1].match(/\/(thumb|poster|preview|ads?)\//i)) addSrc(m[1], false, `كواي أنمي · MP4 ${sources.length + 1}`);
+    }
+
+    // Embed iframes from known video hosts
+    for (const m of html.matchAll(/<iframe[^>]+src=["'](https?:\/\/[^"']+)["']/gi)) {
+      const embedUrl = m[1];
+      const v = parseVideoUrl(embedUrl);
+      if (v) addSrc(v.url, v.type === "hls", `كواي أنمي · embed ${sources.length + 1}`);
+    }
+
+    // Generic parseVideoUrl on full page
+    if (!sources.length) {
+      const v = parseVideoUrl(html);
+      if (v) addSrc(v.url, v.type === "hls", `كواي أنمي · فيديو`);
+    }
+
+    if (!sources.length) return [];
     kawaiiSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
   } catch { return []; }
