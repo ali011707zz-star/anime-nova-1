@@ -28,12 +28,13 @@ interface StreamData {
 }
 interface SubCue { start: number; end: number; text: string }
 interface SubSettings {
-  fontSize: number;     // 13 | 16 | 20 | 24
-  color: string;        // css color
-  bgOpacity: number;    // 0 | 0.55 | 0.82
+  fontSize: number;                        // 13 | 16 | 20 | 24
+  color: string;                           // css color
+  bgOpacity: number;                       // 0 | 0.45 | 0.82
   bold: boolean;
+  position: "top" | "center" | "bottom";  // subtitle placement
 }
-const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 16, color: "#ffffff", bgOpacity: 0.82, bold: true };
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 16, color: "#ffffff", bgOpacity: 0.82, bold: true, position: "bottom" };
 
 /* ══════════════════════════════════ HELPERS ══════════════════ */
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
@@ -1299,6 +1300,8 @@ function EpisodePlayer({
               subCues={subState === "ready" && subCues.length > 0 ? subCues : undefined}
               subElapsed={hlsTime + subOffset}
               subSettings={subSettings}
+              subEnabled={subState === "ready"}
+              onSubtitleClick={fetchSubtitles}
               onBack={onBack}
               onPrevEp={onPrevEp}
               onNextEp={onNextEp}
@@ -1464,6 +1467,29 @@ function EpisodePlayer({
                         }}>
                         {subSettings.bold ? "عريض" : "عادي"}
                       </button>
+                    </div>
+                  </div>
+
+                  {/* ── Position ── */}
+                  <div>
+                    <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">موضع الترجمة</p>
+                    <div className="flex gap-2">
+                      {([
+                        { v: "top",    label: "أعلى",  icon: "⬆" },
+                        { v: "center", label: "وسط",   icon: "⬛" },
+                        { v: "bottom", label: "أسفل",  icon: "⬇" },
+                      ] as { v: "top"|"center"|"bottom"; label: string; icon: string }[]).map(({ v, label, icon }) => (
+                        <button key={v} onClick={() => setSubSettings(s => ({ ...s, position: v }))}
+                          className="flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all active:scale-90"
+                          style={{
+                            background: subSettings.position === v ? "rgba(139,92,246,0.25)" : "rgba(255,255,255,0.05)",
+                            border: subSettings.position === v ? "1px solid rgba(139,92,246,0.50)" : "1px solid rgba(255,255,255,0.08)",
+                            color: subSettings.position === v ? "#c4b5fd" : "rgba(255,255,255,0.40)",
+                          }}>
+                          <span style={{ fontSize: 10 }}>{icon}</span>
+                          <span className="text-[10px] font-bold font-['Cairo']">{label}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
 
