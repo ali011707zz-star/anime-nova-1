@@ -1096,37 +1096,46 @@ export default function RiftPlayer({
                   </div>
 
                   {/* Center: ←10  ⏸  10→ */}
-                  <div className="flex items-center gap-5 flex-1 justify-center">
+                  <div className="flex items-center gap-8 flex-1 justify-center">
                     <button onClick={() => { skip(-10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150">
-                      <RotateCcw className="w-[18px] h-[18px] text-white/75" strokeWidth={1.9} />
-                      <span className="font-mono font-black text-white/50 leading-none" style={{ fontSize: 9 }}>10ث</span>
+                      className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.16)", backdropFilter: "blur(14px)" }}>
+                      <RotateCcw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.9} />
+                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
                     <button onClick={togglePlay}
-                      className="w-[50px] h-[50px] rounded-full flex items-center justify-center active:scale-90 transition-transform shadow-lg"
-                      style={{ background: "rgba(139,92,246,0.90)", boxShadow: "0 4px 20px rgba(139,92,246,0.45)" }}>
+                      className="w-[54px] h-[54px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                      style={{
+                        background: "rgba(139,92,246,0.42)",
+                        border: "1.5px solid rgba(167,139,250,0.55)",
+                        backdropFilter: "blur(20px) saturate(180%)",
+                        boxShadow: "0 4px 20px rgba(139,92,246,0.38), 0 0 0 1px rgba(255,255,255,0.06) inset",
+                      }}>
                       {playing
-                        ? <Pause className="w-[21px] h-[21px] text-white fill-white" />
-                        : <Play  className="w-[21px] h-[21px] text-white fill-white ml-0.5" />}
+                        ? <Pause className="w-[22px] h-[22px] text-white fill-white" />
+                        : <Play  className="w-[22px] h-[22px] text-white fill-white ml-0.5" />}
                     </button>
                     <button onClick={() => { skip(10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150">
-                      <RotateCw className="w-[18px] h-[18px] text-white/75" strokeWidth={1.9} />
-                      <span className="font-mono font-black text-white/50 leading-none" style={{ fontSize: 9 }}>10ث</span>
+                      className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.16)", backdropFilter: "blur(14px)" }}>
+                      <RotateCw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.9} />
+                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
                   </div>
 
                   {/* Right: volume · lock */}
                   <div className="flex items-center gap-2 shrink-0">
                     <button onClick={toggleMute}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(14px)" }}>
                       {muted || volume === 0
-                        ? <VolumeX className="w-[18px] h-[18px] text-white/45" />
-                        : <Volume2 className="w-[18px] h-[18px] text-white/45" />}
+                        ? <VolumeX className="w-[18px] h-[18px] text-white/55" />
+                        : <Volume2 className="w-[18px] h-[18px] text-white/55" />}
                     </button>
                     <button onClick={() => setIsLocked(true)}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
-                      <Lock className="w-[16px] h-[16px] text-white/45" />
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(14px)" }}>
+                      <Lock className="w-[16px] h-[16px] text-white/55" />
                     </button>
                   </div>
                 </div>

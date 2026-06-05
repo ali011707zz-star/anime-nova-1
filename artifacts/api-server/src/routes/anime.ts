@@ -1624,7 +1624,8 @@ function parseAnimePhoenixVideo(html: string): Array<{ url: string; label: strin
 
   // Method 1: <source src="https://*.workers.dev/0:/...">
   for (const m of html.matchAll(/<source[^>]+src=["'](https?:\/\/[^"']+\.(?:mkv|mp4|m3u8)[^"']*)["']/gi)) {
-    const url = m[1];
+    // Encode literal spaces/brackets that appear in paths inside <template> tags
+    const url = encodeURI(m[1]);
     if (!seen.has(url) && url.startsWith("http")) {
       seen.add(url);
       results.push({ url, label: "مباشر" });
@@ -1646,10 +1647,11 @@ function parseAnimePhoenixVideo(html: string): Array<{ url: string; label: strin
     } catch {}
   }
 
-  // Method 3: data-server=urlencoded+base64
+  // Method 3: data-server=urlencoded+base64 (Node.js Buffer, not browser atob)
   for (const m of html.matchAll(/data-server=["']([^"']{20,})["']/gi)) {
     try {
-      const decoded = JSON.parse(decodeURIComponent(atob(m[1])));
+      const raw = m[1].replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = JSON.parse(decodeURIComponent(Buffer.from(raw, "base64").toString("utf-8")));
       if (decoded?.type === "direct" && decoded?.link?.startsWith("http")) {
         const url = decoded.link;
         if (!seen.has(url)) {
@@ -2447,13 +2449,21 @@ async function getOkAnimeSources(
 const ATIME_BASE = "https://anime-time.live";
 const ATIME_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime-time.live/" };
 
-const atimeSeriesCache = new Map<string, { url: string | null; ts: number }>();
+const atimeSeriesCache = new Map<string, { urls: string[]; ts: number }>();
 const atimeSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchAnimeTime(title: string, english: string | null): Promise<string | null> {
+/**
+ * Search anime-time.live and return ALL matching arc (/anime/) URLs for this title.
+ * Multi-arc anime (e.g. One Piece with 20+ seasons) have one /anime/ URL per arc.
+ * Returns all arcs so episodes in any arc can be found.
+ */
+async function searchAnimeTimeArcs(title: string, english: string | null): Promise<string[]> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = atimeSeriesCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.urls;
+
+  const allArcs: string[] = [];
+  const seriesUrls: string[] = [];
 
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
@@ -2465,23 +2475,19 @@ async function searchAnimeTime(title: string, english: string | null): Promise<s
       const html = await r.text();
       if (isCloudflareBlock(html)) continue;
 
-      const candidates: Array<{ url: string; score: number }> = [];
-
-      // Match /series/ parent pages
+      // Collect /series/ parent pages (contain links to all arc pages)
       for (const m of html.matchAll(/href="(https:\/\/anime-time\.live\/series\/[^"]+)"/g)) {
         const u = m[1];
         if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
         const slug = decodeURIComponent(u.replace(ATIME_BASE + "/series/", "").replace(/\/$/, ""));
-        // Use both regular + ASCII-only similarity to handle mixed Arabic-English slugs
-        // e.g. "أنمي-one-piece-مترجم-الموسم-الثالث-عشر" → asciiSimilarity extracts "one piece" first
         const score = Math.max(
           similarity(slug, title), english ? similarity(slug, english) : 0,
           asciiSimilarity(slug, title), english ? asciiSimilarity(slug, english) : 0,
         );
-        candidates.push({ url: u, score });
+        if (score > 0.15 && !seriesUrls.includes(u)) seriesUrls.push(u);
       }
 
-      // Also match /anime/ arc pages directly (some anime have no /series/ parent)
+      // Also collect /anime/ arc pages shown directly in search results
       for (const m of html.matchAll(/href="(https:\/\/anime-time\.live\/anime\/[^"]+)"/g)) {
         const u = m[1];
         if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
@@ -2490,19 +2496,33 @@ async function searchAnimeTime(title: string, english: string | null): Promise<s
           similarity(slug, title), english ? similarity(slug, english) : 0,
           asciiSimilarity(slug, title), english ? asciiSimilarity(slug, english) : 0,
         );
-        candidates.push({ url: u, score });
+        if (score > 0.12 && !allArcs.includes(u)) allArcs.push(u);
       }
 
-      const best = candidates.sort((a, b) => b.score - a.score)[0];
-      if (best && best.score > 0.2) {
-        atimeSeriesCache.set(ck, { url: best.url, ts: Date.now() });
-        return best.url;
-      }
+      if (seriesUrls.length > 0 || allArcs.length > 0) break;
     } catch {}
   }
 
-  atimeSeriesCache.set(ck, { url: null, ts: Date.now() });
-  return null;
+  // Expand each /series/ page to collect ALL its arc (/anime/) links
+  await Promise.allSettled(seriesUrls.map(async (seriesUrl) => {
+    try {
+      const sR = await fetch(seriesUrl, {
+        headers: ATIME_HDRS, signal: AbortSignal.timeout(9000), redirect: "follow",
+      });
+      if (!sR.ok) return;
+      const sHtml = await sR.text();
+      if (isCloudflareBlock(sHtml)) return;
+      for (const m of sHtml.matchAll(/href="(https:\/\/anime-time\.live\/anime\/[^"]+)"/g)) {
+        const u = m[1];
+        if (!allArcs.includes(u) && !u.includes("/page/") && !u.includes("download")) {
+          allArcs.push(u);
+        }
+      }
+    } catch {}
+  }));
+
+  atimeSeriesCache.set(ck, { urls: allArcs, ts: Date.now() });
+  return allArcs;
 }
 
 /** Parse episode buttons from an anime-time arc/season page → Map<epNumber, embedUrls[]> */
@@ -2551,35 +2571,14 @@ async function getAnimeTimeSources(
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    const seriesUrl = await searchAnimeTime(title, english);
-    if (!seriesUrl) return [];
+    // Get ALL arc URLs for this title — searchAnimeTimeArcs expands /series/ parent pages
+    const arcUrls = await searchAnimeTimeArcs(title, english);
+    if (!arcUrls.length) return [];
 
-    // If already an /anime/ arc page → use it directly; else fetch series page for arc links
-    const isArcPage = seriesUrl.includes("/anime/");
-    let arcUrls: string[] = [];
-
-    if (isArcPage) {
-      arcUrls = [seriesUrl];
-    } else {
-      const sR = await fetch(seriesUrl, {
-        headers: ATIME_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
-      });
-      if (!sR.ok) return [];
-      const seriesHtml = await sR.text();
-      if (isCloudflareBlock(seriesHtml)) return [];
-
-      for (const m of seriesHtml.matchAll(/href="(https:\/\/anime-time\.live\/anime\/[^"]+)"/g)) {
-        const u = m[1];
-        if (!arcUrls.includes(u) && !u.includes("/page/") && !u.includes("download")) {
-          arcUrls.push(u);
-        }
-      }
-    }
-
-    // Build global episode map by fetching all arc pages in parallel (up to 6)
+    // Build global episode map by fetching all arc pages in parallel (up to 12)
     const globalEpMap = new Map<number, string[]>();
 
-    await Promise.allSettled(arcUrls.slice(0, 6).map(async (arcUrl) => {
+    await Promise.allSettled(arcUrls.slice(0, 12).map(async (arcUrl) => {
       try {
         const r = await fetch(arcUrl, {
           headers: ATIME_HDRS, signal: AbortSignal.timeout(9000), redirect: "follow",

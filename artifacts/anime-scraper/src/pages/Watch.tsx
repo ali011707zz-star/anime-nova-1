@@ -1001,7 +1001,29 @@ function EpisodePlayer({
   const [resumeTime] = useState(() => {
     try { return parseFloat(localStorage.getItem(progressKey) || "0") || 0; } catch { return 0; }
   });
-  const lastSaveTs = useRef(0);
+  const lastSaveTs   = useRef(0);
+  const lastTimeRef  = useRef(0);
+
+  /* Save helper — only persists when time > 60s */
+  const saveProgress = useCallback(() => {
+    const t = lastTimeRef.current;
+    if (t > 60) {
+      try { localStorage.setItem(progressKey, String(Math.floor(t))); } catch {}
+    }
+  }, [progressKey]);
+
+  /* Save on: unmount, tab hidden, page unload */
+  useEffect(() => {
+    const onUnload     = () => saveProgress();
+    const onVisChange  = () => { if (document.hidden) saveProgress(); };
+    window.addEventListener("beforeunload", onUnload);
+    document.addEventListener("visibilitychange", onVisChange);
+    return () => {
+      saveProgress();
+      window.removeEventListener("beforeunload", onUnload);
+      document.removeEventListener("visibilitychange", onVisChange);
+    };
+  }, [saveProgress]);
 
   /* Detect if all quality tiers have the same server list (flat mode → hide quality picker) */
   const q1 = allServers["1080p FHD"] || [];
@@ -1027,8 +1049,10 @@ function EpisodePlayer({
   const handleRealQuality = useCallback((q: string) => setRealQuality(q), []);
   const handleHlsTime = useCallback((t: number) => {
     setHlsTime(t);
+    lastTimeRef.current = t;
+    /* Fallback: also save every 30s in case beforeunload doesn't fire (mobile) */
     const now = Date.now();
-    if (t > 60 && now - lastSaveTs.current > 5000) {
+    if (t > 60 && now - lastSaveTs.current > 30000) {
       lastSaveTs.current = now;
       try { localStorage.setItem(progressKey, String(Math.floor(t))); } catch {}
     }
