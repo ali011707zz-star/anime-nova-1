@@ -172,7 +172,7 @@ export default function Library() {
                     <motion.div key={`${item.id}-${item.ep}-${i}`}
                       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.04 }}>
-                      <Link href={`/watch?anime=${item.id}&ep=${item.ep}`}>
+                      <Link href={`/watch?anime=${item.id}&ep=${item.ep}${item.cover ? `&cover=${encodeURIComponent(item.cover)}` : ""}`}>
                         <div className="flex items-center gap-3 p-3 bg-[#111116] rounded-2xl border border-white/5 hover:border-primary/20 transition-all cursor-pointer active:scale-[0.98] overflow-hidden">
                           {/* Cover */}
                           <div className="relative shrink-0">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import {
   ChevronRight, ChevronLeft, Play, Loader2,
@@ -1642,6 +1642,7 @@ export default function WatchPage() {
   const ep           = parseInt(sp.get("ep") || "1");
   const titleParam   = sp.get("title") || "";
   const englishParam = sp.get("english") || "";
+  const coverParam   = sp.get("cover") || "";
 
   const [anime,        setAnime]        = useState<any>(null);
   const [skipTimes,    setSkipTimes]    = useState<SkipTimes>({});
@@ -1666,7 +1667,15 @@ export default function WatchPage() {
     : (anime?.nextAiringEpisode?.episode ?? 0) > 0
       ? anime!.nextAiringEpisode!.episode - 1
       : 999;
-  const cover      = anime?.coverImage?.extraLarge || anime?.coverImage?.large || "";
+  /* Cover: prefer AniList data, fallback to URL param, then watch history */
+  const coverFromHistory = useMemo(() => {
+    if (anime) return "";
+    try {
+      const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
+      return h.find(e => e.id === animeId)?.cover || "";
+    } catch { return ""; }
+  }, [anime, animeId]);
+  const cover = anime?.coverImage?.extraLarge || anime?.coverImage?.large || coverParam || coverFromHistory;
 
   /* Episode title from AniList streamingEpisodes */
   const epTitle: string = (() => {
@@ -1737,14 +1746,14 @@ export default function WatchPage() {
 
   function goEp(n: number) {
     /* Use full navigation — wouter only tracks pathname, not search; useRef params won't update otherwise */
-    window.location.href = `/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam })}`;
+    window.location.href = `/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam, cover })}`;
   }
 
   function handleBack() {
-    if (animeId) {
-      navigate(`/anime/${animeId}`);
+    if (window.history.length > 1) {
+      window.history.back();
     } else {
-      navigate("/");
+      navigate(animeId ? `/anime/${animeId}` : "/");
     }
   }
 
@@ -1787,14 +1796,18 @@ export default function WatchPage() {
     if (autoFetchedRef.current) return;
     if (!titleParam) return;
     autoFetchedRef.current = true;
+    let alive = true;
+    const ctrl = new AbortController();
+    const tids: ReturnType<typeof setTimeout>[] = [];
+
     SCRAPER_DEFS.forEach((def, i) => {
-      setTimeout(() => {
-        /* stagger 50ms per scraper so network isn't flooded */
-        /* Pass title params directly to avoid stale anime state at mount time */
+      const tid = setTimeout(() => {
+        if (!alive) return;
         (async () => {
+          if (!alive) return;
           if (inFlightRef.current.has(def.site)) return;
           inFlightRef.current.add(def.site);
-          setSlotStatus(prev => ({ ...prev, [def.site]: "fetching" }));
+          if (alive) setSlotStatus(prev => ({ ...prev, [def.site]: "fetching" }));
           try {
             const params = new URLSearchParams({
               site:    def.site,
@@ -1803,11 +1816,11 @@ export default function WatchPage() {
               ep:      String(ep),
               anime:   String(animeId || 0),
             });
-            const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(40000) });
+            const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: ctrl.signal });
             const data = await r.json() as { sources?: FetchedSrc[] };
             const srcs: FetchedSrc[] = data.sources || [];
+            if (!alive) return;
             if (srcs.length > 0) {
-              /* Don't inflate the picker sources list while player is active */
               if (phaseRef.current === "picker") {
                 setSlotSources(prev => ({ ...prev, [def.site]: srcs }));
                 setSlotStatus(prev => ({ ...prev, [def.site]: "ready" }));
@@ -1818,7 +1831,7 @@ export default function WatchPage() {
               }
             }
           } catch {
-            if (phaseRef.current === "picker") {
+            if (alive && phaseRef.current === "picker") {
               setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
             }
           } finally {
@@ -1826,7 +1839,14 @@ export default function WatchPage() {
           }
         })();
       }, i * 50);
+      tids.push(tid);
     });
+
+    return () => {
+      alive = false;
+      tids.forEach(clearTimeout);
+      ctrl.abort();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

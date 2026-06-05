@@ -593,7 +593,7 @@ export default function Home() {
             {continueWatching.map(item => {
               const progressPct = Math.min(100, Math.round((item.watchTimeSec / (24 * 60)) * 100));
               return (
-                <Link key={`${item.id}-${item.ep}`} href={`/watch?anime=${item.id}&ep=${item.ep}&title=${encodeURIComponent(item.title)}`}>
+                <Link key={`${item.id}-${item.ep}`} href={`/watch?anime=${item.id}&ep=${item.ep}&title=${encodeURIComponent(item.title)}&cover=${encodeURIComponent(item.cover || "")}`}>
                   <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
                     <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
                       {item.cover
