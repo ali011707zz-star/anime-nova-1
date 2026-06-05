@@ -466,7 +466,7 @@ export default function EpisodeListPage() {
           <p className="text-white/25 text-sm font-['Cairo']">لا توجد حلقات مطابقة</p>
         </div>
       ) : (
-        <div className="pb-4">
+        <div className="pb-32">
           {displayedEps.map(n => (
             <EpisodeRow
               key={n} n={n} anime={anime} epData={epData}
