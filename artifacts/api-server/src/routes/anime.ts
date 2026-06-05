@@ -3151,16 +3151,47 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       } catch {}
     }
 
-    // ── Mega.nz embed (MALink: "fileId!decryptionKey") — fallback embed بدون إعلانات ──
-    const maLink = String(epData.MALink || "").trim();
-    if (maLink && maLink.includes("!")) {
-      const bang   = maLink.indexOf("!");
-      const fileId = maLink.slice(0, bang);
-      const key    = maLink.slice(bang + 1);
-      if (fileId && key) {
-        // Quick verify via Mega API: returns [-9] for ENOENT, [{...}] for found
+    // ── Mega.nz embed (MALink) — يدعم عدة صيغ ──
+    // الصيغ الممكنة: "fileId!key" | "fileId#key" | "https://mega.nz/embed/fileId#key"
+    //               | "https://mega.nz/file/fileId#key" | "fileId" (بدون مفتاح)
+    const maLinkRaw = String(epData.MALink || "").trim();
+    if (maLinkRaw) {
+      let embedUrl: string | null = null;
+
+      if (maLinkRaw.startsWith("https://mega.nz/embed/") || maLinkRaw.startsWith("https://mega.co.nz/embed/")) {
+        // صيغة كاملة جاهزة
+        embedUrl = maLinkRaw;
+      } else if (maLinkRaw.startsWith("https://mega.nz/") || maLinkRaw.startsWith("https://mega.co.nz/")) {
+        // رابط عادي → حوّله لـ embed
+        const u = new URL(maLinkRaw);
+        const pathParts = u.pathname.split("/").filter(Boolean); // ["file","fileId"] أو ["embed","fileId"]
+        const fileId = pathParts[pathParts.length - 1];
+        const key    = u.hash.replace(/^#/, "");
+        if (fileId) embedUrl = key ? `https://mega.nz/embed/${fileId}#${key}` : `https://mega.nz/embed/${fileId}`;
+      } else if (maLinkRaw.includes("!")) {
+        // صيغة "fileId!key"
+        const bang   = maLinkRaw.indexOf("!");
+        const fileId = maLinkRaw.slice(0, bang);
+        const key    = maLinkRaw.slice(bang + 1);
+        if (fileId) embedUrl = key ? `https://mega.nz/embed/${fileId}#${key}` : `https://mega.nz/embed/${fileId}`;
+      } else if (maLinkRaw.includes("#")) {
+        // صيغة "fileId#key"
+        const hash   = maLinkRaw.indexOf("#");
+        const fileId = maLinkRaw.slice(0, hash);
+        const key    = maLinkRaw.slice(hash + 1);
+        if (fileId) embedUrl = key ? `https://mega.nz/embed/${fileId}#${key}` : `https://mega.nz/embed/${fileId}`;
+      } else if (maLinkRaw.length > 4) {
+        // مجرد fileId بدون مفتاح
+        embedUrl = `https://mega.nz/embed/${maLinkRaw}`;
+      }
+
+      if (embedUrl) {
+        // تحقق سريع: Mega API ترجع [-9] إذا الملف محذوف
         let megaOk = true;
         try {
+          const u2      = new URL(embedUrl);
+          const pathSeg = u2.pathname.split("/").filter(Boolean);
+          const fileId  = pathSeg[pathSeg.length - 1];
           const megaCheck = await fetch("https://g.api.mega.co.nz/cs?id=0", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -3168,12 +3199,10 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             signal: AbortSignal.timeout(5000),
           });
           const megaData = await megaCheck.json();
-          // -9 = ENOENT (file deleted); any other response means file accessible
           megaOk = !(Array.isArray(megaData) && megaData[0] === -9);
         } catch { megaOk = true; }
 
         if (megaOk) {
-          const embedUrl = `https://mega.nz/embed/${fileId}#${key}`;
           sources.push({
             name: "ميغا · embed",
             url: embedUrl,

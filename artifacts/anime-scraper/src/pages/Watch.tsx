@@ -59,6 +59,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "toonstream",   name: "تون ستريم",    desc: "ياباني مترجم",             tag: "TS" },
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "MG" },
+  { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
