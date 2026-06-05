@@ -546,7 +546,7 @@ const Q_LABEL: Record<Quality, string> = {
   "720p HD":   "جودة عالية · HD 720",
   "360p SD":   "جودة متوسطة · SD 360",
 };
-const Q_SHORT: Record<Quality, string> = { "1080p FHD": "عالي", "720p HD": "متوسط", "360p SD": "عادي" };
+const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
 
 /* ══════════════════════════════════ SCRAPER PICKER ══════════ */
 function ScraperPicker({
@@ -576,8 +576,14 @@ function ScraperPicker({
   }
   allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
 
-  /* Single flat list sorted by qualityRank desc — URL-deduped above */
-  const displaySources = allFlat;
+  /* Smart dedup: max 2 sources per CDN host (prevents explosion after removing dedup) */
+  const hostCount: Record<string, number> = {};
+  const displaySources = allFlat.filter(s => {
+    const url  = s.directUrl || s.url || "";
+    const host = normCdnHost(url);
+    hostCount[host] = (hostCount[host] || 0) + 1;
+    return hostCount[host] <= 2;
+  });
   const hasSources = displaySources.length > 0;
 
   /* Sites not yet ready */
@@ -1539,12 +1545,15 @@ export default function WatchPage() {
   const [quality,      setQuality]      = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]   = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
+  // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   const [showLoading,  setShowLoading]  = useState(false);
   const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
   const [playerSubUrl, setPlayerSubUrl] = useState<string | undefined>(undefined);
   const loadingTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const autoFetchedRef = useRef(false);
+  const phaseRef       = useRef<"picker" | "player">("picker");
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -1631,7 +1640,7 @@ export default function WatchPage() {
 
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0) });
-      const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(25000) });
+      const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(40000) });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
 
@@ -1669,17 +1678,24 @@ export default function WatchPage() {
               ep:      String(ep),
               anime:   String(animeId || 0),
             });
-            const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(25000) });
+            const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(40000) });
             const data = await r.json() as { sources?: FetchedSrc[] };
             const srcs: FetchedSrc[] = data.sources || [];
             if (srcs.length > 0) {
-              setSlotSources(prev => ({ ...prev, [def.site]: srcs }));
-              setSlotStatus(prev => ({ ...prev, [def.site]: "ready" }));
+              /* Don't inflate the picker sources list while player is active */
+              if (phaseRef.current === "picker") {
+                setSlotSources(prev => ({ ...prev, [def.site]: srcs }));
+                setSlotStatus(prev => ({ ...prev, [def.site]: "ready" }));
+              }
             } else {
-              setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
+              if (phaseRef.current === "picker") {
+                setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
+              }
             }
           } catch {
-            setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
+            if (phaseRef.current === "picker") {
+              setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
+            }
           } finally {
             inFlightRef.current.delete(def.site);
           }
