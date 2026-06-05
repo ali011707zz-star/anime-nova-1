@@ -534,13 +534,22 @@ export default function RiftPlayer({
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full"
-        style={{
-          objectFit: isZoomed ? "cover" : "contain",
-          filter: brightness !== 1 ? `brightness(${brightness.toFixed(2)})` : undefined,
-          transition: "filter 0.06s",
-        }}
+        style={{ objectFit: isZoomed ? "cover" : "contain" }}
         playsInline preload="metadata"
       />
+
+      {/* ── Brightness overlay (avoids CSS filter degrading video quality) ── */}
+      {brightness !== 1 && (
+        <div
+          className="absolute inset-0 pointer-events-none z-[1]"
+          style={{
+            background: brightness < 1
+              ? `rgba(0,0,0,${(1 - brightness).toFixed(2)})`
+              : `rgba(255,255,255,${Math.min((brightness - 1) / 1.5, 0.35).toFixed(2)})`,
+            transition: "background 0.06s",
+          }}
+        />
+      )}
 
       {/* ── screenshot flash ── */}
       <AnimatePresence>
