@@ -3924,26 +3924,47 @@ function parseVttCues(text: string): Array<{ timing: string; rawText: string }> 
   return cues;
 }
 
-/** Translate a batch of texts with Google Translate (unofficial gtx endpoint).
- *  Uses newline as separator — preserved reliably by gtx even across languages. */
-async function translateBatchGtx(texts: string[], from: string, to: string): Promise<string[]> {
-  // Use a unique ASCII sentinel unlikely to appear in subtitle text
-  const SEP = "\n||||\n";
-  const joined = texts.join(SEP);
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(joined)}`;
-    const r = await fetch(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(12000) });
-    if (!r.ok) return texts;
-    const data = await r.json() as any;
-    const translated: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || joined;
-    // Split on sentinel — tolerate extra whitespace from translator
-    const parts = translated.split(/\n\|\|\|\|\n/);
-    if (parts.length === texts.length) return parts.map(p => p.trim());
-    // Fallback: try splitting on just newlines (gtx sometimes drops sentinel chars)
-    const byNewline = translated.split("\n").filter(l => l.trim());
-    if (byNewline.length === texts.length) return byNewline.map(p => p.trim());
-    return texts; // total mismatch → return originals unchanged
-  } catch { return texts; }
+/** Translate a batch of texts using MyMemory API (free, no key needed, reliable).
+ *  Processes all chunks in parallel for maximum speed.
+ *  MyMemory: https://api.mymemory.translated.net — 10k words/day free */
+async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
+  const CHUNK = 5; // 5 cues per request (≈250 chars, safe within MyMemory limit)
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < texts.length; i += CHUNK) {
+    chunks.push(texts.slice(i, i + CHUNK));
+  }
+
+  // Run all chunks in parallel for speed
+  const settled = await Promise.allSettled(
+    chunks.map(async (chunk): Promise<string[]> => {
+      const joined = chunk.join("\n");
+      try {
+        // MyMemory: free, no key, good Arabic quality
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(joined)}&langpair=${from}|${to}&de=nova.anime.app@pm.me`;
+        const r = await fetch(url, {
+          headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!r.ok) return chunk;
+        const d = await r.json() as any;
+        const translated: string = d.responseData?.translatedText || "";
+        if (!translated) return chunk;
+        // MyMemory preserves newlines well
+        const parts = translated.split(/\n+/).map((p: string) => p.trim()).filter(Boolean);
+        if (parts.length === chunk.length) return parts;
+        // Slight line count drift → distribute best-effort
+        if (parts.length > 0) return chunk.map((_, i) => parts[Math.min(i, parts.length - 1)] || chunk[i]);
+        return chunk;
+      } catch { return chunk; }
+    }),
+  );
+
+  const results: string[] = [];
+  settled.forEach((r, i) => {
+    results.push(...(r.status === "fulfilled" ? r.value : chunks[i]));
+  });
+  return results;
 }
 
 const translateVttCache = new Map<string, { cues: Array<{ timing: string; text: string }>; ts: number }>();
@@ -3977,12 +3998,9 @@ router.get("/anime/translate-vtt", async (req, res) => {
 
     // Translate in batches of 40 cues for efficiency
     const BATCH = 40;
-    const translatedTexts: string[] = [];
-    for (let i = 0; i < cues.length; i += BATCH) {
-      const batch = cues.slice(i, i + BATCH).map(c => c.rawText);
-      const trans = await translateBatchGtx(batch, from, to);
-      translatedTexts.push(...trans);
-    }
+    // translateBatchFree (MyMemory) handles its own internal chunking + parallelism
+    const translatedTexts = await translateBatchFree(cues.map(c => c.rawText), from, to);
+    void BATCH; // BATCH no longer used — kept for reference
 
     const result = cues.map((c, i) => ({
       timing: c.timing,
