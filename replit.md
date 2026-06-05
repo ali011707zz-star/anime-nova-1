@@ -2,7 +2,7 @@
 
 تطبيق بث أنمي عربي يجمع مصادر من 4 مصادر متوازية ويُشغّلها في مشغّل داخلي.
 
-المصادر الفعّالة: **anime-phoenix.com (MKV/MP4 مباشر)** · **shahiid-anime.net (عربي)** · **animelek.top (عربي)** · **animedar.net (عربي)**
+المصادر الفعّالة: **anime-phoenix.com (MKV/MP4 مباشر)** · **shahiid-anime.net (عربي)** · **animelek.top (عربي)** · **animedar.net (عربي)** · **w1.anime4up.rest (mega.nz/embed + HLS عربي)**
 
 ## Run & Operate
 
@@ -109,7 +109,7 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 
 ## API Endpoints
 
-- `GET /api/anime/sources-stream?title=&english=&ep=` — SSE stream of sources (4 Arabic scrapers)
+- `GET /api/anime/sources-stream?title=&english=&ep=` — SSE stream of sources (5+ Arabic scrapers)
 - `GET /api/anime/probe?url=` — HEAD probe a direct URL
 - `GET /api/anime/extract-video?url=` — multi-hop video extraction
 - `GET /api/anime/translate?text=&from=&to=` — Google Translate proxy

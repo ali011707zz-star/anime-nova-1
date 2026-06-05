@@ -2714,6 +2714,168 @@ async function getRistoAnimeSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  W1.ANIME4UP.REST scraper  (Arabic anime — Anime4up WordPress theme)
+//  Search:  GET /?s={query} → /anime/{slug}/ links
+//  Series:  GET /anime/{slug}/ → 48 visible episode links + old-format slug prefix
+//  Episode: GET /episode/{slug}-الحلقة-{N}/ → src= iframe video embeds
+//  Old-format URL (works for ALL episodes): /episode/{romaji-slug}-الحلقة-{N}/
+// ════════════════════════════════════════════════════════════════════
+
+const A4UP_BASE = "https://w1.anime4up.rest";
+const A4UP_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://w1.anime4up.rest/" };
+
+const a4upSeriesCache = new Map<string, { url: string | null; ts: number }>();
+const a4upSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function searchAnime4up(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const hit = a4upSeriesCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    let r: Response;
+    try {
+      r = await fetch(`${A4UP_BASE}/?s=${encodeURIComponent(q)}`, {
+        headers: A4UP_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
+      });
+    } catch { continue; }
+    if (!r.ok) continue;
+    const html = await r.text();
+    if (isCloudflareBlock(html)) continue;
+
+    const candidates: Array<{ url: string; score: number }> = [];
+    for (const m of html.matchAll(/href="(https?:\/\/w1\.anime4up\.rest\/anime\/[^"]+)"/g)) {
+      const u = m[1];
+      if (u.includes("/page/") || u.includes("/feed/")) continue;
+      const slug = decodeURIComponent(u.replace(A4UP_BASE + "/anime/", "").replace(/\/$/, "")).toLowerCase();
+      const score = Math.max(
+        asciiSimilarity(slug, title),
+        english ? asciiSimilarity(slug, english) : 0,
+        similarity(slug, title),
+        english ? similarity(slug, english) : 0,
+      );
+      if (score > 0.25) candidates.push({ url: u, score });
+    }
+    if (candidates.length) {
+      candidates.sort((a, b) => b.score - a.score);
+      const best = candidates[0].url;
+      a4upSeriesCache.set(ck, { url: best, ts: Date.now() });
+      return best;
+    }
+  }
+
+  a4upSeriesCache.set(ck, { url: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnime4upSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `a4up:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = a4upSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const seriesUrl = await searchAnime4up(title, english);
+    if (!seriesUrl) return [];
+
+    // Fetch series page → collect visible episode links + extract romaji prefix
+    const sR = await fetch(seriesUrl, {
+      headers: A4UP_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
+    });
+    if (!sR.ok) return [];
+    const seriesHtml = await sR.text();
+    if (isCloudflareBlock(seriesHtml)) return [];
+
+    // Unique episode URLs from series page (up to 48 recent episodes)
+    const visibleEps = [
+      ...new Set(
+        [...seriesHtml.matchAll(/href="(https?:\/\/w1\.anime4up\.rest\/episode\/[^"]+)"/g)]
+          .map(m => m[1])
+      ),
+    ];
+
+    // Match target episode from visible list by الحلقة-N in decoded slug
+    let epUrl = visibleEps.find(u => {
+      const dec = decodeURIComponent(u);
+      return new RegExp(`الحلقة[\\-\\u200f]0*${ep}[\\-\\/]`).test(dec) ||
+             dec.includes(`الحلقة-${ep}-`) || dec.includes(`الحلقة-${ep}/`);
+    }) ?? null;
+
+    // ── Old-format URL construction for episodes not in the visible 48 ──
+    // Pattern: /episode/{romaji-slug}-الحلقة-{N}/  (works for ep 1 through 1100+)
+    if (!epUrl) {
+      // Extract romaji slug from old-format visible episodes (no Arabic prefix, no -مترجمة suffix)
+      let romajiSlug: string | null = null;
+      const oldFmtEp = visibleEps.find(u => {
+        const dec = decodeURIComponent(u);
+        return !dec.includes("مترجمة") && !dec.includes("انمي-") && dec.includes("الحلقة-");
+      });
+      if (oldFmtEp) {
+        const dec = decodeURIComponent(oldFmtEp);
+        const path = dec.replace(A4UP_BASE + "/episode/", "").replace(/\/$/, "");
+        romajiSlug = path.replace(/الحلقة.*$/, "").replace(/-$/, "");
+      }
+      // Fallback: derive slug from english title
+      if (!romajiSlug && english) {
+        romajiSlug = english.toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ").trim()
+          .replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      }
+
+      if (romajiSlug) {
+        const candidate = `${A4UP_BASE}/episode/${encodeURIComponent(romajiSlug + "-الحلقة-" + ep)}/`;
+        // Quick HEAD probe to confirm URL exists before fetching the full page
+        const headStatus = await safeHead(candidate, A4UP_HDRS);
+        if (headStatus === 200) epUrl = candidate;
+        // Also try zero-padded (ep < 10)
+        if (!epUrl && ep < 10) {
+          const padded = `${A4UP_BASE}/episode/${encodeURIComponent(romajiSlug + "-الحلقة-0" + ep)}/`;
+          const hs = await safeHead(padded, A4UP_HDRS);
+          if (hs === 200) epUrl = padded;
+        }
+      }
+    }
+
+    if (!epUrl) return [];
+
+    // Fetch episode page → extract iframe src= video embed URLs
+    const epR = await fetch(epUrl, {
+      headers: { ...A4UP_HDRS, Referer: seriesUrl },
+      signal: AbortSignal.timeout(10000), redirect: "follow",
+    });
+    if (!epR.ok) return [];
+    const epHtml = await epR.text();
+    if (isCloudflareBlock(epHtml)) return [];
+
+    // Collect all iframe src= URLs that look like video embeds
+    const iframeUrls: string[] = [];
+    const VIDEO_HOSTS_RE = /(?:mega\.nz|mega\.co\.nz|vidmoly|share4max|voe\.sx|voe\.tv|rubyvidhub|dsvplay|streamwish|filemoon|streamtape|ok\.ru)/i;
+    for (const m of epHtml.matchAll(/(?:src|data-src)=["']([^"']{10,})["']/gi)) {
+      const raw = m[1].trim();
+      const url = raw.startsWith("http") ? raw : null;
+      if (!url) continue;
+      if (!VIDEO_HOSTS_RE.test(url)) continue;
+      if (!iframeUrls.includes(url)) iframeUrls.push(url);
+    }
+
+    if (!iframeUrls.length) return [];
+
+    const sources: UnifiedSource[] = iframeUrls.map((url, i) => ({
+      name: `أنمي فور أب · سيرفر ${i + 1}`,
+      url,
+      quality: "HD",
+      qualityRank: 10,
+      site: "anime4up",
+    }));
+
+    a4upSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Animeify.net scraper (ani-cli-arabic API → FileMoon HLS + MediaFire MP4 + Mega embed)
 // ════════════════════════════════════════════════════════════════════
 let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
@@ -3075,6 +3237,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
+      scrapeCached("anime4up",     () => getAnime4upSources(title, english, ep)),
     ]);
 
   } catch (e: any) {
@@ -3143,6 +3306,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animetime":    await runExtract(await race(getAnimeTimeSources(title, english, ep),    SCRAPER_MS, [])); break;
       case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),   SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anime4up":     await runExtract(await race(getAnime4upSources(title, english, ep),   SCRAPER_MS, [])); break;
       default: break;
     }
     res.json({ sources });
