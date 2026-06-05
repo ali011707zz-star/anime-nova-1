@@ -45,6 +45,7 @@ const QUALITY_LABELS: Quality[] = ["1080p FHD", "720p HD", "360p SD"];
 interface FetchedSrc {
   url: string; directUrl?: string; qualityRank?: number;
   name?: string; site?: string; isEmbed?: boolean;
+  subtitleUrl?: string;
 }
 
 /* ── All known scrapers — shown immediately in picker ── */
@@ -931,12 +932,12 @@ function MegaEmbedPlayer({
 function EpisodePlayer({
   servers, quality, allServers,
   title, epTitle, cover, ep, totalEps, animeTitle,
-  initialServer, downloadUrl,
+  initialServer, downloadUrl, subtitleUrl,
   onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; epTitle?: string; cover: string; ep: number; totalEps: number; animeTitle: string;
-  initialServer?: number; downloadUrl?: string;
+  initialServer?: number; downloadUrl?: string; subtitleUrl?: string;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
   onTierExhausted?: () => void;
@@ -1005,6 +1006,23 @@ function EpisodePlayer({
     const t = setTimeout(async () => {
       if (subState !== "idle") return;
       setSubState("loading");
+
+      // If source provided a direct subtitle VTT/SRT URL (e.g. kawaii), use it first
+      if (subtitleUrl) {
+        try {
+          const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(8000) });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          const text = await r.text();
+          const cues = parseSrt(text);
+          if (cues.length) {
+            setSubCues(cues);
+            setSubLang("eng");
+            setSubState("ready");
+            return;
+          }
+        } catch { /* fall through to API */ }
+      }
+
       try {
         const params = new URLSearchParams({ title: animeTitle, ep: String(ep) });
         const r = await fetch(`/api/anime/subtitles?${params}`);
@@ -1020,7 +1038,7 @@ function EpisodePlayer({
     }, 1800);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animeTitle, ep]);
+  }, [animeTitle, ep, subtitleUrl]);
 
   const lastSwitchRef = useRef(0);
   const tryNextServer = useCallback(() => {
@@ -1367,6 +1385,7 @@ export default function WatchPage() {
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
   const [showLoading,  setShowLoading]  = useState(false);
   const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
+  const [playerSubUrl, setPlayerSubUrl] = useState<string | undefined>(undefined);
   const loadingTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const autoFetchedRef = useRef(false);
@@ -1531,8 +1550,9 @@ export default function WatchPage() {
       if (!servers[tier].includes(u)) servers[tier].push(u);
     }
 
-    /* Store download URL for player */
+    /* Store download URL + subtitle URL for player */
     setPlayerDlUrl(getDownloadUrl(src) || undefined);
+    setPlayerSubUrl(src.subtitleUrl || undefined);
     setPlayerServers(servers);
     setQuality(clickedTier);
     setInitialSrv(0);
@@ -1597,6 +1617,7 @@ export default function WatchPage() {
           animeTitle={animeTitle}
           cover={cover} ep={ep} totalEps={totalEps}
           downloadUrl={playerDlUrl}
+          subtitleUrl={playerSubUrl}
           onBack={() => setPhase("picker")}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}

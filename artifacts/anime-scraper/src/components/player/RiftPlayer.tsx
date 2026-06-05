@@ -172,6 +172,20 @@ export default function RiftPlayer({
     }
   }
 
+  /* ── Rotation toggle — flips portrait/landscape CSS layout manually ── */
+  function toggleRotation() {
+    setIsPortrait(p => !p);
+    // Best-effort: try to lock the OS orientation to match
+    try {
+      const next = !isPortrait;
+      if (next) {
+        (screen.orientation as any).lock?.("portrait-primary").catch?.(() => {});
+      } else {
+        (screen.orientation as any).lock?.("landscape-primary").catch?.(() => {});
+      }
+    } catch {}
+  }
+
   /* ── Control hide ── */
   const schedHide = useCallback(() => {
     if (hideRef.current) clearTimeout(hideRef.current);
@@ -480,20 +494,7 @@ export default function RiftPlayer({
       {/* ══ TOUCH + UI LAYER ══ */}
       <div className="absolute inset-0 z-10" onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
 
-        {/* ── Loading ring ── */}
-        <AnimatePresence>
-          {loading && !error && (
-            <motion.div key="ldr" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-              <div className="relative w-12 h-12">
-                <div className="absolute inset-0 rounded-full border-2" style={{ borderColor: "rgba(255,255,255,0.08)" }} />
-                <motion.div className="absolute inset-0 rounded-full border-2 border-transparent"
-                  style={{ borderTopColor: "#ef4444", borderRightColor: "rgba(239,68,68,0.30)" }}
-                  animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Loading ring removed — play-button spinner (below) is sufficient */}
 
         {/* ── Error ── */}
         <AnimatePresence>
@@ -688,9 +689,9 @@ export default function RiftPlayer({
                       style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.13)", backdropFilter: "blur(10px)" }}>
                       <Camera className="w-[16px] h-[16px] text-white/60" />
                     </button>
-                    <button onClick={toggleFs}
+                    <button onClick={toggleRotation}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(124,58,237,0.16)", border: "1px solid rgba(139,92,246,0.28)", backdropFilter: "blur(10px)" }}>
+                      style={{ background: isPortrait ? "rgba(124,58,237,0.28)" : "rgba(124,58,237,0.16)", border: `1px solid ${isPortrait ? "rgba(139,92,246,0.55)" : "rgba(139,92,246,0.28)"}`, backdropFilter: "blur(10px)" }}>
                       <FlipScreenIcon className="w-[17px] h-[17px] text-violet-300/75" />
                     </button>
                     <button onClick={onBack}
@@ -772,8 +773,20 @@ export default function RiftPlayer({
                     onMouseDown={handlePrgDown}
                     onMouseEnter={() => setPrgHover(true)}
                     onMouseLeave={() => setPrgHover(false)}
-                    onTouchStart={e => { e.stopPropagation(); setPrgHover(true); }}
-                    onTouchEnd={() => setPrgHover(false)}
+                    onTouchStart={e => {
+                      e.stopPropagation();
+                      setPrgHover(true);
+                      const bar = progressRef.current; if (!bar) return;
+                      const r = bar.getBoundingClientRect();
+                      seekFrac((e.touches[0].clientX - r.left) / r.width);
+                    }}
+                    onTouchMove={e => {
+                      e.stopPropagation();
+                      const bar = progressRef.current; if (!bar) return;
+                      const r = bar.getBoundingClientRect();
+                      seekFrac((e.touches[0].clientX - r.left) / r.width);
+                    }}
+                    onTouchEnd={e => { e.stopPropagation(); setPrgHover(false); }}
                   >
                     <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }} />
                     <div className="absolute top-0 left-0 h-full rounded-full"
