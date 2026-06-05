@@ -251,7 +251,8 @@ export default function RiftPlayer({
 
     const isDirect = src.includes("streamtape.com") || src.includes("sendvid.com")
       || src.includes("videos2.sendvid.com") || src.includes("video-proxy?")
-      || src.includes("workers.dev");
+      || src.includes("workers.dev")
+      || /\.(mp4|mkv|webm)([?#]|$)/i.test(src);
     if (isDirect) {
       const px = src.includes("video-proxy?") ? src
         : `/api/anime/video-proxy?url=${encodeURIComponent(src)}&ref=${encodeURIComponent(src)}`;
@@ -506,7 +507,7 @@ export default function RiftPlayer({
         ref={videoRef}
         className="absolute inset-0 w-full h-full"
         style={{
-          objectFit: isZoomed ? "contain" : "cover",
+          objectFit: isZoomed ? "cover" : "contain",
           filter: brightness !== 1 ? `brightness(${brightness})` : undefined,
         }}
         playsInline preload="metadata"
@@ -662,67 +663,70 @@ export default function RiftPlayer({
         </AnimatePresence>
 
         {/* ════════════════════════════════════════
-            LOCK SCREEN — elegant centered design
+            LOCK SCREEN — slim side pill (right edge)
         ════════════════════════════════════════ */}
         <AnimatePresence>
           {isLocked && showCtrl && (
             <motion.div
               key="lock-ui"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 z-40 flex items-center justify-center pointer-events-auto"
+              initial={{ x: 64, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 64, opacity: 0 }}
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-40 pointer-events-auto"
               onClick={e => e.stopPropagation()}
+              onTouchStart={e => e.stopPropagation()}
+              onTouchEnd={e => e.stopPropagation()}
             >
-              <motion.div
-                initial={{ scale: 0.85, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.85, opacity: 0 }}
-                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                className="flex flex-col items-center gap-5 px-10 py-8 rounded-[28px]"
+              <div
+                className="flex flex-col items-center gap-3 py-5 rounded-[22px]"
                 style={{
-                  background: "rgba(0,0,0,0.72)",
-                  backdropFilter: "blur(32px) saturate(180%)",
-                  border: "1px solid rgba(251,191,36,0.20)",
-                  boxShadow: "0 24px 64px rgba(0,0,0,0.60), 0 0 0 1px rgba(251,191,36,0.08)",
+                  width: 52,
+                  background: "rgba(5,5,15,0.82)",
+                  backdropFilter: "blur(28px) saturate(200%)",
+                  border: "1.5px solid rgba(251,191,36,0.32)",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(251,191,36,0.06) inset",
                 }}
               >
-                {/* Lock icon */}
-                <div className="flex flex-col items-center gap-3">
-                  <motion.div
-                    className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                    style={{
-                      background: "rgba(251,191,36,0.12)",
-                      border: "1.5px solid rgba(251,191,36,0.30)",
-                    }}
-                    animate={{ scale: [1, 1.05, 1] }}
-                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                  >
-                    <Lock className="w-7 h-7 text-amber-300" strokeWidth={1.8} />
-                  </motion.div>
-                  <span className="text-amber-200/90 text-[14px] font-black font-['Cairo'] tracking-wide">
-                    الشاشة مقفلة
-                  </span>
-                </div>
+                {/* Animated lock icon */}
+                <motion.div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center"
+                  style={{ background: "rgba(251,191,36,0.14)", border: "1px solid rgba(251,191,36,0.28)" }}
+                  animate={{ scale: [1, 1.06, 1] }}
+                  transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  <Lock className="w-4 h-4 text-amber-300" strokeWidth={2} />
+                </motion.div>
 
-                {/* Divider */}
-                <div className="w-full h-px" style={{ background: "rgba(255,255,255,0.06)" }} />
-
-                {/* Unlock button */}
-                <button
-                  onClick={() => setIsLocked(false)}
-                  className="flex items-center gap-3 px-6 py-3 rounded-2xl active:scale-95 transition-transform"
+                {/* Vertical label */}
+                <p
+                  className="text-amber-200/80 font-black font-['Cairo'] leading-none"
                   style={{
-                    background: "rgba(251,191,36,0.15)",
-                    border: "1.5px solid rgba(251,191,36,0.35)",
+                    fontSize: 10,
+                    writingMode: "vertical-rl" as React.CSSProperties["writingMode"],
+                    textOrientation: "mixed" as React.CSSProperties["textOrientation"],
+                    letterSpacing: "0.1em",
                   }}
                 >
-                  <Unlock className="w-5 h-5 text-amber-300" strokeWidth={1.8} />
-                  <span className="text-amber-100 text-[13px] font-black font-['Cairo']">
-                    اضغط لفتح القفل
-                  </span>
+                  مقفلة
+                </p>
+
+                {/* Thin divider */}
+                <div className="w-6 h-px mx-auto" style={{ background: "rgba(251,191,36,0.18)" }} />
+
+                {/* Unlock tap */}
+                <button
+                  onClick={() => setIsLocked(false)}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{
+                    background: "rgba(251,191,36,0.16)",
+                    border: "1px solid rgba(251,191,36,0.36)",
+                  }}
+                  title="فتح القفل"
+                >
+                  <Unlock className="w-4 h-4 text-amber-300" strokeWidth={2} />
                 </button>
-              </motion.div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1000,7 +1004,7 @@ export default function RiftPlayer({
                     </button>
                   </div>
 
-                  {/* Right: volume · lock · fullscreen */}
+                  {/* Right: volume · lock */}
                   <div className="flex items-center gap-2 shrink-0">
                     <button onClick={toggleMute}
                       className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
@@ -1011,15 +1015,6 @@ export default function RiftPlayer({
                     <button onClick={() => setIsLocked(true)}
                       className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                       <Lock className="w-[16px] h-[16px] text-white/45" />
-                    </button>
-                    <button onClick={toggleFs}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
-                      style={isFs
-                        ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)", borderRadius: 12 }
-                        : GLASS_BTN_SM}>
-                      {isFs
-                        ? <Minimize2 className="w-[17px] h-[17px] text-violet-300" />
-                        : <Maximize2 className="w-[17px] h-[17px] text-white/60" />}
                     </button>
                   </div>
                 </div>

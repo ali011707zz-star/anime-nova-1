@@ -74,15 +74,15 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
 
 function getSrcQualityTier(src: FetchedSrc): Quality {
-  /* qualityRank is the authoritative source — set by scraper with real video info */
   const rank = src.qualityRank ?? 0;
-  if (rank >= 12) return "1080p FHD";
-  if (rank >= 9)  return "720p HD";
-  if (rank >= 7)  return "360p SD";
-  /* Only fall back to name when rank is unset/generic (rank < 7) */
+  /* Use name only when rank explicitly tells us */
   const name = (src.name || "").toLowerCase();
   if (name.includes("1080") || name.includes("fhd")) return "1080p FHD";
   if (name.includes("720")  || name.includes("hd"))  return "720p HD";
+  if (name.includes("360")  || name.includes("sd"))  return "360p SD";
+  /* Fall back to rank — conservative thresholds */
+  if (rank >= 13) return "1080p FHD";
+  if (rank >= 9)  return "720p HD";
   return "360p SD";
 }
 
@@ -546,7 +546,7 @@ const Q_LABEL: Record<Quality, string> = {
   "720p HD":   "جودة عالية · HD 720",
   "360p SD":   "جودة متوسطة · SD 360",
 };
-const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
+const Q_SHORT: Record<Quality, string> = { "1080p FHD": "عالي", "720p HD": "متوسط", "360p SD": "عادي" };
 
 /* ══════════════════════════════════ SCRAPER PICKER ══════════ */
 function ScraperPicker({
@@ -576,19 +576,8 @@ function ScraperPicker({
   }
   allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
 
-  /* CDN-host dedup — keep at most 1 source per CDN (no duplicates) */
-  function deduplicateByHost(srcs: FetchedSrc[]): FetchedSrc[] {
-    const hostCount: Record<string, number> = {};
-    return srcs.filter(s => {
-      const url  = s.directUrl || s.url || "";
-      const host = normCdnHost(url);
-      hostCount[host] = (hostCount[host] || 0) + 1;
-      return hostCount[host] <= 1;
-    });
-  }
-
-  /* Single flat deduplicated list sorted by qualityRank desc */
-  const displaySources = deduplicateByHost(allFlat);
+  /* Single flat list sorted by qualityRank desc — URL-deduped above */
+  const displaySources = allFlat;
   const hasSources = displaySources.length > 0;
 
   /* Sites not yet ready */
@@ -677,9 +666,9 @@ function ScraperPicker({
               const q       = getSrcQualityTier(src);
               const qs      = QUALITY_STYLE[q];
               return (
-                <motion.div key={`${src.site}-${i}-${url.slice(-20)}`}
+                <motion.div key={`${src.site}-${url.slice(-32)}`}
                   initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.04, duration: 0.18 }}>
+                  transition={{ delay: Math.min(i * 0.04, 0.3), duration: 0.18 }}>
                   <div
                     className="flex items-center px-4 py-3.5 gap-3.5 active:bg-white/[0.03] transition-colors cursor-pointer"
                     style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
