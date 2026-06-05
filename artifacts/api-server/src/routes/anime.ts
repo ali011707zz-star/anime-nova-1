@@ -988,6 +988,7 @@ interface UnifiedSource {
   name: string; url: string; quality: string; qualityRank: number; site: string;
   directUrl?: string; directType?: "hls" | "mp4";
   isEmbed?: boolean;
+  subtitleUrl?: string;
 }
 
 const SKIP_EXTRACT_HOSTS = [
@@ -3535,8 +3536,16 @@ async function getKawaiiAnimeSources(
     if (!r.ok) return [];
     const data = await r.json() as {
       sources?: Array<{ url: string; quality?: string; isM3U8?: boolean; type?: string }>;
+      subtitles?: Array<{ url: string; lang?: string; label?: string }>;
     };
     if (!data.sources?.length) return [];
+
+    // Pick first English subtitle VTT if available
+    const subEntry = data.subtitles?.find(s =>
+      (s.lang || s.label || "").toLowerCase().includes("english") ||
+      (s.lang || s.label || "").toLowerCase().includes("eng")
+    ) || data.subtitles?.[0];
+    const subtitleUrl = subEntry?.url || undefined;
 
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
@@ -3546,13 +3555,14 @@ async function getKawaiiAnimeSources(
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`
         : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
       return {
-        name: `كواي أنمي · ${src.quality || "1080p"}`,
+        name: `كواي أنمي · ${src.quality || "1080p"} · إنجليزي`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 14,
+        qualityRank: 9,
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
+        subtitleUrl,
       } as UnifiedSource;
     });
   } catch { return []; }
