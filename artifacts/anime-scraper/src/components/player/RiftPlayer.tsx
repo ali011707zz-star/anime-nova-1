@@ -14,8 +14,7 @@ import {
   Play, Pause, Volume2, VolumeX,
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
   RotateCcw, RotateCw, Sun, Lock, Unlock,
-  Scan, ScanLine, Camera, X,
-  ChevronDown, Zap,
+  Scan, ScanLine, Camera, X, Zap,
 } from "lucide-react";
 
 /* ─────────────────────────────────────── helpers ─── */
@@ -46,10 +45,11 @@ function FlipScreenIcon({ className }: { className?: string }) {
 /* ─────────────────────────────────────── types ──── */
 export interface SubCue { start: number; end: number; text: string }
 export interface SubSettings {
-  fontSize: number;       // 13 | 16 | 20 | 24
-  color: string;          // css color string
-  bgOpacity: number;      // 0 | 0.5 | 0.82
+  fontSize: number;                         // 13 | 16 | 20 | 24
+  color: string;                            // css color string
+  bgOpacity: number;                        // 0 | 0.45 | 0.82
   bold: boolean;
+  position: "top" | "center" | "bottom";   // subtitle placement
 }
 
 interface Props {
@@ -63,10 +63,12 @@ interface Props {
   serverCount?: number;
   serverIndex?: number;
   downloadUrl?: string;
-  /* subtitle passthrough (rendered inside the rotated container) */
+  /* subtitle passthrough */
   subCues?: SubCue[];
   subElapsed?: number;
   subSettings?: SubSettings;
+  subEnabled?: boolean;
+  onSubtitleClick?: () => void;
   onBack?: () => void;
   onPrevEp?: () => void;
   onNextEp?: () => void;
@@ -92,7 +94,8 @@ const GLASS_BTN_SM = { background: "rgba(255,255,255,0.08)", border: "1px solid 
 export default function RiftPlayer({
   src, title = "", epTitle = "", ep = 1, totalEps = 999,
   qualityLabel = "", isHls = false, serverCount = 1, serverIndex = 0,
-  downloadUrl, subCues, subElapsed = 0, subSettings,
+  downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
+  onSubtitleClick,
   onBack, onPrevEp, onNextEp, onRealQuality, onTimeUpdate, onFail,
 }: Props) {
 
@@ -109,6 +112,8 @@ export default function RiftPlayer({
   const lastTap      = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const longTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSpeed    = useRef(1);
+  /* prevents synthetic mousemove after touch from re-showing controls */
+  const lastTouchTs  = useRef(0);
   const moved        = useRef(false);
   const G_THRESH     = 12;
 
@@ -349,6 +354,7 @@ export default function RiftPlayer({
   /* ── touch gestures ── */
   function onTS(e: React.TouchEvent<HTMLDivElement>) {
     if (isLocked) return;
+    lastTouchTs.current = Date.now();
     moved.current = false;
     const t = e.touches[0];
     gestRef.current = { active: "none", startX: t.clientX, startY: t.clientY, lastY: t.clientY, startValue: 0 };
@@ -441,13 +447,22 @@ export default function RiftPlayer({
   /* ── subtitle active cue ── */
   const subActive = subCues?.find(c => subElapsed >= c.start && subElapsed <= c.end);
 
+  /* ── subtitle position style ── */
+  function subPositionStyle(pos: "top" | "center" | "bottom", ctrlVisible: boolean): React.CSSProperties {
+    if (pos === "center") return { top: "50%", transform: "translateY(-50%)", bottom: "auto" };
+    if (pos === "top")    return { top: ctrlVisible ? 90 : 20, bottom: "auto", transform: "none" };
+    /* bottom */          return { bottom: ctrlVisible ? 118 : 20, top: "auto", transform: "none" };
+  }
+
   return (
     <div
       ref={containerRef}
       data-hls-container
       className="bg-black overflow-hidden select-none"
       style={{ cursor: showCtrl ? "default" : "none", ...portraitStyle }}
-      onMouseMove={() => { if (!isLocked) showControls(); }}
+      onMouseMove={() => {
+        if (!isLocked && Date.now() - lastTouchTs.current > 600) showControls();
+      }}
     >
       {/* ══ VIDEO ══ */}
       <video
@@ -693,17 +708,29 @@ export default function RiftPlayer({
 
                   {/* RIGHT: action buttons */}
                   <div className="flex items-center gap-2 shrink-0">
+                    {/* Subtitle / CC button */}
+                    {onSubtitleClick && (
+                      <button onClick={onSubtitleClick}
+                        className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
+                        style={subEnabled
+                          ? { background: "rgba(139,92,246,0.35)", border: "1px solid rgba(139,92,246,0.60)", backdropFilter: "blur(14px)" }
+                          : GLASS_BTN}>
+                        {/* CC icon */}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+                          strokeLinecap="round" strokeLinejoin="round" className="w-[15px] h-[15px]"
+                          style={{ color: subEnabled ? "#c4b5fd" : "rgba(255,255,255,0.65)" }}>
+                          <rect x="2" y="5" width="20" height="14" rx="3" />
+                          <path d="M8 12c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1" />
+                          <path d="M13 12c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1" />
+                          <path d="M7 10h2.5" />
+                          <path d="M12 10h2.5" />
+                        </svg>
+                      </button>
+                    )}
                     <button onClick={takeScreenshot}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
                       style={GLASS_BTN}>
                       <Camera className="w-[15px] h-[15px] text-white/65" />
-                    </button>
-                    <button onClick={toggleRotation}
-                      className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                      style={isPortrait
-                        ? { background: "rgba(124,58,237,0.35)", border: "1px solid rgba(139,92,246,0.55)", backdropFilter: "blur(14px)" }
-                        : GLASS_BTN}>
-                      <FlipScreenIcon className="w-[16px] h-[16px] text-violet-300/80" />
                     </button>
                     <button onClick={onBack}
                       className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
@@ -927,40 +954,48 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── SUBTITLE OVERLAY (inside rotated container — stays with video) ── */}
-        {subCues && subSettings && subActive && (
+      </div>
+
+      {/* ════════════════════════════════════════
+          SUBTITLE OVERLAY — sibling of touch layer,
+          so z-index works correctly in native fullscreen
+      ════════════════════════════════════════ */}
+      {subCues && subSettings && subActive && (
+        <div
+          className="absolute left-0 right-0 flex justify-center px-5 pointer-events-none"
+          style={{
+            zIndex: 70,
+            transition: "top 0.3s ease, bottom 0.3s ease",
+            ...subPositionStyle(subSettings.position ?? "bottom", showCtrl),
+          }}
+        >
           <div
-            className="absolute left-0 right-0 flex justify-center px-4 pointer-events-none z-[55]"
-            style={{ bottom: showCtrl ? 120 : 32, transition: "bottom 0.3s ease" }}
+            className="max-w-[92%] text-center px-4 py-2 rounded-2xl"
+            style={{
+              background: subSettings.bgOpacity > 0
+                ? `rgba(0,0,0,${subSettings.bgOpacity})`
+                : "transparent",
+              backdropFilter: subSettings.bgOpacity > 0 ? "blur(8px)" : undefined,
+              border: subSettings.bgOpacity > 0 ? "1px solid rgba(255,255,255,0.07)" : "none",
+            }}
           >
-            <div
-              className="max-w-[90%] text-center px-4 py-2 rounded-2xl"
+            <p
+              dir="auto"
               style={{
-                background: subSettings.bgOpacity > 0
-                  ? `rgba(0,0,0,${subSettings.bgOpacity})`
-                  : "transparent",
-                backdropFilter: subSettings.bgOpacity > 0 ? "blur(6px)" : undefined,
-                border: subSettings.bgOpacity > 0 ? `1px solid rgba(255,255,255,0.07)` : "none",
+                color: subSettings.color,
+                fontSize: subSettings.fontSize,
+                fontWeight: subSettings.bold ? 700 : 500,
+                fontFamily: "'Cairo', sans-serif",
+                lineHeight: 1.6,
+                textShadow: "0 1px 10px rgba(0,0,0,1), 0 0 3px rgba(0,0,0,1)",
               }}
             >
-              <p
-                dir="auto"
-                style={{
-                  color: subSettings.color,
-                  fontSize: subSettings.fontSize,
-                  fontWeight: subSettings.bold ? 700 : 500,
-                  fontFamily: "'Cairo', sans-serif",
-                  lineHeight: 1.5,
-                  textShadow: "0 1px 8px rgba(0,0,0,0.98), 0 0 2px rgba(0,0,0,0.95)",
-                }}
-              >
-                {subActive.text}
-              </p>
-            </div>
+              {subActive.text}
+            </p>
           </div>
-        )}
+        </div>
+      )}
 
-      </div>
     </div>
   );
 }
