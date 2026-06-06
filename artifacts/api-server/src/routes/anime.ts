@@ -3526,6 +3526,213 @@ async function getKawaiiAnimeSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIKOTO (via megaplay.buzz) — صوت ياباني + ترجمة إنجليزية → عربية
+//  يستخدم AniList ID مباشرة، لا حاجة للبحث عن slug
+// ════════════════════════════════════════════════════════════════════
+const MEGAPLAY_BASE = "https://megaplay.buzz";
+const MEGAPLAY_SPOOF_REF = "https://hianimes.re/";
+
+async function getAniKotoSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+  try {
+    const embedUrl = `${MEGAPLAY_BASE}/stream/ani/${anilistId}/${ep}/sub`;
+    let html = await fetch(embedUrl, {
+      headers: { ...BASE_HDRS, Referer: MEGAPLAY_SPOOF_REF, "Accept-Language": "en-US,en;q=0.9" },
+      signal: AbortSignal.timeout(14000),
+    }).then(r => r.ok ? r.text() : "").catch(() => "");
+
+    // تتبع iframe داخلي إذا لزم الأمر
+    const frameSrc = html.match(/<iframe\b[^>]*src="([^"]+)"/i)?.[1];
+    let actualEmbedUrl = embedUrl;
+    if (!html.match(/data-id="[^"]+?"/) && frameSrc) {
+      actualEmbedUrl = frameSrc.startsWith("http") ? frameSrc : `${MEGAPLAY_BASE}${frameSrc}`;
+      html = await fetch(actualEmbedUrl, {
+        headers: { ...BASE_HDRS, Referer: MEGAPLAY_SPOOF_REF },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.text() : "").catch(() => "");
+    }
+
+    const fileId = html.match(/data-id="([^"]+)"/)?.[1];
+    if (!fileId) return [];
+
+    const origin = new URL(actualEmbedUrl).origin;
+    const data = await fetch(`${origin}/stream/getSources?id=${fileId}&id=${fileId}`, {
+      headers: {
+        ...BASE_HDRS,
+        Referer: `${origin}/`,
+        "X-Requested-With": "XMLHttpRequest",
+        Accept: "application/json, */*",
+      },
+      signal: AbortSignal.timeout(10000),
+    }).then(r => r.ok ? r.json() : null).catch(() => null) as {
+      sources?: { file?: string };
+      tracks?: Array<{ file: string; label?: string; kind?: string; default?: boolean }>;
+    } | null;
+
+    if (!data?.sources?.file) return [];
+
+    const m3u8Url = data.sources.file;
+
+    // اختر أفضل ترجمة إنجليزية VTT
+    const subTrack = data.tracks?.find(t =>
+      t.kind !== "thumbnails" && (
+        (t.label || "").toLowerCase().includes("english") ||
+        (t.label || "").toLowerCase().includes("eng")
+      )
+    ) || data.tracks?.find(t => t.kind !== "thumbnails");
+    // وجّه الـ subtitle عبر proxy-text مع Referer صحيح حتى لا يُحجب من CDN
+    const subtitleUrl = subTrack?.file
+      ? `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(origin + "/")}`
+      : undefined;
+
+    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(origin + "/")}`;
+
+    return [{
+      name: "AniKoto · 1080p · ياباني مترجم",
+      url: m3u8Url,
+      quality: "1080p",
+      qualityRank: 8,
+      site: "anikoto",
+      directUrl: proxied,
+      directType: "hls",
+      subtitleUrl,
+    }];
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANINEKO (anineko.to) — صوت ياباني + ترجمة إنجليزية → عربية
+//  Multi-quality HLS (360p / 720p / 1080p) عبر vibeplayer.site
+// ════════════════════════════════════════════════════════════════════
+const ANINEKO_BASE = "https://anineko.to";
+const aninekoSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const ANINEKO_SLUG_TTL = 12 * 3_600_000;
+
+async function searchAnineko(query: string): Promise<Array<{ slug: string; title: string }>> {
+  const html = await fetch(`${ANINEKO_BASE}/browser?keyword=${encodeURIComponent(query)}`, {
+    headers: { ...BASE_HDRS, Referer: `${ANINEKO_BASE}/` },
+    signal: AbortSignal.timeout(10000),
+  }).then(r => r.ok ? r.text() : "").catch(() => "");
+
+  const results: Array<{ slug: string; title: string }> = [];
+  for (const m of html.matchAll(/<a\b[^>]*class=["'][^"']*nv-anime-thumb[^"']*["'][^>]*>[\s\S]*?<\/a>/gi)) {
+    const tag = m[0].match(/<a\b[^>]*>/i)?.[0] ?? "";
+    const hrefM = tag.match(/href=["']([^"']+)["']/i);
+    const slug = hrefM?.[1].match(/\/watch\/([^/?#]+)/)?.[1];
+    if (!slug) continue;
+    const titleM = m[0].match(/<(?:h3|[^>]+class=["'][^"']*nv-anime-title[^"']*["'][^>]*)>([\s\S]*?)<\/(?:h3|span|div)>/i);
+    const title = titleM ? titleM[1].replace(/<[^>]+>/g, "").trim() : slug.replace(/-/g, " ");
+    results.push({ slug, title });
+  }
+  return results;
+}
+
+async function findAninekoSlug(title: string, english: string | null): Promise<string | null> {
+  const ck = (title + "|" + (english || "")).toLowerCase();
+  const cached = aninekoSlugCache.get(ck);
+  if (cached && Date.now() - cached.ts < ANINEKO_SLUG_TTL) return cached.slug;
+
+  const queries = [...new Set([english, title].filter(Boolean) as string[])];
+  for (const q of queries) {
+    const results = await searchAnineko(q);
+    if (!results.length) continue;
+    // مطابقة بالعنوان
+    const target = (english || title).toLowerCase();
+    const best = results.find(r =>
+      r.title.toLowerCase().includes(target.slice(0, 12)) ||
+      target.includes(r.title.toLowerCase().slice(0, 10))
+    ) || results[0];
+    if (best) {
+      aninekoSlugCache.set(ck, { slug: best.slug, ts: Date.now() });
+      return best.slug;
+    }
+  }
+  aninekoSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function extractAninekoHls(embedUrl: string, seriesSlug: string): Promise<string | null> {
+  const html = await fetch(embedUrl, {
+    headers: { ...BASE_HDRS, Referer: `${ANINEKO_BASE}/watch/${seriesSlug}` },
+    signal: AbortSignal.timeout(10000),
+  }).then(r => r.ok ? r.text() : "").catch(() => "");
+
+  const patterns = [
+    /const\s+src\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+    /file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+    /["'](https?:\/\/[^"']+\/master\.m3u8[^"']*)["']/i,
+    /["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+  ];
+  for (const pattern of patterns) {
+    const m = html.match(pattern);
+    if (m) return m[1].replace(/&amp;/g, "&");
+  }
+  return null;
+}
+
+async function getAninekoSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    const slug = await findAninekoSlug(title, english);
+    if (!slug) return [];
+
+    // صفحة الحلقة
+    const epHtml = await fetch(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, {
+      headers: { ...BASE_HDRS, Referer: `${ANINEKO_BASE}/watch/${slug}` },
+      signal: AbortSignal.timeout(12000),
+    }).then(r => r.ok ? r.text() : "").catch(() => "");
+
+    if (!epHtml) return [];
+
+    // استخرج embed URLs من لوحة sub فقط
+    const embedUrls: string[] = [];
+    for (const panel of epHtml.matchAll(/<div\b[^>]*class=["'][^"']*nv-server-grid[^"']*["'][^>]*data-id=["']([^"']+)["'][^>]*>([\s\S]*?)(?=<div\b[^>]*class=["'][^"']*nv-server-grid|$)/gi)) {
+      const panelAudio = panel[1].toLowerCase().includes("dub") ? "dub" : "sub";
+      if (panelAudio !== "sub") continue;
+      for (const btn of panel[2].matchAll(/data-video=["']([^"']+)["']/gi)) {
+        const decoded = btn[1].replace(/&amp;/g, "&").replace(/&#34;/g, '"');
+        if (decoded) embedUrls.push(decoded);
+      }
+    }
+
+    if (!embedUrls.length) return [];
+
+    // استخرج HLS من أول embed يعمل
+    const results = await Promise.allSettled(
+      embedUrls.slice(0, 3).map(embed => extractAninekoHls(embed, slug))
+    );
+
+    const sources: UnifiedSource[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.status !== "fulfilled" || !r.value) continue;
+      const m3u8Url = r.value;
+      const embedUrl = embedUrls[i];
+      let referer = ANINEKO_BASE + "/";
+      try { referer = new URL(embedUrl).origin + "/"; } catch {}
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
+      sources.push({
+        name: "AniNeko · 1080p · ياباني مترجم",
+        url: m3u8Url,
+        quality: "1080p",
+        qualityRank: 8,
+        site: "anineko",
+        directUrl: proxied,
+        directType: "hls",
+      });
+      break;
+    }
+
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -3641,6 +3848,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("witanime",     () => getWitanimeSources(title, english, ep)),
       scrapeCached("anime3rb",     () => getAnime3rbSources(title, english, ep)),
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
+      scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
+      scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
     ]);
 
   } catch (e: any) {
@@ -3719,6 +3928,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anineko":     (await race(getAninekoSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
     res.json({ sources });
@@ -3856,9 +4067,12 @@ router.get("/anime/translate", async (req, res) => {
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/proxy-text", async (req, res) => {
   const url = String(req.query.url || "");
+  const ref = String(req.query.ref || "");
   if (!url.startsWith("http")) { res.status(400).json({ error: "bad url" }); return; }
   try {
-    const text = await cfGet(url, { "Accept": "text/plain,text/vtt,*/*" });
+    const extraHdrs: Record<string, string> = { Accept: "text/plain,text/vtt,*/*" };
+    if (ref) { extraHdrs["Referer"] = ref; extraHdrs["Origin"] = (() => { try { return new URL(ref).origin; } catch { return ref; } })(); }
+    const text = await cfGet(url, extraHdrs);
     if (!text) { res.status(502).json({ error: "upstream failed" }); return; }
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
@@ -3944,12 +4158,16 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
 const translateVttCache = new Map<string, { cues: Array<{ timing: string; text: string }>; ts: number }>();
 
 router.get("/anime/translate-vtt", async (req, res) => {
-  const url  = ((req.query.url  as string) || "").trim();
-  const from = ((req.query.from as string) || "en").trim();
-  const to   = ((req.query.to   as string) || "ar").trim();
-  if (!url) { res.status(400).json({ error: "url required" }); return; }
+  const rawUrl = ((req.query.url  as string) || "").trim();
+  const from   = ((req.query.from as string) || "en").trim();
+  const to     = ((req.query.to   as string) || "ar").trim();
+  if (!rawUrl) { res.status(400).json({ error: "url required" }); return; }
 
-  const cacheKey = `${from}→${to}:${url}`;
+  // دعم URLs نسبية مثل /api/anime/proxy-text?... (تُحوَّل لـ localhost)
+  const PORT = process.env.PORT || 8080;
+  const url = rawUrl.startsWith("/") ? `http://localhost:${PORT}${rawUrl}` : rawUrl;
+
+  const cacheKey = `${from}→${to}:${rawUrl}`;
   const cached = translateVttCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < 3_600_000) {
     res.json({ cues: cached.cues }); return;
