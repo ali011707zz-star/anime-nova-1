@@ -208,6 +208,26 @@ export default function RiftPlayer({
     return () => document.removeEventListener("fullscreenchange", fn);
   }, []);
 
+  /* ── auto-fullscreen on physical device rotation ── */
+  useEffect(() => {
+    const onRotate = async () => {
+      try {
+        const angle = (screen.orientation?.angle ?? (window as any).orientation ?? 0);
+        const isLand = Math.abs(Number(angle)) === 90 || Math.abs(Number(angle)) === 270;
+        if (isLand && !document.fullscreenElement && containerRef.current) {
+          await containerRef.current.requestFullscreen?.().catch(() => {});
+          await (screen.orientation as any).lock?.("landscape").catch?.(() => {});
+        }
+      } catch {}
+    };
+    screen.orientation?.addEventListener("change", onRotate);
+    window.addEventListener("orientationchange", onRotate);
+    return () => {
+      screen.orientation?.removeEventListener("change", onRotate);
+      window.removeEventListener("orientationchange", onRotate);
+    };
+  }, []);
+
   async function toggleFs() {
     if (!document.fullscreenElement) {
       await containerRef.current?.requestFullscreen?.().catch(() => {});
@@ -514,9 +534,9 @@ export default function RiftPlayer({
       // Same directional fix as volume
       const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
-      const nB = Math.max(0.1, Math.min(2.5, brightnessRef.current + dV / 150));
+      const nB = Math.max(0.1, Math.min(1.5, brightnessRef.current + dV / 150));
       brightnessRef.current = nB;
-      setBrightness(nB); setFeedback({ type: "brightness", value: nB / 2 });
+      setBrightness(nB); setFeedback({ type: "brightness", value: nB });
     }
   }
   function onTE(e: React.TouchEvent<HTMLDivElement>) {
@@ -764,7 +784,7 @@ export default function RiftPlayer({
               className="absolute left-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 pointer-events-none">
               <div className="relative rounded-full overflow-hidden" style={{ width: 4, height: 110, background: "rgba(255,255,255,0.15)" }}>
                 <div className="absolute bottom-0 left-0 right-0 rounded-full"
-                  style={{ background: "rgba(253,224,71,0.90)", height: `${Math.min(feedback.value * 100, 100)}%`, transition: "height 0.06s" }} />
+                  style={{ background: "rgba(253,224,71,0.90)", height: `${Math.min((feedback.value - 0.1) / 1.4 * 100, 100)}%`, transition: "height 0.06s" }} />
               </div>
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
                 style={{ background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.12)" }}>
@@ -1014,8 +1034,8 @@ export default function RiftPlayer({
                 onTouchStart={e => e.stopPropagation()}
                 onTouchEnd={e => e.stopPropagation()}
               >
-                {/* ── Skip intro / outro ── */}
-                {showCtrl && (showSkipIntro || showSkipOutro) && (
+                {/* ── Skip intro / outro — always visible when in range ── */}
+                {(showSkipIntro || showSkipOutro) && (
                   <div className="flex justify-start px-5 pb-2 pointer-events-auto" dir="rtl">
                     {showSkipIntro && (
                       <button
