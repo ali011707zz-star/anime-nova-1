@@ -2,7 +2,7 @@
 
 تطبيق بث أنمي عربي يجمع مصادر من 4 مصادر متوازية ويُشغّلها في مشغّل داخلي.
 
-المصادر الفعّالة: **anime-phoenix.com (MKV/MP4 مباشر)** · **shahiid-anime.net (عربي)** · **animelek.top (عربي)** · **animedar.net (عربي)** · **w1.anime4up.rest (mega.nz/embed + HLS عربي)**
+المصادر الفعّالة: **shahiid-anime.net (عربي)** · **animelek.top (عربي)** · **animedar.net (عربي)** · **kawaii-anime.com (ياباني مترجم)** · **AniKoto/megaplay.buzz (ياباني مترجم + ترجمة VTT)** · **AniNeko/anineko.to (ياباني مترجم HLS متعدد الجودات)**
 
 ## Run & Operate
 
@@ -27,6 +27,8 @@
   - AnimeLek.top scraper (search → series → episode → `data-embed` servers)
   - AnimeDar.net scraper (search → series page → `ul-server-position` → buildAnimestreamEmbed)
   - Anime-Phoenix.com scraper (search → episodes → `<source src>` or `data-server` base64)
+  - AniKoto scraper via megaplay.buzz (AniList ID direct → getSources → HLS + VTT subtitles)
+  - AniNeko scraper via anineko.to (search → slug → ep page → data-video embeds → HLS)
   - Video extraction engine (parseVideoUrl, extractVideoDeep, etc.)
   - HLS proxy (`/api/anime/hls-proxy`, `/api/anime/seg-proxy`)
 - `scripts/src/scrapers/multi-site-scraper.ts` — original multi-site scraper prototype (not used directly)
