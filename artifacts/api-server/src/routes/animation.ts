@@ -5,7 +5,7 @@ const router = Router();
 const TMDB_KEY  = process.env.TMDB_API_KEY || "8265bd1679663a7ea12ac168da84d2e8";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const SD_BASE   = "https://watch.stardima.com/watch";
-const SD_AJAX   = "https://watch.stardima.com/wp-admin/admin-ajax.php";
+const SD_AJAX   = "https://watch.stardima.com/watch/wp-admin/admin-ajax.php";
 const MV_BASE   = "https://moviz-time.co";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -403,12 +403,152 @@ router.get("/animation/stardima-episode", async (req: Request, res: Response) =>
   }
 });
 
+// ── Shared HLS / MP4 extractor for embed pages ────────────────────────────────
+
+// Regex patterns to find direct stream URLs inside HTML/JS source
+const M3U8_RE  = /["'`](https?:\/\/[^"'`\s]{12,}\.m3u8(?:[^"'`\s]*)?)['"` ]/gi;
+const MP4_RE   = /["'`](https?:\/\/[^"'`\s]{12,}\.mp4(?:[^"'`\s]*)?)['"` ]/gi;
+const MPD_RE   = /["'`](https?:\/\/[^"'`\s]{12,}\.mpd(?:[^"'`\s]*)?)['"` ]/gi;
+
+function extractStreamsFromHtml(html: string): { url: string; type: "hls" | "mp4" | "dash" }[] {
+  const seen = new Set<string>();
+  const out:  { url: string; type: "hls" | "mp4" | "dash" }[] = [];
+  const push = (url: string, type: "hls" | "mp4" | "dash") => {
+    const clean = url.replace(/['"` ]/g, "").trim();
+    if (!clean || seen.has(clean)) return;
+    // Skip thumbnail/image/logo/font CDNs
+    if (/\/(thumb|poster|backdrop|image|img|logo|font|css|js)\//i.test(clean)) return;
+    seen.add(clean);
+    out.push({ url: clean, type });
+  };
+  let m: RegExpExecArray | null;
+  M3U8_RE.lastIndex = 0; while ((m = M3U8_RE.exec(html)) !== null) push(m[1], "hls");
+  MP4_RE.lastIndex  = 0; while ((m = MP4_RE.exec(html))  !== null) push(m[1], "mp4");
+  MPD_RE.lastIndex  = 0; while ((m = MPD_RE.exec(html))  !== null) push(m[1], "dash");
+  return out;
+}
+
+// Try to call the internal anime extract-video API (reuses extractVideoDeep logic)
+async function callExtractApi(url: string): Promise<{ directUrl?: string } | null> {
+  try {
+    const port   = process.env["PORT"] || "8080";
+    const apiUrl = `http://localhost:${port}/api/anime/extract-video?url=${encodeURIComponent(url)}`;
+    const r = await fetch(apiUrl, { signal: AbortSignal.timeout(14_000) });
+    if (!r.ok) return null;
+    return (await r.json()) as { directUrl?: string };
+  } catch { return null; }
+}
+
+// Wrap m3u8 in hls-proxy (relative path → works for client)
+function wrapHls(url: string, ref: string): string {
+  return `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+}
+
+// Known extractable video hosts (same ones that extractVideoDeep handles in anime.ts)
+const EXTRACTABLE_HOSTS = [
+  "streamwish", "filemoon", "streamtape", "vidmoly", "vidcloud", "upcloud",
+  "megacloud", "rabbitstream", "mcloud", "vidsrc.stream", "alions.pro",
+  "vizcloud", "dokicloud", "kerapoxy", "bestx.stream", "asianload",
+  "govad", "moviesapi.club", "closeload", "smoothpre", "filmecho",
+  "ghost.online", "zoro", "rapid-cloud", "moon-cloud",
+];
+
+// Find URLs from known extractable hosts in HTML source
+function findExtractableUrls(html: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const re = /["'`](https?:\/\/[^"'`\s,;{}()\[\]]{10,})['"` ,;)]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const url = m[1].trim();
+    if (!url.startsWith("http")) continue;
+    if (EXTRACTABLE_HOSTS.some(h => url.includes(h)) && !seen.has(url)) {
+      seen.add(url);
+      out.push(url);
+    }
+  }
+  return out;
+}
+
+// Try to fetch embed page and extract streams; returns list of found streams
+async function scrapeEmbedForStreams(
+  embedUrl: string
+): Promise<{ url: string; proxyUrl: string; type: "hls" | "mp4" | "dash" }[]> {
+  const out: { url: string; proxyUrl: string; type: "hls" | "mp4" | "dash" }[] = [];
+  try {
+    const html = await cfGet(embedUrl, embedUrl);
+
+    // 1. Look for direct m3u8/mp4 URLs in page source
+    const streams = extractStreamsFromHtml(html);
+    for (const s of streams.slice(0, 4)) {
+      const proxyUrl = s.type === "hls" ? wrapHls(s.url, embedUrl) : s.url;
+      out.push({ url: s.url, proxyUrl, type: s.type });
+    }
+
+    if (out.length) return out;
+
+    // 2. Look for known extractable host URLs in the HTML
+    const extractableUrls = findExtractableUrls(html);
+    for (const inner of extractableUrls.slice(0, 3)) {
+      const extracted = await callExtractApi(inner);
+      if (extracted?.directUrl) {
+        const d = extracted.directUrl;
+        const type: "hls" | "mp4" | "dash" = d.includes(".m3u8") ? "hls" : d.includes(".mpd") ? "dash" : "mp4";
+        const proxyUrl = type === "hls" ? wrapHls(d, inner) : d;
+        out.push({ url: d, proxyUrl, type });
+        if (out.length >= 2) return out;
+      }
+    }
+
+    if (out.length) return out;
+
+    // 3. Check inner iframes → try extractVideoDeep on each
+    const inners = parseIframes(html, ["google", "histats", "w3counter", "doubleclick", "cdn.js"]);
+    for (const inner of inners.slice(0, 4)) {
+      // Try direct streams from inner page first
+      try {
+        const innerHtml = await cfGet(inner, embedUrl);
+        const innerStreams = extractStreamsFromHtml(innerHtml);
+        for (const s of innerStreams.slice(0, 2)) {
+          const proxyUrl = s.type === "hls" ? wrapHls(s.url, inner) : s.url;
+          out.push({ url: s.url, proxyUrl, type: s.type });
+        }
+        // Also check extractable hosts in inner page
+        const innerExtractable = findExtractableUrls(innerHtml);
+        for (const iu of innerExtractable.slice(0, 2)) {
+          const ex = await callExtractApi(iu);
+          if (ex?.directUrl) {
+            const d = ex.directUrl;
+            const type: "hls" | "mp4" | "dash" = d.includes(".m3u8") ? "hls" : d.includes(".mpd") ? "dash" : "mp4";
+            out.push({ url: d, proxyUrl: type === "hls" ? wrapHls(d, iu) : d, type });
+          }
+        }
+      } catch { /* try extractApi directly */ }
+
+      if (!out.length) {
+        const extracted = await callExtractApi(inner);
+        if (extracted?.directUrl) {
+          const d = extracted.directUrl;
+          const type: "hls" | "mp4" | "dash" = d.includes(".m3u8") ? "hls" : d.includes(".mpd") ? "dash" : "mp4";
+          const proxyUrl = type === "hls" ? wrapHls(d, inner) : d;
+          out.push({ url: d, proxyUrl, type });
+        }
+      }
+
+      if (out.length >= 2) break;
+    }
+  } catch { /* silent */ }
+  return out;
+}
+
 // ── SSE animation sources stream ──────────────────────────────────────────────
 
 router.get("/animation/sources-stream", async (req: Request, res: Response) => {
-  const title    = String(req.query.title  || "");
-  const type     = String(req.query.type   || "movie");
-  const epNum    = parseInt(String(req.query.ep || "1"), 10) || 1;
+  const title   = String(req.query.title  || "");
+  const type    = String(req.query.type   || "movie");
+  const epNum   = parseInt(String(req.query.ep     || "1"), 10) || 1;
+  const season  = parseInt(String(req.query.season || "1"), 10) || 1;
+  const tmdbId  = String(req.query.tmdbId || req.query.id || "");
 
   res.setHeader("Content-Type",      "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control",     "no-cache");
@@ -426,30 +566,178 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   const seenUrls = new Set<string>();
   let sourceCount = 0;
 
-  const sendSource = (url: string, label: string) => {
+  // Send a source; directUrl = already-extracted stream URL, proxyUrl = proxied version
+  const sendSource = (url: string, label: string, directUrl?: string, proxyUrl?: string) => {
     if (!url || seenUrls.has(url)) return;
     seenUrls.add(url);
     sourceCount++;
-    send("source", { url, label });
+    send("source", { url, label, directUrl, proxyUrl });
+  };
+
+  // Try embed URL → extract stream → sendSource with directUrl
+  const sendExtracted = async (embedUrl: string, label: string) => {
+    if (!embedUrl || seenUrls.has(embedUrl)) return;
+    // 1. Try callExtractApi (extractVideoDeep)
+    const extracted = await callExtractApi(embedUrl);
+    if (extracted?.directUrl) {
+      const d = extracted.directUrl;
+      const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
+      const proxy = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : d;
+      sendSource(embedUrl, label, d, proxy);
+      return;
+    }
+    // 2. Try fetching embed page for streams
+    const streams = await scrapeEmbedForStreams(embedUrl);
+    if (streams.length) {
+      for (const s of streams.slice(0, 2)) {
+        sendSource(s.url, label, s.url, s.proxyUrl);
+      }
+      return;
+    }
+    // 3. Send as-is (frontend will try extraction)
+    sendSource(embedUrl, label);
   };
 
   try {
     send("status", { msg: `جاري البحث عن "${title}"…` });
 
+    // Fetch IMDB ID from TMDB (needed for some scrapers)
+    let imdbId = "";
+    if (tmdbId) {
+      try {
+        const extUrl = `https://api.themoviedb.org/3/${type === "tv" ? "tv" : "movie"}/${tmdbId}/external_ids?api_key=${TMDB_KEY}`;
+        const extHtml = await cfGet(extUrl, "");
+        const extJson = JSON.parse(extHtml);
+        imdbId = extJson.imdb_id || "";
+      } catch { /* silent */ }
+    }
+
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
 
-      // ── 1. StarDima ─────────────────────────────────────────────────────────
+      // ── 1. vidsrc.xyz (TMDB ID) — best extractor ────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        send("status", { msg: "VidSrc: جاري الاستخراج…" });
+        const embedUrl = type === "tv"
+          ? `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+          : `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}`;
+        await sendExtracted(embedUrl, "VidSrc 1");
+      })(),
+
+      // ── 2. vidsrc.me (TMDB ID) ───────────────────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://vidsrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+          : `https://vidsrc.me/embed/movie?tmdb=${tmdbId}`;
+        await sendExtracted(embedUrl, "VidSrc 2");
+      })(),
+
+      // ── 3. vidsrc.to (TMDB ID) ───────────────────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${epNum}`
+          : `https://vidsrc.to/embed/movie/${tmdbId}`;
+        await sendExtracted(embedUrl, "VidSrc 3");
+      })(),
+
+      // ── 4. vidlink.pro (TMDB ID) ─────────────────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
+          : `https://vidlink.pro/movie/${tmdbId}`;
+        await sendExtracted(embedUrl, "VidLink");
+      })(),
+
+      // ── 5. 2embed.cc (TMDB ID) ───────────────────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://www.2embed.cc/embedtv/${tmdbId}&s=${season}&e=${epNum}`
+          : `https://www.2embed.cc/embed/${tmdbId}`;
+        await sendExtracted(embedUrl, "2Embed");
+      })(),
+
+      // ── 6. multiembed.mov (TMDB ID) ───────────────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${epNum}`
+          : `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1`;
+        await sendExtracted(embedUrl, "MultiEmbed");
+      })(),
+
+      // ── 7. SuperEmbed (TMDB ID) ───────────────────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+          : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}`;
+        await sendExtracted(embedUrl, "SmashyStream");
+      })(),
+
+      // ── 8. embed.su (TMDB ID) — often wraps streamwish/filemoon iframes ────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://embed.su/embed/tv/${tmdbId}/${season}/${epNum}`
+          : `https://embed.su/embed/movie/${tmdbId}`;
+        send("status", { msg: "EmbedSu: جاري الاستخراج…" });
+        await sendExtracted(embedUrl, "EmbedSu");
+      })(),
+
+      // ── 9. autoembed.cc (TMDB ID) — often wraps vid providers ────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://autoembed.cc/tv/tmdb/${tmdbId}-${season}-${epNum}`
+          : `https://autoembed.cc/movie/tmdb/${tmdbId}`;
+        await sendExtracted(embedUrl, "AutoEmbed");
+      })(),
+
+      // ── 10. player.autoembed.cc (alternate) ──────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const embedUrl = type === "tv"
+          ? `https://player.autoembed.cc/embed/tv/${tmdbId}/${season}/${epNum}`
+          : `https://player.autoembed.cc/embed/movie/${tmdbId}`;
+        await sendExtracted(embedUrl, "AutoEmbed Player");
+      })(),
+
+      // ── 11. moviesapi.club (IMDB ID) — static HTML, extractable ─────────────
+      (async () => {
+        if (!imdbId) return;
+        try {
+          const embedUrl = type === "tv"
+            ? `https://moviesapi.club/tv/${imdbId}-${season}-${epNum}`
+            : `https://moviesapi.club/movie/${imdbId}`;
+          send("status", { msg: "MoviesAPI: جاري الاستخراج…" });
+          const html = await cfGet(embedUrl, embedUrl);
+          // moviesapi.club serves JW Player with m3u8 in script
+          const m3u8Match = html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)['"]/);
+          if (m3u8Match) {
+            const direct = m3u8Match[1];
+            const proxy  = wrapHls(direct, embedUrl);
+            sendSource(direct, "MoviesAPI", direct, proxy);
+            return;
+          }
+          // Fallback: try extractVideoDeep on the page
+          await sendExtracted(embedUrl, "MoviesAPI");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 12. StarDima (title-based, Arabic content) ───────────────────────────
       (async () => {
         try {
           const searchHtml = await cfGet(`${SD_BASE}/?s=${encodeURIComponent(title)}`, SD_BASE + "/");
           const shows      = parseSDShows(searchHtml);
           if (!shows.length) return;
 
-          // Score all results; prefer movies when type=movie
           const scored = shows.map(s => ({ ...s, score: titleSim(s.title, title) }));
           scored.sort((a, b) => {
-            // Prefer matching section
             const sectionMatch = (type === "movie" ? "movies" : "tvshows");
             const aBonus = a.section === sectionMatch ? 0.05 : 0;
             const bBonus = b.section === sectionMatch ? 0.05 : 0;
@@ -460,19 +748,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: `StarDima: وُجد "${best.title}"` });
 
           if (best.section === "movies" || type === "movie") {
-            // Movie: fetch movie page → DooPlay AJAX
             const movieSlug = encodeURI(best.slug);
             const movieHtml = await cfGet(`${SD_BASE}/movies/${movieSlug}/`, SD_BASE + "/");
             const postId = parsePostId(movieHtml);
             const nonce  = parseNonce(movieHtml);
-            // Try direct iframes first
-            parseIframes(movieHtml, ["stardima", "google", "histats"]).forEach(u => sendSource(u, "StarDima فيلم"));
+            const iframes = parseIframes(movieHtml, ["stardima", "google", "histats"]);
+            for (const u of iframes) await sendExtracted(u, "StarDima فيلم");
             if (postId) {
               const urls = await sdDoopPlayerAjax(postId, nonce, `${SD_BASE}/movies/${movieSlug}/`);
-              urls.forEach((u, i) => sendSource(u, `StarDima فيلم ${i + 1}`));
+              for (const u of urls) await sendExtracted(u, "StarDima سيرفر");
             }
           } else {
-            // TV show: series page → season → episodes → AJAX
             const seriesHtml = await cfGet(`${SD_BASE}/tvshows/${encodeURI(best.slug)}/`, SD_BASE + "/");
             let episodes = parseSDEpisodes(seriesHtml);
             if (!episodes.length) {
@@ -490,24 +776,23 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const epHtml = await cfGet(`${SD_BASE}/episodes/${encodeURI(target.slug)}/`, SD_BASE + "/");
             const postId = parsePostId(epHtml);
             const nonce  = parseNonce(epHtml);
-            parseIframes(epHtml, ["stardima", "google", "histats"]).forEach(u => sendSource(u, "StarDima إطار"));
+            const iframes = parseIframes(epHtml, ["stardima", "google", "histats"]);
+            for (const u of iframes) await sendExtracted(u, "StarDima إطار");
             if (postId) {
               const urls = await sdDoopPlayerAjax(postId, nonce, `${SD_BASE}/episodes/${encodeURI(target.slug)}/`);
-              urls.forEach((u, i) => sendSource(u, `StarDima سيرفر ${i + 1}`));
+              for (const u of urls) await sendExtracted(u, "StarDima سيرفر");
             }
           }
         } catch { /* silent */ }
       })(),
 
-      // ── 2. moviz-time.co ────────────────────────────────────────────────────
+      // ── 9. moviz-time.co (title-based) ───────────────────────────────────────
       (async () => {
         try {
           const searchHtml = await cfGet(`${MV_BASE}/?s=${encodeURIComponent(title)}`, MV_BASE + "/");
           const allLinks = parseMVLinks(searchHtml);
           if (!allLinks.length) return;
 
-          // For movies: prefer /فيلم- (Arabic "film") URLs
-          // For TV: prefer /anime/ URLs but only if we can find episode links
           let links = allLinks;
           if (type === "movie") {
             const movieLinks = allLinks.filter(l => {
@@ -516,33 +801,29 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             });
             if (movieLinks.length) links = movieLinks;
           }
-
           links.sort((a, b) => titleSim(b.title, title) - titleSim(a.title, title));
           const best = links[0];
           if (titleSim(best.title, title) < 0.15) return;
           send("status", { msg: `Moviz: وُجد "${best.title}"` });
 
           if (type === "tv") {
-            // Try to find episode link on the series page
             const epUrl = await mvFindEpisode(best.url, epNum);
-            if (!epUrl) return; // Series page has no episode HTML links → skip
+            if (!epUrl) return;
             const iframes = await mvScrapeMovie(epUrl);
-            iframes.forEach((u, i) => sendSource(u, `Moviz حلقة ${i + 1}`));
+            for (const u of iframes) await sendExtracted(u, "Moviz حلقة");
           } else {
-            // Movie: scrape directly
             const iframes = await mvScrapeMovie(best.url);
-            iframes.forEach((u, i) => sendSource(u, `Moviz سيرفر ${i + 1}`));
+            for (const u of iframes) await sendExtracted(u, "Moviz سيرفر");
           }
         } catch { /* silent */ }
       })(),
 
-      // ── 3. topcinemaa.com ───────────────────────────────────────────────────
+      // ── 10. topcinemaa.com (title-based) ────────────────────────────────────
       (async () => {
         try {
           const links = await tcSearch(title);
           if (!links.length) return;
 
-          // Score each result by title similarity
           const scored = links.map(l => ({ ...l, score: titleSim(l.title, title) }));
           scored.sort((a, b) => b.score - a.score);
           const topScore = scored[0].score;
@@ -550,20 +831,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
           let target: typeof scored[0] | undefined;
           if (type === "tv") {
-            // Prefer the page whose episode number matches
             const candidates = scored.filter(l => l.score >= topScore * 0.7);
             target = candidates.find(l => l.epNum === epNum)
               || candidates.find(l => l.epNum === undefined)
               || candidates[0];
           } else {
-            // For movies, prefer a link with no episode number
             target = scored.find(l => l.epNum === undefined) || scored[0];
           }
           if (!target) return;
 
           send("status", { msg: `TopCinema: وُجد "${target.title}"` });
           const iframes = await tcScrapePlayer(target.url);
-          iframes.forEach((u, i) => sendSource(u, `TopCinema سيرفر ${i + 1}`));
+          for (const u of iframes) await sendExtracted(u, "TopCinema سيرفر");
         } catch { /* silent */ }
       })(),
 

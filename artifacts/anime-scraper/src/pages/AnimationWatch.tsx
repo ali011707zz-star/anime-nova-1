@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
   ChevronRight, Play, Loader2, AlertCircle,
-  RefreshCw, Server, CheckCircle, Wifi,
+  RefreshCw, Server, CheckCircle, Wifi, XCircle, SkipForward,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -13,6 +13,7 @@ interface Source {
   proxyUrl?: string;
   status?: "loading" | "ok" | "fail";
   isEmbed?: boolean;
+  streamType?: "hls" | "mp4" | "dash";
 }
 
 function wrapHls(url: string, ref: string): string {
@@ -49,11 +50,12 @@ export default function AnimationWatch() {
   const tmdbId  = params.get("id")     || "";
   const poster  = params.get("poster") || "";
 
-  const [step, setStep]       = useState<"searching" | "sources" | "playing" | "error">("searching");
-  const [statusMsg, setStatus] = useState("جاري البحث…");
-  const [sources, setSources]  = useState<Source[]>([]);
-  const [selSrc, setSelSrc]   = useState<Source | null>(null);
-  const [sseDone, setSseDone] = useState(false);
+  const [step, setStep]         = useState<"searching" | "sources" | "playing" | "error">("searching");
+  const [statusMsg, setStatus]  = useState("جاري البحث…");
+  const [sources, setSources]   = useState<Source[]>([]);
+  const [selSrc, setSelSrc]    = useState<Source | null>(null);
+  const [sseDone, setSseDone]  = useState(false);
+  const [playerErr, setPlayerErr] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef   = useRef<any>(null);
   const esRef    = useRef<EventSource | null>(null);
@@ -83,8 +85,16 @@ export default function AnimationWatch() {
 
   // Determine playable URL for a source
   const resolvePlayUrl = useCallback((src: Source): { url: string; isHls: boolean; isEmbed: boolean } => {
-    const raw = src.directUrl || src.url;
     const referer = window.location.origin;
+
+    // Server already gave us a proxyUrl → use it directly
+    if (src.proxyUrl) {
+      const isHls = src.proxyUrl.includes("hls-proxy") || src.proxyUrl.includes(".m3u8");
+      return { url: src.proxyUrl, isHls, isEmbed: false };
+    }
+
+    const raw = src.directUrl || src.url;
+
     if (isEmbedUrl(raw) && !src.directUrl) {
       return { url: raw, isHls: false, isEmbed: true };
     }
@@ -100,16 +110,30 @@ export default function AnimationWatch() {
   // Play a source
   const playSource = useCallback((src: Source) => {
     setSelSrc(src);
+    setPlayerErr(false);
     setStep("playing");
   }, []);
+
+  // Play next available source
+  const playNext = useCallback(() => {
+    if (!selSrc) return;
+    const idx = sources.findIndex(s => s.url === selSrc.url);
+    const next = sources.find((s, i) => i > idx && (s.status === "ok" || (s.status as any) === "unknown"));
+    if (next) playSource(next);
+    else setStep("sources");
+  }, [selSrc, sources, playSource]);
 
   // Attach player when selSrc + step=playing
   useEffect(() => {
     if (step !== "playing" || !selSrc) return;
+    setPlayerErr(false);
     const { url, isHls, isEmbed } = resolvePlayUrl(selSrc);
     if (isEmbed) return; // rendered as iframe
     const video = videoRef.current;
     if (!video) return;
+
+    const onError = () => setPlayerErr(true);
+    video.addEventListener("error", onError);
 
     if (isHls) {
       loadHls(video, url);
@@ -120,6 +144,7 @@ export default function AnimationWatch() {
     }
 
     return () => {
+      video.removeEventListener("error", onError);
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     };
   }, [step, selSrc, loadHls, resolvePlayUrl]);
@@ -130,18 +155,18 @@ export default function AnimationWatch() {
       const r = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(url)}`);
       const d = await r.json();
       let direct = d.directUrl || d.url || "";
-      const referer = window.location.origin;
       // Wrap HLS if needed
-      if (direct.includes(".m3u8")) {
+      if (direct && direct.includes(".m3u8")) {
         direct = wrapHls(direct, url);
       }
+      // If extraction worked → mark ok; if not → mark "unknown" (user can still try)
       setSources(prev => prev.map(s =>
         s.url === url
-          ? { ...s, directUrl: direct || undefined, status: direct ? "ok" : "fail" }
+          ? { ...s, directUrl: direct || undefined, status: direct ? "ok" : "unknown" as any }
           : s
       ));
     } catch {
-      setSources(prev => prev.map(s => s.url === url ? { ...s, status: "fail" } : s));
+      setSources(prev => prev.map(s => s.url === url ? { ...s, status: "unknown" as any } : s));
     }
   }, []);
 
@@ -151,7 +176,7 @@ export default function AnimationWatch() {
     setStep("searching"); setSources([]); setSelSrc(null); setSseDone(false);
     seenUrls.current.clear();
 
-    const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodedTitle)}&type=${type}&ep=${ep}&season=${season}`;
+    const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodedTitle)}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}`;
     const es = new EventSource(q);
     esRef.current = es;
 
@@ -160,9 +185,24 @@ export default function AnimationWatch() {
     });
 
     es.addEventListener("source", (e) => {
-      const src = JSON.parse(e.data) as { url: string; label: string };
-      if (seenUrls.current.has(src.url)) return;
-      seenUrls.current.add(src.url);
+      const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string };
+      const key = src.directUrl || src.url;
+      if (seenUrls.current.has(key)) return;
+      seenUrls.current.add(key);
+
+      // If server already extracted a direct stream → mark as ok immediately
+      if (src.directUrl) {
+        const isHls = src.directUrl.includes(".m3u8") || src.directUrl.includes("hls-proxy");
+        const proxyUrl = src.proxyUrl || (isHls ? wrapHls(src.directUrl, window.location.origin) : wrapMp4(src.directUrl, window.location.origin));
+        const newSrc: Source = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, status: "ok", isEmbed: false };
+        setSources(prev => {
+          const updated = [...prev, newSrc];
+          if (updated.length === 1) setStep("sources");
+          return updated;
+        });
+        return;
+      }
+
       const embed = isEmbedUrl(src.url) && !isHlsUrl(src.url);
       const newSrc: Source = { url: src.url, label: src.label, status: embed ? "ok" : "loading", isEmbed: embed };
       setSources(prev => {
@@ -228,6 +268,29 @@ export default function AnimationWatch() {
           className="absolute inset-0 w-full h-full"
           style={{ background: "#000" }}
         />
+        {/* Player error overlay */}
+        {playerErr && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-3">
+            <XCircle className="w-9 h-9 text-red-400/70" />
+            <p className="text-[12px] font-black text-white/70 font-['Cairo']">تعذّر تشغيل هذا السيرفر</p>
+            <div className="flex gap-2">
+              <button
+                onClick={playNext}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-primary/15 border border-primary/25 text-[11px] font-black text-primary font-['Cairo'] active:scale-95 transition-transform"
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+                السيرفر التالي
+              </button>
+              <button
+                onClick={() => setStep("sources")}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-white/6 border border-white/10 text-[11px] font-black text-white/50 font-['Cairo'] active:scale-95 transition-transform"
+              >
+                <Server className="w-3.5 h-3.5" />
+                كل السيرفرات
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -308,6 +371,9 @@ export default function AnimationWatch() {
           <div className="space-y-2">
             {sources.map((src, i) => {
               const isActive = selSrc?.url === src.url && step === "playing";
+              const isUnknown = (src.status as any) === "unknown";
+              const isOk = src.status === "ok";
+              const isLoading = src.status === "loading";
               return (
                 <motion.button
                   key={i}
@@ -315,32 +381,44 @@ export default function AnimationWatch() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.04 }}
                   onClick={() => playSource(src)}
-                  className={`w-full flex items-center gap-3 px-3 py-3 rounded-2xl border active:scale-[0.98] transition-all text-right ${
+                  disabled={isLoading}
+                  className={`w-full flex items-center gap-3 px-3 py-3 rounded-2xl border transition-all text-right disabled:opacity-60 ${
                     isActive
                       ? "bg-primary/15 border-primary/30"
-                      : "bg-white/5 border-white/8 active:bg-white/10"
+                      : isOk
+                      ? "bg-emerald-500/8 border-emerald-500/20 active:scale-[0.98] active:bg-emerald-500/12"
+                      : isUnknown
+                      ? "bg-white/5 border-white/8 active:scale-[0.98] active:bg-white/10"
+                      : "bg-white/5 border-white/8 active:scale-[0.98] active:bg-white/10"
                   }`}
                 >
                   <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                    src.status === "ok"      ? "bg-emerald-500/15 border border-emerald-500/25" :
-                    src.status === "fail"    ? "bg-white/6  border border-white/10"  :
-                    src.status === "loading" ? "bg-primary/10 border border-primary/20" :
+                    isOk      ? "bg-emerald-500/15 border border-emerald-500/25" :
+                    isUnknown ? "bg-amber-500/10 border border-amber-500/20" :
+                    isLoading ? "bg-primary/10 border border-primary/20" :
                     "bg-white/6 border border-white/10"
                   }`}>
-                    {src.status === "ok"      && <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />}
-                    {src.status === "fail"    && <Server className="w-3.5 h-3.5 text-white/30" />}
-                    {src.status === "loading" && <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />}
-                    {!src.status              && <Server className="w-3.5 h-3.5 text-white/30" />}
+                    {isOk      && <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />}
+                    {isUnknown && <Play className="w-3.5 h-3.5 text-amber-400" />}
+                    {isLoading && <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />}
+                    {!src.status && <Server className="w-3.5 h-3.5 text-white/30" />}
                   </div>
                   <div className="flex-1 min-w-0 text-right">
-                    <p className="text-[12px] font-black text-white font-['Cairo']">{src.label}</p>
-                    <p className="text-[9px] text-white/25 truncate font-['Cairo']">
-                      {src.directUrl ? "رابط مباشر ✓" : src.isEmbed ? "إطار مدمج" : (src.url || "").replace(/^https?:\/\//, "").slice(0, 32)}
+                    <p className={`text-[12px] font-black font-['Cairo'] ${isActive ? "text-primary" : "text-white"}`}>
+                      {src.label}
+                    </p>
+                    <p className="text-[9px] truncate font-['Cairo'] text-white/25">
+                      {src.directUrl ? "✓ رابط مباشر" :
+                       isUnknown    ? "اضغط للمحاولة" :
+                       isLoading    ? "جاري الفحص…" :
+                       (src.url || "").replace(/^https?:\/\//, "").slice(0, 35)}
                     </p>
                   </div>
                   {isActive
                     ? <Wifi className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                    : <Play className="w-3.5 h-3.5 text-primary/60 flex-shrink-0" />
+                    : isLoading
+                    ? null
+                    : <Play className={`w-3.5 h-3.5 flex-shrink-0 ${isOk ? "text-emerald-400/70" : "text-white/30"}`} />
                   }
                 </motion.button>
               );
@@ -352,6 +430,23 @@ export default function AnimationWatch() {
                 <Loader2 className="w-3 h-3 animate-spin" />
                 جاري البحث عن المزيد…
               </div>
+            )}
+
+            {/* All-unknown hint shown after SSE completes */}
+            {sseDone && sources.length > 0 && sources.every(s => (s.status as any) === "unknown") && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-2 px-3.5 py-3 rounded-2xl bg-amber-500/6 border border-amber-500/15 flex gap-2.5 items-start"
+              >
+                <AlertCircle className="w-4 h-4 text-amber-400/60 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[11px] font-black text-amber-300/70 font-['Cairo']">ملاحظة</p>
+                  <p className="text-[10px] text-amber-200/40 font-['Cairo'] leading-relaxed mt-0.5">
+                    هذه السيرفرات تعتمد على JavaScript للتشغيل. اضغط على أي سيرفر للمحاولة — قد يعمل بعضها.
+                  </p>
+                </div>
+              </motion.div>
             )}
           </div>
         </div>
