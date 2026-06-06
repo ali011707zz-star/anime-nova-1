@@ -4383,7 +4383,7 @@ router.get("/anime/sources-stream", async (req, res) => {
   }
 
   try {
-    const SCRAPER_MS = 20000;
+    const SCRAPER_MS = 12000;
     const EXTRACT_MS = 15000;
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
@@ -4448,7 +4448,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
-      scrapeCached("anime4up",     () => getAnime4upSources(title, english, ep)),
       scrapeCached("witanime",     () => getWitanimeSources(title, english, ep)),
       scrapeCached("anime3rb",     () => getAnime3rbSources(title, english, ep)),
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
