@@ -84,7 +84,10 @@ export default function AnimeDetail() {
     if (!params.id) return;
     let cancelled = false;
     const ctrl = new AbortController();
-    setLoading(true); setAnime(null); setDescAr(null); setTitleAr(null); setShowFull(false);
+    setLoading(true); setAnime(null); setDescAr(null); setShowFull(false);
+    // Pre-load cached Arabic title immediately to avoid flash
+    const preTitle = localStorage.getItem(`title-ar-${params.id}`);
+    setTitleAr(preTitle);
     const savedList: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     setSaved(savedList.includes(parseInt(params.id)));
     const savedC = localStorage.getItem(`comments-${params.id}`);
@@ -200,7 +203,7 @@ export default function AnimeDetail() {
         }} />
         {/* Back button */}
         <button
-          onClick={() => { if (window.history.length > 1) { window.history.back(); } else { navigate("/"); } }}
+          onClick={() => navigate("/")}
           className="absolute top-5 right-4 w-9 h-9 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90"
         >
           <ChevronRight className="w-4 h-4 text-white" />
