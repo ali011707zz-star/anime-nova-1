@@ -3582,9 +3582,12 @@ async function getAniKotoSources(
         (t.label || "").toLowerCase().includes("eng")
       )
     ) || data.tracks?.find(t => t.kind !== "thumbnails");
-    // وجّه الـ subtitle عبر proxy-text مع Referer صحيح حتى لا يُحجب من CDN
-    const subtitleUrl = subTrack?.file
+    // وجّه الـ subtitle عبر proxy-text (تجاوز CDN) ثم translate-vtt (ترجمة عربية)
+    const rawSubProxy = subTrack?.file
       ? `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(origin + "/")}`
+      : null;
+    const subtitleUrl = rawSubProxy
+      ? `/api/anime/translate-vtt?url=${encodeURIComponent(rawSubProxy)}&from=en&to=ar`
       : undefined;
 
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(origin + "/")}`;
@@ -3685,48 +3688,87 @@ async function getAninekoSources(
       headers: { ...BASE_HDRS, Referer: `${ANINEKO_BASE}/watch/${slug}` },
       signal: AbortSignal.timeout(12000),
     }).then(r => r.ok ? r.text() : "").catch(() => "");
-
     if (!epHtml) return [];
 
-    // استخرج embed URLs من لوحة sub فقط
-    const embedUrls: string[] = [];
-    for (const panel of epHtml.matchAll(/<div\b[^>]*class=["'][^"']*nv-server-grid[^"']*["'][^>]*data-id=["']([^"']+)["'][^>]*>([\s\S]*?)(?=<div\b[^>]*class=["'][^"']*nv-server-grid|$)/gi)) {
-      const panelAudio = panel[1].toLowerCase().includes("dub") ? "dub" : "sub";
-      if (panelAudio !== "sub") continue;
-      for (const btn of panel[2].matchAll(/data-video=["']([^"']+)["']/gi)) {
-        const decoded = btn[1].replace(/&amp;/g, "&").replace(/&#34;/g, '"');
-        if (decoded) embedUrls.push(decoded);
-      }
-    }
-
-    if (!embedUrls.length) return [];
-
-    // استخرج HLS من أول embed يعمل
-    const results = await Promise.allSettled(
-      embedUrls.slice(0, 3).map(embed => extractAninekoHls(embed, slug))
+    // استهدف الـ panel الخاص بـ sub مباشرة (class lang-group + data-id="sub")
+    // ملاحظة: data-id="dub" يظهر أولاً في tab buttons قبل الـ panels، لذا لا نقسم عليه
+    const subPanelMatch = epHtml.match(
+      /<div\b[^>]*class=["'][^"']*lang-group[^"']*["'][^>]*data-id=["']sub["'][^>]*>([\s\S]*?)(?=<div\b[^>]*class=["'][^"']*lang-group|$)/i
     );
+    const subSection = subPanelMatch?.[1] || epHtml;
+
+    // استخرج data-video من قسم sub — كل قيمة تحتوي على embed URL + subtitle في query params
+    const serverEntries: Array<{ embedUrl: string; rawSubUrl: string | null }> = [];
+    for (const m of subSection.matchAll(/data-video=["']([^"']+)["']/gi)) {
+      const rawVal = m[1].replace(/&amp;/g, "&").replace(/&#34;/g, '"');
+      let embedUrl = rawVal;
+      let rawSubUrl: string | null = null;
+      try {
+        const parsed = new URL(rawVal);
+        // subtitle مُمرَّر في query params: ?sub= أو ?caption_1=
+        const subParam = parsed.searchParams.get("sub") || parsed.searchParams.get("caption_1");
+        if (subParam && subParam.startsWith("http")) {
+          rawSubUrl = subParam;
+          // نظّف الـ embed URL من params الترجمة
+          parsed.searchParams.delete("sub");
+          parsed.searchParams.delete("caption_1");
+          parsed.searchParams.delete("sub_1");
+          embedUrl = parsed.toString();
+        }
+      } catch {}
+      serverEntries.push({ embedUrl, rawSubUrl });
+    }
+    if (!serverEntries.length) return [];
 
     const sources: UnifiedSource[] = [];
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i];
-      if (r.status !== "fulfilled" || !r.value) continue;
-      const m3u8Url = r.value;
-      const embedUrl = embedUrls[i];
+
+    for (const entry of serverEntries.slice(0, 4)) {
+      const { embedUrl, rawSubUrl } = entry;
+      let m3u8Url: string | null = null;
       let referer = ANINEKO_BASE + "/";
-      try { referer = new URL(embedUrl).origin + "/"; } catch {}
+
+      // vibeplayer.site: اشتقاق مباشر للـ HLS من الـ token بدون HTTP request إضافي
+      // pattern: vibeplayer.site/TOKEN → /public/stream/TOKEN/master.m3u8
+      const vibeToken = embedUrl.match(/vibeplayer\.site\/([a-f0-9]{14,})/i)?.[1];
+      if (vibeToken) {
+        m3u8Url = `https://vibeplayer.site/public/stream/${vibeToken}/master.m3u8`;
+        referer = `https://vibeplayer.site/${vibeToken}`;
+      } else {
+        // خوادم أخرى: استخراج HLS من صفحة الـ embed
+        try { referer = new URL(embedUrl).origin + "/"; } catch {}
+        m3u8Url = await extractAninekoHls(embedUrl, slug);
+      }
+
+      if (!m3u8Url) continue;
+
+      // وجّه الـ HLS عبر hls-proxy (CORS + Referer)
       const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
+
+      // الترجمة: proxy-text لتجاوز CDN → translate-vtt للعربية
+      let subtitleUrl: string | undefined;
+      if (rawSubUrl) {
+        const proxySubUrl = `/api/anime/proxy-text?url=${encodeURIComponent(rawSubUrl)}&ref=${encodeURIComponent(ANINEKO_BASE + "/")}`;
+        subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxySubUrl)}&from=en&to=ar`;
+      }
+
+      const hostLabel = embedUrl.includes("bibi") ? "BibiEmb"
+                      : embedUrl.includes("otakuhg") ? "OtakuHG"
+                      : embedUrl.includes("otakuvid") ? "OtakuVid"
+                      : "VibePlayer";
+
       sources.push({
-        name: "AniNeko · 1080p · ياباني مترجم",
+        name: `AniNeko · ${hostLabel} · ياباني مترجم`,
         url: m3u8Url,
         quality: "1080p",
         qualityRank: 8,
         site: "anineko",
         directUrl: proxied,
         directType: "hls",
+        subtitleUrl,
       });
-      break;
-    }
 
+      if (sources.length >= 2) break;
+    }
     return sources;
   } catch { return []; }
 }
@@ -3734,10 +3776,8 @@ async function getAninekoSources(
 
 // ════════════════════════════════════════════════════════════════════
 //  ANIMEGG (www.animegg.org) — ياباني مترجم · MP4 مباشر عبر video-proxy
-//  Flow: /search?q= → /series/{slug} → /{slug}-episode-{N}
-//        → /embed/{id} → videoSources[{file:"/play/{id}/video.mp4"}]
-//        → http://www.animegg.org/play/... → vidcache.net:8161 (non-std port)
-//        → video-proxy routes it server-side (no browser port restriction)
+//  Flow (Anivexa): /search/?q= → /series/{slug} → anm_det_pop links
+//        → data-toggle="tab" embed tabs → /embed/{id} → videoSources
 // ════════════════════════════════════════════════════════════════════
 const ANIMEGG_BASE = "https://www.animegg.org";
 
@@ -3747,93 +3787,550 @@ async function getAnimeGGSources(
   try {
     const q = (english || title).replace(/[^\w\s]/g, " ").trim();
 
-    // 1. Search → /series/{slug} links
+    // 1. Search (trailing slash required!) → /series/{slug} links
     const searchHtml = await cfGet(
-      `${ANIMEGG_BASE}/search?q=${encodeURIComponent(q)}`,
+      `${ANIMEGG_BASE}/search/?q=${encodeURIComponent(q)}`,
       { "Referer": ANIMEGG_BASE },
     );
     if (!searchHtml) return [];
 
-    const slugs: string[] = [];
-    for (const m of searchHtml.matchAll(/href="(\/series\/[^"?#]+)"/gi)) {
-      if (!m[1].includes("/page/") && !slugs.includes(m[1])) slugs.push(m[1]);
+    // Parse series from <a class="...mse..." href="/series/{slug}">
+    const slugCandidates: { slug: string; text: string }[] = [];
+    for (const m of searchHtml.matchAll(/<a\b[^>]*class=["'][^"']*\bmse\b[^"']*["'][^>]*>[\s\S]*?<\/a>/gi)) {
+      const tag = m[0].match(/<a\b[^>]*>/i)?.[0] ?? "";
+      const href = tag.match(/href=["']([^"']+)["']/i)?.[1] ?? "";
+      const slug = href.match(/^\/series\/([^/?#]+)/)?.[1];
+      if (!slug) continue;
+      const strong = m[0].match(/<strong[^>]*>([\s\S]*?)<\/strong>/i)?.[1];
+      slugCandidates.push({ slug, text: strong ? strong.replace(/<[^>]+>/g, "").trim() : slug.replace(/-/g, " ") });
     }
-    if (!slugs.length) return [];
+    // Fallback: any /series/ href
+    if (!slugCandidates.length) {
+      for (const m of searchHtml.matchAll(/href="(\/series\/[^"?#]+)"/gi)) {
+        const slug = m[1].replace("/series/", "");
+        if (!slug.includes("/page/") && !slugCandidates.find(c => c.slug === slug))
+          slugCandidates.push({ slug, text: slug.replace(/-/g, " ") });
+      }
+    }
+    if (!slugCandidates.length) return [];
 
-    // 2. Best title match
-    const scored = slugs.slice(0, 8).map(slug => {
-      const name = slug.replace("/series/", "").replace(/-/g, " ");
-      return { slug, score: titleSimilarity(q, name) };
-    }).sort((a, b) => b.score - a.score);
-    if (!scored[0] || scored[0].score < 0.15) return [];
-    const seriesSlug = scored[0].slug; // e.g. "/series/death-note"
+    // 2. Best match by title similarity
+    const scored = slugCandidates.slice(0, 8).map(c => ({
+      slug: c.slug, score: similarity(q, c.text)
+    })).sort((a, b) => b.score - a.score);
+    if (!scored[0] || scored[0].score < 0.1) return [];
+    const seriesSlug = scored[0].slug;
 
-    // 3. Series page → find episode link /{slug}-episode-{N}
+    // 3. Series page → find episode by number from anm_det_pop anchors
+    // HTML: <a href="/{epSlug}" class="anm_det_pop"><strong>Title N</strong></a>
     const seriesHtml = await cfGet(
-      `${ANIMEGG_BASE}${seriesSlug}`,
-      { "Referer": `${ANIMEGG_BASE}/search` },
+      `${ANIMEGG_BASE}/series/${seriesSlug}`,
+      { "Referer": `${ANIMEGG_BASE}/search/?q=${encodeURIComponent(q)}` },
     );
     if (!seriesHtml) return [];
 
-    // Derive the epSlug from actual episode links on the page
-    // Pattern: href="/death-note-episode-1"
-    const baseSlug = seriesSlug.replace("/series/", ""); // "death-note"
-    const epLinkRe = new RegExp(`href="(/${baseSlug}-episode-${ep}[^"]*)"`, "i");
-    const epLinkMatch = epLinkRe.exec(seriesHtml);
-    const epPath = epLinkMatch ? epLinkMatch[1].split("#")[0]
-                               : `/${baseSlug}-episode-${ep}`;
+    let epPath: string | null = null;
+    for (const m of seriesHtml.matchAll(/<a\b[^>]*class=["'][^"']*anm_det_pop[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      const tag = m[0].match(/<a\b[^>]*>/i)?.[0] ?? "";
+      const href = (tag.match(/href=["']([^"']+)["']/i)?.[1] ?? "").split("#")[0];
+      const strong = (m[0].match(/<strong[^>]*>([\s\S]*?)<\/strong>/i)?.[1] ?? "").replace(/<[^>]+>/g, "").trim();
+      const numM = strong.match(/\b(\d+)\s*$/);
+      if (numM && parseInt(numM[1]) === ep && href) {
+        epPath = href.startsWith("/") ? href : "/" + href;
+        break;
+      }
+    }
+    if (!epPath) return [];
 
-    // 4. Episode page → /embed/{id} iframes
+    // 4. Episode page → server tabs (data-toggle="tab" data-id data-version)
     const epUrl  = `${ANIMEGG_BASE}${epPath}`;
-    const epHtml = await cfGet(epUrl, { "Referer": `${ANIMEGG_BASE}${seriesSlug}` });
+    const epHtml = await cfGet(epUrl, { "Referer": `${ANIMEGG_BASE}/series/${seriesSlug}` });
     if (!epHtml) return [];
 
-    const embedIds: string[] = [];
-    for (const m of epHtml.matchAll(/href="(\/embed\/\d+)"|src="(\/embed\/\d+)"/gi)) {
-      const id = m[1] || m[2];
-      if (id && !embedIds.includes(id)) embedIds.push(id);
+    const tabs: { embedId: string; server: string }[] = [];
+    for (const m of epHtml.matchAll(/<a\b[^>]*data-toggle=["']tab["'][^>]*>/gi)) {
+      const tag = m[0];
+      const getA = (n: string) => tag.match(new RegExp(`\\b${n}=["']([^"']*)["']`, "i"))?.[1] ?? "";
+      const embedId = getA("data-id");
+      const version = getA("data-version") || "subbed";
+      const server  = getA("data-mirror") || "AnimeGG";
+      if (!embedId || version.startsWith("dub")) continue;
+      if (!tabs.find(t => t.embedId === embedId)) tabs.push({ embedId, server });
     }
-    if (!embedIds.length) return [];
+    // Fallback: href="/embed/N" or src="/embed/N"
+    if (!tabs.length) {
+      for (const m of epHtml.matchAll(/(?:href|src)="(\/embed\/\d+)"/gi)) {
+        const id = m[1].replace("/embed/", "");
+        if (!tabs.find(t => t.embedId === id)) tabs.push({ embedId: id, server: "AnimeGG" });
+      }
+    }
+    if (!tabs.length) return [];
 
-    // 5. Fetch first 2 embed pages → extract videoSources[{file:...}]
+    // 5. Fetch embed pages → videoSources[{file, label, bk}]
     const sources: UnifiedSource[] = [];
-    for (const embedPath of embedIds.slice(0, 2)) {
-      const embedUrl  = `${ANIMEGG_BASE}${embedPath}`;
+    for (const tab of tabs.slice(0, 3)) {
+      const embedUrl  = `${ANIMEGG_BASE}/embed/${tab.embedId}`;
       const embedHtml = await cfGet(embedUrl, { "Referer": epUrl });
       if (!embedHtml) continue;
 
-      // var videoSources = [{file: "/play/15143/video.mp4?for=...", label: "360p"}]
       const vsMatch = /var\s+videoSources\s*=\s*(\[[\s\S]*?\]);/.exec(embedHtml);
       if (!vsMatch) continue;
       try {
-        // Clean JS → JSON: unquoted keys, single quotes
         const json = vsMatch[1]
-          .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')   // unquoted keys
-          .replace(/'/g, '"');                           // single → double quotes
-        const arr: { file?: string; label?: string }[] = JSON.parse(json);
+          .replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":')
+          .replace(/:\s*'([^']*)'/g, ': "$1"');
+        const arr: { file?: string; label?: string; bk?: string }[] = JSON.parse(json);
         for (const item of arr) {
           if (!item.file) continue;
-          // Build absolute URL
-          const rawUrl = item.file.startsWith("http")
-            ? item.file
-            : `${ANIMEGG_BASE}${item.file}`;
-          // Route through video-proxy (vidcache.net:8161 is blocked from browser)
-          const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(embedUrl)}`;
+          let finalUrl = item.file.startsWith("http") ? item.file : `${ANIMEGG_BASE}${item.file}`;
+          // bk = backup URL (base64-encoded)
+          if (item.bk) { try { finalUrl = decodeURIComponent(atob(item.bk)) || finalUrl; } catch {} }
+          const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(finalUrl)}&ref=${encodeURIComponent(embedUrl)}`;
           const label   = item.label || "360p";
           const rank    = label.includes("1080") ? 9 : label.includes("720") ? 8 : 7;
           sources.push({
-            name: `AnimeGG · ${label} · ياباني مترجم`,
-            url:  rawUrl,
-            quality: label,
-            qualityRank: rank,
-            site: "animegg",
-            directUrl: proxied,
-            directType: "mp4",
+            name: `AnimeGG · ${tab.server} · ${label} · ياباني مترجم`,
+            url: finalUrl, quality: label, qualityRank: rank,
+            site: "animegg", directUrl: proxied, directType: "mp4",
           });
         }
-      } catch { /* bad JSON, skip */ }
+      } catch { /* bad JSON */ }
+      if (sources.length >= 3) break;
+    }
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ALLMANGA (via AllAnime API — api.allanime.day)
+//  صوت ياباني + ترجمة إنجليزية | AES-CTR + hex decode + AES-CBC
+// ════════════════════════════════════════════════════════════════════
+const ALLANIME_API   = "https://api.allanime.day";
+const ALLANIME_REF   = "https://allmanga.to";
+const ALLANIME_UA    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
+const ALLANIME_PASS  = "Xot36i3lK3:v1";
+const ALLANIME_EP_H  = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec";
+
+const ALLANIME_HEX: Record<string, string> = {
+  "79":"A","7a":"B","7b":"C","7c":"D","7d":"E","7e":"F","7f":"G","70":"H","71":"I","72":"J",
+  "73":"K","74":"L","75":"M","76":"N","77":"O","68":"P","69":"Q","6a":"R","6b":"S","6c":"T",
+  "6d":"U","6e":"V","6f":"W","60":"X","61":"Y","62":"Z","59":"a","5a":"b","5b":"c","5c":"d",
+  "5d":"e","5e":"f","5f":"g","50":"h","51":"i","52":"j","53":"k","54":"l","55":"m","56":"n",
+  "57":"o","48":"p","49":"q","4a":"r","4b":"s","4c":"t","4d":"u","4e":"v","4f":"w","40":"x",
+  "41":"y","42":"z","08":"0","09":"1","0a":"2","0b":"3","0c":"4","0d":"5","0e":"6","0f":"7",
+  "00":"8","01":"9","15":"-","16":".","67":"_","46":"~","02":":","17":"/","07":"?","1b":"#",
+  "63":"[","65":"]","78":"@","19":"!","1c":"$","1e":"&","10":"(","11":")","12":"*","13":"+",
+  "14":",","03":";","05":"=","1d":"%",
+};
+
+let _aaKey: CryptoKey | null = null;
+async function getAllAnimeKey(): Promise<CryptoKey> {
+  if (_aaKey) return _aaKey;
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ALLANIME_PASS));
+  _aaKey = await crypto.subtle.importKey("raw", h, { name: "AES-CTR" }, false, ["decrypt"]);
+  return _aaKey;
+}
+async function aaDecryptB64(b64: string): Promise<string> {
+  const buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const ctr = new Uint8Array(16); ctr.set(buf.slice(1, 13)); ctr[15] = 2;
+  const key = await getAllAnimeKey();
+  const ctLen = buf.length - 13 - 16;
+  const plain = await crypto.subtle.decrypt({ name: "AES-CTR", counter: ctr, length: 32 }, key, buf.slice(13, 13 + ctLen));
+  return new TextDecoder().decode(plain);
+}
+function aaHexDecode(hex: string): string {
+  let out = "";
+  for (let i = 0; i < hex.length; i += 2) out += ALLANIME_HEX[hex.substring(i, i+2).toLowerCase()] ?? hex.substring(i, i+2);
+  return out;
+}
+async function aaUnsDec(hex: string): Promise<string> {
+  const hexToU8 = (h: string) => { const b = new Uint8Array(h.length/2); for (let i=0;i<b.length;i++) b[i]=parseInt(h.slice(i*2,i*2+2),16); return b; };
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode("kiemtienmua911ca"), { name: "AES-CBC" }, false, ["decrypt"]);
+  const p = await crypto.subtle.decrypt({ name: "AES-CBC", iv: new TextEncoder().encode("1234567890oiuytr") }, k, hexToU8(hex));
+  return new TextDecoder().decode(p);
+}
+async function aaPost(gql: string, vars: object): Promise<any> {
+  const r = await fetch(`${ALLANIME_API}/api`, {
+    method: "POST",
+    headers: { "User-Agent": ALLANIME_UA, "Referer": ALLANIME_REF, "Origin": ALLANIME_REF, "Content-Type": "application/json" },
+    body: JSON.stringify({ variables: vars, query: gql }),
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!r.ok) throw new Error(`AllAnime POST ${r.status}`);
+  const j = await r.json() as any;
+  if (j?.data?.tobeparsed) j.data = JSON.parse(await aaDecryptB64(j.data.tobeparsed));
+  return j.data;
+}
+async function aaGet(url: string): Promise<any> {
+  const r = await fetch(url, { headers: { "User-Agent": ALLANIME_UA, "Referer": ALLANIME_REF, "Origin": ALLANIME_REF }, signal: AbortSignal.timeout(12000) });
+  if (!r.ok) throw new Error(`AllAnime GET ${r.status}`);
+  const j = await r.json() as any;
+  if (j?.data?.tobeparsed) j.data = JSON.parse(await aaDecryptB64(j.data.tobeparsed));
+  return j.data;
+}
+
+async function getAllMangaSources(
+  title: string, english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  try {
+    const q = english || title;
+    // 1. Search
+    const sd = await aaPost(
+      `query($search:SearchInput $limit:Int $page:Int $translationType:VaildTranslationTypeEnumType $countryOrigin:VaildCountryOriginEnumType){shows(search:$search limit:$limit page:$page translationType:$translationType countryOrigin:$countryOrigin){edges{_id name englishName nativeName availableEpisodes aniListId __typename}}}`,
+      { search: { allowAdult: false, allowUnknown: false, query: q }, limit: 40, page: 1, translationType: "sub", countryOrigin: "ALL" }
+    );
+    const results: any[] = sd?.shows?.edges ?? [];
+    if (!results.length) return [];
+
+    // 2. Best match (prefer AniList ID)
+    const normQ = q.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+    let best = results[0];
+    for (const r of results) {
+      if (anilistId && String(r.aniListId) === String(anilistId)) { best = r; break; }
+      const names = [r.name, r.englishName].filter(Boolean).map((s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""));
+      if (names.includes(normQ)) { best = r; break; }
     }
 
+    // 3. Episode sources (persisted query)
+    const epVars = { showId: best._id, translationType: "sub", episodeString: String(ep) };
+    const epData = await aaGet(
+      `${ALLANIME_API}/api?variables=${encodeURIComponent(JSON.stringify(epVars))}&extensions=${encodeURIComponent(JSON.stringify({ persistedQuery: { version: 1, sha256Hash: ALLANIME_EP_H } }))}`
+    );
+    const srcUrls: any[] = epData?.episode?.sourceUrls ?? [];
+    const sources: UnifiedSource[] = [];
+
+    for (const src of srcUrls.slice(0, 8)) {
+      let url: string = src.sourceUrl ?? "";
+      if (!url) continue;
+      if (url.startsWith("--")) url = aaHexDecode(url.slice(2));
+      if (url.startsWith("/apivtwo/clock")) url = "https://allanime.day" + url.replace("/clock", "/clock.json");
+
+      // allanime.uns.bio — AES-CBC encrypted HLS
+      if (url.includes("allanime.uns.bio")) {
+        try {
+          const token = url.split("#").pop() ?? "";
+          if (!token || token.length <= 2) continue;
+          const base = "https://allanime.uns.bio";
+          const vr = await fetch(`${base}/api/v1/video?id=${token}&w=1280&h=720&r=`, {
+            headers: { "User-Agent": ALLANIME_UA, "Referer": `${base}/#${token}`, "Origin": base },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!vr.ok) continue;
+          const hexStr = (await vr.text()).trim();
+          if (!hexStr || !/^[0-9a-f]+$/i.test(hexStr)) continue;
+          const parsed = JSON.parse(await aaUnsDec(hexStr));
+          const hlsUrl: string = parsed.source || parsed.cf || "";
+          if (!hlsUrl.startsWith("http")) continue;
+          sources.push({
+            name: "AllManga · HLS · ياباني مترجم",
+            url: hlsUrl, quality: "1080p", qualityRank: 8, site: "allmanga",
+            directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(ALLANIME_REF + "/")}`,
+            directType: "hls",
+          });
+        } catch { /* skip */ }
+      }
+      // mp4upload — scrape embed for MP4
+      else if (url.includes("mp4upload.com")) {
+        try {
+          const m = url.match(/embed-([a-zA-Z0-9]+)\.html/);
+          if (!m) continue;
+          const er = await fetch(`https://www.mp4upload.com/embed-${m[1]}.html`, {
+            headers: { "User-Agent": ALLANIME_UA, "Referer": ALLANIME_REF + "/" },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!er.ok) continue;
+          const html = await er.text();
+          const mp = html.match(/player\.src\s*\(\s*\{[^}]*\bsrc\s*:\s*"([^"]+)"/) || html.match(/"file"\s*:\s*"(https?:[^"]+\.mp4[^"]*)"/);
+          const mp4Url = mp?.[1]?.replace(/\\/g, "");
+          if (!mp4Url) continue;
+          sources.push({
+            name: "AllManga · MP4 · ياباني مترجم",
+            url: mp4Url, quality: "1080p", qualityRank: 7, site: "allmanga",
+            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mp4Url)}&ref=${encodeURIComponent("https://www.mp4upload.com/")}`,
+            directType: "mp4",
+          });
+        } catch { /* skip */ }
+      }
+      if (sources.length >= 2) break;
+    }
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  REANIME (reanime.to via FlixCloud) — صوت ياباني + ترجمة
+//  Flow: api/flix/{anilistId}/{ep} → embed HTML → WASM+PBKDF2+AES-CBC decrypt → HLS
+// ════════════════════════════════════════════════════════════════════
+const REANIME_BASE = "https://reanime.to";
+const REANIME_FLIX = "https://flixcloud.cc";
+const REANIME_UA   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const REANIME_H    = { "User-Agent": REANIME_UA, "Accept": "application/json, */*" };
+
+const re_enc = new TextEncoder();
+const re_dec = new TextDecoder();
+
+async function re_sha256hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", re_enc.encode(s));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function re_b64toU8(b64: string): Uint8Array {
+  const bin = atob(b64); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function re_deriveFields(seed: string) {
+  let e = seed;
+  for (let i = 0; i < 3; i++) e = await re_sha256hex(e + i);
+  let l = e;
+  for (let i = 0; i < 3; i++) l = await re_sha256hex(l + i);
+  return {
+    keyField: "kf_" + e.substring(8, 16),
+    ivField:  "ivf_" + e.substring(16, 24),
+    containerName: "cd_" + e.substring(24, 32),
+    arrayName:     "ad_" + e.substring(32, 40),
+    objectName:    "od_" + e.substring(40, 48),
+    tokenField:    e.substring(48, 64) + "_" + e.substring(56, 64),
+    keyFrag2Field: l.substring(0, 16) + "_" + l.substring(16, 24),
+  };
+}
+function re_extractSsrObj(html: string): string {
+  const m = html.match(/\{type:"data",data:(\{)/);
+  if (!m) throw new Error("SSR data block not found");
+  let depth = 0;
+  const start = html.indexOf("{", m.index! + m[0].length - 1);
+  for (let i = start; i < html.length; i++) {
+    if (html[i] === "{") depth++;
+    else if (html[i] === "}") { if (--depth === 0) return html.slice(start, i + 1); }
+  }
+  throw new Error("SSR brace matching failed");
+}
+function re_parseJsLiteral(src: string): any {
+  let i = 0;
+  const ws = () => { while (i < src.length && /\s/.test(src[i])) i++; };
+  function parseValue(): any {
+    ws();
+    if (src[i] === "{") return parseObject();
+    if (src[i] === "[") return parseArray();
+    if (src[i] === '"') return parseDStr();
+    if (src[i] === "'") return parseSStr();
+    if (src.startsWith("true", i))  { i += 4; return true; }
+    if (src.startsWith("false", i)) { i += 5; return false; }
+    if (src.startsWith("null", i))  { i += 4; return null; }
+    if (src.startsWith("undefined", i)) { i += 9; return null; }
+    if (src.startsWith("!0", i)) { i += 2; return true; }
+    if (src.startsWith("!1", i)) { i += 2; return false; }
+    const m = src.slice(i).match(/^-?[\d.]+([eE][+-]?\d+)?/);
+    if (m) { i += m[0].length; return parseFloat(m[0]); }
+    throw new Error(`JS parse error at ${i}: ${src.slice(i, i+20)}`);
+  }
+  function parseDStr(): string {
+    let r = ""; i++;
+    while (i < src.length && src[i] !== '"') {
+      if (src[i] === "\\") { i++; const e: Record<string,string> = {n:"\n",t:"\t",r:"\r",'"':'"',"\\":"\\"}; r += e[src[i]] ?? src[i]; i++; }
+      else r += src[i++];
+    } i++; return r;
+  }
+  function parseSStr(): string {
+    let r = ""; i++;
+    while (i < src.length && src[i] !== "'") {
+      if (src[i] === "\\") { i++; r += src[i] === "'" ? "'" : ({n:"\n",t:"\t",r:"\r","\\":"\\"}[src[i]] ?? src[i]); i++; }
+      else r += src[i++];
+    } i++; return r;
+  }
+  function parseKey(): string {
+    ws();
+    if (src[i] === '"') return parseDStr();
+    if (src[i] === "'") return parseSStr();
+    const m = src.slice(i).match(/^[a-zA-Z_$][a-zA-Z0-9_$]*/);
+    if (m) { i += m[0].length; return m[0]; }
+    throw new Error(`Bad key at ${i}: ${src.slice(i, i+20)}`);
+  }
+  function parseObject(): any {
+    const obj: any = {}; i++; ws();
+    while (i < src.length && src[i] !== "}") {
+      if (src[i] === ",") { i++; ws(); continue; }
+      const k = parseKey(); ws(); i++; obj[k] = parseValue(); ws();
+    } i++; return obj;
+  }
+  function parseArray(): any[] {
+    const arr: any[] = []; i++; ws();
+    while (i < src.length && src[i] !== "]") {
+      if (src[i] === ",") { i++; ws(); continue; }
+      arr.push(parseValue()); ws();
+    } i++; return arr;
+  }
+  return parseValue();
+}
+function re_parseWasm(wasm: Uint8Array): { step: number; transform: (b: number) => number } {
+  const b = wasm; let pos = 8;
+  while (pos < b.length) {
+    const secId = b[pos++]; let sz = 0, sh = 0, by: number;
+    do { by = b[pos++]; sz |= (by & 127) << sh; sh += 7; } while (by & 128);
+    if (secId === 10) {
+      pos++; let sbs = 0, sh2 = 0, by2: number;
+      do { by2 = b[pos++]; sbs |= (by2 & 127) << sh2; sh2 += 7; } while (by2 & 128);
+      pos += sbs; break;
+    } pos += sz;
+  }
+  let rbs = 0, sh3 = 0, by3: number;
+  do { by3 = b[pos++]; rbs |= (by3 & 127) << sh3; sh3 += 7; } while (by3 & 128);
+  const r = b.slice(pos, pos + rbs);
+  function leb(arr: Uint8Array, ii: number): [number, number] {
+    let v = 0, s = 0, bx: number;
+    do { bx = arr[ii++]; v |= (bx & 127) << s; s += 7; } while (bx & 128);
+    return [v, ii];
+  }
+  const XOR_END = [32, 2, 32, 5, 106, 45, 0, 0, 115, 33, 6];
+  let txStart = -1;
+  outer: for (let ii = 0; ii < r.length - XOR_END.length; ii++) {
+    for (let j = 0; j < XOR_END.length; j++) if (r[ii+j] !== XOR_END[j]) continue outer;
+    txStart = ii + XOR_END.length; break;
+  }
+  if (txStart < 0) throw new Error("WASM: transform start not found");
+  let txEnd = -1, step = 36;
+  for (let ii = txStart; ii < r.length - 4; ii++) {
+    if (r[ii] === 32 && r[ii+1] === 5 && r[ii+2] === 65) {
+      const [val, ni] = leb(r, ii + 3);
+      if (r[ni] === 108) { txEnd = ii; step = val; break; }
+    }
+  }
+  if (txEnd < 0) throw new Error("WASM: keystream not found");
+  const code = r.slice(txStart, txEnd);
+  function transform(inputByte: number): number {
+    let local6 = inputByte & 255; const stk: number[] = []; let ii = 0;
+    while (ii < code.length) {
+      const op = code[ii++];
+      if (op === 32) { const [idx, ni] = leb(code, ii); ii = ni; stk.push(idx === 6 ? local6 : 0); }
+      else if (op === 33) { const [idx, ni] = leb(code, ii); ii = ni; const v = stk.pop()!; if (idx === 6) local6 = v & 255; }
+      else if (op === 65) { const [v, ni] = leb(code, ii); ii = ni; stk.push(v); }
+      else if (op === 106) { const bv = stk.pop()!, a = stk.pop()!; stk.push((a + bv) & 255); }
+      else if (op === 107) { const bv = stk.pop()!, a = stk.pop()!; stk.push((a - bv + 256) & 255); }
+      else if (op === 113) { const bv = stk.pop()!, a = stk.pop()!; stk.push(a & bv & 255); }
+      else if (op === 114) { const bv = stk.pop()!, a = stk.pop()!; stk.push((a | bv) & 255); }
+      else if (op === 115) { const bv = stk.pop()!, a = stk.pop()!; stk.push((a ^ bv) & 255); }
+      else if (op === 116) { const bv = stk.pop()!, a = stk.pop()!; stk.push((a << (bv & 7)) & 255); }
+      else if (op === 118) { const bv = stk.pop()!, a = stk.pop()!; stk.push(a >>> (bv & 7) & 255); }
+    }
+    return local6;
+  }
+  return { step, transform };
+}
+function re_runDecrypt(wasm: Uint8Array, frag1: Uint8Array, kf2: Uint8Array, T: Uint8Array, seedInt: number): Uint8Array {
+  const { step, transform } = re_parseWasm(wasm);
+  const out = new Uint8Array(frag1.length);
+  for (let i = 0; i < frag1.length; i++) out[i] = transform((frag1[i] ^ kf2[i] ^ T[i]) & 255) ^ ((i * step + seedInt) & 255);
+  return out;
+}
+async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: any[] }> {
+  const raw  = re_extractSsrObj(html);
+  const data = re_parseJsLiteral(raw);
+  const seed: string = data.obfuscation_seed;
+  if (!seed) throw new Error("obfuscation_seed missing");
+  const fields = await re_deriveFields(seed);
+  const ocd = data.obfuscated_crypto_data;
+  if (!ocd) throw new Error("obfuscated_crypto_data missing");
+  const container = ocd[fields.containerName];
+  if (!container) throw new Error(`containerName "${fields.containerName}" missing`);
+  const arr = container[fields.arrayName];
+  if (!arr) throw new Error(`arrayName "${fields.arrayName}" missing`);
+  const obj = arr[0][fields.objectName];
+  if (!obj) throw new Error(`objectName "${fields.objectName}" missing`);
+  const frag1 = re_b64toU8(obj[fields.keyField]);
+  const iv    = re_b64toU8(obj[fields.ivField]);
+  const kf2raw: string = data[fields.keyFrag2Field];
+  if (!kf2raw) throw new Error(`kf2 field "${fields.keyFrag2Field}" missing`);
+  const kf2   = re_b64toU8(kf2raw);
+  const token: string = data[fields.tokenField];
+  if (!token) throw new Error(`tokenField "${fields.tokenField}" missing`);
+  const tokData: any = await fetch(`${REANIME_FLIX}/api/m3u8/${token}`, {
+    headers: { ...REANIME_H, "Referer": `${REANIME_BASE}/` },
+    signal: AbortSignal.timeout(8000),
+  }).then(r => { if (!r.ok) throw new Error(`Token API ${r.status}`); return r.json(); });
+  const vidKey  = (await re_sha256hex(token + "vid")).substring(0, 10);
+  const keyKey  = (await re_sha256hex(token + "key")).substring(0, 10);
+  const v_bytes = re_b64toU8(tokData[vidKey]);
+  const T_bytes = re_b64toU8(tokData[keyKey]);
+  if (!v_bytes.length || !T_bytes.length) throw new Error("Token fields missing");
+  const seedInt  = parseInt(seed.substring(0, 8), 16);
+  const wPayload = re_b64toU8(data.w_payload ?? "");
+  if (!wPayload.length) throw new Error("w_payload missing");
+  const wasmOut  = re_runDecrypt(wPayload, frag1, kf2, T_bytes, seedInt);
+  const keyMat   = await crypto.subtle.importKey("raw", Buffer.from(wasmOut), { name: "PBKDF2" }, false, ["deriveBits"]);
+  const derivedBuf = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: re_enc.encode(seed), iterations: 1000, hash: "SHA-256" }, keyMat, 256
+  );
+  const derived  = new Uint8Array(derivedBuf);
+  for (let i = 0; i < 32; i++) derived[i] ^= seed.charCodeAt(i % seed.length);
+  const aesKeyBytes = new Uint8Array(await crypto.subtle.digest("SHA-256", Buffer.from(derived)));
+  const aesKey = await crypto.subtle.importKey("raw", Buffer.from(aesKeyBytes), { name: "AES-CBC" }, false, ["decrypt"]);
+  const plain  = await crypto.subtle.decrypt({ name: "AES-CBC", iv: Buffer.from(iv) }, aesKey, Buffer.from(v_bytes));
+  const url    = re_dec.decode(plain).trim().replace(/\0+$/, "");
+  if (!url.startsWith("http")) throw new Error(`Unexpected decrypted value: ${url.substring(0, 60)}`);
+  return { url, subtitles: data.subtitles ?? [] };
+}
+
+const reanimeSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const REANIME_TTL = 30 * 60_000;
+
+async function getReanímeSources(
+  title: string, english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+  const ck = `reanime:${anilistId}:${ep}`;
+  const cached = reanimeSrcCache.get(ck);
+  if (cached && Date.now() - cached.ts < REANIME_TTL) return cached.sources;
+  try {
+    // رانيمي يستخدم AniList ID مباشرة عبر endpoint مخصص
+    const flixRes = await fetch(`${REANIME_BASE}/api/flix/${anilistId}/${ep}`, {
+      headers: { ...REANIME_H, "Referer": `${REANIME_BASE}/` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!flixRes.ok) return [];
+    const flixData: any = await flixRes.json();
+    // flixData: { servers: [{serverName, dataType, dataLink, ...}] }
+    const servers: any[] = flixData?.servers ?? flixData?.episode_links ?? [];
+    const subServer = servers.find((s: any) =>
+      (s.dataType || s.type || "").toLowerCase().includes("sub") ||
+      !(s.dataType || s.type || "").toLowerCase().includes("dub")
+    ) ?? servers[0];
+    if (!subServer) return [];
+    const embedUrl: string = subServer.dataLink || subServer.link || "";
+    if (!embedUrl.startsWith("http")) return [];
+
+    // جلب صفحة الـ embed وفك تشفيرها
+    const embedHtml = await fetch(embedUrl, {
+      headers: { "User-Agent": REANIME_UA, "Referer": `${REANIME_BASE}/` },
+      signal: AbortSignal.timeout(12000),
+    }).then(r => r.ok ? r.text() : "").catch(() => "");
+    if (!embedHtml) return [];
+
+    const { url: m3u8Url, subtitles } = await re_decryptEmbed(embedHtml);
+
+    // subtitle: أول ترجمة إنجليزية متاحة
+    const subTrack = subtitles.find((s: any) =>
+      (s.label || s.lang || "").toLowerCase().includes("eng") ||
+      (s.label || s.lang || "").toLowerCase().includes("english")
+    ) ?? subtitles[0];
+    let subtitleUrl: string | undefined;
+    if (subTrack?.file || subTrack?.url) {
+      const rawVtt: string = subTrack.file || subTrack.url;
+      const proxyVtt = `/api/anime/proxy-text?url=${encodeURIComponent(rawVtt)}&ref=${encodeURIComponent(embedUrl)}`;
+      subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxyVtt)}&from=en&to=ar`;
+    }
+
+    // أرسل عبر hls-proxy أولاً
+    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(embedUrl)}`;
+    const sources: UnifiedSource[] = [{
+      name: "Reanime · FlixCloud · ياباني مترجم",
+      url: m3u8Url, quality: "1080p", qualityRank: 9,
+      site: "reanime",
+      directUrl: proxied,
+      directType: "hls",
+      subtitleUrl,
+    }];
+    reanimeSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
   } catch { return []; }
 }
@@ -3958,6 +4455,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animegg",      () => getAnimeGGSources(title, english, ep),                 false),
+      // allmanga: CDN تغيرت (clock.json→500, fast4speed→401) — معطّل مؤقتاً
+      // reanime:  FlixCloud يبلوك Replit IP بالكامل — معطّل مؤقتاً
     ]);
 
   } catch (e: any) {
@@ -4039,6 +4538,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animegg":     (await race(getAnimeGGSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "allmanga":    (await race(getAllMangaSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "reanime":     (await race(getReanímeSources(title, english, ep, anilistId),       SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
     res.json({ sources });
