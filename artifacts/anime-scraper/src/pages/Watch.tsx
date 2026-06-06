@@ -69,13 +69,10 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK" },
   { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS" },
   { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم",              tag: "AT" },
-  { site: "toonstream",   name: "تون ستريم",    desc: "ياباني مترجم",             tag: "TS" },
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "MG" },
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
-  { site: "anineko",      name: "AniNeko",       desc: "ياباني مترجم · HLS",      tag: "AN" },
-  { site: "animegg",      name: "AnimeGG",       desc: "ياباني مترجم · مباشر",   tag: "GG" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -676,13 +673,7 @@ function ScraperPicker({
     return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
   });
 
-  /* Smart dedup: max 2 sources per CDN host */
-  const hostCount: Record<string, number> = {};
-  const displaySources = allFlat.filter(s => {
-    const host = normCdnHost(s.directUrl || s.url || "");
-    hostCount[host] = (hostCount[host] || 0) + 1;
-    return hostCount[host] <= 2;
-  });
+  const displaySources = allFlat;
 
   /* Group by quality tier */
   const grouped: Record<Quality, FetchedSrc[]> = {
@@ -693,8 +684,8 @@ function ScraperPicker({
 
   const hasSources = displaySources.length > 0;
 
-  /* ── While scrapers are running AND no sources yet: show full-screen loading poster ── */
-  if (!allDone && !hasSources) {
+  /* ── While scrapers are still running: show full-screen loading poster ── */
+  if (!allDone) {
     return (
       <div className="fixed inset-0 z-50 overflow-hidden bg-[#07070d]" dir="rtl">
         {cover && (
@@ -1067,24 +1058,83 @@ function EpisodePlayer({
     setRealQuality(null);
   }, [quality]);
 
-  /* ── Fetch subtitles ── */
+  /* ── Fetch subtitles (called on button click) ── */
   async function fetchSubtitles() {
-    if (subState === "none") return; // already tried, nothing found — don't show empty panel
+    /* If already showing or loading — just toggle the panel visibility */
     if (subState === "loading" || subState === "ready") { setShowSubPanel(p => !p); return; }
+    /* Reset so we can retry (covers "none" state as well) */
     setSubState("loading");
     setShowSubPanel(true);
+    setSubCues([]);
     try {
+      /* If source has a subtitle URL already, translate it to Arabic first */
+      if (subtitleUrl) {
+        const toSec = (ts: string): number => {
+          const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
+          if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
+          const m2 = ts.match(/(\d{1,2}):(\d{2})[,.](\d{3})/);
+          if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
+          return 0;
+        };
+        /* subtitleUrl may already be a translate-vtt URL from the scraper → fetch directly */
+        if (subtitleUrl.startsWith("/api/anime/translate-vtt")) {
+          try {
+            const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(30000) });
+            if (r.ok) {
+              const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+              if (d.cues?.length) {
+                const arCues = d.cues.map(c => {
+                  const pts = c.timing.split("-->").map(s => s.trim());
+                  return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
+                }).filter(c => c.start < c.end && c.text.trim());
+                if (arCues.length) { setSubCues(arCues); setSubLang("ara"); setSubState("ready"); return; }
+              }
+            }
+          } catch { /* fall through */ }
+        } else {
+          /* Plain VTT/SRT URL — wrap with translate-vtt */
+          try {
+            const r = await fetch(
+              `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
+              { signal: AbortSignal.timeout(30000) },
+            );
+            if (r.ok) {
+              const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+              if (d.cues?.length) {
+                const arCues = d.cues.map(c => {
+                  const pts = c.timing.split("-->").map(s => s.trim());
+                  return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
+                }).filter(c => c.start < c.end && c.text.trim());
+                if (arCues.length) { setSubCues(arCues); setSubLang("ara"); setSubState("ready"); return; }
+              }
+            }
+          } catch { /* fall through */ }
+          /* English fallback */
+          try {
+            const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10000) });
+            if (r2.ok) {
+              const text = await r2.text();
+              const cues = parseSrt(text);
+              if (cues.length) { setSubCues(cues); setSubLang("eng"); setSubState("ready"); return; }
+            }
+          } catch { /* fall through */ }
+        }
+      }
+      /* SUBDL Arabic lookup */
       const params = new URLSearchParams({ title: animeTitle, ep: String(ep) });
-      const r = await fetch(`/api/anime/subtitles?${params}`);
-      if (!r.ok) throw new Error("HTTP " + r.status);
+      const r = await fetch(`/api/anime/subtitles?${params}`, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) { setSubState("none"); setShowSubPanel(true); return; }
       const d = await r.json() as { lang: string | null; content: string | null };
-      if (!d.content) { setSubState("none"); setShowSubPanel(false); return; }
+      if (!d.content) { setSubState("none"); setShowSubPanel(true); return; }
       const cues = parseSrt(d.content);
-      if (!cues.length) { setSubState("none"); setShowSubPanel(false); return; }
+      if (!cues.length) { setSubState("none"); setShowSubPanel(true); return; }
       setSubCues(cues);
       setSubLang(d.lang);
       setSubState("ready");
-    } catch { setSubState("none"); setShowSubPanel(false); }
+    } catch {
+      setSubState("none");
+      setShowSubPanel(true);
+    }
   }
 
   function adjustOffset(delta: number) {
@@ -1098,13 +1148,14 @@ function EpisodePlayer({
     setSubLang(null);
   }, [subtitleUrl]);
 
-  /* ── Auto-load subtitles on mount ── */
+  /* ── Auto-load subtitles when source has a subtitleUrl ── */
   useEffect(() => {
+    if (!subtitleUrl) { setSubState("none"); return; }
+    let cancelled = false;
     const t = setTimeout(async () => {
-      if (subState !== "idle") return;
+      if (cancelled) return;
       setSubState("loading");
 
-      // Helper: parse HH:MM:SS.mmm or MM:SS.mmm → seconds
       const toSec = (ts: string): number => {
         const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
         if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
@@ -1113,69 +1164,52 @@ function EpisodePlayer({
         return 0;
       };
 
-      // If source has a subtitle VTT/SRT URL (e.g. kawaii), auto-translate to Arabic
-      if (subtitleUrl) {
-        // 1️⃣ Translate to Arabic via server (server-side fetch — bypasses CORS, handles VTT/SRT)
-        let gotArabic = false;
-        try {
-          const r = await fetch(
-            `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
-            { signal: AbortSignal.timeout(60000) },
-          );
-          if (r.ok) {
+      try {
+        /* subtitleUrl from anikoto/anineko is already a /api/anime/translate-vtt URL → fetch directly */
+        if (subtitleUrl.startsWith("/api/anime/translate-vtt")) {
+          const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(30000) });
+          if (!cancelled && r.ok) {
             const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
             if (d.cues?.length) {
-              const arCues: SubCue[] = d.cues
-                .map(c => {
-                  const pts = c.timing.split("-->").map(s => s.trim());
-                  return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
-                })
-                .filter(c => c.start < c.end && c.text.trim());
-              if (arCues.length) {
-                setSubCues(arCues);
-                setSubLang("ara");
-                setSubState("ready");
-                gotArabic = true;
-              }
+              const arCues = d.cues.map(c => {
+                const pts = c.timing.split("-->").map(s => s.trim());
+                return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
+              }).filter(c => c.start < c.end && c.text.trim());
+              if (!cancelled && arCues.length) { setSubCues(arCues); setSubLang("ara"); setSubState("ready"); return; }
             }
           }
-        } catch { /* fall through to English fallback */ }
-
-        if (gotArabic) return;
-
-        // 2️⃣ English fallback — fetch VTT directly from server proxy if translation failed
-        try {
-          const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10000) });
-          if (r2.ok) {
-            const text = await r2.text();
-            const cues = parseSrt(text);
-            if (cues.length) {
-              setSubCues(cues);
-              setSubLang("eng");
-              setSubState("ready");
-              return;
+        } else {
+          /* Raw VTT/SRT URL — translate to Arabic */
+          const r = await fetch(
+            `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
+            { signal: AbortSignal.timeout(30000) },
+          );
+          if (!cancelled && r.ok) {
+            const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+            if (d.cues?.length) {
+              const arCues = d.cues.map(c => {
+                const pts = c.timing.split("-->").map(s => s.trim());
+                return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
+              }).filter(c => c.start < c.end && c.text.trim());
+              if (!cancelled && arCues.length) { setSubCues(arCues); setSubLang("ara"); setSubState("ready"); return; }
             }
           }
-        } catch { /* fall through */ }
-      }
+          /* English fallback */
+          if (!cancelled) {
+            const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10000) });
+            if (!cancelled && r2.ok) {
+              const cues = parseSrt(await r2.text());
+              if (!cancelled && cues.length) { setSubCues(cues); setSubLang("eng"); setSubState("ready"); return; }
+            }
+          }
+        }
+      } catch { /* fall through */ }
 
-      // Subtitle API fallback (SUBDL Arabic lookup)
-      try {
-        const params = new URLSearchParams({ title: animeTitle, ep: String(ep) });
-        const r = await fetch(`/api/anime/subtitles?${params}`);
-        if (!r.ok) { setSubState("none"); return; }
-        const d = await r.json() as { lang: string | null; content: string | null };
-        if (!d.content) { setSubState("none"); return; }
-        const cues = parseSrt(d.content);
-        if (!cues.length) { setSubState("none"); return; }
-        setSubCues(cues);
-        setSubLang(d.lang);
-        setSubState("ready");
-      } catch { setSubState("none"); }
+      if (!cancelled) setSubState("none");
     }, 500);
-    return () => clearTimeout(t);
+    return () => { cancelled = true; clearTimeout(t); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animeTitle, ep, subtitleUrl]);
+  }, [subtitleUrl]);
 
   const lastSwitchRef = useRef(0);
   const tryNextServer = useCallback(() => {
