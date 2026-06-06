@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, Clock, Star, ChevronLeft, ChevronRight, Info, Flame, Radio, Film, RotateCw } from "lucide-react";
+import { Play, Loader2, ChevronDown, Clock, Star, ChevronLeft, ChevronRight, Info, Flame, Radio, Film, RotateCw, Clapperboard } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* ── Continue Watching helpers ── */
@@ -190,10 +190,20 @@ export default function Home() {
   };
 
   const [continueWatching, setContinueWatching] = useState<ContinueItem[]>([]);
+  const [animationMovies, setAnimationMovies] = useState<any[]>([]);
 
   /* Load continue-watching from localStorage (fast, synchronous) */
   useEffect(() => {
     setContinueWatching(loadContinueWatching());
+  }, []);
+
+  /* Load popular animation movies from TMDB */
+  useEffect(() => {
+    const key = "8265bd1679663a7ea12ac168da84d2e8";
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&sort_by=popularity.desc&page=1`)
+      .then(r => r.json())
+      .then(d => setAnimationMovies((d.results || []).slice(0, 10)))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -660,6 +670,86 @@ export default function Home() {
               </Link>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── قسم الأنيميشن ── */}
+      {!selectedGenre && (
+        <div className="mt-5 px-4">
+          {/* Banner */}
+          <Link href="/animations">
+            <motion.div
+              whileTap={{ scale: 0.97 }}
+              className="relative w-full h-[110px] rounded-3xl overflow-hidden cursor-pointer mb-3 shadow-2xl shadow-black/60"
+              style={{ background: "linear-gradient(135deg,#1a1040 0%,#2d1b69 40%,#0f3460 100%)" }}
+            >
+              {/* Decorative circles */}
+              <div className="absolute -top-8 -left-8 w-40 h-40 rounded-full opacity-20" style={{ background: "radial-gradient(circle,#7c3aed,transparent)" }} />
+              <div className="absolute -bottom-6 -right-4 w-32 h-32 rounded-full opacity-15" style={{ background: "radial-gradient(circle,#06b6d4,transparent)" }} />
+              {/* Stars */}
+              {[{top:"18%",left:"12%",size:2},{top:"60%",left:"25%",size:1.5},{top:"30%",left:"75%",size:2.5},{top:"70%",left:"85%",size:1.5},{top:"15%",left:"55%",size:1}].map((s,i) => (
+                <div key={i} className="absolute rounded-full bg-white/60 animate-pulse" style={{ top:s.top,left:s.left,width:s.size,height:s.size }} />
+              ))}
+              <div className="absolute inset-0 flex items-center justify-between px-5">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#7c3aed,#06b6d4)" }}>
+                      <Clapperboard className="w-3 h-3 text-white" />
+                    </div>
+                    <span className="text-[11px] text-violet-300/80 font-black font-['Cairo']">NEW</span>
+                  </div>
+                  <h3 className="text-[18px] font-black text-white font-['Cairo'] leading-tight">قسم الأنيميشن</h3>
+                  <p className="text-[10px] text-white/40 font-['Cairo']">أفلام ومسلسلات كرتون عالمية</p>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/10 backdrop-blur-md border border-white/15 px-3.5 py-2 rounded-2xl">
+                  <span className="text-[11px] font-black text-white font-['Cairo']">اكتشف</span>
+                  <ChevronLeft className="w-3.5 h-3.5 text-white" />
+                </div>
+              </div>
+            </motion.div>
+          </Link>
+
+          {/* Popular animation movies row */}
+          {animationMovies.length > 0 && (
+            <>
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#7c3aed,#4f46e5)" }}>
+                    <Film className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <h2 className="text-[13px] font-black font-['Cairo'] text-white">أفلام أنيميشن مميزة</h2>
+                </div>
+                <Link href="/animations">
+                  <button className="text-[10px] text-violet-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-violet-500/8 px-2.5 py-1 rounded-xl border border-violet-500/15">
+                    عرض الكل <ChevronLeft className="w-3 h-3" />
+                  </button>
+                </Link>
+              </div>
+              <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+                {animationMovies.map(m => (
+                  <Link key={m.id} href={`/animation/movie/${m.id}`}>
+                    <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[120px] cursor-pointer">
+                      <div className="relative w-[120px] h-[170px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                        {m.poster_path
+                          ? <img src={`https://image.tmdb.org/t/p/w300${m.poster_path}`} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          : <div className="w-full h-full bg-violet-900/20 flex items-center justify-center"><Film className="w-8 h-8 text-violet-600/30" /></div>
+                        }
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
+                        {m.vote_average > 0 && (
+                          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
+                            <Star className="w-1.5 h-1.5 fill-current" /> {m.vote_average.toFixed(1)}
+                          </div>
+                        )}
+                        <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                          <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">{m.title}</p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </Link>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
