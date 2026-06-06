@@ -5,7 +5,6 @@ import { Header } from "@/components/layout/Header";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AuthProvider } from "@/lib/auth-context";
-import Home from "@/pages/Home";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   constructor(props: { children: ReactNode }) { super(props); this.state = { hasError: false }; }
@@ -32,6 +31,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
   }
 }
 
+const Home               = lazy(() => import("@/pages/Home"));
 const AnimeDetail        = lazy(() => import("@/pages/AnimeDetail"));
 const EpisodeList        = lazy(() => import("@/pages/EpisodeList"));
 const Watch              = lazy(() => import("@/pages/Watch"));
