@@ -1752,11 +1752,7 @@ export default function WatchPage() {
   }
 
   function handleBack() {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      navigate(animeId ? `/anime/${animeId}` : "/");
-    }
+    navigate(animeId ? `/anime/${animeId}` : "/");
   }
 
   /* ── Track in-flight fetches to prevent duplicate calls ── */

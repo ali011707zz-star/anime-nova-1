@@ -2063,6 +2063,8 @@ async function resolveToonSeriesUrls(title: string, english: string | null): Pro
   const seenUrls = new Set<string>();
 
   function addCandidate(url: string) {
+    // Reject Hindi-dubbed series (slug contains -hindi- or ends in -hindi)
+    if (/[\-/]hindi(?:[\-/.]|$)/i.test(url)) return;
     if (!seenUrls.has(url)) { seenUrls.add(url); found.push(url); }
   }
 
@@ -2126,7 +2128,13 @@ async function resolveToonSeriesUrls(title: string, english: string | null): Pro
         );
         if (score > 0.22) candidates.push({ url: seriesUrl, score });
       }
-      candidates.sort((a, b) => b.score - a.score);
+      // Prefer Arabic-dubbed series; reject Hindi
+      candidates.sort((a, b) => {
+        const aAr = /arabic|عربي/i.test(a.url) ? 1 : 0;
+        const bAr = /arabic|عربي/i.test(b.url) ? 1 : 0;
+        if (aAr !== bAr) return bAr - aAr;
+        return b.score - a.score;
+      });
       for (const c of candidates.slice(0, 4)) addCandidate(c.url);
       if (found.length) break;
     } catch {}
