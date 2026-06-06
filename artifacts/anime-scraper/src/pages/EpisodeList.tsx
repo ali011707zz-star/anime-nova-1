@@ -39,8 +39,7 @@ function EpisodeRow({
 }) {
   const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
-  const epTitle = ep?.title || ep?.title_romanji || null;
-  const displayTitle = arEpTitle || epTitle;
+  const displayTitle = arEpTitle || null; // Only show Arabic titles — no English episode titles
   const durationMin = anime?.duration || 24;
   const dur = durationMin >= 60
     ? `${Math.floor(durationMin / 60)}:${String(durationMin % 60).padStart(2, "0")}:00`
@@ -76,12 +75,10 @@ function EpisodeRow({
         <p className={`text-[13px] font-black font-['Cairo'] ${watched ? "text-primary/80" : "text-white/90"}`}>
           الحلقة {n}
         </p>
-        {displayTitle ? (
-          <p className={`text-[9px] font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed ${arEpTitle ? "text-white/45" : "text-white/30"}`} dir="auto">
+        {displayTitle && (
+          <p className="text-[9px] font-['Cairo'] mt-0.5 line-clamp-2 leading-relaxed text-white/50" dir="rtl">
             {displayTitle}
           </p>
-        ) : (
-          <p className="text-[9px] text-white/20 font-['Cairo'] mt-0.5 line-clamp-1">{anime?.title?.romaji}</p>
         )}
       </button>
 

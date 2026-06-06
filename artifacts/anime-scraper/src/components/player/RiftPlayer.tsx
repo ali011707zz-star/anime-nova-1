@@ -534,7 +534,7 @@ export default function RiftPlayer({
       // Same directional fix as volume
       const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
-      const nB = Math.max(0.2, Math.min(1.1, brightnessRef.current + dV / 250));
+      const nB = Math.max(0.1, Math.min(2.0, brightnessRef.current + dV / 160));
       brightnessRef.current = nB;
       setBrightness(nB); setFeedback({ type: "brightness", value: nB });
     }
@@ -784,7 +784,7 @@ export default function RiftPlayer({
               className="absolute left-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 pointer-events-none">
               <div className="relative rounded-full overflow-hidden" style={{ width: 4, height: 110, background: "rgba(255,255,255,0.15)" }}>
                 <div className="absolute bottom-0 left-0 right-0 rounded-full"
-                  style={{ background: "rgba(253,224,71,0.90)", height: `${Math.min((feedback.value - 0.1) / 1.4 * 100, 100)}%`, transition: "height 0.06s" }} />
+                  style={{ background: "rgba(253,224,71,0.90)", height: `${Math.min(Math.max((feedback.value - 0.1) / 1.9 * 100, 0), 100)}%`, transition: "height 0.06s" }} />
               </div>
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
                 style={{ background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.12)" }}>
@@ -912,32 +912,33 @@ export default function RiftPlayer({
                 onTouchEnd={e => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between gap-3">
-                  {/* LEFT: title block */}
+                  {/* LEFT: quality → title → episode row */}
                   <div className="flex-1 min-w-0">
+                    {/* Row 1: quality + badges */}
+                    <div className="flex items-center gap-2 mb-[5px] flex-wrap">
+                      {qualityLabel && (
+                        <span className="px-2 py-0.5 rounded-lg text-[12px] font-black font-mono text-amber-300"
+                          style={{ background: "rgba(251,191,36,0.18)", border: "1px solid rgba(251,191,36,0.35)" }}>
+                          {qualityLabel}P
+                        </span>
+                      )}
+                      <span className="text-white/40 text-[11px] font-['Cairo']">عربي مترجم</span>
+                      {serverCount > 1 && (
+                        <span className="text-white/25 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount}</span>
+                      )}
+                    </div>
+                    {/* Row 2: anime title */}
                     <h1 className="text-white font-black leading-snug truncate"
                       style={{ fontSize: 15, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
                       {title || "Nova Player"}
                     </h1>
-                    {epTitle && (
-                      <p className="text-violet-300/70 text-[11px] font-['Cairo'] font-bold truncate leading-tight mt-[2px]"
-                        style={{ textShadow: "0 1px 8px rgba(0,0,0,0.90)" }}>
-                        {epTitle}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-1.5 mt-[5px] flex-wrap">
+                    {/* Row 3: episode + episode title if Arabic */}
+                    <div className="flex items-center gap-1.5 mt-[4px] flex-wrap">
                       <span className="text-white/50 text-[11px] font-['Cairo']">الحلقة {ep}</span>
-                      {qualityLabel && (
+                      {epTitle && (
                         <>
                           <span className="text-white/18 text-[9px]">•</span>
-                          <span className="text-amber-300/80 text-[11px] font-black font-mono">{qualityLabel}P</span>
-                        </>
-                      )}
-                      <span className="text-white/18 text-[9px]">•</span>
-                      <span className="text-white/38 text-[11px] font-['Cairo']">عربي مترجم</span>
-                      {serverCount > 1 && (
-                        <>
-                          <span className="text-white/18 text-[9px]">•</span>
-                          <span className="text-white/28 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount}</span>
+                          <span className="text-violet-300/65 text-[10px] font-['Cairo'] truncate max-w-[140px]">{epTitle}</span>
                         </>
                       )}
                     </div>

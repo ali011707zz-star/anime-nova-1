@@ -3,6 +3,15 @@ import { Link } from "wouter";
 import { Play, Loader2, ChevronDown, Clock, Star, ChevronLeft, ChevronRight, Info, Flame, Radio, Film, RotateCw, Clapperboard } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+/* ── Module-level cache — survives component unmount/remount so categories
+      don't disappear when navigating Home → AnimeDetail → Home ── */
+interface HomeCache {
+  popular: any[]; recent: any[]; trending: any[]; movies: any[];
+  topRated: any[]; seasonal: any[]; newSeason: any[];
+  hero: any; hasMore: boolean;
+}
+let _homeCache: HomeCache | null = null;
+
 /* ── Continue Watching helpers ── */
 interface WatchHistoryItem {
   id: number;
@@ -145,19 +154,19 @@ function AnimeCard({ anime }: { anime: any }) {
 }
 
 export default function Home() {
-  const [popular, setPopular]     = useState<any[]>([]);
-  const [recent, setRecent]       = useState<any[]>([]);
-  const [trending, setTrending]   = useState<any[]>([]);
-  const [movies, setMovies]       = useState<any[]>([]);
-  const [topRated, setTopRated]   = useState<any[]>([]);
-  const [seasonal, setSeasonal]   = useState<any[]>([]);
-  const [newSeason, setNewSeason] = useState<any[]>([]);
-  const [loading, setLoading]     = useState(true);
+  const [popular, setPopular]     = useState<any[]>(_homeCache?.popular || []);
+  const [recent, setRecent]       = useState<any[]>(_homeCache?.recent || []);
+  const [trending, setTrending]   = useState<any[]>(_homeCache?.trending || []);
+  const [movies, setMovies]       = useState<any[]>(_homeCache?.movies || []);
+  const [topRated, setTopRated]   = useState<any[]>(_homeCache?.topRated || []);
+  const [seasonal, setSeasonal]   = useState<any[]>(_homeCache?.seasonal || []);
+  const [newSeason, setNewSeason] = useState<any[]>(_homeCache?.newSeason || []);
+  const [loading, setLoading]     = useState(!_homeCache);
   const [genreLoading, setGenreLoading] = useState(false);
   const [page, setPage]           = useState(1);
-  const [hasMore, setHasMore]     = useState(true);
+  const [hasMore, setHasMore]     = useState(_homeCache?.hasMore ?? true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hero, setHero]           = useState<any>(null);
+  const [hero, setHero]           = useState<any>(_homeCache?.hero || null);
   const [heroIdx, setHeroIdx]     = useState(0);
   const [heroDir, setHeroDir]     = useState(1);
   const [selectedGenre, setSelectedGenre] = useState("");
@@ -207,31 +216,54 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    /* If cache exists → skip fetch entirely, data is already in state */
+    if (_homeCache) return;
+
     async function load() {
       setLoading(true);
-      /* ── Step 1: load popular first — shows hero + grid immediately ── */
-      const pop = await fetch$(buildPopularQuery(""), { page: 1, perPage: 12 });
-      setPopular(pop?.media || []);
-      setHasMore(pop?.pageInfo?.hasNextPage ?? false);
-      const heroes = (pop?.media || []).filter((a: any) => a.bannerImage);
-      setHero(heroes[0] || pop?.media?.[0]);
-      setLoading(false); /* ← hero + popular visible now, rest loads below */
+      try {
+        /* ── Step 1: load popular first — shows hero + grid immediately ── */
+        const pop = await fetch$(buildPopularQuery(""), { page: 1, perPage: 12 });
+        const popMedia = pop?.media || [];
+        const hasMorePop = pop?.pageInfo?.hasNextPage ?? false;
+        const heroes = popMedia.filter((a: any) => a.bannerImage);
+        const heroItem = heroes[0] || popMedia[0];
+        setPopular(popMedia);
+        setHasMore(hasMorePop);
+        setHero(heroItem);
+        setLoading(false); /* ← hero + popular visible now, rest loads below */
 
-      /* ── Step 2: remaining 6 queries fire in parallel (non-blocking) ── */
-      const [rec, trend, mov, top, seas, newS] = await Promise.all([
-        fetch$(RECENT_QUERY, { page: 1, perPage: 16 }),
-        fetch$(TRENDING_QUERY),
-        fetch$(MOVIES_QUERY),
-        fetch$(TOP_RATED_QUERY),
-        fetch$(SEASON_QUERY),
-        fetch$(NEW_SEASON_QUERY),
-      ]);
-      setRecent(rec?.media || []);
-      setTrending(trend?.media || []);
-      setMovies(mov?.media || []);
-      setTopRated(top?.media || []);
-      setSeasonal(seas?.media || []);
-      setNewSeason(newS?.media || []);
+        /* ── Step 2: remaining 6 queries fire in parallel (non-blocking) ── */
+        const [rec, trend, mov, top, seas, newS] = await Promise.all([
+          fetch$(RECENT_QUERY, { page: 1, perPage: 16 }),
+          fetch$(TRENDING_QUERY),
+          fetch$(MOVIES_QUERY),
+          fetch$(TOP_RATED_QUERY),
+          fetch$(SEASON_QUERY),
+          fetch$(NEW_SEASON_QUERY),
+        ]);
+        const recMedia   = rec?.media   || [];
+        const trendMedia = trend?.media || [];
+        const movMedia   = mov?.media   || [];
+        const topMedia   = top?.media   || [];
+        const seasMedia  = seas?.media  || [];
+        const newSMedia  = newS?.media  || [];
+        setRecent(recMedia);
+        setTrending(trendMedia);
+        setMovies(movMedia);
+        setTopRated(topMedia);
+        setSeasonal(seasMedia);
+        setNewSeason(newSMedia);
+
+        /* ── Persist to module-level cache ── */
+        _homeCache = {
+          popular: popMedia, recent: recMedia, trending: trendMedia,
+          movies: movMedia, topRated: topMedia, seasonal: seasMedia,
+          newSeason: newSMedia, hero: heroItem, hasMore: hasMorePop,
+        };
+      } catch {
+        setLoading(false);
+      }
     }
     load();
   }, []);
