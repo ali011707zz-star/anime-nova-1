@@ -300,7 +300,9 @@ router.get("/animation/browse", async (req: Request, res: Response) => {
     const gp    = genre === "all" || genre === "0"
                   ? "16"
                   : genre === "16" ? "16" : `16,${genre}`;
-    const data = await tmdb(`${ep}?with_genres=${gp}&sort_by=popularity.desc&page=${page}&include_adult=false`);
+    // For TV: exclude anime (TMDB keyword 210024) so only Western animation appears
+    const tvExtra = type === "tv" ? "&without_keywords=210024" : "";
+    const data = await tmdb(`${ep}?with_genres=${gp}&sort_by=popularity.desc&page=${page}&include_adult=false${tvExtra}`);
     res.json(data);
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
