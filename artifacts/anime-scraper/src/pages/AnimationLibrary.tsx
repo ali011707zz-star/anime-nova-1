@@ -58,8 +58,10 @@ export default function AnimationLibrary() {
 
   const genres = type === "movie" ? MOVIE_GENRES : TV_GENRES;
 
+  const loadingRef = useRef(false);
   const load = useCallback(async (t: MediaType, g: number, p: number, reset = false) => {
-    if (loading) return;
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
     try {
       const gParam = g === 0 ? "16" : `${g}`;
@@ -70,8 +72,9 @@ export default function AnimationLibrary() {
       setHasMore(p < (data.total_pages || 1));
       setPage(p);
     } catch { /* skip */ }
+    loadingRef.current = false;
     setLoading(false);
-  }, [loading]);
+  }, []);
 
   useEffect(() => {
     setItems([]); setPage(1); setHasMore(true);

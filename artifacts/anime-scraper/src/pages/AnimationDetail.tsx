@@ -46,12 +46,11 @@ export default function AnimationDetail() {
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
   const [descAr, setDescAr] = useState<string | null>(null);
-  const [titleAr, setTitleAr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true); setDetail(null); setDescAr(null); setTitleAr(null);
+    setLoading(true); setDetail(null); setDescAr(null);
     const key = `anim-${type}-${id}`;
     const savedList: string[] = JSON.parse(localStorage.getItem("savedAnimations") || "[]");
     setSaved(savedList.includes(key));
@@ -63,21 +62,8 @@ export default function AnimationDetail() {
       .then(async d => {
         setDetail(d);
         setLoading(false);
-        // Translate title
-        const rawTitle = d.title || d.name || "";
-        const cachedTitle = localStorage.getItem(`anim-title-ar-${type}-${id}`);
-        if (cachedTitle) { setTitleAr(cachedTitle); }
-        else if (rawTitle) {
-          try {
-            const rt = await fetch(`/api/anime/translate?text=${encodeURIComponent(rawTitle)}&from=en&to=ar`);
-            const dt = await rt.json();
-            if (dt.translated && dt.translated !== rawTitle && dt.translated.length > 2) {
-              setTitleAr(dt.translated);
-              localStorage.setItem(`anim-title-ar-${type}-${id}`, dt.translated);
-            }
-          } catch { }
-        }
-        // Translate overview
+        // Keep title in original language — no translation for animation titles
+        // Translate overview only
         const overview = d.overview || "";
         if (!overview) return;
         const cachedDesc = localStorage.getItem(`anim-desc-ar-${type}-${id}`);
@@ -147,8 +133,8 @@ export default function AnimationDetail() {
     </div>
   );
 
-  const title     = titleAr || detail.title || detail.name || "—";
-  const rawTitle  = detail.title || detail.name || "";
+  const title     = detail.title || detail.name || "—";
+  const rawTitle  = title;
   const year      = (detail.release_date || detail.first_air_date || "").slice(0, 4);
   const runtime   = detail.runtime || (detail.episode_run_time?.[0]) || 0;
   const score     = detail.vote_average || 0;
@@ -217,9 +203,6 @@ export default function AnimationDetail() {
           <h1 className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2">
             {title}
           </h1>
-          {titleAr && rawTitle && (
-            <p className="text-[10px] text-white/35 line-clamp-1">{rawTitle}</p>
-          )}
           <div className="flex flex-wrap gap-1.5">
             {year && (
               <span className="text-[9px] font-black px-2 py-1 rounded-lg border border-white/8 bg-white/5 text-white/40 font-['Cairo']">
