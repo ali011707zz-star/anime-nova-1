@@ -1,13 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, Clock, Star, ChevronLeft, ChevronRight, Info, Flame, Radio, Film, RotateCw, Clapperboard } from "lucide-react";
+import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* ── Module-level cache — survives component unmount/remount so categories
       don't disappear when navigating Home → AnimeDetail → Home ── */
 interface HomeCache {
-  popular: any[]; recent: any[]; trending: any[]; movies: any[];
-  topRated: any[]; seasonal: any[]; newSeason: any[];
+  popular: any[]; movies: any[];
   hero: any; hasMore: boolean;
 }
 let _homeCache: HomeCache | null = null;
@@ -96,51 +95,10 @@ function buildPopularQuery(genre: string) {
 }`;
 }
 
-const RECENT_QUERY = `query ($page: Int, $perPage: Int) {
-  Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: TRENDING_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], status: RELEASING) {
-      id title { romaji } coverImage { large } averageScore episodes
-      nextAiringEpisode { episode }
-    }
-  }
-}`;
-
-const TRENDING_QUERY = `query {
-  Page(perPage: 16) {
-    media(type: ANIME, sort: TRENDING_DESC, countryOfOrigin: "JP", status: RELEASING) {
-      id title { romaji } coverImage { large } averageScore episodes nextAiringEpisode { episode }
-    }
-  }
-}`;
-
 const MOVIES_QUERY = `query {
-  Page(perPage: 16) {
+  Page(perPage: 12) {
     media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP") {
       id title { romaji } coverImage { large } averageScore
-    }
-  }
-}`;
-
-const TOP_RATED_QUERY = `query {
-  Page(perPage: 16) {
-    media(type: ANIME, sort: SCORE_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE], averageScore_greater: 75) {
-      id title { romaji } coverImage { large } averageScore episodes format
-    }
-  }
-}`;
-
-const SEASON_QUERY = `query {
-  Page(perPage: 16) {
-    media(type: ANIME, season: SPRING, seasonYear: 2026, sort: POPULARITY_DESC, format_in: [TV, ONA], countryOfOrigin: "JP") {
-      id title { romaji } coverImage { large } averageScore nextAiringEpisode { episode }
-    }
-  }
-}`;
-
-const NEW_SEASON_QUERY = `query {
-  Page(perPage: 16) {
-    media(type: ANIME, sort: START_DATE_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], status_in: [RELEASING, NOT_YET_RELEASED]) {
-      id title { romaji } coverImage { large } averageScore nextAiringEpisode { episode } startDate { year month }
     }
   }
 }`;
@@ -176,12 +134,7 @@ function AnimeCard({ anime }: { anime: any }) {
 
 export default function Home() {
   const [popular, setPopular]     = useState<any[]>(_homeCache?.popular || []);
-  const [recent, setRecent]       = useState<any[]>(_homeCache?.recent || []);
-  const [trending, setTrending]   = useState<any[]>(_homeCache?.trending || []);
   const [movies, setMovies]       = useState<any[]>(_homeCache?.movies || []);
-  const [topRated, setTopRated]   = useState<any[]>(_homeCache?.topRated || []);
-  const [seasonal, setSeasonal]   = useState<any[]>(_homeCache?.seasonal || []);
-  const [newSeason, setNewSeason] = useState<any[]>(_homeCache?.newSeason || []);
   const [loading, setLoading]     = useState(!_homeCache);
   const [genreLoading, setGenreLoading] = useState(false);
   const [page, setPage]           = useState(1);
@@ -254,33 +207,15 @@ export default function Home() {
         setHero(heroItem);
         setLoading(false); /* ← hero + popular visible now, rest loads below */
 
-        /* ── Step 2: remaining 6 queries fire in parallel (non-blocking) ── */
-        const [rec, trend, mov, top, seas, newS] = await Promise.all([
-          fetch$(RECENT_QUERY, { page: 1, perPage: 16 }),
-          fetch$(TRENDING_QUERY),
-          fetch$(MOVIES_QUERY),
-          fetch$(TOP_RATED_QUERY),
-          fetch$(SEASON_QUERY),
-          fetch$(NEW_SEASON_QUERY),
-        ]);
-        const recMedia   = rec?.media   || [];
-        const trendMedia = trend?.media || [];
-        const movMedia   = mov?.media   || [];
-        const topMedia   = top?.media   || [];
-        const seasMedia  = seas?.media  || [];
-        const newSMedia  = newS?.media  || [];
-        setRecent(recMedia);
-        setTrending(trendMedia);
+        /* ── Step 2: load movies (non-blocking) ── */
+        const mov = await fetch$(MOVIES_QUERY);
+        const movMedia = mov?.media || [];
         setMovies(movMedia);
-        setTopRated(topMedia);
-        setSeasonal(seasMedia);
-        setNewSeason(newSMedia);
 
         /* ── Persist to module-level cache ── */
         _homeCache = {
-          popular: popMedia, recent: recMedia, trending: trendMedia,
-          movies: movMedia, topRated: topMedia, seasonal: seasMedia,
-          newSeason: newSMedia, hero: heroItem, hasMore: hasMorePop,
+          popular: popMedia, movies: movMedia,
+          hero: heroItem, hasMore: hasMorePop,
         };
       } catch {
         setLoading(false);
@@ -348,7 +283,7 @@ export default function Home() {
         <div
           ref={heroContainerRef}
           className="relative w-full overflow-hidden select-none"
-          style={{ height: 560 }}
+          style={{ height: 390 }}
           onMouseMove={handleHeroMouseMove}
           onMouseLeave={handleHeroMouseLeave}
           onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
@@ -739,44 +674,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── موسم الربيع 2026 ── */}
-      {seasonal.length > 0 && !selectedGenre && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#06B6D4,#0284C7)" }}>
-                <Star className="w-3.5 h-3.5 text-white fill-white" />
-              </div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white">موسم الربيع 2026</h2>
-            </div>
-          </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
-            {seasonal.map(anime => (
-              <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
-                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/88 via-black/10 to-transparent" />
-                    {anime.averageScore && (
-                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
-                      </div>
-                    )}
-                    {anime.nextAiringEpisode && (
-                      <div className="absolute top-2 left-2 bg-emerald-500 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
-                        حلقة {anime.nextAiringEpisode.episode}
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── قسم الأنيميشن ── */}
       {!selectedGenre && (
@@ -858,165 +755,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── Trending — يُبث الآن ── */}
-      {trending.length > 0 && !selectedGenre && (
-        <div className="mt-5">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>
-                <Radio className="w-3.5 h-3.5 text-white" />
-              </div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white">يُبث الآن</h2>
-            </div>
-            <Link href="/news">
-              <button className="text-[10px] text-primary/80 font-black font-['Cairo'] flex items-center gap-0.5 active:opacity-70 bg-primary/8 px-2.5 py-1 rounded-xl border border-primary/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
-            {trending.map((anime, i) => (
-              <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
-                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-xl flex items-center justify-center text-[9px] font-black text-white shadow-lg" style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>{i + 1}</div>
-                    {anime.nextAiringEpisode && (
-                      <div className="absolute top-2 left-2 bg-emerald-500 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
-                        حلقة {anime.nextAiringEpisode.episode}
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
-                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── آخر الإصدارات (Recent) ── */}
-      {recent.length > 0 && !selectedGenre && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#10B981,#059669)" }}>
-                <Clock className="w-3.5 h-3.5 text-white" />
-              </div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white">آخر الإصدارات</h2>
-            </div>
-            <Link href="/news">
-              <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 active:opacity-70 bg-emerald-500/8 px-2.5 py-1 rounded-xl border border-emerald-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
-            {recent.map(anime => (
-              <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
-                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                    {anime.nextAiringEpisode && (
-                      <div className="absolute top-2 left-2 bg-emerald-500 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black shadow-md shadow-emerald-500/40">
-                        حلقة {anime.nextAiringEpisode.episode}
-                      </div>
-                    )}
-                    {anime.averageScore && (
-                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
-                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── رائج الآن (New Season Upcoming) ── */}
-      {newSeason.length > 0 && !selectedGenre && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#F97316,#EA580C)" }}>
-                <Flame className="w-3.5 h-3.5 text-white fill-orange-200" />
-              </div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white">رائج الآن</h2>
-            </div>
-          </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
-            {newSeason.map(anime => (
-              <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
-                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                    {anime.nextAiringEpisode && (
-                      <div className="absolute top-2 left-2 bg-orange-500 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
-                        حلقة {anime.nextAiringEpisode.episode}
-                      </div>
-                    )}
-                    {anime.averageScore && (
-                      <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
-                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-
-      {/* ── Top Rated ── */}
-      {topRated.length > 0 && !selectedGenre && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#EAB308,#CA8A04)" }}>
-                <Star className="w-3.5 h-3.5 text-white fill-white" />
-              </div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white">أعلى تقييماً</h2>
-            </div>
-          </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
-            {topRated.map((anime, i) => (
-              <Link key={anime.id} href={`/anime/${anime.id}`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
-                  <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                    <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                      <Star className="w-1.5 h-1.5 fill-current" /> {anime.averageScore ? (anime.averageScore / 10).toFixed(1) : "—"}
-                    </div>
-                    {anime.format === "MOVIE" && (
-                      <div className="absolute top-2 left-2 bg-primary text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-primary/50">فيلم</div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
-                      <div className="text-[7.5px] text-yellow-400/60 font-black font-mono mb-0.5">#{i + 1}</div>
-                      <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{anime.title?.romaji}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── Movies ── */}
       {movies.length > 0 && !selectedGenre && (
