@@ -7,6 +7,8 @@ const TMDB_BASE = "https://api.themoviedb.org/3";
 const SD_BASE   = "https://watch.stardima.com/watch";
 const SD_AJAX   = "https://watch.stardima.com/watch/wp-admin/admin-ajax.php";
 const MV_BASE   = "https://moviz-time.co";
+const AS_CDN_B  = "https://as-cdn21.top";
+const RUBY_B    = "https://rubystm.com";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -824,13 +826,80 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }
           if (!trembedUrls.length) return;
 
-          // Process each trembed server (up to 4) — extract direct stream, no iframe fallback
+          // Process each trembed server (up to 4) — extract as-cdn21/rubystm HLS
+          let foundStream = false;
           for (const trUrl of trembedUrls.slice(0, 4)) {
+            if (foundStream) break;
             try {
               const trHtml = await cfGet(trUrl, pageUrl);
-              const innerMatch = trHtml.match(/<iframe[^>]+src="([^"]+)"/i);
+              const innerMatch = trHtml.match(
+                /<iframe[^>]+src=["']([^"']*(?:as-cdn21\.top|rubystm\.com)[^"']*)["']/i
+              );
               if (!innerMatch) continue;
-              await sendExtracted(innerMatch[1], "ToonStream");
+              const playerUrl = innerMatch[1];
+
+              if (playerUrl.includes("as-cdn21.top")) {
+                // HEAD → get session cookie, then POST getVideo to get signed HLS URL
+                try {
+                  const r1 = await fetch(playerUrl, {
+                    method: "HEAD",
+                    headers: { "User-Agent": UA },
+                    signal: AbortSignal.timeout(7000),
+                  });
+                  const rawCookies = (r1.headers.getSetCookie?.() ?? [r1.headers.get("set-cookie") ?? ""])
+                    .filter(Boolean);
+                  const cook = rawCookies.map((c: string) => c.split(";")[0]).join("; ");
+                  const hash = playerUrl.split("/").pop() || "";
+                  if (!hash || hash.length < 5) continue;
+
+                  const r2 = await fetch(`${AS_CDN_B}/player/index.php?data=${hash}&do=getVideo`, {
+                    method: "POST",
+                    body: JSON.stringify({ hash, r: "" }),
+                    headers: {
+                      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                      "X-Requested-With": "XMLHttpRequest",
+                      Origin: AS_CDN_B,
+                      Referer: playerUrl,
+                      "User-Agent": UA,
+                      ...(cook ? { Cookie: cook } : {}),
+                    },
+                    signal: AbortSignal.timeout(8000),
+                  });
+                  if (!r2.ok) continue;
+                  const j = await r2.json() as any;
+                  const m3u8 = j.securedLink || j.videoSource;
+                  if (m3u8 && typeof m3u8 === "string" && m3u8.startsWith("http")) {
+                    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(playerUrl)}`;
+                    sendSource(playerUrl, "ToonStream", proxied, proxied);
+                    foundStream = true;
+                  }
+                } catch { /* skip */ }
+
+              } else if (playerUrl.includes("rubystm.com")) {
+                // RubyStm: POST /dl for embed
+                try {
+                  const fc = playerUrl.replace(".html", "").split("/").pop() || "";
+                  if (!fc) continue;
+                  const r = await fetch(`${RUBY_B}/dl`, {
+                    method: "POST",
+                    body: `op=embed&file_code=${fc}&auto=1&referer=${encodeURIComponent(trUrl)}`,
+                    headers: {
+                      "Content-Type": "application/x-www-form-urlencoded",
+                      Referer: playerUrl,
+                      "User-Agent": UA,
+                    },
+                    signal: AbortSignal.timeout(10000),
+                  });
+                  if (!r.ok) continue;
+                  const html = await r.text();
+                  const m3u8M = html.match(/["']([^"']+\.m3u8[^"']*)["']/);
+                  if (m3u8M) {
+                    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8M[1])}&ref=${encodeURIComponent(playerUrl)}`;
+                    sendSource(playerUrl, "ToonStream", proxied, proxied);
+                    foundStream = true;
+                  }
+                } catch { /* skip */ }
+              }
             } catch { /* skip this server */ }
           }
         } catch { /* silent */ }
