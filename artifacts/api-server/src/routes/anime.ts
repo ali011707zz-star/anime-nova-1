@@ -5247,7 +5247,10 @@ router.get("/anime/seg-proxy", async (req, res) => {
     if (len) res.setHeader("Content-Length", len);
     if (r.body) {
       const { Readable } = await import("stream");
-      Readable.fromWeb(r.body as any).pipe(res);
+      const readable = Readable.fromWeb(r.body as any);
+      readable.on("error", () => { try { res.destroy(); } catch {} });
+      res.on("close", () => { try { readable.destroy(); } catch {} });
+      readable.pipe(res);
     } else {
       const body = Buffer.from(await r.arrayBuffer());
       if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body, ct, ts: Date.now() });
