@@ -52,3 +52,6 @@
 - [kawaii-anime.com API](kawaii-api.md) — uses AniList IDs natively; GET /api/watch?anilistId={id}&ep={N} → {sources:[{url,quality,isM3U8,type}]}; CDN video.kawaii-anime.com: CORS *, no auth, range-bytes; pass anilistId from req.query.anime
 - [witanime/anime3rb CF block](witanime-cf.md) — witanime.life and anime3rb.com: CF Managed Challenge blocks ALL datacenter IPs (Replit included); no server-side bypass without headless browser; return empty arrays silently
 - [iframe policy mega+vidmoly only](iframe-policy.md) — sendSrc, collectSrc, and collect in extractAndCollect all filter isEmbed: only mega.nz/mega.co.nz and VIDMOLY_HOSTS pass; all other isEmbed sources dropped
+- [TMDB animation Arabic API](tmdb-animation.md) — TMDB returns fully Arabic data with language=ar; genre 16=رسوم متحركة; public demo key works; new routes in animation.ts; /animations, /animation/:type/:id, /animation/watch
+- [StarDima DooPlay scraper](stardima-scraper.md) — watch.stardima.com uses DooPlay WP theme; search /?s=; series /tvshows/{slug}/; episode /episodes/{slug}/; AJAX action=doo_player_ajax&post_id&nonce&num; nonce extracted from dtGonza JS block
+- [AnimeDetail Arabic title](animedetail-title-ar.md) — titleAr state translates anime.title.english→Arabic via /api/anime/translate; cached as title-ar-{id} in localStorage; shows as main title with romaji as subtitle

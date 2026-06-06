@@ -77,13 +77,14 @@ export default function AnimeDetail() {
   const [newComment, setNewComment]   = useState("");
   const [saved, setSaved]             = useState(false);
   const [descAr, setDescAr]           = useState<string | null>(null);
+  const [titleAr, setTitleAr]         = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!params.id) return;
     let cancelled = false;
     const ctrl = new AbortController();
-    setLoading(true); setAnime(null); setDescAr(null); setShowFull(false);
+    setLoading(true); setAnime(null); setDescAr(null); setTitleAr(null); setShowFull(false);
     const savedList: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     setSaved(savedList.includes(parseInt(params.id)));
     const savedC = localStorage.getItem(`comments-${params.id}`);
@@ -98,6 +99,27 @@ export default function AnimeDetail() {
       if (cancelled) return;
       const a = d.data?.Media;
       setAnime(a);
+
+      // ── Title translation (English → Arabic) ──
+      const cachedTitle = localStorage.getItem(`title-ar-${params.id}`);
+      if (cachedTitle) {
+        setTitleAr(cachedTitle);
+      } else if (a?.title?.english || a?.title?.romaji) {
+        const srcTitle = a.title.english || a.title.romaji;
+        (async () => {
+          try {
+            const rt = await fetch(`/api/anime/translate?text=${encodeURIComponent(srcTitle)}&from=en&to=ar`, { signal: ctrl.signal });
+            const dt = await rt.json();
+            if (cancelled) return;
+            if (dt.translated && dt.translated !== srcTitle && dt.translated.length > 2) {
+              setTitleAr(dt.translated);
+              localStorage.setItem(`title-ar-${params.id}`, dt.translated);
+            }
+          } catch { /* keep romaji */ }
+        })();
+      }
+
+      // ── Description translation ──
       if (!a?.description) return;
       const cached = localStorage.getItem(`desc-ar-${params.id}`);
       if (cached) { setDescAr(cached); return; }
@@ -211,11 +233,11 @@ export default function AnimeDetail() {
         {/* Title + badges */}
         <div className="flex-1 pb-3 min-w-0 space-y-2">
           <h1 className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2">
-            {anime.title.romaji}
+            {titleAr || anime.title.romaji}
           </h1>
-          {anime.title.english && (
-            <p className="text-[10px] text-white/35 line-clamp-1">{anime.title.english}</p>
-          )}
+          <p className="text-[10px] text-white/35 line-clamp-1">
+            {titleAr ? anime.title.romaji : (anime.title.english || "")}
+          </p>
           <div className="flex flex-wrap gap-1.5">
             <span className={`text-[9px] font-black px-2 py-1 rounded-lg border font-['Cairo'] ${statusInfo.color}`}>
               {statusInfo.label}

@@ -31,17 +31,21 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
     return this.props.children;
   }
 }
-const AnimeDetail = lazy(() => import("@/pages/AnimeDetail"));
-const EpisodeList = lazy(() => import("@/pages/EpisodeList"));
-const Watch       = lazy(() => import("@/pages/Watch"));
-const WatchById   = lazy(() => import("@/pages/WatchById"));
-const Search      = lazy(() => import("@/pages/Search"));
-const Schedule    = lazy(() => import("@/pages/Schedule"));
-const Library     = lazy(() => import("@/pages/Library"));
-const Browse      = lazy(() => import("@/pages/Browse"));
-const News        = lazy(() => import("@/pages/News"));
-const Settings    = lazy(() => import("@/pages/Settings"));
-const NotFound    = lazy(() => import("@/pages/not-found"));
+
+const AnimeDetail        = lazy(() => import("@/pages/AnimeDetail"));
+const EpisodeList        = lazy(() => import("@/pages/EpisodeList"));
+const Watch              = lazy(() => import("@/pages/Watch"));
+const WatchById          = lazy(() => import("@/pages/WatchById"));
+const Search             = lazy(() => import("@/pages/Search"));
+const Schedule           = lazy(() => import("@/pages/Schedule"));
+const Library            = lazy(() => import("@/pages/Library"));
+const Browse             = lazy(() => import("@/pages/Browse"));
+const News               = lazy(() => import("@/pages/News"));
+const Settings           = lazy(() => import("@/pages/Settings"));
+const NotFound           = lazy(() => import("@/pages/not-found"));
+const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
+const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
+const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
 
 function PageLoader() {
   return (
@@ -54,7 +58,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/news", "/browse"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/news", "/browse", "/animation/"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
@@ -86,18 +90,21 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
       <Suspense fallback={<PageLoader />}>
         <Switch>
-          <Route path="/" component={Home} />
-          <Route path="/anime/:id" component={AnimeDetail} />
-          <Route path="/episodes/:id" component={EpisodeList} />
-          <Route path="/watch/:id" component={WatchById} />
-          <Route path="/watch" component={Watch} />
-          <Route path="/search" component={Search} />
-          <Route path="/schedule" component={Schedule} />
-          <Route path="/library" component={Library} />
-          <Route path="/browse" component={Browse} />
-          <Route path="/news" component={News} />
-          <Route path="/settings" component={Settings} />
-          <Route component={NotFound} />
+          <Route path="/"                        component={Home} />
+          <Route path="/anime/:id"               component={AnimeDetail} />
+          <Route path="/episodes/:id"            component={EpisodeList} />
+          <Route path="/watch/:id"               component={WatchById} />
+          <Route path="/watch"                   component={Watch} />
+          <Route path="/search"                  component={Search} />
+          <Route path="/schedule"               component={Schedule} />
+          <Route path="/library"                 component={Library} />
+          <Route path="/browse"                  component={Browse} />
+          <Route path="/news"                    component={News} />
+          <Route path="/settings"               component={Settings} />
+          <Route path="/animations"              component={AnimationLibrary} />
+          <Route path="/animation/watch"         component={AnimationWatch} />
+          <Route path="/animation/:type/:id"     component={AnimationDetail} />
+          <Route                                 component={NotFound} />
         </Switch>
       </Suspense>
       <BottomNav />
