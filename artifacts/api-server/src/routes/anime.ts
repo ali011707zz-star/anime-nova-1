@@ -3821,30 +3821,47 @@ async function getAnimeGGSources(
     if (!scored[0] || scored[0].score < 0.1) return [];
     const seriesSlug = scored[0].slug;
 
-    // 3. Series page → find episode by number from anm_det_pop anchors
-    // HTML: <a href="/{epSlug}" class="anm_det_pop"><strong>Title N</strong></a>
-    const seriesHtml = await cfGet(
-      `${ANIMEGG_BASE}/series/${seriesSlug}`,
-      { "Referer": `${ANIMEGG_BASE}/search/?q=${encodeURIComponent(q)}` },
-    );
-    if (!seriesHtml) return [];
+    // 3. Build episode URL directly: /{seriesSlug}-episode-{N}
+    // AnimeGG series pages only show the latest ~15 episodes (pagination),
+    // so we construct the URL directly instead of searching the series page.
+    let epPath: string | null = `/${seriesSlug}-episode-${ep}`;
 
-    let epPath: string | null = null;
-    for (const m of seriesHtml.matchAll(/<a\b[^>]*class=["'][^"']*anm_det_pop[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi)) {
-      const tag = m[0].match(/<a\b[^>]*>/i)?.[0] ?? "";
-      const href = (tag.match(/href=["']([^"']+)["']/i)?.[1] ?? "").split("#")[0];
-      const strong = (m[0].match(/<strong[^>]*>([\s\S]*?)<\/strong>/i)?.[1] ?? "").replace(/<[^>]+>/g, "").trim();
-      const numM = strong.match(/\b(\d+)\s*$/);
-      if (numM && parseInt(numM[1]) === ep && href) {
-        epPath = href.startsWith("/") ? href : "/" + href;
-        break;
+    // Verify the direct URL is a real episode page (not soft-404)
+    const testHtml = await cfGet(
+      `${ANIMEGG_BASE}${epPath}`,
+      { "Referer": `${ANIMEGG_BASE}/series/${seriesSlug}` },
+    );
+    const hasTabs = testHtml && (
+      testHtml.includes('data-version="subbed"') ||
+      testHtml.includes("data-version='subbed'") ||
+      testHtml.includes('data-version=&quot;subbed&quot;')
+    );
+    if (!hasTabs) {
+      // Fallback: load series page and scan episode list (works for recent eps)
+      const seriesHtml = await cfGet(
+        `${ANIMEGG_BASE}/series/${seriesSlug}`,
+        { "Referer": `${ANIMEGG_BASE}/search/?q=${encodeURIComponent(q)}` },
+      );
+      if (!seriesHtml) return [];
+      epPath = null;
+      for (const m of seriesHtml.matchAll(/<a\b[^>]*class=["'][^"']*anm_det_pop[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+        const tag = m[0].match(/<a\b[^>]*>/i)?.[0] ?? "";
+        const href = (tag.match(/href=["']([^"']+)["']/i)?.[1] ?? "").split("#")[0];
+        const strong = (m[0].match(/<strong[^>]*>([\s\S]*?)<\/strong>/i)?.[1] ?? "").replace(/<[^>]+>/g, "").trim();
+        const numM = strong.match(/\b(\d+)\s*$/);
+        if (numM && parseInt(numM[1]) === ep && href) {
+          epPath = href.startsWith("/") ? href : "/" + href;
+          break;
+        }
       }
+      if (!epPath) return [];
     }
-    if (!epPath) return [];
 
     // 4. Episode page → server tabs (data-toggle="tab" data-id data-version)
     const epUrl  = `${ANIMEGG_BASE}${epPath}`;
-    const epHtml = await cfGet(epUrl, { "Referer": `${ANIMEGG_BASE}/series/${seriesSlug}` });
+    // Reuse testHtml if it was fetched for the direct URL (same page); otherwise fetch now
+    const epHtml = (hasTabs && testHtml) ? testHtml
+      : await cfGet(epUrl, { "Referer": `${ANIMEGG_BASE}/series/${seriesSlug}` });
     if (!epHtml) return [];
 
     const tabs: { embedId: string; server: string }[] = [];
@@ -3903,8 +3920,9 @@ async function getAnimeGGSources(
         for (const item of arr) {
           if (!item.file) continue;
           let finalUrl = item.file.startsWith("http") ? item.file : `${ANIMEGG_BASE}${item.file}`;
-          // bk = backup URL (base64-encoded)
-          if (item.bk) { try { finalUrl = decodeURIComponent(atob(item.bk)) || finalUrl; } catch {} }
+          // bk = backup embed URL (base64 of URL-encoded href) — it decodes to an embed page
+          // (e.g. mp4upload.com/embed-*.html), NOT a direct video URL, so we do NOT use it
+          // as finalUrl. The primary /play/N/video.mp4 URL works via video-proxy.
           const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(finalUrl)}&ref=${encodeURIComponent(embedUrl)}`;
           const label   = item.label || "360p";
           const rank    = label.includes("1080") ? 10 : label.includes("720") ? 9 : 7;
