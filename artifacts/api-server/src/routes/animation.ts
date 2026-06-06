@@ -619,22 +619,52 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     send("source", { url, label, directUrl, proxyUrl });
   };
 
-  // Try embed URL → extract stream → sendSource with directUrl (no iframe fallback)
+  // Try embed URL → extract stream → probe → sendSource (no iframe fallback)
   const sendExtracted = async (embedUrl: string, label: string) => {
     if (!embedUrl || seenUrls.has(embedUrl)) return;
     seenUrls.add(embedUrl); // mark seen early to avoid double-processing
+
     // 1. Try callExtractApi (extractVideoDeep)
     const extracted = await callExtractApi(embedUrl);
     if (extracted?.directUrl) {
       const d = extracted.directUrl;
+      // Probe the extracted URL before sending — prevents black screens
+      // from CDN blocks or expired tokens
+      if (d.startsWith("http")) {
+        try {
+          const probe = await fetch(d, {
+            method : "HEAD",
+            headers: { "User-Agent": UA, "Referer": embedUrl },
+            signal : AbortSignal.timeout(5_000),
+            redirect: "follow",
+          });
+          // 403/405 may still work via hls-proxy (CDN checks full request);
+          // skip 404, 4xx (except 403/405), 5xx — these are definitively broken
+          const ok = probe.ok || probe.status === 403 || probe.status === 405;
+          if (!ok) return;
+        } catch { return; } // CDN unreachable from Replit — skip
+      }
       const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
       const proxy = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : d;
       sendSource(embedUrl, label, d, proxy);
       return;
     }
+
     // 2. Try fetching embed page for direct streams
     const streams = await scrapeEmbedForStreams(embedUrl);
     for (const s of streams.slice(0, 2)) {
+      // Probe each found stream too
+      if (s.url.startsWith("http")) {
+        try {
+          const probe = await fetch(s.url, {
+            method : "HEAD",
+            headers: { "User-Agent": UA, "Referer": embedUrl },
+            signal : AbortSignal.timeout(4_000),
+            redirect: "follow",
+          });
+          if (!probe.ok && probe.status !== 403 && probe.status !== 405) continue;
+        } catch { continue; }
+      }
       sendSource(s.url, label, s.url, s.proxyUrl);
     }
     // No iframe fallback — user requires internal player only

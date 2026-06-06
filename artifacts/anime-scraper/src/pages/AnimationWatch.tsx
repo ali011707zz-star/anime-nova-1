@@ -5,7 +5,7 @@ import {
   MonitorPlay, Download, ChevronLeft, List, ChevronDown, SkipForward,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import RiftPlayer from "@/components/player/RiftPlayer";
+import RiftPlayer, { type SubSettings } from "@/components/player/RiftPlayer";
 
 /* ── SubCue ── */
 interface SubCue { start: number; end: number; text: string; }
@@ -115,9 +115,12 @@ export default function AnimationWatch() {
   const [showEpList, setShowEpList] = useState(false);
 
   /* ── Subtitle state ── */
-  const [subCues,  setSubCues]  = useState<SubCue[]>([]);
-  const [subState, setSubState] = useState<"idle" | "loading" | "ready">("idle");
-  const [hlsTime,  setHlsTime]  = useState(0);
+  const [subCues,    setSubCues]    = useState<SubCue[]>([]);
+  const [subState,   setSubState]   = useState<"idle" | "loading" | "ready">("idle");
+  const [hlsTime,    setHlsTime]    = useState(0);
+  const [subSettings, setSubSettings] = useState<SubSettings>({
+    fontSize: 16, color: "#ffffff", bgOpacity: 0.6, bold: false, position: "bottom",
+  });
 
   const esRef            = useRef<EventSource | null>(null);
   const seenUrls         = useRef(new Set<string>());
@@ -260,56 +263,59 @@ export default function AnimationWatch() {
     setStep(sources.length === 0 ? "error" : "sources");
   }, [sseDone]); // eslint-disable-line
 
-  /* ── Fetch Arabic subtitles via backend (bypasses CORS) ── */
-  useEffect(() => {
-    if (!tmdbId || subState !== "idle") return;
+  /* ── Fetch Arabic subtitles (called on mount + by onSubtitleClick) ── */
+  const fetchSubs = useCallback(async () => {
+    if (!tmdbId) return;
     setSubState("loading");
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch(
-          `/api/animation/vidzee-meta?tmdbId=${tmdbId}&type=${type}&season=${season}&ep=${ep}`,
-          { signal: AbortSignal.timeout(12_000) }
+    setSubCues([]);
+    try {
+      const r = await fetch(
+        `/api/animation/vidzee-meta?tmdbId=${tmdbId}&type=${type}&season=${season}&ep=${ep}`,
+        { signal: AbortSignal.timeout(12_000) }
+      );
+      if (!r.ok) { setSubState("idle"); return; }
+      const data: any = await r.json();
+      const subs: any[] = data.subtitles || [];
+
+      // Prefer direct Arabic VTT (full https URL), fallback to English
+      const arSub = subs.find((s: any) => s.languageCode === "ar" && s.url?.startsWith("http"))
+        || subs.find((s: any) => s.languageCode === "ar");
+      const enSub = subs.find((s: any) => s.languageCode === "en" && s.url?.startsWith("http"));
+
+      const chosen = arSub || enSub;
+      if (!chosen) { setSubState("idle"); return; }
+
+      const rawUrl = chosen.url?.startsWith("/")
+        ? `https://starcima.com${chosen.url}`
+        : chosen.url;
+
+      if (chosen.languageCode === "ar") {
+        // Direct Arabic — proxy-text to bypass CORS
+        const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawUrl)}`, { signal: AbortSignal.timeout(12_000) });
+        if (!r2.ok) { setSubState("idle"); return; }
+        const text = await r2.text();
+        const cues = parseSrt(text);
+        if (cues.length > 0) { setSubCues(cues); setSubState("ready"); }
+        else setSubState("idle");
+      } else {
+        // English → translate to Arabic
+        const r2 = await fetch(
+          `/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=en&to=ar`,
+          { signal: AbortSignal.timeout(30_000) }
         );
-        if (cancelled || !r.ok) { setSubState("idle"); return; }
-        const data: any = await r.json();
-        const subs: any[] = data.subtitles || [];
+        if (!r2.ok) { setSubState("idle"); return; }
+        const text = await r2.text();
+        const cues = parseSrt(text);
+        if (cues.length > 0) { setSubCues(cues); setSubState("ready"); }
+        else setSubState("idle");
+      }
+    } catch { setSubState("idle"); }
+  }, [tmdbId, type, season, ep]);
 
-        // Prefer direct Arabic VTT (full https URL)
-        const arSub = subs.find((s: any) => s.languageCode === "ar" && s.url?.startsWith("http"))
-          || subs.find((s: any) => s.languageCode === "ar");
-        const enSub = subs.find((s: any) => s.languageCode === "en" && s.url?.startsWith("http"));
-
-        const chosen = arSub || enSub;
-        if (!chosen) { setSubState("idle"); return; }
-
-        const rawUrl = chosen.url?.startsWith("/")
-          ? `https://starcima.com${chosen.url}`
-          : chosen.url;
-
-        if (chosen.languageCode === "ar") {
-          // Direct Arabic — proxy-text to bypass CORS
-          const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawUrl)}`, { signal: AbortSignal.timeout(12_000) });
-          if (cancelled || !r2.ok) { setSubState("idle"); return; }
-          const text = await r2.text();
-          const cues = parseSrt(text);
-          if (!cancelled && cues.length > 0) { setSubCues(cues); setSubState("ready"); }
-          else setSubState("idle");
-        } else {
-          // English → translate to Arabic
-          const r2 = await fetch(
-            `/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=en&to=ar`,
-            { signal: AbortSignal.timeout(30_000) }
-          );
-          if (cancelled || !r2.ok) { setSubState("idle"); return; }
-          const text = await r2.text();
-          const cues = parseSrt(text);
-          if (!cancelled && cues.length > 0) { setSubCues(cues); setSubState("ready"); }
-          else setSubState("idle");
-        }
-      } catch { if (!cancelled) setSubState("idle"); }
-    })();
-    return () => { cancelled = true; };
+  /* Auto-fetch subtitles on episode change */
+  useEffect(() => {
+    setSubCues([]); setSubState("idle");
+    fetchSubs();
   }, [tmdbId, type, season, ep]); // eslint-disable-line
 
   /* ── Resume time ── */
@@ -408,6 +414,9 @@ export default function AnimationWatch() {
           subCues={subState === "ready" && subCues.length > 0 ? subCues : undefined}
           subElapsed={hlsTime}
           subEnabled={subState === "ready" && subCues.length > 0}
+          subSettings={subSettings}
+          onSubSettingsChange={setSubSettings}
+          onSubtitleClick={fetchSubs}
           onTimeUpdate={handleTimeUpdate}
           onFail={stableOnFail}
           onBack={() => setStep("sources")}
