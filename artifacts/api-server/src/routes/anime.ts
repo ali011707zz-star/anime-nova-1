@@ -1376,39 +1376,7 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
   const SKIP_SLUGS = ["feed/", "wp-", "/page/", "genre/", "cast/", "tag/", "category/",
     "dmca", "contact", "about", "privacy", "xmlrpc", "wp-json"];
 
-  // ── Step 1: Try direct slug construction (much faster than search) ──
-  const slugCandidates: string[] = [];
-  for (const q of [english, title].filter(Boolean) as string[]) {
-    const s = toSlug(q as string);
-    if (!s) continue;
-    slugCandidates.push(s);
-    // Colon-removed join: "Re:Zero" → "ReZero" → "rezero-kara-..." (AnimeDar style)
-    const colonJoined = toSlug((q as string).replace(/[：:]/g, ""));
-    if (colonJoined && colonJoined !== s) slugCandidates.push(colonJoined);
-    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
-    if (stripped !== s && stripped.length > 2) slugCandidates.push(stripped);
-    const colonJoinedStripped = colonJoined.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
-    if (colonJoinedStripped !== colonJoined && colonJoinedStripped.length > 2) slugCandidates.push(colonJoinedStripped);
-  }
-  for (const slug of [...new Set(slugCandidates)]) {
-    try {
-      const r = await fetch(`${ADAR_BASE}/${slug}/`, {
-        headers: ADAR_HDRS,
-        signal: AbortSignal.timeout(7000),
-        redirect: "follow",
-      });
-      if (r.ok) {
-        const html = await r.text();
-        if (!isCloudflareBlock(html) && html.includes("ul-server-position")) {
-          const url = `${ADAR_BASE}/${slug}/`;
-          adarSlugCache.set(ck, { url, ts: Date.now() });
-          return url;
-        }
-      }
-    } catch {}
-  }
-
-  // ── Step 2: Fall back to search ──
+  // ── Step 1: Search first (accurate — avoids slug hitting wrong OVA/movie page) ──
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
       const r = await fetch(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, {
@@ -1423,18 +1391,14 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
       let best: string | null = null;
       let bestScore = 0;
 
-      // Try both itemprop="url" anchors and plain article/post anchors
-      // Note: AnimeDar now uses Arabic percent-encoded slugs (e.g. /انمي-ون-بيس-مترجم/)
       const anchorRe = /<a\s+href="(https?:\/\/animedar\.net\/([^"#?]+))"(?:[^>]*title="([^"]*)")?[^>]*>/gi;
       for (const m of html.matchAll(anchorRe)) {
         const url      = m[1];
         const slug     = m[2];
         const rawLabel = m[3] || "";
         if (SKIP_SLUGS.some(s => slug.includes(s) || decodeURIComponent(slug).includes(s))) continue;
-        // Decode percent-encoded slug (supports Arabic URLs like /انمي-ون-بيس-مترجم/)
         let slugDecoded = slug;
         try { slugDecoded = decodeURIComponent(slug); } catch {}
-        // Extract ASCII portion of decoded slug for similarity matching
         const slugAscii = slugDecoded.replace(/-/g, " ").replace(/[^\x00-\x7F]/g, " ").replace(/\s+/g, " ").trim();
         const label = rawLabel.replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim()
           || slugAscii
@@ -1451,6 +1415,41 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
       if (best && bestScore > 0.28) {
         adarSlugCache.set(ck, { url: best, ts: Date.now() });
         return best;
+      }
+    } catch {}
+  }
+
+  // ── Step 2: Direct slug fallback (for cases where search fails / site slow) ──
+  // Slug must be 3+ distinct words to avoid ambiguous matches (e.g. "one-piece" = OVA/series/movie)
+  const slugCandidates: string[] = [];
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const s = toSlug(q as string);
+    if (!s) continue;
+    // Only use slug when it uniquely identifies the series (colon-variant / stripped season suffix)
+    const colonJoined = toSlug((q as string).replace(/[：:]/g, ""));
+    if (colonJoined && colonJoined !== s) slugCandidates.push(colonJoined);
+    const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
+    if (stripped !== s && stripped.length > 2) slugCandidates.push(stripped);
+    const colonJoinedStripped = colonJoined.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
+    if (colonJoinedStripped !== colonJoined && colonJoinedStripped.length > 2) slugCandidates.push(colonJoinedStripped);
+    // Only add plain slug if it's long enough to be distinctive (3+ words)
+    if (s.split("-").length >= 3) slugCandidates.push(s);
+  }
+  for (const slug of [...new Set(slugCandidates)]) {
+    try {
+      const r = await fetch(`${ADAR_BASE}/${slug}/`, {
+        headers: ADAR_HDRS,
+        signal: AbortSignal.timeout(7000),
+        redirect: "follow",
+      });
+      if (r.ok) {
+        const html = await r.text();
+        if (!isCloudflareBlock(html) && html.includes("ul-server-position")) {
+          // Use the final URL (after any redirects) to get the canonical series URL
+          const finalUrl = (r.url || `${ADAR_BASE}/${slug}/`).replace(/\/?$/, "/");
+          adarSlugCache.set(ck, { url: finalUrl, ts: Date.now() });
+          return finalUrl;
+        }
       }
     } catch {}
   }
@@ -1675,104 +1674,10 @@ function parseAnimePhoenixVideo(html: string): Array<{ url: string; label: strin
 }
 
 async function getAnimePhoenixSources(
-  title: string, english: string | null, ep: number,
+  _title: string, _english: string | null, _ep: number,
 ): Promise<UnifiedSource[]> {
-  const ck = `aph:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
-  const hit = aphSrcCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
-
-  try {
-    const slug = await searchAnimePhoenix(title, english);
-    if (!slug) return [];
-
-    // Fast path: try direct episode URL first (new site structure — skips series page fetch)
-    let epUrl: string | null = null;
-    const directCandidates = [
-      `${APH_BASE}/episodes/${slug}-episode-${ep}`,
-      `${APH_BASE}/episodes/${slug}-episode-${String(ep).padStart(2, "0")}`,
-    ];
-    for (const u of directCandidates) {
-      const status = await safeHead(u, APH_HDRS);
-      if (status === 200 || status === 301 || status === 302) { epUrl = u; break; }
-    }
-
-    // Fallback: fetch series page to find episode link
-    if (!epUrl) {
-      const seriesUrl = `${APH_BASE}/animes/${slug}/`;
-      const sr = await fetch(seriesUrl, {
-        headers: APH_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
-      });
-      if (sr.ok) {
-        const sHtml = await sr.text();
-        if (!isCloudflareBlock(sHtml)) {
-          // Pattern 1: episode link matching exact number
-          for (const m of sHtml.matchAll(/href="(https?:\/\/anime-phoenix\.com\/[^"]*episode[^"]*)"[^>]*/gi)) {
-            const url = m[1];
-            const numM = url.match(/[-_](\d+)\/?$/);
-            if (numM && parseInt(numM[1]) === ep) { epUrl = url; break; }
-          }
-          // Pattern 2: any numbered link
-          if (!epUrl) {
-            for (const m of sHtml.matchAll(/href="(https?:\/\/anime-phoenix\.com\/[^"]+)"/gi)) {
-              const url = m[1];
-              if (url === seriesUrl) continue;
-              const numM = url.match(/[-_\/](\d+)\/?(?:[?#]|$)/);
-              if (numM && parseInt(numM[1]) === ep) { epUrl = url; break; }
-            }
-          }
-        }
-      }
-    }
-
-    // Last resort candidates
-    if (!epUrl) {
-      const fallbackCandidates = [
-        `${APH_BASE}/animes/${slug}/episodes/${slug}-${ep}/`,
-        `${APH_BASE}/watch/${slug}-episode-${ep}/`,
-        `${APH_BASE}/animes/${slug}/${ep}/`,
-      ];
-      for (const u of fallbackCandidates) {
-        const status = await safeHead(u, APH_HDRS);
-        if (status === 200 || status === 301 || status === 302) { epUrl = u; break; }
-      }
-    }
-    if (!epUrl) return [];
-
-    const er = await fetch(epUrl, {
-      headers: { ...APH_HDRS, Referer: `${APH_BASE}/animes/${slug}/` },
-      signal: AbortSignal.timeout(10000), redirect: "follow",
-    });
-    if (!er.ok) return [];
-    const eHtml = await er.text();
-    if (isCloudflareBlock(eHtml)) return [];
-
-    const videos = parseAnimePhoenixVideo(eHtml);
-    if (!videos.length) return [];
-
-    // Build sources — deduplicate CDN mirrors by file path (keep only first per unique file)
-    const seenPaths = new Set<string>();
-    const sources: UnifiedSource[] = [];
-    for (const [i, v] of videos.entries()) {
-      const filePath = v.url.includes("workers.dev")
-        ? v.url.replace(/^https?:\/\/[^/]+/, "")
-        : v.url;
-      if (seenPaths.has(filePath)) continue;
-      seenPaths.add(filePath);
-      const isM3u8 = v.url.includes(".m3u8");
-      sources.push({
-        name: `فينكس · ${v.label || `سيرفر ${i + 1}`}`,
-        url: v.url,
-        quality: "HD",
-        qualityRank: 3,
-        site: "animephoenix",
-        directUrl: v.url,
-        directType: isM3u8 ? "hls" : "mp4",
-      });
-    }
-
-    if (sources.length) aphSrcCache.set(ck, { sources, ts: Date.now() });
-    return sources;
-  } catch { return []; }
+  // Site is dead — connection times out from datacenter IPs (Replit blocked)
+  return [];
 }
 
 
@@ -2797,11 +2702,38 @@ async function getRistoAnimeSources(
 //  Old-format URL (works for ALL episodes): /episode/{romaji-slug}-الحلقة-{N}/
 // ════════════════════════════════════════════════════════════════════
 
-const A4UP_BASE = "https://w1.anime4up.rest";
-const A4UP_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://w1.anime4up.rest/" };
+const A4UP_BASE = "https://anime4up.cam";
+const A4UP_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime4up.cam/" };
 
 const a4upSeriesCache = new Map<string, { url: string | null; ts: number }>();
 const a4upSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+/**
+ * Fetch an anime4up.cam page, handling the JS bot-protection redirect.
+ * The site sometimes returns: <script>window.location.replace('URL?ch=1&js=JWT')</script>
+ * We extract the redirect URL and follow it to get the real page.
+ */
+async function a4upFetchHtml(url: string): Promise<{ ok: boolean; html: string }> {
+  try {
+    const r = await fetch(url, {
+      headers: A4UP_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow",
+    });
+    if (!r.ok) return { ok: false, html: "" };
+    let html = await r.text();
+    // Detect JS bot-protection redirect
+    const jsRedir = html.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/)?.[1];
+    if (jsRedir) {
+      const r2 = await fetch(jsRedir, {
+        headers: A4UP_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow",
+      });
+      if (!r2.ok) return { ok: false, html: "" };
+      html = await r2.text();
+    }
+    return { ok: true, html };
+  } catch {
+    return { ok: false, html: "" };
+  }
+}
 
 async function searchAnime4up(title: string, english: string | null): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
@@ -2809,18 +2741,11 @@ async function searchAnime4up(title: string, english: string | null): Promise<st
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
 
   for (const q of [english, title].filter(Boolean) as string[]) {
-    let r: Response;
-    try {
-      r = await fetch(`${A4UP_BASE}/?s=${encodeURIComponent(q)}`, {
-        headers: A4UP_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
-      });
-    } catch { continue; }
-    if (!r.ok) continue;
-    const html = await r.text();
-    if (isCloudflareBlock(html)) continue;
+    const { ok, html } = await a4upFetchHtml(`${A4UP_BASE}/?s=${encodeURIComponent(q)}`);
+    if (!ok || isCloudflareBlock(html)) continue;
 
     const candidates: Array<{ url: string; score: number }> = [];
-    for (const m of html.matchAll(/href="(https?:\/\/w1\.anime4up\.rest\/anime\/[^"]+)"/g)) {
+    for (const m of html.matchAll(/href="(https?:\/\/anime4up\.cam\/anime\/[^"]+)"/g)) {
       const u = m[1];
       if (u.includes("/page/") || u.includes("/feed/")) continue;
       const slug = decodeURIComponent(u.replace(A4UP_BASE + "/anime/", "").replace(/\/$/, "")).toLowerCase();
@@ -2858,12 +2783,8 @@ async function getAnime4upSources(
   /* ── try one episode URL → return sources or null ── */
   async function tryEpUrl(url: string): Promise<UnifiedSource[] | null> {
     if (cfBlocked) return null;
-    let r: Response;
-    try {
-      r = await fetch(url, { headers: A4UP_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow" });
-    } catch { return null; }
-    if (!r.ok) return null;
-    const html = await r.text();
+    const { ok, html } = await a4upFetchHtml(url);
+    if (!ok) return null;
     if (isCloudflareBlock(html)) { cfBlocked = true; return null; }
     /* Real episode pages have the Arabic word for "episode" or data-src attributes */
     if (!html.includes("الحلقة") && !html.includes("data-src") && !html.includes("player")) return null;
@@ -2872,7 +2793,7 @@ async function getAnime4upSources(
     for (const m of html.matchAll(/(?:src|data-src)=["']([^"']{10,})["']/gi)) {
       const raw = m[1].trim();
       if (!raw.startsWith("https://")) continue;
-      if (raw.includes("w1.anime4up.rest")) continue;
+      if (raw.includes("anime4up.cam") || raw.includes("w1.anime4up.rest")) continue;
       if (/google-analytics|googleapis|gstatic|facebook|twitter|cloudflare|jquery|bootstrap/i.test(raw)) continue;
       if (!seen.has(raw)) { seen.add(raw); iframeUrls.push(raw); }
     }
@@ -2898,15 +2819,14 @@ async function getAnime4upSources(
   const seriesUrl = await searchAnime4up(title, english);
   if (seriesUrl && !cfBlocked) {
     try {
-      const sr = await fetch(seriesUrl, { headers: A4UP_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow" });
-      if (sr.ok) {
-        const srHtml = await sr.text();
+      const { ok: srOk, html: srHtml } = await a4upFetchHtml(seriesUrl);
+      if (srOk) {
         if (isCloudflareBlock(srHtml)) {
           cfBlocked = true;
         } else {
           /* Collect all episode links from the series page */
           const epLinks: string[] = [];
-          for (const m of srHtml.matchAll(/href="(https?:\/\/w1\.anime4up\.rest\/episode\/[^"]+)"/g)) {
+          for (const m of srHtml.matchAll(/href="(https?:\/\/anime4up\.cam\/episode\/[^"]+)"/g)) {
             if (!epLinks.includes(m[1])) epLinks.push(m[1]);
           }
           /* First: look for exact episode in visible links */
