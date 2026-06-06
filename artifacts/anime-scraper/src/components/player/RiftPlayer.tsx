@@ -152,7 +152,8 @@ export default function RiftPlayer({
   const lastTouchTs  = useRef(0);
   const moved        = useRef(false);
   const seekThrottle = useRef<number>(0);
-  const G_THRESH     = 12;
+  const tapTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const G_THRESH     = 18;
 
   const [isPortrait,      setIsPortrait]      = useState(
     typeof window !== "undefined" && window.innerHeight > window.innerWidth
@@ -533,7 +534,9 @@ export default function RiftPlayer({
     const side: "L" | "R" = touch.clientX < visW / 2 ? "L" : "R";
     const now = Date.now();
 
-    if (lastTap.current && now - lastTap.current.time < 300 && lastTap.current.side === side) {
+    if (lastTap.current && now - lastTap.current.time < 350 && lastTap.current.side === side) {
+      // ── DOUBLE TAP: cancel pending single-tap toggle, then seek ──
+      if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
       const delta = side === "R" ? 10 : -10;
       skip(delta);
       setDblTap({ side, id: now, secs: Math.abs(delta) });
@@ -541,8 +544,14 @@ export default function RiftPlayer({
       lastTap.current = null;
       showControls();
     } else {
+      // ── SINGLE TAP: record and delay controls toggle so double-tap can cancel it ──
       lastTap.current = { time: now, side };
-      setShowCtrl(p => { const n = !p; if (n) schedHide(); return n; });
+      if (tapTimer.current) clearTimeout(tapTimer.current);
+      tapTimer.current = setTimeout(() => {
+        tapTimer.current = null;
+        lastTap.current = null;
+        setShowCtrl(p => { const n = !p; if (n) schedHide(); return n; });
+      }, 260);
     }
   }
 
@@ -588,22 +597,13 @@ export default function RiftPlayer({
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full"
-        style={{ objectFit: isZoomed ? "cover" : "contain" }}
+        style={{
+          objectFit: isZoomed ? "cover" : "contain",
+          filter: brightness !== 1 ? `brightness(${brightness.toFixed(3)})` : undefined,
+          transition: "filter 0.06s",
+        }}
         playsInline preload="metadata"
       />
-
-      {/* ── Brightness overlay (avoids CSS filter degrading video quality) ── */}
-      {brightness !== 1 && (
-        <div
-          className="absolute inset-0 pointer-events-none z-[1]"
-          style={{
-            background: brightness < 1
-              ? `rgba(0,0,0,${(1 - brightness).toFixed(2)})`
-              : `rgba(255,255,255,${Math.min((brightness - 1) / 1.5, 0.35).toFixed(2)})`,
-            transition: "background 0.06s",
-          }}
-        />
-      )}
 
       {/* ── screenshot flash ── */}
       <AnimatePresence>
@@ -974,7 +974,7 @@ export default function RiftPlayer({
               >
                 {/* ── Skip intro / outro ── */}
                 {showCtrl && (showSkipIntro || showSkipOutro) && (
-                  <div className="flex justify-end px-5 pb-2 pointer-events-auto">
+                  <div className="flex justify-start px-5 pb-2 pointer-events-auto" dir="rtl">
                     {showSkipIntro && (
                       <button
                         onPointerDown={e => { e.stopPropagation(); const skipTo = skipIntro ? skipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
@@ -1027,22 +1027,33 @@ export default function RiftPlayer({
                     <div className="absolute left-0 right-0 rounded-full overflow-hidden pointer-events-none"
                       style={{ height: prgHover ? 7 : 4, transition: "height 0.15s ease" }}>
                       <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.18)" }} />
-                      {/* Intro marker — amber */}
-                      {skipIntro && duration > 0 && (
-                        <div className="absolute top-0 h-full" style={{
-                          left: `${(skipIntro.start / duration) * 100}%`,
-                          width: `${Math.max(0, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
-                          background: "rgba(251,191,36,0.72)",
-                        }} />
-                      )}
-                      {/* Outro marker — violet */}
-                      {skipOutro && duration > 0 && (
-                        <div className="absolute top-0 h-full" style={{
-                          left: `${(skipOutro.start / duration) * 100}%`,
-                          width: `${Math.max(0, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
-                          background: "rgba(167,139,250,0.55)",
-                        }} />
-                      )}
+                        {/* Intro marker — yellow: use prop or heuristic (62–148s) */}
+                      {duration > 300 && (() => {
+                        const s = skipIntro?.start ?? 62;
+                        const e2 = skipIntro?.end ?? 148;
+                        return (
+                          <div className="absolute top-0 h-full" style={{
+                            left: `${(s / duration) * 100}%`,
+                            width: `${Math.max(0, (e2 - s) / duration * 100)}%`,
+                            background: "rgba(234,179,8,0.85)",
+                            zIndex: 2,
+                          }} />
+                        );
+                      })()}
+                      {/* Outro marker — yellow: use prop or heuristic (last 200s) */}
+                      {duration > 0 && (() => {
+                        const s = skipOutro?.start ?? Math.max(0, duration - 200);
+                        const e2 = skipOutro?.end ?? Math.max(0, duration - 12);
+                        if (e2 <= s) return null;
+                        return (
+                          <div className="absolute top-0 h-full" style={{
+                            left: `${(s / duration) * 100}%`,
+                            width: `${Math.max(0, (e2 - s) / duration * 100)}%`,
+                            background: "rgba(234,179,8,0.60)",
+                            zIndex: 2,
+                          }} />
+                        );
+                      })()}
                       <div className="absolute top-0 left-0 h-full"
                         style={{ width: `${bufPct}%`, background: "rgba(139,92,246,0.35)", transition: "width 0.3s" }} />
                       <div className="absolute top-0 left-0 h-full"
