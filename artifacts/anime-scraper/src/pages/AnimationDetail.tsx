@@ -478,12 +478,17 @@ export default function AnimationDetail() {
             {cast.map((c: any) => (
               <motion.div key={c.id} whileTap={{ scale: 0.95 }} className="shrink-0 w-[44px] text-center">
                 <div className="relative">
-                  <img
-                    src={c.profile_path ? `${IMG_S}${c.profile_path}` : ""}
-                    alt={c.name}
-                    className="w-[44px] h-[44px] rounded-xl object-cover border border-white/8 mb-1 bg-white/6"
-                    onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
+                  {c.profile_path
+                    ? <img
+                        src={`${IMG_S}${c.profile_path}`}
+                        alt={c.name}
+                        className="w-[44px] h-[44px] rounded-xl object-cover border border-white/8 mb-1 bg-white/6"
+                        onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    : <div className="w-[44px] h-[44px] rounded-xl border border-white/8 mb-1 bg-white/6 flex items-center justify-center">
+                        <Users className="w-4 h-4 text-white/20" />
+                      </div>
+                  }
                 </div>
                 <p className="text-[8px] text-white/45 font-bold truncate leading-tight">{c.name}</p>
                 {c.character && (

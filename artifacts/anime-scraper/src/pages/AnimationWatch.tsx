@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import {
   ChevronRight, Play, Loader2, AlertCircle,
   RefreshCw, Server, CheckCircle, Wifi, XCircle, SkipForward,
+  List, ChevronDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -58,6 +59,8 @@ function saveAnimHistory(tmdbId: string, type: string, title: string, posterUrl:
   } catch { /* silent */ }
 }
 
+interface EpisodeItem { episode_number: number; name: string; still_path?: string; runtime?: number; }
+
 export default function AnimationWatch() {
   const [, navigate] = useLocation();
   const params  = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -74,6 +77,8 @@ export default function AnimationWatch() {
   const [selSrc, setSelSrc]    = useState<Source | null>(null);
   const [sseDone, setSseDone]  = useState(false);
   const [playerErr, setPlayerErr] = useState(false);
+  const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
+  const [showEpList, setShowEpList] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef   = useRef<any>(null);
   const esRef    = useRef<EventSource | null>(null);
@@ -205,6 +210,15 @@ export default function AnimationWatch() {
 
   // Reset history-saved flag when episode/source changes
   useEffect(() => { histSavedRef.current = false; }, [tmdbId, type, ep, season]);
+
+  // Fetch episode list for TV shows
+  useEffect(() => {
+    if (type !== "tv" || !tmdbId) return;
+    fetch(`/api/animation/season?id=${tmdbId}&season=${season}`)
+      .then(r => r.json())
+      .then(d => setEpisodes(d.episodes || []))
+      .catch(() => {});
+  }, [type, tmdbId, season]);
 
   // Extract direct URL for a source
   const tryExtract = useCallback(async (url: string) => {
@@ -498,6 +512,64 @@ export default function AnimationWatch() {
               </motion.div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Episode list (TV shows only) ── */}
+      {type === "tv" && episodes.length > 0 && (
+        <div className="px-3 py-3 border-t border-white/6">
+          <button
+            onClick={() => setShowEpList(o => !o)}
+            className="w-full flex items-center justify-between py-1"
+          >
+            <div className="flex items-center gap-2">
+              <List className="w-4 h-4 text-primary" />
+              <span className="text-[13px] font-black text-white font-['Cairo']">الحلقات</span>
+              <span className="text-[10px] text-white/30 bg-white/6 px-2 py-0.5 rounded-lg font-['Cairo']">
+                {episodes.length} حلقة · الموسم {season}
+              </span>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-white/40 transition-transform ${showEpList ? "rotate-180" : ""}`} />
+          </button>
+          <AnimatePresence>
+            {showEpList && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-2 space-y-1.5 max-h-64 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
+                  {episodes.map(epItem => {
+                    const isActive = epItem.episode_number === ep;
+                    const epUrl = `/animation/watch?title=${title}&type=tv&id=${tmdbId}&ep=${epItem.episode_number}&season=${season}&poster=${poster}`;
+                    return (
+                      <Link key={epItem.episode_number} href={epUrl}>
+                        <div className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all ${
+                          isActive
+                            ? "bg-primary/15 border-primary/25"
+                            : "bg-[#111116] border-white/6 active:bg-white/8"
+                        }`}>
+                          <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black flex-shrink-0 font-mono ${
+                            isActive ? "bg-primary text-white" : "bg-white/8 text-white/40"
+                          }`}>
+                            {epItem.episode_number}
+                          </div>
+                          <p className={`text-[11px] font-black line-clamp-1 font-['Cairo'] flex-1 ${
+                            isActive ? "text-primary" : "text-white/80"
+                          }`}>
+                            {epItem.name}
+                          </p>
+                          {isActive && <Wifi className="w-3 h-3 text-primary flex-shrink-0" />}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
