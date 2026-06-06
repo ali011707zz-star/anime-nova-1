@@ -691,17 +691,17 @@ export default function Home() {
                 <div key={i} className="absolute rounded-full bg-white/60 animate-pulse" style={{ top:s.top,left:s.left,width:s.size,height:s.size }} />
               ))}
               <div className="absolute inset-0 flex items-center justify-between px-5">
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#7c3aed,#06b6d4)" }}>
-                      <Clapperboard className="w-3 h-3 text-white" />
+                    <div className="w-7 h-7 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg,#7c3aed,#06b6d4)" }}>
+                      <Clapperboard className="w-3.5 h-3.5 text-white" />
                     </div>
-                    <span className="text-[11px] text-violet-300/80 font-black font-['Cairo']">NEW</span>
+                    <span className="text-[10px] text-white/40 font-['Cairo'] tracking-wider uppercase">Animation</span>
                   </div>
-                  <h3 className="text-[18px] font-black text-white font-['Cairo'] leading-tight">قسم الأنيميشن</h3>
-                  <p className="text-[10px] text-white/40 font-['Cairo']">أفلام ومسلسلات كرتون عالمية</p>
+                  <h3 className="text-[20px] font-black text-white font-['Cairo'] leading-tight">عالم الأنيميشن</h3>
+                  <p className="text-[10px] text-white/45 font-['Cairo']">أفلام ومسلسلات كرتون عالمية</p>
                 </div>
-                <div className="flex items-center gap-1.5 bg-white/10 backdrop-blur-md border border-white/15 px-3.5 py-2 rounded-2xl">
+                <div className="flex items-center gap-1.5 border border-white/20 px-3.5 py-2 rounded-2xl" style={{ background: "rgba(255,255,255,0.07)", backdropFilter: "blur(12px)" }}>
                   <span className="text-[11px] font-black text-white font-['Cairo']">اكتشف</span>
                   <ChevronLeft className="w-3.5 h-3.5 text-white" />
                 </div>

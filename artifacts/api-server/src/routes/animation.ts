@@ -615,96 +615,68 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
 
-      // ── 1. vidsrc.xyz (TMDB ID) — best extractor ────────────────────────────
+      // ── 1-10. Embed players (TMDB ID) — sent as in-app iframes ─────────────
       (async () => {
         if (!tmdbId) return;
-        send("status", { msg: "VidSrc: جاري الاستخراج…" });
-        const embedUrl = type === "tv"
-          ? `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
-          : `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}`;
-        await sendExtracted(embedUrl, "VidSrc 1");
-      })(),
-
-      // ── 2. vidsrc.me (TMDB ID) ───────────────────────────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://vidsrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
-          : `https://vidsrc.me/embed/movie?tmdb=${tmdbId}`;
-        await sendExtracted(embedUrl, "VidSrc 2");
-      })(),
-
-      // ── 3. vidsrc.to (TMDB ID) ───────────────────────────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${epNum}`
-          : `https://vidsrc.to/embed/movie/${tmdbId}`;
-        await sendExtracted(embedUrl, "VidSrc 3");
-      })(),
-
-      // ── 4. vidlink.pro (TMDB ID) ─────────────────────────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
-          : `https://vidlink.pro/movie/${tmdbId}`;
-        await sendExtracted(embedUrl, "VidLink");
-      })(),
-
-      // ── 5. 2embed.cc (TMDB ID) ───────────────────────────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://www.2embed.cc/embedtv/${tmdbId}&s=${season}&e=${epNum}`
-          : `https://www.2embed.cc/embed/${tmdbId}`;
-        await sendExtracted(embedUrl, "2Embed");
-      })(),
-
-      // ── 6. multiembed.mov (TMDB ID) ───────────────────────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${epNum}`
-          : `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1`;
-        await sendExtracted(embedUrl, "MultiEmbed");
-      })(),
-
-      // ── 7. SuperEmbed (TMDB ID) ───────────────────────────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
-          : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}`;
-        await sendExtracted(embedUrl, "SmashyStream");
-      })(),
-
-      // ── 8. embed.su (TMDB ID) — often wraps streamwish/filemoon iframes ────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://embed.su/embed/tv/${tmdbId}/${season}/${epNum}`
-          : `https://embed.su/embed/movie/${tmdbId}`;
-        send("status", { msg: "EmbedSu: جاري الاستخراج…" });
-        await sendExtracted(embedUrl, "EmbedSu");
-      })(),
-
-      // ── 9. autoembed.cc (TMDB ID) — often wraps vid providers ────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://autoembed.cc/tv/tmdb/${tmdbId}-${season}-${epNum}`
-          : `https://autoembed.cc/movie/tmdb/${tmdbId}`;
-        await sendExtracted(embedUrl, "AutoEmbed");
-      })(),
-
-      // ── 10. player.autoembed.cc (alternate) ──────────────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const embedUrl = type === "tv"
-          ? `https://player.autoembed.cc/embed/tv/${tmdbId}/${season}/${epNum}`
-          : `https://player.autoembed.cc/embed/movie/${tmdbId}`;
-        await sendExtracted(embedUrl, "AutoEmbed Player");
+        const tv = type === "tv";
+        // Build all embed URLs up-front and send immediately (no extraction needed)
+        const embeds: { url: string; label: string }[] = [
+          {
+            label: "VidSrc 1",
+            url: tv
+              ? `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+              : `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}`,
+          },
+          {
+            label: "VidSrc 2",
+            url: tv
+              ? `https://vidsrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+              : `https://vidsrc.me/embed/movie?tmdb=${tmdbId}`,
+          },
+          {
+            label: "VidSrc 3",
+            url: tv
+              ? `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${epNum}`
+              : `https://vidsrc.to/embed/movie/${tmdbId}`,
+          },
+          {
+            label: "VidLink",
+            url: tv
+              ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
+              : `https://vidlink.pro/movie/${tmdbId}`,
+          },
+          {
+            label: "MultiEmbed",
+            url: tv
+              ? `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${epNum}`
+              : `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1`,
+          },
+          {
+            label: "EmbedSu",
+            url: tv
+              ? `https://embed.su/embed/tv/${tmdbId}/${season}/${epNum}`
+              : `https://embed.su/embed/movie/${tmdbId}`,
+          },
+          {
+            label: "AutoEmbed",
+            url: tv
+              ? `https://autoembed.cc/tv/tmdb/${tmdbId}-${season}-${epNum}`
+              : `https://autoembed.cc/movie/tmdb/${tmdbId}`,
+          },
+          {
+            label: "SmashyStream",
+            url: tv
+              ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+              : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}`,
+          },
+          {
+            label: "2Embed",
+            url: tv
+              ? `https://www.2embed.cc/embedtv/${tmdbId}&s=${season}&e=${epNum}`
+              : `https://www.2embed.cc/embed/${tmdbId}`,
+          },
+        ];
+        for (const e of embeds) sendSource(e.url, e.label);
       })(),
 
       // ── 11. moviesapi.club (IMDB ID) — static HTML, extractable ─────────────

@@ -30,6 +30,12 @@ const KNOWN_EMBEDS = [
   "vidhls.com/player", "embed.mystream.to", "filemoon.", "streamwish.",
   "dood.", "streamtape.", "vidmoly.", "uptostream.", "playerwish.",
   "wishfast.", "share4max.", "megamax.me", "asnwish.", "vidyard.",
+  // Animation embed players (JS-rendered, in-app iframe)
+  "vidsrc.xyz", "vidsrc.me", "vidsrc.to", "vidsrc.net",
+  "autoembed.cc", "player.autoembed.cc",
+  "multiembed.mov", "vidlink.pro",
+  "smashystream.com", "2embed.cc",
+  "embed.su/embed", "vidlink.pro",
 ];
 
 function isEmbedUrl(url: string): boolean {
@@ -300,7 +306,7 @@ export default function AnimationWatch() {
       {/* ── Top bar ── */}
       <div className="flex items-center gap-3 px-3 py-2.5 bg-black/90 border-b border-white/8">
         <button
-          onClick={() => navigate(-1 as any)}
+          onClick={() => { if (window.history.length > 1) window.history.back(); else navigate("/animations"); }}
           className="w-7 h-7 rounded-lg bg-white/8 flex items-center justify-center active:scale-90 transition-transform"
         >
           <ChevronRight className="w-4 h-4 text-white" />
@@ -472,7 +478,7 @@ export default function AnimationWatch() {
               إعادة المحاولة
             </button>
             <button
-              onClick={() => navigate(-1 as any)}
+              onClick={() => { if (window.history.length > 1) window.history.back(); else navigate("/animations"); }}
               className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-white/6 border border-white/10 text-xs font-black text-white/50 font-['Cairo'] active:scale-95 transition-transform"
             >
               <ChevronRight className="w-3.5 h-3.5" />
