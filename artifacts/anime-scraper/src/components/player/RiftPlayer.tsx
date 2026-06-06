@@ -534,7 +534,7 @@ export default function RiftPlayer({
       // Same directional fix as volume
       const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
-      const nB = Math.max(0.1, Math.min(1.5, brightnessRef.current + dV / 150));
+      const nB = Math.max(0.2, Math.min(1.1, brightnessRef.current + dV / 250));
       brightnessRef.current = nB;
       setBrightness(nB); setFeedback({ type: "brightness", value: nB });
     }
