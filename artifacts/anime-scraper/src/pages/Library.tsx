@@ -112,7 +112,7 @@ export default function Library() {
 
       {/* Header */}
       <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-4 pb-3">
-        <h1 className="text-xl font-black font-['Cairo'] mb-3">مكتبتي</h1>
+        <h1 className="text-xl font-black font-['Cairo'] mb-3">قائمتي</h1>
         <div className="flex gap-2 bg-[#18181B] p-1 rounded-2xl">
           <button onClick={() => setTab("history")}
             className={`flex-1 py-2.5 rounded-xl text-xs font-black font-['Cairo'] transition-all flex items-center justify-center gap-2
@@ -129,7 +129,7 @@ export default function Library() {
             className={`flex-1 py-2.5 rounded-xl text-xs font-black font-['Cairo'] transition-all flex items-center justify-center gap-2
               ${tab === "saved" ? "bg-primary text-white shadow-lg shadow-primary/20" : "text-white/40"}`}>
             <BookMarked className="w-3.5 h-3.5" />
-            قائمتي
+            المحفوظة
             {savedAnime.length > 0 && (
               <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${tab === "saved" ? "bg-white/20" : "bg-white/8 text-white/40"}`}>
                 {savedAnime.length}

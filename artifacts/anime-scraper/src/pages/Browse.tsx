@@ -146,7 +146,7 @@ export default function Browse() {
       <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-4 pb-3">
         <div className="flex items-center gap-2 mb-3">
           <h1 className="text-xl font-black font-['Cairo'] flex-1">
-            {selectedGenre ? currentGenreLabel : "تصفح الأنمي"}
+            {selectedGenre ? currentGenreLabel : "مكتبة الأنمي"}
           </h1>
           {(selectedGenre || selectedFormat) && (
             <button onClick={() => { setSelectedGenre(""); setSelectedFormat(""); setShowGenreGrid(true); }}

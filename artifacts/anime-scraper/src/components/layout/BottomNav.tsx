@@ -1,13 +1,13 @@
 import { Link, useLocation } from "wouter";
-import { Home, Search, Compass, BookOpen, Film } from "lucide-react";
+import { Home, Search, Compass, BookOpen, Film, Heart } from "lucide-react";
 import { motion } from "framer-motion";
 
 const navItems = [
   { icon: Home,     label: "الرئيسية", href: "/" },
-  { icon: BookOpen, label: "مكتبة",    href: "/library" },
+  { icon: Heart,    label: "قائمتي",   href: "/library" },
   { icon: Film,     label: "أنيميشن",  href: "/animations" },
   { icon: Search,   label: "بحث",      href: "/search" },
-  { icon: Compass,  label: "تصفح",     href: "/browse" },
+  { icon: BookOpen, label: "مكتبة",    href: "/browse" },
 ];
 
 const HIDE_ON = ["/watch", "/animation/watch"];
@@ -18,7 +18,7 @@ export function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 pb-safe">
-      <div className="mx-3 mb-3 flex items-center justify-around bg-[#0e0e14]/97 backdrop-blur-2xl border border-white/[0.07] rounded-[26px] px-1 py-2 shadow-2xl shadow-black/70">
+      <div className="mx-2 mb-2 flex items-center justify-around bg-[#0e0e14]/98 backdrop-blur-2xl border border-white/[0.07] rounded-[22px] px-0.5 py-1.5 shadow-2xl shadow-black/70">
         {navItems.map((item) => {
           const isActive = item.href === "/"
             ? (location === "/" || location === "")
@@ -26,19 +26,19 @@ export function BottomNav() {
           const Icon = item.icon;
           return (
             <Link key={item.href} href={item.href}
-              className="relative flex flex-col items-center justify-center px-3.5 py-1 min-w-[48px]"
+              className="relative flex flex-col items-center justify-center px-3 py-0.5 min-w-[44px]"
             >
               {isActive && (
                 <motion.div
                   layoutId="nav-pill"
-                  className="absolute inset-0 rounded-2xl"
+                  className="absolute inset-0 rounded-[16px]"
                   style={{ background: "linear-gradient(135deg,rgba(139,92,246,0.18),rgba(109,40,217,0.12))", border: "1px solid rgba(139,92,246,0.22)" }}
                   transition={{ type: "spring", stiffness: 420, damping: 34 }}
                 />
               )}
               <div className="relative z-10">
                 <Icon
-                  className={`transition-all duration-200 w-[19px] h-[19px]
+                  className={`transition-all duration-200 w-[17px] h-[17px]
                     ${isActive ? "text-violet-400" : "text-white/28"}`}
                   strokeWidth={isActive ? 2.5 : 1.8}
                 />
@@ -46,12 +46,12 @@ export function BottomNav() {
                   <motion.div
                     layoutId="nav-glow"
                     className="absolute -inset-1 rounded-full blur-md"
-                    style={{ background: "rgba(139,92,246,0.35)" }}
+                    style={{ background: "rgba(139,92,246,0.30)" }}
                     transition={{ type: "spring", stiffness: 420, damping: 34 }}
                   />
                 )}
               </div>
-              <span className={`relative z-10 mt-0.5 text-[8px] font-black transition-colors font-['Cairo']
+              <span className={`relative z-10 mt-0.5 text-[7.5px] font-black transition-colors font-['Cairo']
                 ${isActive ? "text-violet-400" : "text-white/22"}`}>
                 {item.label}
               </span>
