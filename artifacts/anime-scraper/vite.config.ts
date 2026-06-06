@@ -51,6 +51,8 @@ export default defineConfig(async ({ mode }) => {
           target: "http://localhost:8080",
           changeOrigin: true,
           secure: false,
+          timeout: 0,
+          proxyTimeout: 0,
         },
       },
     },

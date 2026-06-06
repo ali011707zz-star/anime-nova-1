@@ -574,9 +574,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     send("source", { url, label, directUrl, proxyUrl });
   };
 
-  // Try embed URL → extract stream → sendSource with directUrl
+  // Try embed URL → extract stream → sendSource with directUrl (no iframe fallback)
   const sendExtracted = async (embedUrl: string, label: string) => {
     if (!embedUrl || seenUrls.has(embedUrl)) return;
+    seenUrls.add(embedUrl); // mark seen early to avoid double-processing
     // 1. Try callExtractApi (extractVideoDeep)
     const extracted = await callExtractApi(embedUrl);
     if (extracted?.directUrl) {
@@ -586,16 +587,12 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       sendSource(embedUrl, label, d, proxy);
       return;
     }
-    // 2. Try fetching embed page for streams
+    // 2. Try fetching embed page for direct streams
     const streams = await scrapeEmbedForStreams(embedUrl);
-    if (streams.length) {
-      for (const s of streams.slice(0, 2)) {
-        sendSource(s.url, label, s.url, s.proxyUrl);
-      }
-      return;
+    for (const s of streams.slice(0, 2)) {
+      sendSource(s.url, label, s.url, s.proxyUrl);
     }
-    // 3. Send as-is (frontend will try extraction)
-    sendSource(embedUrl, label);
+    // No iframe fallback — user requires internal player only
   };
 
   try {
@@ -614,70 +611,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
-
-      // ── 1-10. Embed players (TMDB ID) — sent as in-app iframes ─────────────
-      (async () => {
-        if (!tmdbId) return;
-        const tv = type === "tv";
-        // Build all embed URLs up-front and send immediately (no extraction needed)
-        const embeds: { url: string; label: string }[] = [
-          {
-            label: "VidSrc 1",
-            url: tv
-              ? `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
-              : `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}`,
-          },
-          {
-            label: "VidSrc 2",
-            url: tv
-              ? `https://vidsrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
-              : `https://vidsrc.me/embed/movie?tmdb=${tmdbId}`,
-          },
-          {
-            label: "VidSrc 3",
-            url: tv
-              ? `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${epNum}`
-              : `https://vidsrc.to/embed/movie/${tmdbId}`,
-          },
-          {
-            label: "VidLink",
-            url: tv
-              ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
-              : `https://vidlink.pro/movie/${tmdbId}`,
-          },
-          {
-            label: "MultiEmbed",
-            url: tv
-              ? `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1&s=${season}&e=${epNum}`
-              : `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1`,
-          },
-          {
-            label: "EmbedSu",
-            url: tv
-              ? `https://embed.su/embed/tv/${tmdbId}/${season}/${epNum}`
-              : `https://embed.su/embed/movie/${tmdbId}`,
-          },
-          {
-            label: "AutoEmbed",
-            url: tv
-              ? `https://autoembed.cc/tv/tmdb/${tmdbId}-${season}-${epNum}`
-              : `https://autoembed.cc/movie/tmdb/${tmdbId}`,
-          },
-          {
-            label: "SmashyStream",
-            url: tv
-              ? `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
-              : `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}`,
-          },
-          {
-            label: "2Embed",
-            url: tv
-              ? `https://www.2embed.cc/embedtv/${tmdbId}&s=${season}&e=${epNum}`
-              : `https://www.2embed.cc/embed/${tmdbId}`,
-          },
-        ];
-        for (const e of embeds) sendSource(e.url, e.label);
-      })(),
 
       // ── 11. moviesapi.club (IMDB ID) — static HTML, extractable ─────────────
       (async () => {
@@ -815,6 +748,78 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: `TopCinema: وُجد "${target.title}"` });
           const iframes = await tcScrapePlayer(target.url);
           for (const u of iframes) await sendExtracted(u, "TopCinema سيرفر");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 13. ToonStream (title-based, animation content) ──────────────────────
+      (async () => {
+        try {
+          const TS_BASE = "https://toonstream.vip";
+          send("status", { msg: "ToonStream: جاري البحث…" });
+
+          const searchHtml = await cfGet(
+            `${TS_BASE}/?s=${encodeURIComponent(title)}`,
+            TS_BASE + "/"
+          );
+
+          // Parse movie/tvshow result URLs
+          const urlRe = /href="(https:\/\/toonstream\.vip\/(movies|tvshows)\/([^/"]+)\/)"/g;
+          const candidates: { url: string; section: string; slug: string }[] = [];
+          const seenCand = new Set<string>();
+          let um: RegExpExecArray | null;
+          while ((um = urlRe.exec(searchHtml)) !== null) {
+            if (seenCand.has(um[1])) continue;
+            seenCand.add(um[1]);
+            candidates.push({ url: um[1], section: um[2], slug: um[3] });
+          }
+          if (!candidates.length) return;
+
+          const scored = candidates.map(c => {
+            const titleStr = c.slug.replace(/-\d{4}$/, "").replace(/-/g, " ");
+            return { ...c, titleStr, score: titleSim(titleStr, title) };
+          });
+          scored.sort((a, b) => b.score - a.score);
+          const best = scored[0];
+          if (best.score < 0.25) return;
+
+          send("status", { msg: `ToonStream: وُجد "${best.titleStr}"` });
+
+          let pageUrl = best.url;
+
+          // For TV shows, find the specific episode page
+          if (type === "tv" && best.section === "tvshows") {
+            const seriesHtml = await cfGet(best.url, TS_BASE + "/");
+            // Episode URLs like /episodes/show-name-s01e03/
+            const epRe = new RegExp(
+              `href="(${TS_BASE}/episodes/[^"]*-s0*${season}e0*${epNum}[^"]*)"`,
+              "i"
+            );
+            const epMatch = seriesHtml.match(epRe);
+            if (!epMatch) return;
+            pageUrl = epMatch[1];
+          }
+
+          const pageHtml = await cfGet(pageUrl, TS_BASE + "/");
+
+          // Parse trembed server buttons (decode HTML entities: &#038; → &)
+          const embedRe = /data-src="([^"]*trembed=[^"]*)"/g;
+          const trembedUrls: string[] = [];
+          let em: RegExpExecArray | null;
+          while ((em = embedRe.exec(pageHtml)) !== null) {
+            const url = em[1].replace(/&#0*38;/g, "&").replace(/&amp;/g, "&");
+            if (!trembedUrls.includes(url)) trembedUrls.push(url);
+          }
+          if (!trembedUrls.length) return;
+
+          // Process each trembed server (up to 4) — extract direct stream, no iframe fallback
+          for (const trUrl of trembedUrls.slice(0, 4)) {
+            try {
+              const trHtml = await cfGet(trUrl, pageUrl);
+              const innerMatch = trHtml.match(/<iframe[^>]+src="([^"]+)"/i);
+              if (!innerMatch) continue;
+              await sendExtracted(innerMatch[1], "ToonStream");
+            } catch { /* skip this server */ }
+          }
         } catch { /* silent */ }
       })(),
 

@@ -26,16 +26,6 @@ function wrapMp4(url: string, ref: string): string {
 const KNOWN_EMBEDS = [
   "mega.nz", "mega.co.nz", "vidmoly", "vidbm", "ok.ru", "dailymotion", "youtube",
   "ya.kooora", "imovietime.bond",
-  // Video player embeds (not direct streams)
-  "vidhls.com/player", "embed.mystream.to", "filemoon.", "streamwish.",
-  "dood.", "streamtape.", "vidmoly.", "uptostream.", "playerwish.",
-  "wishfast.", "share4max.", "megamax.me", "asnwish.", "vidyard.",
-  // Animation embed players (JS-rendered, in-app iframe)
-  "vidsrc.xyz", "vidsrc.me", "vidsrc.to", "vidsrc.net",
-  "autoembed.cc", "player.autoembed.cc",
-  "multiembed.mov", "vidlink.pro",
-  "smashystream.com", "2embed.cc",
-  "embed.su/embed", "vidlink.pro",
 ];
 
 function isEmbedUrl(url: string): boolean {
