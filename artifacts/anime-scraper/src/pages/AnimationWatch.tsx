@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import {
   ChevronRight, Play, Loader2, AlertCircle,
@@ -32,13 +32,35 @@ function isEmbedUrl(url: string): boolean {
   return KNOWN_EMBEDS.some(d => url.includes(d));
 }
 function isHlsUrl(url: string): boolean {
-  // Must end with .m3u8 or have /hls/ path (not just "hls" in domain name)
   return url.includes(".m3u8") || url.includes("/hls/") || url.includes("yplayer");
+}
+
+function saveAnimProgress(tmdbId: string, type: string, season: number, ep: number, currentTime: number) {
+  if (!tmdbId || currentTime < 5) return;
+  const key = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
+  localStorage.setItem(key, String(Math.floor(currentTime)));
+}
+
+function loadAnimProgress(tmdbId: string, type: string, season: number, ep: number): number {
+  if (!tmdbId) return 0;
+  const key = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
+  return parseFloat(localStorage.getItem(key) || "0") || 0;
+}
+
+function saveAnimHistory(tmdbId: string, type: string, title: string, posterUrl: string, ep: number, season: number) {
+  if (!tmdbId) return;
+  try {
+    const histKey = "anim-watch-history";
+    const hist = JSON.parse(localStorage.getItem(histKey) || "[]");
+    const item = { id: tmdbId, type, title, poster: posterUrl, ep, season, date: new Date().toISOString() };
+    const filtered = hist.filter((h: any) => !(h.id === tmdbId && h.type === type && h.ep === ep && h.season === season));
+    localStorage.setItem(histKey, JSON.stringify([item, ...filtered].slice(0, 50)));
+  } catch { /* silent */ }
 }
 
 export default function AnimationWatch() {
   const [, navigate] = useLocation();
-  const params  = new URLSearchParams(window.location.search);
+  const params  = useMemo(() => new URLSearchParams(window.location.search), []);
   const title   = params.get("title")  || "";
   const type    = params.get("type")   || "movie";
   const ep      = parseInt(params.get("ep") || "1", 10) || 1;
@@ -56,6 +78,18 @@ export default function AnimationWatch() {
   const hlsRef   = useRef<any>(null);
   const esRef    = useRef<EventSource | null>(null);
   const seenUrls = useRef(new Set<string>());
+  const lastProgressSave = useRef(0);
+  const histSavedRef = useRef(false);
+
+  const displayTitle = decodeURIComponent(title);
+  const epLabel = type === "tv" ? ` • الحلقة ${ep}` : "";
+  const posterUrl = poster ? decodeURIComponent(poster) : "";
+
+  // ── Back navigation ────────────────────────────────────────────────────────
+  const goBack = useCallback(() => {
+    if (tmdbId && type) navigate(`/animation/${type}/${tmdbId}`);
+    else navigate("/animations");
+  }, [tmdbId, type, navigate]);
 
   // HLS.js dynamic import
   const loadHls = useCallback(async (videoEl: HTMLVideoElement, src: string) => {
@@ -83,7 +117,6 @@ export default function AnimationWatch() {
   const resolvePlayUrl = useCallback((src: Source): { url: string; isHls: boolean; isEmbed: boolean } => {
     const referer = window.location.origin;
 
-    // Server already gave us a proxyUrl → use it directly
     if (src.proxyUrl) {
       const isHls = src.proxyUrl.includes("hls-proxy") || src.proxyUrl.includes(".m3u8");
       return { url: src.proxyUrl, isHls, isEmbed: false };
@@ -98,7 +131,6 @@ export default function AnimationWatch() {
       const proxied = raw.startsWith("/") ? raw : wrapHls(raw, referer);
       return { url: proxied, isHls: true, isEmbed: false };
     }
-    // Use video-proxy for MP4
     const proxied = raw.startsWith("/api/") ? raw : wrapMp4(raw, referer);
     return { url: proxied, isHls: false, isEmbed: false };
   }, []);
@@ -124,12 +156,29 @@ export default function AnimationWatch() {
     if (step !== "playing" || !selSrc) return;
     setPlayerErr(false);
     const { url, isHls, isEmbed } = resolvePlayUrl(selSrc);
-    if (isEmbed) return; // rendered as iframe
+    if (isEmbed) return;
     const video = videoRef.current;
     if (!video) return;
 
     const onError = () => setPlayerErr(true);
+
+    const onCanPlay = () => {
+      const saved = loadAnimProgress(tmdbId, type, season, ep);
+      if (saved > 10 && video.duration && saved < video.duration - 30) {
+        video.currentTime = saved;
+      }
+    };
+
+    const onTimeUpdate = () => {
+      const now = Date.now();
+      if (now - lastProgressSave.current < 5000) return;
+      lastProgressSave.current = now;
+      saveAnimProgress(tmdbId, type, season, ep, video.currentTime);
+    };
+
     video.addEventListener("error", onError);
+    video.addEventListener("canplay", onCanPlay);
+    video.addEventListener("timeupdate", onTimeUpdate);
 
     if (isHls) {
       loadHls(video, url);
@@ -141,9 +190,21 @@ export default function AnimationWatch() {
 
     return () => {
       video.removeEventListener("error", onError);
+      video.removeEventListener("canplay", onCanPlay);
+      video.removeEventListener("timeupdate", onTimeUpdate);
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     };
-  }, [step, selSrc, loadHls, resolvePlayUrl]);
+  }, [step, selSrc, loadHls, resolvePlayUrl, tmdbId, type, season, ep]);
+
+  // Save to watch history when playback starts
+  useEffect(() => {
+    if (step !== "playing" || !selSrc || !tmdbId || histSavedRef.current) return;
+    histSavedRef.current = true;
+    saveAnimHistory(tmdbId, type, displayTitle, posterUrl, ep, season);
+  }, [step, selSrc, tmdbId, type, displayTitle, posterUrl, ep, season]);
+
+  // Reset history-saved flag when episode/source changes
+  useEffect(() => { histSavedRef.current = false; }, [tmdbId, type, ep, season]);
 
   // Extract direct URL for a source
   const tryExtract = useCallback(async (url: string) => {
@@ -151,11 +212,9 @@ export default function AnimationWatch() {
       const r = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(url)}`);
       const d = await r.json();
       let direct = d.directUrl || d.url || "";
-      // Wrap HLS if needed
       if (direct && direct.includes(".m3u8")) {
         direct = wrapHls(direct, url);
       }
-      // If extraction worked → mark ok; if not → mark "unknown" (user can still try)
       setSources(prev => prev.map(s =>
         s.url === url
           ? { ...s, directUrl: direct || undefined, status: direct ? "ok" : "unknown" as any }
@@ -171,6 +230,7 @@ export default function AnimationWatch() {
     const decodedTitle = decodeURIComponent(title);
     setStep("searching"); setSources([]); setSelSrc(null); setSseDone(false);
     seenUrls.current.clear();
+    histSavedRef.current = false;
 
     const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodedTitle)}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}`;
     const es = new EventSource(q);
@@ -186,7 +246,6 @@ export default function AnimationWatch() {
       if (seenUrls.current.has(key)) return;
       seenUrls.current.add(key);
 
-      // If server already extracted a direct stream → mark as ok immediately
       if (src.directUrl) {
         const isHls = src.directUrl.includes(".m3u8") || src.directUrl.includes("hls-proxy");
         const proxyUrl = src.proxyUrl || (isHls ? wrapHls(src.directUrl, window.location.origin) : wrapMp4(src.directUrl, window.location.origin));
@@ -232,10 +291,7 @@ export default function AnimationWatch() {
     };
 
     return () => { es.close(); };
-  }, [title, type, ep, season, tryExtract]);
-
-  const displayTitle = decodeURIComponent(title);
-  const epLabel = type === "tv" ? ` • الحلقة ${ep}` : "";
+  }, [title, type, ep, season, tmdbId, tryExtract]);
 
   const renderPlayer = () => {
     if (!selSrc) return null;
@@ -264,7 +320,6 @@ export default function AnimationWatch() {
           className="absolute inset-0 w-full h-full"
           style={{ background: "#000" }}
         />
-        {/* Player error overlay */}
         {playerErr && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-3">
             <XCircle className="w-9 h-9 text-red-400/70" />
@@ -296,7 +351,7 @@ export default function AnimationWatch() {
       {/* ── Top bar ── */}
       <div className="flex items-center gap-3 px-3 py-2.5 bg-black/90 border-b border-white/8">
         <button
-          onClick={() => { if (window.history.length > 1) window.history.back(); else navigate("/animations"); }}
+          onClick={goBack}
           className="w-7 h-7 rounded-lg bg-white/8 flex items-center justify-center active:scale-90 transition-transform"
         >
           <ChevronRight className="w-4 h-4 text-white" />
@@ -332,9 +387,9 @@ export default function AnimationWatch() {
       {/* ── Searching state ── */}
       {step === "searching" && (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8 py-12">
-          {poster && (
+          {posterUrl && (
             <motion.img
-              src={decodeURIComponent(poster)}
+              src={posterUrl}
               alt=""
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -420,7 +475,6 @@ export default function AnimationWatch() {
               );
             })}
 
-            {/* Loading more indicator — only while SSE is still open */}
             {!sseDone && sources.length > 0 && (
               <div className="flex items-center gap-2 py-2 px-3 text-white/20 text-[10px] font-['Cairo']">
                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -428,7 +482,6 @@ export default function AnimationWatch() {
               </div>
             )}
 
-            {/* All-unknown hint shown after SSE completes */}
             {sseDone && sources.length > 0 && sources.every(s => (s.status as any) === "unknown") && (
               <motion.div
                 initial={{ opacity: 0, y: 6 }}
@@ -451,8 +504,8 @@ export default function AnimationWatch() {
       {/* ── Error state ── */}
       {step === "error" && (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8 py-12">
-          {poster && (
-            <img src={decodeURIComponent(poster)} alt="" className="w-24 rounded-xl shadow-2xl opacity-40" />
+          {posterUrl && (
+            <img src={posterUrl} alt="" className="w-24 rounded-xl shadow-2xl opacity-40" />
           )}
           <div className="text-center space-y-2.5">
             <AlertCircle className="w-9 h-9 text-white/20 mx-auto" />
@@ -468,7 +521,7 @@ export default function AnimationWatch() {
               إعادة المحاولة
             </button>
             <button
-              onClick={() => { if (window.history.length > 1) window.history.back(); else navigate("/animations"); }}
+              onClick={goBack}
               className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-white/6 border border-white/10 text-xs font-black text-white/50 font-['Cairo'] active:scale-95 transition-transform"
             >
               <ChevronRight className="w-3.5 h-3.5" />

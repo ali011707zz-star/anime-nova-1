@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useLocation, Link } from "wouter";
 import {
   ChevronRight, Play, Star, Calendar, Clock,
@@ -46,6 +46,7 @@ export default function AnimationDetail() {
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
   const [descAr, setDescAr] = useState<string | null>(null);
+  const [epProgress, setEpProgress] = useState<Record<number, number>>({});
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -89,12 +90,41 @@ export default function AnimationDetail() {
       .catch(() => setEpLoading(false));
   }, [type, id, selSeason, detail]);
 
+  // Load episode progress from localStorage
+  useEffect(() => {
+    if (type !== "tv" || !episodes.length) return;
+    const prog: Record<number, number> = {};
+    episodes.forEach(ep => {
+      const key = `anim-wp-${id}-tv-${selSeason}-${ep.episode_number}`;
+      const t = parseFloat(localStorage.getItem(key) || "0");
+      if (t > 0) prog[ep.episode_number] = t;
+    });
+    setEpProgress(prog);
+  }, [episodes, id, selSeason, type]);
+
+  // Find last watched episode from history (for TV main watch button)
+  const continueEp = useMemo(() => {
+    if (type !== "tv") return undefined;
+    try {
+      const hist = JSON.parse(localStorage.getItem("anim-watch-history") || "[]");
+      const item = hist.find((h: any) => h.id === id && h.type === "tv");
+      if (item) return item.ep as number;
+    } catch {}
+    return 1;
+  }, [type, id]);
+
   const watchUrl = (ep?: number) => {
     const t = encodeURIComponent(detail?.title || detail?.name || "");
-    const poster = encodeURIComponent(detail?.poster_path ? `${IMG_W}${detail.poster_path}` : "");
-    const epStr  = ep != null ? `&ep=${ep}&season=${selSeason}` : "";
-    return `/animation/watch?title=${t}&type=${type}&id=${id}${epStr}&poster=${poster}`;
+    const posterPath = encodeURIComponent(detail?.poster_path ? `${IMG_W}${detail.poster_path}` : "");
+    if (ep != null) {
+      return `/animation/watch?title=${t}&type=${type}&id=${id}&ep=${ep}&season=${selSeason}&poster=${posterPath}`;
+    }
+    // For TV main button — use the continue episode or ep 1
+    const startEp = continueEp ?? 1;
+    return `/animation/watch?title=${t}&type=${type}&id=${id}&ep=${startEp}&season=${selSeason}&poster=${posterPath}`;
   };
+
+  const goBack = () => navigate("/animations");
 
   const toggleSave = () => {
     const key = `anim-${type}-${id}`;
@@ -113,10 +143,6 @@ export default function AnimationDetail() {
     setNewComment("");
   };
 
-  const goBack = () => {
-    if (window.history.length > 1) window.history.back();
-    else navigate("/animations");
-  };
 
   if (loading) return (
     <div className="bg-[#09090B] min-h-screen flex items-center justify-center">
@@ -254,7 +280,7 @@ export default function AnimationDetail() {
 
       <div className="px-4 mt-5 space-y-2.5">
         {/* Watch button */}
-        <Link href={watchUrl(type === "tv" ? undefined : undefined)}>
+        <Link href={watchUrl()}>
           <motion.button
             whileTap={{ scale: 0.97 }}
             className="w-full h-12 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-sm font-['Cairo'] text-white"
@@ -263,7 +289,11 @@ export default function AnimationDetail() {
             <div className="w-7 h-7 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
               <Play className="w-3.5 h-3.5 fill-white text-white" />
             </div>
-            {type === "movie" ? "مشاهدة الفيلم" : "مشاهدة المسلسل"}
+            {type === "movie"
+              ? "مشاهدة الفيلم"
+              : continueEp && continueEp > 1
+              ? `تابع الحلقة ${continueEp}`
+              : "مشاهدة المسلسل"}
           </motion.button>
         </Link>
 
@@ -364,40 +394,68 @@ export default function AnimationDetail() {
             </div>
           ) : (
             <div className="space-y-2">
-              {episodes.map(ep => (
-                <Link key={ep.episode_number} href={watchUrl(ep.episode_number)}>
+              {episodes.map(epItem => {
+                const progressSec = epProgress[epItem.episode_number] || 0;
+                const estDuration = (epItem.runtime || 24) * 60;
+                const progressPct = progressSec > 0 ? Math.min(100, Math.round((progressSec / estDuration) * 100)) : 0;
+                const watched = progressPct >= 90;
+                return (
+                <Link key={epItem.episode_number} href={watchUrl(epItem.episode_number)}>
                   <motion.div
                     whileTap={{ scale: 0.97 }}
-                    className="flex items-center gap-3 p-3 rounded-2xl bg-[#111116] border border-white/6 active:bg-white/8"
+                    className={`flex items-center gap-3 p-3 rounded-2xl border active:bg-white/8 ${
+                      watched ? "bg-white/4 border-white/4 opacity-60" : "bg-[#111116] border-white/6"
+                    }`}
                   >
                     <div className="w-[80px] h-[48px] rounded-xl overflow-hidden bg-white/6 flex-shrink-0 relative">
-                      {ep.still_path
-                        ? <img src={`${IMG_S}${ep.still_path}`} alt="" className="w-full h-full object-cover" />
+                      {epItem.still_path
+                        ? <img src={`${IMG_S}${epItem.still_path}`} alt="" className="w-full h-full object-cover" />
                         : <div className="w-full h-full flex items-center justify-center"><Play className="w-4 h-4 text-white/20" /></div>
                       }
                       <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
                       <div className="absolute bottom-1 left-1 text-[8px] font-black text-white/70 bg-black/50 px-1 rounded font-mono">
-                        {ep.episode_number}
+                        {epItem.episode_number}
                       </div>
+                      {/* Progress bar overlay */}
+                      {progressPct > 0 && !watched && (
+                        <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/20">
+                          <div className="h-full bg-primary" style={{ width: `${progressPct}%` }} />
+                        </div>
+                      )}
+                      {watched && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                          <div className="w-4 h-4 rounded-full bg-emerald-500/80 flex items-center justify-center">
+                            <svg viewBox="0 0 12 12" className="w-2.5 h-2.5 text-white fill-current"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0 text-right">
                       <p className="text-[11px] font-black text-white line-clamp-1 font-['Cairo']">
-                        {ep.name}
+                        {epItem.name}
                       </p>
-                      {ep.overview && (
-                        <p className="text-[9.5px] text-white/30 line-clamp-2 font-['Cairo'] mt-0.5 leading-snug">{ep.overview}</p>
+                      {epItem.overview && (
+                        <p className="text-[9.5px] text-white/30 line-clamp-2 font-['Cairo'] mt-0.5 leading-snug">{epItem.overview}</p>
                       )}
-                      {ep.runtime && (
-                        <div className="flex items-center gap-1 mt-1">
-                          <Clock className="w-2.5 h-2.5 text-white/20" />
-                          <span className="text-[8.5px] text-white/20 font-['Cairo']">{ep.runtime} دق</span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2 mt-1">
+                        {epItem.runtime && (
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 text-white/20" />
+                            <span className="text-[8.5px] text-white/20 font-['Cairo']">{epItem.runtime} دق</span>
+                          </div>
+                        )}
+                        {progressSec > 30 && !watched && (
+                          <span className="text-[8.5px] text-primary/60 font-['Cairo']">
+                            {Math.floor(progressSec / 60)}:{String(Math.floor(progressSec % 60)).padStart(2, "0")}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <Play className="w-4 h-4 text-primary flex-shrink-0" />
                   </motion.div>
                 </Link>
-              ))}
+                );
+              })}
               {episodes.length === 0 && (
                 <p className="text-center text-white/25 text-sm font-['Cairo'] py-6">لا توجد حلقات لهذا الموسم</p>
               )}

@@ -261,24 +261,38 @@ async function tcScrapePlayer(url: string): Promise<string[]> {
     const cdnMatch = html.match(/https?:\/\/(?:embed\.mystream\.to|vidbm\.|streamwish\.|filemoon\.|ok\.ru|dood\.|streamtape\.|vidmoly\.|mega\.nz)[^\s"'<>]{6,}/gi);
     if (cdnMatch) return [...new Set(cdnMatch)].slice(0, 3);
 
-    // 4. DooPlay AJAX fallback
-    const postId = parsePostId(html);
-    const nonce  = parseNonce(html);
+    // 4. Get post ID — try HTML parse first, then WordPress REST API via slug
+    let postId = parsePostId(html);
+    if (!postId) {
+      const slugMatch = url.match(/topcinemaa\.com\/([^/?#]+)\/?$/);
+      if (slugMatch) {
+        try {
+          const slugRaw = slugMatch[1];
+          const restText = await cfGet(
+            `https://topcinemaa.com/wp-json/wp/v2/posts?slug=${slugRaw}&_fields=id`,
+            "https://topcinemaa.com/"
+          );
+          const restData = JSON.parse(restText);
+          if (Array.isArray(restData) && restData[0]?.id) postId = String(restData[0].id);
+        } catch { /* silent */ }
+      }
+    }
+    const nonce = parseNonce(html);
     if (!postId) return [];
 
     const results: string[] = [];
-    await Promise.allSettled([1, 2, 3].map(async (num) => {
-      const body = new URLSearchParams({ action: "doo_player_ajax", post_id: postId, nonce, num: String(num), g: "0" });
+    await Promise.allSettled([1, 2, 3, 4, 5].map(async (num) => {
+      const body = new URLSearchParams({ action: "doo_player_ajax", post_id: postId!, nonce, num: String(num), g: "0" });
       try {
         const r = await fetch("https://topcinemaa.com/wp-admin/admin-ajax.php", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA, "Referer": url, "X-Requested-With": "XMLHttpRequest" },
           body  : body.toString(),
-          signal: AbortSignal.timeout(6_000),
+          signal: AbortSignal.timeout(8_000),
         });
         if (!r.ok) return;
         const text = await r.text();
-        if (!text || text === "0" || text.length > 3000) return;
+        if (!text || text === "0" || text === "false") return;
         let parsed: any;
         try { parsed = JSON.parse(text); } catch { return; }
         const u = parsed.embed_url || parsed.url || parsed.link || "";
@@ -614,25 +628,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
 
-      // ── 11. moviesapi.club (IMDB ID) — static HTML, extractable ─────────────
+      // ── 11. vidsrc.me (IMDB ID) — known embed source ────────────────────────
       (async () => {
         if (!imdbId) return;
         try {
           const embedUrl = type === "tv"
-            ? `https://moviesapi.club/tv/${imdbId}-${season}-${epNum}`
-            : `https://moviesapi.club/movie/${imdbId}`;
-          send("status", { msg: "MoviesAPI: جاري الاستخراج…" });
-          const html = await cfGet(embedUrl, embedUrl);
-          // moviesapi.club serves JW Player with m3u8 in script
-          const m3u8Match = html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)['"]/);
-          if (m3u8Match) {
-            const direct = m3u8Match[1];
-            const proxy  = wrapHls(direct, embedUrl);
-            sendSource(direct, "MoviesAPI", direct, proxy);
-            return;
-          }
-          // Fallback: try extractVideoDeep on the page
-          await sendExtracted(embedUrl, "MoviesAPI");
+            ? `https://vidsrc.me/embed/tv?imdb=${imdbId}&season=${season}&episode=${epNum}`
+            : `https://vidsrc.me/embed/movie?imdb=${imdbId}`;
+          send("status", { msg: "VidSrc: جاري الاستخراج…" });
+          await sendExtracted(embedUrl, "VidSrc");
         } catch { /* silent */ }
       })(),
 
@@ -693,24 +697,23 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 9. moviz-time.co (title-based) ───────────────────────────────────────
+      // ── 9. moviz-time.co (REST API title-based) ──────────────────────────────
       (async () => {
         try {
-          const searchHtml = await cfGet(`${MV_BASE}/?s=${encodeURIComponent(title)}`, MV_BASE + "/");
-          const allLinks = parseMVLinks(searchHtml);
-          if (!allLinks.length) return;
+          // Use WordPress REST API — the /?s= search page is dynamically rendered
+          const apiUrl = `${MV_BASE}/wp-json/wp/v2/posts?search=${encodeURIComponent(title)}&per_page=8&_fields=id,link,title`;
+          const apiText = await cfGet(apiUrl, `${MV_BASE}/`);
+          const posts: any[] = JSON.parse(apiText);
+          if (!Array.isArray(posts) || !posts.length) return;
 
-          let links = allLinks;
-          if (type === "movie") {
-            const movieLinks = allLinks.filter(l => {
-              const decoded = decodeURIComponent(l.url).toLowerCase();
-              return decoded.includes("/فيلم") || decoded.includes("/film") || decoded.includes("/movie");
-            });
-            if (movieLinks.length) links = movieLinks;
-          }
-          links.sort((a, b) => titleSim(b.title, title) - titleSim(a.title, title));
-          const best = links[0];
-          if (titleSim(best.title, title) < 0.15) return;
+          const scored = posts.map((p: any) => {
+            const t = (p.title?.rendered || "").replace(/<[^>]+>/g, "").replace(/&[a-z]+;/g, "").trim();
+            const postUrl = (p.link || "").replace(/\\\//g, "/");
+            return { url: postUrl, title: t, score: titleSim(t, title) };
+          });
+          scored.sort((a, b) => b.score - a.score);
+          const best = scored[0];
+          if (!best || best.score < 0.15) return;
           send("status", { msg: `Moviz: وُجد "${best.title}"` });
 
           if (type === "tv") {

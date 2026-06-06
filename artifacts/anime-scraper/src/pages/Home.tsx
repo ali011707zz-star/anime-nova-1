@@ -24,6 +24,16 @@ interface WatchHistoryItem {
 interface ContinueItem extends WatchHistoryItem {
   watchTimeSec: number;
 }
+interface AnimContinueItem {
+  id: string;
+  type: "movie" | "tv";
+  title: string;
+  poster: string;
+  ep: number;
+  season: number;
+  date: string;
+  watchTimeSec: number;
+}
 function fmtMinute(sec: number) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -39,6 +49,19 @@ function loadContinueWatching(): ContinueItem[] {
       })
       .filter(item => item.watchTimeSec > 30)
       .slice(0, 8);
+  } catch { return []; }
+}
+function loadAnimContinueWatching(): AnimContinueItem[] {
+  try {
+    const h = JSON.parse(localStorage.getItem("anim-watch-history") || "[]") as AnimContinueItem[];
+    return h
+      .map(item => {
+        const key = `anim-wp-${item.id}-${item.type}-${item.season}-${item.ep}`;
+        const t = parseFloat(localStorage.getItem(key) || "0") || 0;
+        return { ...item, watchTimeSec: t };
+      })
+      .filter(item => item.watchTimeSec > 30)
+      .slice(0, 6);
   } catch { return []; }
 }
 
@@ -199,11 +222,13 @@ export default function Home() {
   };
 
   const [continueWatching, setContinueWatching] = useState<ContinueItem[]>([]);
+  const [animContinue, setAnimContinue] = useState<AnimContinueItem[]>([]);
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
 
   /* Load continue-watching from localStorage (fast, synchronous) */
   useEffect(() => {
     setContinueWatching(loadContinueWatching());
+    setAnimContinue(loadAnimContinueWatching());
   }, []);
 
   /* Load popular animation movies from TMDB */
@@ -621,7 +646,7 @@ export default function Home() {
       </div>
 
       {/* ── تابع المشاهدة (Continue Watching) ── */}
-      {continueWatching.length > 0 && !selectedGenre && (
+      {(continueWatching.length > 0 || animContinue.length > 0) && !selectedGenre && (
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
@@ -632,27 +657,61 @@ export default function Home() {
             </div>
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+            {/* Anime history items */}
             {continueWatching.map(item => {
               const progressPct = Math.min(100, Math.round((item.watchTimeSec / (24 * 60)) * 100));
               return (
-                <Link key={`${item.id}-${item.ep}`} href={`/watch?anime=${item.id}&ep=${item.ep}&title=${encodeURIComponent(item.title)}&cover=${encodeURIComponent(item.cover || "")}`}>
+                <Link key={`anime-${item.id}-${item.ep}`} href={`/watch?anime=${item.id}&ep=${item.ep}&title=${encodeURIComponent(item.title)}&cover=${encodeURIComponent(item.cover || "")}`}>
                   <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
                     <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
                       {item.cover
                         ? <img src={item.cover} alt="" className="w-full h-full object-cover" loading="lazy" />
                         : <div className="w-full h-full bg-violet-900/20" />}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/20 to-transparent" />
-                      {/* Episode badge */}
                       <div className="absolute top-2 right-2 bg-violet-600 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
                         ح {item.ep}
                       </div>
-                      {/* Resume time badge */}
                       <div className="absolute top-2 left-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-white/70 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-white/10">
                         {fmtMinute(item.watchTimeSec)}
                       </div>
-                      {/* Progress bar */}
                       <div className="absolute bottom-10 left-2 right-2 h-0.5 rounded-full bg-white/15 overflow-hidden">
                         <div className="h-full rounded-full bg-violet-500" style={{ width: `${progressPct}%` }} />
+                      </div>
+                      <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
+                        <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{item.title}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                </Link>
+              );
+            })}
+            {/* Animation history items */}
+            {animContinue.map(item => {
+              const estDur = item.type === "movie" ? 90 * 60 : 24 * 60;
+              const progressPct = Math.min(100, Math.round((item.watchTimeSec / estDur) * 100));
+              const href = (() => {
+                const t = encodeURIComponent(item.title);
+                const p = encodeURIComponent(item.poster || "");
+                if (item.type === "tv") return `/animation/watch?title=${t}&type=tv&id=${item.id}&ep=${item.ep}&season=${item.season}&poster=${p}`;
+                return `/animation/watch?title=${t}&type=movie&id=${item.id}&ep=1&season=1&poster=${p}`;
+              })();
+              return (
+                <Link key={`anim-${item.id}-${item.type}-${item.ep}`} href={href}>
+                  <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
+                    <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-primary/15 shadow-lg shadow-black/50">
+                      {item.poster
+                        ? <img src={item.poster} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        : <div className="w-full h-full bg-violet-900/20" />}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/20 to-transparent" />
+                      {/* Anim badge */}
+                      <div className="absolute top-2 right-2 bg-primary/80 text-white text-[7px] px-1.5 py-0.5 rounded-lg font-black">
+                        {item.type === "tv" ? `ح ${item.ep}` : "فيلم"}
+                      </div>
+                      <div className="absolute top-2 left-2 flex items-center gap-0.5 bg-black/65 backdrop-blur-md text-white/70 text-[7.5px] px-1.5 py-0.5 rounded-lg font-black border border-white/10">
+                        {fmtMinute(item.watchTimeSec)}
+                      </div>
+                      <div className="absolute bottom-10 left-2 right-2 h-0.5 rounded-full bg-white/15 overflow-hidden">
+                        <div className="h-full rounded-full bg-primary" style={{ width: `${progressPct}%` }} />
                       </div>
                       <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
                         <p className="text-[9.5px] text-white/90 font-bold truncate leading-tight">{item.title}</p>
