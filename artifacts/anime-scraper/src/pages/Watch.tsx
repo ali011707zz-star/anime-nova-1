@@ -66,7 +66,6 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH" },
   { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "AL" },
   { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD" },
-  { site: "anime4up",     name: "أنمي 4 أب",    desc: "عربي مترجم",              tag: "4U" },
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK" },
   { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS" },
   { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم",              tag: "AT" },
@@ -120,10 +119,8 @@ function shouldShowSrc(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   // Remove mp4upload entirely (HEVC codec — audio plays but video fails on Linux Chrome)
   if (url.includes("mp4upload")) return false;
-  // For embed sources, only allow mega.nz and vidmoly
-  if (src.isEmbed) {
-    return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
-  }
+  // Hide ALL embed/iframe sources — keep code, just don't display
+  if (src.isEmbed) return false;
   return true;
 }
 
@@ -694,8 +691,10 @@ function ScraperPicker({
     "360p SD":   displaySources.filter(s => getSrcQualityTier(s) === "360p SD"),
   };
 
-  /* ── While ANY scraper is still running: show full-screen loading poster ── */
-  if (!allDone) {
+  const hasSources = displaySources.length > 0;
+
+  /* ── While scrapers are running AND no sources yet: show full-screen loading poster ── */
+  if (!allDone && !hasSources) {
     return (
       <div className="fixed inset-0 z-50 overflow-hidden bg-[#07070d]" dir="rtl">
         {cover && (
@@ -760,9 +759,6 @@ function ScraperPicker({
       </div>
     );
   }
-
-  /* ── All scrapers done: show results ── */
-  const hasSources = displaySources.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#06060c]" dir="rtl">
