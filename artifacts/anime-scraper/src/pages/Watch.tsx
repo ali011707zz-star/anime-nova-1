@@ -66,6 +66,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH" },
   { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "AL" },
   { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD" },
+  { site: "anime4up",     name: "أنمي 4 أب",    desc: "عربي مترجم",              tag: "4U" },
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK" },
   { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS" },
   { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم",              tag: "AT" },
@@ -773,8 +774,9 @@ function ScraperPicker({
           paddingLeft: 14,
         }}>
         <button onClick={onBack}
-          className="w-10 h-10 flex items-center justify-center active:opacity-50 shrink-0">
-          <ChevronRight className="w-5 h-5 text-white/55" />
+          className="w-11 h-11 flex items-center justify-center active:scale-90 shrink-0 rounded-xl transition-all"
+          style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.11)" }}>
+          <ChevronRight className="w-5 h-5 text-white/70" />
         </button>
 
         {cover && (
@@ -802,16 +804,16 @@ function ScraperPicker({
 
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={onPrevEp} disabled={ep <= 1}
-            className="flex items-center gap-1 px-3 py-2 rounded-xl transition-all active:scale-90 disabled:opacity-20"
-            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.10)" }}>
-            <ChevronRight className="w-3.5 h-3.5 text-white/60" />
-            <span className="text-white/55 text-[10px] font-bold font-['Cairo'] leading-none">السابقة</span>
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl transition-all active:scale-90 disabled:opacity-20"
+            style={{ background: "rgba(255,255,255,0.09)", border: "1px solid rgba(255,255,255,0.13)" }}>
+            <ChevronRight className="w-4 h-4 text-white/70" />
+            <span className="text-white/65 text-[12px] font-bold font-['Cairo'] leading-none">السابقة</span>
           </button>
           <button onClick={onNextEp} disabled={ep >= totalEps}
-            className="flex items-center gap-1 px-3 py-2 rounded-xl transition-all active:scale-90 disabled:opacity-20"
-            style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.28)" }}>
-            <span className="text-violet-300/80 text-[10px] font-bold font-['Cairo'] leading-none">التالية</span>
-            <ChevronLeft className="w-3.5 h-3.5 text-violet-300/70" />
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl transition-all active:scale-90 disabled:opacity-20"
+            style={{ background: "rgba(124,58,237,0.22)", border: "1px solid rgba(124,58,237,0.38)" }}>
+            <span className="text-violet-300/90 text-[12px] font-bold font-['Cairo'] leading-none">التالية</span>
+            <ChevronLeft className="w-4 h-4 text-violet-300/80" />
           </button>
         </div>
       </div>
