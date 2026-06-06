@@ -1,14 +1,21 @@
 import { useState, useEffect, lazy, Suspense, Component, ReactNode } from "react";
-import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation, useSearch } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { Header } from "@/components/layout/Header";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AuthProvider } from "@/lib/auth-context";
 
-class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  constructor(props: { children: ReactNode }) { super(props); this.state = { hasError: false }; }
+class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { hasError: boolean; lastKey?: string }> {
+  constructor(props: { children: ReactNode; resetKey?: string }) {
+    super(props);
+    this.state = { hasError: false, lastKey: props.resetKey };
+  }
   static getDerivedStateFromError() { return { hasError: true }; }
+  static getDerivedStateFromProps(props: { resetKey?: string }, state: { hasError: boolean; lastKey?: string }) {
+    if (props.resetKey !== state.lastKey) return { hasError: false, lastKey: props.resetKey };
+    return null;
+  }
   componentDidCatch() {}
   render() {
     if (this.state.hasError) {
@@ -29,6 +36,16 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
     }
     return this.props.children;
   }
+}
+
+/* ── Route wrappers that remount components when search params change ── */
+function WatchWrapper() {
+  const search = useSearch();
+  return <Watch key={search} />;
+}
+function AnimationWatchWrapper() {
+  const search = useSearch();
+  return <AnimationWatch key={search} />;
 }
 
 const Home               = lazy(() => import("@/pages/Home"));
@@ -88,25 +105,27 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
   return (
     <>
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
-      <Suspense fallback={<PageLoader />}>
-        <Switch>
-          <Route path="/"                        component={Home} />
-          <Route path="/anime/:id"               component={AnimeDetail} />
-          <Route path="/episodes/:id"            component={EpisodeList} />
-          <Route path="/watch/:id"               component={WatchById} />
-          <Route path="/watch"                   component={Watch} />
-          <Route path="/search"                  component={Search} />
-          <Route path="/schedule"               component={Schedule} />
-          <Route path="/library"                 component={Library} />
-          <Route path="/browse"                  component={Browse} />
-          <Route path="/news"                    component={News} />
-          <Route path="/settings"               component={Settings} />
-          <Route path="/animations"              component={AnimationLibrary} />
-          <Route path="/animation/watch"         component={AnimationWatch} />
-          <Route path="/animation/:type/:id"     component={AnimationDetail} />
-          <Route                                 component={NotFound} />
-        </Switch>
-      </Suspense>
+      <ErrorBoundary resetKey={location}>
+        <Suspense fallback={<PageLoader />}>
+          <Switch>
+            <Route path="/"                        component={Home} />
+            <Route path="/anime/:id"               component={AnimeDetail} />
+            <Route path="/episodes/:id"            component={EpisodeList} />
+            <Route path="/watch/:id"               component={WatchById} />
+            <Route path="/watch"                   component={WatchWrapper} />
+            <Route path="/search"                  component={Search} />
+            <Route path="/schedule"               component={Schedule} />
+            <Route path="/library"                 component={Library} />
+            <Route path="/browse"                  component={Browse} />
+            <Route path="/news"                    component={News} />
+            <Route path="/settings"               component={Settings} />
+            <Route path="/animations"              component={AnimationLibrary} />
+            <Route path="/animation/watch"         component={AnimationWatchWrapper} />
+            <Route path="/animation/:type/:id"     component={AnimationDetail} />
+            <Route                                 component={NotFound} />
+          </Switch>
+        </Suspense>
+      </ErrorBoundary>
       <BottomNav />
       <Toaster />
     </>
@@ -122,7 +141,7 @@ function App() {
   }, []);
 
   return (
-    <ErrorBoundary>
+    <ErrorBoundary resetKey="root">
       <AuthProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <Router onMenuClick={() => setSidebarOpen(true)} />

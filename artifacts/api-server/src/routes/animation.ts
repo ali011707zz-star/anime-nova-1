@@ -628,16 +628,24 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
 
-      // ── 11. vidsrc.me (IMDB ID) — known embed source ────────────────────────
+      // ── 11. vidsrc.me (IMDB ID) + vidsrc.xyz (TMDB ID) ─────────────────────
       (async () => {
-        if (!imdbId) return;
         try {
-          const embedUrl = type === "tv"
-            ? `https://vidsrc.me/embed/tv?imdb=${imdbId}&season=${season}&episode=${epNum}`
-            : `https://vidsrc.me/embed/movie?imdb=${imdbId}`;
           send("status", { msg: "VidSrc: جاري الاستخراج…" });
-          await sendExtracted(embedUrl, "VidSrc");
+          // Try vidsrc.xyz with TMDB ID (no IMDB required)
+          const xyzUrl = type === "tv"
+            ? `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+            : `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}`;
+          await sendExtracted(xyzUrl, "VidSrc");
         } catch { /* silent */ }
+        if (imdbId) {
+          try {
+            const meUrl = type === "tv"
+              ? `https://vidsrc.me/embed/tv?imdb=${imdbId}&season=${season}&episode=${epNum}`
+              : `https://vidsrc.me/embed/movie?imdb=${imdbId}`;
+            await sendExtracted(meUrl, "VidSrc2");
+          } catch { /* silent */ }
+        }
       })(),
 
       // ── 12. StarDima (title-based, Arabic content) ───────────────────────────
@@ -824,6 +832,83 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               if (!innerMatch) continue;
               await sendExtracted(innerMatch[1], "ToonStream");
             } catch { /* skip this server */ }
+          }
+        } catch { /* silent */ }
+      })(),
+
+      // ── 14. wecima.show (DooPlay, Arabic) ────────────────────────────────────
+      (async () => {
+        const WC_BASE  = "https://wecima.show";
+        const WC_AJAX  = `${WC_BASE}/wp-admin/admin-ajax.php`;
+        try {
+          send("status", { msg: "Wecima: جاري البحث…" });
+          const searchHtml = await cfGet(`${WC_BASE}/?s=${encodeURIComponent(title)}`, WC_BASE + "/");
+
+          // Parse result links — wecima uses /movie/{slug}/ and /series/{slug}/
+          const seen = new Set<string>();
+          const results: { url: string; slug: string; titleStr: string }[] = [];
+          const re = /href="(https?:\/\/wecima\.show\/(movie|movies?|series|film)\/([^"/?]+)\/?)"/gi;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(searchHtml)) !== null) {
+            if (seen.has(m[1])) continue; seen.add(m[1]);
+            const slug = decodeURIComponent(m[3]).replace(/-\d{4}$/, "").replace(/-/g, " ");
+            results.push({ url: m[1], slug: m[3], titleStr: slug });
+          }
+          if (!results.length) return;
+
+          const scored = results.map(r => ({ ...r, score: titleSim(r.titleStr, title) }));
+          scored.sort((a, b) => b.score - a.score);
+          const best = scored[0];
+          if (best.score < 0.2) return;
+          send("status", { msg: `Wecima: وُجد "${best.titleStr}"` });
+
+          // For TV shows find specific episode
+          let pageUrl = best.url;
+          if (type === "tv") {
+            const seriesHtml = await cfGet(best.url, WC_BASE + "/");
+            // Episode links like /episode/{slug}-الحلقة-{N}/
+            const epRe = /href="(https?:\/\/wecima\.show\/episode\/[^"]+)"/gi;
+            const eps: { url: string; num: number }[] = [];
+            let em: RegExpExecArray | null;
+            while ((em = epRe.exec(seriesHtml)) !== null) {
+              const numM = em[1].match(/(?:الحلقة|episode)[^\d]*(\d+)/u);
+              const num = numM ? parseInt(numM[1]) : 0;
+              eps.push({ url: em[1], num });
+            }
+            const target = eps.find(e => e.num === epNum) || eps[0];
+            if (!target) return;
+            pageUrl = target.url;
+          }
+
+          const pageHtml = await cfGet(pageUrl, WC_BASE + "/");
+          // Try direct iframes first
+          const iframes = parseIframes(pageHtml, ["wecima", "google", "histats", "w3counter"]);
+          for (const u of iframes) await sendExtracted(u, "Wecima سيرفر");
+
+          // Try DooPlay AJAX
+          const postId = parsePostId(pageHtml);
+          const nonce  = parseNonce(pageHtml);
+          if (postId) {
+            await Promise.allSettled(
+              [1, 2, 3, 4].map(async (num) => {
+                try {
+                  const body = new URLSearchParams({ action: "doo_player_ajax", post_id: postId, nonce, num: String(num), g: "0" });
+                  const r = await fetch(WC_AJAX, {
+                    method : "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA, "Referer": pageUrl, "X-Requested-With": "XMLHttpRequest" },
+                    body   : body.toString(),
+                    signal : AbortSignal.timeout(7_000),
+                  });
+                  if (!r.ok) return;
+                  const text = await r.text();
+                  if (!text || text === "0" || text === "false") return;
+                  let parsed: any;
+                  try { parsed = JSON.parse(text); } catch { return; }
+                  const url = parsed.embed_url || parsed.url || parsed.link || "";
+                  if (url) await sendExtracted(url, "Wecima AJAX");
+                } catch { /* skip */ }
+              })
+            );
           }
         } catch { /* silent */ }
       })(),
