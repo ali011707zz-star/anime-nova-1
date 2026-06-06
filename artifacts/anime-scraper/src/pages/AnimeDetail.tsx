@@ -81,7 +81,9 @@ export default function AnimeDetail() {
 
   useEffect(() => {
     if (!params.id) return;
-    setLoading(true); setDescAr(null); setShowFull(false);
+    let cancelled = false;
+    const ctrl = new AbortController();
+    setLoading(true); setAnime(null); setDescAr(null); setShowFull(false);
     const savedList: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     setSaved(savedList.includes(parseInt(params.id)));
     const savedC = localStorage.getItem(`comments-${params.id}`);
@@ -91,7 +93,9 @@ export default function AnimeDetail() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id) } }),
+      signal: ctrl.signal,
     }).then(r => r.json()).then(d => {
+      if (cancelled) return;
       const a = d.data?.Media;
       setAnime(a);
       if (!a?.description) return;
@@ -105,15 +109,18 @@ export default function AnimeDetail() {
       const raw = stripped.substring(0, 480);
       (async () => {
         try {
-          const r = await fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}`);
-          const d = await r.json();
-          if (d.translated && d.translated !== raw && d.translated.length > 10) {
-            setDescAr(d.translated);
-            localStorage.setItem(`desc-ar-${params.id}`, d.translated);
+          const r2 = await fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}`, { signal: ctrl.signal });
+          const d2 = await r2.json();
+          if (cancelled) return;
+          if (d2.translated && d2.translated !== raw && d2.translated.length > 10) {
+            setDescAr(d2.translated);
+            localStorage.setItem(`desc-ar-${params.id}`, d2.translated);
           } else { setDescAr(stripped); }
-        } catch { setDescAr(stripped); }
+        } catch { if (!cancelled) setDescAr(stripped); }
       })();
-    }).finally(() => setLoading(false));
+    }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; ctrl.abort(); };
   }, [params.id]);
 
   const toggleSave = () => {
@@ -171,7 +178,7 @@ export default function AnimeDetail() {
         }} />
         {/* Back button */}
         <button
-          onClick={() => { if (window.history.length > 1) window.history.back(); else navigate("/"); }}
+          onClick={() => window.history.back()}
           className="absolute top-5 right-4 w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90"
         >
           <ChevronRight className="w-5 h-5 text-white" />
