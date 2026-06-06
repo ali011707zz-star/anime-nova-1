@@ -309,16 +309,20 @@ async function tcScrapePlayer(url: string): Promise<string[]> {
 
 router.get("/animation/browse", async (req: Request, res: Response) => {
   try {
-    const type  = String(req.query.type  || "movie");
-    const genre = String(req.query.genre || "16");
-    const page  = String(req.query.page  || "1");
-    const ep    = type === "tv" ? "/discover/tv"    : "/discover/movie";
-    const gp    = genre === "all" || genre === "0"
-                  ? "16"
-                  : genre === "16" ? "16" : `16,${genre}`;
-    // For TV: exclude anime (TMDB keyword 210024) so only Western animation appears
+    const type   = String(req.query.type   || "movie");
+    const genre  = String(req.query.genre  || "16");
+    const page   = String(req.query.page   || "1");
+    const sort   = String(req.query.sort   || "popularity.desc");
+    const year   = String(req.query.year   || "");
+    const ep     = type === "tv" ? "/discover/tv"    : "/discover/movie";
+    const gp     = genre === "all" || genre === "0"
+                   ? "16"
+                   : genre === "16" ? "16" : `16,${genre}`;
     const tvExtra = type === "tv" ? "&without_keywords=210024" : "";
-    const data = await tmdb(`${ep}?with_genres=${gp}&sort_by=popularity.desc&page=${page}&include_adult=false${tvExtra}`);
+    const yearParam = year
+      ? (type === "tv" ? `&first_air_date_year=${year}` : `&primary_release_year=${year}`)
+      : "";
+    const data = await tmdb(`${ep}?with_genres=${gp}&sort_by=${sort}&page=${page}&include_adult=false${tvExtra}${yearParam}&vote_count.gte=10`);
     res.json(data);
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
@@ -897,10 +901,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const data: any = await r.json();
                 const servers: any[] = (data.servers || []);
 
-                for (const srv of servers.slice(0, 4)) {
-                  if (!srv.url) continue;
-                  let rawUrl   = String(srv.url);
-                  let referer  = SC_REF_HLS;
+                // Probe all servers in parallel, only send working ones
+                await Promise.allSettled(servers.slice(0, 4).map(async (srv) => {
+                  if (!srv.url) return;
+                  let rawUrl  = String(srv.url);
+                  let referer = SC_REF_HLS;
 
                   // Unwrap starcima CDN proxy: /cdn/?url=...&referer=...
                   if (rawUrl.includes(`${SC_BASE}/cdn/?`)) {
@@ -911,9 +916,19 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     } catch { /* keep original */ }
                   }
 
+                  // Quick probe — skip if CDN returns non-2xx
+                  try {
+                    const probe = await fetch(rawUrl, {
+                      method: "HEAD",
+                      headers: { "User-Agent": UA, "Referer": referer },
+                      signal: AbortSignal.timeout(5_000),
+                    });
+                    if (!probe.ok && probe.status !== 403) return; // 403 may still work via proxy
+                  } catch { return; }
+
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
                   sendSource(srv.url, `StarCima ${srv.name || "HLS"}`, proxied, proxied);
-                }
+                }));
               } catch { /* silent */ }
             })(),
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Search, Film, Tv, Star, ChevronDown, Loader2 } from "lucide-react";
+import { Search, Film, Tv, Star, ChevronDown, Loader2, SlidersHorizontal, X, TrendingUp, Calendar, Flame, Award } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const IMG = "https://image.tmdb.org/t/p/w342";
@@ -30,6 +30,22 @@ const TV_GENRES: Genre[] = [
   { id: 18,    ar: "دراما" },
 ];
 
+const SORT_OPTIONS = [
+  { value: "popularity.desc",          label: "الأكثر مشاهدة",  icon: Flame },
+  { value: "vote_average.desc",        label: "الأعلى تقييماً", icon: Award },
+  { value: "primary_release_date.desc",label: "الأحدث",         icon: Calendar },
+  { value: "primary_release_date.asc", label: "الأقدم",         icon: Calendar },
+] as const;
+
+const SORT_OPTIONS_TV = [
+  { value: "popularity.desc",     label: "الأكثر مشاهدة",  icon: Flame },
+  { value: "vote_average.desc",   label: "الأعلى تقييماً", icon: Award },
+  { value: "first_air_date.desc", label: "الأحدث",         icon: Calendar },
+  { value: "first_air_date.asc",  label: "الأقدم",         icon: Calendar },
+] as const;
+
+const YEARS = ["الكل", ...Array.from({ length: 14 }, (_, i) => String(2025 - i))];
+
 interface TmdbItem {
   id: number;
   title?: string;
@@ -41,13 +57,14 @@ interface TmdbItem {
   release_date?: string;
   first_air_date?: string;
   genre_ids?: number[];
-  overview?: string;
 }
 
 export default function AnimationLibrary() {
   const [, navigate]    = useLocation();
   const [type, setType] = useState<MediaType>("movie");
   const [genre, setGenre]  = useState<number>(0);
+  const [sort, setSort]    = useState("popularity.desc");
+  const [year, setYear]    = useState("");
   const [items, setItems]  = useState<TmdbItem[]>([]);
   const [page, setPage]    = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -55,19 +72,21 @@ export default function AnimationLibrary() {
   const [searchQ, setSearchQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<TmdbItem[]>([]);
-  const searchRef  = useRef<HTMLInputElement>(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const searchRef   = useRef<HTMLInputElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const genres = type === "movie" ? MOVIE_GENRES : TV_GENRES;
+  const sortOptions = type === "movie" ? SORT_OPTIONS : SORT_OPTIONS_TV;
 
   const loadingRef = useRef(false);
-  const load = useCallback(async (t: MediaType, g: number, p: number, reset = false) => {
+  const load = useCallback(async (t: MediaType, g: number, s: string, y: string, p: number, reset = false) => {
     if (loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
     try {
       const gParam = g === 0 ? "16" : `${g}`;
-      const r = await fetch(`/api/animation/browse?type=${t}&genre=${gParam}&page=${p}`);
+      const r = await fetch(`/api/animation/browse?type=${t}&genre=${gParam}&sort=${encodeURIComponent(s)}&year=${y}&page=${p}`);
       const data = await r.json();
       const results: TmdbItem[] = data.results || [];
       setItems(prev => reset ? results : [...prev, ...results]);
@@ -80,8 +99,8 @@ export default function AnimationLibrary() {
 
   useEffect(() => {
     setItems([]); setPage(1); setHasMore(true);
-    load(type, genre, 1, true);
-  }, [type, genre]);
+    load(type, genre, sort, year, 1, true);
+  }, [type, genre, sort, year]);
 
   useEffect(() => {
     if (!searchQ.trim()) { setSearchResults([]); return; }
@@ -95,75 +114,103 @@ export default function AnimationLibrary() {
     }, 350);
   }, [searchQ, type]);
 
-  const year = (item: TmdbItem) => {
+  const yearLabel = (item: TmdbItem) => {
     const d = item.release_date || item.first_air_date || "";
     return d.slice(0, 4);
   };
 
-  const displayTitle = (item: TmdbItem) => item.original_title || item.original_name || item.title || item.name || "—";
+  const displayTitle = (item: TmdbItem) =>
+    item.title || item.name || item.original_title || item.original_name || "—";
+
+  const activeFilterCount = (genre !== 0 ? 1 : 0) + (sort !== "popularity.desc" ? 1 : 0) + (year ? 1 : 0);
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)] pb-28" dir="rtl">
+
       {/* ── Header ── */}
       <div className="sticky top-0 z-30 bg-[var(--bg-base)]/95 backdrop-blur-2xl border-b border-white/[0.06]">
         <div className="px-4 pt-12 pb-3">
-          <div className="flex items-center justify-between mb-3">
+
+          {/* Title row */}
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-[20px] font-black text-white font-['Cairo']">رسوم متحركة</h1>
-              <p className="text-[11px] text-white/35 font-['Cairo']">أفلام ومسلسلات أنيميشن</p>
+              <h1 className="text-[22px] font-black text-white font-['Cairo'] leading-none">رسوم متحركة</h1>
+              <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">أفلام ومسلسلات أنيميشن عالمية</p>
             </div>
-            <button
-              onClick={() => { setSearchOpen(o => !o); setTimeout(() => searchRef.current?.focus(), 100); }}
-              className="w-9 h-9 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center active:scale-90 transition-transform"
-            >
-              <Search className="w-4 h-4 text-white/60" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowFilters(o => !o)}
+                className="relative w-9 h-9 rounded-2xl flex items-center justify-center active:scale-90 transition-transform"
+                style={{ background: showFilters ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.06)", border: `1px solid ${showFilters ? "rgba(139,92,246,0.4)" : "rgba(255,255,255,0.10)"}` }}
+              >
+                <SlidersHorizontal className="w-4 h-4" style={{ color: showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)" }} />
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1 -left-1 w-4 h-4 rounded-full text-[8px] font-black flex items-center justify-center text-white"
+                    style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => { setSearchOpen(o => !o); setTimeout(() => searchRef.current?.focus(), 100); }}
+                className="w-9 h-9 rounded-2xl flex items-center justify-center active:scale-90 transition-transform"
+                style={{ background: searchOpen ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.06)", border: `1px solid ${searchOpen ? "rgba(139,92,246,0.4)" : "rgba(255,255,255,0.10)"}` }}
+              >
+                <Search className="w-4 h-4" style={{ color: searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)" }} />
+              </button>
+            </div>
+          </div>
+
+          {/* Type tabs */}
+          <div className="flex gap-2 mb-3">
+            {(["movie", "tv"] as MediaType[]).map(t => (
+              <button key={t} onClick={() => { setType(t); setGenre(0); setSort("popularity.desc"); }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-black font-['Cairo'] transition-all duration-200"
+                style={type === t
+                  ? { background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", color: "#fff", boxShadow: "0 4px 16px rgba(109,40,217,0.35)" }
+                  : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                {t === "movie" ? <Film className="w-3.5 h-3.5" /> : <Tv className="w-3.5 h-3.5" />}
+                {t === "movie" ? "أفلام" : "مسلسلات"}
+              </button>
+            ))}
           </div>
 
           {/* Search bar */}
           <AnimatePresence>
             {searchOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden mb-3"
-              >
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }} className="overflow-hidden mb-3">
                 <div className="relative">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
-                  <input
-                    ref={searchRef}
-                    type="text"
+                  <input ref={searchRef} type="text"
                     placeholder={type === "movie" ? "ابحث عن فيلم أنيميشن…" : "ابحث عن مسلسل أنيميشن…"}
-                    value={searchQ}
-                    onChange={e => setSearchQ(e.target.value)}
-                    className="w-full bg-white/6 border border-white/10 rounded-2xl py-2.5 pr-9 pl-4 text-sm text-white placeholder-white/25 font-['Cairo'] outline-none focus:border-primary/40"
-                  />
+                    value={searchQ} onChange={e => setSearchQ(e.target.value)}
+                    className="w-full py-2.5 pr-9 pl-10 text-sm text-white placeholder-white/25 font-['Cairo'] outline-none"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 14 }} />
+                  {searchQ && (
+                    <button onClick={() => setSearchQ("")}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center"
+                      style={{ background: "rgba(255,255,255,0.12)" }}>
+                      <X className="w-3 h-3 text-white/60" />
+                    </button>
+                  )}
                 </div>
                 <AnimatePresence>
                   {searchResults.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="mt-2 bg-[var(--bg-card)] border border-white/8 rounded-2xl overflow-hidden"
-                    >
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                      className="mt-2 overflow-hidden"
+                      style={{ background: "rgba(15,12,30,0.95)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, backdropFilter: "blur(20px)" }}>
                       {searchResults.map(item => (
-                        <button
-                          key={item.id}
-                          onClick={() => {
-                            navigate(`/animation/${type}/${item.id}`);
-                            setSearchOpen(false); setSearchQ("");
-                          }}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 border-b border-white/5 last:border-0 active:bg-white/5"
-                        >
+                        <button key={item.id}
+                          onClick={() => { navigate(`/animation/${type}/${item.id}`); setSearchOpen(false); setSearchQ(""); }}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 border-b border-white/5 last:border-0 active:bg-white/5">
                           {item.poster_path
                             ? <img src={`${IMG}${item.poster_path}`} alt="" className="w-8 h-11 rounded-lg object-cover" />
                             : <div className="w-8 h-11 rounded-lg bg-white/8 flex items-center justify-center"><Film className="w-3.5 h-3.5 text-white/30" /></div>
                           }
                           <div className="text-right flex-1 min-w-0">
                             <p className="text-sm font-black text-white line-clamp-1 font-['Cairo']">{displayTitle(item)}</p>
-                            <p className="text-[10px] text-white/35 font-['Cairo']">{year(item)}</p>
+                            <p className="text-[10px] text-white/35 font-['Cairo']">{yearLabel(item)}</p>
                           </div>
                         </button>
                       ))}
@@ -174,87 +221,173 @@ export default function AnimationLibrary() {
             )}
           </AnimatePresence>
 
-          {/* Type tabs */}
-          <div className="flex gap-2 mb-3">
-            {(["movie", "tv"] as MediaType[]).map(t => (
-              <button
-                key={t}
-                onClick={() => { setType(t); setGenre(0); }}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl text-xs font-black font-['Cairo'] transition-all duration-200 ${
-                  type === t
-                    ? "bg-primary text-white shadow-lg shadow-primary/25"
-                    : "bg-white/6 text-white/40 border border-white/8"
-                }`}
-              >
-                {t === "movie" ? <Film className="w-3.5 h-3.5" /> : <Tv className="w-3.5 h-3.5" />}
-                {t === "movie" ? "أفلام" : "مسلسلات"}
-              </button>
-            ))}
-          </div>
+          {/* Filter panel */}
+          <AnimatePresence>
+            {showFilters && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <div className="rounded-2xl mb-3 p-3 space-y-3"
+                  style={{ background: "rgba(139,92,246,0.07)", border: "1px solid rgba(139,92,246,0.18)" }}>
 
-          {/* Genre filter */}
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-            {genres.map(g => (
-              <button
-                key={g.id}
-                onClick={() => setGenre(g.id)}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-2xl text-[11px] font-black font-['Cairo'] transition-all duration-200 ${
-                  genre === g.id
-                    ? "bg-primary/20 text-primary border border-primary/30"
-                    : "bg-white/5 text-white/35 border border-white/8"
-                }`}
-              >
-                {g.ar}
-              </button>
-            ))}
-          </div>
+                  {/* Sort */}
+                  <div>
+                    <p className="text-[9px] font-black text-white/30 font-['Cairo'] tracking-widest mb-1.5 px-0.5">ترتيب حسب</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {sortOptions.map(opt => {
+                        const Icon = opt.icon;
+                        const active = sort === opt.value;
+                        return (
+                          <button key={opt.value} onClick={() => setSort(opt.value)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-all"
+                            style={active
+                              ? { background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", color: "#fff", boxShadow: "0 3px 12px rgba(109,40,217,0.35)" }
+                              : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                            <Icon className="w-3 h-3" />
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Year */}
+                  <div>
+                    <p className="text-[9px] font-black text-white/30 font-['Cairo'] tracking-widest mb-1.5 px-0.5">السنة</p>
+                    <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+                      {YEARS.map(y => {
+                        const val = y === "الكل" ? "" : y;
+                        const active = year === val;
+                        return (
+                          <button key={y} onClick={() => setYear(val)}
+                            className="shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-all"
+                            style={active
+                              ? { background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", color: "#fff" }
+                              : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                            {y}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Genre */}
+                  <div>
+                    <p className="text-[9px] font-black text-white/30 font-['Cairo'] tracking-widest mb-1.5 px-0.5">النوع</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {genres.map(g => {
+                        const active = genre === g.id;
+                        return (
+                          <button key={g.id} onClick={() => setGenre(g.id)}
+                            className="px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-all"
+                            style={active
+                              ? { background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", color: "#fff" }
+                              : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                            {g.ar}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Reset */}
+                  {activeFilterCount > 0 && (
+                    <button onClick={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
+                      className="flex items-center gap-1.5 text-[10px] font-black font-['Cairo'] px-3 py-1.5 rounded-xl"
+                      style={{ color: "rgba(252,165,165,0.8)", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.16)" }}>
+                      <X className="w-3 h-3" /> مسح الفلاتر ({activeFilterCount})
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Active filters summary bar (when panel is closed) */}
+          {!showFilters && activeFilterCount > 0 && (
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 mb-1" style={{ scrollbarWidth: "none" }}>
+              {sort !== "popularity.desc" && (
+                <span className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo']"
+                  style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.28)", color: "#c4b5fd" }}>
+                  {sortOptions.find(o => o.value === sort)?.label}
+                  <button onClick={() => setSort("popularity.desc")}><X className="w-2.5 h-2.5" /></button>
+                </span>
+              )}
+              {year && (
+                <span className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo']"
+                  style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.28)", color: "#c4b5fd" }}>
+                  {year}
+                  <button onClick={() => setYear("")}><X className="w-2.5 h-2.5" /></button>
+                </span>
+              )}
+              {genre !== 0 && (
+                <span className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo']"
+                  style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.28)", color: "#c4b5fd" }}>
+                  {genres.find(g => g.id === genre)?.ar}
+                  <button onClick={() => setGenre(0)}><X className="w-2.5 h-2.5" /></button>
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── Grid ── */}
       <div className="px-4 pt-5">
         {items.length === 0 && loading ? (
-          <div className="flex items-center justify-center py-24">
-            <Loader2 className="w-7 h-7 animate-spin text-primary" />
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <div className="relative w-10 h-10">
+              <div className="absolute inset-0 rounded-full border-2 border-violet-500/20" />
+              <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-400/40"
+                animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
+            </div>
+            <p className="text-white/25 text-xs font-['Cairo']">جارٍ التحميل…</p>
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <div className="w-16 h-16 rounded-3xl flex items-center justify-center"
+              style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.18)" }}>
+              <Film className="w-7 h-7 text-violet-400/50" />
+            </div>
+            <p className="text-white/40 text-sm font-black font-['Cairo']">لا توجد نتائج</p>
+            <button onClick={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
+              className="text-[11px] font-black font-['Cairo'] px-4 py-2 rounded-xl"
+              style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.28)", color: "#c4b5fd" }}>
+              مسح الفلاتر
+            </button>
           </div>
         ) : (
           <>
             <div className="grid grid-cols-3 gap-3">
               <AnimatePresence>
                 {items.map((item, i) => (
-                  <motion.div
-                    key={`${item.id}-${i}`}
-                    initial={{ opacity: 0, scale: 0.95 }}
+                  <motion.div key={`${item.id}-${i}`}
+                    initial={{ opacity: 0, scale: 0.93 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: Math.min(i % 12, 11) * 0.03 }}
-                  >
+                    transition={{ delay: Math.min(i % 12, 11) * 0.03 }}>
                     <Link href={`/animation/${type}/${item.id}`} className="block">
-                      <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/6 aspect-[2/3]">
+                      <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/6 aspect-[2/3]"
+                        style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
                         {item.poster_path ? (
-                          <img
-                            src={`${IMG}${item.poster_path}`}
-                            alt={displayTitle(item)}
-                            loading="lazy"
-                            className="w-full h-full object-cover"
-                          />
+                          <img src={`${IMG}${item.poster_path}`} alt={displayTitle(item)}
+                            loading="lazy" className="w-full h-full object-cover" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center">
+                          <div className="w-full h-full flex items-center justify-center bg-violet-900/10">
                             <Film className="w-8 h-8 text-white/15" />
                           </div>
                         )}
-                        {/* Score badge */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/5 to-transparent" />
                         {(item.vote_average || 0) > 0 && (
-                          <div className="absolute top-1.5 left-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-sm rounded-lg px-1.5 py-0.5">
+                          <div className="absolute top-1.5 left-1.5 flex items-center gap-0.5 rounded-lg px-1.5 py-0.5"
+                            style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)", border: "1px solid rgba(251,191,36,0.18)" }}>
                             <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
                             <span className="text-[9px] font-black text-white">{item.vote_average!.toFixed(1)}</span>
                           </div>
                         )}
-                        {/* Year */}
-                        {year(item) && (
-                          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 to-transparent px-2 py-2">
-                            <p className="text-[9px] text-white/50 font-['Cairo']">{year(item)}</p>
-                          </div>
-                        )}
+                        <div className="absolute bottom-0 inset-x-0 px-2 pb-2">
+                          {yearLabel(item) && (
+                            <p className="text-[8px] text-white/35 font-['Cairo'] mb-0.5">{yearLabel(item)}</p>
+                          )}
+                        </div>
                       </div>
                       <p className="mt-1.5 text-[10.5px] font-black text-white/80 line-clamp-2 leading-snug font-['Cairo'] text-right">
                         {displayTitle(item)}
@@ -265,22 +398,18 @@ export default function AnimationLibrary() {
               </AnimatePresence>
             </div>
 
-            {/* Load more */}
             {hasMore && (
               <div className="mt-8 flex justify-center">
-                <button
-                  onClick={() => load(type, genre, page + 1)}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/8 border border-white/10 text-sm font-black text-white/60 font-['Cairo'] active:scale-95 transition-transform disabled:opacity-50"
-                >
+                <button onClick={() => load(type, genre, sort, year, page + 1)} disabled={loading}
+                  className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-black text-white/60 font-['Cairo'] active:scale-95 transition-transform disabled:opacity-50"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}>
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronDown className="w-4 h-4" />}
                   تحميل المزيد
                 </button>
               </div>
             )}
-
             {!hasMore && items.length > 0 && (
-              <p className="text-center text-white/20 text-xs font-['Cairo'] mt-8">لا مزيد من النتائج</p>
+              <p className="text-center text-white/15 text-xs font-['Cairo'] mt-8 pb-4">لا مزيد من النتائج</p>
             )}
           </>
         )}
