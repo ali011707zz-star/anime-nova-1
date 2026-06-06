@@ -11,7 +11,8 @@
 - [AniPub titleSimilarity bug](anipub-similarity.md) — includes() shortcut returns same score for title+sequel; use length-ratio formula instead
 - [AniPub movie ep case](anipub-similarity.md) — when local.ep[] is empty, use local.link directly (movie has one link, not episode array)
 - [Subtitle APIs dead/gated](subtitle-apis.md) — rest.opensubtitles.org → 302 to broken URL; subdl.com needs key; jimaku.cc requires auth; endpoint returns null gracefully
-- [Dead Arabic anime sites](dead-arabic-sites.md) — anime4up.cam→spam redirect, animerco→403, animeblkom→403, animeiat→dead, animepahe.ru→blocked from Replit
+- [Dead Arabic anime sites](dead-arabic-sites.md) — anime-phoenix.com→timeout from Replit; anime4up.cam→JWT JS-redirect CF protection; w1.anime4up.rest→403; animerco→403; animeblkom→403; animeiat→dead; animepahe.ru→blocked
+- [AnimeDar slug fast-path wrong series](animedar-slug-order.md) — direct slug "one-piece" hits OVA/movie page not main series; fix: search FIRST (accurate), slug only as fallback for 3+ word slugs
 - [Embed-only sources pipeline](embed-only-pipeline.md) — EMBED_ONLY_HOSTS are now SKIPPED entirely in extractAndCollect (user requirement: no iframes); seenKeys must be LOCAL per-scraper or all sources are silently dropped
 - [share4max NOT embed-only](sharmax-inertia.md) — share4max.com removed from EMBED_ONLY_HOSTS; extractVideoDeep already has Inertia.js extraction (parseShareMaxStreams); blocking it in EMBED_ONLY_HOSTS silently drops ALL shahiid sources
 - [parseVideoUrl unquoted key bug](parsevideo-unquoted.md) — streamwish/filemoon unpacked JS has unquoted keys (file:"url"), not "file":"url"; must include /\bfile\s*:\s*["'`]/ pattern alongside quoted-key patterns; parseStreamwish must call unpackPacked first
