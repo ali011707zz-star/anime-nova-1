@@ -1747,8 +1747,8 @@ export default function WatchPage() {
   }, [animeId, ep]);
 
   function goEp(n: number) {
-    /* Use full navigation — wouter only tracks pathname, not search; useRef params won't update otherwise */
-    window.location.href = `/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam, cover })}`;
+    /* Navigate via wouter — WatchWrapper adds key={search} so Watch remounts with fresh params */
+    navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam, cover })}`);
   }
 
   function handleBack() {

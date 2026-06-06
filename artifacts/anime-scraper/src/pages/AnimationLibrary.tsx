@@ -34,6 +34,8 @@ interface TmdbItem {
   id: number;
   title?: string;
   name?: string;
+  original_title?: string;
+  original_name?: string;
   poster_path?: string;
   vote_average?: number;
   release_date?: string;
@@ -98,7 +100,7 @@ export default function AnimationLibrary() {
     return d.slice(0, 4);
   };
 
-  const displayTitle = (item: TmdbItem) => item.title || item.name || "—";
+  const displayTitle = (item: TmdbItem) => item.original_title || item.original_name || item.title || item.name || "—";
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)] pb-28" dir="rtl">

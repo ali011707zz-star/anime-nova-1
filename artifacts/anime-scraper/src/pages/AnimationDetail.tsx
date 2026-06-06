@@ -114,7 +114,7 @@ export default function AnimationDetail() {
   }, [type, id]);
 
   const watchUrl = (ep?: number) => {
-    const t = encodeURIComponent(detail?.title || detail?.name || "");
+    const t = encodeURIComponent(detail?.original_title || detail?.original_name || detail?.title || detail?.name || "");
     const posterPath = encodeURIComponent(detail?.poster_path ? `${IMG_W}${detail.poster_path}` : "");
     if (ep != null) {
       return `/animation/watch?title=${t}&type=${type}&id=${id}&ep=${ep}&season=${selSeason}&poster=${posterPath}`;
@@ -159,7 +159,7 @@ export default function AnimationDetail() {
     </div>
   );
 
-  const title     = detail.title || detail.name || "—";
+  const title     = detail.original_title || detail.original_name || detail.title || detail.name || "—";
   const rawTitle  = title;
   const year      = (detail.release_date || detail.first_air_date || "").slice(0, 4);
   const runtime   = detail.runtime || (detail.episode_run_time?.[0]) || 0;
