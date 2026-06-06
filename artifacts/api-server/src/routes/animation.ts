@@ -982,6 +982,86 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
+      // ── 15. StarCima (vidzee HLS direct + arabic-sources embeds, TMDB ID native) ─
+      (async () => {
+        if (!tmdbId) return;
+        const SC_BASE    = "https://starcima.com";
+        const SC_VIDZEE  = `${SC_BASE}/api/vidzee`;
+        const SC_ARABIC  = `${SC_BASE}/api/arabic-sources`;
+        const SC_REF_HLS = "https://player.vidzee.wtf/";
+        const tvExtra    = type === "tv" ? `&season=${season}&episode=${epNum}` : "";
+        const watchRef   = `${SC_BASE}/watch/${tmdbId}?type=${type}`;
+
+        const scHeaders = { "User-Agent": UA, "Referer": watchRef, "Accept": "application/json" };
+
+        try {
+          send("status", { msg: "StarCima: جاري الاستخراج…" });
+
+          await Promise.allSettled([
+
+            // ── vidzee: 3 direct HLS servers ────────────────────────────────
+            (async () => {
+              try {
+                const r = await fetch(
+                  `${SC_VIDZEE}?tmdbId=${tmdbId}&type=${type}${tvExtra}`,
+                  { headers: scHeaders, signal: AbortSignal.timeout(12_000) }
+                );
+                if (!r.ok) return;
+                const data: any = await r.json();
+                const servers: any[] = (data.servers || []);
+
+                for (const srv of servers.slice(0, 4)) {
+                  if (!srv.url) continue;
+                  let rawUrl   = String(srv.url);
+                  let referer  = SC_REF_HLS;
+
+                  // Unwrap starcima CDN proxy: /cdn/?url=...&referer=...
+                  if (rawUrl.includes(`${SC_BASE}/cdn/?`)) {
+                    try {
+                      const pu   = new URL(rawUrl);
+                      rawUrl     = pu.searchParams.get("url")     || rawUrl;
+                      referer    = pu.searchParams.get("referer") || SC_REF_HLS;
+                    } catch { /* keep original */ }
+                  }
+
+                  const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
+                  sendSource(srv.url, `StarCima ${srv.name || "HLS"}`, proxied, proxied);
+                }
+              } catch { /* silent */ }
+            })(),
+
+            // ── arabic-sources: many embed servers (streamwish, filemoon …) ─
+            (async () => {
+              try {
+                const sp = new URLSearchParams({
+                  title : title,
+                  type,
+                  tmdbId,
+                  ...(type === "tv" ? { season: String(season), episode: String(epNum) } : {}),
+                });
+                const r = await fetch(`${SC_ARABIC}?${sp.toString()}`, {
+                  headers: scHeaders,
+                  signal : AbortSignal.timeout(12_000),
+                });
+                if (!r.ok) return;
+                const data: any = await r.json();
+                const servers: any[] = (data.servers || []);
+
+                // isTopPriority first (streamwish, filemoon, dood …)
+                const priority = servers.filter((s: any) => s.isTopPriority);
+                const rest     = servers.filter((s: any) => !s.isTopPriority);
+
+                for (const srv of [...priority, ...rest].slice(0, 10)) {
+                  if (!srv.embedUrl) continue;
+                  await sendExtracted(srv.embedUrl, `StarCima ${srv.name || "عربي"}`);
+                }
+              } catch { /* silent */ }
+            })(),
+          ]);
+
+        } catch { /* silent */ }
+      })(),
+
     ]);
 
     if (sourceCount === 0) {

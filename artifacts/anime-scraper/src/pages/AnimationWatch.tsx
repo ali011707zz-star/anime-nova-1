@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useLocation, Link } from "wouter";
+import { useLocation } from "wouter";
 import {
   ChevronRight, Play, Loader2, AlertCircle,
-  RefreshCw, Server, CheckCircle, Wifi, XCircle, SkipForward,
+  Server, CheckCircle, Wifi, SkipForward,
   List, ChevronDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import RiftPlayer from "@/components/player/RiftPlayer";
 
 interface Source {
   url: string;
@@ -13,7 +14,6 @@ interface Source {
   directUrl?: string;
   proxyUrl?: string;
   status?: "loading" | "ok" | "fail";
-  isEmbed?: boolean;
   streamType?: "hls" | "mp4" | "dash";
 }
 
@@ -24,16 +24,8 @@ function wrapMp4(url: string, ref: string): string {
   return `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
 }
 
-const KNOWN_EMBEDS = [
-  "mega.nz", "mega.co.nz", "vidmoly", "vidbm", "ok.ru", "dailymotion", "youtube",
-  "ya.kooora", "imovietime.bond",
-];
-
-function isEmbedUrl(url: string): boolean {
-  return KNOWN_EMBEDS.some(d => url.includes(d));
-}
 function isHlsUrl(url: string): boolean {
-  return url.includes(".m3u8") || url.includes("/hls/") || url.includes("yplayer");
+  return url.includes(".m3u8") || url.includes("/hls/") || url.includes("hls-proxy");
 }
 
 function saveAnimProgress(tmdbId: string, type: string, season: number, ep: number, currentTime: number) {
@@ -74,21 +66,19 @@ export default function AnimationWatch() {
   const [step, setStep]         = useState<"searching" | "sources" | "playing" | "error">("searching");
   const [statusMsg, setStatus]  = useState("جاري البحث…");
   const [sources, setSources]   = useState<Source[]>([]);
-  const [selSrc, setSelSrc]    = useState<Source | null>(null);
-  const [sseDone, setSseDone]  = useState(false);
-  const [playerErr, setPlayerErr] = useState(false);
+  const [selSrc, setSelSrc]     = useState<Source | null>(null);
+  const [sseDone, setSseDone]   = useState(false);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [showEpList, setShowEpList] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef   = useRef<any>(null);
-  const esRef    = useRef<EventSource | null>(null);
-  const seenUrls = useRef(new Set<string>());
+
+  const esRef            = useRef<EventSource | null>(null);
+  const seenUrls         = useRef(new Set<string>());
   const lastProgressSave = useRef(0);
-  const histSavedRef = useRef(false);
+  const histSavedRef     = useRef(false);
 
   const displayTitle = decodeURIComponent(title);
-  const epLabel = type === "tv" ? ` • الحلقة ${ep}` : "";
-  const posterUrl = poster ? decodeURIComponent(poster) : "";
+  const epLabel      = type === "tv" ? ` • الحلقة ${ep}` : "";
+  const posterUrl    = poster ? decodeURIComponent(poster) : "";
 
   // ── Back navigation ────────────────────────────────────────────────────────
   const goBack = useCallback(() => {
@@ -96,122 +86,63 @@ export default function AnimationWatch() {
     else navigate("/animations");
   }, [tmdbId, type, navigate]);
 
-  // HLS.js dynamic import
-  const loadHls = useCallback(async (videoEl: HTMLVideoElement, src: string) => {
-    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-    if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
-      videoEl.src = src;
-      videoEl.play().catch(() => {});
-      return;
-    }
-    try {
-      const { default: Hls } = await import("hls.js");
-      if (!Hls.isSupported()) { videoEl.src = src; videoEl.play().catch(() => {}); return; }
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
-      hlsRef.current = hls;
-      hls.loadSource(src);
-      hls.attachMedia(videoEl);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => { videoEl.play().catch(() => {}); });
-    } catch {
-      videoEl.src = src;
-      videoEl.play().catch(() => {});
-    }
+  // ── Progress save (from RiftPlayer onTimeUpdate) ───────────────────────────
+  const handleTimeUpdate = useCallback((t: number) => {
+    const now = Date.now();
+    if (now - lastProgressSave.current < 5000) return;
+    lastProgressSave.current = now;
+    saveAnimProgress(tmdbId, type, season, ep, t);
+  }, [tmdbId, type, season, ep]);
+
+  // ── Resolve best play URL from a source ───────────────────────────────────
+  const getSourceInfo = useCallback((src: Source): { url: string; isHls: boolean } => {
+    const url   = src.proxyUrl || src.directUrl || src.url;
+    const isHls = isHlsUrl(url) || src.streamType === "hls";
+    return { url, isHls };
   }, []);
 
-  // Determine playable URL for a source
-  const resolvePlayUrl = useCallback((src: Source): { url: string; isHls: boolean; isEmbed: boolean } => {
-    const referer = window.location.origin;
-
-    if (src.proxyUrl) {
-      const isHls = src.proxyUrl.includes("hls-proxy") || src.proxyUrl.includes(".m3u8");
-      return { url: src.proxyUrl, isHls, isEmbed: false };
-    }
-
-    const raw = src.directUrl || src.url;
-
-    if (isEmbedUrl(raw) && !src.directUrl) {
-      return { url: raw, isHls: false, isEmbed: true };
-    }
-    if (raw.startsWith("/api/anime/hls-proxy") || raw.includes(".m3u8")) {
-      const proxied = raw.startsWith("/") ? raw : wrapHls(raw, referer);
-      return { url: proxied, isHls: true, isEmbed: false };
-    }
-    const proxied = raw.startsWith("/api/") ? raw : wrapMp4(raw, referer);
-    return { url: proxied, isHls: false, isEmbed: false };
-  }, []);
-
-  // Play a source
+  // ── Play a source ─────────────────────────────────────────────────────────
   const playSource = useCallback((src: Source) => {
     setSelSrc(src);
-    setPlayerErr(false);
     setStep("playing");
   }, []);
 
-  // Play next available source
+  // ── Try next source on player fail ────────────────────────────────────────
   const playNext = useCallback(() => {
-    if (!selSrc) return;
-    const idx = sources.findIndex(s => s.url === selSrc.url);
+    if (!selSrc) { setStep("sources"); return; }
+    const idx  = sources.findIndex(s => s.url === selSrc.url);
     const next = sources.find((s, i) => i > idx && (s.status === "ok" || (s.status as any) === "unknown"));
     if (next) playSource(next);
     else setStep("sources");
   }, [selSrc, sources, playSource]);
 
-  // Attach player when selSrc + step=playing
-  useEffect(() => {
-    if (step !== "playing" || !selSrc) return;
-    setPlayerErr(false);
-    const { url, isHls, isEmbed } = resolvePlayUrl(selSrc);
-    if (isEmbed) return;
-    const video = videoRef.current;
-    if (!video) return;
-
-    const onError = () => setPlayerErr(true);
-
-    const onCanPlay = () => {
-      const saved = loadAnimProgress(tmdbId, type, season, ep);
-      if (saved > 10 && video.duration && saved < video.duration - 30) {
-        video.currentTime = saved;
-      }
-    };
-
-    const onTimeUpdate = () => {
-      const now = Date.now();
-      if (now - lastProgressSave.current < 5000) return;
-      lastProgressSave.current = now;
-      saveAnimProgress(tmdbId, type, season, ep, video.currentTime);
-    };
-
-    video.addEventListener("error", onError);
-    video.addEventListener("canplay", onCanPlay);
-    video.addEventListener("timeupdate", onTimeUpdate);
-
-    if (isHls) {
-      loadHls(video, url);
-    } else {
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-      video.src = url;
-      video.play().catch(() => {});
+  // ── Front-end extraction for unresolved sources ───────────────────────────
+  const tryExtract = useCallback(async (url: string) => {
+    try {
+      const r = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(url)}`);
+      const d = await r.json();
+      let direct = d.directUrl || d.url || "";
+      if (direct && direct.includes(".m3u8")) direct = wrapHls(direct, url);
+      setSources(prev => prev.map(s =>
+        s.url === url
+          ? { ...s, directUrl: direct || undefined, proxyUrl: direct || undefined, status: direct ? "ok" : "unknown" as any }
+          : s
+      ));
+    } catch {
+      setSources(prev => prev.map(s => s.url === url ? { ...s, status: "unknown" as any } : s));
     }
+  }, []);
 
-    return () => {
-      video.removeEventListener("error", onError);
-      video.removeEventListener("canplay", onCanPlay);
-      video.removeEventListener("timeupdate", onTimeUpdate);
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-    };
-  }, [step, selSrc, loadHls, resolvePlayUrl, tmdbId, type, season, ep]);
-
-  // Save to watch history when playback starts
+  // ── Save to watch history ─────────────────────────────────────────────────
   useEffect(() => {
     if (step !== "playing" || !selSrc || !tmdbId || histSavedRef.current) return;
     histSavedRef.current = true;
     saveAnimHistory(tmdbId, type, displayTitle, posterUrl, ep, season);
   }, [step, selSrc, tmdbId, type, displayTitle, posterUrl, ep, season]);
 
-  // Reset history-saved flag when episode/source changes
   useEffect(() => { histSavedRef.current = false; }, [tmdbId, type, ep, season]);
 
-  // Fetch episode list for TV shows
+  // ── Fetch episode list for TV ─────────────────────────────────────────────
   useEffect(() => {
     if (type !== "tv" || !tmdbId) return;
     fetch(`/api/animation/season?id=${tmdbId}&season=${season}`)
@@ -220,26 +151,7 @@ export default function AnimationWatch() {
       .catch(() => {});
   }, [type, tmdbId, season]);
 
-  // Extract direct URL for a source
-  const tryExtract = useCallback(async (url: string) => {
-    try {
-      const r = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(url)}`);
-      const d = await r.json();
-      let direct = d.directUrl || d.url || "";
-      if (direct && direct.includes(".m3u8")) {
-        direct = wrapHls(direct, url);
-      }
-      setSources(prev => prev.map(s =>
-        s.url === url
-          ? { ...s, directUrl: direct || undefined, status: direct ? "ok" : "unknown" as any }
-          : s
-      ));
-    } catch {
-      setSources(prev => prev.map(s => s.url === url ? { ...s, status: "unknown" as any } : s));
-    }
-  }, []);
-
-  // Start SSE stream
+  // ── SSE stream ────────────────────────────────────────────────────────────
   useEffect(() => {
     const decodedTitle = decodeURIComponent(title);
     setStep("searching"); setSources([]); setSelSrc(null); setSseDone(false);
@@ -260,10 +172,20 @@ export default function AnimationWatch() {
       if (seenUrls.current.has(key)) return;
       seenUrls.current.add(key);
 
-      if (src.directUrl) {
-        const isHls = src.directUrl.includes(".m3u8") || src.directUrl.includes("hls-proxy");
-        const proxyUrl = src.proxyUrl || (isHls ? wrapHls(src.directUrl, window.location.origin) : wrapMp4(src.directUrl, window.location.origin));
-        const newSrc: Source = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, status: "ok", isEmbed: false };
+      if (src.directUrl || src.proxyUrl) {
+        const resolved = src.proxyUrl || src.directUrl!;
+        const isHls    = isHlsUrl(resolved);
+        const proxyUrl = src.proxyUrl || (isHls
+          ? wrapHls(src.directUrl!, window.location.origin)
+          : wrapMp4(src.directUrl!, window.location.origin));
+        const newSrc: Source = {
+          url      : src.url,
+          label    : src.label,
+          directUrl: src.directUrl,
+          proxyUrl,
+          status   : "ok",
+          streamType: isHls ? "hls" : "mp4",
+        };
         setSources(prev => {
           const updated = [...prev, newSrc];
           if (updated.length === 1) setStep("sources");
@@ -272,14 +194,14 @@ export default function AnimationWatch() {
         return;
       }
 
-      const embed = isEmbedUrl(src.url) && !isHlsUrl(src.url);
-      const newSrc: Source = { url: src.url, label: src.label, status: embed ? "ok" : "loading", isEmbed: embed };
+      // No direct URL yet — try client-side extraction
+      const newSrc: Source = { url: src.url, label: src.label, status: "loading" };
       setSources(prev => {
         const updated = [...prev, newSrc];
         if (updated.length === 1) setStep("sources");
         return updated;
       });
-      if (!embed) tryExtract(src.url);
+      tryExtract(src.url);
     });
 
     es.addEventListener("error", (e) => {
@@ -307,61 +229,16 @@ export default function AnimationWatch() {
     return () => { es.close(); };
   }, [title, type, ep, season, tmdbId, tryExtract]);
 
-  const renderPlayer = () => {
-    if (!selSrc) return null;
-    const { url, isHls, isEmbed } = resolvePlayUrl(selSrc);
-    if (isEmbed) {
-      return (
-        <div className="w-full" style={{ paddingBottom: "56.25%", position: "relative" }}>
-          <iframe
-            src={url}
-            className="absolute inset-0 w-full h-full"
-            allowFullScreen
-            allow="autoplay; fullscreen"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups-to-escape-sandbox"
-            style={{ border: "none", background: "#000" }}
-          />
-        </div>
-      );
-    }
-    return (
-      <div className="relative w-full" style={{ paddingBottom: "56.25%" }}>
-        <video
-          ref={videoRef}
-          controls
-          playsInline
-          crossOrigin="anonymous"
-          className="absolute inset-0 w-full h-full"
-          style={{ background: "#000" }}
-        />
-        {playerErr && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-3">
-            <XCircle className="w-9 h-9 text-red-400/70" />
-            <p className="text-[12px] font-black text-white/70 font-['Cairo']">تعذّر تشغيل هذا السيرفر</p>
-            <div className="flex gap-2">
-              <button
-                onClick={playNext}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-primary/15 border border-primary/25 text-[11px] font-black text-primary font-['Cairo'] active:scale-95 transition-transform"
-              >
-                <SkipForward className="w-3.5 h-3.5" />
-                السيرفر التالي
-              </button>
-              <button
-                onClick={() => setStep("sources")}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-white/6 border border-white/10 text-[11px] font-black text-white/50 font-['Cairo'] active:scale-95 transition-transform"
-              >
-                <Server className="w-3.5 h-3.5" />
-                كل السيرفرات
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
+  // ── Compute resume time ───────────────────────────────────────────────────
+  const resumeTime = useMemo(() => {
+    if (!selSrc || step !== "playing") return 0;
+    return loadAnimProgress(tmdbId, type, season, ep);
+  }, [selSrc, step, tmdbId, type, season, ep]);
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-black flex flex-col" dir="rtl">
+
       {/* ── Top bar ── */}
       <div className="flex items-center gap-3 px-3 py-2.5 bg-black/90 border-b border-white/8">
         <button
@@ -376,26 +253,44 @@ export default function AnimationWatch() {
         </div>
       </div>
 
-      {/* ── Video player (when playing) ── */}
+      {/* ── RiftPlayer (when playing) ── */}
       <AnimatePresence>
-        {step === "playing" && selSrc && (
-          <motion.div
-            key="player"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="w-full bg-black"
-          >
-            {renderPlayer()}
-            <div className="px-3 py-2 flex items-center justify-between border-b border-white/6">
-              <span className="text-[9px] text-white/30 font-['Cairo']">
-                {selSrc.isEmbed ? "إطار مدمج" : (selSrc.directUrl ? "رابط مباشر ✓" : "سيرفر مؤقت")}
-              </span>
-              <button onClick={() => setStep("sources")} className="text-[10px] text-primary font-['Cairo'] font-black">
-                تغيير السيرفر
-              </button>
-            </div>
-          </motion.div>
-        )}
+        {step === "playing" && selSrc && (() => {
+          const { url, isHls } = getSourceInfo(selSrc);
+          return (
+            <motion.div
+              key="rift-player"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="w-full bg-black"
+            >
+              <RiftPlayer
+                key={`anim-${selSrc.url}`}
+                src={url}
+                isHls={isHls}
+                title={displayTitle}
+                ep={type === "tv" ? ep : undefined}
+                totalEps={episodes.length || undefined}
+                qualityLabel={selSrc.streamType === "hls" ? "HLS" : "MP4"}
+                resumeTime={resumeTime > 10 ? resumeTime : undefined}
+                onTimeUpdate={handleTimeUpdate}
+                onFail={playNext}
+                onBack={goBack}
+              />
+              <div className="px-3 py-2 flex items-center justify-between border-b border-white/6">
+                <span className="text-[9px] text-white/30 font-['Cairo']">
+                  {selSrc.directUrl ? "رابط مباشر ✓" : "سيرفر مؤقت"}
+                </span>
+                <button
+                  onClick={() => setStep("sources")}
+                  className="text-[10px] text-primary font-['Cairo'] font-black"
+                >
+                  تغيير السيرفر
+                </button>
+              </div>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* ── Searching state ── */}
@@ -435,10 +330,10 @@ export default function AnimationWatch() {
 
           <div className="space-y-2">
             {sources.map((src, i) => {
-              const isActive = selSrc?.url === src.url && step === "playing";
-              const isUnknown = (src.status as any) === "unknown";
-              const isOk = src.status === "ok";
-              const isLoading = src.status === "loading";
+              const isActive   = selSrc?.url === src.url && step === "playing";
+              const isUnknown  = (src.status as any) === "unknown";
+              const isOk       = src.status === "ok";
+              const isLoading  = src.status === "loading";
               return (
                 <motion.button
                   key={i}
@@ -473,9 +368,9 @@ export default function AnimationWatch() {
                       {src.label}
                     </p>
                     <p className="text-[9px] truncate font-['Cairo'] text-white/25">
-                      {src.directUrl ? "✓ رابط مباشر" :
-                       isUnknown    ? "اضغط للمحاولة" :
-                       isLoading    ? "جاري الفحص…" :
+                      {src.directUrl  ? "✓ رابط مباشر"   :
+                       isUnknown      ? "اضغط للمحاولة"  :
+                       isLoading      ? "جاري الفحص…"    :
                        (src.url || "").replace(/^https?:\/\//, "").slice(0, 35)}
                     </p>
                   </div>
@@ -515,6 +410,24 @@ export default function AnimationWatch() {
         </div>
       )}
 
+      {/* ── Error state ── */}
+      {step === "error" && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8 py-12">
+          <AlertCircle className="w-10 h-10 text-red-400/60" />
+          <div className="text-center space-y-2">
+            <p className="text-sm font-black text-white font-['Cairo']">{displayTitle}</p>
+            <p className="text-[11px] text-white/35 font-['Cairo']">{statusMsg}</p>
+          </div>
+          <button
+            onClick={goBack}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-primary/15 border border-primary/25 text-[12px] font-black text-primary font-['Cairo'] active:scale-95 transition-transform"
+          >
+            <ChevronRight className="w-4 h-4" />
+            العودة
+          </button>
+        </div>
+      )}
+
       {/* ── Episode list (TV shows only) ── */}
       {type === "tv" && episodes.length > 0 && (
         <div className="px-3 py-3 border-t border-white/6">
@@ -543,63 +456,41 @@ export default function AnimationWatch() {
                 <div className="mt-2 space-y-1.5 max-h-64 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
                   {episodes.map(epItem => {
                     const isActive = epItem.episode_number === ep;
-                    const epUrl = `/animation/watch?title=${title}&type=tv&id=${tmdbId}&ep=${epItem.episode_number}&season=${season}&poster=${poster}`;
                     return (
-                      <Link key={epItem.episode_number} href={epUrl}>
-                        <div className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all ${
+                      <button
+                        key={epItem.episode_number}
+                        onClick={() => {
+                          const newParams = new URLSearchParams(window.location.search);
+                          newParams.set("ep", String(epItem.episode_number));
+                          navigate(`/animation/watch?${newParams.toString()}`);
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-right transition-all active:scale-[0.98] ${
                           isActive
                             ? "bg-primary/15 border-primary/25"
-                            : "bg-[#111116] border-white/6 active:bg-white/8"
-                        }`}>
-                          <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black flex-shrink-0 font-mono ${
-                            isActive ? "bg-primary text-white" : "bg-white/8 text-white/40"
-                          }`}>
-                            {epItem.episode_number}
-                          </div>
-                          <p className={`text-[11px] font-black line-clamp-1 font-['Cairo'] flex-1 ${
-                            isActive ? "text-primary" : "text-white/80"
-                          }`}>
-                            {epItem.name}
-                          </p>
-                          {isActive && <Wifi className="w-3 h-3 text-primary flex-shrink-0" />}
+                            : "bg-white/4 border-white/6 active:bg-white/8"
+                        }`}
+                      >
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-[11px] font-black ${
+                          isActive ? "bg-primary/20 text-primary" : "bg-white/8 text-white/40"
+                        } font-['Cairo']`}>
+                          {epItem.episode_number}
                         </div>
-                      </Link>
+                        <div className="flex-1 min-w-0 text-right">
+                          <p className={`text-[11px] font-black font-['Cairo'] line-clamp-1 ${isActive ? "text-primary" : "text-white/80"}`}>
+                            {epItem.name || `الحلقة ${epItem.episode_number}`}
+                          </p>
+                          {epItem.runtime && (
+                            <p className="text-[9px] text-white/25 font-['Cairo']">{epItem.runtime} دقيقة</p>
+                          )}
+                        </div>
+                        {isActive && <SkipForward className="w-3.5 h-3.5 text-primary flex-shrink-0" />}
+                      </button>
                     );
                   })}
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
-      )}
-
-      {/* ── Error state ── */}
-      {step === "error" && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8 py-12">
-          {posterUrl && (
-            <img src={posterUrl} alt="" className="w-24 rounded-xl shadow-2xl opacity-40" />
-          )}
-          <div className="text-center space-y-2.5">
-            <AlertCircle className="w-9 h-9 text-white/20 mx-auto" />
-            <p className="text-sm font-black text-white font-['Cairo']">لم يُعثر على مصادر</p>
-            <p className="text-[11px] text-white/35 font-['Cairo'] leading-relaxed">{statusMsg}</p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => window.location.reload()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-primary/15 border border-primary/25 text-xs font-black text-primary font-['Cairo'] active:scale-95 transition-transform"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              إعادة المحاولة
-            </button>
-            <button
-              onClick={goBack}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-white/6 border border-white/10 text-xs font-black text-white/50 font-['Cairo'] active:scale-95 transition-transform"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-              رجوع
-            </button>
-          </div>
         </div>
       )}
     </div>

@@ -192,7 +192,7 @@ export default function Library() {
               </div>
             ) : (
               <div className="space-y-3">
-                {continueItems.map((item, i) => {
+                {continueItems.map((item: any, i: number) => {
                   const pct = progressPct(item.progressSec);
                   const watchUrl = `/watch?anime=${item.id}&ep=${item.ep}${item.cover ? `&cover=${encodeURIComponent(item.cover)}` : ""}${item.title ? `&title=${encodeURIComponent(item.title)}` : ""}`;
                   return (
