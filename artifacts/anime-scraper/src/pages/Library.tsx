@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "wouter";
-import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle } from "lucide-react";
+import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Clapperboard } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { loadWatchHistory, loadSavedIds, unsaveAnime } from "@/lib/db";
 import { motion, AnimatePresence } from "framer-motion";
@@ -14,6 +14,32 @@ query ($ids: [Int]) {
     }
   }
 }`;
+
+/* ── Load animation watch history from localStorage ── */
+interface AnimHistItem {
+  tmdbId: number | string;
+  type: "movie" | "tv";
+  ep?: number;
+  season?: number;
+  title: string;
+  poster?: string;
+  date: string;
+  progressSec?: number;
+}
+
+function loadAnimHistory(): AnimHistItem[] {
+  try {
+    const raw = localStorage.getItem("anim-watch-history");
+    if (!raw) return [];
+    return JSON.parse(raw) as AnimHistItem[];
+  } catch { return []; }
+}
+
+function getAnimProgress(tmdbId: number | string, type: string, season = 1, ep = 1): number {
+  try {
+    return parseFloat(localStorage.getItem(`anim-wp-${tmdbId}-${type}-${season}-${ep}`) || "0") || 0;
+  } catch { return 0; }
+}
 
 const FORMAT_LABEL: Record<string, string> = {
   TV: "مسلسل", MOVIE: "فيلم", OVA: "أوفا", ONA: "ONA", SPECIAL: "خاص",
@@ -57,12 +83,14 @@ export default function Library() {
   const [tab, setTab] = useState<"continue" | "history" | "saved">("continue");
   const [savedAnime, setSavedAnime] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
+  const [animHistory, setAnimHistory] = useState<AnimHistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "date" | "score">("date");
 
   const loadData = useCallback(async () => {
     const hist = await loadWatchHistory(user?.id ?? null);
     setHistory(hist);
+    setAnimHistory(loadAnimHistory());
 
     const savedIds = await loadSavedIds(user?.id ?? null);
     if (savedIds.length === 0) { setSavedAnime([]); return; }
@@ -85,6 +113,7 @@ export default function Library() {
     (async () => {
       const hist = await loadWatchHistory(user?.id ?? null);
       if (!cancelled) setHistory(hist);
+      if (!cancelled) setAnimHistory(loadAnimHistory());
       const savedIds = await loadSavedIds(user?.id ?? null);
       if (savedIds.length === 0) { if (!cancelled) setSavedAnime([]); return; }
       if (!cancelled) setLoading(true);
@@ -119,13 +148,27 @@ export default function Library() {
     setHistory([]);
   };
 
-  /* ── Derive "continue watching" — items with progress > 30s, dedup by anime ── */
-  const continueItems = history.reduce((acc: any[], item: any) => {
+  /* ── Derive "continue watching" — anime items with progress > 30s ── */
+  const animeContinue = history.reduce((acc: any[], item: any) => {
     const prog = getProgress(item.id, item.ep);
     if (prog < 30) return acc;
     if (acc.some(x => x.id === item.id && x.ep === item.ep)) return acc;
+    return [...acc, { ...item, progressSec: prog, kind: "anime" }];
+  }, []);
+
+  /* ── Animation continue items ── */
+  const animContinue = animHistory.reduce((acc: AnimHistItem[], item: AnimHistItem) => {
+    const prog = getAnimProgress(item.tmdbId, item.type, item.season, item.ep);
+    if (prog < 30) return acc;
+    if (acc.some(x => x.tmdbId === item.tmdbId && x.ep === item.ep && x.season === item.season)) return acc;
     return [...acc, { ...item, progressSec: prog }];
-  }, []).slice(0, 20);
+  }, []);
+
+  /* ── Merge and sort by date ── */
+  const continueItems = [
+    ...animeContinue.map((i: any) => ({ ...i, _kind: "anime" as const })),
+    ...animContinue.map((i: AnimHistItem) => ({ ...i, _kind: "anim" as const })),
+  ].sort((a, b) => ((b.date ?? "") > (a.date ?? "") ? 1 : -1)).slice(0, 20);
 
   const sortedSaved = [...savedAnime].sort((a, b) => {
     if (sortBy === "name") return (a.title?.romaji || "").localeCompare(b.title?.romaji || "");
@@ -135,7 +178,7 @@ export default function Library() {
 
   const tabCount = {
     continue: continueItems.length,
-    history: history.length,
+    history: history.length + animHistory.length,
     saved: savedAnime.length,
   };
 
@@ -182,7 +225,7 @@ export default function Library() {
                 </div>
                 <div className="text-center">
                   <p className="text-white/40 font-black font-['Cairo'] text-sm">لا توجد حلقات قيد المشاهدة</p>
-                  <p className="text-white/20 text-xs font-['Cairo'] mt-1">ابدأ مشاهدة أنمي وسيظهر هنا تلقائياً</p>
+                  <p className="text-white/20 text-xs font-['Cairo'] mt-1">ابدأ مشاهدة أنمي أو أنيميشن وسيظهر هنا</p>
                 </div>
                 <Link href="/">
                   <button className="flex items-center gap-2 bg-primary/15 border border-primary/25 text-primary px-5 py-2.5 rounded-xl text-sm font-black font-['Cairo'] active:scale-95">
@@ -193,43 +236,61 @@ export default function Library() {
             ) : (
               <div className="space-y-3">
                 {continueItems.map((item: any, i: number) => {
+                  const isAnim = item._kind === "anim";
                   const pct = progressPct(item.progressSec);
-                  const watchUrl = `/watch?anime=${item.id}&ep=${item.ep}${item.cover ? `&cover=${encodeURIComponent(item.cover)}` : ""}${item.title ? `&title=${encodeURIComponent(item.title)}` : ""}`;
+                  const accent = isAnim ? "#06B6D4" : "#8B5CF6";
+                  const cover = isAnim ? item.poster : item.cover;
+                  const watchUrl = isAnim
+                    ? `/animation/${item.type ?? "movie"}/${item.tmdbId}?ep=${item.ep ?? 1}&season=${item.season ?? 1}`
+                    : `/watch?anime=${item.id}&ep=${item.ep}${item.cover ? `&cover=${encodeURIComponent(item.cover)}` : ""}${item.title ? `&title=${encodeURIComponent(item.title)}` : ""}`;
+                  const epLabel = isAnim
+                    ? (item.type === "tv" ? `ج${item.season ?? 1} ح${item.ep ?? 1}` : "فيلم")
+                    : `ح ${item.ep}`;
                   return (
-                    <motion.div key={`${item.id}-${item.ep}`}
+                    <motion.div key={isAnim ? `anim-${item.tmdbId}-${item.season}-${item.ep}` : `${item.id}-${item.ep}`}
                       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.04 }}>
                       <Link href={watchUrl}>
-                        <div className="flex items-center gap-3 p-3 bg-[#111116] rounded-2xl border border-white/5 hover:border-primary/20 transition-all cursor-pointer active:scale-[0.98]">
-                          {/* Cover with play overlay */}
+                        <div className="flex items-center gap-3 p-3 bg-[#111116] rounded-2xl border border-white/5 transition-all cursor-pointer active:scale-[0.98]"
+                          style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                          {/* Cover */}
                           <div className="relative shrink-0">
-                            <img src={item.cover} alt="" className="w-16 h-[84px] rounded-xl object-cover border border-white/10" />
+                            {cover
+                              ? <img src={isAnim && cover ? `https://image.tmdb.org/t/p/w200${cover}` : cover} alt="" className="w-16 h-[84px] rounded-xl object-cover border border-white/10" />
+                              : <div className="w-16 h-[84px] rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
+                                  {isAnim ? <Clapperboard className="w-6 h-6 text-white/20" /> : <PlayCircle className="w-6 h-6 text-white/20" />}
+                                </div>
+                            }
                             <div className="absolute inset-0 rounded-xl bg-black/30 flex items-center justify-center">
-                              <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center shadow-lg shadow-primary/40">
+                              <div className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg"
+                                style={{ background: accent }}>
                                 <Play className="w-4 h-4 text-white fill-white ml-0.5" />
                               </div>
                             </div>
-                            {/* Progress arc */}
-                            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 bg-black/90 text-primary text-[8px] font-black px-1.5 py-0.5 rounded-full border border-primary/30 whitespace-nowrap">
+                            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 bg-black/90 text-[8px] font-black px-1.5 py-0.5 rounded-full border whitespace-nowrap"
+                              style={{ color: accent, borderColor: `${accent}44` }}>
                               {pct}%
                             </div>
                           </div>
 
                           {/* Info */}
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-black text-white line-clamp-1 font-['Cairo'] leading-tight">{item.title}</p>
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-primary text-[10px] font-black font-['Cairo'] bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
-                                ح {item.ep}
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md"
+                                style={{ background: `${accent}20`, color: accent, border: `1px solid ${accent}33` }}>
+                                {isAnim ? "أنيميشن" : "أنمي"}
                               </span>
-                              {item.totalEps > 0 && (
-                                <span className="text-white/25 text-[9px] font-['Cairo']">/ {item.totalEps}</span>
-                              )}
                             </div>
-                            {/* Progress bar */}
+                            <p className="text-sm font-black text-white line-clamp-1 font-['Cairo'] leading-tight">{item.title}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[10px] font-black font-['Cairo'] px-2 py-0.5 rounded-lg"
+                                style={{ color: accent, background: `${accent}15`, border: `1px solid ${accent}25` }}>
+                                {epLabel}
+                              </span>
+                            </div>
                             <div className="mt-2 w-full h-1.5 bg-white/8 rounded-full overflow-hidden">
                               <div className="h-full rounded-full transition-all"
-                                style={{ width: `${pct || 3}%`, background: "linear-gradient(90deg,#8B5CF6,#6D28D9)" }} />
+                                style={{ width: `${pct || 3}%`, background: `linear-gradient(90deg,${accent},${accent}99)` }} />
                             </div>
                             <div className="flex items-center justify-between mt-1">
                               <span className="text-white/30 text-[9px] font-mono">{fmtTime(item.progressSec)}</span>
@@ -238,8 +299,6 @@ export default function Library() {
                               )}
                             </div>
                           </div>
-
-                          {/* Arrow */}
                           <ChevronRight className="w-4 h-4 text-white/20 shrink-0" />
                         </div>
                       </Link>
