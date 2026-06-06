@@ -3733,6 +3733,113 @@ async function getAninekoSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMEGG (www.animegg.org) — ياباني مترجم · MP4 مباشر عبر video-proxy
+//  Flow: /search?q= → /series/{slug} → /{slug}-episode-{N}
+//        → /embed/{id} → videoSources[{file:"/play/{id}/video.mp4"}]
+//        → http://www.animegg.org/play/... → vidcache.net:8161 (non-std port)
+//        → video-proxy routes it server-side (no browser port restriction)
+// ════════════════════════════════════════════════════════════════════
+const ANIMEGG_BASE = "https://www.animegg.org";
+
+async function getAnimeGGSources(
+  title: string, english: string | null, ep: number
+): Promise<UnifiedSource[]> {
+  try {
+    const q = (english || title).replace(/[^\w\s]/g, " ").trim();
+
+    // 1. Search → /series/{slug} links
+    const searchHtml = await cfGet(
+      `${ANIMEGG_BASE}/search?q=${encodeURIComponent(q)}`,
+      { "Referer": ANIMEGG_BASE },
+    );
+    if (!searchHtml) return [];
+
+    const slugs: string[] = [];
+    for (const m of searchHtml.matchAll(/href="(\/series\/[^"?#]+)"/gi)) {
+      if (!m[1].includes("/page/") && !slugs.includes(m[1])) slugs.push(m[1]);
+    }
+    if (!slugs.length) return [];
+
+    // 2. Best title match
+    const scored = slugs.slice(0, 8).map(slug => {
+      const name = slug.replace("/series/", "").replace(/-/g, " ");
+      return { slug, score: titleSimilarity(q, name) };
+    }).sort((a, b) => b.score - a.score);
+    if (!scored[0] || scored[0].score < 0.15) return [];
+    const seriesSlug = scored[0].slug; // e.g. "/series/death-note"
+
+    // 3. Series page → find episode link /{slug}-episode-{N}
+    const seriesHtml = await cfGet(
+      `${ANIMEGG_BASE}${seriesSlug}`,
+      { "Referer": `${ANIMEGG_BASE}/search` },
+    );
+    if (!seriesHtml) return [];
+
+    // Derive the epSlug from actual episode links on the page
+    // Pattern: href="/death-note-episode-1"
+    const baseSlug = seriesSlug.replace("/series/", ""); // "death-note"
+    const epLinkRe = new RegExp(`href="(/${baseSlug}-episode-${ep}[^"]*)"`, "i");
+    const epLinkMatch = epLinkRe.exec(seriesHtml);
+    const epPath = epLinkMatch ? epLinkMatch[1].split("#")[0]
+                               : `/${baseSlug}-episode-${ep}`;
+
+    // 4. Episode page → /embed/{id} iframes
+    const epUrl  = `${ANIMEGG_BASE}${epPath}`;
+    const epHtml = await cfGet(epUrl, { "Referer": `${ANIMEGG_BASE}${seriesSlug}` });
+    if (!epHtml) return [];
+
+    const embedIds: string[] = [];
+    for (const m of epHtml.matchAll(/href="(\/embed\/\d+)"|src="(\/embed\/\d+)"/gi)) {
+      const id = m[1] || m[2];
+      if (id && !embedIds.includes(id)) embedIds.push(id);
+    }
+    if (!embedIds.length) return [];
+
+    // 5. Fetch first 2 embed pages → extract videoSources[{file:...}]
+    const sources: UnifiedSource[] = [];
+    for (const embedPath of embedIds.slice(0, 2)) {
+      const embedUrl  = `${ANIMEGG_BASE}${embedPath}`;
+      const embedHtml = await cfGet(embedUrl, { "Referer": epUrl });
+      if (!embedHtml) continue;
+
+      // var videoSources = [{file: "/play/15143/video.mp4?for=...", label: "360p"}]
+      const vsMatch = /var\s+videoSources\s*=\s*(\[[\s\S]*?\]);/.exec(embedHtml);
+      if (!vsMatch) continue;
+      try {
+        // Clean JS → JSON: unquoted keys, single quotes
+        const json = vsMatch[1]
+          .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":')   // unquoted keys
+          .replace(/'/g, '"');                           // single → double quotes
+        const arr: { file?: string; label?: string }[] = JSON.parse(json);
+        for (const item of arr) {
+          if (!item.file) continue;
+          // Build absolute URL
+          const rawUrl = item.file.startsWith("http")
+            ? item.file
+            : `${ANIMEGG_BASE}${item.file}`;
+          // Route through video-proxy (vidcache.net:8161 is blocked from browser)
+          const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(embedUrl)}`;
+          const label   = item.label || "360p";
+          const rank    = label.includes("1080") ? 9 : label.includes("720") ? 8 : 7;
+          sources.push({
+            name: `AnimeGG · ${label} · ياباني مترجم`,
+            url:  rawUrl,
+            quality: label,
+            qualityRank: rank,
+            site: "animegg",
+            directUrl: proxied,
+            directType: "mp4",
+          });
+        }
+      } catch { /* bad JSON, skip */ }
+    }
+
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -3850,6 +3957,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
+      scrapeCached("animegg",      () => getAnimeGGSources(title, english, ep),                 false),
     ]);
 
   } catch (e: any) {
@@ -3930,6 +4038,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animegg":     (await race(getAnimeGGSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
     res.json({ sources });

@@ -74,6 +74,9 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "MG" },
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
+  { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
+  { site: "anineko",      name: "AniNeko",       desc: "ياباني مترجم · HLS",      tag: "AN" },
+  { site: "animegg",      name: "AnimeGG",       desc: "ياباني مترجم · مباشر",   tag: "GG" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
