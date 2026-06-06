@@ -3596,7 +3596,7 @@ async function getAniKotoSources(
       name: "AniKoto · 1080p · ياباني مترجم",
       url: m3u8Url,
       quality: "1080p",
-      qualityRank: 8,
+      qualityRank: 10,
       site: "anikoto",
       directUrl: proxied,
       directType: "hls",
@@ -3760,7 +3760,7 @@ async function getAninekoSources(
         name: `AniNeko · ${hostLabel} · ياباني مترجم`,
         url: m3u8Url,
         quality: "1080p",
-        qualityRank: 8,
+        qualityRank: 9,
         site: "anineko",
         directUrl: proxied,
         directType: "hls",
@@ -3866,7 +3866,7 @@ async function getAnimeGGSources(
     }
     if (!tabs.length) return [];
 
-    // 5. Fetch embed pages → videoSources[{file, label, bk}]
+    // 5. Fetch embed pages → videoSources[{file, label, bk}] + tracks[{file, label, kind}]
     const sources: UnifiedSource[] = [];
     for (const tab of tabs.slice(0, 3)) {
       const embedUrl  = `${ANIMEGG_BASE}/embed/${tab.embedId}`;
@@ -3875,6 +3875,26 @@ async function getAnimeGGSources(
 
       const vsMatch = /var\s+videoSources\s*=\s*(\[[\s\S]*?\]);/.exec(embedHtml);
       if (!vsMatch) continue;
+
+      /* Extract subtitle tracks: var tracks = [...] */
+      let embedSubUrl: string | undefined;
+      const tracksMatch = /var\s+tracks\s*=\s*(\[[\s\S]*?\]);/.exec(embedHtml);
+      if (tracksMatch) {
+        try {
+          const tracksJson = tracksMatch[1]
+            .replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":')
+            .replace(/:\s*'([^']*)'/g, ': "$1"');
+          const tracks: Array<{ file?: string; label?: string; kind?: string }> = JSON.parse(tracksJson);
+          const subTrack = tracks.find(t =>
+            t.kind !== "thumbnails" && t.file?.startsWith("http")
+          );
+          if (subTrack?.file) {
+            const rawProxy = `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(embedUrl)}`;
+            embedSubUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(rawProxy)}&from=en&to=ar`;
+          }
+        } catch { /* bad JSON */ }
+      }
+
       try {
         const json = vsMatch[1]
           .replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":')
@@ -3887,11 +3907,12 @@ async function getAnimeGGSources(
           if (item.bk) { try { finalUrl = decodeURIComponent(atob(item.bk)) || finalUrl; } catch {} }
           const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(finalUrl)}&ref=${encodeURIComponent(embedUrl)}`;
           const label   = item.label || "360p";
-          const rank    = label.includes("1080") ? 9 : label.includes("720") ? 8 : 7;
+          const rank    = label.includes("1080") ? 10 : label.includes("720") ? 9 : 7;
           sources.push({
             name: `AnimeGG · ${tab.server} · ${label} · ياباني مترجم`,
             url: finalUrl, quality: label, qualityRank: rank,
             site: "animegg", directUrl: proxied, directType: "mp4",
+            subtitleUrl: embedSubUrl,
           });
         }
       } catch { /* bad JSON */ }
@@ -5218,14 +5239,21 @@ router.get("/anime/seg-proxy", async (req, res) => {
       res.send(rewritten);
       return;
     }
-    const body = Buffer.from(await r.arrayBuffer());
-    if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body, ct, ts: Date.now() });
+    /* Stream binary TS/AAC segments directly — avoids buffering entire chunk before sending,
+       which significantly reduces time-to-first-byte and improves playback smoothness */
     res.setHeader("Content-Type", ct);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=3600");
     if (len) res.setHeader("Content-Length", len);
-    res.send(body);
-  } catch (e: any) { res.status(502).send(`proxy error: ${e?.message ?? e}`); }
+    if (r.body) {
+      const { Readable } = await import("stream");
+      Readable.fromWeb(r.body as any).pipe(res);
+    } else {
+      const body = Buffer.from(await r.arrayBuffer());
+      if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body, ct, ts: Date.now() });
+      res.send(body);
+    }
+  } catch (e: any) { if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`); }
 });
 
 export default router;
