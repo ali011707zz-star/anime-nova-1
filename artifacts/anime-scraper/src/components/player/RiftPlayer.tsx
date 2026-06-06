@@ -291,7 +291,17 @@ export default function RiftPlayer({
     }
 
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: false, lowLatencyMode: false, maxBufferLength: 30 });
+      const hls = new Hls({
+        enableWorker: false,
+        lowLatencyMode: false,
+        maxBufferLength: 45,
+        maxMaxBufferLength: 90,
+        backBufferLength: 30,
+        startFragPrefetch: true,
+        progressive: true,
+        fragLoadingMaxRetry: 4,
+        manifestLoadingMaxRetry: 3,
+      });
       hlsRef.current = hls;
       hls.loadSource(m3u8); hls.attachMedia(v);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -1099,17 +1109,16 @@ export default function RiftPlayer({
                   <div className="flex items-center gap-8 flex-1 justify-center">
                     <button onClick={() => { skip(-10); showControls(); }}
                       className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.16)", backdropFilter: "blur(14px)" }}>
+                      style={{ background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.18)" }}>
                       <RotateCcw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.9} />
                       <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
                     <button onClick={togglePlay}
                       className="w-[54px] h-[54px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
                       style={{
-                        background: "rgba(139,92,246,0.42)",
+                        background: "rgba(109,40,217,0.85)",
                         border: "1.5px solid rgba(167,139,250,0.55)",
-                        backdropFilter: "blur(20px) saturate(180%)",
-                        boxShadow: "0 4px 20px rgba(139,92,246,0.38), 0 0 0 1px rgba(255,255,255,0.06) inset",
+                        boxShadow: "0 4px 20px rgba(139,92,246,0.45), 0 0 0 1px rgba(255,255,255,0.06) inset",
                       }}>
                       {playing
                         ? <Pause className="w-[22px] h-[22px] text-white fill-white" />
@@ -1117,7 +1126,7 @@ export default function RiftPlayer({
                     </button>
                     <button onClick={() => { skip(10); showControls(); }}
                       className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.16)", backdropFilter: "blur(14px)" }}>
+                      style={{ background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.18)" }}>
                       <RotateCw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.9} />
                       <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
                     </button>
@@ -1127,14 +1136,14 @@ export default function RiftPlayer({
                   <div className="flex items-center gap-2 shrink-0">
                     <button onClick={toggleMute}
                       className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(14px)" }}>
+                      style={{ background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.14)" }}>
                       {muted || volume === 0
                         ? <VolumeX className="w-[18px] h-[18px] text-white/55" />
                         : <Volume2 className="w-[18px] h-[18px] text-white/55" />}
                     </button>
                     <button onClick={() => setIsLocked(true)}
                       className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(14px)" }}>
+                      style={{ background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.14)" }}>
                       <Lock className="w-[16px] h-[16px] text-white/55" />
                     </button>
                   </div>
@@ -1159,9 +1168,11 @@ export default function RiftPlayer({
               className="absolute z-50 pointer-events-auto"
               dir="rtl"
               style={{
-                top: 72,
+                top: isPortrait ? 72 : 56,
                 right: 14,
-                width: 268,
+                width: isPortrait ? "calc(100% - 28px)" : 268,
+                maxWidth: 340,
+                maxHeight: isPortrait ? "calc(100vh - 110px)" : "calc(100vh - 80px)",
                 background: "rgba(5,5,16,0.96)",
                 backdropFilter: "blur(40px) saturate(220%)",
                 border: "1px solid rgba(139,92,246,0.18)",
@@ -1169,6 +1180,7 @@ export default function RiftPlayer({
                 padding: "0 0 4px",
                 boxShadow: "0 28px 72px rgba(0,0,0,0.80), 0 0 0 1px rgba(139,92,246,0.06) inset",
                 overflow: "hidden",
+                overflowY: "auto",
               }}
               onClick={e => e.stopPropagation()}
               onTouchStart={e => e.stopPropagation()}

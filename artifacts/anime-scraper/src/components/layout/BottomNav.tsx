@@ -1,12 +1,12 @@
 import { Link, useLocation } from "wouter";
-import { Home, Search, BookMarked, Compass } from "lucide-react";
+import { Home, Search, Compass, BookOpen } from "lucide-react";
 import { motion } from "framer-motion";
 
 const navItems = [
-  { icon: Home,       label: "الرئيسية", href: "/" },
-  { icon: Compass,    label: "تصفح",     href: "/browse" },
-  { icon: Search,     label: "بحث",      href: "/search" },
-  { icon: BookMarked, label: "مكتبتي",   href: "/library" },
+  { icon: Home,     label: "الرئيسية", href: "/" },
+  { icon: BookOpen, label: "مكتبة",    href: "/library" },
+  { icon: Search,   label: "بحث",      href: "/search" },
+  { icon: Compass,  label: "تصفح",     href: "/browse" },
 ];
 
 const HIDE_ON = ["/watch"];

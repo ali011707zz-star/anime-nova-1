@@ -3908,9 +3908,8 @@ router.get("/anime/proxy-text", async (req, res) => {
   const url = String(req.query.url || "");
   if (!url.startsWith("http")) { res.status(400).json({ error: "bad url" }); return; }
   try {
-    const r = await cfGet(url, { headers: { Accept: "text/plain,text/vtt,*/*" } });
-    if (!r.ok) { res.status(502).json({ error: `upstream ${r.status}` }); return; }
-    const text = await r.text();
+    const text = await cfGet(url, { "Accept": "text/plain,text/vtt,*/*" });
+    if (!text) { res.status(502).json({ error: "upstream failed" }); return; }
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.send(text);
