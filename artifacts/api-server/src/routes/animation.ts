@@ -559,6 +559,29 @@ async function scrapeEmbedForStreams(
   return out;
 }
 
+// ── StarCima vidzee subtitle proxy (CORS bypass) ────────────────────────────
+router.get("/animation/vidzee-meta", async (req: Request, res: Response) => {
+  const tmdbId = String(req.query.tmdbId || "");
+  const type   = String(req.query.type   || "movie");
+  const ep     = String(req.query.ep     || "1");
+  const season = String(req.query.season || "1");
+  if (!tmdbId) { res.status(400).json({ error: "tmdbId required" }); return; }
+
+  const tvExtra = type === "tv" ? `&season=${season}&episode=${ep}` : "";
+  const url = `https://starcima.com/api/vidzee?tmdbId=${tmdbId}&type=${type}${tvExtra}`;
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": UA, "Referer": `https://starcima.com/watch/${tmdbId}?type=${type}`, "Accept": "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) { res.json({ subtitles: [] }); return; }
+    const data: any = await r.json();
+    res.json({ subtitles: data.subtitles || [] });
+  } catch {
+    res.json({ subtitles: [] });
+  }
+});
+
 // ── SSE animation sources stream ──────────────────────────────────────────────
 
 router.get("/animation/sources-stream", async (req: Request, res: Response) => {
@@ -766,144 +789,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 13. ToonStream (title-based, animation content) ──────────────────────
-      (async () => {
-        try {
-          const TS_BASE = "https://toonstream.vip";
-          send("status", { msg: "ToonStream: جاري البحث…" });
-
-          const searchHtml = await cfGet(
-            `${TS_BASE}/?s=${encodeURIComponent(title)}`,
-            TS_BASE + "/"
-          );
-
-          // Parse movie/tvshow result URLs
-          const urlRe = /href="(https:\/\/toonstream\.vip\/(movies|tvshows)\/([^/"]+)\/)"/g;
-          const candidates: { url: string; section: string; slug: string }[] = [];
-          const seenCand = new Set<string>();
-          let um: RegExpExecArray | null;
-          while ((um = urlRe.exec(searchHtml)) !== null) {
-            if (seenCand.has(um[1])) continue;
-            seenCand.add(um[1]);
-            candidates.push({ url: um[1], section: um[2], slug: um[3] });
-          }
-          if (!candidates.length) return;
-
-          const scored = candidates.map(c => {
-            const titleStr = c.slug.replace(/-\d{4}$/, "").replace(/-/g, " ");
-            return { ...c, titleStr, score: titleSim(titleStr, title) };
-          });
-          scored.sort((a, b) => b.score - a.score);
-          const best = scored[0];
-          if (best.score < 0.25) return;
-
-          send("status", { msg: `ToonStream: وُجد "${best.titleStr}"` });
-
-          let pageUrl = best.url;
-
-          // For TV shows, find the specific episode page
-          if (type === "tv" && best.section === "tvshows") {
-            const seriesHtml = await cfGet(best.url, TS_BASE + "/");
-            // Episode URLs like /episodes/show-name-s01e03/
-            const epRe = new RegExp(
-              `href="(${TS_BASE}/episodes/[^"]*-s0*${season}e0*${epNum}[^"]*)"`,
-              "i"
-            );
-            const epMatch = seriesHtml.match(epRe);
-            if (!epMatch) return;
-            pageUrl = epMatch[1];
-          }
-
-          const pageHtml = await cfGet(pageUrl, TS_BASE + "/");
-
-          // Parse trembed server buttons (decode HTML entities: &#038; → &)
-          const embedRe = /data-src="([^"]*trembed=[^"]*)"/g;
-          const trembedUrls: string[] = [];
-          let em: RegExpExecArray | null;
-          while ((em = embedRe.exec(pageHtml)) !== null) {
-            const url = em[1].replace(/&#0*38;/g, "&").replace(/&amp;/g, "&");
-            if (!trembedUrls.includes(url)) trembedUrls.push(url);
-          }
-          if (!trembedUrls.length) return;
-
-          // Process each trembed server (up to 4) — extract as-cdn21/rubystm HLS
-          let foundStream = false;
-          for (const trUrl of trembedUrls.slice(0, 4)) {
-            if (foundStream) break;
-            try {
-              const trHtml = await cfGet(trUrl, pageUrl);
-              const innerMatch = trHtml.match(
-                /<iframe[^>]+src=["']([^"']*(?:as-cdn21\.top|rubystm\.com)[^"']*)["']/i
-              );
-              if (!innerMatch) continue;
-              const playerUrl = innerMatch[1];
-
-              if (playerUrl.includes("as-cdn21.top")) {
-                // HEAD → get session cookie, then POST getVideo to get signed HLS URL
-                try {
-                  const r1 = await fetch(playerUrl, {
-                    method: "HEAD",
-                    headers: { "User-Agent": UA },
-                    signal: AbortSignal.timeout(7000),
-                  });
-                  const rawCookies = (r1.headers.getSetCookie?.() ?? [r1.headers.get("set-cookie") ?? ""])
-                    .filter(Boolean);
-                  const cook = rawCookies.map((c: string) => c.split(";")[0]).join("; ");
-                  const hash = playerUrl.split("/").pop() || "";
-                  if (!hash || hash.length < 5) continue;
-
-                  const r2 = await fetch(`${AS_CDN_B}/player/index.php?data=${hash}&do=getVideo`, {
-                    method: "POST",
-                    body: JSON.stringify({ hash, r: "" }),
-                    headers: {
-                      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                      "X-Requested-With": "XMLHttpRequest",
-                      Origin: AS_CDN_B,
-                      Referer: playerUrl,
-                      "User-Agent": UA,
-                      ...(cook ? { Cookie: cook } : {}),
-                    },
-                    signal: AbortSignal.timeout(8000),
-                  });
-                  if (!r2.ok) continue;
-                  const j = await r2.json() as any;
-                  const m3u8 = j.securedLink || j.videoSource;
-                  if (m3u8 && typeof m3u8 === "string" && m3u8.startsWith("http")) {
-                    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(playerUrl)}`;
-                    sendSource(playerUrl, "ToonStream", proxied, proxied);
-                    foundStream = true;
-                  }
-                } catch { /* skip */ }
-
-              } else if (playerUrl.includes("rubystm.com")) {
-                // RubyStm: POST /dl for embed
-                try {
-                  const fc = playerUrl.replace(".html", "").split("/").pop() || "";
-                  if (!fc) continue;
-                  const r = await fetch(`${RUBY_B}/dl`, {
-                    method: "POST",
-                    body: `op=embed&file_code=${fc}&auto=1&referer=${encodeURIComponent(trUrl)}`,
-                    headers: {
-                      "Content-Type": "application/x-www-form-urlencoded",
-                      Referer: playerUrl,
-                      "User-Agent": UA,
-                    },
-                    signal: AbortSignal.timeout(10000),
-                  });
-                  if (!r.ok) continue;
-                  const html = await r.text();
-                  const m3u8M = html.match(/["']([^"']+\.m3u8[^"']*)["']/);
-                  if (m3u8M) {
-                    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8M[1])}&ref=${encodeURIComponent(playerUrl)}`;
-                    sendSource(playerUrl, "ToonStream", proxied, proxied);
-                    foundStream = true;
-                  }
-                } catch { /* skip */ }
-              }
-            } catch { /* skip this server */ }
-          }
-        } catch { /* silent */ }
-      })(),
+      // ── 13. ToonStream — DISABLED (rubystm CDN expired, as-cdn21 returns 403) ──
+      Promise.resolve(),
 
       // ── 14. wecima.show (DooPlay, Arabic) ────────────────────────────────────
       (async () => {
