@@ -1037,6 +1037,14 @@ function EpisodePlayer({
   const [subSettings,  setSubSettings] = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
 
   const currentUrl  = servers[currentServer] || "";
+
+  /* ── Synchronous subtitle reset when source URL changes (prevents old cues flashing on new source) ── */
+  const prevUrlRef = useRef(currentUrl);
+  if (prevUrlRef.current !== currentUrl) {
+    prevUrlRef.current = currentUrl;
+    if (subCues.length > 0) setSubCues([]);
+    if (subState === "ready") setSubState("idle");
+  }
   const currentInfo = getServerInfo(currentUrl, currentServer);
 
   /* ── Stable HLS callbacks ── */

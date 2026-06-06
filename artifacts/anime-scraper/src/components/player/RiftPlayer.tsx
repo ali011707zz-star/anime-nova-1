@@ -932,13 +932,13 @@ export default function RiftPlayer({
                       style={{ fontSize: 15, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
                       {title || "Nova Player"}
                     </h1>
-                    {/* Row 3: episode + episode title if Arabic */}
+                    {/* Row 3: episode + episode title */}
                     <div className="flex items-center gap-1.5 mt-[4px] flex-wrap">
-                      <span className="text-white/50 text-[11px] font-['Cairo']">الحلقة {ep}</span>
+                      <span className="text-white/55 text-[12px] font-black font-['Cairo']">الحلقة {ep}</span>
                       {epTitle && (
                         <>
-                          <span className="text-white/18 text-[9px]">•</span>
-                          <span className="text-violet-300/65 text-[10px] font-['Cairo'] truncate max-w-[140px]">{epTitle}</span>
+                          <span className="text-white/25 text-[10px]">·</span>
+                          <span className="text-violet-200/85 text-[12px] font-['Cairo'] line-clamp-1" style={{ maxWidth: "min(240px, 50vw)" }}>{epTitle}</span>
                         </>
                       )}
                     </div>
@@ -999,32 +999,67 @@ export default function RiftPlayer({
 
               {/* ════ CENTER ════ */}
               <div className="flex-1 flex items-center justify-center pointer-events-none">
-                <button onClick={togglePlay}
+                <div
+                  className="flex items-center gap-7 pointer-events-auto"
                   onTouchStart={e => e.stopPropagation()}
                   onTouchEnd={e => e.stopPropagation()}
-                  className="flex items-center justify-center active:scale-90 transition-transform pointer-events-auto"
-                  style={{
-                    width: 72, height: 72, borderRadius: "50%",
-                    background: "rgba(0,0,0,0.52)",
-                    border: "2px solid rgba(255,255,255,0.50)",
-                    boxShadow: "0 8px 32px rgba(0,0,0,0.55), 0 0 0 6px rgba(255,255,255,0.04)",
-                  }}>
-                  <AnimatePresence mode="wait">
-                    {loading && !error ? (
-                      <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
-                        <div className="w-6 h-6 rounded-full border-2 border-white/25 border-t-white/80 animate-spin" />
-                      </motion.div>
-                    ) : playing ? (
-                      <motion.div key="p" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
-                        <Pause className="w-7 h-7 text-white fill-white" />
-                      </motion.div>
-                    ) : (
-                      <motion.div key="pl" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
-                        <Play className="w-7 h-7 text-white fill-white ml-1" />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </button>
+                >
+                  {/* ← 10s back */}
+                  <button
+                    onClick={() => { skip(-10); showControls(); }}
+                    className="flex flex-col items-center justify-center gap-[5px] active:scale-90 transition-transform"
+                    style={{
+                      width: 58, height: 58, borderRadius: "50%",
+                      background: "rgba(0,0,0,0.48)",
+                      border: "1.5px solid rgba(255,255,255,0.32)",
+                      boxShadow: "0 4px 18px rgba(0,0,0,0.50)",
+                    }}
+                  >
+                    <RotateCcw className="w-[22px] h-[22px] text-white/90" strokeWidth={1.8} />
+                    <span className="font-mono font-black text-white/65 leading-none" style={{ fontSize: 10 }}>10ث</span>
+                  </button>
+
+                  {/* Play / Pause */}
+                  <button onClick={togglePlay}
+                    className="flex items-center justify-center active:scale-90 transition-transform"
+                    style={{
+                      width: 76, height: 76, borderRadius: "50%",
+                      background: "rgba(0,0,0,0.54)",
+                      border: "2px solid rgba(255,255,255,0.52)",
+                      boxShadow: "0 8px 32px rgba(0,0,0,0.60), 0 0 0 6px rgba(255,255,255,0.04)",
+                    }}>
+                    <AnimatePresence mode="wait">
+                      {loading && !error ? (
+                        <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
+                          <div className="w-6 h-6 rounded-full border-2 border-white/25 border-t-white/80 animate-spin" />
+                        </motion.div>
+                      ) : playing ? (
+                        <motion.div key="p" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
+                          <Pause className="w-7 h-7 text-white fill-white" />
+                        </motion.div>
+                      ) : (
+                        <motion.div key="pl" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
+                          <Play className="w-7 h-7 text-white fill-white ml-1" />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </button>
+
+                  {/* +10s forward */}
+                  <button
+                    onClick={() => { skip(10); showControls(); }}
+                    className="flex flex-col items-center justify-center gap-[5px] active:scale-90 transition-transform"
+                    style={{
+                      width: 58, height: 58, borderRadius: "50%",
+                      background: "rgba(0,0,0,0.48)",
+                      border: "1.5px solid rgba(255,255,255,0.32)",
+                      boxShadow: "0 4px 18px rgba(0,0,0,0.50)",
+                    }}
+                  >
+                    <RotateCw className="w-[22px] h-[22px] text-white/90" strokeWidth={1.8} />
+                    <span className="font-mono font-black text-white/65 leading-none" style={{ fontSize: 10 }}>10ث</span>
+                  </button>
+                </div>
               </div>
 
               {/* ════ BOTTOM SECTION ════ */}
