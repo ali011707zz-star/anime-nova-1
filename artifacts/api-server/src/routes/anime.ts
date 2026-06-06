@@ -2851,75 +2851,122 @@ async function getAnime4upSources(
   const hit = a4upSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
-  // ── Build slug candidates from title/english directly (skip CF-blocked search+series pages) ──
+  const epStr = String(ep);
+  const epPad = ep < 10 ? `0${ep}` : epStr;
+  let cfBlocked = false;
+
+  /* ── try one episode URL → return sources or null ── */
+  async function tryEpUrl(url: string): Promise<UnifiedSource[] | null> {
+    if (cfBlocked) return null;
+    let r: Response;
+    try {
+      r = await fetch(url, { headers: A4UP_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow" });
+    } catch { return null; }
+    if (!r.ok) return null;
+    const html = await r.text();
+    if (isCloudflareBlock(html)) { cfBlocked = true; return null; }
+    /* Real episode pages have the Arabic word for "episode" or data-src attributes */
+    if (!html.includes("الحلقة") && !html.includes("data-src") && !html.includes("player")) return null;
+    const seen = new Set<string>();
+    const iframeUrls: string[] = [];
+    for (const m of html.matchAll(/(?:src|data-src)=["']([^"']{10,})["']/gi)) {
+      const raw = m[1].trim();
+      if (!raw.startsWith("https://")) continue;
+      if (raw.includes("w1.anime4up.rest")) continue;
+      if (/google-analytics|googleapis|gstatic|facebook|twitter|cloudflare|jquery|bootstrap/i.test(raw)) continue;
+      if (!seen.has(raw)) { seen.add(raw); iframeUrls.push(raw); }
+    }
+    if (!iframeUrls.length) return null;
+    return iframeUrls.map((u, i) => ({
+      name: `أنمي فور أب · سيرفر ${i + 1}`,
+      url: u, quality: "HD", qualityRank: 10, site: "anime4up",
+    }));
+  }
+
+  /* ── helper: try ep number variants on a known series slug ── */
+  async function trySlug(slug: string): Promise<UnifiedSource[] | null> {
+    for (const n of [epStr, ...(ep < 10 ? [epPad] : [])]) {
+      const u = `${A4UP_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + n)}/`;
+      const s = await tryEpUrl(u);
+      if (cfBlocked) return null;
+      if (s && s.length > 0) return s;
+    }
+    return null;
+  }
+
+  // ── Step 1: Search + series page → extract real episode slug ──
+  const seriesUrl = await searchAnime4up(title, english);
+  if (seriesUrl && !cfBlocked) {
+    try {
+      const sr = await fetch(seriesUrl, { headers: A4UP_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow" });
+      if (sr.ok) {
+        const srHtml = await sr.text();
+        if (isCloudflareBlock(srHtml)) {
+          cfBlocked = true;
+        } else {
+          /* Collect all episode links from the series page */
+          const epLinks: string[] = [];
+          for (const m of srHtml.matchAll(/href="(https?:\/\/w1\.anime4up\.rest\/episode\/[^"]+)"/g)) {
+            if (!epLinks.includes(m[1])) epLinks.push(m[1]);
+          }
+          /* First: look for exact episode in visible links */
+          for (const link of epLinks) {
+            const rawSlug = decodeURIComponent(link.replace(A4UP_BASE + "/episode/", "").replace(/\/$/, ""));
+            if (rawSlug.endsWith(`-الحلقة-${epStr}`) || rawSlug.endsWith(`-الحلقة-${epPad}`)) {
+              const sources = await tryEpUrl(link);
+              if (cfBlocked) break;
+              if (sources && sources.length > 0) {
+                a4upSrcCache.set(ck, { sources, ts: Date.now() });
+                return sources;
+              }
+            }
+          }
+          /* Second: extract series slug prefix from any visible link → construct episode URL */
+          if (!cfBlocked && epLinks.length > 0) {
+            for (const link of epLinks) {
+              const rawSlug = decodeURIComponent(link.replace(A4UP_BASE + "/episode/", "").replace(/\/$/, ""));
+              const m = rawSlug.match(/^(.+?)-الحلقة-\d+/);
+              if (!m) continue;
+              const seriesSlug = m[1];
+              const sources = await trySlug(seriesSlug);
+              if (cfBlocked) break;
+              if (sources && sources.length > 0) {
+                a4upSrcCache.set(ck, { sources, ts: Date.now() });
+                return sources;
+              }
+              break; // only use slug from the first valid link
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (cfBlocked) {
+    a4upSrcCache.set(ck, { sources: [], ts: Date.now() });
+    return [];
+  }
+
+  // ── Step 2: Fallback — derive slug from title directly ──
   const slugCandidates: string[] = [];
   for (const q of [english, title].filter(Boolean) as string[]) {
     const s = toSlug(q as string);
     if (!s || slugCandidates.includes(s)) continue;
     slugCandidates.push(s);
-    // Without common season suffixes
     const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
     if (stripped !== s && stripped.length > 2 && !slugCandidates.includes(stripped)) slugCandidates.push(stripped);
-    // Without "the-" prefix
     if (s.startsWith("the-") && !slugCandidates.includes(s.slice(4))) slugCandidates.push(s.slice(4));
-    // Colon-joined variant (Re:Zero → rezero)
     const colonJoined = toSlug((q as string).replace(/[：:]/g, ""));
     if (colonJoined && colonJoined !== s && !slugCandidates.includes(colonJoined)) slugCandidates.push(colonJoined);
   }
-
-  const epStr = String(ep);
-  const epPad = ep < 10 ? `0${ep}` : epStr;
-  const VIDEO_HOSTS_RE = /(?:mega\.nz|mega\.co\.nz|vidmoly|share4max|voe\.sx|voe\.tv|rubyvidhub|dsvplay|streamwish|filemoon|streamtape|ok\.ru)/i;
-
-  try {
-    for (const slug of slugCandidates) {
-      // Try both plain and zero-padded episode numbers for ep < 10
-      const epUrls = [
-        `${A4UP_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr)}/`,
-        ...(ep < 10 ? [`${A4UP_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epPad)}/`] : []),
-      ];
-
-      for (const epUrl of epUrls) {
-        let epR: Response;
-        try {
-          epR = await fetch(epUrl, {
-            headers: A4UP_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
-          });
-        } catch { continue; }
-        if (!epR.ok) continue;
-        const epHtml = await epR.text();
-        // If CF blocks the page, the entire domain is blocked — bail immediately
-        if (isCloudflareBlock(epHtml)) {
-          a4upSrcCache.set(ck, { sources: [], ts: Date.now() });
-          return [];
-        }
-        // Must look like a real episode page
-        if (!epHtml.includes("iframe") && !epHtml.includes("src=")) continue;
-
-        // Collect all iframe/embed src= URLs that look like video hosts
-        const iframeUrls: string[] = [];
-        for (const m of epHtml.matchAll(/(?:src|data-src)=["']([^"']{10,})["']/gi)) {
-          const raw = m[1].trim();
-          const url = raw.startsWith("http") ? raw : null;
-          if (!url) continue;
-          if (!VIDEO_HOSTS_RE.test(url)) continue;
-          if (!iframeUrls.includes(url)) iframeUrls.push(url);
-        }
-        if (!iframeUrls.length) continue;
-
-        const sources: UnifiedSource[] = iframeUrls.map((url, i) => ({
-          name: `أنمي فور أب · سيرفر ${i + 1}`,
-          url,
-          quality: "HD",
-          qualityRank: 10,
-          site: "anime4up",
-        }));
-
-        a4upSrcCache.set(ck, { sources, ts: Date.now() });
-        return sources;
-      }
+  for (const slug of slugCandidates) {
+    const sources = await trySlug(slug);
+    if (cfBlocked) break;
+    if (sources && sources.length > 0) {
+      a4upSrcCache.set(ck, { sources, ts: Date.now() });
+      return sources;
     }
-  } catch {}
+  }
 
   a4upSrcCache.set(ck, { sources: [], ts: Date.now() });
   return [];

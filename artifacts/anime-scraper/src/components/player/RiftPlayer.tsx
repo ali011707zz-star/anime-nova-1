@@ -179,6 +179,7 @@ export default function RiftPlayer({
   const [dblTap,          setDblTap]          = useState<{ side: "L" | "R"; id: number; secs: number } | null>(null);
   const [longPress,       setLongPress]       = useState(false);
   const [screenshotFlash, setScreenshotFlash] = useState(false);
+  const [isEnded,         setIsEnded]         = useState(false);
 
   /* ── auto-close sub menu when controls hide ── */
   useEffect(() => {
@@ -247,7 +248,7 @@ export default function RiftPlayer({
     const v = videoRef.current; if (!v) return;
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     v.src = "";
-    setLoading(true); setError(null); setCurrentTime(0); setDuration(0); setPlaying(false);
+    setLoading(true); setError(null); setCurrentTime(0); setDuration(0); setPlaying(false); setIsEnded(false);
     failFired.current = false;
     if (failTimer.current) { clearTimeout(failTimer.current); failTimer.current = null; }
 
@@ -354,13 +355,16 @@ export default function RiftPlayer({
     const onDur   = () => { setDuration(v.duration); if (v.duration > 0) onDuration?.(v.duration); };
     const onWait  = () => setLoading(true);
     const onPlay2 = () => setLoading(false);
+    const onEnded = () => { setIsEnded(true); setPlaying(false); setShowCtrl(true); };
     v.addEventListener("play", onPlay); v.addEventListener("pause", onPause);
     v.addEventListener("timeupdate", onTime); v.addEventListener("durationchange", onDur);
     v.addEventListener("waiting", onWait); v.addEventListener("playing", onPlay2);
+    v.addEventListener("ended", onEnded);
     return () => {
       v.removeEventListener("play", onPlay); v.removeEventListener("pause", onPause);
       v.removeEventListener("timeupdate", onTime); v.removeEventListener("durationchange", onDur);
       v.removeEventListener("waiting", onWait); v.removeEventListener("playing", onPlay2);
+      v.removeEventListener("ended", onEnded);
     };
   }, [onTimeUpdate]);
 
@@ -478,13 +482,13 @@ export default function RiftPlayer({
       }
     }
     if (g.active === "seek") {
-      const maxD = Math.min(duration * 0.5, 120);
+      const maxD = Math.min(duration * 0.25, 60);
       let delta: number;
       if (isPortrait) {
         // Vertical screen movement = horizontal player movement (down = forward)
         delta = (dy / window.innerHeight) * maxD;
       } else {
-        delta = (dx / e.currentTarget.clientWidth) * maxD;
+        delta = (dx / window.innerWidth) * maxD;
       }
       const seekVal = Math.max(0, Math.min(duration, g.startValue + delta));
       setFeedback({ type: "seek", value: seekVal, delta });
@@ -530,8 +534,10 @@ export default function RiftPlayer({
     if (moved.current) return;
 
     const touch = e.changedTouches[0];
-    const visW = isPortrait ? window.innerWidth : e.currentTarget.clientWidth;
-    const side: "L" | "R" = touch.clientX < visW / 2 ? "L" : "R";
+    /* In portrait (CSS-rotated 90° CW): video's left/right = screen's top/bottom (Y axis) */
+    const side: "L" | "R" = isPortrait
+      ? (touch.clientY < window.innerHeight / 2 ? "L" : "R")
+      : (touch.clientX < window.innerWidth / 2 ? "L" : "R");
     const now = Date.now();
 
     if (lastTap.current && now - lastTap.current.time < 350 && lastTap.current.side === side) {
@@ -558,13 +564,9 @@ export default function RiftPlayer({
   const pct    = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufPct = duration > 0 ? (buffered   / duration) * 100 : 0;
 
-  /* ── Skip intro/outro visibility (AniSkip API or heuristic fallback) ── */
-  const showSkipIntro = skipIntro
-    ? currentTime >= skipIntro.start && currentTime <= skipIntro.end
-    : duration > 300 && currentTime >= 62 && currentTime <= 148;
-  const showSkipOutro = skipOutro
-    ? currentTime >= skipOutro.start && currentTime <= skipOutro.end
-    : duration > 0 && currentTime >= duration - 200 && currentTime <= duration - 12;
+  /* ── Skip intro/outro visibility (AniSkip API only — no heuristics) ── */
+  const showSkipIntro = !!skipIntro && currentTime >= skipIntro.start && currentTime <= skipIntro.end;
+  const showSkipOutro = !!skipOutro && currentTime >= skipOutro.start && currentTime <= skipOutro.end;
 
   /* ── portrait style ── */
   const portraitStyle: React.CSSProperties = isPortrait ? {
@@ -615,6 +617,46 @@ export default function RiftPlayer({
 
       {/* ══ TOUCH + UI LAYER ══ */}
       <div className="absolute inset-0 z-10" onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
+
+        {/* ── end of episode card ── */}
+        <AnimatePresence>
+          {isEnded && (
+            <motion.div key="ended"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 flex flex-col items-center justify-center gap-6 z-20 pointer-events-auto"
+              style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(8px)" }}
+              dir="rtl">
+              <motion.div initial={{ scale: 0.88, y: 12 }} animate={{ scale: 1, y: 0 }} transition={{ delay: 0.08 }}
+                className="flex flex-col items-center gap-5">
+                <div className="w-16 h-16 rounded-full flex items-center justify-center"
+                  style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(167,139,250,0.35)" }}>
+                  <span className="text-3xl">✓</span>
+                </div>
+                <div className="text-center px-8">
+                  <p className="text-white/45 text-[12px] font-['Cairo'] mb-1">انتهت الحلقة</p>
+                  <p className="text-white text-[16px] font-black font-['Cairo']">{title}</p>
+                  {ep > 0 && <p className="text-white/60 text-[13px] font-['Cairo']">الحلقة {ep}</p>}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onPointerDown={e => { e.stopPropagation(); const v = videoRef.current; if (v) { v.currentTime = 0; v.play().catch(() => {}); } setIsEnded(false); showControls(); }}
+                    className="flex items-center gap-2 px-5 py-3 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                    style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.22)", color: "white" }}>
+                    ↺ إعادة
+                  </button>
+                  {onNextEp && ep < totalEps && (
+                    <button
+                      onPointerDown={e => { e.stopPropagation(); onNextEp?.(); }}
+                      className="flex items-center gap-2 px-5 py-3 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                      style={{ background: "rgba(139,92,246,0.92)", border: "1px solid rgba(167,139,250,0.55)", color: "white", boxShadow: "0 4px 20px rgba(139,92,246,0.4)" }}>
+                      الحلقة التالية ⏭
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── error ── */}
         <AnimatePresence>
@@ -1027,33 +1069,22 @@ export default function RiftPlayer({
                     <div className="absolute left-0 right-0 rounded-full overflow-hidden pointer-events-none"
                       style={{ height: prgHover ? 7 : 4, transition: "height 0.15s ease" }}>
                       <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.18)" }} />
-                        {/* Intro marker — yellow: use prop or heuristic (62–148s) */}
-                      {duration > 300 && (() => {
-                        const s = skipIntro?.start ?? 62;
-                        const e2 = skipIntro?.end ?? 148;
-                        return (
-                          <div className="absolute top-0 h-full" style={{
-                            left: `${(s / duration) * 100}%`,
-                            width: `${Math.max(0, (e2 - s) / duration * 100)}%`,
-                            background: "rgba(234,179,8,0.85)",
-                            zIndex: 2,
-                          }} />
-                        );
-                      })()}
-                      {/* Outro marker — yellow: use prop or heuristic (last 200s) */}
-                      {duration > 0 && (() => {
-                        const s = skipOutro?.start ?? Math.max(0, duration - 200);
-                        const e2 = skipOutro?.end ?? Math.max(0, duration - 12);
-                        if (e2 <= s) return null;
-                        return (
-                          <div className="absolute top-0 h-full" style={{
-                            left: `${(s / duration) * 100}%`,
-                            width: `${Math.max(0, (e2 - s) / duration * 100)}%`,
-                            background: "rgba(234,179,8,0.60)",
-                            zIndex: 2,
-                          }} />
-                        );
-                      })()}
+                        {/* Intro marker — only when real AniSkip data provided */}
+                      {skipIntro && duration > 0 && (
+                        <div className="absolute top-0 h-full" style={{
+                          left: `${(skipIntro.start / duration) * 100}%`,
+                          width: `${Math.max(0, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
+                          background: "rgba(234,179,8,0.85)", zIndex: 2,
+                        }} />
+                      )}
+                      {/* Outro marker — only when real AniSkip data provided */}
+                      {skipOutro && duration > 0 && (
+                        <div className="absolute top-0 h-full" style={{
+                          left: `${(skipOutro.start / duration) * 100}%`,
+                          width: `${Math.max(0, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
+                          background: "rgba(234,179,8,0.60)", zIndex: 2,
+                        }} />
+                      )}
                       <div className="absolute top-0 left-0 h-full"
                         style={{ width: `${bufPct}%`, background: "rgba(139,92,246,0.35)", transition: "width 0.3s" }} />
                       <div className="absolute top-0 left-0 h-full"

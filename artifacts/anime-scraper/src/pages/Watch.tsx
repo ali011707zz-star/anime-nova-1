@@ -1752,7 +1752,8 @@ export default function WatchPage() {
   }
 
   function handleBack() {
-    navigate(animeId ? `/anime/${animeId}` : "/");
+    /* Replace current /watch entry in history so pressing browser-back never loops back here */
+    navigate(animeId ? `/anime/${animeId}` : "/", { replace: true } as any);
   }
 
   /* ── Track in-flight fetches to prevent duplicate calls ── */
