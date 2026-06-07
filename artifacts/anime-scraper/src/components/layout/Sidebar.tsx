@@ -2,46 +2,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useLocation } from 'wouter';
 import {
   X, Home, Search, Heart, History,
-  Library, Film, Settings, Moon, Palette,
-  Trash2, Globe, Bell, BellOff, Compass,
-  CalendarDays, ChevronLeft, User, LogIn,
-  ChevronDown, Monitor, Zap, Star,
+  Library, Film, Settings, CalendarDays, ChevronLeft, User, LogIn,
+  Star, Compass, ChevronRight,
 } from 'lucide-react';
-import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 
 interface SidebarProps { open: boolean; onClose: () => void; }
 
-function applyTheme(t: string) {
-  const root = document.documentElement;
-  root.setAttribute('data-theme', t);
-  const map: Record<string, [string, string]> = {
-    amoled:  ['#000000', '#0A0A0A'],
-    violet:  ['#0B0814', '#130F1E'],
-    blue:    ['#0B1120', '#0F1829'],
-    pink:    ['#130811', '#1A0E15'],
-  };
-  const [base, card] = map[t] ?? ['#09090B', '#111116'];
-  root.style.setProperty('--bg-base', base);
-  root.style.setProperty('--bg-card', card);
-}
-
-const THEMES = [
-  { id: 'dark',   label: 'داكن',    dot: '#3F3F46' },
-  { id: 'amoled', label: 'AMOLED',  dot: '#ffffff' },
-  { id: 'violet', label: 'بنفسجي',  dot: '#a78bfa' },
-  { id: 'blue',   label: 'أزرق',    dot: '#3b82f6' },
-  { id: 'pink',   label: 'وردي',    dot: '#ec4899' },
-];
-
 export function Sidebar({ open, onClose }: SidebarProps) {
   const [location, navigate] = useLocation();
   const { user } = useAuth();
-
-  const [theme,       setTheme]       = useState(() => localStorage.getItem('pref-theme')  || 'dark');
-  const [notifs,      setNotifs]      = useState(() => localStorage.getItem('pref-notifs') !== 'false');
-  const [showAppear,  setShowAppear]  = useState(false);
-  const [showGeneral, setShowGeneral] = useState(false);
 
   const watchCount = (() => {
     try {
@@ -53,11 +23,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const favCount = (() => {
     try { return JSON.parse(localStorage.getItem('favorites') || '[]').length; } catch { return 0; }
   })();
-
-  const setT = (t: string) => { setTheme(t); localStorage.setItem('pref-theme', t); applyTheme(t); };
-  const toggleNotifs = () => {
-    const n = !notifs; setNotifs(n); localStorage.setItem('pref-notifs', String(n));
-  };
 
   const isActive = (href: string) =>
     href === '/' ? (location === '/' || location === '') : location.startsWith(href);
@@ -220,123 +185,29 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
               <Divider />
 
-              {/* الإعدادات */}
+              {/* الإعدادات — navigates directly to /settings */}
               <div className="px-3">
                 <SectionLabel>الإعدادات</SectionLabel>
-
-                {/* ── المظهر (dropdown) ── */}
-                <button onClick={() => setShowAppear(v => !v)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.04] transition-colors text-right"
-                  style={{ border: '1px solid transparent' }}>
-                  <Palette className="w-[15px] h-[15px] text-violet-400 shrink-0" strokeWidth={1.8} />
-                  <span className="flex-1 text-[13px] font-bold font-['Cairo'] text-white/60">المظهر</span>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full border border-white/15"
-                      style={{ background: THEMES.find(t => t.id === theme)?.dot ?? '#3F3F46' }} />
-                    <span className="text-[9px] text-white/25 font-['Cairo']">{THEMES.find(t => t.id === theme)?.label}</span>
+                <button onClick={() => go('/settings')}
+                  className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98] text-right
+                    ${isActive('/settings') ? 'text-white' : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'}`}
+                  style={isActive('/settings') ? {
+                    background: 'linear-gradient(135deg,rgba(124,58,237,0.18),rgba(79,70,229,0.10))',
+                    border: '1px solid rgba(139,92,246,0.22)',
+                  } : { border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                    style={{
+                      background: isActive('/settings') ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.05)',
+                      border: isActive('/settings') ? '1px solid rgba(139,92,246,0.40)' : '1px solid rgba(255,255,255,0.08)',
+                    }}>
+                    <Settings className={`w-3.5 h-3.5 ${isActive('/settings') ? 'text-violet-300' : 'text-white/30'}`} strokeWidth={1.8} />
                   </div>
-                  <ChevronDown className={`w-3 h-3 text-white/20 shrink-0 transition-transform duration-200 ${showAppear ? 'rotate-180' : ''}`} />
+                  <div className="flex-1 text-right">
+                    <p className="text-[13px] font-bold font-['Cairo']">الإعدادات</p>
+                    <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">المظهر · المشغّل · الحساب</p>
+                  </div>
+                  <ChevronLeft className="w-3.5 h-3.5 text-white/20 shrink-0" />
                 </button>
-
-                <AnimatePresence>
-                  {showAppear && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18 }}
-                      className="overflow-hidden">
-                      <div className="grid grid-cols-5 gap-1 mx-1 mt-1 mb-2">
-                        {THEMES.map(t => {
-                          const active = theme === t.id;
-                          return (
-                            <button key={t.id} onClick={() => { setT(t.id); setShowAppear(false); }}
-                              className="flex flex-col items-center gap-1 py-2.5 rounded-xl border transition-all active:scale-90"
-                              style={{
-                                background: active ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.03)',
-                                borderColor: active ? 'rgba(139,92,246,0.40)' : 'rgba(255,255,255,0.06)',
-                              }}>
-                              <div className="w-4 h-4 rounded-full border border-white/15"
-                                style={{ background: t.dot }} />
-                              <span className="text-[8px] font-black font-['Cairo']"
-                                style={{ color: active ? '#c4b5fd' : 'rgba(255,255,255,0.28)' }}>{t.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* ── الإعدادات العامة (dropdown) ── */}
-                <button onClick={() => setShowGeneral(v => !v)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.04] transition-colors text-right"
-                  style={{ border: '1px solid transparent' }}>
-                  <Settings className="w-[15px] h-[15px] text-cyan-400 shrink-0" strokeWidth={1.8} />
-                  <span className="flex-1 text-[13px] font-bold font-['Cairo'] text-white/60">إعدادات عامة</span>
-                  <ChevronDown className={`w-3 h-3 text-white/20 shrink-0 transition-transform duration-200 ${showGeneral ? 'rotate-180' : ''}`} />
-                </button>
-
-                <AnimatePresence>
-                  {showGeneral && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18 }}
-                      className="overflow-hidden">
-                      <div className="mx-1 mt-1 mb-2 rounded-xl overflow-hidden"
-                        style={{ border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-
-                        {/* الإشعارات */}
-                        <button onClick={toggleNotifs}
-                          className="w-full flex items-center gap-3 px-3 py-3 hover:bg-white/[0.04] transition-colors text-right"
-                          style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                          {notifs
-                            ? <Bell className="w-[14px] h-[14px] text-violet-400 shrink-0" strokeWidth={2} />
-                            : <BellOff className="w-[14px] h-[14px] text-white/25 shrink-0" strokeWidth={1.8} />}
-                          <span className="flex-1 text-[12px] font-bold font-['Cairo'] text-white/55">الإشعارات</span>
-                          <div className={`relative shrink-0 rounded-full transition-colors ${notifs ? 'bg-violet-600' : 'bg-white/10'}`}
-                            style={{ width: 32, height: 18 }}>
-                            <motion.div
-                              animate={{ x: notifs ? 15 : 2 }}
-                              className="absolute top-[2px] w-3.5 h-3.5 bg-white rounded-full shadow"
-                              transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                            />
-                          </div>
-                        </button>
-
-                        {/* اللغة */}
-                        <button onClick={() => go('/settings')}
-                          className="w-full flex items-center gap-3 px-3 py-3 hover:bg-white/[0.04] transition-colors text-right"
-                          style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                          <Globe className="w-[14px] h-[14px] text-cyan-400 shrink-0" strokeWidth={1.8} />
-                          <span className="flex-1 text-[12px] font-bold font-['Cairo'] text-white/55">اللغة والمنطقة</span>
-                          <span className="text-[9px] text-white/20 font-['Cairo']">العربية</span>
-                          <ChevronLeft className="w-3 h-3 text-white/15 shrink-0" />
-                        </button>
-
-                        {/* جودة التشغيل */}
-                        <button onClick={() => go('/settings')}
-                          className="w-full flex items-center gap-3 px-3 py-3 hover:bg-white/[0.04] transition-colors text-right"
-                          style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                          <Monitor className="w-[14px] h-[14px] text-emerald-400 shrink-0" strokeWidth={1.8} />
-                          <span className="flex-1 text-[12px] font-bold font-['Cairo'] text-white/55">جودة التشغيل</span>
-                          <span className="text-[9px] text-white/20 font-['Cairo']">تلقائي</span>
-                          <ChevronLeft className="w-3 h-3 text-white/15 shrink-0" />
-                        </button>
-
-                        {/* مسح الكاش */}
-                        <button onClick={() => {
-                          if (confirm('مسح الكاش والبيانات المؤقتة؟')) {
-                            localStorage.clear(); window.location.reload();
-                          }
-                        }}
-                          className="w-full flex items-center gap-3 px-3 py-3 hover:bg-red-500/5 transition-colors text-right">
-                          <Trash2 className="w-[14px] h-[14px] text-red-400/50 shrink-0" strokeWidth={1.8} />
-                          <span className="flex-1 text-[12px] font-bold font-['Cairo'] text-red-400/50">مسح الكاش</span>
-                          <span className="text-[9px] text-white/15 font-['Cairo']">بيانات مؤقتة</span>
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
 
               {/* بطاقة تعريفية */}
@@ -353,19 +224,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
             {/* ── FOOTER ── */}
             <div className="shrink-0 px-3 pt-2 pb-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-              <button onClick={() => go('/settings')}
-                className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98]
-                  ${isActive('/settings') ? 'text-white' : 'text-white/50 hover:text-white/80 hover:bg-white/[0.05]'}`}
-                style={isActive('/settings') ? {
-                  background: 'linear-gradient(135deg,rgba(124,58,237,0.18),rgba(79,70,229,0.10))',
-                  border: '1px solid rgba(139,92,246,0.22)',
-                } : { border: '1px solid transparent' }}>
-                <Zap className={`w-[15px] h-[15px] shrink-0 ${isActive('/settings') ? 'text-violet-400' : 'text-white/30'}`} strokeWidth={1.8} />
-                <span className="flex-1 text-[13px] font-bold font-['Cairo']">جميع الإعدادات</span>
-                <ChevronLeft className="w-3 h-3 text-white/20 shrink-0" />
-              </button>
-
-              <div className="flex items-center justify-between px-1 mt-2">
+              <div className="flex items-center justify-between px-1">
                 <p className="text-[7.5px] text-white/12 font-bold">Anime Nova © 2025</p>
                 <div className="flex items-center gap-1">
                   <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
