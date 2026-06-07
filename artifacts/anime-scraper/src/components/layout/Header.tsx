@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Bell, Search, Menu, User, LogOut, LogIn } from "lucide-react";
+import { Bell, Menu, User, LogOut, LogIn } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
 import { AuthModal } from "@/pages/Auth";
@@ -21,41 +21,38 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   return (
     <>
-      <header className="sticky top-0 z-50 w-full bg-[#09090B]/90 backdrop-blur-xl border-b border-white/[0.06] px-3 py-2 flex items-center justify-between">
+      <header className="sticky top-0 z-50 w-full bg-[#09090B]/90 backdrop-blur-xl border-b border-white/[0.06] px-3 py-2 flex items-center justify-between" dir="rtl">
+        {/* RIGHT: Menu + Logo */}
         <div className="flex items-center gap-2">
           <button
             onClick={onMenuClick}
-            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/8 text-white/70 hover:text-white transition-all"
+            className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-white/8 text-white/70 hover:text-white transition-all active:scale-90"
           >
             <Menu className="w-4 h-4" />
           </button>
           <div className="flex items-center gap-0.5">
-            <span className="text-[18px] font-black tracking-tight" style={{ background: "linear-gradient(135deg,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>NOVA</span>
-            <span className="text-[18px] font-black text-white/90 tracking-tight">ANIME</span>
+            <span className="text-[16px] font-black tracking-tight" style={{ background: "linear-gradient(135deg,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>NOVA</span>
+            <span className="text-[16px] font-black tracking-tight text-white/90">ANIME</span>
           </div>
         </div>
+
+        {/* LEFT: Bell + User */}
         <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => navigate("/search")}
-            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/8 text-white/50 hover:text-white transition-all"
-          >
-            <Search className="w-4 h-4" />
-          </button>
-          <button className="relative w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/8 text-white/50 hover:text-white transition-all">
+          <button className="relative w-8 h-8 flex items-center justify-center rounded-xl hover:bg-white/8 text-white/50 hover:text-white transition-all">
             <Bell className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-1 h-1 bg-primary rounded-full" />
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full" />
           </button>
           {user ? (
             <div className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="w-7 h-7 flex items-center justify-center rounded-lg bg-primary/20 border border-primary/30 text-primary font-black text-xs transition-all hover:bg-primary/30"
+                className="w-8 h-8 flex items-center justify-center rounded-xl bg-primary/20 border border-primary/30 text-primary font-black text-xs transition-all hover:bg-primary/30"
               >
                 {avatarLetter}
               </button>
               <AnimatePresence>
                 {showUserMenu && (
-                  <div className="absolute top-9 left-0 w-40 bg-[#111116] border border-white/10 rounded-xl shadow-2xl py-1 z-50" dir="rtl">
+                  <div className="absolute top-10 left-0 w-40 bg-[#111116] border border-white/10 rounded-xl shadow-2xl py-1 z-50" dir="rtl">
                     <div className="px-3 py-2 border-b border-white/6">
                       <p className="text-[9px] text-white/40 font-['Cairo'] truncate">{user.email}</p>
                     </div>
@@ -78,7 +75,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           ) : (
             <button
               onClick={() => setShowAuth(true)}
-              className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/8 text-white/50 hover:text-white transition-all"
+              className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-white/8 text-white/50 hover:text-white transition-all"
             >
               <LogIn className="w-4 h-4" />
             </button>
