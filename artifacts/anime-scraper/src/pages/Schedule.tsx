@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, Clock, Tv2, Star, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
+import { Loader2, Clock, Tv2, Star, CalendarDays } from 'lucide-react';
 import { Link } from 'wouter';
 
 const SCHEDULE_QUERY = `
@@ -13,7 +13,6 @@ query ($page: Int, $perPage: Int, $weekStart: Int, $weekEnd: Int) {
         id
         title { romaji english }
         coverImage { large extraLarge }
-        bannerImage
         averageScore
         popularity
         genres
@@ -86,13 +85,11 @@ function AnimeCard({ item, isToday }: { item: any; isToday: boolean }) {
           opacity: isPast ? 0.55 : 1,
         }}
       >
-        {/* Glow for today */}
         {isToday && !isPast && (
           <div className="absolute inset-0 pointer-events-none rounded-2xl"
             style={{ boxShadow: "inset 0 0 20px rgba(139,92,246,0.06)" }} />
         )}
 
-        {/* Cover */}
         <div className="relative shrink-0 rounded-xl overflow-hidden" style={{ width: 48, height: 66 }}>
           <img
             src={media?.coverImage?.extraLarge || media?.coverImage?.large}
@@ -107,7 +104,6 @@ function AnimeCard({ item, isToday }: { item: any; isToday: boolean }) {
           )}
         </div>
 
-        {/* Info */}
         <div className="flex-1 min-w-0 text-right">
           <h3 className="text-[13px] font-black text-white leading-snug line-clamp-1 font-['Cairo']">
             {media?.title?.romaji}
@@ -118,7 +114,6 @@ function AnimeCard({ item, isToday }: { item: any; isToday: boolean }) {
             </p>
           )}
 
-          {/* Tags row */}
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap justify-end">
             {genres.map((g: string) => (
               <span key={g} className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-lg"
@@ -134,7 +129,6 @@ function AnimeCard({ item, isToday }: { item: any; isToday: boolean }) {
             )}
           </div>
 
-          {/* Bottom row: ep + time + score */}
           <div className="flex items-center gap-2 mt-2 justify-between">
             <div className="flex items-center gap-1.5">
               <ScoreBadge score={media?.averageScore} />
@@ -153,7 +147,6 @@ function AnimeCard({ item, isToday }: { item: any; isToday: boolean }) {
           </div>
         </div>
 
-        {/* Active dot for today + future */}
         {isToday && !isPast && (
           <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full"
             style={{ background: "#a78bfa", boxShadow: "0 0 8px rgba(167,139,250,0.80)" }} />
@@ -169,15 +162,11 @@ export default function Schedule() {
   const [activeDay, setActiveDay] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [todayName, setTodayName] = useState('');
-  const dayRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const tabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const now = Math.floor(Date.now() / 1000);
     const today = DAYS_AR[new Date().getDay()];
     setTodayName(today);
 
-    // Start from beginning of today (midnight local)
     const todayMidnight = new Date();
     todayMidnight.setHours(0, 0, 0, 0);
     const weekStart = Math.floor(todayMidnight.getTime() / 1000);
@@ -186,7 +175,7 @@ export default function Schedule() {
     fetch('https://graphql.anilist.co', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: SCHEDULE_QUERY, variables: { page: 1, perPage: 100, weekStart, weekEnd } }),
+      body: JSON.stringify({ query: SCHEDULE_QUERY, variables: { page: 1, perPage: 50, weekStart, weekEnd } }),
     })
       .then(r => r.json())
       .then(d => {
@@ -196,16 +185,11 @@ export default function Schedule() {
 
         items.forEach((item: any) => {
           const date = new Date(item.airingAt * 1000);
-          const dayIdx = date.getDay();
-          const day = DAYS_AR[dayIdx];
-          if (!grouped[day]) {
-            grouped[day] = [];
-            dayOrder.push(day);
-          }
+          const day = DAYS_AR[date.getDay()];
+          if (!grouped[day]) { grouped[day] = []; dayOrder.push(day); }
           grouped[day].push(item);
         });
 
-        // Sort each day's items by airing time
         Object.values(grouped).forEach(arr => arr.sort((a, b) => a.airingAt - b.airingAt));
 
         setSchedule(grouped);
@@ -214,32 +198,6 @@ export default function Schedule() {
       })
       .finally(() => setLoading(false));
   }, []);
-
-  const scrollToDay = (day: string) => {
-    setActiveDay(day);
-    dayRefs.current[day]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
-  // Intersection observer to update active tab on scroll
-  useEffect(() => {
-    if (!orderedDays.length) return;
-    const observer = new IntersectionObserver(
-      entries => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            const day = entry.target.getAttribute('data-day');
-            if (day) setActiveDay(day);
-          }
-        }
-      },
-      { threshold: 0.3, rootMargin: '-60px 0px -60% 0px' }
-    );
-    orderedDays.forEach(day => {
-      const el = dayRefs.current[day];
-      if (el) observer.observe(el);
-    });
-    return () => observer.disconnect();
-  }, [orderedDays]);
 
   if (loading) return (
     <div className="bg-[#08080F] min-h-screen flex flex-col items-center justify-center gap-4 font-['Cairo']">
@@ -255,7 +213,11 @@ export default function Schedule() {
     </div>
   );
 
-  const totalItems = Object.values(schedule).reduce((s, a) => s + a.length, 0);
+  const dayItems: any[] = schedule[activeDay] || [];
+  const isToday = activeDay === todayName;
+  const pastCount = dayItems.filter(i => i.airingAt < Math.floor(Date.now() / 1000)).length;
+  const upcomingCount = dayItems.length - pastCount;
+  const activeDayIdx = DAYS_AR.indexOf(activeDay);
 
   return (
     <div className="bg-[#08080F] min-h-screen text-white font-['Cairo']" dir="rtl">
@@ -266,7 +228,7 @@ export default function Schedule() {
           <div>
             <h1 className="text-[22px] font-black leading-tight tracking-tight">جدول البث</h1>
             <p className="text-white/35 text-[12px] mt-0.5">
-              {totalItems} حلقة هذا الأسبوع
+              {dayItems.length} حلقة {isToday ? "اليوم" : `يوم ${activeDay}`}
             </p>
           </div>
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
@@ -277,9 +239,8 @@ export default function Schedule() {
         </div>
       </div>
 
-      {/* ── Day Tabs (sticky) ── */}
+      {/* ── Day Tabs ── */}
       <div
-        ref={tabsRef}
         className="sticky top-0 z-30 overflow-x-auto scrollbar-hide px-4 py-2 flex items-center gap-2"
         style={{
           background: "rgba(8,8,15,0.92)",
@@ -287,26 +248,26 @@ export default function Schedule() {
           borderBottom: "1px solid rgba(255,255,255,0.05)",
         }}
       >
-        {orderedDays.map((day, i) => {
+        {orderedDays.map(day => {
           const isActive = activeDay === day;
-          const isToday = day === todayName;
+          const isDayToday = day === todayName;
           const count = schedule[day]?.length || 0;
           const dayIdx = DAYS_AR.indexOf(day);
           return (
             <motion.button
               key={day}
-              onClick={() => scrollToDay(day)}
+              onClick={() => setActiveDay(day)}
               whileTap={{ scale: 0.93 }}
               className="flex flex-col items-center gap-0.5 shrink-0 px-3 py-1.5 rounded-2xl transition-all"
               style={{
                 background: isActive
                   ? "linear-gradient(135deg, rgba(139,92,246,0.35), rgba(109,40,217,0.25))"
-                  : isToday
+                  : isDayToday
                   ? "rgba(139,92,246,0.10)"
                   : "rgba(255,255,255,0.04)",
                 border: isActive
                   ? "1px solid rgba(139,92,246,0.55)"
-                  : isToday
+                  : isDayToday
                   ? "1px solid rgba(139,92,246,0.22)"
                   : "1px solid rgba(255,255,255,0.06)",
                 minWidth: 52,
@@ -314,7 +275,7 @@ export default function Schedule() {
             >
               <span className="text-base leading-none">{DAY_ICONS[dayIdx]}</span>
               <span className="text-[10px] font-black leading-tight"
-                style={{ color: isActive ? "#e2d9fc" : isToday ? "#a78bfa" : "rgba(255,255,255,0.50)" }}>
+                style={{ color: isActive ? "#e2d9fc" : isDayToday ? "#a78bfa" : "rgba(255,255,255,0.50)" }}>
                 {day}
               </span>
               <span className="text-[8px] font-bold font-mono"
@@ -326,101 +287,81 @@ export default function Schedule() {
         })}
       </div>
 
-      {/* ── Content ── */}
+      {/* ── Day Content (only active day) ── */}
       <div className="pb-28">
-        {orderedDays.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-4">
-            <CalendarDays className="w-12 h-12 text-white/15" />
-            <p className="text-white/35 text-sm font-bold">لا توجد بيانات للجدول</p>
-          </div>
-        ) : orderedDays.map((day, di) => {
-          const items: any[] = schedule[day] || [];
-          const isToday = day === todayName;
-          const dayIdx = DAYS_AR.indexOf(day);
-          const pastCount = items.filter(i => i.airingAt < Math.floor(Date.now() / 1000)).length;
-          const upcomingCount = items.length - pastCount;
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeDay}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {/* Day header */}
+            <div className="px-4 pt-5 pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-1 rounded-full"
+                  style={{
+                    height: 28,
+                    background: isToday
+                      ? "linear-gradient(180deg, #8b5cf6, #6d28d9)"
+                      : "linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0.06))",
+                    boxShadow: isToday ? "0 0 10px rgba(139,92,246,0.60)" : "none",
+                  }} />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xl leading-none">{DAY_ICONS[activeDayIdx] ?? '📅'}</span>
+                  <h2 className="text-[16px] font-black" style={{ color: isToday ? "#e2d9fc" : "rgba(255,255,255,0.88)" }}>
+                    {activeDay}
+                  </h2>
+                  {isToday && (
+                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(139,92,246,0.40), rgba(109,40,217,0.30))",
+                        border: "1px solid rgba(139,92,246,0.55)",
+                        color: "#c4b5fd",
+                      }}>
+                      اليوم
+                    </span>
+                  )}
+                </div>
+              </div>
 
-          return (
-            <div
-              key={day}
-              data-day={day}
-              ref={el => { dayRefs.current[day] = el; }}
-              className="pt-5 px-4"
-            >
-              {/* Day Header */}
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2.5">
-                  {/* Accent bar */}
-                  <div className="w-1 rounded-full"
-                    style={{
-                      height: 28,
-                      background: isToday
-                        ? "linear-gradient(180deg, #8b5cf6, #6d28d9)"
-                        : "linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0.06))",
-                      boxShadow: isToday ? "0 0 10px rgba(139,92,246,0.60)" : "none",
-                    }} />
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xl leading-none">{DAY_ICONS[dayIdx]}</span>
-                      <h2 className="text-[16px] font-black leading-tight"
-                        style={{ color: isToday ? "#e2d9fc" : "rgba(255,255,255,0.88)" }}>
-                        {day}
-                      </h2>
-                      {isToday && (
-                        <motion.span
-                          initial={{ scale: 0.8, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          className="text-[9px] font-black px-2 py-0.5 rounded-full"
-                          style={{
-                            background: "linear-gradient(135deg, rgba(139,92,246,0.40), rgba(109,40,217,0.30))",
-                            border: "1px solid rgba(139,92,246,0.55)",
-                            color: "#c4b5fd",
-                          }}>
-                          اليوم
-                        </motion.span>
-                      )}
-                    </div>
+              <div className="flex items-center gap-2 text-[10px]">
+                {upcomingCount > 0 && (
+                  <div className="flex items-center gap-1 px-2 py-1 rounded-xl"
+                    style={{ background: "rgba(167,139,250,0.10)", border: "1px solid rgba(167,139,250,0.18)" }}>
+                    <Tv2 className="w-2.5 h-2.5 text-violet-400" />
+                    <span className="font-bold text-violet-300">{upcomingCount} قادم</span>
                   </div>
-                </div>
-                {/* Stats */}
-                <div className="flex items-center gap-2 text-[10px]">
-                  {upcomingCount > 0 && (
-                    <div className="flex items-center gap-1 px-2 py-1 rounded-xl"
-                      style={{ background: "rgba(167,139,250,0.10)", border: "1px solid rgba(167,139,250,0.18)" }}>
-                      <Tv2 className="w-2.5 h-2.5 text-violet-400" />
-                      <span className="font-bold text-violet-300">{upcomingCount}</span>
-                    </div>
-                  )}
-                  {pastCount > 0 && (
-                    <span className="text-white/25 font-bold">{pastCount} بُثّ</span>
-                  )}
-                </div>
+                )}
+                {pastCount > 0 && (
+                  <span className="text-white/25 font-bold">{pastCount} بُثّ</span>
+                )}
               </div>
-
-              {/* Cards */}
-              <div className="space-y-2">
-                <AnimatePresence>
-                  {items.map((item, ii) => (
-                    <motion.div
-                      key={item.media?.id || ii}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: Math.min(ii * 0.04, 0.3), duration: 0.24 }}
-                    >
-                      <AnimeCard item={item} isToday={isToday} />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-
-              {/* Separator */}
-              {di < orderedDays.length - 1 && (
-                <div className="mt-5 h-px"
-                  style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.06) 30%, rgba(255,255,255,0.06) 70%, transparent)" }} />
-              )}
             </div>
-          );
-        })}
+
+            {/* Cards */}
+            {dayItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-4">
+                <CalendarDays className="w-12 h-12 text-white/15" />
+                <p className="text-white/35 text-sm font-bold">لا توجد حلقات هذا اليوم</p>
+              </div>
+            ) : (
+              <div className="px-4 space-y-2">
+                {dayItems.map((item, ii) => (
+                  <motion.div
+                    key={item.media?.id || ii}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: Math.min(ii * 0.035, 0.25), duration: 0.22 }}
+                  >
+                    <AnimeCard item={item} isToday={isToday} />
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

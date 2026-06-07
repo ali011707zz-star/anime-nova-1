@@ -128,15 +128,23 @@ export default function AnimationWatch() {
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [showEpList, setShowEpList] = useState(false);
 
+  /* ── User prefs (read once on mount) ── */
+  const prefAutoplay = useRef(localStorage.getItem("pref-autoplay") !== "false");
+  const prefSubSize  = useRef(localStorage.getItem("pref-subsize") || "medium");
+  const prefAutoSub  = useRef(localStorage.getItem("pref-autosub") !== "false");
+
   /* ── Subtitle state ── */
   const [subTracks,   setSubTracks]   = useState<SubTrack[]>([]);
   const [subChoice,   setSubChoice]   = useState<SubChoice>("off");
   const [subStatus,   setSubStatus]   = useState<SubStatus>("off");
   const [subCues,     setSubCues]     = useState<SubCue[]>([]);
+  const [subTrigger,  setSubTrigger]  = useState(0);
   const [showSubPanel, setShowSubPanel] = useState(false);
   const [hlsTime,     setHlsTime]     = useState(0);
+
+  const subFontSize = prefSubSize.current === "small" ? 13 : prefSubSize.current === "large" ? 20 : 16;
   const [subSettings, setSubSettings] = useState<SubSettings>({
-    fontSize: 16, color: "#ffffff", bgOpacity: 0, bold: false, position: "bottom",
+    fontSize: subFontSize, color: "#ffffff", bgOpacity: 0, bold: false, position: "bottom",
   });
   const subAbortRef = useRef<AbortController | null>(null);
 
@@ -185,10 +193,11 @@ export default function AnimationWatch() {
 
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
-  /* ── Auto-play first available "ok" source (also fires from "sources" step) ── */
+  /* ── Auto-play first available "ok" source (respects pref-autoplay setting) ── */
   useEffect(() => {
     if (step === "playing" || step === "error") return;
     if (autoPlayedRef.current) return;
+    if (!prefAutoplay.current) return;             // user disabled auto-play
     const first = sources.find(s => s.status === "ok");
     if (!first) return;
     autoPlayedRef.current = true;
@@ -382,9 +391,18 @@ export default function AnimationWatch() {
     }
   }, [subTracks, loadSubTrack]);
 
-  /* ── Discover + auto-load subtitle tracks whenever episode changes ── */
+  /* ── Retry subtitle loading (called by user — always forces load) ── */
+  const forceSubRef = useRef(false);
+  const retrySubtitles = useCallback(() => {
+    forceSubRef.current = true;
+    setSubTrigger(t => t + 1);
+  }, []);
+
+  /* ── Discover + auto-load subtitle tracks whenever episode/trigger changes ── */
   useEffect(() => {
     subAbortRef.current?.abort();
+    const forced = forceSubRef.current;
+    forceSubRef.current = false;
     setSubTracks([]); setSubCues([]); setSubChoice("off"); setSubStatus("discovering");
     if (!tmdbId) { setSubStatus("off"); return; }
 
@@ -393,20 +411,29 @@ export default function AnimationWatch() {
 
     (async () => {
       try {
+        // Race: 18s hard timeout so we never hang forever
+        const timeoutId = setTimeout(() => ctrl.abort(), 18_000);
         const r = await fetch(
           `/api/animation/subtitle-tracks?tmdbId=${encodeURIComponent(tmdbId)}&type=${type}&ep=${ep}&season=${season}`,
           { signal: ctrl.signal }
         );
-        if (ctrl.signal.aborted || !r.ok) return;
+        clearTimeout(timeoutId);
+        if (ctrl.signal.aborted || !r.ok) { if (!ctrl.signal.aborted) setSubStatus("failed"); return; }
+
         const d = await r.json() as { tracks?: SubTrack[] };
         const tracks: SubTrack[] = d.tracks || [];
         setSubTracks(tracks);
+
+        // If auto-subtitle disabled and not a forced retry → discover only, don't load
+        if (!prefAutoSub.current && !forced) {
+          setSubStatus("off");
+          return;
+        }
 
         const arTrack = tracks.find(t => t.lang === "ar");
         const enTrack = tracks.find(t => t.lang === "en");
 
         if (arTrack) {
-          // Direct Arabic track — fast, no translation needed
           setSubChoice("ar");
           const ok = await loadSubTrack(arTrack, "direct", ctrl.signal);
           if (!ok && !ctrl.signal.aborted && enTrack) {
@@ -427,7 +454,7 @@ export default function AnimationWatch() {
     })();
 
     return () => ctrl.abort();
-  }, [tmdbId, type, ep, season]); // eslint-disable-line
+  }, [tmdbId, type, ep, season, subTrigger]); // eslint-disable-line
 
   /* ── Resume time ── */
   const resumeTime = useMemo(
@@ -535,7 +562,11 @@ export default function AnimationWatch() {
           }
           subSettings={subSettings}
           onSubSettingsChange={setSubSettings}
-          onSubtitleClick={() => setShowSubPanel(p => !p)}
+          onSubtitleClick={
+            subStatus === "failed" || subStatus === "off"
+              ? retrySubtitles
+              : () => setShowSubPanel(p => !p)
+          }
           onTimeUpdate={handleTimeUpdate}
           onFail={stableOnFail}
           onBack={() => setStep("sources")}
