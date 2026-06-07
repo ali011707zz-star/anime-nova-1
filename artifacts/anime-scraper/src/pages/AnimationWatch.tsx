@@ -62,6 +62,7 @@ interface Source {
   proxyUrl?: string;
   status?: "loading" | "ok" | "fail";
   tier?: QualityTier;
+  isEmbed?: boolean;
 }
 
 function getSourceTier(src: Source): QualityTier {
@@ -260,13 +261,16 @@ export default function AnimationWatch() {
     esRef.current = es;
 
     es.addEventListener("source", (e) => {
-      const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string };
+      const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
       const key = src.directUrl || src.url;
       if (seenUrls.current.has(key)) return;
       seenUrls.current.add(key);
 
       let newSrc: Source;
-      if (src.directUrl || src.proxyUrl) {
+      if (src.isEmbed) {
+        // Embed iframe source (e.g. StarCima arabic-sources that can't be extracted server-side)
+        newSrc = { url: src.url, label: src.label, status: "ok", isEmbed: true };
+      } else if (src.directUrl || src.proxyUrl) {
         const resolved = src.proxyUrl || src.directUrl!;
         const hl       = isHlsUrl(resolved);
         const proxyUrl = src.proxyUrl || (hl ? wrapHls(src.directUrl!, window.location.origin) : wrapMp4(src.directUrl!, window.location.origin));
@@ -318,15 +322,25 @@ export default function AnimationWatch() {
     };
 
     try {
-      // ── 1. Try direct Arabic CDN (cache.vdrk.site pattern from StarCima vidzee API) ──
-      const directArUrl = type === "tv"
-        ? `https://cache.vdrk.site/v3/tv/${tmdbId}/${season}/${ep}/Arabic.vtt`
-        : `https://cache.vdrk.site/v3/movie/${tmdbId}/Arabic.vtt`;
+      // ── 1. Try direct Arabic CDN (cache.vdrk.site) — try v3 first, then v2 ──
+      const tryVdrk = async (): Promise<SubCue[]> => {
+        const v3 = type === "tv"
+          ? `https://cache.vdrk.site/v3/tv/${tmdbId}/${season}/${ep}/Arabic.vtt`
+          : `https://cache.vdrk.site/v3/movie/${tmdbId}/Arabic.vtt`;
+        const v3Cues = await fetchVtt(v3, 7_000).catch(() => [] as SubCue[]);
+        if (v3Cues.length > 0) return v3Cues;
 
-      const directCues = await fetchVtt(directArUrl, 8_000).catch(() => [] as SubCue[]);
+        // v3 failed → try v2
+        const v2 = type === "tv"
+          ? `https://cache.vdrk.site/v2/tv/${tmdbId}/${season}/${ep}/Arabic.vtt`
+          : `https://cache.vdrk.site/v2/movie/${tmdbId}/Arabic.vtt`;
+        return fetchVtt(v2, 7_000).catch(() => [] as SubCue[]);
+      };
+
+      const directCues = await tryVdrk();
       if (directCues.length > 0) { setSubCues(directCues); setSubState("ready"); return; }
 
-      // ── 2. Fallback: vidzee-meta API for subtitle URLs ──
+      // ── 2. Fallback: vidzee-meta API — get subtitle URLs from StarCima vidzee ──
       const r = await fetch(
         `/api/animation/vidzee-meta?tmdbId=${tmdbId}&type=${type}&season=${season}&ep=${ep}`,
         { signal: AbortSignal.timeout(12_000) }
@@ -335,12 +349,11 @@ export default function AnimationWatch() {
       const data: any = await r.json();
       const subs: any[] = data.subtitles || [];
 
-      // Prefer direct Arabic VTT (full https URL), fallback to English
-      const arSub = subs.find((s: any) => s.languageCode === "ar" && s.url?.startsWith("http"))
-        || subs.find((s: any) => s.languageCode === "ar");
-      const enSub = subs.find((s: any) => s.languageCode === "en" && s.url?.startsWith("http"));
-
-      const chosen = arSub || enSub;
+      // Prefer direct Arabic VTT (full https URL, not relative starcima sub-retime)
+      const arDirect = subs.find((s: any) => s.languageCode === "ar" && s.url?.startsWith("http"));
+      const arRelative = subs.find((s: any) => s.languageCode === "ar" && s.url?.startsWith("/"));
+      const enDirect = subs.find((s: any) => s.languageCode === "en" && s.url?.startsWith("http"));
+      const chosen = arDirect || arRelative || enDirect;
       if (!chosen) { setSubState("idle"); return; }
 
       const rawUrl = chosen.url?.startsWith("/")
@@ -455,6 +468,41 @@ export default function AnimationWatch() {
 
   /* ────────────────────────── PLAYER ─────────────────────────────────────── */
   if (step === "playing" && selSrc) {
+
+    /* ── Embed iframe player (for StarCima arabic-sources that block server extraction) ── */
+    if (selSrc.isEmbed) {
+      return (
+        <div className="fixed inset-0 bg-black flex flex-col" dir="rtl">
+          {/* Top bar */}
+          <div className="flex items-center shrink-0 px-3 py-2 gap-2"
+            style={{ background: "rgba(0,0,0,0.85)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+            <button onClick={() => setStep("sources")}
+              className="w-10 h-10 flex items-center justify-center rounded-xl active:scale-90 transition-all"
+              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
+              <ChevronRight className="w-5 h-5 text-white/70" />
+            </button>
+            <div className="flex-1 min-w-0 px-2">
+              <p className="text-white font-black text-[14px] font-['Cairo'] truncate">{displayTitle}</p>
+              <p className="text-white/40 text-[11px] font-['Cairo']">{selSrc.label}</p>
+            </div>
+            <span className="text-[10px] font-['Cairo'] px-2 py-1 rounded-full"
+              style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)", color: "rgba(196,181,253,0.85)" }}>
+              تشغيل مدمج
+            </span>
+          </div>
+          {/* Sandboxed iframe */}
+          <iframe
+            key={`embed-${selSrc.url}`}
+            src={selSrc.url}
+            className="flex-1 w-full border-0"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+            referrerPolicy="no-referrer"
+          />
+        </div>
+      );
+    }
+
     const { url, isHls } = getSourceInfo(selSrc);
     return (
       <div className="fixed inset-0 bg-black" dir="rtl">
