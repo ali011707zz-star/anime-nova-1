@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard } from "lucide-react";
+import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard, Tv2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* ── Module-level cache — survives component unmount/remount so categories
@@ -94,6 +94,14 @@ function buildPopularQuery(genre: string) {
 }`;
 }
 
+const SPRING_2026_QUERY = `query {
+  Page(perPage: 20) {
+    media(type: ANIME, season: SPRING, seasonYear: 2026, sort: POPULARITY_DESC, format_in: [TV, ONA]) {
+      id title { romaji english } coverImage { large } averageScore episodes nextAiringEpisode { episode } status
+    }
+  }
+}`;
+
 const MOVIES_QUERY = `query {
   Page(perPage: 12) {
     media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP") {
@@ -173,6 +181,7 @@ export default function Home() {
 
   const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
+  const [spring2026, setSpring2026] = useState<any[]>([]);
 
   /* Load continue-watching from localStorage (fast, synchronous) */
   useEffect(() => {
@@ -185,6 +194,17 @@ export default function Home() {
     fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
       .then(d => setAnimationMovies((d.results || []).slice(0, 10)))
+      .catch(() => {});
+  }, []);
+
+  /* Load Spring 2026 seasonal anime */
+  useEffect(() => {
+    fetch("https://graphql.anilist.co", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: SPRING_2026_QUERY }),
+    })
+      .then(r => r.json())
+      .then(d => setSpring2026(d.data?.Page?.media || []))
       .catch(() => {});
   }, []);
 
@@ -681,6 +701,67 @@ export default function Home() {
         </div>
       </div>
 
+      {/* ── موسم الربيع 2026 ── */}
+      {spring2026.length > 0 && !selectedGenre && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: "linear-gradient(135deg,#ec4899,#8b5cf6)" }}>
+                <Tv2 className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">موسم الربيع 2026 🌸</h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">{spring2026.length} أنمي يُبث الآن</p>
+              </div>
+            </div>
+            <Link href="/browse?year=2026&season=SPRING&format=TV">
+              <button className="text-[10px] text-pink-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-pink-500/8 px-2.5 py-1 rounded-xl border border-pink-500/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
+            {spring2026.map(anime => {
+              const aired = anime.status === "RELEASING" && anime.nextAiringEpisode?.episode
+                ? anime.nextAiringEpisode.episode - 1
+                : (anime.episodes || 0);
+              const total = anime.episodes || 0;
+              return (
+                <Link key={anime.id} href={`/anime/${anime.id}`}>
+                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>
+                    <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50"
+                      style={{ width: 110, height: 156 }}>
+                      <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
+                      {anime.averageScore > 0 && (
+                        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
+                          <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                        </div>
+                      )}
+                      {aired > 0 && (
+                        <div className="absolute top-1.5 left-1.5 text-[6.5px] font-black px-1.5 py-0.5 rounded-md"
+                          style={{ background: "rgba(236,72,153,0.85)", color: "#fff" }}>
+                          {aired}{total && total > aired ? `/${total}` : ""} ح
+                        </div>
+                      )}
+                      {anime.status === "RELEASING" && (
+                        <div className="absolute bottom-8 left-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      )}
+                      <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
+                        <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">
+                          {anime.title?.romaji}
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── قسم الأنيميشن ── */}
       {!selectedGenre && (
         <div className="mt-5 px-4">
@@ -772,6 +853,11 @@ export default function Home() {
               </div>
               <h2 className="text-[13px] font-black font-['Cairo'] text-white">أفلام أنمي</h2>
             </div>
+            <Link href="/browse?format=MOVIE">
+              <button className="text-[10px] text-blue-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-blue-500/8 px-2.5 py-1 rounded-xl border border-blue-500/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
             {movies.map(anime => (

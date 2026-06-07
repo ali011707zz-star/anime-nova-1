@@ -38,14 +38,15 @@ const FORMAT_TABS = [
 const CUR_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: CUR_YEAR - 1989 }, (_, i) => CUR_YEAR - i);
 
-function buildQuery(genre: string, format: string, year: number | "", page: number) {
+function buildQuery(genre: string, format: string, year: number | "", page: number, season = "") {
   const gf = genre  ? `, genre: "${genre}"` : "";
   const ff = format ? `, format: ${format}` : `, format_in: [TV, MOVIE, OVA, ONA]`;
   const yf = year   ? `, seasonYear: ${year}` : "";
+  const sf = season && year ? `, season: ${season}` : "";
   return `query {
   Page(page: ${page}, perPage: 24) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP"${gf}${ff}${yf}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP"${gf}${ff}${yf}${sf}) {
       id title { romaji } coverImage { large } averageScore episodes format status
     }
   }
@@ -85,10 +86,12 @@ function AnimeCard({ anime }: { anime: any }) {
 }
 
 export default function Browse() {
-  const [selectedGenre, setSelectedGenre] = useState("");
-  const [selectedFormat, setSelectedFormat] = useState("");
-  const [selectedYear, setSelectedYear] = useState<number | "">("");
-  const [showGenreGrid, setShowGenreGrid] = useState(true);
+  const _sp = new URLSearchParams(window.location.search);
+  const [selectedGenre, setSelectedGenre] = useState(_sp.get("genre") || "");
+  const [selectedFormat, setSelectedFormat] = useState(_sp.get("format") || "");
+  const [selectedYear, setSelectedYear] = useState<number | "">(_sp.get("year") ? Number(_sp.get("year")) : "");
+  const [selectedSeason, setSelectedSeason] = useState(_sp.get("season") || "");
+  const [showGenreGrid, setShowGenreGrid] = useState(!_sp.get("genre") && !_sp.get("format") && !_sp.get("year"));
   const [animeList, setAnimeList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -107,10 +110,10 @@ export default function Browse() {
     return (await r.json()).data?.Page;
   };
 
-  const loadAnime = useCallback(async (genre: string, format: string, year: number | "", p: number, append: boolean) => {
+  const loadAnime = useCallback(async (genre: string, format: string, year: number | "", p: number, append: boolean, season = "") => {
     if (!append) setLoading(true); else setLoadingMore(true);
     try {
-      const data = await fetch$(buildQuery(genre, format, year, p));
+      const data = await fetch$(buildQuery(genre, format, year, p, season));
       const list = data?.media || [];
       setAnimeList(prev => append ? [...prev, ...list] : list);
       setHasMore(data?.pageInfo?.hasNextPage ?? false);
@@ -119,9 +122,9 @@ export default function Browse() {
 
   useEffect(() => {
     setPage(1); setAnimeList([]);
-    loadAnime(selectedGenre, selectedFormat, selectedYear, 1, false);
-    setShowGenreGrid(!selectedGenre && !selectedFormat && !selectedYear);
-  }, [selectedGenre, selectedFormat, selectedYear]);
+    loadAnime(selectedGenre, selectedFormat, selectedYear, 1, false, selectedSeason);
+    setShowGenreGrid(!selectedGenre && !selectedFormat && !selectedYear && !selectedSeason);
+  }, [selectedGenre, selectedFormat, selectedYear, selectedSeason]);
 
   useEffect(() => {
     if (!searchQ.trim()) { setSearchResults([]); return; }
@@ -138,12 +141,13 @@ export default function Browse() {
   const loadMore = () => {
     const next = page + 1;
     setPage(next);
-    loadAnime(selectedGenre, selectedFormat, selectedYear, next, true);
+    loadAnime(selectedGenre, selectedFormat, selectedYear, next, true, selectedSeason);
   };
 
   const displayList = searchQ.trim() ? searchResults : animeList;
   const currentGenreLabel = GENRES.find(g => g.en === selectedGenre)?.ar || "";
-  const hasFilter = !!(selectedGenre || selectedFormat || selectedYear);
+  const seasonLabel: Record<string, string> = { SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف", WINTER: "شتاء" };
+  const hasFilter = !!(selectedGenre || selectedFormat || selectedYear || selectedSeason);
 
   return (
     <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
@@ -152,10 +156,13 @@ export default function Browse() {
       <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-4 pb-3">
         <div className="flex items-center gap-2 mb-3">
           <h1 className="text-xl font-black font-['Cairo'] flex-1">
-            {selectedGenre ? currentGenreLabel : selectedYear ? `أنمي ${selectedYear}` : "مكتبة الأنمي"}
+            {selectedGenre ? currentGenreLabel
+              : selectedSeason && selectedYear ? `موسم ${seasonLabel[selectedSeason] || selectedSeason} ${selectedYear}`
+              : selectedYear ? `أنمي ${selectedYear}`
+              : "مكتبة الأنمي"}
           </h1>
           {hasFilter && (
-            <button onClick={() => { setSelectedGenre(""); setSelectedFormat(""); setSelectedYear(""); setShowGenreGrid(true); }}
+            <button onClick={() => { setSelectedGenre(""); setSelectedFormat(""); setSelectedYear(""); setSelectedSeason(""); setShowGenreGrid(true); }}
               className="text-[10px] text-white/40 bg-white/6 border border-white/8 px-2.5 py-1.5 rounded-lg font-['Cairo'] active:scale-95">
               × مسح
             </button>
