@@ -746,6 +746,116 @@ router.get("/animation/subtitles", async (req: Request, res: Response) => {
   }
 });
 
+// ── subtitle-tracks: discover ALL available subtitle tracks for a title ──────
+// Returns { tracks:[{id,lang,label,url}] } — Arabic first, then English
+// CDN HEAD checks + wyzie.ru + vidzee run in parallel (max ~12s), cached 25 min
+const animTracksCache = new Map<string, { tracks: any[]; ts: number }>();
+const TRACKS_TTL = 25 * 60 * 1000;
+
+router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => {
+  const tmdbId = String(req.query.tmdbId || "");
+  const type   = String(req.query.type   || "movie");
+  const ep     = parseInt(String(req.query.ep     || "1"), 10) || 1;
+  const season = parseInt(String(req.query.season || "1"), 10) || 1;
+  if (!tmdbId) { res.json({ tracks: [] }); return; }
+
+  const ck = `tracks:${tmdbId}:${type}:${season}:${ep}`;
+  const hit = animTracksCache.get(ck);
+  if (hit && Date.now() - hit.ts < TRACKS_TTL) { res.json({ tracks: hit.tracks }); return; }
+
+  type Track = { id: string; lang: string; label: string; url: string };
+
+  // ── 1. IMDB ID from TMDB (needed for wyzie.ru) ──
+  let imdbId = "";
+  try {
+    const r = await fetch(`${TMDB_BASE}/${type}/${tmdbId}/external_ids?api_key=${TMDB_KEY}`, {
+      headers: { "User-Agent": UA }, signal: AbortSignal.timeout(5_000),
+    });
+    if (r.ok) { const d = await r.json() as any; imdbId = String(d.imdb_id || ""); }
+  } catch { /* ignore */ }
+
+  // ── 2. CDN candidates (vdrk.site v3 + v2) — verified with HEAD ──
+  const cdnPath = type === "tv" ? `tv/${tmdbId}/${season}/${ep}` : `movie/${tmdbId}`;
+  const cdnBase = "https://cache.vdrk.site";
+  const cdnCandidates: Track[] = [
+    { id: "ar-cdn-v3", lang: "ar", label: "عربي · CDN",      url: `${cdnBase}/v3/${cdnPath}/Arabic.vtt`  },
+    { id: "ar-cdn-v2", lang: "ar", label: "عربي · CDN v2",   url: `${cdnBase}/v2/${cdnPath}/Arabic.vtt`  },
+    { id: "en-cdn-v3", lang: "en", label: "إنجليزي · CDN",   url: `${cdnBase}/v3/${cdnPath}/English.vtt` },
+    { id: "en-cdn-v2", lang: "en", label: "إنجليزي · CDN v2",url: `${cdnBase}/v2/${cdnPath}/English.vtt` },
+  ];
+  const cdnFound: Track[] = [];
+  await Promise.allSettled(cdnCandidates.map(async c => {
+    try {
+      const r = await fetch(c.url, { method: "HEAD", signal: AbortSignal.timeout(4_000) });
+      if (r.ok) cdnFound.push(c);
+    } catch { /* ignore */ }
+  }));
+
+  // ── 3. wyzie.ru (Arabic + English) — run in parallel with CDN ──
+  const wyzieItems: Track[] = [];
+  if (imdbId) {
+    await Promise.allSettled(["ar", "en"].map(async lang => {
+      try {
+        const q = type === "tv"
+          ? `https://sub.wyzie.ru/search?id=${imdbId}&language=${lang}&season=${season}&episode=${ep}`
+          : `https://sub.wyzie.ru/search?id=${imdbId}&language=${lang}`;
+        const r = await fetch(q, {
+          headers: { "User-Agent": UA, Accept: "application/json" },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (!r.ok) return;
+        const data = await r.json() as any;
+        const items: any[] = Array.isArray(data) ? data : (data?.data ?? []);
+        items.slice(0, 2).forEach((item: any, i: number) => {
+          if (!item.url) return;
+          const sfx = i > 0 ? ` ${i + 1}` : "";
+          wyzieItems.push({
+            id: `${lang}-wyzie-${i}`,
+            lang,
+            label: lang === "ar" ? `عربي · Wyzie${sfx}` : `إنجليزي · Wyzie${sfx}`,
+            url: item.url,
+          });
+        });
+      } catch { /* ignore */ }
+    }));
+  }
+
+  // ── 4. vidzee-meta (starcima) ──
+  const vidzeeItems: Track[] = [];
+  try {
+    const tvExtra = type === "tv" ? `&season=${season}&episode=${ep}` : "";
+    const r = await fetch(
+      `https://starcima.com/api/vidzee?tmdbId=${tmdbId}&type=${type}${tvExtra}`,
+      { headers: { "User-Agent": UA, Referer: "https://starcima.com/", Accept: "application/json" }, signal: AbortSignal.timeout(8_000) },
+    );
+    if (r.ok) {
+      const vData = await r.json() as any;
+      const cnt: Record<string, number> = {};
+      for (const s of (vData.subtitles || []) as any[]) {
+        if (!s.url) continue;
+        const lang = (s.languageCode || "").toLowerCase().startsWith("ar") ? "ar" : "en";
+        const i = (cnt[lang] = (cnt[lang] ?? 0) + 1);
+        const sfx = i > 1 ? ` ${i}` : "";
+        vidzeeItems.push({
+          id: `${lang}-vidzee-${i}`,
+          lang,
+          label: lang === "ar" ? `عربي · الثريا${sfx}` : `إنجليزي · الثريا${sfx}`,
+          url: s.url,
+        });
+      }
+    }
+  } catch { /* ignore */ }
+
+  // ── Merge, sort Arabic-first, deduplicate by URL ──
+  const all = [...cdnFound, ...wyzieItems, ...vidzeeItems];
+  all.sort((a, b) => (a.lang === "ar" && b.lang !== "ar" ? -1 : a.lang !== "ar" && b.lang === "ar" ? 1 : 0));
+  const seen = new Set<string>();
+  const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
+
+  animTracksCache.set(ck, { tracks, ts: Date.now() });
+  res.json({ tracks });
+});
+
 // ── StarCima vidzee subtitle proxy (CORS bypass) ────────────────────────────
 router.get("/animation/vidzee-meta", async (req: Request, res: Response) => {
   const tmdbId = String(req.query.tmdbId || "");
