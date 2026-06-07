@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import {
-  Globe, Bell, BellOff, Home, Monitor, ChevronRight,
+  Bell, BellOff, Home, Monitor,
   Check, Tv, Layers, Info, Shield, Star, LogIn, LogOut, User,
   Smartphone, List, LayoutGrid, Trash2, ChevronLeft,
-  Settings as SettingsIcon, Palette, ChevronDown, Zap,
+  Settings as SettingsIcon, Palette, ChevronDown, Zap, ChevronRight,
+  Subtitles, PlayCircle, Award, BarChart3,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "wouter";
@@ -201,6 +202,24 @@ function DangerRow({ label, sub, onClick }: { label: string; sub?: string; onCli
   );
 }
 
+/* ──────────────── Info row ──────────────── */
+function InfoRow({ icon: Icon, iconColor, iconBg, label, sub, value }: {
+  icon: any; iconColor: string; iconBg: string; label: string; sub?: string; value?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3.5 px-5 py-3.5">
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${iconBg} border-white/8`}>
+        <Icon className={`w-4 h-4 ${iconColor}`} />
+      </div>
+      <div className="flex-1 min-w-0 text-right">
+        <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+        {sub && <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">{sub}</p>}
+      </div>
+      {value && <span className="text-[12px] font-black text-primary shrink-0">{value}</span>}
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════
    MAIN COMPONENT
 ══════════════════════════════════════════════════ */
@@ -208,21 +227,25 @@ export default function Settings() {
   const { user, signOut } = useAuth();
   const [showAuth, setShowAuth] = useState(false);
 
-  const [theme,     setTheme]     = useState(() => localStorage.getItem("pref-theme")     || "dark");
-  const [notifs,    setNotifs]    = useState(() => localStorage.getItem("pref-notifs")    !== "false");
-  const [autoMark,  setAutoMark]  = useState(() => localStorage.getItem("pref-automark") !== "false");
-  const [startPage, setStartPage] = useState(() => localStorage.getItem("pref-startpage") || "home");
-  const [lang,      setLang]      = useState(() => localStorage.getItem("pref-lang")      || "ar");
-  const [viewMode,  setViewMode]  = useState(() => localStorage.getItem("pref-viewmode")  || "grid");
-  const [player,    setPlayer]    = useState(() => localStorage.getItem("pref-player")    || "native");
+  const [theme,       setTheme]       = useState(() => localStorage.getItem("pref-theme")     || "dark");
+  const [notifs,      setNotifs]      = useState(() => localStorage.getItem("pref-notifs")    !== "false");
+  const [autoMark,    setAutoMark]    = useState(() => localStorage.getItem("pref-automark")  !== "false");
+  const [autoplay,    setAutoplay]    = useState(() => localStorage.getItem("pref-autoplay")  !== "false");
+  const [startPage,   setStartPage]   = useState(() => localStorage.getItem("pref-startpage") || "home");
+  const [viewMode,    setViewMode]    = useState(() => localStorage.getItem("pref-viewmode")  || "grid");
+  const [quality,     setQuality]     = useState(() => localStorage.getItem("pref-quality")   || "auto");
+  const [subSize,     setSubSize]     = useState(() => localStorage.getItem("pref-subsize")   || "medium");
+  const [autoSub,     setAutoSub]     = useState(() => localStorage.getItem("pref-autosub")   !== "false");
 
-  const setT  = (t: string) => { setTheme(t);     localStorage.setItem("pref-theme",     t); applyTheme(t); };
-  const setN  = (v: boolean) => { setNotifs(v);   localStorage.setItem("pref-notifs",    String(v)); };
-  const setAM = (v: boolean) => { setAutoMark(v); localStorage.setItem("pref-automark",  String(v)); };
-  const setSP = (v: string)  => { setStartPage(v);localStorage.setItem("pref-startpage", v); };
-  const setL  = (v: string)  => { setLang(v);     localStorage.setItem("pref-lang",      v); };
-  const setVM = (v: string)  => { setViewMode(v); localStorage.setItem("pref-viewmode",  v); };
-  const setP  = (v: string)  => { setPlayer(v);   localStorage.setItem("pref-player",    v); };
+  const setT   = (t: string)  => { setTheme(t);     localStorage.setItem("pref-theme",     t); applyTheme(t); };
+  const setN   = (v: boolean) => { setNotifs(v);    localStorage.setItem("pref-notifs",    String(v)); };
+  const setAM  = (v: boolean) => { setAutoMark(v);  localStorage.setItem("pref-automark",  String(v)); };
+  const setAP  = (v: boolean) => { setAutoplay(v);  localStorage.setItem("pref-autoplay",  String(v)); };
+  const setSP  = (v: string)  => { setStartPage(v); localStorage.setItem("pref-startpage", v); };
+  const setVM  = (v: string)  => { setViewMode(v);  localStorage.setItem("pref-viewmode",  v); };
+  const setQ   = (v: string)  => { setQuality(v);   localStorage.setItem("pref-quality",   v); };
+  const setSS  = (v: string)  => { setSubSize(v);   localStorage.setItem("pref-subsize",   v); };
+  const setAS  = (v: boolean) => { setAutoSub(v);   localStorage.setItem("pref-autosub",   String(v)); };
 
   const histCount = (() => {
     try {
@@ -233,6 +256,18 @@ export default function Settings() {
   })();
   const savedCount = (() => {
     try { return JSON.parse(localStorage.getItem("savedAnime") || "[]").length; } catch { return 0; }
+  })();
+
+  const cacheKb = (() => {
+    try {
+      let total = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) || "";
+        const v = localStorage.getItem(k) || "";
+        total += k.length + v.length;
+      }
+      return Math.round(total / 1024);
+    } catch { return 0; }
   })();
 
   const currentTheme = THEMES.find(t => t.id === theme) || THEMES[0];
@@ -259,7 +294,7 @@ export default function Settings() {
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[9px] text-white/30 font-bold">Nova v2.2</span>
+          <span className="text-[9px] text-white/30 font-bold">Nova v2.3</span>
         </div>
       </div>
 
@@ -301,15 +336,16 @@ export default function Settings() {
       </div>
 
       {/* ── Stats row ── */}
-      <div className="mx-4 mt-3 flex gap-3">
+      <div className="mx-4 mt-3 grid grid-cols-4 gap-2">
         {[
-          { label: "مشاهدة",  val: histCount,  color: "text-violet-400", bg: "rgba(139,92,246,0.10)" },
-          { label: "محفوظة",  val: savedCount, color: "text-pink-400",   bg: "rgba(236,72,153,0.10)" },
-          { label: "مجاني",   val: "∞",        color: "text-emerald-400",bg: "rgba(16,185,129,0.10)" },
+          { label: "مشاهَدة", val: histCount,         color: "text-violet-400", bg: "rgba(139,92,246,0.10)" },
+          { label: "محفوظة",  val: savedCount,        color: "text-pink-400",   bg: "rgba(236,72,153,0.10)" },
+          { label: "الكاش",   val: `${cacheKb}KB`,   color: "text-cyan-400",   bg: "rgba(6,182,212,0.10)" },
+          { label: "مجاني",   val: "∞",               color: "text-emerald-400",bg: "rgba(16,185,129,0.10)" },
         ].map(s => (
-          <div key={s.label} className="flex-1 flex flex-col items-center gap-1 rounded-xl py-2.5"
+          <div key={s.label} className="flex flex-col items-center gap-1 rounded-xl py-2.5"
             style={{ background: s.bg, border: "1px solid rgba(255,255,255,0.05)" }}>
-            <span className={`text-lg font-black ${s.color}`}>{s.val}</span>
+            <span className={`text-base font-black ${s.color}`}>{s.val}</span>
             <span className="text-[9px] text-white/30 font-bold">{s.label}</span>
           </div>
         ))}
@@ -330,8 +366,6 @@ export default function Settings() {
               <p className="text-[10px] text-white/30 mt-0.5">الثيم الحالي: {currentTheme.label} · {currentTheme.desc}</p>
             </div>
           </div>
-
-          {/* Theme cards */}
           <div className="grid grid-cols-5 gap-2">
             {THEMES.map(t => {
               const active = theme === t.id;
@@ -375,21 +409,71 @@ export default function Settings() {
         />
       </Card>
 
-      {/* ══════ عام ══════ */}
-      <SectionHeader title="عام" icon="⚙️" />
+      {/* ══════ التشغيل ══════ */}
+      <SectionHeader title="التشغيل" icon="▶️" />
       <Card>
-
-        {/* Language */}
+        {/* Quality preference */}
         <DropdownSelect
-          icon={Globe} iconColor="text-cyan-400" iconBg="bg-cyan-500/10"
-          label="لغة التطبيق" sub="اللغة المعروضة في الواجهة"
-          value={lang} onChange={setL}
+          icon={Award} iconColor="text-amber-400" iconBg="bg-amber-500/10"
+          label="الجودة المفضّلة" sub="أولوية الجودة عند بدء التشغيل"
+          value={quality} onChange={setQ}
           options={[
-            { id: "ar", label: "العربية", icon: "🇸🇦" },
-            { id: "en", label: "English", icon: "🇺🇸" },
+            { id: "auto",  label: "تلقائي (الأفضل المتاح)", icon: "✨" },
+            { id: "fhd",   label: "FHD 1080 أولاً",         icon: "🏆" },
+            { id: "hd",    label: "HD 720 أولاً",            icon: "⭐" },
+            { id: "sd",    label: "SD 360 (توفير البيانات)", icon: "💾" },
           ]}
         />
 
+        {/* Autoplay toggle */}
+        <ToggleRow
+          icon={PlayCircle}
+          iconColor={autoplay ? "text-emerald-400" : "text-white/30"}
+          iconBg={autoplay ? "bg-emerald-500/10" : "bg-white/5"}
+          label="تشغيل تلقائي"
+          sub="ابدأ التشغيل فور وصول أول مصدر"
+          on={autoplay} onChange={setAP}
+        />
+
+        {/* Auto-mark watched */}
+        <ToggleRow
+          icon={Check}
+          iconColor="text-violet-400" iconBg="bg-violet-500/10"
+          label="تأشير تلقائي للمشاهدة"
+          sub="تحديد الحلقات كمشاهَدة تلقائياً"
+          on={autoMark} onChange={setAM}
+        />
+      </Card>
+
+      {/* ══════ الترجمة ══════ */}
+      <SectionHeader title="الترجمة" icon="💬" />
+      <Card>
+        {/* Auto subtitle */}
+        <ToggleRow
+          icon={Subtitles}
+          iconColor={autoSub ? "text-blue-400" : "text-white/30"}
+          iconBg={autoSub ? "bg-blue-500/10" : "bg-white/5"}
+          label="ترجمة تلقائية"
+          sub="تحميل الترجمة العربية تلقائياً"
+          on={autoSub} onChange={setAS}
+        />
+
+        {/* Subtitle size */}
+        <DropdownSelect
+          icon={Monitor} iconColor="text-cyan-400" iconBg="bg-cyan-500/10"
+          label="حجم خط الترجمة" sub="حجم نص الترجمة أثناء التشغيل"
+          value={subSize} onChange={setSS}
+          options={[
+            { id: "small",  label: "صغير",  icon: "🔡" },
+            { id: "medium", label: "متوسط", icon: "🔠" },
+            { id: "large",  label: "كبير",  icon: "🅰️" },
+          ]}
+        />
+      </Card>
+
+      {/* ══════ عام ══════ */}
+      <SectionHeader title="عام" icon="⚙️" />
+      <Card>
         {/* Start page */}
         <DropdownSelect
           icon={Home} iconColor="text-blue-400" iconBg="bg-blue-500/10"
@@ -410,69 +494,36 @@ export default function Settings() {
           sub="تفعيل إشعارات الحلقات الجديدة"
           on={notifs} onChange={setN}
         />
-
-        {/* Auto-mark watched */}
-        <ToggleRow
-          icon={Check}
-          iconColor="text-emerald-400" iconBg="bg-emerald-500/10"
-          label="تأشير تلقائي للمشاهدات"
-          sub="تحديد الحلقات كمشاهَدة تلقائياً"
-          on={autoMark} onChange={setAM}
-        />
-
-      </Card>
-
-      {/* ══════ المشغّل ══════ */}
-      <SectionHeader title="المشغّل" icon="▶️" />
-      <Card>
-        <DropdownSelect
-          icon={Tv} iconColor="text-rose-400" iconBg="bg-rose-500/10"
-          label="نوع المشغّل الافتراضي" sub="طريقة تشغيل الحلقات"
-          value={player} onChange={setP}
-          options={[
-            { id: "native", label: "مشغّل داخلي", icon: "🖥️" },
-            { id: "iframe", label: "مشغّل المواقع", icon: "🌐" },
-          ]}
-        />
       </Card>
 
       {/* ══════ عن التطبيق ══════ */}
       <SectionHeader title="عن التطبيق" icon="ℹ️" />
       <Card>
-        <div className="px-5 py-3.5 flex items-center gap-3.5">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-teal-500/10 border-white/8">
-            <Shield className="w-4 h-4 text-teal-400" />
-          </div>
-          <div className="flex-1 text-right">
-            <p className="text-[13.5px] font-bold text-white/85">الخصوصية والبيانات</p>
-            <p className="text-[10px] text-white/30 mt-0.5">لا نجمع أي بيانات شخصية · مفتوح المصدر</p>
-          </div>
-        </div>
-
-        <div className="px-5 py-3.5 flex items-center gap-3.5">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-violet-500/10 border-white/8">
-            <Smartphone className="w-4 h-4 text-violet-400" />
-          </div>
-          <div className="flex-1 text-right">
-            <p className="text-[13.5px] font-bold text-white/85">الإصدار الحالي</p>
-            <p className="text-[10px] text-white/30 mt-0.5">Nova Anime</p>
-          </div>
-          <span className="text-[12px] font-black text-primary shrink-0">v2.2.0</span>
-        </div>
-
-        <div className="px-5 py-3.5 flex items-center gap-3.5">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-white/5 border-white/8">
-            <Zap className="w-4 h-4 text-amber-400" />
-          </div>
-          <div className="flex-1 text-right">
-            <p className="text-[13.5px] font-bold text-white/85">10+ مصادر أنمي</p>
-            <p className="text-[10px] text-white/30 mt-0.5">شاهيد · أنميليك · أنيمي دار · كاواي · وأكثر</p>
-          </div>
-        </div>
+        <InfoRow
+          icon={Shield} iconColor="text-teal-400" iconBg="bg-teal-500/10"
+          label="الخصوصية والبيانات"
+          sub="لا نجمع أي بيانات شخصية · مجاني للجميع"
+        />
+        <InfoRow
+          icon={Zap} iconColor="text-amber-400" iconBg="bg-amber-500/10"
+          label="مصادر الأنمي النشطة"
+          sub="شاهيد · أنميليك · أنيمي دار · كاواي · أنيكوتو · أنيميكو"
+        />
+        <InfoRow
+          icon={BarChart3} iconColor="text-violet-400" iconBg="bg-violet-500/10"
+          label="مصادر الرسوم المتحركة"
+          sub="StarCima · Wecima · StarDima · MovizTime · TopCinema"
+        />
+        <InfoRow
+          icon={Smartphone} iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
+          label="إصدار التطبيق"
+          sub="Nova Anime · Arabic Streaming App"
+          value="v2.3.0"
+        />
       </Card>
 
       {/* ══════ البيانات ══════ */}
-      <SectionHeader title="البيانات" icon="🗑️" />
+      <SectionHeader title="البيانات والكاش" icon="🗑️" />
       <Card>
         <DangerRow
           label="مسح سجل المشاهدة"
@@ -486,8 +537,18 @@ export default function Settings() {
           }}
         />
         <DangerRow
+          label="مسح قائمة المحفوظات"
+          sub={`${savedCount} أنمي محفوظ · لا يمكن التراجع`}
+          onClick={() => {
+            if (confirm("هل تريد مسح جميع المحفوظات؟")) {
+              localStorage.removeItem("savedAnime");
+              window.location.reload();
+            }
+          }}
+        />
+        <DangerRow
           label="مسح الكاش والإعدادات"
-          sub="يعيد التطبيق للحالة الأولية"
+          sub={`${cacheKb}KB مُخزَّن · يعيد التطبيق للحالة الأولية`}
           onClick={() => {
             if (confirm("سيتم مسح جميع البيانات والإعدادات. تأكد؟")) {
               localStorage.clear();
