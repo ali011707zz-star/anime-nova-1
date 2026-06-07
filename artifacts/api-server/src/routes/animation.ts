@@ -585,6 +585,114 @@ async function scrapeEmbedForStreams(
   return out;
 }
 
+// ── Animation subtitle local cache ──────────────────────────────────────────
+const animSubCache = new Map<string, { content: string | null; ts: number }>();
+const ANIM_SUB_TTL = 60 * 60 * 1000; // 1 hour
+
+// ── Arabic subtitle search for TMDB animation content ───────────────────────
+// Uses wyzie.ru (free aggregator, no key) + subdl fallback (needs SUBDL_API_KEY)
+router.get("/animation/subtitles", async (req: Request, res: Response) => {
+  const tmdbId = String(req.query.tmdbId || "");
+  const type   = String(req.query.type   || "movie"); // movie | tv
+  const ep     = parseInt(String(req.query.ep     || "1"), 10) || 1;
+  const season = parseInt(String(req.query.season || "1"), 10) || 1;
+  const title  = String(req.query.title  || "");
+  if (!tmdbId) { res.json({ content: null }); return; }
+
+  const ck = `anim-sub:${tmdbId}:${type}:${season}:${ep}`;
+  const hit = animSubCache.get(ck);
+  if (hit && Date.now() - hit.ts < ANIM_SUB_TTL) { res.json({ content: hit.content }); return; }
+
+  try {
+    // Step 1: Get IMDB ID from TMDB external_ids
+    let imdbId = "";
+    try {
+      const extR = await fetch(
+        `${TMDB_BASE}/${type}/${tmdbId}/external_ids?api_key=${TMDB_KEY}`,
+        { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(7_000) }
+      );
+      if (extR.ok) {
+        const ext = await extR.json() as any;
+        imdbId = (ext.imdb_id as string) || "";
+      }
+    } catch { /* ignore */ }
+
+    // Step 2: wyzie.ru — free subtitle aggregator (no key needed)
+    if (imdbId) {
+      try {
+        const wyzieBase = "https://sub.wyzie.ru/search";
+        const wyzieQ = type === "tv"
+          ? `${wyzieBase}?id=${imdbId}&language=ar&season=${season}&episode=${ep}`
+          : `${wyzieBase}?id=${imdbId}&language=ar`;
+        const wR = await fetch(wyzieQ, {
+          headers: { "User-Agent": UA, "Accept": "application/json" },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (wR.ok) {
+          const wData = await wR.json() as any;
+          const items: any[] = Array.isArray(wData) ? wData : (wData?.data ?? []);
+          const arItem = items.find((s: any) =>
+            (s.language || s.lang || "").toLowerCase().includes("ar") && s.url
+          );
+          if (arItem?.url) {
+            const dlR = await fetch(arItem.url, {
+              headers: { "User-Agent": UA },
+              signal: AbortSignal.timeout(10_000),
+            });
+            if (dlR.ok) {
+              const content = await dlR.text();
+              if (content.includes("-->") || (content.includes(",") && content.includes("\n"))) {
+                animSubCache.set(ck, { content, ts: Date.now() });
+                res.json({ content }); return;
+              }
+            }
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Step 3: subdl.com with IMDB ID or title (requires SUBDL_API_KEY)
+    const sdKey = (process.env.SUBDL_API_KEY || "").trim();
+    if (sdKey) {
+      try {
+        const sdParam = imdbId
+          ? `imdb_id=${imdbId.replace("tt", "")}`
+          : `film_name=${encodeURIComponent(title)}`;
+        const sdEpParam = type === "tv" ? `&season_number=${season}&episode_number=${ep}` : "";
+        const sdUrl = `https://api.subdl.com/api/v1/subtitles?api_key=${sdKey}&${sdParam}${sdEpParam}&languages=AR&subs_per_page=5`;
+        const sdR = await fetch(sdUrl, {
+          headers: { "User-Agent": UA },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (sdR.ok) {
+          const sdData = await sdR.json() as any;
+          const subs: any[] = (sdData.subtitles || []).filter((s: any) => s.url);
+          if (subs.length > 0) {
+            const dlPath = subs[0].url as string;
+            const dlUrl = dlPath.startsWith("http") ? dlPath : `https://dl.subdl.com${dlPath}`;
+            const dlR = await fetch(dlUrl, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12_000) });
+            if (dlR.ok) {
+              const ct = dlR.headers.get("content-type") || "";
+              if (!ct.includes("zip") && !dlUrl.endsWith(".zip")) {
+                const content = await dlR.text();
+                if (content.includes("-->")) {
+                  animSubCache.set(ck, { content, ts: Date.now() });
+                  res.json({ content }); return;
+                }
+              }
+            }
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    animSubCache.set(ck, { content: null, ts: Date.now() });
+    res.json({ content: null });
+  } catch {
+    res.json({ content: null });
+  }
+});
+
 // ── StarCima vidzee subtitle proxy (CORS bypass) ────────────────────────────
 router.get("/animation/vidzee-meta", async (req: Request, res: Response) => {
   const tmdbId = String(req.query.tmdbId || "");

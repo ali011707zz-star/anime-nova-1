@@ -32,6 +32,13 @@ const STATUS_OPTIONS = [
   { label: "مكتملة",    value: "FINISHED" },
   { label: "قريباً",    value: "NOT_YET_RELEASED" },
 ];
+const SEASON_OPTIONS = [
+  { label: "الكل",  value: "",       emoji: "🌟" },
+  { label: "شتاء",  value: "WINTER", emoji: "❄️" },
+  { label: "ربيع",  value: "SPRING", emoji: "🌸" },
+  { label: "صيف",   value: "SUMMER", emoji: "☀️" },
+  { label: "خريف",  value: "FALL",   emoji: "🍂" },
+];
 const SORT_OPTIONS = [
   { label: "الأشهر",        value: "POPULARITY_DESC" },
   { label: "الأعلى تقييماً", value: "SCORE_DESC" },
@@ -55,10 +62,6 @@ const GENRES_AR: Record<string, string> = {
 const FORMAT_AR: Record<string, string> = {
   TV: "مسلسل", MOVIE: "فيلم", OVA: "OVA", ONA: "ONA", SPECIAL: "خاص", MUSIC: "موسيقى",
 };
-const STATUS_AR: Record<string, string> = {
-  RELEASING: "يُبث", FINISHED: "مكتملة", NOT_YET_RELEASED: "قريباً",
-  CANCELLED: "ملغي", HIATUS: "متوقف",
-};
 
 /* ── Arabic transliteration ── */
 const AR_TO_EN: Record<string, string> = {
@@ -81,16 +84,17 @@ function translateQuery(q: string): string {
   return trimmed;
 }
 
-/* ── GraphQL query builder ── */
-function buildQuery(sort: string, format: string, status: string, genre: string) {
+/* ── GraphQL query builders ── */
+function buildQuery(sort: string, format: string, status: string, genre: string, season: string) {
   const sortArr = sort ? `[SEARCH_MATCH, ${sort}]` : "[SEARCH_MATCH, POPULARITY_DESC]";
   const formatFilter = format ? `, format: ${format}` : "";
   const statusFilter = status ? `, status: ${status}` : "";
   const genreFilter  = genre  ? `, genre: "${genre}"` : "";
+  const seasonFilter = season ? `, season: ${season}` : "";
   return `
 query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: ${sortArr}${formatFilter}${statusFilter}${genreFilter}) {
+    media(search: $search, type: ANIME, sort: ${sortArr}${formatFilter}${statusFilter}${genreFilter}${seasonFilter}) {
       id title { romaji english native } coverImage { large }
       averageScore episodes format status startDate { year } genres
     }
@@ -98,14 +102,15 @@ query ($search: String, $page: Int, $perPage: Int) {
 }`;
 }
 
-function buildBrowseQuery(sort: string, format: string, status: string, genre: string) {
+function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string) {
   const formatFilter = format ? `, format: ${format}` : "";
   const statusFilter = status ? `, status: ${status}` : "";
   const genreFilter  = genre  ? `, genre: "${genre}"` : "";
+  const seasonFilter = season ? `, season: ${season}` : "";
   return `
 query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}]${formatFilter}${statusFilter}${genreFilter}, isAdult: false) {
+    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}]${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false) {
       id title { romaji english native } coverImage { large }
       averageScore episodes format status startDate { year } genres
     }
@@ -186,6 +191,7 @@ export default function Search() {
   const [format,      setFormat]     = useState('');
   const [status,      setStatus]     = useState('');
   const [genre,       setGenre]      = useState('');
+  const [season,      setSeason]     = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [showGenres,  setShowGenres]  = useState(false);
   const [history,     setHistory]    = useState<string[]>(
@@ -193,7 +199,7 @@ export default function Search() {
   );
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const activeFilterCount = [format, status, genre].filter(Boolean).length;
+  const activeFilterCount = [format, status, genre, season].filter(Boolean).length;
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -202,12 +208,12 @@ export default function Search() {
         let q: object;
         if (query.trim()) {
           const searchTerm = translateQuery(query);
-          q = { query: buildQuery(sort, format, status, genre), variables: { search: searchTerm, page: 1, perPage: 30 } };
+          q = { query: buildQuery(sort, format, status, genre, season), variables: { search: searchTerm, page: 1, perPage: 30 } };
           const updated = [query, ...history.filter(h => h !== query)].slice(0, 8);
           setHistory(updated);
           localStorage.setItem('searchHistory', JSON.stringify(updated));
         } else {
-          q = { query: buildBrowseQuery(sort, format, status, genre), variables: { page: 1, perPage: 30 } };
+          q = { query: buildBrowseQuery(sort, format, status, genre, season), variables: { page: 1, perPage: 30 } };
         }
         const res  = await fetch('https://graphql.anilist.co', {
           method: 'POST',
@@ -222,13 +228,16 @@ export default function Search() {
     }, query.trim() ? 400 : 100);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, sort, format, status, genre]);
+  }, [query, sort, format, status, genre, season]);
 
   function clearFilters() {
     setFormat('');
     setStatus('');
     setGenre('');
+    setSeason('');
   }
+
+  const activeSeason = SEASON_OPTIONS.find(s => s.value === season);
 
   return (
     <main className="bg-[#0A0A0F] min-h-screen text-white pb-24" dir="rtl">
@@ -290,6 +299,21 @@ export default function Search() {
           )}
         </div>
 
+        {/* Season quick-filter row */}
+        <div className="flex items-center gap-1.5 px-4 pb-2.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+          {SEASON_OPTIONS.map(opt => (
+            <button key={opt.value} onClick={() => setSeason(opt.value)}
+              className={`shrink-0 flex items-center gap-1.5 text-[11px] font-black font-['Cairo'] px-3 py-1.5 rounded-xl border transition-all active:scale-95 ${
+                season === opt.value
+                  ? "bg-primary/20 text-primary border-primary/40 shadow-sm shadow-primary/20"
+                  : "bg-[#18181B] text-white/40 border-white/5"
+              }`}>
+              <span>{opt.emoji}</span>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
         {/* Expandable filter panel */}
         <AnimatePresence>
           {showFilters && (
@@ -348,8 +372,8 @@ export default function Search() {
         </AnimatePresence>
       </div>
 
-      {/* ── Search history (shown when no query and no filters) ── */}
-      {!query && !format && !status && !genre && history.length > 0 && (
+      {/* ── Search history ── */}
+      {!query && !format && !status && !genre && !season && history.length > 0 && (
         <div className="px-4 mt-4 mb-2">
           <div className="flex items-center justify-between mb-2.5">
             <h2 className="text-[11px] font-black text-white/30 font-['Cairo'] tracking-wider">البحث الأخير</h2>
@@ -367,6 +391,16 @@ export default function Search() {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Active season badge */}
+      {activeSeason && activeSeason.value && (
+        <div className="flex items-center gap-2 px-4 mt-3">
+          <span className="text-[10px] text-white/25 font-['Cairo']">موسم:</span>
+          <span className="text-[11px] font-black text-primary font-['Cairo'] flex items-center gap-1">
+            {activeSeason.emoji} {activeSeason.label}
+          </span>
         </div>
       )}
 
@@ -399,7 +433,7 @@ export default function Search() {
       )}
 
       {/* ── Empty state ── */}
-      {!loading && results.length === 0 && (query || format || status || genre) && (
+      {!loading && results.length === 0 && (query || format || status || genre || season) && (
         <div className="text-center py-20 px-6">
           <div className="w-16 h-16 rounded-3xl bg-white/4 border border-white/8 flex items-center justify-center mx-auto mb-4">
             <SearchIcon className="w-7 h-7 text-white/15" />
@@ -407,7 +441,7 @@ export default function Search() {
           <p className="font-bold text-sm font-['Cairo'] text-white/40">
             {query ? `لا توجد نتائج لـ "${query}"` : "لا توجد نتائج بهذه الفلاتر"}
           </p>
-          {(format || status || genre) && (
+          {(format || status || genre || season) && (
             <button onClick={clearFilters}
               className="mt-4 text-[12px] text-primary font-black font-['Cairo'] px-4 py-2 rounded-xl bg-primary/10 border border-primary/20 active:scale-95">
               إزالة الفلاتر

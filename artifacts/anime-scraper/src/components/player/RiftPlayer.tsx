@@ -75,6 +75,7 @@ interface Props {
   subElapsed?: number;
   subSettings?: SubSettings;
   subEnabled?: boolean;
+  subNote?: string;
   onSubtitleClick?: () => void;
   onSubSettingsChange?: (s: SubSettings) => void;
   skipIntro?: { start: number; end: number };
@@ -127,6 +128,7 @@ export default function RiftPlayer({
   src, title = "", epTitle = "", ep = 1, totalEps = 999, resumeTime = 0,
   qualityLabel = "", isHls = false, serverCount = 1, serverIndex = 0,
   downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
+  subNote,
   onSubtitleClick, onSubSettingsChange,
   skipIntro, skipOutro,
   onBack, onPrevEp, onNextEp, onRealQuality, onTimeUpdate, onDuration, onFail,
@@ -1424,15 +1426,19 @@ export default function RiftPlayer({
               {/* Not loaded yet */}
               {!subEnabled && (
                 <div className="flex flex-col items-center gap-3 py-2">
-                  <p className="text-white/28 text-[11px] font-['Cairo'] text-center">الترجمة غير محملة</p>
-                  <button
-                    onClick={() => { onSubtitleClick?.(); }}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                    style={{ background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.40)", color: "#c4b5fd" }}
-                  >
-                    <SubtitleIcon className="w-3.5 h-3.5" />
-                    تحميل الترجمة
-                  </button>
+                  <p className="text-white/28 text-[11px] font-['Cairo'] text-center">
+                    {subNote || "الترجمة غير محملة"}
+                  </p>
+                  {onSubtitleClick && (
+                    <button
+                      onClick={() => { onSubtitleClick?.(); }}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                      style={{ background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.40)", color: "#c4b5fd" }}
+                    >
+                      <SubtitleIcon className="w-3.5 h-3.5" />
+                      {subNote ? "إعادة المحاولة" : "تحميل الترجمة"}
+                    </button>
+                  )}
                 </div>
               )}
 
