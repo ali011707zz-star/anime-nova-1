@@ -590,6 +590,14 @@ export default function Home() {
                 <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">{mergedContinue.length} عنوان</p>
               </div>
             </div>
+            <Link href="/history">
+              <motion.button
+                whileTap={{ scale: 0.92 }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-colors active:bg-white/10"
+                style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)", color: "rgba(196,181,253,0.85)" }}>
+                عرض الكل
+              </motion.button>
+            </Link>
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
             {mergedContinue.map(item => {
