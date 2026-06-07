@@ -275,7 +275,11 @@ export default function EpisodeListPage() {
     navigate(`/watch?anime=${params.id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${cvr ? `&cover=${cvr}` : ""}`);
   }
 
-  const total = anime ? (anime.episodes || anime.nextAiringEpisode?.episode || 12) : 0;
+  const total = anime
+    ? (anime.status === "RELEASING" && anime.nextAiringEpisode?.episode
+        ? anime.nextAiringEpisode.episode - 1
+        : (anime.episodes || anime.nextAiringEpisode?.episode || 12))
+    : 0;
   const allEps = useMemo(() => Array.from({ length: total }, (_, i) => i + 1), [total]);
   const watchedCount = useMemo(() => [...watched].filter(n => n >= 1 && n <= total).length, [watched, total]);
   const pct = total > 0 ? Math.round((watchedCount / total) * 100) : 0;

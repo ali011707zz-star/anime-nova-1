@@ -1752,6 +1752,12 @@ export default function WatchPage() {
     return () => ctrl.abort();
   }, [epTitle]);
 
+  /* ── Early history save using URL params — before AniList data loads ── */
+  useEffect(() => {
+    if (animeId && titleParam) saveHistory(animeId, titleParam, coverParam, ep);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* Fetch AniList metadata */
   useEffect(() => {
     if (!animeId) return;
