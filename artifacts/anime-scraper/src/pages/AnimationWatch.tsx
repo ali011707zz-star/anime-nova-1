@@ -324,22 +324,29 @@ export default function AnimationWatch() {
         : chosen.url;
 
       if (chosen.languageCode === "ar") {
-        // Direct Arabic — proxy-text to bypass CORS
-        const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawUrl)}`, { signal: AbortSignal.timeout(12_000) });
+        // Direct Arabic — proxy-text to bypass CORS (pass StarCima referer)
+        const ref = encodeURIComponent("https://starcima.com/");
+        const r2 = await fetch(
+          `/api/anime/proxy-text?url=${encodeURIComponent(rawUrl)}&ref=${ref}`,
+          { signal: AbortSignal.timeout(12_000) }
+        );
         if (!r2.ok) { setSubState("idle"); return; }
         const text = await r2.text();
         const cues = parseSrt(text);
         if (cues.length > 0) { setSubCues(cues); setSubState("ready"); }
         else setSubState("idle");
       } else {
-        // English → translate to Arabic
+        // English → translate to Arabic (translate-vtt returns JSON {cues:[{timing,text}]})
         const r2 = await fetch(
           `/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=en&to=ar`,
-          { signal: AbortSignal.timeout(30_000) }
+          { signal: AbortSignal.timeout(60_000) }
         );
         if (!r2.ok) { setSubState("idle"); return; }
-        const text = await r2.text();
-        const cues = parseSrt(text);
+        const json = await r2.json() as { cues?: Array<{ timing: string; text: string }> };
+        if (!json.cues?.length) { setSubState("idle"); return; }
+        // Reconstruct VTT string so parseSrt can handle it
+        const vttText = "WEBVTT\n\n" + json.cues.map((c) => `${c.timing}\n${c.text}`).join("\n\n");
+        const cues = parseSrt(vttText);
         if (cues.length > 0) { setSubCues(cues); setSubState("ready"); }
         else setSubState("idle");
       }

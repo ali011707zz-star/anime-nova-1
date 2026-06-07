@@ -952,19 +952,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     } catch { /* keep original */ }
                   }
 
-                  // Probe: if CDN returns 4xx (except 403/405) skip this server
-                  try {
-                    const probe = await fetch(rawUrl, {
-                      method: "HEAD",
-                      headers: { "User-Agent": UA, "Referer": referer },
-                      signal : AbortSignal.timeout(5_000),
-                      redirect: "follow",
-                    });
-                    // 403/405 → CDN may require browser referer; hls-proxy might still work
-                    const ok = probe.ok || probe.status === 403 || probe.status === 405 || probe.status === 401;
-                    if (!ok) return; // 404, 5xx — definitively broken
-                  } catch { /* network error — try anyway */ }
-
+                    // No probe — trust StarCima vidzee servers directly; hls-proxy handles CDN auth
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
                   sendSource(proxied, `StarCima ${srv.name || "HLS"}`, proxied, proxied);
                 }));
