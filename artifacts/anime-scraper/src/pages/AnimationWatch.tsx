@@ -126,7 +126,7 @@ export default function AnimationWatch() {
 
   /* ── Subtitle state ── */
   const [subCues,    setSubCues]    = useState<SubCue[]>([]);
-  const [subState,   setSubState]   = useState<"idle" | "loading" | "ready">("idle");
+  const [subState,   setSubState]   = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [hlsTime,    setHlsTime]    = useState(0);
   const [subSettings, setSubSettings] = useState<SubSettings>({
     fontSize: 16, color: "#ffffff", bgOpacity: 0, bold: false, position: "bottom",
@@ -334,16 +334,17 @@ export default function AnimationWatch() {
       } catch { return []; }
     };
 
-    // SubDL Arabic lookup via existing anime subtitles endpoint
-    const fetchSubdlArabic = async (): Promise<SubCue[]> => {
+    // Animation-specific subtitle lookup (wyzie.ru + subdl via new endpoint)
+    const fetchAnimSubtitles = async (): Promise<SubCue[]> => {
       try {
-        const episodeNum = type === "movie" ? 0 : ep;
         const params = new URLSearchParams({
+          tmdbId,
+          type,
+          ep: String(ep),
+          season: String(season),
           title: displayTitle,
-          ep: String(episodeNum),
-          ...(type === "tv" ? { season: String(season) } : {}),
         });
-        const r = await fetch(`/api/anime/subtitles?${params}`, { signal: AbortSignal.timeout(12_000) });
+        const r = await fetch(`/api/animation/subtitles?${params}`, { signal: AbortSignal.timeout(18_000) });
         if (!r.ok) return [];
         const d = await r.json() as { content?: string | null };
         if (!d.content) return [];
@@ -366,22 +367,22 @@ export default function AnimationWatch() {
         ? `https://cache.vdrk.site/v2/tv/${tmdbId}/${season}/${ep}/English.vtt`
         : `https://cache.vdrk.site/v2/movie/${tmdbId}/English.vtt`;
 
-      const [arV3, arV2, vidzeeResp, subdlCues] = await Promise.all([
+      const [arV3, arV2, vidzeeResp, animCues] = await Promise.all([
         fetchVttProxy(arCdnV3),
         fetchVttProxy(arCdnV2),
         fetch(
           `/api/animation/vidzee-meta?tmdbId=${tmdbId}&type=${type}&season=${season}&ep=${ep}`,
           { signal: AbortSignal.timeout(12_000) }
         ).then(r => r.ok ? r.json() : { subtitles: [] }).catch(() => ({ subtitles: [] })),
-        fetchSubdlArabic(),
+        fetchAnimSubtitles(),
       ]);
 
       // Arabic CDN — fastest path
       if (arV3.length > 0) { setSubCues(arV3); setSubState("ready"); return; }
       if (arV2.length > 0) { setSubCues(arV2); setSubState("ready"); return; }
 
-      // SubDL Arabic
-      if (subdlCues.length > 0) { setSubCues(subdlCues); setSubState("ready"); return; }
+      // Animation subtitle endpoint (wyzie.ru / subdl)
+      if (animCues.length > 0) { setSubCues(animCues); setSubState("ready"); return; }
 
       // Arabic from vidzee-meta
       const subs: any[] = (vidzeeResp as any).subtitles || [];
@@ -403,8 +404,9 @@ export default function AnimationWatch() {
       }
       if (translated.length > 0) { setSubCues(translated); setSubState("ready"); return; }
 
-      setSubState("idle");
-    } catch { setSubState("idle"); }
+      // All sources exhausted
+      setSubState("failed");
+    } catch { setSubState("failed"); }
   }, [tmdbId, type, season, ep]);
 
   /* Auto-fetch subtitles on episode change */
@@ -510,9 +512,10 @@ export default function AnimationWatch() {
           subCues={subState === "ready" && subCues.length > 0 ? subCues : undefined}
           subElapsed={hlsTime}
           subEnabled={subState === "ready" && subCues.length > 0}
+          subNote={subState === "failed" ? "لا تتوفر ترجمة عربية لهذا المحتوى" : subState === "loading" ? "جاري البحث عن الترجمة..." : undefined}
           subSettings={subSettings}
           onSubSettingsChange={setSubSettings}
-          onSubtitleClick={fetchSubs}
+          onSubtitleClick={subState !== "loading" ? fetchSubs : undefined}
           onTimeUpdate={handleTimeUpdate}
           onFail={stableOnFail}
           onBack={() => setStep("sources")}
