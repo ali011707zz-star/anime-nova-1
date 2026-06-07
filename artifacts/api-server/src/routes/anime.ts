@@ -4489,7 +4489,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
-      scrapeCached("animegg",      () => getAnimeGGSources(title, english, ep),                 false),
+      // animegg: معطّل مؤقتاً بطلب المستخدم
+      // scrapeCached("animegg", () => getAnimeGGSources(title, english, ep), false),
       // allmanga: CDN تغيرت (clock.json→500, fast4speed→401) — معطّل مؤقتاً
       // reanime:  FlixCloud يبلوك Replit IP بالكامل — معطّل مؤقتاً
     ]);
@@ -4572,7 +4573,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animegg":     (await race(getAnimeGGSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
+      // case "animegg": معطّل مؤقتاً
       case "allmanga":    (await race(getAllMangaSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "reanime":     (await race(getReanímeSources(title, english, ep, anilistId),       SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;

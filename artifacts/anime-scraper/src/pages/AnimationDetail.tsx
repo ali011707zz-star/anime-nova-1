@@ -3,7 +3,7 @@ import { useParams, useLocation, Link } from "wouter";
 import {
   ChevronRight, Play, Star, Calendar, Clock,
   Tv, Film, ChevronDown, Sparkles, Users,
-  Bookmark, MessageCircle, Send, X, List,
+  Bookmark, MessageCircle, Send, X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -130,7 +130,6 @@ export default function AnimationDetail() {
   const cast = (detail.credits?.cast || detail.aggregate_credits?.cast || []).slice(0, 12);
   const recs: any[] = (detail.recommendations?.results || []).slice(0, 10);
   const studios = (detail.production_companies || []).slice(0, 2).map((c: any) => c.name).join(" · ");
-  const seasons: any[] = (detail.seasons || []).filter((s: any) => s.season_number > 0);
 
   return (
     <main className="min-h-screen bg-[#09090B] pb-32 text-white" dir="rtl">
@@ -239,52 +238,21 @@ export default function AnimationDetail() {
       )}
 
       <div className="px-4 mt-5 space-y-2.5">
-        {/* Primary CTA: Episodes page for TV, Watch for movies */}
-        {type === "tv" ? (
-          <Link href={episodesUrl()}>
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              className="w-full h-12 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-sm font-['Cairo'] text-white"
-              style={{ background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)", boxShadow: "0 8px 32px rgba(109,40,217,0.45)" }}
-            >
-              <div className="w-7 h-7 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                <List className="w-3.5 h-3.5 text-white" />
-              </div>
-              الحلقات
-              {detail?.number_of_episodes > 0 && (
-                <span className="text-white/60 text-xs font-bold">({detail.number_of_episodes})</span>
-              )}
-            </motion.button>
-          </Link>
-        ) : (
-          <Link href={watchUrl()}>
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              className="w-full h-12 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-sm font-['Cairo'] text-white"
-              style={{ background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)", boxShadow: "0 8px 32px rgba(109,40,217,0.45)" }}
-            >
-              <div className="w-7 h-7 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-                <Play className="w-3.5 h-3.5 fill-white text-white" />
-              </div>
-              مشاهدة الفيلم
-            </motion.button>
-          </Link>
-        )}
+        {/* Primary CTA — same pattern as AnimeDetail */}
+        <Link href={type === "tv" ? episodesUrl() : watchUrl()}>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            className="w-full h-12 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-sm font-['Cairo'] text-white"
+            style={{ background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)", boxShadow: "0 8px 32px rgba(109,40,217,0.45)" }}
+          >
+            <div className="w-7 h-7 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+              <Play className="w-3.5 h-3.5 fill-white text-white" />
+            </div>
+            {type === "tv" ? "مشاهدة المسلسل" : "مشاهدة الفيلم"}
+          </motion.button>
+        </Link>
 
         <div className="flex gap-2.5">
-          {/* For TV: watch/continue button as secondary */}
-          {type === "tv" && (
-            <Link href={watchUrl()} className="flex-1">
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                className="w-full h-11 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-1.5 text-xs font-bold font-['Cairo'] text-white/70"
-              >
-                <Play className="w-3.5 h-3.5 text-primary fill-primary" />
-                {continueEp && continueEp > 1 ? `تابع ح ${continueEp}` : "شاهد"}
-              </motion.button>
-            </Link>
-          )}
-
           {/* Save */}
           <motion.button
             whileTap={{ scale: 0.97 }}
@@ -337,51 +305,6 @@ export default function AnimationDetail() {
         </div>
       )}
 
-
-      {/* ── Seasons (TV only) ── */}
-      {type === "tv" && seasons.length > 0 && (
-        <div className="mt-7">
-          <div className="flex items-center gap-2 mb-3 px-4">
-            <div className="w-1 h-5 bg-primary rounded-full" />
-            <h2 className="text-[15px] font-black font-['Cairo']">المواسم</h2>
-            <span className="text-[9px] text-white/30 bg-white/5 px-2 py-1 rounded-lg font-['Cairo']">
-              {seasons.length} موسم
-            </span>
-          </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
-            {seasons.map((s: any, idx: number) => (
-              <Link key={s.id || s.season_number} href={`/animation/${type}/${id}/episodes?season=${s.season_number}`}>
-                <motion.div whileTap={{ scale: 0.94 }} className="shrink-0 w-[130px] cursor-pointer">
-                  <div className="relative h-[78px] rounded-2xl overflow-hidden border border-white/6 mb-2">
-                    {s.poster_path
-                      ? <img src={`${IMG_W}${s.poster_path}`} alt="" loading="lazy" className="w-full h-full object-cover" />
-                      : <div className="w-full h-full flex items-center justify-center"
-                          style={{ background: `linear-gradient(135deg, rgba(109,40,217,${Math.min(0.45, 0.18 + idx * 0.07)}), rgba(139,92,246,${Math.min(0.35, 0.10 + idx * 0.05)}))` }}>
-                          <span className="text-3xl font-black font-['Cairo']" style={{ color: `rgba(255,255,255,${0.08 + idx * 0.02})` }}>
-                            {s.season_number}
-                          </span>
-                        </div>
-                    }
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/5 to-transparent" />
-                    <div className="absolute bottom-1.5 right-2 left-2 flex items-center justify-between">
-                      <span className="text-[8px] font-black text-white/60 bg-black/40 px-1.5 py-0.5 rounded-md font-['Cairo']">
-                        {s.episode_count} ح
-                      </span>
-                      {s.air_date && (
-                        <span className="text-[8px] text-white/40 font-['Cairo']">{s.air_date.slice(0, 4)}</span>
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-[11px] font-black text-white/75 font-['Cairo'] truncate leading-tight">
-                    {s.name || `الموسم ${s.season_number}`}
-                  </p>
-                  <p className="text-[9px] text-white/28 font-['Cairo'] mt-0.5">{s.episode_count} حلقة</p>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── Cast ── */}
       {cast.length > 0 && (
