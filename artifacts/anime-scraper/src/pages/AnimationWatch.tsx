@@ -278,7 +278,9 @@ export default function AnimationWatch() {
         tryExtract(src.url);
       }
       sourceCountRef.current += 1;
-      setSources(prev => [...prev, newSrc]);
+      // StarCima "الثريا" is always preferred — insert at front so it plays first
+      const isPreferred = src.label.includes("StarCima") || src.label.includes("الثريا");
+      setSources(prev => isPreferred ? [newSrc, ...prev] : [...prev, newSrc]);
     });
 
     es.addEventListener("done", () => {
