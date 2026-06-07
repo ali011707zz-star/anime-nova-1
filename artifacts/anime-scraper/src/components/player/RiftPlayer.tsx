@@ -1278,79 +1278,23 @@ export default function RiftPlayer({
                   {/* Left: view-mode · speed */}
                   <div className="flex items-center gap-1.5 shrink-0">
 
-                    {/* ── View Mode Panel ── */}
-                    <div className="relative">
-                      <button
-                        onClick={() => { setShowViewMode(v => !v); setShowSpeed(false); showControls(); }}
-                        className="h-9 px-2 flex items-center gap-1 rounded-xl active:bg-white/10 transition-colors"
-                        title="وضع العرض"
-                      >
-                        {isFs
-                          ? <Minimize2  className="w-[15px] h-[15px] text-violet-300/85" />
-                          : isZoomed
-                          ? <Scan       className="w-[15px] h-[15px] text-violet-300/85" />
-                          : <Maximize2  className="w-[15px] h-[15px] text-white/80" />}
-                      </button>
-                      <AnimatePresence>
-                        {showViewMode && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 8, scale: 0.93 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 8, scale: 0.93 }}
-                            transition={{ duration: 0.14 }}
-                            className="absolute bottom-full mb-2 left-0 rounded-2xl overflow-hidden z-50 shadow-2xl"
-                            style={{ background: GLASS_PANEL, border: `1px solid ${GLASS_BORDER}`, backdropFilter: GLASS_BLUR, width: 186 }}
-                            onClick={e => e.stopPropagation()}
-                            onTouchStart={e => e.stopPropagation()}
-                            onTouchEnd={e => e.stopPropagation()}
-                          >
-                            {([
-                              {
-                                Icon: ScanLine, label: "عرض عادي", desc: "مع حواف سوداء",
-                                active: !isZoomed && !isFs,
-                                action: () => { setIsZoomed(false); if (isFs) toggleFs(); setShowViewMode(false); },
-                              },
-                              {
-                                Icon: Scan, label: "تكبير ملء", desc: "بدون حواف سوداء (اقتصاص)",
-                                active: isZoomed,
-                                action: () => { setIsZoomed(z => !z); setShowViewMode(false); },
-                              },
-                              {
-                                Icon: isFs ? Minimize2 : Maximize2,
-                                label: isFs ? "إلغاء ملء الشاشة" : "ملء الشاشة",
-                                desc: isFs ? "العودة للوضع العادي" : "وضع الشاشة الكاملة",
-                                active: isFs,
-                                action: () => { toggleFs(); setShowViewMode(false); },
-                              },
-                              {
-                                Icon: FlipScreenIcon,
-                                label: "تدوير الشاشة", desc: isPortrait ? "الوضع الأفقي" : "الوضع العمودي",
-                                active: isPortrait,
-                                action: () => { toggleRotation(); setShowViewMode(false); },
-                              },
-                            ] as { Icon: React.ElementType; label: string; desc: string; active: boolean; action: () => void }[]).map(
-                              ({ Icon, label, desc, active, action }, i, arr) => (
-                                <button key={label} onClick={action}
-                                  className="w-full flex items-center gap-3 px-3.5 py-2.5 transition-colors active:bg-white/5"
-                                  style={{
-                                    background: active ? "rgba(139,92,246,0.18)" : "transparent",
-                                    borderBottom: i < arr.length - 1 ? `1px solid ${GLASS_BORDER}` : "none",
-                                  }}>
-                                  <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.38)" }} />
-                                  <div className="flex-1 min-w-0 text-right">
-                                    <p className="text-[11px] font-black font-['Cairo'] leading-tight"
-                                      style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.78)" }}>{label}</p>
-                                    <p className="text-[8.5px] font-['Cairo'] leading-tight mt-[2px]"
-                                      style={{ color: "rgba(255,255,255,0.22)" }}>{desc}</p>
-                                  </div>
-                                  {active && <div className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />}
-                                </button>
-                              )
-                            )}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
+                    {/* ── View Mode Button (panel rendered at root level to escape overflow-hidden) ── */}
+                    <button
+                      onClick={() => { setShowViewMode(v => !v); setShowSpeed(false); showControls(); }}
+                      className="h-9 px-2.5 flex items-center gap-1.5 rounded-xl active:bg-white/10 transition-colors"
+                      title="وضع العرض"
+                      style={showViewMode ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)" } : {}}
+                    >
+                      {isFs
+                        ? <Minimize2  className="w-[15px] h-[15px] text-violet-300" />
+                        : isZoomed
+                        ? <Scan       className="w-[15px] h-[15px] text-violet-300" />
+                        : <Maximize2  className="w-[15px] h-[15px] text-white/75" />}
+                      <span className="text-[10px] font-black font-['Cairo']"
+                        style={{ color: (showViewMode || isZoomed || isFs) ? "#c4b5fd" : "rgba(255,255,255,0.55)" }}>
+                        {isFs ? "ملء" : isZoomed ? "تكبير" : "عرض"}
+                      </span>
+                    </button>
 
                     {/* Speed */}
                     <div className="relative">
@@ -1438,6 +1382,106 @@ export default function RiftPlayer({
                 </div>
               </div>
 
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ════════════════════════════════════════
+            VIEW MODE PANEL — root level (escapes overflow-hidden)
+        ════════════════════════════════════════ */}
+        <AnimatePresence>
+          {showViewMode && showCtrl && !error && !isLocked && (
+            <motion.div
+              key="viewmode"
+              initial={{ opacity: 0, y: 12, scale: 0.92 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.92 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="absolute z-50 pointer-events-auto"
+              dir="rtl"
+              style={{
+                bottom: 130,
+                left: 14,
+                width: 210,
+                background: "rgba(4,4,14,0.97)",
+                backdropFilter: "blur(40px) saturate(200%)",
+                border: "1px solid rgba(139,92,246,0.25)",
+                borderRadius: 18,
+                overflow: "hidden",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.85), 0 0 0 1px rgba(139,92,246,0.08) inset",
+              }}
+              onClick={e => e.stopPropagation()}
+              onTouchStart={e => e.stopPropagation()}
+              onTouchEnd={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-2.5"
+                style={{ borderBottom: "1px solid rgba(139,92,246,0.14)", background: "rgba(139,92,246,0.10)" }}>
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-lg flex items-center justify-center"
+                    style={{ background: "rgba(139,92,246,0.30)", border: "1px solid rgba(139,92,246,0.50)" }}>
+                    <Maximize2 className="w-2.5 h-2.5 text-violet-300" />
+                  </div>
+                  <span className="text-white text-[12px] font-black font-['Cairo']">وضع العرض</span>
+                </div>
+                <button onClick={() => setShowViewMode(false)}
+                  className="w-6 h-6 rounded-full flex items-center justify-center active:bg-white/10 transition-colors">
+                  <X className="w-3 h-3 text-white/40" />
+                </button>
+              </div>
+              {/* Options */}
+              {([
+                {
+                  Icon: ScanLine, label: "عرض عادي", desc: "نسبة أصلية مع حواف سوداء",
+                  active: !isZoomed && !isFs,
+                  action: () => { setIsZoomed(false); if (isFs) toggleFs(); setShowViewMode(false); },
+                },
+                {
+                  Icon: Scan, label: "تكبير ملء الشاشة", desc: "اقتصاص الحواف السوداء",
+                  active: isZoomed,
+                  action: () => { setIsZoomed(z => !z); setShowViewMode(false); },
+                },
+                {
+                  Icon: isFs ? Minimize2 : Maximize2,
+                  label: isFs ? "إلغاء ملء الشاشة" : "ملء الشاشة الكاملة",
+                  desc: isFs ? "العودة للحجم الطبيعي" : "وضع ملء الشاشة",
+                  active: isFs,
+                  action: () => { toggleFs(); setShowViewMode(false); },
+                },
+                {
+                  Icon: FlipScreenIcon,
+                  label: "تدوير الشاشة",
+                  desc: isPortrait ? "التبديل للوضع الأفقي" : "التبديل للوضع العمودي",
+                  active: isPortrait,
+                  action: () => { toggleRotation(); setShowViewMode(false); },
+                },
+              ] as { Icon: React.ElementType; label: string; desc: string; active: boolean; action: () => void }[]).map(
+                ({ Icon, label, desc, active, action }, i, arr) => (
+                  <button key={label} onClick={action}
+                    className="w-full flex items-center gap-3 px-4 py-3 transition-all active:bg-white/5"
+                    style={{
+                      background: active ? "rgba(139,92,246,0.16)" : "transparent",
+                      borderBottom: i < arr.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none",
+                    }}>
+                    <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                      style={{
+                        background: active ? "rgba(139,92,246,0.28)" : "rgba(255,255,255,0.06)",
+                        border: active ? "1px solid rgba(139,92,246,0.55)" : "1px solid rgba(255,255,255,0.10)",
+                      }}>
+                      <Icon className="w-3.5 h-3.5" style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.50)" }} />
+                    </div>
+                    <div className="flex-1 min-w-0 text-right">
+                      <p className="text-[12px] font-black font-['Cairo'] leading-snug"
+                        style={{ color: active ? "#e2d9fc" : "rgba(255,255,255,0.88)" }}>{label}</p>
+                      <p className="text-[10px] font-['Cairo'] leading-tight mt-0.5"
+                        style={{ color: active ? "rgba(196,181,253,0.65)" : "rgba(255,255,255,0.38)" }}>{desc}</p>
+                    </div>
+                    {active && (
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: "#a78bfa", boxShadow: "0 0 6px rgba(167,139,250,0.80)" }} />
+                    )}
+                  </button>
+                )
+              )}
             </motion.div>
           )}
         </AnimatePresence>
