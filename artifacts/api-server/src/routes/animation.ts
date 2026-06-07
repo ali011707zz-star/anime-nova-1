@@ -641,10 +641,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     send("source", { url, label, directUrl, proxyUrl });
   };
 
-  // Try embed URL → extract stream → probe → sendSource (no iframe fallback)
-  const sendExtracted = async (embedUrl: string, label: string) => {
-    if (!embedUrl || seenUrls.has(embedUrl)) return;
-    seenUrls.add(embedUrl); // mark seen early to avoid double-processing
+  // Try embed URL → extract stream → probe → sendSource
+  // Returns true if a direct stream was found and sent, false otherwise
+  const sendExtracted = async (embedUrl: string, label: string): Promise<boolean> => {
+    if (!embedUrl || seenUrls.has(embedUrl)) return true; // already seen → don't send embed either
 
     // 1. Try callExtractApi (extractVideoDeep)
     const extracted = await callExtractApi(embedUrl);
@@ -663,23 +663,26 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           // 403/405 may still work via hls-proxy (CDN checks full request);
           // skip 404, 4xx (except 403/405), 5xx — these are definitively broken
           const ok = probe.ok || probe.status === 403 || probe.status === 405;
-          if (!ok) return;
+          if (!ok) return false;
         } catch {
           // HEAD failed from Replit server — CDN may still work via hls-proxy from client
           const isHls2 = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
           const proxy2 = isHls2 ? (d.startsWith("/") ? d : wrapHls(d, embedUrl)) : d;
+          seenUrls.add(embedUrl);
           sendSource(embedUrl, label, d, proxy2);
-          return;
+          return true;
         }
       }
       const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
       const proxy = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : d;
+      seenUrls.add(embedUrl);
       sendSource(embedUrl, label, d, proxy);
-      return;
+      return true;
     }
 
     // 2. Try fetching embed page for direct streams
     const streams = await scrapeEmbedForStreams(embedUrl);
+    let sentAny = false;
     for (const s of streams.slice(0, 2)) {
       // Probe each found stream too
       if (s.url.startsWith("http")) {
@@ -693,9 +696,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (!probe.ok && probe.status !== 403 && probe.status !== 405) continue;
         } catch { continue; }
       }
+      seenUrls.add(embedUrl);
       sendSource(s.url, label, s.url, s.proxyUrl);
+      sentAny = true;
     }
-    // No iframe fallback — user requires internal player only
+    return sentAny;
   };
 
   try {
@@ -998,14 +1003,23 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const data: any = await r.json();
                 const servers: any[] = (data.servers || []);
 
-                // isTopPriority first (streamwish, filemoon, dood …) — run in parallel
+                // isTopPriority first (streamwish, filemoon, dood …) — run ALL in parallel (no cap)
                 const priority = servers.filter((s: any) => s.isTopPriority);
                 const rest     = servers.filter((s: any) => !s.isTopPriority);
-                const ordered  = [...priority, ...rest].slice(0, 8); // cap at 8
+                const ordered  = [...priority, ...rest];
 
                 await Promise.allSettled(ordered.map(async (srv: any) => {
                   if (!srv.embedUrl) return;
-                  await sendExtracted(srv.embedUrl, `StarCima ${srv.name || "عربي"}`);
+                  // Try server-side extraction first; fall back to embed iframe
+                  const extracted = await sendExtracted(srv.embedUrl, `StarCima ${srv.name || "عربي"}`);
+                  if (!extracted) {
+                    // Extraction failed → send as embed iframe (animation allows iframes)
+                    if (!seenUrls.has(srv.embedUrl)) {
+                      seenUrls.add(srv.embedUrl);
+                      sourceCount++;
+                      send("source", { url: srv.embedUrl, label: `StarCima ${srv.name || "عربي"}`, isEmbed: true });
+                    }
+                  }
                 }));
               } catch { /* silent */ }
             })(),
