@@ -320,44 +320,51 @@ export default function AnimationWatch() {
       } catch { return []; }
     };
 
-    // Translate English VTT → Arabic cues via server-side Google Translate
-    const translateEnToAr = async (enUrl: string): Promise<SubCue[]> => {
+    // Fetch raw VTT string via proxy-text (bypasses CDN CORS)
+    const fetchVttRaw = async (vttUrl: string): Promise<string> => {
       try {
         const r = await fetch(
-          `/api/anime/translate-vtt?url=${encodeURIComponent(enUrl)}&from=en&to=ar`,
-          { signal: AbortSignal.timeout(35_000) }
+          `/api/anime/proxy-text?url=${encodeURIComponent(vttUrl)}&ref=${SC_REF}`,
+          { signal: AbortSignal.timeout(9_000) }
         );
-        if (!r.ok) return [];
-        const json = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-        if (!json.cues?.length) return [];
-        return parseSrt("WEBVTT\n\n" + json.cues.map(c => `${c.timing}\n${c.text}`).join("\n\n"));
-      } catch { return []; }
+        if (!r.ok) return "";
+        return r.text();
+      } catch { return ""; }
     };
 
-    // Batch translate VTT content (English cues → Arabic) via /api/anime/translate
+    // Batch translate VTT content (English cues → Arabic) — parallel, 4 requests at a time
     const translateContent = async (content: string): Promise<SubCue[]> => {
       try {
         const cues = parseSrt(content);
         if (!cues.length) return [];
-        const BATCH = 20;
-        const results: SubCue[] = [];
-        for (let i = 0; i < cues.length; i += BATCH) {
-          const batch = cues.slice(i, i + BATCH);
-          const joined = batch.map(c => c.text).join("\n||||\n");
-          try {
-            const r = await fetch(
-              `/api/anime/translate?text=${encodeURIComponent(joined)}&from=en&to=ar`,
-              { signal: AbortSignal.timeout(20_000) }
-            );
-            if (!r.ok) { results.push(...batch); continue; }
-            const d = await r.json() as { translated: string };
-            const parts = d.translated.split(/\n\|{4}\n/);
-            for (let j = 0; j < batch.length; j++) {
-              results.push({ ...batch[j], text: parts[j]?.trim() || batch[j].text });
-            }
-          } catch { results.push(...batch); }
+        const BATCH    = 15;
+        const PARALLEL = 4;
+        const results: SubCue[] = new Array(cues.length);
+        const batches: SubCue[][] = [];
+        for (let i = 0; i < cues.length; i += BATCH) batches.push(cues.slice(i, i + BATCH));
+
+        for (let i = 0; i < batches.length; i += PARALLEL) {
+          const group = batches.slice(i, i + PARALLEL);
+          await Promise.allSettled(
+            group.map(async (batch, gi) => {
+              const startIdx = (i + gi) * BATCH;
+              const joined = batch.map(c => c.text).join("\n||||\n");
+              try {
+                const r = await fetch(
+                  `/api/anime/translate?text=${encodeURIComponent(joined)}&from=en&to=ar`,
+                  { signal: AbortSignal.timeout(20_000) }
+                );
+                if (!r.ok) { batch.forEach((c, j) => { results[startIdx + j] = c; }); return; }
+                const d = await r.json() as { translated: string };
+                const parts = d.translated.split(/\n\|{4}\n/);
+                for (let j = 0; j < batch.length; j++) {
+                  results[startIdx + j] = { ...batch[j], text: parts[j]?.trim() || batch[j].text };
+                }
+              } catch { batch.forEach((c, j) => { results[startIdx + j] = c; }); }
+            })
+          );
         }
-        return results;
+        return results.filter(Boolean);
       } catch { return []; }
     };
 
@@ -420,17 +427,17 @@ export default function AnimationWatch() {
         if (cues.length > 0) { setSubCues(cues); setSubState("ready"); return; }
       }
 
-      // No Arabic found → translate English automatically
-      // Try vidzee English first, then CDN fallback
+      // No Arabic found → fetch English VTT raw then translate client-side (parallel)
       const enVidzee = subs.find((s: any) => s.languageCode === "en" && s.url?.startsWith("http"));
-      const enUrl = enVidzee?.url || enCdnV3;
+      const enUrl    = enVidzee?.url || enCdnV3;
       const enFallback = enCdnV2;
 
-      let translated = await translateEnToAr(enUrl);
-      if (!translated.length && enUrl !== enFallback) {
-        translated = await translateEnToAr(enFallback);
+      let rawEn = await fetchVttRaw(enUrl);
+      if (!rawEn && enUrl !== enFallback) rawEn = await fetchVttRaw(enFallback);
+      if (rawEn) {
+        const translated = await translateContent(rawEn);
+        if (translated.length > 0) { setSubCues(translated); setSubState("ready"); return; }
       }
-      if (translated.length > 0) { setSubCues(translated); setSubState("ready"); return; }
 
       // All sources exhausted
       setSubState("failed");

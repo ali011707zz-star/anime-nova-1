@@ -602,8 +602,9 @@ async function scrapeEmbedForStreams(
 }
 
 // ── Animation subtitle local cache ──────────────────────────────────────────
-const animSubCache = new Map<string, { content: string | null; ts: number }>();
-const ANIM_SUB_TTL = 60 * 60 * 1000; // 1 hour
+const animSubCache = new Map<string, { content: string | null; language?: string; ts: number }>();
+const ANIM_SUB_TTL      = 60 * 60 * 1000; // 1 hour  (success)
+const ANIM_SUB_FAIL_TTL =  5 * 60 * 1000; // 5 min   (failure → retry sooner)
 
 // ── Arabic subtitle search for TMDB animation content ───────────────────────
 // Uses wyzie.ru (free aggregator, no key) + subdl fallback (needs SUBDL_API_KEY)
@@ -617,7 +618,11 @@ router.get("/animation/subtitles", async (req: Request, res: Response) => {
 
   const ck = `anim-sub:${tmdbId}:${type}:${season}:${ep}`;
   const hit = animSubCache.get(ck);
-  if (hit && Date.now() - hit.ts < ANIM_SUB_TTL) { res.json({ content: hit.content }); return; }
+  const hitTtl = hit?.content ? ANIM_SUB_TTL : ANIM_SUB_FAIL_TTL;
+  if (hit && Date.now() - hit.ts < hitTtl) {
+    res.json({ content: hit.content, ...(hit.language ? { language: hit.language } : {}) });
+    return;
+  }
 
   try {
     // Step 1: Get IMDB ID from TMDB external_ids
@@ -690,7 +695,7 @@ router.get("/animation/subtitles", async (req: Request, res: Response) => {
             if (dlEnR.ok) {
               const content = await dlEnR.text();
               if (content.includes("-->")) {
-                animSubCache.set(ck, { content, ts: Date.now() });
+                animSubCache.set(ck, { content, language: "en", ts: Date.now() });
                 res.json({ content, language: "en" }); return;
               }
             }
@@ -1017,32 +1022,33 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── 13. ToonStream — DISABLED (rubystm CDN expired, as-cdn21 returns 403) ──
       Promise.resolve(),
 
-      // ── 16. vidsrc.pro (TMDB-based, often has streamwish/filemoon inner links) ─
+      // ── 16. 2embed.skin (TMDB-based, tries streamwish/filemoon extraction) ─────
       (async () => {
         try {
           const url = type === "tv"
-            ? `https://vidsrc.pro/embed/tv/${tmdbId}/${season}/${epNum}`
-            : `https://vidsrc.pro/embed/movie/${tmdbId}`;
-          await sendExtracted(url, "VidSrc Pro");
+            ? `https://www.2embed.skin/embedtv/${tmdbId}&s=${season}&e=${epNum}`
+            : `https://www.2embed.skin/embed/${tmdbId}`;
+          await sendExtracted(url, "2Embed");
         } catch { /* silent */ }
       })(),
 
-      // ── 17. multiembed.mov (TMDB-based, multiple embedded servers) ────────────
-      (async () => {
-        try {
-          const tvQ = type === "tv" ? `&s=${season}&e=${epNum}` : "";
-          const url = `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1${tvQ}`;
-          await sendExtracted(url, "MultiEmbed");
-        } catch { /* silent */ }
-      })(),
-
-      // ── 18. autoembed.to (TMDB-based, clean API) ─────────────────────────────
+      // ── 17. vidsrc.xyz (TMDB-based, known to have streamsb/filemoon sources) ──
       (async () => {
         try {
           const url = type === "tv"
-            ? `https://autoembed.to/tv/tmdb/${tmdbId}-${season}-${epNum}`
-            : `https://autoembed.to/movie/tmdb/${tmdbId}`;
-          await sendExtracted(url, "AutoEmbed");
+            ? `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+            : `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}`;
+          await sendExtracted(url, "VidSrc XYZ");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 18. embed.su (TMDB-based, often filemoon/streamwish inside) ───────────
+      (async () => {
+        try {
+          const url = type === "tv"
+            ? `https://embed.su/embed/tv/${tmdbId}/${season}/${epNum}`
+            : `https://embed.su/embed/movie/${tmdbId}`;
+          await sendExtracted(url, "Embed.su");
         } catch { /* silent */ }
       })(),
 
