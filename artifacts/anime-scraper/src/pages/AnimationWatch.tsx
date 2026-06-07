@@ -348,16 +348,17 @@ export default function AnimationWatch() {
     } catch { return []; }
   }, []);
 
-  // Load a single track — direct parse or server-side translation
-  const loadSubTrack = useCallback(async (track: SubTrack, mode: "direct" | "translate", signal?: AbortSignal) => {
+  // Load a single track — direct parse or server-side translation; returns true on success
+  const loadSubTrack = useCallback(async (track: SubTrack, mode: "direct" | "translate", signal?: AbortSignal): Promise<boolean> => {
     setSubCues([]);
     setSubStatus(mode === "translate" ? "translating" : "loading");
     const cues = mode === "translate"
       ? await translateVttUrl(track.url, signal)
       : await fetchVttParsed(track.url, signal);
-    if (signal?.aborted) return;
-    if (cues.length > 0) { setSubCues(cues); setSubStatus("ready"); }
-    else { setSubStatus("failed"); }
+    if (signal?.aborted) return false;
+    if (cues.length > 0) { setSubCues(cues); setSubStatus("ready"); return true; }
+    setSubStatus("failed");
+    return false;
   }, [fetchVttParsed, translateVttUrl]);
 
   // Manual subtitle choice — user picks language option
@@ -407,7 +408,12 @@ export default function AnimationWatch() {
         if (arTrack) {
           // Direct Arabic track — fast, no translation needed
           setSubChoice("ar");
-          await loadSubTrack(arTrack, "direct", ctrl.signal);
+          const ok = await loadSubTrack(arTrack, "direct", ctrl.signal);
+          if (!ok && !ctrl.signal.aborted && enTrack) {
+            // Arabic VTT fetch failed → fall back to translating English
+            setSubChoice("ar-translated");
+            await loadSubTrack(enTrack, "translate", ctrl.signal);
+          }
         } else if (enTrack) {
           // No Arabic available → auto-translate English (server-side, cached)
           setSubChoice("ar-translated");
