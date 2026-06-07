@@ -38,7 +38,7 @@ export function BottomNav() {
               )}
               <div className="relative z-10">
                 <Icon
-                  className={`transition-all duration-200 w-[17px] h-[17px]
+                  className={`transition-all duration-200 w-[14px] h-[14px]
                     ${isActive ? "text-violet-400" : "text-white/28"}`}
                   strokeWidth={isActive ? 2.5 : 1.8}
                 />

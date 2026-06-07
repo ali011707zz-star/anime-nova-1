@@ -825,9 +825,9 @@ export default function Home() {
           </motion.div>
         </AnimatePresence>
         {hasMore && (
-          <Link href="/library">
+          <Link href="/browse">
             <button className="w-full mt-5 py-3.5 bg-[#18181B] border border-white/8 rounded-2xl text-sm font-black flex items-center justify-center gap-2 text-white/50 hover:text-white hover:border-primary/30 transition-all active:scale-[0.98] font-['Cairo']">
-              <ChevronDown className="w-4 h-4" /> عرض الكل في المكتبة
+              <ChevronDown className="w-4 h-4" /> عرض المزيد
             </button>
           </Link>
         )}

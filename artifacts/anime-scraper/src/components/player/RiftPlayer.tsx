@@ -320,13 +320,19 @@ export default function RiftPlayer({
       const hls = new Hls({
         enableWorker: false,
         lowLatencyMode: false,
-        maxBufferLength: 45,
-        maxMaxBufferLength: 90,
+        maxBufferLength: 90,
+        maxMaxBufferLength: 180,
         backBufferLength: 30,
         startFragPrefetch: true,
         progressive: true,
-        fragLoadingMaxRetry: 4,
-        manifestLoadingMaxRetry: 3,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 500,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingMaxRetry: 4,
+        highBufferWatchdogPeriod: 5,
+        nudgeOffset: 0.2,
+        nudgeMaxRetry: 5,
       });
       hlsRef.current = hls;
       hls.loadSource(m3u8); hls.attachMedia(v);
