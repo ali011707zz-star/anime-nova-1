@@ -238,25 +238,53 @@ export default function AnimationDetail() {
       )}
 
       <div className="px-4 mt-5 space-y-2.5">
-        {/* Watch button */}
-        <Link href={watchUrl()}>
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            className="w-full h-12 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-sm font-['Cairo'] text-white"
-            style={{ background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)", boxShadow: "0 8px 32px rgba(109,40,217,0.45)" }}
-          >
-            <div className="w-7 h-7 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-              <Play className="w-3.5 h-3.5 fill-white text-white" />
-            </div>
-            {type === "movie"
-              ? "مشاهدة الفيلم"
-              : continueEp && continueEp > 1
-              ? `تابع الحلقة ${continueEp}`
-              : "مشاهدة المسلسل"}
-          </motion.button>
-        </Link>
+        {/* Primary CTA: Episodes page for TV, Watch for movies */}
+        {type === "tv" ? (
+          <Link href={episodesUrl()}>
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              className="w-full h-12 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-sm font-['Cairo'] text-white"
+              style={{ background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)", boxShadow: "0 8px 32px rgba(109,40,217,0.45)" }}
+            >
+              <div className="w-7 h-7 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                <List className="w-3.5 h-3.5 text-white" />
+              </div>
+              الحلقات
+              {detail?.number_of_episodes > 0 && (
+                <span className="text-white/60 text-xs font-bold">({detail.number_of_episodes})</span>
+              )}
+            </motion.button>
+          </Link>
+        ) : (
+          <Link href={watchUrl()}>
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              className="w-full h-12 rounded-2xl font-black flex items-center justify-center gap-2.5 shadow-2xl text-sm font-['Cairo'] text-white"
+              style={{ background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)", boxShadow: "0 8px 32px rgba(109,40,217,0.45)" }}
+            >
+              <div className="w-7 h-7 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                <Play className="w-3.5 h-3.5 fill-white text-white" />
+              </div>
+              مشاهدة الفيلم
+            </motion.button>
+          </Link>
+        )}
 
         <div className="flex gap-2.5">
+          {/* For TV: watch/continue button as secondary */}
+          {type === "tv" && (
+            <Link href={watchUrl()} className="flex-1">
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                className="w-full h-11 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-1.5 text-xs font-bold font-['Cairo'] text-white/70"
+              >
+                <Play className="w-3.5 h-3.5 text-primary fill-primary" />
+                {continueEp && continueEp > 1 ? `تابع ح ${continueEp}` : "شاهد"}
+              </motion.button>
+            </Link>
+          )}
+
+          {/* Save */}
           <motion.button
             whileTap={{ scale: 0.97 }}
             onClick={toggleSave}
@@ -268,30 +296,15 @@ export default function AnimationDetail() {
             <span className="text-[8px] font-black">{saved ? "محفوظ" : "حفظ"}</span>
           </motion.button>
 
-          {/* Episodes button — TV only */}
-          {type === "tv" && (
-            <Link href={episodesUrl()}>
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                className="flex-1 h-11 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold font-['Cairo'] text-white/70"
-              >
-                <List className="w-3.5 h-3.5 text-primary" />
-                الحلقات
-                {detail?.number_of_episodes > 0 && (
-                  <span className="bg-primary/20 text-primary text-[9px] font-black px-1.5 py-0.5 rounded-full">{detail.number_of_episodes}</span>
-                )}
-              </motion.button>
-            </Link>
-          )}
-
+          {/* Comments */}
           <motion.button
             whileTap={{ scale: 0.97 }}
             onClick={() => setShowComments(true)}
-            className={`${type === "tv" ? "w-12" : "flex-1"} h-11 bg-[#18181B] border border-white/7 rounded-2xl flex flex-col items-center justify-center gap-0.5 text-xs font-bold font-['Cairo'] text-white/70`}
+            className="flex-1 h-11 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold font-['Cairo'] text-white/70"
           >
             <MessageCircle className="w-3.5 h-3.5 text-primary" />
-            {type !== "tv" && <span>التعليقات</span>}
-            {comments.length > 0 && type !== "tv" && (
+            التعليقات
+            {comments.length > 0 && (
               <span className="bg-primary/20 text-primary text-[9px] font-black px-1.5 py-0.5 rounded-full">{comments.length}</span>
             )}
           </motion.button>

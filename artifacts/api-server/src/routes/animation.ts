@@ -642,7 +642,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           // skip 404, 4xx (except 403/405), 5xx — these are definitively broken
           const ok = probe.ok || probe.status === 403 || probe.status === 405;
           if (!ok) return;
-        } catch { return; } // CDN unreachable from Replit — skip
+        } catch {
+          // HEAD failed from Replit server — CDN may still work via hls-proxy from client
+          const isHls2 = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
+          const proxy2 = isHls2 ? (d.startsWith("/") ? d : wrapHls(d, embedUrl)) : d;
+          sendSource(embedUrl, label, d, proxy2);
+          return;
+        }
       }
       const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
       const proxy = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : d;
@@ -931,8 +937,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const data: any = await r.json();
                 const servers: any[] = (data.servers || []);
 
-                // Probe all servers in parallel, only send working ones
-                await Promise.allSettled(servers.slice(0, 4).map(async (srv) => {
+                // Send ALL servers through hls-proxy — no HEAD probe (CDN blocks server IPs)
+                await Promise.allSettled(servers.map(async (srv) => {
                   if (!srv.url) return;
                   let rawUrl  = String(srv.url);
                   let referer = SC_REF_HLS;
@@ -945,16 +951,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                       referer    = pu.searchParams.get("referer") || SC_REF_HLS;
                     } catch { /* keep original */ }
                   }
-
-                  // Quick probe — skip if CDN returns non-2xx
-                  try {
-                    const probe = await fetch(rawUrl, {
-                      method: "HEAD",
-                      headers: { "User-Agent": UA, "Referer": referer },
-                      signal: AbortSignal.timeout(5_000),
-                    });
-                    if (!probe.ok && probe.status !== 403) return; // 403 may still work via proxy
-                  } catch { return; }
 
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
                   sendSource(proxied, `StarCima ${srv.name || "HLS"}`, proxied, proxied);
@@ -983,7 +979,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const priority = servers.filter((s: any) => s.isTopPriority);
                 const rest     = servers.filter((s: any) => !s.isTopPriority);
 
-                for (const srv of [...priority, ...rest].slice(0, 10)) {
+                for (const srv of [...priority, ...rest]) {
                   if (!srv.embedUrl) continue;
                   await sendExtracted(srv.embedUrl, `StarCima ${srv.name || "عربي"}`);
                 }

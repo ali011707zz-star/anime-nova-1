@@ -997,10 +997,10 @@ function EpisodePlayer({
   const lastSaveTs   = useRef(0);
   const lastTimeRef  = useRef(0);
 
-  /* Save helper — only persists when time > 60s */
+  /* Save helper — persists when time > 10s */
   const saveProgress = useCallback(() => {
     const t = lastTimeRef.current;
-    if (t > 60) {
+    if (t > 10) {
       try { localStorage.setItem(progressKey, String(Math.floor(t))); } catch {}
     }
   }, [progressKey]);
@@ -1925,6 +1925,42 @@ export default function WatchPage() {
       setInitialSrv(0);
       setPhase("player");
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotSources, phase]);
+
+  /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
+  useEffect(() => {
+    if (phase !== "player") return;
+    const newFlat: FetchedSrc[] = [];
+    const seenKeys = new Set<string>();
+    for (const srcs of Object.values(slotSources)) {
+      for (const s of srcs) {
+        if (!shouldShowSrc(s)) continue;
+        const key = s.directUrl || s.url;
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        newFlat.push(s);
+      }
+    }
+    if (!newFlat.length) return;
+    newFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+    setPlayerServers(prev => {
+      const next: Record<Quality, string[]> = {
+        "1080p FHD": [...prev["1080p FHD"]],
+        "720p HD":   [...prev["720p HD"]],
+        "360p SD":   [...prev["360p SD"]],
+      };
+      for (const s of newFlat) {
+        const u = s.directUrl || s.url;
+        if (!u) continue;
+        const tier = getSrcQualityTier(s);
+        if (!next[tier].includes(u)) next[tier].push(u);
+      }
+      const changed = (["1080p FHD", "720p HD", "360p SD"] as Quality[]).some(
+        k => JSON.stringify(next[k]) !== JSON.stringify(prev[k])
+      );
+      return changed ? next : prev;
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotSources, phase]);
 
