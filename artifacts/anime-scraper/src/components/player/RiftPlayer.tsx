@@ -175,6 +175,7 @@ export default function RiftPlayer({
   const [isZoomed,        setIsZoomed]        = useState(false);
   const [isLocked,        setIsLocked]        = useState(false);
   const [showSpeed,       setShowSpeed]       = useState(false);
+  const [showViewMode,    setShowViewMode]    = useState(false);
   const [showSubMenu,     setShowSubMenu]      = useState(false);
   const [prgHover,        setPrgHover]        = useState(false);
   const [feedback,        setFeedback]        = useState<GF | null>(null);
@@ -1192,22 +1193,86 @@ export default function RiftPlayer({
                   className="flex items-center px-3 pt-2"
                   style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
                 >
-                  {/* Left: zoom · speed */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {/* Zoom toggle */}
-                    <button
-                      onClick={() => setIsZoomed(z => !z)}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors"
-                      title={isZoomed ? "ملء الشاشة" : "عرض كامل"}
-                    >
-                      {isZoomed
-                        ? <Scan    className="w-[17px] h-[17px] text-violet-300/80" />
-                        : <ScanLine className="w-[17px] h-[17px] text-white/40" />}
-                    </button>
+                  {/* Left: view-mode · speed */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+
+                    {/* ── View Mode Panel ── */}
+                    <div className="relative">
+                      <button
+                        onClick={() => { setShowViewMode(v => !v); setShowSpeed(false); showControls(); }}
+                        className="h-9 px-2 flex items-center gap-1 rounded-xl active:bg-white/10 transition-colors"
+                        title="وضع العرض"
+                      >
+                        {isFs
+                          ? <Minimize2  className="w-[15px] h-[15px] text-violet-300/85" />
+                          : isZoomed
+                          ? <Scan       className="w-[15px] h-[15px] text-violet-300/85" />
+                          : <Maximize2  className="w-[15px] h-[15px] text-white/38" />}
+                      </button>
+                      <AnimatePresence>
+                        {showViewMode && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 8, scale: 0.93 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 8, scale: 0.93 }}
+                            transition={{ duration: 0.14 }}
+                            className="absolute bottom-full mb-2 left-0 rounded-2xl overflow-hidden z-50 shadow-2xl"
+                            style={{ background: GLASS_PANEL, border: `1px solid ${GLASS_BORDER}`, backdropFilter: GLASS_BLUR, width: 186 }}
+                            onClick={e => e.stopPropagation()}
+                            onTouchStart={e => e.stopPropagation()}
+                            onTouchEnd={e => e.stopPropagation()}
+                          >
+                            {([
+                              {
+                                Icon: ScanLine, label: "عرض عادي", desc: "مع حواف سوداء",
+                                active: !isZoomed && !isFs,
+                                action: () => { setIsZoomed(false); if (isFs) toggleFs(); setShowViewMode(false); },
+                              },
+                              {
+                                Icon: Scan, label: "تكبير ملء", desc: "بدون حواف سوداء (اقتصاص)",
+                                active: isZoomed,
+                                action: () => { setIsZoomed(z => !z); setShowViewMode(false); },
+                              },
+                              {
+                                Icon: isFs ? Minimize2 : Maximize2,
+                                label: isFs ? "إلغاء ملء الشاشة" : "ملء الشاشة",
+                                desc: isFs ? "العودة للوضع العادي" : "وضع الشاشة الكاملة",
+                                active: isFs,
+                                action: () => { toggleFs(); setShowViewMode(false); },
+                              },
+                              {
+                                Icon: FlipScreenIcon,
+                                label: "تدوير الشاشة", desc: isPortrait ? "الوضع الأفقي" : "الوضع العمودي",
+                                active: isPortrait,
+                                action: () => { toggleRotation(); setShowViewMode(false); },
+                              },
+                            ] as { Icon: React.ElementType; label: string; desc: string; active: boolean; action: () => void }[]).map(
+                              ({ Icon, label, desc, active, action }, i, arr) => (
+                                <button key={label} onClick={action}
+                                  className="w-full flex items-center gap-3 px-3.5 py-2.5 transition-colors active:bg-white/5"
+                                  style={{
+                                    background: active ? "rgba(139,92,246,0.18)" : "transparent",
+                                    borderBottom: i < arr.length - 1 ? `1px solid ${GLASS_BORDER}` : "none",
+                                  }}>
+                                  <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.38)" }} />
+                                  <div className="flex-1 min-w-0 text-right">
+                                    <p className="text-[11px] font-black font-['Cairo'] leading-tight"
+                                      style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.78)" }}>{label}</p>
+                                    <p className="text-[8.5px] font-['Cairo'] leading-tight mt-[2px]"
+                                      style={{ color: "rgba(255,255,255,0.22)" }}>{desc}</p>
+                                  </div>
+                                  {active && <div className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />}
+                                </button>
+                              )
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
 
                     {/* Speed */}
                     <div className="relative">
-                      <button onClick={() => { setShowSpeed(s => !s); showControls(); }}
+                      <button onClick={() => { setShowSpeed(s => !s); setShowViewMode(false); showControls(); }}
                         className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-white/10 transition-colors">
                         <span className="px-2 py-[3px] rounded-lg font-mono text-[11px] font-black leading-none"
                           style={{
@@ -1226,7 +1291,7 @@ export default function RiftPlayer({
                             exit={{ opacity: 0, y: 8, scale: 0.93 }}
                             transition={{ duration: 0.14 }}
                             className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 rounded-2xl overflow-hidden z-50 shadow-2xl"
-                            style={{ background: GLASS_PANEL, border: `1px solid ${GLASS_BORDER}`, backdropFilter: GLASS_BLUR, minWidth: 88 }}
+                            style={{ background: GLASS_PANEL, border: `1px solid ${GLASS_BORDER}`, backdropFilter: GLASS_BLUR, minWidth: 100 }}
                           >
                             {SPEEDS.map((s, i) => (
                               <button key={s} onClick={() => changeSpeed(s)}
@@ -1361,89 +1426,127 @@ export default function RiftPlayer({
                 </div>
               )}
 
-              {/* Settings when loaded */}
+              {/* Settings when loaded — pill buttons (no native pickers) */}
               {subEnabled && subSettings && onSubSettingsChange && (
-                <div className="flex flex-col gap-2.5">
-                  {(
-                    [
-                      {
-                        label: "حجم الخط",
-                        value: String(subSettings.fontSize),
-                        onChange: (v: string) => updateSub({ fontSize: Number(v) }),
-                        opts: FONT_SIZES.map(f => ({ v: String(f.sz), l: f.name })),
-                      },
-                      {
-                        label: "لون النص",
-                        value: subSettings.color,
-                        onChange: (v: string) => updateSub({ color: v }),
-                        opts: SUB_COLORS.map(c => ({ v: c.v, l: c.label })),
-                      },
-                      {
-                        label: "الموضع",
-                        value: subSettings.position,
-                        onChange: (v: string) => updateSub({ position: v as "top" | "center" | "bottom" }),
-                        opts: SUB_POSITIONS.map(p => ({ v: p.v, l: `${p.icon} ${p.label}` })),
-                      },
-                      {
-                        label: "الخلفية",
-                        value: String(subSettings.bgOpacity),
-                        onChange: (v: string) => updateSub({ bgOpacity: Number(v) }),
-                        opts: [
-                          { v: "0",    l: "بلا خلفية" },
-                          { v: "0.45", l: "شفافة" },
-                          { v: "0.82", l: "معتمة" },
-                        ],
-                      },
-                    ] as { label: string; value: string; onChange: (v: string) => void; opts: { v: string; l: string }[] }[]
-                  ).map(({ label, value, onChange, opts }) => (
-                    <div key={label} className="flex items-center gap-2.5">
-                      <span className="text-white/40 text-[10px] font-bold font-['Cairo'] shrink-0" style={{ width: 64 }}>{label}</span>
-                      <div className="flex-1 relative">
-                        <select
-                          value={value}
-                          onChange={e => onChange(e.target.value)}
-                          onTouchStart={e => e.stopPropagation()}
-                          onTouchEnd={e => e.stopPropagation()}
-                          className="w-full text-[11px] font-['Cairo'] rounded-xl"
-                          style={{
-                            padding: "7px 24px 7px 10px",
-                            background: "rgba(255,255,255,0.07)",
-                            border: "1px solid rgba(255,255,255,0.13)",
-                            color: "rgba(255,255,255,0.88)",
-                            outline: "none",
-                            appearance: "none",
-                            WebkitAppearance: "none",
-                          }}
-                        >
-                          {opts.map(({ v, l }) => (
-                            <option key={v} value={v} style={{ background: "#120820", color: "#ede9fe" }}>{l}</option>
-                          ))}
-                        </select>
-                        <div className="absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                          <svg width="9" height="5" viewBox="0 0 9 5" fill="none">
-                            <path d="M1 1l3.5 3.5L8 1" stroke="rgba(255,255,255,0.38)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        </div>
+                <div className="flex flex-col gap-3.5">
+
+                  {/* ── Font size ── */}
+                  <div>
+                    <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">حجم الخط</p>
+                    <div className="flex gap-1.5">
+                      {FONT_SIZES.map(f => {
+                        const active = subSettings.fontSize === f.sz;
+                        return (
+                          <button key={f.sz}
+                            onPointerDown={e => { e.stopPropagation(); updateSub({ fontSize: f.sz }); }}
+                            className="flex-1 py-2 rounded-xl flex flex-col items-center gap-[3px] transition-all active:scale-90"
+                            style={{
+                              background: active ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
+                              border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.08)"}`,
+                            }}>
+                            <span className="font-black font-['Cairo']"
+                              style={{ fontSize: Math.min(f.sz * 0.55 + 5, 16), color: active ? "#c4b5fd" : "rgba(255,255,255,0.40)" }}>
+                              أ
+                            </span>
+                            <span className="text-[7.5px] font-['Cairo']"
+                              style={{ color: active ? "rgba(196,181,253,0.75)" : "rgba(255,255,255,0.22)" }}>
+                              {f.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── Color ── */}
+                  <div>
+                    <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">لون النص</p>
+                    <div className="flex gap-1.5">
+                      {SUB_COLORS.map(c => {
+                        const active = subSettings.color === c.v;
+                        return (
+                          <button key={c.v}
+                            onPointerDown={e => { e.stopPropagation(); updateSub({ color: c.v }); }}
+                            className="flex-1 py-2 rounded-xl flex flex-col items-center gap-1.5 transition-all active:scale-90"
+                            style={{
+                              background: active ? "rgba(124,58,237,0.22)" : "rgba(255,255,255,0.05)",
+                              border: `${active ? 1.5 : 1}px solid ${active ? c.v : "rgba(255,255,255,0.08)"}`,
+                            }}>
+                            <span className="w-4 h-4 rounded-full shrink-0"
+                              style={{ background: c.v, boxShadow: active ? `0 0 8px ${c.v}88` : "none" }} />
+                            <span className="text-[7.5px] font-['Cairo']"
+                              style={{ color: active ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.28)" }}>
+                              {c.label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── Position ── */}
+                  <div>
+                    <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">موضع الترجمة</p>
+                    <div className="flex gap-1.5">
+                      {SUB_POSITIONS.map(p => {
+                        const active = subSettings.position === p.v;
+                        return (
+                          <button key={p.v}
+                            onPointerDown={e => { e.stopPropagation(); updateSub({ position: p.v as "top" | "center" | "bottom" }); }}
+                            className="flex-1 py-2.5 rounded-xl flex flex-col items-center gap-1 transition-all active:scale-90"
+                            style={{
+                              background: active ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
+                              border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.08)"}`,
+                            }}>
+                            <span className="text-[14px] leading-none">{p.icon}</span>
+                            <span className="text-[8px] font-['Cairo']"
+                              style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.30)" }}>
+                              {p.label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── Background + Bold row ── */}
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">الخلفية</p>
+                      <div className="flex gap-1">
+                        {([{ v: 0, l: "بلا" }, { v: 0.45, l: "شفاف" }, { v: 0.82, l: "معتم" }]).map(({ v, l }) => {
+                          const active = subSettings.bgOpacity === v;
+                          return (
+                            <button key={v}
+                              onPointerDown={e => { e.stopPropagation(); updateSub({ bgOpacity: v }); }}
+                              className="flex-1 py-2 rounded-lg text-[8px] font-black font-['Cairo'] transition-all active:scale-90"
+                              style={{
+                                background: active ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
+                                border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.08)"}`,
+                                color: active ? "#c4b5fd" : "rgba(255,255,255,0.28)",
+                              }}>
+                              {l}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
-                  ))}
-                  {/* Bold toggle */}
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-white/40 text-[10px] font-bold font-['Cairo'] shrink-0" style={{ width: 64 }}>سمك الخط</span>
-                    <button
-                      onClick={() => updateSub({ bold: !subSettings.bold })}
-                      onTouchStart={e => e.stopPropagation()}
-                      onTouchEnd={e => e.stopPropagation()}
-                      className="flex-1 py-[7px] rounded-xl text-[11px] font-['Cairo'] transition-all active:scale-95"
-                      style={{
-                        fontWeight: subSettings.bold ? 800 : 400,
-                        background: subSettings.bold ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.07)",
-                        border: subSettings.bold ? "1px solid rgba(139,92,246,0.55)" : "1px solid rgba(255,255,255,0.13)",
-                        color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.55)",
-                      }}>
-                      {subSettings.bold ? "عريض ✓" : "عادي"}
-                    </button>
+                    <div className="flex-1">
+                      <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">سمك الخط</p>
+                      <button
+                        onPointerDown={e => { e.stopPropagation(); updateSub({ bold: !subSettings.bold }); }}
+                        className="w-full py-2 rounded-lg text-[9px] font-['Cairo'] transition-all active:scale-95"
+                        style={{
+                          fontWeight: subSettings.bold ? 800 : 400,
+                          background: subSettings.bold ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
+                          border: `1px solid ${subSettings.bold ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.08)"}`,
+                          color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.28)",
+                        }}>
+                        {subSettings.bold ? "✓ عريض" : "عادي"}
+                      </button>
+                    </div>
                   </div>
+
                 </div>
               )}
 

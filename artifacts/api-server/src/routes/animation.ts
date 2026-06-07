@@ -988,14 +988,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const data: any = await r.json();
                 const servers: any[] = (data.servers || []);
 
-                // isTopPriority first (streamwish, filemoon, dood …)
+                // isTopPriority first (streamwish, filemoon, dood …) — run in parallel
                 const priority = servers.filter((s: any) => s.isTopPriority);
                 const rest     = servers.filter((s: any) => !s.isTopPriority);
+                const ordered  = [...priority, ...rest].slice(0, 8); // cap at 8
 
-                for (const srv of [...priority, ...rest]) {
-                  if (!srv.embedUrl) continue;
+                await Promise.allSettled(ordered.map(async (srv: any) => {
+                  if (!srv.embedUrl) return;
                   await sendExtracted(srv.embedUrl, `StarCima ${srv.name || "عربي"}`);
-                }
+                }));
               } catch { /* silent */ }
             })(),
           ]);

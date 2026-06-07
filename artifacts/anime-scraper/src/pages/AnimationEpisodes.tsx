@@ -110,9 +110,9 @@ export default function AnimationEpisodes() {
           )}
         </div>
 
-        {/* Season tabs */}
+        {/* Season tabs — visual cards */}
         {seasons.length > 1 && (
-          <div ref={tabsRef} className="flex gap-2 px-4 pb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+          <div ref={tabsRef} className="flex gap-2.5 px-4 pb-3.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
             {seasons.map(s => {
               const isActive = s.season_number === selSeason;
               return (
@@ -120,20 +120,57 @@ export default function AnimationEpisodes() {
                   key={s.id}
                   data-active={isActive}
                   onClick={() => setSelSeason(s.season_number)}
-                  className="shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[11px] font-black font-['Cairo'] transition-all active:scale-95 whitespace-nowrap"
-                  style={isActive ? {
-                    background: "linear-gradient(135deg, rgba(139,92,246,0.35), rgba(109,40,217,0.35))",
-                    border: "1px solid rgba(167,139,250,0.45)",
-                    color: "#c4b5fd",
-                    boxShadow: "0 0 16px rgba(139,92,246,0.20)",
-                  } : {
-                    background: "rgba(255,255,255,0.05)",
-                    border: "1px solid rgba(255,255,255,0.09)",
-                    color: "rgba(255,255,255,0.40)",
+                  className="shrink-0 relative overflow-hidden transition-all active:scale-95"
+                  style={{
+                    borderRadius: 14,
+                    width: 80,
+                    height: 108,
+                    border: isActive ? "1.5px solid rgba(167,139,250,0.55)" : "1px solid rgba(255,255,255,0.08)",
+                    boxShadow: isActive ? "0 0 22px rgba(139,92,246,0.22), 0 4px 16px rgba(0,0,0,0.45)" : "0 2px 8px rgba(0,0,0,0.30)",
+                    transform: isActive ? "scale(1.04)" : "scale(1)",
                   }}
                 >
-                  <span>{s.name || `الموسم ${s.season_number}`}</span>
-                  <span className="font-mono text-[9px] opacity-60">{s.episode_count}</span>
+                  {/* Poster background */}
+                  {s.poster_path ? (
+                    <img
+                      src={`https://image.tmdb.org/t/p/w185${s.poster_path}`}
+                      alt=""
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="absolute inset-0" style={{
+                      background: isActive
+                        ? "linear-gradient(145deg, rgba(109,40,217,0.80), rgba(139,92,246,0.40))"
+                        : "linear-gradient(145deg, rgba(30,20,55,0.90), rgba(15,10,30,0.95))",
+                    }} />
+                  )}
+
+                  {/* Overlay gradient */}
+                  <div className="absolute inset-0"
+                    style={{ background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.40) 55%, rgba(0,0,0,0.15) 100%)" }} />
+
+                  {/* Active indicator glow */}
+                  {isActive && (
+                    <div className="absolute inset-0" style={{ background: "rgba(139,92,246,0.18)" }} />
+                  )}
+
+                  {/* Content */}
+                  <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-1.5 text-center">
+                    <p className="text-[8px] font-black font-['Cairo'] leading-tight"
+                      style={{ color: isActive ? "#c4b5fd" : "rgba(255,255,255,0.70)" }}>
+                      {s.name || `الموسم ${s.season_number}`}
+                    </p>
+                    <p className="text-[7px] font-mono mt-[2px]"
+                      style={{ color: isActive ? "rgba(196,181,253,0.65)" : "rgba(255,255,255,0.28)" }}>
+                      {s.episode_count} حلقة
+                    </p>
+                  </div>
+
+                  {/* Active dot */}
+                  {isActive && (
+                    <div className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-violet-400"
+                      style={{ boxShadow: "0 0 6px rgba(167,139,250,0.80)" }} />
+                  )}
                 </button>
               );
             })}
