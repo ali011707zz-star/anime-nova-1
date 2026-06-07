@@ -488,6 +488,17 @@ function wrapHls(url: string, ref: string): string {
   return `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
 }
 
+// Wrap MP4/video through video-proxy (needed for IP-tied sources like Streamtape, Sendvid, CDNs)
+function wrapMp4(url: string, ref: string): string {
+  return `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+}
+
+// Hosts that must go through video-proxy (IP-tied or CORS-blocked)
+const MP4_PROXY_HOSTS = [
+  "streamtape", "sendvid", "sendcdn", "uptostream", "uqload",
+  "upstream", "vidcdn", "cdnfile", "vidmoly",
+];
+
 // Known extractable video hosts (same ones that extractVideoDeep handles in anime.ts)
 const EXTRACTABLE_HOSTS = [
   "streamwish", "filemoon", "streamtape", "vidmoly", "vidcloud", "upcloud",
@@ -525,7 +536,8 @@ async function scrapeEmbedForStreams(
     // 1. Look for direct m3u8/mp4 URLs in page source
     const streams = extractStreamsFromHtml(html);
     for (const s of streams.slice(0, 4)) {
-      const proxyUrl = s.type === "hls" ? wrapHls(s.url, embedUrl) : s.url;
+      const needProxy = MP4_PROXY_HOSTS.some(h => s.url.includes(h));
+      const proxyUrl = s.type === "hls" ? wrapHls(s.url, embedUrl) : needProxy ? wrapMp4(s.url, embedUrl) : s.url;
       out.push({ url: s.url, proxyUrl, type: s.type });
     }
 
@@ -538,7 +550,8 @@ async function scrapeEmbedForStreams(
       if (extracted?.directUrl) {
         const d = extracted.directUrl;
         const type: "hls" | "mp4" | "dash" = d.includes(".m3u8") ? "hls" : d.includes(".mpd") ? "dash" : "mp4";
-        const proxyUrl = type === "hls" ? wrapHls(d, inner) : d;
+        const needProxy = MP4_PROXY_HOSTS.some(h => d.includes(h));
+        const proxyUrl = type === "hls" ? wrapHls(d, inner) : needProxy ? wrapMp4(d, inner) : d;
         out.push({ url: d, proxyUrl, type });
         if (out.length >= 2) return out;
       }
@@ -554,7 +567,8 @@ async function scrapeEmbedForStreams(
         const innerHtml = await cfGet(inner, embedUrl);
         const innerStreams = extractStreamsFromHtml(innerHtml);
         for (const s of innerStreams.slice(0, 2)) {
-          const proxyUrl = s.type === "hls" ? wrapHls(s.url, inner) : s.url;
+          const needProxy = MP4_PROXY_HOSTS.some(h => s.url.includes(h));
+          const proxyUrl = s.type === "hls" ? wrapHls(s.url, inner) : needProxy ? wrapMp4(s.url, inner) : s.url;
           out.push({ url: s.url, proxyUrl, type: s.type });
         }
         // Also check extractable hosts in inner page
@@ -564,7 +578,8 @@ async function scrapeEmbedForStreams(
           if (ex?.directUrl) {
             const d = ex.directUrl;
             const type: "hls" | "mp4" | "dash" = d.includes(".m3u8") ? "hls" : d.includes(".mpd") ? "dash" : "mp4";
-            out.push({ url: d, proxyUrl: type === "hls" ? wrapHls(d, iu) : d, type });
+            const needProxy = MP4_PROXY_HOSTS.some(h => d.includes(h));
+            out.push({ url: d, proxyUrl: type === "hls" ? wrapHls(d, iu) : needProxy ? wrapMp4(d, iu) : d, type });
           }
         }
       } catch { /* try extractApi directly */ }
@@ -574,7 +589,8 @@ async function scrapeEmbedForStreams(
         if (extracted?.directUrl) {
           const d = extracted.directUrl;
           const type: "hls" | "mp4" | "dash" = d.includes(".m3u8") ? "hls" : d.includes(".mpd") ? "dash" : "mp4";
-          const proxyUrl = type === "hls" ? wrapHls(d, inner) : d;
+          const needProxy = MP4_PROXY_HOSTS.some(h => d.includes(h));
+          const proxyUrl = type === "hls" ? wrapHls(d, inner) : needProxy ? wrapMp4(d, inner) : d;
           out.push({ url: d, proxyUrl, type });
         }
       }
@@ -773,16 +789,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const ok = probe.ok || probe.status === 403 || probe.status === 405;
           if (!ok) return false;
         } catch {
-          // HEAD failed from Replit server — CDN may still work via hls-proxy from client
+          // HEAD failed from Replit server — CDN may still work via hls-proxy/video-proxy from client
           const isHls2 = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
-          const proxy2 = isHls2 ? (d.startsWith("/") ? d : wrapHls(d, embedUrl)) : d;
+          const needPrxy2 = !isHls2 && MP4_PROXY_HOSTS.some(h => d.includes(h));
+          const proxy2 = isHls2 ? (d.startsWith("/") ? d : wrapHls(d, embedUrl)) : needPrxy2 ? wrapMp4(d, embedUrl) : d;
           seenUrls.add(embedUrl);
           sendSource(embedUrl, label, d, proxy2);
           return true;
         }
       }
       const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
-      const proxy = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : d;
+      const needProxy = !isHls && MP4_PROXY_HOSTS.some(h => d.includes(h));
+      const proxy = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : needProxy ? wrapMp4(d, embedUrl) : d;
       seenUrls.add(embedUrl);
       sendSource(embedUrl, label, d, proxy);
       return true;
