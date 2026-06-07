@@ -957,7 +957,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   } catch { return; }
 
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-                  sendSource(srv.url, `StarCima ${srv.name || "HLS"}`, proxied, proxied);
+                  sendSource(proxied, `StarCima ${srv.name || "HLS"}`, proxied, proxied);
                 }));
               } catch { /* silent */ }
             })(),

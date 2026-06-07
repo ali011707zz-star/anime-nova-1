@@ -1702,8 +1702,9 @@ export default function WatchPage() {
   const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
   const [playerSubUrl, setPlayerSubUrl] = useState<string | undefined>(undefined);
 
-  const autoFetchedRef = useRef(false);
-  const phaseRef       = useRef<"picker" | "player">("picker");
+  const autoFetchedRef  = useRef(false);
+  const autoPlayedRef   = useRef(false);
+  const phaseRef        = useRef<"picker" | "player">("picker");
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -1863,17 +1864,13 @@ export default function WatchPage() {
             const srcs: FetchedSrc[] = data.sources || [];
             if (!alive) return;
             if (srcs.length > 0) {
-              if (phaseRef.current === "picker") {
-                setSlotSources(prev => ({ ...prev, [def.site]: srcs }));
-                setSlotStatus(prev => ({ ...prev, [def.site]: "ready" }));
-              }
+              setSlotSources(prev => ({ ...prev, [def.site]: srcs }));
+              setSlotStatus(prev => ({ ...prev, [def.site]: "ready" }));
             } else {
-              if (phaseRef.current === "picker") {
-                setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
-              }
+              setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
             }
           } catch {
-            if (alive && phaseRef.current === "picker") {
+            if (alive) {
               setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
             }
           } finally {
@@ -1891,6 +1888,46 @@ export default function WatchPage() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* ── Auto-play: fire when first high-quality source (≥ 720p) arrives ── */
+  useEffect(() => {
+    if (autoPlayedRef.current) return;
+    if (phase !== "picker") return;
+    const allSrcs: FetchedSrc[] = [];
+    const seenKeys = new Set<string>();
+    for (const srcs of Object.values(slotSources)) {
+      for (const s of srcs) {
+        if (!shouldShowSrc(s)) continue;
+        const key = s.directUrl || s.url;
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        allSrcs.push(s);
+      }
+    }
+    const goodSrc = allSrcs.find(s => (s.qualityRank ?? 0) >= 9);
+    if (goodSrc) {
+      autoPlayedRef.current = true;
+      /* Build all servers and switch to player */
+      const clickedUrl  = goodSrc.directUrl || goodSrc.url;
+      const clickedTier = getSrcQualityTier(goodSrc);
+      allSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+      const srvMap: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
+      srvMap[clickedTier].push(clickedUrl);
+      for (const s of allSrcs) {
+        const u = s.directUrl || s.url;
+        if (!u || u === clickedUrl) continue;
+        const tier = getSrcQualityTier(s);
+        if (!srvMap[tier].includes(u)) srvMap[tier].push(u);
+      }
+      setPlayerDlUrl(undefined);
+      setPlayerSubUrl(goodSrc.subtitleUrl || undefined);
+      setPlayerServers(srvMap);
+      setQuality(clickedTier);
+      setInitialSrv(0);
+      setPhase("player");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotSources, phase]);
 
   /* ── Play a specific source — show loading modal then switch to player ── */
   function handlePlaySrc(src: FetchedSrc) {
