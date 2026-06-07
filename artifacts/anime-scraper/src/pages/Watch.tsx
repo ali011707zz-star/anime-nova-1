@@ -1889,7 +1889,7 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Auto-play: fire when first high-quality source (≥ 720p) arrives ── */
+  /* ── Auto-play: fire only when first FHD 1080p source arrives ── */
   useEffect(() => {
     if (autoPlayedRef.current) return;
     if (phase !== "picker") return;
@@ -1904,7 +1904,7 @@ export default function WatchPage() {
         allSrcs.push(s);
       }
     }
-    const goodSrc = allSrcs.find(s => (s.qualityRank ?? 0) >= 9);
+    const goodSrc = allSrcs.find(s => (s.qualityRank ?? 0) >= 13);
     if (goodSrc) {
       autoPlayedRef.current = true;
       /* Build all servers and switch to player */

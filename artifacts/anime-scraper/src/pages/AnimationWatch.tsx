@@ -165,11 +165,11 @@ export default function AnimationWatch() {
 
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
-  /* ── Auto-play first available "ok" source (don't wait for SSE to finish) ── */
+  /* ── Auto-play only when first FHD 1080p source arrives ── */
   useEffect(() => {
     if (step !== "loading") return;
     if (autoPlayedRef.current) return;
-    const first = sources.find(s => s.status === "ok");
+    const first = sources.find(s => s.status === "ok" && getSourceTier(s) === "1080p FHD");
     if (!first) return;
     autoPlayedRef.current = true;
     playSource(first);

@@ -3902,9 +3902,10 @@ async function getAnimeGGSources(
             .replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":')
             .replace(/:\s*'([^']*)'/g, ': "$1"');
           const tracks: Array<{ file?: string; label?: string; kind?: string }> = JSON.parse(tracksJson);
-          const subTrack = tracks.find(t =>
-            t.kind !== "thumbnails" && t.file?.startsWith("http")
-          );
+          /* Prefer explicit captions/subtitles kind; fallback to any non-thumbnail track */
+          const subTrack =
+            tracks.find(t => (t.kind === "captions" || t.kind === "subtitles") && t.file?.startsWith("http")) ||
+            tracks.find(t => t.kind !== "thumbnails" && t.kind !== "chapters" && t.file?.startsWith("http"));
           if (subTrack?.file) {
             const rawProxy = `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(embedUrl)}`;
             embedSubUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(rawProxy)}&from=en&to=ar`;
