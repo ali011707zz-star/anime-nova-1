@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Link } from "wouter";
-import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Clapperboard } from "lucide-react";
+import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Clapperboard, Search as SearchIcon, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { loadWatchHistory, loadSavedIds, unsaveAnime } from "@/lib/db";
 import { motion, AnimatePresence } from "framer-motion";
@@ -31,7 +31,11 @@ function loadAnimHistory(): AnimHistItem[] {
   try {
     const raw = localStorage.getItem("anim-watch-history");
     if (!raw) return [];
-    return JSON.parse(raw) as AnimHistItem[];
+    return (JSON.parse(raw) as any[]).map(x => ({
+      ...x,
+      tmdbId: x.tmdbId ?? x.id,
+      poster: x.poster ?? x.cover,
+    })) as AnimHistItem[];
   } catch { return []; }
 }
 
@@ -86,6 +90,7 @@ export default function Library() {
   const [animHistory, setAnimHistory] = useState<AnimHistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "date" | "score">("date");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const loadData = useCallback(async () => {
     const hist = await loadWatchHistory(user?.id ?? null);
@@ -170,11 +175,22 @@ export default function Library() {
     ...animContinue.map((i: AnimHistItem) => ({ ...i, _kind: "anim" as const })),
   ].sort((a, b) => ((b.date ?? "") > (a.date ?? "") ? 1 : -1)).slice(0, 20);
 
-  const sortedSaved = [...savedAnime].sort((a, b) => {
-    if (sortBy === "name") return (a.title?.romaji || "").localeCompare(b.title?.romaji || "");
-    if (sortBy === "score") return (b.averageScore || 0) - (a.averageScore || 0);
-    return 0;
-  });
+  const sq = searchQuery.toLowerCase().trim();
+
+  const filteredContinue = useMemo(() =>
+    continueItems.filter((i: any) => !sq || (i.title || "").toLowerCase().includes(sq)),
+    [continueItems, sq]);
+
+  const filteredSaved = useMemo(() => {
+    const sorted = [...savedAnime].sort((a, b) => {
+      if (sortBy === "name") return (a.title?.romaji || "").localeCompare(b.title?.romaji || "");
+      if (sortBy === "score") return (b.averageScore || 0) - (a.averageScore || 0);
+      return 0;
+    });
+    return sq ? sorted.filter(a => (a.title?.romaji || a.title?.english || "").toLowerCase().includes(sq)) : sorted;
+  }, [savedAnime, sortBy, sq]);
+
+  const sortedSaved = filteredSaved;
 
   const tabCount = {
     continue: continueItems.length,
@@ -188,7 +204,7 @@ export default function Library() {
       {/* ── Header ── */}
       <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-4 pb-3">
         <h1 className="text-xl font-black font-['Cairo'] mb-3">قائمتي</h1>
-        <div className="flex gap-1.5 bg-[#18181B] p-1 rounded-2xl">
+        <div className="flex gap-1.5 bg-[#18181B] p-1 rounded-2xl mb-3">
           {(["continue", "history", "saved"] as const).map(t => {
             const labels = { continue: "متابعة", history: "السجل", saved: "المحفوظة" };
             const icons = {
@@ -211,6 +227,21 @@ export default function Library() {
             );
           })}
         </div>
+        {/* Search bar */}
+        <div className="flex items-center gap-2 bg-[#111116] rounded-xl px-3 border border-white/[0.06]">
+          <SearchIcon className="w-4 h-4 text-white/25 shrink-0" />
+          <input
+            type="text" value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="ابحث في قائمتك..."
+            className="flex-1 bg-transparent text-white py-2.5 outline-none text-[13px] font-['Cairo'] placeholder:text-white/22"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery("")} className="text-white/25 hover:text-white/60 active:scale-90">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── CONTINUE WATCHING TAB ── */}
@@ -218,7 +249,7 @@ export default function Library() {
         {tab === "continue" && (
           <motion.div key="continue" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="px-4 mt-4">
-            {continueItems.length === 0 ? (
+            {filteredContinue.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 gap-5">
                 <div className="w-20 h-20 rounded-full bg-white/4 border border-white/8 flex items-center justify-center">
                   <PlayCircle className="w-9 h-9 text-white/15" />
@@ -235,7 +266,7 @@ export default function Library() {
               </div>
             ) : (
               <div className="space-y-3">
-                {continueItems.map((item: any, i: number) => {
+                {filteredContinue.map((item: any, i: number) => {
                   const isAnim = item._kind === "anim";
                   const pct = progressPct(item.progressSec);
                   const accent = isAnim ? "#06B6D4" : "#8B5CF6";
@@ -319,7 +350,8 @@ export default function Library() {
               const animeRows = history.map((item: any) => ({ ...item, _kind: "anime" as const }));
               const animRows  = animHistory.map((item: AnimHistItem) => ({ ...item, _kind: "anim" as const }));
               const merged = [...animeRows, ...animRows]
-                .sort((a, b) => ((b.date ?? "") > (a.date ?? "") ? 1 : -1));
+                .sort((a, b) => ((b.date ?? "") > (a.date ?? "") ? 1 : -1))
+                .filter((item: any) => !sq || (item.title || "").toLowerCase().includes(sq));
 
               if (merged.length === 0) return (
                 <div className="flex flex-col items-center justify-center py-24 gap-5">
