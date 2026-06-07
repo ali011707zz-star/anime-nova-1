@@ -1701,9 +1701,10 @@ export default function WatchPage() {
   const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
   const [playerSubUrl, setPlayerSubUrl] = useState<string | undefined>(undefined);
 
-  const autoFetchedRef  = useRef(false);
-  const autoPlayedRef   = useRef(false);
-  const phaseRef        = useRef<"picker" | "player">("picker");
+  const autoFetchedRef    = useRef(false);
+  const autoPlayedRef     = useRef(false);
+  const upgradedToFhdRef  = useRef(false);
+  const phaseRef          = useRef<"picker" | "player">("picker");
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -1888,7 +1889,7 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Auto-play: fire only when first FHD 1080p source arrives ── */
+  /* ── Auto-play: fire on first available source of any quality — don't wait for FHD ── */
   useEffect(() => {
     if (autoPlayedRef.current) return;
     if (phase !== "picker") return;
@@ -1903,13 +1904,13 @@ export default function WatchPage() {
         allSrcs.push(s);
       }
     }
-    const goodSrc = allSrcs.find(s => (s.qualityRank ?? 0) >= 13);
-    if (goodSrc) {
+    /* Play best available immediately (sorted by qualityRank desc) */
+    if (allSrcs.length > 0) {
       autoPlayedRef.current = true;
-      /* Build all servers and switch to player */
-      const clickedUrl  = goodSrc.directUrl || goodSrc.url;
-      const clickedTier = getSrcQualityTier(goodSrc);
       allSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+      const firstSrc    = allSrcs[0];
+      const clickedUrl  = firstSrc.directUrl || firstSrc.url;
+      const clickedTier = getSrcQualityTier(firstSrc);
       const srvMap: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
       srvMap[clickedTier].push(clickedUrl);
       for (const s of allSrcs) {
@@ -1919,7 +1920,7 @@ export default function WatchPage() {
         if (!srvMap[tier].includes(u)) srvMap[tier].push(u);
       }
       setPlayerDlUrl(undefined);
-      setPlayerSubUrl(goodSrc.subtitleUrl || undefined);
+      setPlayerSubUrl(firstSrc.subtitleUrl || undefined);
       setPlayerServers(srvMap);
       setQuality(clickedTier);
       setInitialSrv(0);
@@ -1963,6 +1964,34 @@ export default function WatchPage() {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotSources, phase]);
+
+  /* ── Auto-upgrade to FHD: when 1080p source arrives and we started on lower quality, switch ── */
+  useEffect(() => {
+    if (phase !== "player") return;
+    if (upgradedToFhdRef.current) return;
+    if (quality === "1080p FHD") { upgradedToFhdRef.current = true; return; }
+    const seenKeys = new Set<string>();
+    const fhdSrcs: FetchedSrc[] = [];
+    for (const srcs of Object.values(slotSources)) {
+      for (const s of srcs) {
+        if (!shouldShowSrc(s)) continue;
+        const key = s.directUrl || s.url;
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        if ((s.qualityRank ?? 0) >= 13) fhdSrcs.push(s);
+      }
+    }
+    if (fhdSrcs.length === 0) return;
+    upgradedToFhdRef.current = true;
+    fhdSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+    const bestFhd  = fhdSrcs[0];
+    const allFhdUs = fhdSrcs.map(s => s.directUrl || s.url).filter(Boolean) as string[];
+    setPlayerServers(prev => ({ ...prev, "1080p FHD": allFhdUs }));
+    setPlayerSubUrl(bestFhd.subtitleUrl || undefined);
+    setQuality("1080p FHD");
+    setInitialSrv(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotSources, phase, quality]);
 
   /* ── Play a specific source — show loading modal then switch to player ── */
   function handlePlaySrc(src: FetchedSrc) {

@@ -130,6 +130,7 @@ export default function AnimationDetail() {
   const cast = (detail.credits?.cast || detail.aggregate_credits?.cast || []).slice(0, 12);
   const recs: any[] = (detail.recommendations?.results || []).slice(0, 10);
   const studios = (detail.production_companies || []).slice(0, 2).map((c: any) => c.name).join(" · ");
+  const seasons: any[] = (detail.seasons || []).filter((s: any) => s.season_number > 0);
 
   return (
     <main className="min-h-screen bg-[#09090B] pb-32 text-white" dir="rtl">
@@ -336,6 +337,51 @@ export default function AnimationDetail() {
         </div>
       )}
 
+
+      {/* ── Seasons (TV only) ── */}
+      {type === "tv" && seasons.length > 0 && (
+        <div className="mt-7">
+          <div className="flex items-center gap-2 mb-3 px-4">
+            <div className="w-1 h-5 bg-primary rounded-full" />
+            <h2 className="text-[15px] font-black font-['Cairo']">المواسم</h2>
+            <span className="text-[9px] text-white/30 bg-white/5 px-2 py-1 rounded-lg font-['Cairo']">
+              {seasons.length} موسم
+            </span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
+            {seasons.map((s: any, idx: number) => (
+              <Link key={s.id || s.season_number} href={`/animation/${type}/${id}/episodes?season=${s.season_number}`}>
+                <motion.div whileTap={{ scale: 0.94 }} className="shrink-0 w-[130px] cursor-pointer">
+                  <div className="relative h-[78px] rounded-2xl overflow-hidden border border-white/6 mb-2">
+                    {s.poster_path
+                      ? <img src={`${IMG_W}${s.poster_path}`} alt="" loading="lazy" className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center"
+                          style={{ background: `linear-gradient(135deg, rgba(109,40,217,${Math.min(0.45, 0.18 + idx * 0.07)}), rgba(139,92,246,${Math.min(0.35, 0.10 + idx * 0.05)}))` }}>
+                          <span className="text-3xl font-black font-['Cairo']" style={{ color: `rgba(255,255,255,${0.08 + idx * 0.02})` }}>
+                            {s.season_number}
+                          </span>
+                        </div>
+                    }
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/5 to-transparent" />
+                    <div className="absolute bottom-1.5 right-2 left-2 flex items-center justify-between">
+                      <span className="text-[8px] font-black text-white/60 bg-black/40 px-1.5 py-0.5 rounded-md font-['Cairo']">
+                        {s.episode_count} ح
+                      </span>
+                      {s.air_date && (
+                        <span className="text-[8px] text-white/40 font-['Cairo']">{s.air_date.slice(0, 4)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-[11px] font-black text-white/75 font-['Cairo'] truncate leading-tight">
+                    {s.name || `الموسم ${s.season_number}`}
+                  </p>
+                  <p className="text-[9px] text-white/28 font-['Cairo'] mt-0.5">{s.episode_count} حلقة</p>
+                </motion.div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Cast ── */}
       {cast.length > 0 && (

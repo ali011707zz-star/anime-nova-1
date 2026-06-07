@@ -126,7 +126,8 @@ export default function AnimationWatch() {
   const seenUrls         = useRef(new Set<string>());
   const lastProgressSave = useRef(0);
   const histSavedRef     = useRef(false);
-  const autoPlayedRef    = useRef(false);
+  const autoPlayedRef      = useRef(false);
+  const upgradedToFhdRef   = useRef(false);
 
   /* ── Navigate to detail page ── */
   const goToDetail = useCallback(() => {
@@ -174,6 +175,18 @@ export default function AnimationWatch() {
     autoPlayedRef.current = true;
     playSource(first);
   }, [sources, step, playSource]);
+
+  /* ── Auto-upgrade: switch to FHD when 1080p source arrives (if started on lower quality) ── */
+  useEffect(() => { upgradedToFhdRef.current = false; }, [tmdbId, type, ep, season]);
+  useEffect(() => {
+    if (step !== "playing") return;
+    if (upgradedToFhdRef.current) return;
+    if (selSrc && getSourceTier(selSrc) === "1080p FHD") { upgradedToFhdRef.current = true; return; }
+    const fhdSrc = sources.find(s => s.status === "ok" && getSourceTier(s) === "1080p FHD");
+    if (!fhdSrc) return;
+    upgradedToFhdRef.current = true;
+    playSource(fhdSrc);
+  }, [sources, step, selSrc, playSource]);
 
   /* ── Time update (progress + subtitle sync) ── */
   const handleTimeUpdate = useCallback((t: number) => {

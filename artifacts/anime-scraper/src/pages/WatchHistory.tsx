@@ -69,12 +69,16 @@ function loadHistory(): HistoryItem[] {
     for (const x of raw) {
       const tmdbId = x?.tmdbId || x?.id;
       if (!tmdbId || !x?.title) continue;
+      const rawCover = x.cover || x.poster || "";
+      const fullCover = rawCover && !rawCover.startsWith("http")
+        ? `https://image.tmdb.org/t/p/w300${rawCover}`
+        : rawCover;
       anim.push({
         kind: "anim",
         tmdbId: String(tmdbId),
         type: x.type || "movie",
         title: x.title,
-        cover: x.cover || x.poster || "",
+        cover: fullCover,
         ep: x.ep || 1,
         season: x.season || 1,
         date: x.date || new Date().toISOString(),
@@ -107,7 +111,7 @@ export default function WatchHistory() {
   function removeAnim(tmdbId: string, type: string, ep: number, season: number) {
     try {
       const raw: any[] = JSON.parse(localStorage.getItem("anim-watch-history") || "[]");
-      const updated = raw.filter(x => !(x.tmdbId === tmdbId && x.type === type && x.ep === ep && x.season === season));
+      const updated = raw.filter(x => !((x.id === tmdbId || x.tmdbId === tmdbId) && x.type === type && x.ep === ep && x.season === season));
       localStorage.setItem("anim-watch-history", JSON.stringify(updated));
     } catch { /* ignore */ }
     setHistory(loadHistory());
