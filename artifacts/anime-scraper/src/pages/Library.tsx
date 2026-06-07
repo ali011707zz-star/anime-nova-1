@@ -314,100 +314,150 @@ export default function Library() {
         {tab === "history" && (
           <motion.div key="history" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="px-4 mt-4">
-            {history.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 gap-5">
-                <div className="w-20 h-20 rounded-full bg-white/4 border border-white/8 flex items-center justify-center">
-                  <History className="w-9 h-9 text-white/15" />
+            {(() => {
+              /* Merge anime + animation history sorted by date desc */
+              const animeRows = history.map((item: any) => ({ ...item, _kind: "anime" as const }));
+              const animRows  = animHistory.map((item: AnimHistItem) => ({ ...item, _kind: "anim" as const }));
+              const merged = [...animeRows, ...animRows]
+                .sort((a, b) => ((b.date ?? "") > (a.date ?? "") ? 1 : -1));
+
+              if (merged.length === 0) return (
+                <div className="flex flex-col items-center justify-center py-24 gap-5">
+                  <div className="w-20 h-20 rounded-full bg-white/4 border border-white/8 flex items-center justify-center">
+                    <History className="w-9 h-9 text-white/15" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-white/40 font-black font-['Cairo'] text-sm">لا توجد مشاهدات بعد</p>
+                    <p className="text-white/20 text-xs font-['Cairo'] mt-1">ابدأ مشاهدة أنمي أو أنيميشن</p>
+                  </div>
+                  <Link href="/">
+                    <button className="flex items-center gap-2 bg-primary/15 border border-primary/25 text-primary px-5 py-2.5 rounded-xl text-sm font-black font-['Cairo'] active:scale-95">
+                      <Home className="w-4 h-4" /> الصفحة الرئيسية
+                    </button>
+                  </Link>
                 </div>
-                <div className="text-center">
-                  <p className="text-white/40 font-black font-['Cairo'] text-sm">لا توجد مشاهدات بعد</p>
-                  <p className="text-white/20 text-xs font-['Cairo'] mt-1">ابدأ مشاهدة أنمي الآن</p>
-                </div>
-                <Link href="/">
-                  <button className="flex items-center gap-2 bg-primary/15 border border-primary/25 text-primary px-5 py-2.5 rounded-xl text-sm font-black font-['Cairo'] active:scale-95">
-                    <Home className="w-4 h-4" /> الصفحة الرئيسية
-                  </button>
-                </Link>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <p className="text-[10px] text-white/30 font-['Cairo'] font-bold">{history.length} حلقة</p>
-                  <button onClick={clearHistory} className="flex items-center gap-1.5 text-red-400/60 text-[10px] font-bold font-['Cairo'] hover:text-red-400 active:scale-95">
-                    <Trash2 className="w-3 h-3" /> مسح الكل
-                  </button>
-                </div>
-                <div className="space-y-2.5">
-                  {history.map((item, i) => {
-                    const progressSec = getProgress(item.id, item.ep);
-                    const pct = progressPct(progressSec);
-                    const watchUrl = `/watch?anime=${item.id}&ep=${item.ep}${item.cover ? `&cover=${encodeURIComponent(item.cover)}` : ""}${item.title ? `&title=${encodeURIComponent(item.title)}` : ""}`;
-                    return (
-                      <motion.div key={`${item.id}-${item.ep}-${i}`}
-                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.04 }}>
-                        <Link href={watchUrl}>
-                          <div className="flex items-center gap-3 p-3 bg-[#111116] rounded-2xl border border-white/5 hover:border-primary/20 transition-all cursor-pointer active:scale-[0.98]">
-                            {/* Cover */}
-                            <div className="relative shrink-0">
-                              <img src={item.cover} alt="" className="w-14 h-[72px] rounded-xl object-cover border border-white/10" />
-                              <div className="absolute inset-0 rounded-xl bg-black/20 flex items-center justify-center">
-                                <div className="w-7 h-7 bg-primary/90 rounded-full flex items-center justify-center shadow-lg">
-                                  <Play className="w-3.5 h-3.5 text-white fill-white" />
+              );
+
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-[10px] text-white/30 font-['Cairo'] font-bold">{merged.length} عنصر</p>
+                    <button onClick={() => { clearHistory(); localStorage.removeItem("anim-watch-history"); setAnimHistory([]); }}
+                      className="flex items-center gap-1.5 text-red-400/60 text-[10px] font-bold font-['Cairo'] hover:text-red-400 active:scale-95">
+                      <Trash2 className="w-3 h-3" /> مسح الكل
+                    </button>
+                  </div>
+                  <div className="space-y-2.5">
+                    {merged.map((item: any, i: number) => {
+                      const isAnim = item._kind === "anim";
+                      const accent = isAnim ? "#06B6D4" : "#8B5CF6";
+                      const progressSec = isAnim
+                        ? getAnimProgress(item.tmdbId, item.type, item.season, item.ep)
+                        : getProgress(item.id, item.ep);
+                      const pct = progressPct(progressSec);
+                      const cover = isAnim ? item.poster : item.cover;
+                      const coverSrc = isAnim && cover
+                        ? (cover.startsWith("http") ? cover : `https://image.tmdb.org/t/p/w200${cover}`)
+                        : cover;
+                      const watchUrl = isAnim
+                        ? `/animation/watch?id=${item.tmdbId}&type=${item.type ?? "movie"}&ep=${item.ep ?? 1}&season=${item.season ?? 1}&title=${encodeURIComponent(item.title)}&poster=${encodeURIComponent(cover ?? "")}`
+                        : `/watch?anime=${item.id}&ep=${item.ep}${item.cover ? `&cover=${encodeURIComponent(item.cover)}` : ""}${item.title ? `&title=${encodeURIComponent(item.title)}` : ""}`;
+                      const epLabel = isAnim
+                        ? (item.type === "tv" ? `ج${item.season ?? 1} · ح${item.ep ?? 1}` : "فيلم")
+                        : `الحلقة ${item.ep}`;
+                      const kindLabel = isAnim ? "أنيميشن" : "أنمي";
+
+                      return (
+                        <motion.div key={isAnim ? `anim-${item.tmdbId}-${item.season}-${item.ep}-${i}` : `${item.id}-${item.ep}-${i}`}
+                          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: i * 0.04 }}>
+                          <Link href={watchUrl}>
+                            <div className="flex items-center gap-3 p-3 bg-[#111116] rounded-2xl border border-white/5 transition-all cursor-pointer active:scale-[0.98]"
+                              style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                              {/* Cover */}
+                              <div className="relative shrink-0">
+                                {coverSrc
+                                  ? <img src={coverSrc} alt="" className="w-14 h-[72px] rounded-xl object-cover border border-white/10" />
+                                  : <div className="w-14 h-[72px] rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
+                                      {isAnim ? <Clapperboard className="w-5 h-5 text-white/20" /> : <PlayCircle className="w-5 h-5 text-white/20" />}
+                                    </div>
+                                }
+                                <div className="absolute inset-0 rounded-xl bg-black/25 flex items-center justify-center">
+                                  <div className="w-7 h-7 rounded-full flex items-center justify-center shadow-lg"
+                                    style={{ background: accent }}>
+                                    <Play className="w-3.5 h-3.5 text-white fill-white ml-0.5" />
+                                  </div>
                                 </div>
                               </div>
-                            </div>
 
-                            {/* Info */}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-black text-white line-clamp-1 font-['Cairo'] leading-tight">{item.title}</p>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-primary text-[10px] font-black font-['Cairo'] bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
-                                  الحلقة {item.ep}
-                                </span>
-                                {item.totalEps > 0 && (
-                                  <span className="text-white/25 text-[9px] font-['Cairo']">من {item.totalEps}</span>
-                                )}
+                              {/* Info */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md"
+                                    style={{ background: `${accent}20`, color: accent, border: `1px solid ${accent}33` }}>
+                                    {kindLabel}
+                                  </span>
+                                </div>
+                                <p className="text-sm font-black text-white line-clamp-1 font-['Cairo'] leading-tight">{item.title}</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-black font-['Cairo'] px-2 py-0.5 rounded-lg"
+                                    style={{ color: accent, background: `${accent}15`, border: `1px solid ${accent}25` }}>
+                                    {epLabel}
+                                  </span>
+                                  {!isAnim && item.totalEps > 0 && (
+                                    <span className="text-white/25 text-[9px] font-['Cairo']">من {item.totalEps}</span>
+                                  )}
+                                </div>
+                                <div className="mt-2 w-full h-1 bg-white/8 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full transition-all"
+                                    style={{
+                                      width: `${pct || 3}%`,
+                                      background: pct > 80
+                                        ? "linear-gradient(90deg,#10B981,#059669)"
+                                        : `linear-gradient(90deg,${accent},${accent}99)`,
+                                    }} />
+                                </div>
+                                <div className="flex items-center justify-between mt-1">
+                                  {progressSec > 0
+                                    ? <span className="text-white/25 text-[9px] font-mono">{fmtTime(progressSec)} · {pct}%</span>
+                                    : <span className="text-white/20 text-[9px] font-['Cairo']">لم يُسجَّل تقدم</span>
+                                  }
+                                  {item.date && (
+                                    <div className="flex items-center gap-0.5">
+                                      <Clock className="w-2.5 h-2.5 text-white/20" />
+                                      <span className="text-white/20 text-[9px] font-['Cairo']">منذ {timeAgo(item.date)}</span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                              {/* Progress bar */}
-                              <div className="mt-2 w-full h-1 bg-white/8 rounded-full overflow-hidden">
-                                <div className="h-full rounded-full transition-all"
-                                  style={{
-                                    width: `${pct || 3}%`,
-                                    background: pct > 80
-                                      ? "linear-gradient(90deg,#10B981,#059669)"
-                                      : "linear-gradient(90deg,#EF4444,#F97316)",
-                                  }} />
-                              </div>
-                              <div className="flex items-center justify-between mt-1">
-                                {progressSec > 0
-                                  ? <span className="text-white/25 text-[9px] font-mono">{fmtTime(progressSec)} · {pct}%</span>
-                                  : <span className="text-white/20 text-[9px] font-['Cairo']">لم يُسجَّل تقدم</span>
-                                }
-                                {item.date && (
-                                  <div className="flex items-center gap-0.5">
-                                    <Clock className="w-2.5 h-2.5 text-white/20" />
-                                    <span className="text-white/20 text-[9px] font-['Cairo']">منذ {timeAgo(item.date)}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
 
-                            {/* Remove */}
-                            <button
-                              onClick={e => { e.preventDefault(); e.stopPropagation(); removeHistory(item.id, item.ep); }}
-                              className="w-7 h-7 bg-white/5 rounded-xl flex items-center justify-center text-white/25 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0 active:scale-90"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </Link>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
+                              {/* Remove */}
+                              <button
+                                onClick={e => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  if (isAnim) {
+                                    const updated = animHistory.filter(h =>
+                                      !(String(h.tmdbId) === String(item.tmdbId) && h.ep === item.ep && h.season === item.season)
+                                    );
+                                    localStorage.setItem("anim-watch-history", JSON.stringify(updated));
+                                    setAnimHistory(updated);
+                                  } else {
+                                    removeHistory(item.id, item.ep);
+                                  }
+                                }}
+                                className="w-7 h-7 bg-white/5 rounded-xl flex items-center justify-center text-white/25 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0 active:scale-90"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </Link>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </motion.div>
         )}
 
