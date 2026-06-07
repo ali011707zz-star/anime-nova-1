@@ -603,9 +603,11 @@ export default function AnimationWatch() {
                       {srcs.length}
                     </span>
                   </div>
-                  {srcs.map((src, i) => (
-                    <AnimSourceRow key={`${src.url}-${i}`} src={src} idx={rowIdx + i} qs={qs} qShort={Q_SHORT[q]} onPlay={playSource} />
-                  ))}
+                  <div className="flex flex-col gap-2.5 px-4">
+                    {srcs.map((src, i) => (
+                      <AnimSourceRow key={`${src.url}-${i}`} src={src} idx={rowIdx + i} qs={qs} qShort={Q_SHORT[q]} onPlay={playSource} />
+                    ))}
+                  </div>
                 </div>
               );
             })}
@@ -678,7 +680,7 @@ export default function AnimationWatch() {
   );
 }
 
-/* ── Source Row Component ─────────────────────────────────────────────── */
+/* ── Source Card Component ─────────────────────────────────────────────── */
 function AnimSourceRow({
   src, idx, qs, qShort, onPlay,
 }: {
@@ -690,56 +692,78 @@ function AnimSourceRow({
 }) {
   const url = src.proxyUrl || src.directUrl || src.url;
   const isHls = isHlsUrl(url);
-
-  // CDN display name from URL
-  let cdn = src.label;
-  try {
-    const host = new URL(url.startsWith("/") ? `https://x.com${url}` : url).hostname;
-    if (!url.startsWith("/api/")) cdn = src.label; // keep label
-    else cdn = src.label;
-  } catch { cdn = src.label; }
-
   const hasDownload = !isHls && (url.includes(".mp4") || url.includes("video-proxy"));
 
   return (
-    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(idx * 0.04, 0.28), duration: 0.18 }}>
-      <div
-        className="flex items-center px-4 py-3.5 gap-3.5 active:bg-white/[0.03] transition-colors cursor-pointer"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
-        onClick={() => onPlay(src)}>
-        <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ delay: Math.min(idx * 0.06, 0.35), duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+      whileTap={{ scale: 0.975 }}
+      onClick={() => onPlay(src)}
+      className="relative overflow-hidden cursor-pointer rounded-2xl"
+      style={{
+        background: "linear-gradient(145deg, rgba(18,12,40,0.92), rgba(12,8,28,0.96))",
+        border: `1px solid ${qs.border}`,
+        boxShadow: `0 4px 24px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03) inset`,
+      }}
+    >
+      {/* Subtle quality-colored glow strip */}
+      <div className="absolute top-0 left-0 right-0 h-[2px]"
+        style={{ background: `linear-gradient(90deg, transparent, ${qs.icon}55, transparent)` }} />
+
+      <div className="flex items-center gap-3.5 px-4 py-3.5">
+
+        {/* Icon */}
+        <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 relative"
           style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
-          <MonitorPlay className="w-[18px] h-[18px]" style={{ color: qs.icon }} />
+          <MonitorPlay className="w-[19px] h-[19px]" style={{ color: qs.icon }} />
+          {/* Format badge */}
+          <span className="absolute -bottom-1.5 -left-1 font-mono text-[7px] font-black px-1 py-[1px] rounded-md leading-none"
+            style={{ background: isHls ? "rgba(99,102,241,0.88)" : "rgba(52,211,153,0.85)", color: "white" }}>
+            {isHls ? "HLS" : "MP4"}
+          </span>
         </div>
+
+        {/* Label + quality */}
         <div className="flex-1 min-w-0">
-          <p className="text-white/90 text-[14px] font-black font-['Cairo'] leading-tight">{cdn}</p>
-          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            <span className="font-mono text-[8px] font-bold px-1 py-0.5 rounded"
-              style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              {isHls ? "HLS" : "MP4"}
+          <p className="text-white/92 text-[14px] font-black font-['Cairo'] leading-tight truncate">
+            {src.label}
+          </p>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className="text-[9px] font-black font-mono px-2 py-[3px] rounded-lg"
+              style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
+              {qShort}
             </span>
+            {isHls && (
+              <span className="text-[8.5px] font-['Cairo']" style={{ color: "rgba(139,92,246,0.65)" }}>
+                بث مباشر
+              </span>
+            )}
           </div>
         </div>
+
+        {/* Actions */}
         <div className="flex items-center gap-2 shrink-0">
-          <span className="font-mono text-[8px] font-bold px-1.5 py-0.5 rounded"
-            style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
-            {qShort}
-          </span>
           {hasDownload && (
             <a href={url} download target="_blank" rel="noreferrer"
               onClick={e => e.stopPropagation()}
-              className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
-              style={{ background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.28)" }}>
-              <Download className="w-4 h-4 text-emerald-400/85" />
+              className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+              style={{ background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.22)" }}>
+              <Download className="w-4 h-4 text-emerald-400/80" />
             </a>
           )}
-          <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl active:scale-95 transition-transform"
-            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 14px rgba(109,40,217,0.30)" }}>
+          <div className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl active:scale-95 transition-transform"
+            style={{
+              background: "linear-gradient(135deg, rgba(124,58,237,0.88), rgba(91,33,182,0.95))",
+              border: "1px solid rgba(167,139,250,0.22)",
+              boxShadow: "0 2px 16px rgba(109,40,217,0.28)",
+            }}>
             <Play className="w-3.5 h-3.5 text-white fill-white" />
             <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
           </div>
         </div>
+
       </div>
     </motion.div>
   );
