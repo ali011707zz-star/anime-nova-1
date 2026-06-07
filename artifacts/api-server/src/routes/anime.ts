@@ -4761,10 +4761,10 @@ function parseVttCues(text: string): Array<{ timing: string; rawText: string }> 
 }
 
 /** Translate a batch of texts using Google Translate unofficial API (gtx).
- *  Fast, high quality Arabic translation, no rate limits in practice.
- *  Groups cues into chunks and processes 4 chunks in parallel. */
+ *  Uses ||| separator to preserve cue order even when Google collapses whitespace.
+ *  Groups cues into chunks of 10 and processes 6 chunks in parallel. */
 async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
-  const CHUNK = 18; // 18 cues per request — faster without hitting URL limits
+  const CHUNK = 10; // Smaller chunks → more reliable separator preservation
 
   const chunks: string[][] = [];
   for (let i = 0; i < texts.length; i += CHUNK) {
@@ -4773,27 +4773,40 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
 
   const PARALLEL = 6;
   const results: string[] = new Array(texts.length).fill("");
+  const SEP = " ||| "; // Preserved literally by Google Translate
 
   for (let i = 0; i < chunks.length; i += PARALLEL) {
     const batch = chunks.slice(i, i + PARALLEL);
     await Promise.allSettled(
       batch.map(async (chunk, batchIdx) => {
         const start = (i + batchIdx) * CHUNK;
-        const joined = chunk.join("\n\n");
+        // Strip any stray ||| from source text to avoid false splits
+        const cleaned = chunk.map(t => t.replace(/\|\|\|/g, "").trim());
+        const joined = cleaned.join(SEP);
         try {
           const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(joined)}`;
           const r = await fetch(url, {
             headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
-            signal: AbortSignal.timeout(12000),
+            signal: AbortSignal.timeout(15000),
           });
           if (!r.ok) { chunk.forEach((t, j) => { results[start + j] = t; }); return; }
           const data = await r.json() as any;
           const translated: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || "";
           if (!translated) { chunk.forEach((t, j) => { results[start + j] = t; }); return; }
-          const parts = translated.split(/\n\n+/).map((p: string) => p.trim()).filter(Boolean);
+          // Split by ||| separator — preserves index alignment even if some cues are empty
+          const parts = translated.split(/\s*\|\|\|\s*/);
           chunk.forEach((t, j) => { results[start + j] = parts[j]?.trim() || t; });
         } catch {
-          chunk.forEach((t, j) => { results[start + j] = t; });
+          // Fallback: try MyMemory API for each text individually
+          await Promise.allSettled(chunk.map(async (t, j) => {
+            try {
+              const mmUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(t.slice(0, 300))}&langpair=${from}|${to}`;
+              const mmR = await fetch(mmUrl, { signal: AbortSignal.timeout(8000) });
+              if (!mmR.ok) { results[start + j] = t; return; }
+              const mmData = await mmR.json() as any;
+              results[start + j] = mmData?.responseData?.translatedText || t;
+            } catch { results[start + j] = t; }
+          }));
         }
       }),
     );

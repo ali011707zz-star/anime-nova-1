@@ -831,16 +831,28 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     if (r.ok) {
       const vData = await r.json() as any;
       const cnt: Record<string, number> = {};
+      const EN_LANGS = ["english", "en"];
       for (const s of (vData.subtitles || []) as any[]) {
         if (!s.url) continue;
-        const lang = (s.languageCode || "").toLowerCase().startsWith("ar") ? "ar" : "en";
+        // Resolve relative URLs (starcima returns /api/sub-retime?... for some tracks)
+        let trackUrl: string = s.url;
+        if (!trackUrl.startsWith("http")) {
+          if (trackUrl.startsWith("/")) trackUrl = `https://starcima.com${trackUrl}`;
+          else continue; // skip unparseable URLs
+        }
+        const lCode = (s.languageCode || s.language || "").toLowerCase();
+        // Only include Arabic or English tracks — skip Bengali, Malay, Russian, etc.
+        const isAr = lCode.startsWith("ar");
+        const isEn = EN_LANGS.some(l => lCode.startsWith(l));
+        if (!isAr && !isEn) continue;
+        const lang = isAr ? "ar" : "en";
         const i = (cnt[lang] = (cnt[lang] ?? 0) + 1);
         const sfx = i > 1 ? ` ${i}` : "";
         vidzeeItems.push({
           id: `${lang}-vidzee-${i}`,
           lang,
           label: lang === "ar" ? `عربي · الثريا${sfx}` : `إنجليزي · الثريا${sfx}`,
-          url: s.url,
+          url: trackUrl,
         });
       }
     }
@@ -878,6 +890,34 @@ router.get("/animation/vidzee-meta", async (req: Request, res: Response) => {
     res.json({ subtitles: [] });
   }
 });
+
+// ── MovieUniverse scraper ─────────────────────────────────────────────────────
+// Server-rendered HTML site using TMDB IDs directly in URLs
+// Movie: /watch-movieuniverse-{tmdbId}
+// TV:    /watch-tvuniverse-{tmdbId}-season-{season}-ep-{ep}
+const MU_BASE = "https://movieuniverse.skin";
+
+async function scrapeMovieUniverseServers(tmdbId: string, type: string, season: number, ep: number): Promise<string[]> {
+  const url = type === "tv"
+    ? `${MU_BASE}/watch-tvuniverse-${tmdbId}-season-${season}-ep-${ep}`
+    : `${MU_BASE}/watch-movieuniverse-${tmdbId}`;
+  try {
+    const html = await cfGet(url, MU_BASE + "/");
+    // Parse onclick="go('https://...')" server URLs
+    const servers: string[] = [];
+    const re = /go\('(https?:\/\/[^']+)'/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      if (!servers.includes(m[1])) servers.push(m[1]);
+    }
+    // Also parse data-src iframe fallback
+    const ifRe = /<iframe[^>]+data-src="(https?:\/\/[^"]+)"/g;
+    while ((m = ifRe.exec(html)) !== null) {
+      if (!servers.includes(m[1])) servers.push(m[1]);
+    }
+    return servers.slice(0, 5);
+  } catch { return []; }
+}
 
 // ── SSE animation sources stream ──────────────────────────────────────────────
 
@@ -1236,6 +1276,52 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               })
             );
           }
+        } catch { /* silent */ }
+      })(),
+
+      // ── 19. MovieUniverse (TMDB ID native, server-rendered HTML, multiple servers) ─
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "MovieUniverse: جاري الاستخراج…" });
+          const servers = await scrapeMovieUniverseServers(tmdbId, type, season, epNum);
+          if (!servers.length) return;
+          await Promise.allSettled(servers.map(async (u) => {
+            await sendExtracted(u, "MovieUniverse");
+          }));
+        } catch { /* silent */ }
+      })(),
+
+      // ── 20. vidsrc.cc (TMDB ID native, multi-CDN) ────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const url = type === "tv"
+            ? `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidsrc.cc/v2/embed/movie/${tmdbId}`;
+          await sendExtracted(url, "VidSrc CC");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 21. vidrock.net (TMDB ID native) ─────────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const url = type === "tv"
+            ? `https://vidrock.net/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidrock.net/movie/${tmdbId}`;
+          await sendExtracted(url, "VidRock");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 22. videasy.net (TMDB ID native) ─────────────────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const url = type === "tv"
+            ? `https://player.videasy.net/tv/${tmdbId}/${season}/${epNum}`
+            : `https://player.videasy.net/movie/${tmdbId}`;
+          await sendExtracted(url, "Videasy");
         } catch { /* silent */ }
       })(),
 
