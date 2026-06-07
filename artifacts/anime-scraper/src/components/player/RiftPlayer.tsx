@@ -139,7 +139,9 @@ export default function RiftPlayer({
   const hideRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekDrag     = useRef(false);
   const touchScrubbing = useRef(false);
-  const resumedRef   = useRef(false);
+  const resumedRef     = useRef(false);
+  const resumeTimeRef  = useRef(resumeTime);
+  resumeTimeRef.current = resumeTime;
   const onFailRef    = useRef(onFail); onFailRef.current = onFail;
   const failFired    = useRef(false);
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -270,6 +272,7 @@ export default function RiftPlayer({
     v.src = "";
     setLoading(true); setError(null); setCurrentTime(0); setDuration(0); setPlaying(false); setIsEnded(false);
     failFired.current = false;
+    resumedRef.current = false;
     if (failTimer.current) { clearTimeout(failTimer.current); failTimer.current = null; }
 
     let m3u8 = src;
@@ -329,7 +332,17 @@ export default function RiftPlayer({
       hls.loadSource(m3u8); hls.attachMedia(v);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (hlsRef.current !== hls) return;
-        setError(null); setLoading(false); v.play().catch(() => {}); showControls();
+        setError(null); setLoading(false); showControls();
+        v.play().catch(() => {});
+      });
+      hls.on(Hls.Events.LEVEL_LOADED, () => {
+        if (hlsRef.current !== hls) return;
+        const rt = resumeTimeRef.current;
+        if (!resumedRef.current && rt && rt >= 5 && v.duration > 30 && rt < v.duration - 10) {
+          v.currentTime = rt;
+          setCurrentTime(rt);
+          resumedRef.current = true;
+        }
       });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (hlsRef.current !== hls) return;

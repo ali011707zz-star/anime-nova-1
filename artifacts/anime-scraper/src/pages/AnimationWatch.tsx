@@ -119,13 +119,14 @@ export default function AnimationWatch() {
   const [subState,   setSubState]   = useState<"idle" | "loading" | "ready">("idle");
   const [hlsTime,    setHlsTime]    = useState(0);
   const [subSettings, setSubSettings] = useState<SubSettings>({
-    fontSize: 16, color: "#ffffff", bgOpacity: 0.6, bold: false, position: "bottom",
+    fontSize: 16, color: "#ffffff", bgOpacity: 0, bold: false, position: "bottom",
   });
 
   const esRef            = useRef<EventSource | null>(null);
   const seenUrls         = useRef(new Set<string>());
   const lastProgressSave = useRef(0);
   const histSavedRef     = useRef(false);
+  const autoPlayedRef    = useRef(false);
 
   /* ── Navigate to detail page ── */
   const goToDetail = useCallback(() => {
@@ -163,6 +164,16 @@ export default function AnimationWatch() {
   }, [playSource]);
 
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
+
+  /* ── Auto-play first available "ok" source (don't wait for SSE to finish) ── */
+  useEffect(() => {
+    if (step !== "loading") return;
+    if (autoPlayedRef.current) return;
+    const first = sources.find(s => s.status === "ok");
+    if (!first) return;
+    autoPlayedRef.current = true;
+    playSource(first);
+  }, [sources, step, playSource]);
 
   /* ── Time update (progress + subtitle sync) ── */
   const handleTimeUpdate = useCallback((t: number) => {
@@ -218,7 +229,7 @@ export default function AnimationWatch() {
   useEffect(() => {
     setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
     setSubCues([]); setSubState("idle"); setHlsTime(0);
-    seenUrls.current.clear(); histSavedRef.current = false;
+    seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false;
 
     const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodeURIComponent(title))}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}`;
     const es = new EventSource(q);
