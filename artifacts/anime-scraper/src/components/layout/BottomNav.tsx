@@ -1,13 +1,13 @@
 import { Link, useLocation } from "wouter";
-import { Home, Search, Film, Heart, History } from "lucide-react";
+import { Home, Search, Film, Heart, Grid2X2 } from "lucide-react";
 import { motion } from "framer-motion";
 
 const navItems = [
-  { icon: Home,    label: "الرئيسية", href: "/" },
-  { icon: Heart,   label: "قائمتي",   href: "/library" },
-  { icon: Film,    label: "أنيميشن",  href: "/animations" },
-  { icon: History, label: "السجل",    href: "/history" },
-  { icon: Search,  label: "بحث",      href: "/search" },
+  { icon: Home,      label: "الرئيسية", href: "/" },
+  { icon: Heart,     label: "قائمتي",   href: "/library" },
+  { icon: Film,      label: "أنيميشن",  href: "/animations" },
+  { icon: Grid2X2,   label: "المكتبة",  href: "/browse" },
+  { icon: Search,    label: "بحث",      href: "/search" },
 ];
 
 const HIDE_ON = ["/watch", "/animation/watch"];

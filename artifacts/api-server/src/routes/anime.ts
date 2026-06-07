@@ -4485,7 +4485,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       scrapeCached("toonstream",   () => getToonStreamSources(title, english, ep), false),
       scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep)),
-      scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep)),
+      // animetime: جميع روابطه ميتة — معطّل مؤقتاً
+      // scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
       scrapeCached("witanime",     () => getWitanimeSources(title, english, ep)),

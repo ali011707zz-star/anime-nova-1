@@ -63,6 +63,7 @@ const Settings           = lazy(() => import("@/pages/Settings"));
 const NotFound           = lazy(() => import("@/pages/not-found"));
 const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
 const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
+const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
 
 function PageLoader() {
@@ -122,8 +123,9 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
             <Route path="/news"                    component={News} />
             <Route path="/settings"               component={Settings} />
             <Route path="/animations"              component={AnimationLibrary} />
-            <Route path="/animation/watch"         component={AnimationWatchWrapper} />
-            <Route path="/animation/:type/:id"     component={AnimationDetail} />
+            <Route path="/animation/watch"                    component={AnimationWatchWrapper} />
+            <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
+            <Route path="/animation/:type/:id"             component={AnimationDetail} />
             <Route                                 component={NotFound} />
           </Switch>
         </Suspense>

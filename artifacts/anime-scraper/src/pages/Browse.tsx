@@ -35,13 +35,17 @@ const FORMAT_TABS = [
   { id: "OVA",   ar: "OVA" },
 ];
 
-function buildQuery(genre: string, format: string, page: number) {
+const CUR_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: CUR_YEAR - 1989 }, (_, i) => CUR_YEAR - i);
+
+function buildQuery(genre: string, format: string, year: number | "", page: number) {
   const gf = genre  ? `, genre: "${genre}"` : "";
   const ff = format ? `, format: ${format}` : `, format_in: [TV, MOVIE, OVA, ONA]`;
+  const yf = year   ? `, seasonYear: ${year}` : "";
   return `query {
   Page(page: ${page}, perPage: 24) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP"${gf}${ff}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP"${gf}${ff}${yf}) {
       id title { romaji } coverImage { large } averageScore episodes format status
     }
   }
@@ -83,6 +87,7 @@ function AnimeCard({ anime }: { anime: any }) {
 export default function Browse() {
   const [selectedGenre, setSelectedGenre] = useState("");
   const [selectedFormat, setSelectedFormat] = useState("");
+  const [selectedYear, setSelectedYear] = useState<number | "">("");
   const [showGenreGrid, setShowGenreGrid] = useState(true);
   const [animeList, setAnimeList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -102,10 +107,10 @@ export default function Browse() {
     return (await r.json()).data?.Page;
   };
 
-  const loadAnime = useCallback(async (genre: string, format: string, p: number, append: boolean) => {
+  const loadAnime = useCallback(async (genre: string, format: string, year: number | "", p: number, append: boolean) => {
     if (!append) setLoading(true); else setLoadingMore(true);
     try {
-      const data = await fetch$(buildQuery(genre, format, p));
+      const data = await fetch$(buildQuery(genre, format, year, p));
       const list = data?.media || [];
       setAnimeList(prev => append ? [...prev, ...list] : list);
       setHasMore(data?.pageInfo?.hasNextPage ?? false);
@@ -114,9 +119,9 @@ export default function Browse() {
 
   useEffect(() => {
     setPage(1); setAnimeList([]);
-    loadAnime(selectedGenre, selectedFormat, 1, false);
-    setShowGenreGrid(!selectedGenre && !selectedFormat);
-  }, [selectedGenre, selectedFormat]);
+    loadAnime(selectedGenre, selectedFormat, selectedYear, 1, false);
+    setShowGenreGrid(!selectedGenre && !selectedFormat && !selectedYear);
+  }, [selectedGenre, selectedFormat, selectedYear]);
 
   useEffect(() => {
     if (!searchQ.trim()) { setSearchResults([]); return; }
@@ -133,11 +138,12 @@ export default function Browse() {
   const loadMore = () => {
     const next = page + 1;
     setPage(next);
-    loadAnime(selectedGenre, selectedFormat, next, true);
+    loadAnime(selectedGenre, selectedFormat, selectedYear, next, true);
   };
 
   const displayList = searchQ.trim() ? searchResults : animeList;
   const currentGenreLabel = GENRES.find(g => g.en === selectedGenre)?.ar || "";
+  const hasFilter = !!(selectedGenre || selectedFormat || selectedYear);
 
   return (
     <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
@@ -146,10 +152,10 @@ export default function Browse() {
       <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-4 pb-3">
         <div className="flex items-center gap-2 mb-3">
           <h1 className="text-xl font-black font-['Cairo'] flex-1">
-            {selectedGenre ? currentGenreLabel : "مكتبة الأنمي"}
+            {selectedGenre ? currentGenreLabel : selectedYear ? `أنمي ${selectedYear}` : "مكتبة الأنمي"}
           </h1>
-          {(selectedGenre || selectedFormat) && (
-            <button onClick={() => { setSelectedGenre(""); setSelectedFormat(""); setShowGenreGrid(true); }}
+          {hasFilter && (
+            <button onClick={() => { setSelectedGenre(""); setSelectedFormat(""); setSelectedYear(""); setShowGenreGrid(true); }}
               className="text-[10px] text-white/40 bg-white/6 border border-white/8 px-2.5 py-1.5 rounded-lg font-['Cairo'] active:scale-95">
               × مسح
             </button>
@@ -169,12 +175,31 @@ export default function Browse() {
 
         {/* Format tabs */}
         {!searchQ.trim() && (
-          <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
+          <div className="flex gap-1.5 overflow-x-auto pb-1.5" style={{ scrollbarWidth: "none" }}>
             {FORMAT_TABS.map(f => (
               <button key={f.id} onClick={() => setSelectedFormat(f.id)}
-                className={`shrink-0 py-2 px-3.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-all
+                className={`shrink-0 py-1.5 px-3 rounded-xl text-[11px] font-black font-['Cairo'] transition-all
                   ${selectedFormat === f.id ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-[#18181B] text-white/40 border border-white/6"}`}>
                 {f.ar}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Year filter */}
+        {!searchQ.trim() && (
+          <div className="flex gap-1.5 overflow-x-auto pt-0.5" style={{ scrollbarWidth: "none" }}>
+            <button
+              onClick={() => setSelectedYear("")}
+              className={`shrink-0 py-1.5 px-3 rounded-xl text-[11px] font-black font-['Cairo'] transition-all
+                ${selectedYear === "" ? "bg-white/12 text-white border border-white/20" : "bg-[#18181B] text-white/30 border border-white/6"}`}>
+              كل الأعوام
+            </button>
+            {YEARS.map(y => (
+              <button key={y} onClick={() => setSelectedYear(y)}
+                className={`shrink-0 py-1.5 px-3 rounded-xl text-[11px] font-black font-mono transition-all
+                  ${selectedYear === y ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-[#18181B] text-white/30 border border-white/6"}`}>
+                {y}
               </button>
             ))}
           </div>
