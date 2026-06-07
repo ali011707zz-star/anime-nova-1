@@ -62,7 +62,6 @@ interface Source {
   proxyUrl?: string;
   status?: "loading" | "ok" | "fail";
   tier?: QualityTier;
-  isEmbed?: boolean;
 }
 
 function getSourceTier(src: Source): QualityTier {
@@ -262,15 +261,14 @@ export default function AnimationWatch() {
 
     es.addEventListener("source", (e) => {
       const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
+      // Skip embed-only sources — internal player only
+      if (src.isEmbed) return;
       const key = src.directUrl || src.url;
       if (seenUrls.current.has(key)) return;
       seenUrls.current.add(key);
 
       let newSrc: Source;
-      if (src.isEmbed) {
-        // Embed iframe source (e.g. StarCima arabic-sources that can't be extracted server-side)
-        newSrc = { url: src.url, label: src.label, status: "ok", isEmbed: true };
-      } else if (src.directUrl || src.proxyUrl) {
+      if (src.directUrl || src.proxyUrl) {
         const resolved = src.proxyUrl || src.directUrl!;
         const hl       = isHlsUrl(resolved);
         const proxyUrl = src.proxyUrl || (hl ? wrapHls(src.directUrl!, window.location.origin) : wrapMp4(src.directUrl!, window.location.origin));
@@ -308,76 +306,83 @@ export default function AnimationWatch() {
     setSubState("loading");
     setSubCues([]);
 
-    const scRef = encodeURIComponent("https://starcima.com/");
+    const SC_REF = encodeURIComponent("https://starcima.com/");
 
-    // Helper: fetch VTT text via proxy-text and parse it
-    const fetchVtt = async (vttUrl: string, timeoutMs = 10_000): Promise<SubCue[]> => {
-      const r = await fetch(
-        `/api/anime/proxy-text?url=${encodeURIComponent(vttUrl)}&ref=${scRef}`,
-        { signal: AbortSignal.timeout(timeoutMs) }
-      );
-      if (!r.ok) return [];
-      const text = await r.text();
-      return parseSrt(text);
+    // Fetch VTT text via server proxy and parse cues
+    const fetchVttProxy = async (vttUrl: string, timeoutMs = 9_000): Promise<SubCue[]> => {
+      try {
+        const r = await fetch(
+          `/api/anime/proxy-text?url=${encodeURIComponent(vttUrl)}&ref=${SC_REF}`,
+          { signal: AbortSignal.timeout(timeoutMs) }
+        );
+        if (!r.ok) return [];
+        return parseSrt(await r.text());
+      } catch { return []; }
+    };
+
+    // Translate English VTT → Arabic cues via server-side Google Translate
+    const translateEnToAr = async (enUrl: string): Promise<SubCue[]> => {
+      try {
+        const r = await fetch(
+          `/api/anime/translate-vtt?url=${encodeURIComponent(enUrl)}&from=en&to=ar`,
+          { signal: AbortSignal.timeout(90_000) }
+        );
+        if (!r.ok) return [];
+        const json = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+        if (!json.cues?.length) return [];
+        return parseSrt("WEBVTT\n\n" + json.cues.map(c => `${c.timing}\n${c.text}`).join("\n\n"));
+      } catch { return []; }
     };
 
     try {
-      // ── 1. Try direct Arabic CDN (cache.vdrk.site) — try v3 first, then v2 ──
-      const tryVdrk = async (): Promise<SubCue[]> => {
-        const v3 = type === "tv"
-          ? `https://cache.vdrk.site/v3/tv/${tmdbId}/${season}/${ep}/Arabic.vtt`
-          : `https://cache.vdrk.site/v3/movie/${tmdbId}/Arabic.vtt`;
-        const v3Cues = await fetchVtt(v3, 7_000).catch(() => [] as SubCue[]);
-        if (v3Cues.length > 0) return v3Cues;
+      // CDN paths (v3 + v2) and vidzee-meta API — all in parallel
+      const arCdnV3 = type === "tv"
+        ? `https://cache.vdrk.site/v3/tv/${tmdbId}/${season}/${ep}/Arabic.vtt`
+        : `https://cache.vdrk.site/v3/movie/${tmdbId}/Arabic.vtt`;
+      const arCdnV2 = type === "tv"
+        ? `https://cache.vdrk.site/v2/tv/${tmdbId}/${season}/${ep}/Arabic.vtt`
+        : `https://cache.vdrk.site/v2/movie/${tmdbId}/Arabic.vtt`;
+      const enCdnV3 = type === "tv"
+        ? `https://cache.vdrk.site/v3/tv/${tmdbId}/${season}/${ep}/English.vtt`
+        : `https://cache.vdrk.site/v3/movie/${tmdbId}/English.vtt`;
+      const enCdnV2 = type === "tv"
+        ? `https://cache.vdrk.site/v2/tv/${tmdbId}/${season}/${ep}/English.vtt`
+        : `https://cache.vdrk.site/v2/movie/${tmdbId}/English.vtt`;
 
-        // v3 failed → try v2
-        const v2 = type === "tv"
-          ? `https://cache.vdrk.site/v2/tv/${tmdbId}/${season}/${ep}/Arabic.vtt`
-          : `https://cache.vdrk.site/v2/movie/${tmdbId}/Arabic.vtt`;
-        return fetchVtt(v2, 7_000).catch(() => [] as SubCue[]);
-      };
+      const [arV3, arV2, vidzeeResp] = await Promise.all([
+        fetchVttProxy(arCdnV3),
+        fetchVttProxy(arCdnV2),
+        fetch(
+          `/api/animation/vidzee-meta?tmdbId=${tmdbId}&type=${type}&season=${season}&ep=${ep}`,
+          { signal: AbortSignal.timeout(12_000) }
+        ).then(r => r.ok ? r.json() : { subtitles: [] }).catch(() => ({ subtitles: [] })),
+      ]);
 
-      const directCues = await tryVdrk();
-      if (directCues.length > 0) { setSubCues(directCues); setSubState("ready"); return; }
+      // Arabic CDN — fastest path
+      if (arV3.length > 0) { setSubCues(arV3); setSubState("ready"); return; }
+      if (arV2.length > 0) { setSubCues(arV2); setSubState("ready"); return; }
 
-      // ── 2. Fallback: vidzee-meta API — get subtitle URLs from StarCima vidzee ──
-      const r = await fetch(
-        `/api/animation/vidzee-meta?tmdbId=${tmdbId}&type=${type}&season=${season}&ep=${ep}`,
-        { signal: AbortSignal.timeout(12_000) }
-      );
-      if (!r.ok) { setSubState("idle"); return; }
-      const data: any = await r.json();
-      const subs: any[] = data.subtitles || [];
-
-      // Prefer direct Arabic VTT (full https URL, not relative starcima sub-retime)
-      const arDirect = subs.find((s: any) => s.languageCode === "ar" && s.url?.startsWith("http"));
-      const arRelative = subs.find((s: any) => s.languageCode === "ar" && s.url?.startsWith("/"));
-      const enDirect = subs.find((s: any) => s.languageCode === "en" && s.url?.startsWith("http"));
-      const chosen = arDirect || arRelative || enDirect;
-      if (!chosen) { setSubState("idle"); return; }
-
-      const rawUrl = chosen.url?.startsWith("/")
-        ? `https://starcima.com${chosen.url}`
-        : chosen.url;
-
-      if (chosen.languageCode === "ar") {
-        const cues = await fetchVtt(rawUrl, 12_000).catch(() => [] as SubCue[]);
-        if (cues.length > 0) { setSubCues(cues); setSubState("ready"); }
-        else setSubState("idle");
-      } else {
-        // English → translate to Arabic (translate-vtt returns JSON {cues:[{timing,text}]})
-        const r2 = await fetch(
-          `/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=en&to=ar`,
-          { signal: AbortSignal.timeout(60_000) }
-        );
-        if (!r2.ok) { setSubState("idle"); return; }
-        const json = await r2.json() as { cues?: Array<{ timing: string; text: string }> };
-        if (!json.cues?.length) { setSubState("idle"); return; }
-        const vttText = "WEBVTT\n\n" + json.cues.map((c) => `${c.timing}\n${c.text}`).join("\n\n");
-        const cues = parseSrt(vttText);
-        if (cues.length > 0) { setSubCues(cues); setSubState("ready"); }
-        else setSubState("idle");
+      // Arabic from vidzee-meta
+      const subs: any[] = (vidzeeResp as any).subtitles || [];
+      const arVidzee = subs.find((s: any) => s.languageCode === "ar" && s.url?.startsWith("http"));
+      if (arVidzee) {
+        const cues = await fetchVttProxy(arVidzee.url);
+        if (cues.length > 0) { setSubCues(cues); setSubState("ready"); return; }
       }
+
+      // No Arabic found → translate English automatically
+      // Try vidzee English first, then CDN fallback
+      const enVidzee = subs.find((s: any) => s.languageCode === "en" && s.url?.startsWith("http"));
+      const enUrl = enVidzee?.url || enCdnV3;
+      const enFallback = enCdnV2;
+
+      let translated = await translateEnToAr(enUrl);
+      if (!translated.length && enUrl !== enFallback) {
+        translated = await translateEnToAr(enFallback);
+      }
+      if (translated.length > 0) { setSubCues(translated); setSubState("ready"); return; }
+
+      setSubState("idle");
     } catch { setSubState("idle"); }
   }, [tmdbId, type, season, ep]);
 
@@ -468,40 +473,6 @@ export default function AnimationWatch() {
 
   /* ────────────────────────── PLAYER ─────────────────────────────────────── */
   if (step === "playing" && selSrc) {
-
-    /* ── Embed iframe player (for StarCima arabic-sources that block server extraction) ── */
-    if (selSrc.isEmbed) {
-      return (
-        <div className="fixed inset-0 bg-black flex flex-col" dir="rtl">
-          {/* Top bar */}
-          <div className="flex items-center shrink-0 px-3 py-2 gap-2"
-            style={{ background: "rgba(0,0,0,0.85)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-            <button onClick={() => setStep("sources")}
-              className="w-10 h-10 flex items-center justify-center rounded-xl active:scale-90 transition-all"
-              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
-              <ChevronRight className="w-5 h-5 text-white/70" />
-            </button>
-            <div className="flex-1 min-w-0 px-2">
-              <p className="text-white font-black text-[14px] font-['Cairo'] truncate">{displayTitle}</p>
-              <p className="text-white/40 text-[11px] font-['Cairo']">{selSrc.label}</p>
-            </div>
-            <span className="text-[10px] font-['Cairo'] px-2 py-1 rounded-full"
-              style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)", color: "rgba(196,181,253,0.85)" }}>
-              تشغيل مدمج
-            </span>
-          </div>
-          {/* Sandboxed iframe */}
-          <iframe
-            key={`embed-${selSrc.url}`}
-            src={selSrc.url}
-            className="flex-1 w-full border-0"
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-            referrerPolicy="no-referrer"
-          />
-        </div>
-      );
-    }
 
     const { url, isHls } = getSourceInfo(selSrc);
     return (
