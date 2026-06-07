@@ -972,13 +972,13 @@ function MegaEmbedPlayer({
 function EpisodePlayer({
   servers, quality, allServers,
   title, epTitle, cover, ep, totalEps, animeTitle, animeId,
-  initialServer, downloadUrl, subtitleUrl, skipTimes,
+  initialServer, downloadUrl, subtitleUrl, subtitleSite, skipTimes,
   onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; epTitle?: string; cover: string; ep: number; totalEps: number; animeTitle: string;
   animeId: number;
-  initialServer?: number; downloadUrl?: string; subtitleUrl?: string; skipTimes?: SkipTimes;
+  initialServer?: number; downloadUrl?: string; subtitleUrl?: string; subtitleSite?: string; skipTimes?: SkipTimes;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
   onTierExhausted?: () => void;
@@ -1129,7 +1129,11 @@ function EpisodePlayer({
           } catch { /* fall through */ }
         }
       }
-      /* SUBDL Arabic lookup */
+      /* SUBDL Arabic lookup — only for sources that support subtitles */
+      const SUB_ALLOWED_SITES = ["kawaii", "anikoto", "anineko"];
+      if (!SUB_ALLOWED_SITES.includes(subtitleSite || "")) {
+        setSubState("none"); setShowSubPanel(true); return;
+      }
       const params = new URLSearchParams({ title: animeTitle, ep: String(ep) });
       const r = await fetch(`/api/anime/subtitles?${params}`, { signal: AbortSignal.timeout(15000) });
       if (!r.ok) { setSubState("none"); setShowSubPanel(true); return; }
@@ -1700,6 +1704,7 @@ export default function WatchPage() {
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
   const [playerSubUrl, setPlayerSubUrl] = useState<string | undefined>(undefined);
+  const [playerSrcSite, setPlayerSrcSite] = useState<string>("");
 
   const autoFetchedRef    = useRef(false);
   const autoPlayedRef     = useRef(false);
@@ -1927,6 +1932,7 @@ export default function WatchPage() {
       }
       setPlayerDlUrl(undefined);
       setPlayerSubUrl(firstSrc.subtitleUrl || undefined);
+      setPlayerSrcSite(firstSrc.site || "");
       setPlayerServers(srvMap);
       setQuality(clickedTier);
       setInitialSrv(0);
@@ -1994,6 +2000,7 @@ export default function WatchPage() {
     const allFhdUs = fhdSrcs.map(s => s.directUrl || s.url).filter(Boolean) as string[];
     setPlayerServers(prev => ({ ...prev, "1080p FHD": allFhdUs }));
     setPlayerSubUrl(bestFhd.subtitleUrl || undefined);
+    setPlayerSrcSite(bestFhd.site || "");
     setQuality("1080p FHD");
     setInitialSrv(0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2031,6 +2038,7 @@ export default function WatchPage() {
     /* Store download URL + subtitle URL for player */
     setPlayerDlUrl(getDownloadUrl(src) || undefined);
     setPlayerSubUrl(src.subtitleUrl || undefined);
+    setPlayerSrcSite(src.site || "");
     setPlayerServers(servers);
     setQuality(clickedTier);
     setInitialSrv(0);
@@ -2078,6 +2086,7 @@ export default function WatchPage() {
           cover={cover} ep={ep} totalEps={totalEps}
           downloadUrl={playerDlUrl}
           subtitleUrl={playerSubUrl}
+          subtitleSite={playerSrcSite}
           skipTimes={skipTimes}
           onBack={() => setPhase("picker")}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}

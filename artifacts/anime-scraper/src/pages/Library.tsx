@@ -15,14 +15,6 @@ query ($ids: [Int]) {
   }
 }`;
 
-const SEASONS = [
-  { id: "",       label: "الكل",  emoji: "🌟" },
-  { id: "SPRING", label: "ربيع", emoji: "🌸" },
-  { id: "SUMMER", label: "صيف",  emoji: "☀️" },
-  { id: "FALL",   label: "خريف", emoji: "🍂" },
-  { id: "WINTER", label: "شتاء", emoji: "❄️" },
-];
-
 /* ── Load animation watch history from localStorage ── */
 interface AnimHistItem {
   tmdbId: number | string;
@@ -99,7 +91,6 @@ export default function Library() {
   const [loading, setLoading] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "date" | "score">("date");
   const [searchQuery, setSearchQuery] = useState("");
-  const [seasonFilter, setSeasonFilter] = useState<string>("");
 
   const loadData = useCallback(async () => {
     const hist = await loadWatchHistory(user?.id ?? null);
@@ -192,14 +183,13 @@ export default function Library() {
 
   const filteredSaved = useMemo(() => {
     let arr = [...savedAnime];
-    if (seasonFilter) arr = arr.filter(a => a.season === seasonFilter);
     const sorted = arr.sort((a, b) => {
       if (sortBy === "name") return (a.title?.romaji || "").localeCompare(b.title?.romaji || "");
       if (sortBy === "score") return (b.averageScore || 0) - (a.averageScore || 0);
       return 0;
     });
     return sq ? sorted.filter(a => (a.title?.romaji || a.title?.english || "").toLowerCase().includes(sq)) : sorted;
-  }, [savedAnime, sortBy, sq, seasonFilter]);
+  }, [savedAnime, sortBy, sq]);
 
   const sortedSaved = filteredSaved;
 
@@ -253,26 +243,6 @@ export default function Library() {
             </button>
           )}
         </div>
-        {/* Season filter — only on saved tab */}
-        {tab === "saved" && (
-          <div className="flex gap-1.5 mt-2.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
-            {SEASONS.map(s => (
-              <button key={s.id} onClick={() => setSeasonFilter(s.id)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] whitespace-nowrap shrink-0 transition-all active:scale-95
-                  ${seasonFilter === s.id
-                    ? "bg-primary text-white shadow shadow-primary/25"
-                    : "bg-white/5 text-white/45 border border-white/[0.06] hover:text-white/70"}`}>
-                <span className="text-[12px]">{s.emoji}</span>
-                {s.label}
-                {s.id !== "" && savedAnime.filter(a => a.season === s.id).length > 0 && (
-                  <span className={`text-[9px] px-1 rounded-full ${seasonFilter === s.id ? "bg-white/20" : "bg-white/8 text-white/30"}`}>
-                    {savedAnime.filter(a => a.season === s.id).length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
         {/* Sort bar — only on saved tab */}
         {tab === "saved" && savedAnime.length > 1 && (
           <div className="flex items-center gap-1.5 mt-2">

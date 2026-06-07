@@ -35,6 +35,14 @@ const FORMAT_TABS = [
   { id: "OVA",   ar: "OVA" },
 ];
 
+const SEASONS_BROWSE = [
+  { id: "",       label: "كل المواسم", emoji: "🌟" },
+  { id: "WINTER", label: "شتاء",   emoji: "❄️" },
+  { id: "SPRING", label: "ربيع",   emoji: "🌸" },
+  { id: "SUMMER", label: "صيف",    emoji: "☀️" },
+  { id: "FALL",   label: "خريف",   emoji: "🍂" },
+];
+
 const CUR_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: CUR_YEAR - 1989 }, (_, i) => CUR_YEAR - i);
 
@@ -188,6 +196,20 @@ export default function Browse() {
                 className={`shrink-0 py-1.5 px-3 rounded-xl text-[11px] font-black font-['Cairo'] transition-all
                   ${selectedFormat === f.id ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-[#18181B] text-white/40 border border-white/6"}`}>
                 {f.ar}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Season filter */}
+        {!searchQ.trim() && (
+          <div className="flex gap-1.5 overflow-x-auto pt-1.5 pb-0.5" style={{ scrollbarWidth: "none" }}>
+            {SEASONS_BROWSE.map(s => (
+              <button key={s.id} onClick={() => setSelectedSeason(s.id)}
+                className={`shrink-0 flex items-center gap-1 py-1.5 px-3 rounded-xl text-[11px] font-black font-['Cairo'] transition-all
+                  ${selectedSeason === s.id ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-[#18181B] text-white/35 border border-white/6"}`}>
+                <span className="text-[12px]">{s.emoji}</span>
+                {s.label}
               </button>
             ))}
           </div>

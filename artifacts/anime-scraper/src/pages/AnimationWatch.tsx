@@ -325,12 +325,29 @@ export default function AnimationWatch() {
       try {
         const r = await fetch(
           `/api/anime/translate-vtt?url=${encodeURIComponent(enUrl)}&from=en&to=ar`,
-          { signal: AbortSignal.timeout(90_000) }
+          { signal: AbortSignal.timeout(35_000) }
         );
         if (!r.ok) return [];
         const json = await r.json() as { cues?: Array<{ timing: string; text: string }> };
         if (!json.cues?.length) return [];
         return parseSrt("WEBVTT\n\n" + json.cues.map(c => `${c.timing}\n${c.text}`).join("\n\n"));
+      } catch { return []; }
+    };
+
+    // SubDL Arabic lookup via existing anime subtitles endpoint
+    const fetchSubdlArabic = async (): Promise<SubCue[]> => {
+      try {
+        const episodeNum = type === "movie" ? 0 : ep;
+        const params = new URLSearchParams({
+          title: displayTitle,
+          ep: String(episodeNum),
+          ...(type === "tv" ? { season: String(season) } : {}),
+        });
+        const r = await fetch(`/api/anime/subtitles?${params}`, { signal: AbortSignal.timeout(12_000) });
+        if (!r.ok) return [];
+        const d = await r.json() as { content?: string | null };
+        if (!d.content) return [];
+        return parseSrt(d.content);
       } catch { return []; }
     };
 
@@ -349,18 +366,22 @@ export default function AnimationWatch() {
         ? `https://cache.vdrk.site/v2/tv/${tmdbId}/${season}/${ep}/English.vtt`
         : `https://cache.vdrk.site/v2/movie/${tmdbId}/English.vtt`;
 
-      const [arV3, arV2, vidzeeResp] = await Promise.all([
+      const [arV3, arV2, vidzeeResp, subdlCues] = await Promise.all([
         fetchVttProxy(arCdnV3),
         fetchVttProxy(arCdnV2),
         fetch(
           `/api/animation/vidzee-meta?tmdbId=${tmdbId}&type=${type}&season=${season}&ep=${ep}`,
           { signal: AbortSignal.timeout(12_000) }
         ).then(r => r.ok ? r.json() : { subtitles: [] }).catch(() => ({ subtitles: [] })),
+        fetchSubdlArabic(),
       ]);
 
       // Arabic CDN — fastest path
       if (arV3.length > 0) { setSubCues(arV3); setSubState("ready"); return; }
       if (arV2.length > 0) { setSubCues(arV2); setSubState("ready"); return; }
+
+      // SubDL Arabic
+      if (subdlCues.length > 0) { setSubCues(subdlCues); setSubState("ready"); return; }
 
       // Arabic from vidzee-meta
       const subs: any[] = (vidzeeResp as any).subtitles || [];
