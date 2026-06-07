@@ -48,7 +48,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
   const watchCount = (() => {
-    try { return JSON.parse(localStorage.getItem('watch-history') || '[]').length; } catch { return 0; }
+    try {
+      const anime = JSON.parse(localStorage.getItem('watch-history') || '[]').length;
+      const anim  = JSON.parse(localStorage.getItem('anim-watch-history') || '[]').length;
+      return anime + anim;
+    } catch { return 0; }
   })();
 
   const favCount = (() => {

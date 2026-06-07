@@ -319,21 +319,26 @@ export default function RiftPlayer({
 
     if (Hls.isSupported()) {
       const hls = new Hls({
-        enableWorker: false,
+        enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: 90,
-        maxMaxBufferLength: 180,
-        backBufferLength: 30,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
+        backBufferLength: 20,
         startFragPrefetch: true,
         progressive: true,
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 500,
-        manifestLoadingMaxRetry: 4,
-        manifestLoadingRetryDelay: 1000,
-        levelLoadingMaxRetry: 4,
-        highBufferWatchdogPeriod: 5,
-        nudgeOffset: 0.2,
-        nudgeMaxRetry: 5,
+        fragLoadingMaxRetry: 8,
+        fragLoadingRetryDelay: 300,
+        fragLoadingMaxRetryTimeout: 8000,
+        manifestLoadingMaxRetry: 5,
+        manifestLoadingRetryDelay: 800,
+        levelLoadingMaxRetry: 5,
+        highBufferWatchdogPeriod: 2,
+        nudgeOffset: 0.3,
+        nudgeMaxRetry: 8,
+        maxStarvationDelay: 3,
+        maxLoadingDelay: 3,
+        startLevel: -1,
+        abrEwmaDefaultEstimate: 1_500_000,
       });
       hlsRef.current = hls;
       hls.loadSource(m3u8); hls.attachMedia(v);
@@ -353,7 +358,12 @@ export default function RiftPlayer({
       });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (hlsRef.current !== hls) return;
-        if (d.fatal) fireOnFail();
+        if (!d.fatal) return;
+        if (d.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+        } else {
+          fireOnFail();
+        }
       });
     } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
       v.src = m3u8;
@@ -557,7 +567,7 @@ export default function RiftPlayer({
       // Same directional fix as volume
       const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
-      const nB = Math.max(0.1, Math.min(2.0, brightnessRef.current + dV / 160));
+      const nB = Math.max(0.1, Math.min(1.5, brightnessRef.current + dV / 180));
       brightnessRef.current = nB;
       setBrightness(nB); setFeedback({ type: "brightness", value: nB });
     }
@@ -1207,7 +1217,7 @@ export default function RiftPlayer({
                           ? <Minimize2  className="w-[15px] h-[15px] text-violet-300/85" />
                           : isZoomed
                           ? <Scan       className="w-[15px] h-[15px] text-violet-300/85" />
-                          : <Maximize2  className="w-[15px] h-[15px] text-white/38" />}
+                          : <Maximize2  className="w-[15px] h-[15px] text-white/80" />}
                       </button>
                       <AnimatePresence>
                         {showViewMode && (
