@@ -1384,15 +1384,15 @@ export default function RiftPlayer({
               className="absolute z-50 pointer-events-auto"
               dir="rtl"
               style={{
-                top: isPortrait ? 72 : 56,
+                top: isPortrait ? 72 : 48,
                 right: 14,
-                width: isPortrait ? "calc(100% - 28px)" : 268,
+                width: isPortrait ? "calc(100% - 28px)" : 230,
                 maxWidth: 340,
-                maxHeight: isPortrait ? "calc(100vh - 110px)" : "calc(100vh - 80px)",
+                maxHeight: isPortrait ? "calc(100vh - 110px)" : "52vh",
                 background: "rgba(5,5,16,0.96)",
                 backdropFilter: "blur(40px) saturate(220%)",
                 border: "1px solid rgba(139,92,246,0.18)",
-                borderRadius: 22,
+                borderRadius: isPortrait ? 22 : 16,
                 padding: "0 0 4px",
                 boxShadow: "0 28px 72px rgba(0,0,0,0.80), 0 0 0 1px rgba(139,92,246,0.06) inset",
                 overflow: "hidden",

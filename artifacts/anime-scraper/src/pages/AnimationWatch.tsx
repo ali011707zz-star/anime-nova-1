@@ -138,6 +138,7 @@ export default function AnimationWatch() {
   const histSavedRef     = useRef(false);
   const autoPlayedRef      = useRef(false);
   const upgradedToFhdRef   = useRef(false);
+  const sourceCountRef     = useRef(0);
 
   /* ── Navigate to detail page ── */
   const goToDetail = useCallback(() => {
@@ -176,9 +177,9 @@ export default function AnimationWatch() {
 
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
-  /* ── Auto-play first available "ok" source (don't wait for SSE to finish) ── */
+  /* ── Auto-play first available "ok" source (also fires from "sources" step) ── */
   useEffect(() => {
-    if (step !== "loading") return;
+    if (step === "playing" || step === "error") return;
     if (autoPlayedRef.current) return;
     const first = sources.find(s => s.status === "ok");
     if (!first) return;
@@ -252,7 +253,7 @@ export default function AnimationWatch() {
   useEffect(() => {
     setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
     setSubCues([]); setSubState("idle"); setHlsTime(0);
-    seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false;
+    seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
 
     const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodeURIComponent(title))}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}`;
     const es = new EventSource(q);
@@ -274,6 +275,7 @@ export default function AnimationWatch() {
         newSrc = { url: src.url, label: src.label, status: "loading" };
         tryExtract(src.url);
       }
+      sourceCountRef.current += 1;
       setSources(prev => [...prev, newSrc]);
     });
 
@@ -290,19 +292,41 @@ export default function AnimationWatch() {
     return () => { es.close(); };
   }, [title, type, ep, season, tmdbId, tryExtract]);
 
-  /* ── Step transitions on SSE done ── */
+  /* ── Step transitions on SSE done (sourceCountRef avoids stale closure) ── */
   useEffect(() => {
     if (!sseDone) return;
-    if (step === "playing") return;
-    setStep(sources.length === 0 ? "error" : "sources");
-  }, [sseDone]); // eslint-disable-line
+    setStep(prev => prev === "playing" ? prev : (sourceCountRef.current === 0 ? "error" : "sources"));
+  }, [sseDone]);
 
   /* ── Fetch Arabic subtitles (called on mount + by onSubtitleClick) ── */
   const fetchSubs = useCallback(async () => {
     if (!tmdbId) return;
     setSubState("loading");
     setSubCues([]);
+
+    const scRef = encodeURIComponent("https://starcima.com/");
+
+    // Helper: fetch VTT text via proxy-text and parse it
+    const fetchVtt = async (vttUrl: string, timeoutMs = 10_000): Promise<SubCue[]> => {
+      const r = await fetch(
+        `/api/anime/proxy-text?url=${encodeURIComponent(vttUrl)}&ref=${scRef}`,
+        { signal: AbortSignal.timeout(timeoutMs) }
+      );
+      if (!r.ok) return [];
+      const text = await r.text();
+      return parseSrt(text);
+    };
+
     try {
+      // ── 1. Try direct Arabic CDN (cache.vdrk.site pattern from StarCima vidzee API) ──
+      const directArUrl = type === "tv"
+        ? `https://cache.vdrk.site/v3/tv/${tmdbId}/${season}/${ep}/Arabic.vtt`
+        : `https://cache.vdrk.site/v3/movie/${tmdbId}/Arabic.vtt`;
+
+      const directCues = await fetchVtt(directArUrl, 8_000).catch(() => [] as SubCue[]);
+      if (directCues.length > 0) { setSubCues(directCues); setSubState("ready"); return; }
+
+      // ── 2. Fallback: vidzee-meta API for subtitle URLs ──
       const r = await fetch(
         `/api/animation/vidzee-meta?tmdbId=${tmdbId}&type=${type}&season=${season}&ep=${ep}`,
         { signal: AbortSignal.timeout(12_000) }
@@ -324,15 +348,7 @@ export default function AnimationWatch() {
         : chosen.url;
 
       if (chosen.languageCode === "ar") {
-        // Direct Arabic — proxy-text to bypass CORS (pass StarCima referer)
-        const ref = encodeURIComponent("https://starcima.com/");
-        const r2 = await fetch(
-          `/api/anime/proxy-text?url=${encodeURIComponent(rawUrl)}&ref=${ref}`,
-          { signal: AbortSignal.timeout(12_000) }
-        );
-        if (!r2.ok) { setSubState("idle"); return; }
-        const text = await r2.text();
-        const cues = parseSrt(text);
+        const cues = await fetchVtt(rawUrl, 12_000).catch(() => [] as SubCue[]);
         if (cues.length > 0) { setSubCues(cues); setSubState("ready"); }
         else setSubState("idle");
       } else {
@@ -344,7 +360,6 @@ export default function AnimationWatch() {
         if (!r2.ok) { setSubState("idle"); return; }
         const json = await r2.json() as { cues?: Array<{ timing: string; text: string }> };
         if (!json.cues?.length) { setSubState("idle"); return; }
-        // Reconstruct VTT string so parseSrt can handle it
         const vttText = "WEBVTT\n\n" + json.cues.map((c) => `${c.timing}\n${c.text}`).join("\n\n");
         const cues = parseSrt(vttText);
         if (cues.length > 0) { setSubCues(cues); setSubState("ready"); }

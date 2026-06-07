@@ -307,6 +307,11 @@ async function tcScrapePlayer(url: string): Promise<string[]> {
 
 // ── TMDB endpoints ────────────────────────────────────────────────────────────
 
+/** Detect Japanese/Chinese/Korean characters — filter out untranslated titles */
+function hasCJK(text: string): boolean {
+  return /[\u3040-\u30ff\u4e00-\u9fff\u3400-\u4dbf\uff00-\uffef]/.test(text);
+}
+
 router.get("/animation/browse", async (req: Request, res: Response) => {
   try {
     const type   = String(req.query.type   || "movie");
@@ -322,8 +327,13 @@ router.get("/animation/browse", async (req: Request, res: Response) => {
     const yearParam = year
       ? (type === "tv" ? `&first_air_date_year=${year}` : `&primary_release_year=${year}`)
       : "";
-    const data = await tmdb(`${ep}?with_genres=${gp}&sort_by=${sort}&page=${page}&include_adult=false${tvExtra}${yearParam}&vote_count.gte=10`);
-    res.json(data);
+    const data: any = await tmdb(`${ep}?with_genres=${gp}&sort_by=${sort}&page=${page}&include_adult=false${tvExtra}${yearParam}&vote_count.gte=10`);
+    // Remove results whose TMDB title is still in Japanese/Chinese (no Arabic translation)
+    const results = (data.results || []).filter((r: any) => {
+      const title = r.title || r.name || "";
+      return !hasCJK(title);
+    });
+    res.json({ ...data, results });
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
 
@@ -336,6 +346,12 @@ router.get("/animation/detail", async (req: Request, res: Response) => {
       ? "aggregate_credits,recommendations,content_ratings"
       : "credits,recommendations";
     const data: any = await tmdb(`/${type}/${id}?append_to_response=${app}`);
+    // Filter recommendations to animation-only (genre 16 = رسوم متحركة)
+    if (data.recommendations?.results) {
+      data.recommendations.results = data.recommendations.results.filter(
+        (r: any) => (r.genre_ids || []).includes(16)
+      );
+    }
     res.json(data);
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
@@ -356,9 +372,11 @@ router.get("/animation/search", async (req: Request, res: Response) => {
     const type = String(req.query.type || "multi");
     if (!q) { res.status(400).json({ error: "q required" }); return; }
     const data: any = await tmdb(`/search/${type}?query=${encodeURIComponent(q)}&include_adult=false`);
-    const results = (data.results || []).filter(
-      (r: any) => (r.genre_ids || []).includes(16) || type !== "multi"
-    );
+    const results = (data.results || []).filter((r: any) => {
+      if (type === "multi" && !(r.genre_ids || []).includes(16)) return false;
+      const title = r.title || r.name || "";
+      return !hasCJK(title);
+    });
     res.json({ ...data, results });
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
@@ -368,7 +386,11 @@ router.get("/animation/trending", async (req: Request, res: Response) => {
     const type   = String(req.query.type   || "movie");
     const window = String(req.query.window || "week");
     const data: any = await tmdb(`/trending/${type}/${window}`);
-    const results = (data.results || []).filter((r: any) => (r.genre_ids || []).includes(16));
+    const results = (data.results || []).filter((r: any) => {
+      if (!(r.genre_ids || []).includes(16)) return false;
+      const title = r.title || r.name || "";
+      return !hasCJK(title);
+    });
     res.json({ ...data, results });
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
