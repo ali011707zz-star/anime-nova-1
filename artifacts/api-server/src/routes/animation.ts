@@ -1010,16 +1010,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
                 await Promise.allSettled(ordered.map(async (srv: any) => {
                   if (!srv.embedUrl) return;
-                  // Try server-side extraction first; fall back to embed iframe
-                  const extracted = await sendExtracted(srv.embedUrl, `StarCima ${srv.name || "عربي"}`);
-                  if (!extracted) {
-                    // Extraction failed → send as embed iframe (animation allows iframes)
-                    if (!seenUrls.has(srv.embedUrl)) {
-                      seenUrls.add(srv.embedUrl);
-                      sourceCount++;
-                      send("source", { url: srv.embedUrl, label: `StarCima ${srv.name || "عربي"}`, isEmbed: true });
-                    }
-                  }
+                  // Try server-side extraction only — no iframe fallback
+                  await sendExtracted(srv.embedUrl, `StarCima ${srv.name || "عربي"}`);
                 }));
               } catch { /* silent */ }
             })(),
