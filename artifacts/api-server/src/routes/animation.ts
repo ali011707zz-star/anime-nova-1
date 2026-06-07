@@ -979,7 +979,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     } catch { /* keep original */ }
                   }
 
-                    // No probe — trust StarCima vidzee servers directly; hls-proxy handles CDN auth
+                  // Quick probe — only send servers that actually return 200 (not 302/404/403)
+                  try {
+                    const probe = await fetch(rawUrl, {
+                      method: "HEAD",
+                      headers: { "User-Agent": UA, "Referer": referer || SC_REF_HLS },
+                      signal: AbortSignal.timeout(6_000),
+                      redirect: "follow",
+                    });
+                    if (!probe.ok) return; // skip 4xx / 5xx
+                  } catch { return; } // timeout or network error → skip
+
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
                   sendSource(proxied, `StarCima ${srv.name || "HLS"}`, proxied, proxied);
                 }));

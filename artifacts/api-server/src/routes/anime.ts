@@ -4764,14 +4764,14 @@ function parseVttCues(text: string): Array<{ timing: string; rawText: string }> 
  *  Fast, high quality Arabic translation, no rate limits in practice.
  *  Groups cues into chunks and processes 4 chunks in parallel. */
 async function translateBatchFree(texts: string[], from: string, to: string): Promise<string[]> {
-  const CHUNK = 8; // 8 cues per request — safe under URL length limits
+  const CHUNK = 18; // 18 cues per request — faster without hitting URL limits
 
   const chunks: string[][] = [];
   for (let i = 0; i < texts.length; i += CHUNK) {
     chunks.push(texts.slice(i, i + CHUNK));
   }
 
-  const PARALLEL = 4;
+  const PARALLEL = 6;
   const results: string[] = new Array(texts.length).fill("");
 
   for (let i = 0; i < chunks.length; i += PARALLEL) {

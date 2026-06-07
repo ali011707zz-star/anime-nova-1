@@ -1436,125 +1436,98 @@ export default function RiftPlayer({
                 </div>
               )}
 
-              {/* Settings when loaded — pill buttons (no native pickers) */}
+              {/* Settings when loaded — compact 2-row layout */}
               {subEnabled && subSettings && onSubSettingsChange && (
-                <div className="flex flex-col gap-3.5">
+                <div className="flex flex-col gap-2">
 
-                  {/* ── Font size ── */}
-                  <div>
-                    <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">حجم الخط</p>
-                    <div className="flex gap-1.5">
+                  {/* ── Row 1: Font sizes + Color dots + Bold ── */}
+                  <div className="flex items-center gap-2">
+                    {/* Font sizes */}
+                    <div className="flex gap-1 flex-1">
                       {FONT_SIZES.map(f => {
                         const active = subSettings.fontSize === f.sz;
                         return (
                           <button key={f.sz}
                             onPointerDown={e => { e.stopPropagation(); updateSub({ fontSize: f.sz }); }}
-                            className="flex-1 py-2 rounded-xl flex flex-col items-center gap-[3px] transition-all active:scale-90"
+                            className="flex-1 py-1.5 rounded-lg flex items-center justify-center transition-all active:scale-90"
                             style={{
                               background: active ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
-                              border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.08)"}`,
+                              border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
                             }}>
-                            <span className="font-black font-['Cairo']"
-                              style={{ fontSize: Math.min(f.sz * 0.55 + 5, 16), color: active ? "#c4b5fd" : "rgba(255,255,255,0.40)" }}>
+                            <span className="font-black font-['Cairo'] leading-none"
+                              style={{ fontSize: Math.min(f.sz * 0.5 + 5, 15), color: active ? "#c4b5fd" : "rgba(255,255,255,0.35)" }}>
                               أ
-                            </span>
-                            <span className="text-[7.5px] font-['Cairo']"
-                              style={{ color: active ? "rgba(196,181,253,0.75)" : "rgba(255,255,255,0.22)" }}>
-                              {f.name}
                             </span>
                           </button>
                         );
                       })}
                     </div>
-                  </div>
-
-                  {/* ── Color ── */}
-                  <div>
-                    <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">لون النص</p>
-                    <div className="flex gap-1.5">
+                    {/* Color dots */}
+                    <div className="flex gap-1.5 items-center">
                       {SUB_COLORS.map(c => {
                         const active = subSettings.color === c.v;
                         return (
                           <button key={c.v}
                             onPointerDown={e => { e.stopPropagation(); updateSub({ color: c.v }); }}
-                            className="flex-1 py-2 rounded-xl flex flex-col items-center gap-1.5 transition-all active:scale-90"
+                            className="transition-all active:scale-90 shrink-0"
                             style={{
-                              background: active ? "rgba(124,58,237,0.22)" : "rgba(255,255,255,0.05)",
-                              border: `${active ? 1.5 : 1}px solid ${active ? c.v : "rgba(255,255,255,0.08)"}`,
-                            }}>
-                            <span className="w-4 h-4 rounded-full shrink-0"
-                              style={{ background: c.v, boxShadow: active ? `0 0 8px ${c.v}88` : "none" }} />
-                            <span className="text-[7.5px] font-['Cairo']"
-                              style={{ color: active ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.28)" }}>
-                              {c.label}
-                            </span>
-                          </button>
+                              width: active ? 18 : 14, height: active ? 18 : 14, borderRadius: "50%",
+                              background: c.v,
+                              boxShadow: active ? `0 0 0 2px rgba(139,92,246,0.8), 0 0 8px ${c.v}88` : "none",
+                              border: active ? "1.5px solid rgba(255,255,255,0.55)" : "1px solid rgba(255,255,255,0.12)",
+                              transition: "all 0.15s",
+                            }} />
                         );
                       })}
                     </div>
+                    {/* Bold toggle */}
+                    <button
+                      onPointerDown={e => { e.stopPropagation(); updateSub({ bold: !subSettings.bold }); }}
+                      className="px-2.5 py-1.5 rounded-lg text-[10px] font-['Cairo'] transition-all active:scale-95 shrink-0"
+                      style={{
+                        fontWeight: subSettings.bold ? 900 : 400,
+                        background: subSettings.bold ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
+                        border: `1px solid ${subSettings.bold ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
+                        color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.28)",
+                      }}>ع</button>
                   </div>
 
-                  {/* ── Position ── */}
-                  <div>
-                    <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">موضع الترجمة</p>
-                    <div className="flex gap-1.5">
-                      {SUB_POSITIONS.map(p => {
-                        const active = subSettings.position === p.v;
-                        return (
-                          <button key={p.v}
-                            onPointerDown={e => { e.stopPropagation(); updateSub({ position: p.v as "top" | "center" | "bottom" }); }}
-                            className="flex-1 py-2.5 rounded-xl flex flex-col items-center gap-1 transition-all active:scale-90"
-                            style={{
-                              background: active ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
-                              border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.08)"}`,
-                            }}>
-                            <span className="text-[14px] leading-none">{p.icon}</span>
-                            <span className="text-[8px] font-['Cairo']"
-                              style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.30)" }}>
-                              {p.label}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* ── Background + Bold row ── */}
-                  <div className="flex gap-3">
-                    <div className="flex-1">
-                      <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">الخلفية</p>
-                      <div className="flex gap-1">
-                        {([{ v: 0, l: "بلا" }, { v: 0.45, l: "شفاف" }, { v: 0.82, l: "معتم" }]).map(({ v, l }) => {
-                          const active = subSettings.bgOpacity === v;
-                          return (
-                            <button key={v}
-                              onPointerDown={e => { e.stopPropagation(); updateSub({ bgOpacity: v }); }}
-                              className="flex-1 py-2 rounded-lg text-[8px] font-black font-['Cairo'] transition-all active:scale-90"
-                              style={{
-                                background: active ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
-                                border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.08)"}`,
-                                color: active ? "#c4b5fd" : "rgba(255,255,255,0.28)",
-                              }}>
-                              {l}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-white/28 text-[8.5px] font-bold font-['Cairo'] tracking-widest mb-2">سمك الخط</p>
-                      <button
-                        onPointerDown={e => { e.stopPropagation(); updateSub({ bold: !subSettings.bold }); }}
-                        className="w-full py-2 rounded-lg text-[9px] font-['Cairo'] transition-all active:scale-95"
-                        style={{
-                          fontWeight: subSettings.bold ? 800 : 400,
-                          background: subSettings.bold ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
-                          border: `1px solid ${subSettings.bold ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.08)"}`,
-                          color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.28)",
-                        }}>
-                        {subSettings.bold ? "✓ عريض" : "عادي"}
-                      </button>
-                    </div>
+                  {/* ── Row 2: Position + Background ── */}
+                  <div className="flex gap-1.5">
+                    {SUB_POSITIONS.map(p => {
+                      const active = subSettings.position === p.v;
+                      return (
+                        <button key={p.v}
+                          onPointerDown={e => { e.stopPropagation(); updateSub({ position: p.v as "top" | "center" | "bottom" }); }}
+                          className="flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all active:scale-90"
+                          style={{
+                            background: active ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
+                            border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
+                          }}>
+                          <span className="text-[11px] leading-none">{p.icon}</span>
+                          <span className="text-[8px] font-['Cairo']"
+                            style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.28)" }}>
+                            {p.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    <div className="w-px bg-white/8 shrink-0" />
+                    {([{ v: 0, l: "☀" }, { v: 0.45, l: "◑" }, { v: 0.82, l: "●" }]).map(({ v, l }) => {
+                      const active = subSettings.bgOpacity === v;
+                      return (
+                        <button key={v}
+                          onPointerDown={e => { e.stopPropagation(); updateSub({ bgOpacity: v }); }}
+                          className="flex-1 py-1.5 rounded-lg text-[11px] transition-all active:scale-90"
+                          style={{
+                            background: active ? "rgba(124,58,237,0.32)" : "rgba(255,255,255,0.05)",
+                            border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
+                            color: active ? "#c4b5fd" : "rgba(255,255,255,0.28)",
+                          }}>
+                          {l}
+                        </button>
+                      );
+                    })}
                   </div>
 
                 </div>
