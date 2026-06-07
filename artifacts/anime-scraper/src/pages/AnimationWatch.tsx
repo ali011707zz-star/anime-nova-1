@@ -12,18 +12,28 @@ interface SubCue { start: number; end: number; text: string; }
 function parseSrt(srt: string): SubCue[] {
   const cues: SubCue[] = [];
   const toSec = (ts: string) => {
-    const m = ts.match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/);
-    if (!m) return 0;
-    return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 1000;
+    const t = ts.trim();
+    /* HH:MM:SS,mmm or HH:MM:SS.mmm */
+    const m3 = t.match(/^(\d+):(\d{2}):(\d{2})[,.](\d{1,3})/);
+    if (m3) {
+      return parseInt(m3[1]) * 3600 + parseInt(m3[2]) * 60 + parseInt(m3[3]) + parseInt(m3[4].padEnd(3,"0")) / 1000;
+    }
+    /* MM:SS.mmm  (VTT short format — no hours) */
+    const m2 = t.match(/^(\d+):(\d{2})[,.](\d{1,3})/);
+    if (m2) {
+      return parseInt(m2[1]) * 60 + parseInt(m2[2]) + parseInt(m2[3].padEnd(3,"0")) / 1000;
+    }
+    return 0;
   };
   const blocks = srt.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split(/\n{2,}/);
   for (const block of blocks) {
     const lines = block.trim().split("\n");
     const timeLine = lines.find(l => l.includes("-->"));
     if (!timeLine) continue;
-    const [startStr, endStr] = timeLine.split("-->").map(s => s.trim());
-    const textLines = lines.filter(l => l !== timeLine && !l.match(/^\d+$/))
-      .join(" ").replace(/<[^>]+>/g, "").trim();
+    const [startStr, endStr] = timeLine.split("-->").map(s => s.split(/\s/)[0].trim());
+    const textLines = lines
+      .filter(l => l !== timeLine && !/^\s*\d+\s*$/.test(l) && !/^WEBVTT|^NOTE|^STYLE/.test(l))
+      .join(" ").replace(/<[^>]+>/g, "").replace(/\{[^}]+\}/g, "").trim();
     if (textLines) cues.push({ start: toSec(startStr), end: toSec(endStr), text: textLines });
   }
   return cues;
