@@ -3869,18 +3869,14 @@ async function getAnimeGGSources(
       const tag = m[0];
       const getA = (n: string) => tag.match(new RegExp(`\\b${n}=["']([^"']*)["']`, "i"))?.[1] ?? "";
       const embedId = getA("data-id");
-      const version = getA("data-version") || "subbed";
+      const version = (getA("data-version") || "").toLowerCase();
       const server  = getA("data-mirror") || "AnimeGG";
-      if (!embedId || version.startsWith("dub")) continue;
+      // Only keep subbed versions — skip any dubbed/dub/english-dub content
+      if (!embedId) continue;
+      if (version && !version.includes("sub")) continue;
       if (!tabs.find(t => t.embedId === embedId)) tabs.push({ embedId, server });
     }
-    // Fallback: href="/embed/N" or src="/embed/N"
-    if (!tabs.length) {
-      for (const m of epHtml.matchAll(/(?:href|src)="(\/embed\/\d+)"/gi)) {
-        const id = m[1].replace("/embed/", "");
-        if (!tabs.find(t => t.embedId === id)) tabs.push({ embedId: id, server: "AnimeGG" });
-      }
-    }
+    // No fallback: if no subbed tabs found, this episode has no subtitled version
     if (!tabs.length) return [];
 
     // 5. Fetch embed pages → videoSources[{file, label, bk}] + tracks[{file, label, kind}]
@@ -3935,7 +3931,6 @@ async function getAnimeGGSources(
           });
         }
       } catch { /* bad JSON */ }
-      if (sources.length >= 3) break;
     }
     return sources;
   } catch { return []; }

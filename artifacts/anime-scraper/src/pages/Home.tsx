@@ -38,7 +38,6 @@ function loadMergedContinue(): MergedContinueItem[] {
     const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
     for (const item of h) {
       const t = parseFloat(localStorage.getItem(`wp-${item.id}-${item.ep}`) || "0") || 0;
-      if (t < 30) continue;
       const href = `/watch?anime=${item.id}&ep=${item.ep}&title=${encodeURIComponent(item.title)}&cover=${encodeURIComponent(item.cover || "")}`;
       out.push({ key: `anime-${item.id}-${item.ep}`, kind: "anime", id: item.id, title: item.title, cover: item.cover || "", ep: item.ep, date: item.date || "", watchTimeSec: t, durationSec: 24 * 60, href });
     }
@@ -534,48 +533,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── Genre Filters with images ── */}
-      <div className="pt-4 pb-2">
-        <div className="flex gap-2 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
-          {GENRES_AR.map((g) => (
-            <motion.button
-              key={g.en}
-              whileTap={{ scale: 0.92 }}
-              onClick={() => handleGenreSelect(g.en)}
-              className={`shrink-0 relative overflow-hidden rounded-2xl transition-all border
-                ${selectedGenre === g.en
-                  ? "border-primary shadow-lg shadow-primary/20"
-                  : "border-white/8"
-                }`}
-              style={{ minWidth: g.en ? 80 : 58, height: 56 }}
-            >
-              {g.animeId > 0 && (
-                <img
-                  src={genreImg(g.animeId)}
-                  alt=""
-                  className="absolute inset-0 w-full h-full object-cover"
-                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                />
-              )}
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: selectedGenre === g.en
-                    ? `linear-gradient(135deg, ${g.color}EE, ${g.color}99)`
-                    : g.animeId > 0
-                      ? "linear-gradient(135deg, rgba(0,0,0,0.7), rgba(0,0,0,0.5))"
-                      : `linear-gradient(135deg, ${g.color}33, ${g.color}11)`,
-                }}
-              />
-              <span className={`relative z-10 font-black text-[11px] font-['Cairo'] px-3 flex items-center justify-center h-full
-                ${selectedGenre === g.en ? "text-white" : g.animeId > 0 ? "text-white/85" : `text-white/55`}`}>
-                {g.ar}
-              </span>
-            </motion.button>
-          ))}
-        </div>
-      </div>
-
       {/* ── تابع المشاهدة (Continue Watching — merged anime + animation) ── */}
       {mergedContinue.length > 0 && !selectedGenre && (
         <div className="mt-5">
@@ -682,6 +639,47 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── Genre Filters with images ── */}
+      <div className="pt-4 pb-2">
+        <div className="flex gap-2 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+          {GENRES_AR.map((g) => (
+            <motion.button
+              key={g.en}
+              whileTap={{ scale: 0.92 }}
+              onClick={() => handleGenreSelect(g.en)}
+              className={`shrink-0 relative overflow-hidden rounded-2xl transition-all border
+                ${selectedGenre === g.en
+                  ? "border-primary shadow-lg shadow-primary/20"
+                  : "border-white/8"
+                }`}
+              style={{ minWidth: g.en ? 80 : 58, height: 56 }}
+            >
+              {g.animeId > 0 && (
+                <img
+                  src={genreImg(g.animeId)}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover"
+                  onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              )}
+              <div
+                className="absolute inset-0"
+                style={{
+                  background: selectedGenre === g.en
+                    ? `linear-gradient(135deg, ${g.color}EE, ${g.color}99)`
+                    : g.animeId > 0
+                      ? "linear-gradient(135deg, rgba(0,0,0,0.7), rgba(0,0,0,0.5))"
+                      : `linear-gradient(135deg, ${g.color}33, ${g.color}11)`,
+                }}
+              />
+              <span className={`relative z-10 font-black text-[11px] font-['Cairo'] px-3 flex items-center justify-center h-full
+                ${selectedGenre === g.en ? "text-white" : g.animeId > 0 ? "text-white/85" : `text-white/55`}`}>
+                {g.ar}
+              </span>
+            </motion.button>
+          ))}
+        </div>
+      </div>
 
       {/* ── قسم الأنيميشن ── */}
       {!selectedGenre && (
