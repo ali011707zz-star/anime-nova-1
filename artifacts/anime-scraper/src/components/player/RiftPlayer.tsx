@@ -159,6 +159,10 @@ export default function RiftPlayer({
   const tapTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const G_THRESH     = 18;
 
+  /* ── Web Audio API: GainNode + DynamicsCompressor ── */
+  const audioCtxRef  = useRef<AudioContext | null>(null);
+  const gainNodeRef  = useRef<GainNode | null>(null);
+
   const [isPortrait,      setIsPortrait]      = useState(
     typeof window !== "undefined" && window.innerHeight > window.innerWidth
   );
@@ -212,6 +216,39 @@ export default function RiftPlayer({
     document.addEventListener("fullscreenchange", fn);
     return () => document.removeEventListener("fullscreenchange", fn);
   }, []);
+
+  /* ── Web Audio API setup (once per mount) ── */
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    let cleanup: (() => void) | undefined;
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = ctx.createMediaElementSource(v);
+      const gain   = ctx.createGain();
+      const comp   = ctx.createDynamicsCompressor();
+      comp.threshold.value = -24;
+      comp.knee.value      = 30;
+      comp.ratio.value     = 4;
+      comp.attack.value    = 0.003;
+      comp.release.value   = 0.25;
+      gain.gain.value      = volumeRef.current;
+      source.connect(gain);
+      gain.connect(comp);
+      comp.connect(ctx.destination);
+      audioCtxRef.current = ctx;
+      gainNodeRef.current = gain;
+      const resume = () => { if (ctx.state === "suspended") ctx.resume().catch(() => {}); };
+      v.addEventListener("play", resume);
+      cleanup = () => {
+        v.removeEventListener("play", resume);
+        ctx.close().catch(() => {});
+        audioCtxRef.current = null;
+        gainNodeRef.current = null;
+      };
+    } catch { /* AudioContext not supported — native volume fallback */ }
+    return cleanup;
+  }, []); // once per mount
 
   /* ── auto-fullscreen on physical device rotation ── */
   useEffect(() => {
@@ -426,10 +463,19 @@ export default function RiftPlayer({
   /* ── controls ── */
   function togglePlay() {
     const v = videoRef.current; if (!v) return;
+    if (audioCtxRef.current?.state === "suspended") audioCtxRef.current.resume().catch(() => {});
     v.paused ? v.play().catch(() => {}) : v.pause();
     showControls();
   }
   function toggleMute() {
+    if (gainNodeRef.current) {
+      const nowMuted = !muted;
+      setMuted(nowMuted);
+      gainNodeRef.current.gain.value = nowMuted ? 0 : volumeRef.current;
+      if (audioCtxRef.current?.state === "suspended") audioCtxRef.current.resume().catch(() => {});
+      if (videoRef.current) videoRef.current.muted = false;
+      return;
+    }
     const v = videoRef.current; if (!v) return;
     v.muted = !v.muted; setMuted(v.muted);
   }
@@ -559,11 +605,19 @@ export default function RiftPlayer({
       const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
       // Use videoRef.current.volume for freshest value (avoids stale React state)
-      const curVol = videoRef.current?.volume ?? volumeRef.current;
-      const nV = Math.max(0, Math.min(1, curVol + dV / 150));
+      const curVol = volumeRef.current;
+      const nV = Math.max(0, Math.min(1.5, curVol + dV / 150));
       volumeRef.current = nV;
       setVolume(nV);
-      if (videoRef.current) { videoRef.current.volume = nV; videoRef.current.muted = false; setMuted(false); }
+      if (gainNodeRef.current) {
+        gainNodeRef.current.gain.value = nV;
+        if (audioCtxRef.current?.state === "suspended") audioCtxRef.current.resume().catch(() => {});
+        if (videoRef.current) { videoRef.current.muted = false; setMuted(false); }
+      } else if (videoRef.current) {
+        videoRef.current.volume = Math.min(1, nV);
+        videoRef.current.muted = false;
+        setMuted(false);
+      }
       setFeedback({ type: "volume", value: nV });
     } else if (g.active === "brightness") {
       // Same directional fix as volume
@@ -801,12 +855,12 @@ export default function RiftPlayer({
               className="absolute right-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 pointer-events-none">
               <div className="relative rounded-full overflow-hidden" style={{ width: 4, height: 110, background: "rgba(255,255,255,0.15)" }}>
                 <div className="absolute bottom-0 left-0 right-0 rounded-full"
-                  style={{ background: "rgba(255,255,255,0.85)", height: `${feedback.value * 100}%`, transition: "height 0.06s" }} />
+                  style={{ background: feedback.value > 1 ? "rgba(167,139,250,0.90)" : "rgba(255,255,255,0.85)", height: `${Math.min(feedback.value / 1.5 * 100, 100)}%`, transition: "height 0.06s" }} />
               </div>
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
-                style={{ background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.12)" }}>
-                <Volume2 className="w-3 h-3 text-white/65" />
-                <span className="text-white/85 text-[11px] font-bold font-mono">{Math.round(feedback.value * 100)}%</span>
+                style={{ background: "rgba(0,0,0,0.65)", border: `1px solid ${feedback.value > 1 ? "rgba(167,139,250,0.35)" : "rgba(255,255,255,0.12)"}` }}>
+                <Volume2 className="w-3 h-3" style={{ color: feedback.value > 1 ? "rgba(196,181,253,0.80)" : "rgba(255,255,255,0.65)" }} />
+                <span className="text-white/85 text-[11px] font-bold font-mono">{Math.round(feedback.value / 1.5 * 100)}%</span>
               </div>
             </motion.div>
           )}
@@ -1108,21 +1162,35 @@ export default function RiftPlayer({
                 {/* ── Skip intro / outro — always visible when in range ── */}
                 {(showSkipIntro || showSkipOutro) && (
                   <div className="flex justify-start px-5 pb-2 pointer-events-auto" dir="rtl">
-                    {showSkipIntro && (
-                      <button
-                        onPointerDown={e => { e.stopPropagation(); const skipTo = skipIntro ? skipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
-                        className="flex items-center gap-1.5 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                        style={{ background: "rgba(139,92,246,0.92)", border: "1px solid rgba(167,139,250,0.55)", color: "white", boxShadow: "0 4px 20px rgba(139,92,246,0.50)", touchAction: "manipulation" }}>
-                        ⏭ تخطي المقدمة
-                      </button>
-                    )}
+                    {showSkipIntro && (() => {
+                      const rem = skipIntro ? Math.max(0, Math.ceil(skipIntro.end - currentTime)) : 0;
+                      return (
+                        <motion.button
+                          key="skip-intro"
+                          initial={{ opacity: 0, y: 6, scale: 0.94 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                          transition={{ duration: 0.18 }}
+                          onPointerDown={e => { e.stopPropagation(); const skipTo = skipIntro ? skipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
+                          className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                          style={{ background: "rgba(6,182,212,0.88)", border: "1px solid rgba(34,211,238,0.55)", color: "white", boxShadow: "0 4px 20px rgba(6,182,212,0.45)", touchAction: "manipulation" }}>
+                          <span>⏭ تخطي المقدمة</span>
+                          {rem > 0 && <span className="font-mono text-[10px] opacity-80 bg-white/15 px-1.5 py-0.5 rounded-lg">{rem}ث</span>}
+                        </motion.button>
+                      );
+                    })()}
                     {showSkipOutro && !showSkipIntro && (
-                      <button
+                      <motion.button
+                        key="skip-outro"
+                        initial={{ opacity: 0, y: 6, scale: 0.94 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                        transition={{ duration: 0.18 }}
                         onPointerDown={e => { e.stopPropagation(); onNextEp?.(); }}
-                        className="flex items-center gap-1.5 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                        style={{ background: "rgba(20,20,45,0.92)", border: "1px solid rgba(139,92,246,0.45)", color: "rgba(167,139,250,0.95)", boxShadow: "0 4px 16px rgba(0,0,0,0.55)", touchAction: "manipulation" }}>
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                        style={{ background: "rgba(249,115,22,0.88)", border: "1px solid rgba(251,146,60,0.55)", color: "white", boxShadow: "0 4px 16px rgba(249,115,22,0.40)", touchAction: "manipulation" }}>
                         ⏭ الحلقة التالية
-                      </button>
+                      </motion.button>
                     )}
                   </div>
                 )}
@@ -1160,20 +1228,22 @@ export default function RiftPlayer({
                     <div className="absolute left-0 right-0 rounded-full overflow-hidden pointer-events-none"
                       style={{ height: prgHover ? 7 : 4, transition: "height 0.15s ease" }}>
                       <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.18)" }} />
-                        {/* Intro marker — only when real AniSkip data provided */}
+                        {/* Intro marker — cyan, clearly visible */}
                       {skipIntro && duration > 0 && (
                         <div className="absolute top-0 h-full" style={{
                           left: `${(skipIntro.start / duration) * 100}%`,
                           width: `${Math.max(0, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
-                          background: "rgba(234,179,8,0.85)", zIndex: 2,
+                          background: "rgba(6,182,212,0.90)", zIndex: 2,
+                          boxShadow: "0 0 4px rgba(6,182,212,0.60)",
                         }} />
                       )}
-                      {/* Outro marker — only when real AniSkip data provided */}
+                      {/* Outro marker — orange, distinct from intro */}
                       {skipOutro && duration > 0 && (
                         <div className="absolute top-0 h-full" style={{
                           left: `${(skipOutro.start / duration) * 100}%`,
                           width: `${Math.max(0, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
-                          background: "rgba(234,179,8,0.60)", zIndex: 2,
+                          background: "rgba(249,115,22,0.85)", zIndex: 2,
+                          boxShadow: "0 0 4px rgba(249,115,22,0.55)",
                         }} />
                       )}
                       <div className="absolute top-0 left-0 h-full"

@@ -334,6 +334,33 @@ export default function AnimationWatch() {
       } catch { return []; }
     };
 
+    // Batch translate VTT content (English cues → Arabic) via /api/anime/translate
+    const translateContent = async (content: string): Promise<SubCue[]> => {
+      try {
+        const cues = parseSrt(content);
+        if (!cues.length) return [];
+        const BATCH = 20;
+        const results: SubCue[] = [];
+        for (let i = 0; i < cues.length; i += BATCH) {
+          const batch = cues.slice(i, i + BATCH);
+          const joined = batch.map(c => c.text).join("\n||||\n");
+          try {
+            const r = await fetch(
+              `/api/anime/translate?text=${encodeURIComponent(joined)}&from=en&to=ar`,
+              { signal: AbortSignal.timeout(20_000) }
+            );
+            if (!r.ok) { results.push(...batch); continue; }
+            const d = await r.json() as { translated: string };
+            const parts = d.translated.split(/\n\|{4}\n/);
+            for (let j = 0; j < batch.length; j++) {
+              results.push({ ...batch[j], text: parts[j]?.trim() || batch[j].text });
+            }
+          } catch { results.push(...batch); }
+        }
+        return results;
+      } catch { return []; }
+    };
+
     // Animation-specific subtitle lookup (wyzie.ru + subdl via new endpoint)
     const fetchAnimSubtitles = async (): Promise<SubCue[]> => {
       try {
@@ -346,8 +373,9 @@ export default function AnimationWatch() {
         });
         const r = await fetch(`/api/animation/subtitles?${params}`, { signal: AbortSignal.timeout(18_000) });
         if (!r.ok) return [];
-        const d = await r.json() as { content?: string | null };
+        const d = await r.json() as { content?: string | null; language?: string };
         if (!d.content) return [];
+        if (d.language === "en") return await translateContent(d.content);
         return parseSrt(d.content);
       } catch { return []; }
     };

@@ -667,6 +667,38 @@ router.get("/animation/subtitles", async (req: Request, res: Response) => {
       } catch { /* fall through */ }
     }
 
+    // Step 2b: wyzie.ru English fallback — client will auto-translate
+    if (imdbId) {
+      try {
+        const wyzieBase = "https://sub.wyzie.ru/search";
+        const wyzieEnQ = type === "tv"
+          ? `${wyzieBase}?id=${imdbId}&language=en&season=${season}&episode=${ep}`
+          : `${wyzieBase}?id=${imdbId}&language=en`;
+        const wEnR = await fetch(wyzieEnQ, {
+          headers: { "User-Agent": UA, "Accept": "application/json" },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (wEnR.ok) {
+          const wEnData = await wEnR.json() as any;
+          const enItems: any[] = Array.isArray(wEnData) ? wEnData : (wEnData?.data ?? []);
+          const enItem = enItems.find((s: any) => s.url);
+          if (enItem?.url) {
+            const dlEnR = await fetch(enItem.url, {
+              headers: { "User-Agent": UA },
+              signal: AbortSignal.timeout(10_000),
+            });
+            if (dlEnR.ok) {
+              const content = await dlEnR.text();
+              if (content.includes("-->")) {
+                animSubCache.set(ck, { content, ts: Date.now() });
+                res.json({ content, language: "en" }); return;
+              }
+            }
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
     // Step 3: subdl.com with IMDB ID or title (requires SUBDL_API_KEY)
     const sdKey = (process.env.SUBDL_API_KEY || "").trim();
     if (sdKey) {
@@ -984,6 +1016,35 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
       // ── 13. ToonStream — DISABLED (rubystm CDN expired, as-cdn21 returns 403) ──
       Promise.resolve(),
+
+      // ── 16. vidsrc.pro (TMDB-based, often has streamwish/filemoon inner links) ─
+      (async () => {
+        try {
+          const url = type === "tv"
+            ? `https://vidsrc.pro/embed/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidsrc.pro/embed/movie/${tmdbId}`;
+          await sendExtracted(url, "VidSrc Pro");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 17. multiembed.mov (TMDB-based, multiple embedded servers) ────────────
+      (async () => {
+        try {
+          const tvQ = type === "tv" ? `&s=${season}&e=${epNum}` : "";
+          const url = `https://multiembed.mov/?video_id=${tmdbId}&tmdb=1${tvQ}`;
+          await sendExtracted(url, "MultiEmbed");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 18. autoembed.to (TMDB-based, clean API) ─────────────────────────────
+      (async () => {
+        try {
+          const url = type === "tv"
+            ? `https://autoembed.to/tv/tmdb/${tmdbId}-${season}-${epNum}`
+            : `https://autoembed.to/movie/tmdb/${tmdbId}`;
+          await sendExtracted(url, "AutoEmbed");
+        } catch { /* silent */ }
+      })(),
 
       // ── 14. wecima.show (DooPlay, Arabic) ────────────────────────────────────
       (async () => {
