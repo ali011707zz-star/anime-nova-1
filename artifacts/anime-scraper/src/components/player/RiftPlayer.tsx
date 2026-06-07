@@ -367,6 +367,9 @@ export default function RiftPlayer({
     loadSource();
     return () => {
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      /* Stop audio/video immediately on unmount to prevent background playback */
+      const v = videoRef.current;
+      if (v) { try { v.pause(); v.src = ""; v.load(); } catch {} }
       if (hideRef.current) clearTimeout(hideRef.current);
       if (failTimer.current) clearTimeout(failTimer.current);
     };

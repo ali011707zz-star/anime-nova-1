@@ -3,7 +3,7 @@ import { useParams, useLocation, Link } from "wouter";
 import {
   ChevronRight, Play, Star, Calendar, Clock,
   Tv, Film, ChevronDown, Sparkles, Users,
-  Bookmark, MessageCircle, Send, X,
+  Bookmark, MessageCircle, Send, X, List,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -19,17 +19,6 @@ const GENRE_AR: Record<number, string> = {
   53: "إثارة", 10752: "حرب", 37: "غرب",
 };
 
-interface Episode {
-  episode_number: number;
-  name: string;
-  overview?: string;
-  still_path?: string;
-  air_date?: string;
-  runtime?: number;
-}
-
-interface Season { id: number; season_number: number; name: string; episode_count: number; poster_path?: string }
-
 export default function AnimationDetail() {
   const { type, id } = useParams<{ type: string; id: string }>();
   const [, navigate] = useLocation();
@@ -37,16 +26,11 @@ export default function AnimationDetail() {
   const [detail,   setDetail]   = useState<any>(null);
   const [loading,  setLoading]  = useState(true);
   const [showFull, setShowFull] = useState(false);
-  const [selSeason, setSelSeason] = useState(1);
-  const [episodes, setEpisodes] = useState<Episode[]>([]);
-  const [epLoading, setEpLoading] = useState(false);
-  const [seasonOpen, setSeasonOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
   const [descAr, setDescAr] = useState<string | null>(null);
-  const [epProgress, setEpProgress] = useState<Record<number, number>>({});
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -81,27 +65,6 @@ export default function AnimationDetail() {
       .catch(() => setLoading(false));
   }, [type, id]);
 
-  useEffect(() => {
-    if (type !== "tv" || !detail) return;
-    setEpLoading(true);
-    fetch(`/api/animation/season?id=${id}&season=${selSeason}`)
-      .then(r => r.json())
-      .then(d => { setEpisodes(d.episodes || []); setEpLoading(false); })
-      .catch(() => setEpLoading(false));
-  }, [type, id, selSeason, detail]);
-
-  // Load episode progress from localStorage
-  useEffect(() => {
-    if (type !== "tv" || !episodes.length) return;
-    const prog: Record<number, number> = {};
-    episodes.forEach(ep => {
-      const key = `anim-wp-${id}-tv-${selSeason}-${ep.episode_number}`;
-      const t = parseFloat(localStorage.getItem(key) || "0");
-      if (t > 0) prog[ep.episode_number] = t;
-    });
-    setEpProgress(prog);
-  }, [episodes, id, selSeason, type]);
-
   // Find last watched episode from history (for TV main watch button)
   const continueEp = useMemo(() => {
     if (type !== "tv") return undefined;
@@ -113,16 +76,14 @@ export default function AnimationDetail() {
     return 1;
   }, [type, id]);
 
-  const watchUrl = (ep?: number) => {
+  const watchUrl = () => {
     const t = encodeURIComponent(detail?.original_title || detail?.original_name || detail?.title || detail?.name || "");
     const posterPath = encodeURIComponent(detail?.poster_path ? `${IMG_W}${detail.poster_path}` : "");
-    if (ep != null) {
-      return `/animation/watch?title=${t}&type=${type}&id=${id}&ep=${ep}&season=${selSeason}&poster=${posterPath}`;
-    }
-    // For TV main button — use the continue episode or ep 1
     const startEp = continueEp ?? 1;
-    return `/animation/watch?title=${t}&type=${type}&id=${id}&ep=${startEp}&season=${selSeason}&poster=${posterPath}`;
+    return `/animation/watch?title=${t}&type=${type}&id=${id}&ep=${startEp}&season=1&poster=${posterPath}`;
   };
+
+  const episodesUrl = () => `/animation/${type}/${id}/episodes`;
 
   const goBack = () => navigate("/animations");
 
@@ -166,8 +127,6 @@ export default function AnimationDetail() {
   const score     = detail.vote_average || 0;
   const genres: { id: number; name: string }[] = detail.genres || [];
   const overview  = descAr || detail.overview || "";
-  const seasons: Season[] = (detail.seasons || []).filter((s: Season) => s.season_number > 0);
-  const currentSeason = seasons.find(s => s.season_number === selSeason);
   const cast = (detail.credits?.cast || detail.aggregate_credits?.cast || []).slice(0, 12);
   const recs: any[] = (detail.recommendations?.results || []).slice(0, 10);
   const studios = (detail.production_companies || []).slice(0, 2).map((c: any) => c.name).join(" · ");
@@ -308,14 +267,31 @@ export default function AnimationDetail() {
             <Bookmark className={`w-3.5 h-3.5 transition-all ${saved ? "fill-current" : ""}`} />
             <span className="text-[8px] font-black">{saved ? "محفوظ" : "حفظ"}</span>
           </motion.button>
+
+          {/* Episodes button — TV only */}
+          {type === "tv" && (
+            <Link href={episodesUrl()}>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                className="flex-1 h-11 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold font-['Cairo'] text-white/70"
+              >
+                <List className="w-3.5 h-3.5 text-primary" />
+                الحلقات
+                {detail?.number_of_episodes > 0 && (
+                  <span className="bg-primary/20 text-primary text-[9px] font-black px-1.5 py-0.5 rounded-full">{detail.number_of_episodes}</span>
+                )}
+              </motion.button>
+            </Link>
+          )}
+
           <motion.button
             whileTap={{ scale: 0.97 }}
             onClick={() => setShowComments(true)}
-            className="flex-1 h-11 bg-[#18181B] border border-white/7 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold font-['Cairo'] text-white/70"
+            className={`${type === "tv" ? "w-12" : "flex-1"} h-11 bg-[#18181B] border border-white/7 rounded-2xl flex flex-col items-center justify-center gap-0.5 text-xs font-bold font-['Cairo'] text-white/70`}
           >
             <MessageCircle className="w-3.5 h-3.5 text-primary" />
-            التعليقات
-            {comments.length > 0 && (
+            {type !== "tv" && <span>التعليقات</span>}
+            {comments.length > 0 && type !== "tv" && (
               <span className="bg-primary/20 text-primary text-[9px] font-black px-1.5 py-0.5 rounded-full">{comments.length}</span>
             )}
           </motion.button>
@@ -347,122 +323,6 @@ export default function AnimationDetail() {
         </div>
       )}
 
-      {/* ── TV Seasons & Episodes ── */}
-      {type === "tv" && seasons.length > 0 && (
-        <div className="mt-7 px-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-1 h-5 bg-primary rounded-full" />
-            <h2 className="text-[15px] font-black font-['Cairo'] flex-1">الحلقات</h2>
-            {/* Season selector */}
-            <div className="relative">
-              <button
-                onClick={() => setSeasonOpen(o => !o)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/8 border border-white/10 text-[11px] font-black text-white/70 font-['Cairo']"
-              >
-                {currentSeason?.name || `الموسم ${selSeason}`}
-                <ChevronDown className={`w-3 h-3 transition-transform ${seasonOpen ? "rotate-180" : ""}`} />
-              </button>
-              <AnimatePresence>
-                {seasonOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: -5 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: -5 }}
-                    className="absolute left-0 top-full mt-1 bg-[#111116] border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-20 min-w-[140px]"
-                  >
-                    {seasons.map(s => (
-                      <button
-                        key={s.id}
-                        onClick={() => { setSelSeason(s.season_number); setSeasonOpen(false); }}
-                        className={`w-full text-right px-4 py-2.5 text-[11px] font-black font-['Cairo'] border-b border-white/5 last:border-0 ${
-                          s.season_number === selSeason ? "text-primary bg-primary/10" : "text-white/60"
-                        }`}
-                      >
-                        {s.name}
-                        <span className="block text-[9px] font-normal text-white/25">{s.episode_count} حلقة</span>
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-
-          {epLoading ? (
-            <div className="flex justify-center py-8">
-              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {episodes.map(epItem => {
-                const progressSec = epProgress[epItem.episode_number] || 0;
-                const estDuration = (epItem.runtime || 24) * 60;
-                const progressPct = progressSec > 0 ? Math.min(100, Math.round((progressSec / estDuration) * 100)) : 0;
-                const watched = progressPct >= 90;
-                return (
-                <Link key={epItem.episode_number} href={watchUrl(epItem.episode_number)}>
-                  <motion.div
-                    whileTap={{ scale: 0.97 }}
-                    className={`flex items-center gap-3 p-3 rounded-2xl border active:bg-white/8 ${
-                      watched ? "bg-white/4 border-white/4 opacity-60" : "bg-[#111116] border-white/6"
-                    }`}
-                  >
-                    <div className="w-[80px] h-[48px] rounded-xl overflow-hidden bg-white/6 flex-shrink-0 relative">
-                      {epItem.still_path
-                        ? <img src={`${IMG_S}${epItem.still_path}`} alt="" className="w-full h-full object-cover" />
-                        : <div className="w-full h-full flex items-center justify-center"><Play className="w-4 h-4 text-white/20" /></div>
-                      }
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
-                      <div className="absolute bottom-1 left-1 text-[8px] font-black text-white/70 bg-black/50 px-1 rounded font-mono">
-                        {epItem.episode_number}
-                      </div>
-                      {/* Progress bar overlay */}
-                      {progressPct > 0 && !watched && (
-                        <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/20">
-                          <div className="h-full bg-primary" style={{ width: `${progressPct}%` }} />
-                        </div>
-                      )}
-                      {watched && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                          <div className="w-4 h-4 rounded-full bg-emerald-500/80 flex items-center justify-center">
-                            <svg viewBox="0 0 12 12" className="w-2.5 h-2.5 text-white fill-current"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0 text-right">
-                      <p className="text-[11px] font-black text-white line-clamp-1 font-['Cairo']">
-                        {epItem.name}
-                      </p>
-                      {epItem.overview && (
-                        <p className="text-[9.5px] text-white/30 line-clamp-2 font-['Cairo'] mt-0.5 leading-snug">{epItem.overview}</p>
-                      )}
-                      <div className="flex items-center gap-2 mt-1">
-                        {epItem.runtime && (
-                          <div className="flex items-center gap-1">
-                            <Clock className="w-2.5 h-2.5 text-white/20" />
-                            <span className="text-[8.5px] text-white/20 font-['Cairo']">{epItem.runtime} دق</span>
-                          </div>
-                        )}
-                        {progressSec > 30 && !watched && (
-                          <span className="text-[8.5px] text-primary/60 font-['Cairo']">
-                            {Math.floor(progressSec / 60)}:{String(Math.floor(progressSec % 60)).padStart(2, "0")}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <Play className="w-4 h-4 text-primary flex-shrink-0" />
-                  </motion.div>
-                </Link>
-                );
-              })}
-              {episodes.length === 0 && (
-                <p className="text-center text-white/25 text-sm font-['Cairo'] py-6">لا توجد حلقات لهذا الموسم</p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ── Cast ── */}
       {cast.length > 0 && (

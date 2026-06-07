@@ -68,7 +68,6 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD" },
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK" },
   { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS" },
-  { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم",              tag: "AT" },
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "MG" },
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
