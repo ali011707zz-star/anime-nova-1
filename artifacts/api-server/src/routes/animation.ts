@@ -1512,7 +1512,24 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     ]);
 
     if (sourceCount === 0) {
-      send("status", { msg: "لم يُعثر على مصادر لهذا العنوان" });
+      send("status", { msg: "لم يُعثر على مصادر مباشرة — جارٍ إرسال مشغلات بديلة…" });
+      // Iframe fallback: send embed-only sources (TMDB-native, ad-free)
+      if (tmdbId) {
+        const iframeSrcs = type === "tv"
+          ? [
+              { url: `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`, label: "VidLink · مشغل متكامل" },
+              { url: `https://www.vidking.net/embed/tv/${tmdbId}/${season}/${epNum}`, label: "VidKing · مشغل متكامل" },
+              { url: `https://player.videasy.net/tv/${tmdbId}/${season}/${epNum}`, label: "Videasy · مشغل متكامل" },
+            ]
+          : [
+              { url: `https://vidlink.pro/movie/${tmdbId}`, label: "VidLink · مشغل متكامل" },
+              { url: `https://www.vidking.net/embed/movie/${tmdbId}`, label: "VidKing · مشغل متكامل" },
+              { url: `https://player.videasy.net/movie/${tmdbId}`, label: "Videasy · مشغل متكامل" },
+            ];
+        for (const src of iframeSrcs) {
+          send("source", { url: src.url, label: src.label, isEmbed: true });
+        }
+      }
     }
     send("done", {}); clearInterval(keepAlive); res.end();
   } catch (e) {

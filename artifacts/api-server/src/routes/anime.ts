@@ -3775,6 +3775,141 @@ async function getAninekoSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMEHUB (123animehub.cc) — ياباني مترجم · HLS عبر echovideo.ru
+//  Flow: /ajax/film/search?keyword= → slug →
+//        /ajax/episode/info?epr={slug}/1/{ep} → target embed URL →
+//        echovideo origin/hs/getSources?id= → HLS m3u8
+// ════════════════════════════════════════════════════════════════════
+const ANIMEHUB_BASE = "https://123animehub.cc";
+const ANIMEHUB_UA   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+async function getAnimeHubSources(
+  title: string, english: string | null, ep: number
+): Promise<UnifiedSource[]> {
+  try {
+    // 1. Build candidate keywords (English preferred, romaji fallback)
+    const keywords: string[] = [];
+    for (const t of [english, title].filter(Boolean) as string[]) {
+      const clean = t.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+      if (clean) keywords.push(clean);
+      // First 2–3 words shortcut (helps when full title has season suffix)
+      const words = clean.split(/\s+/).filter((w: string) => w.length > 1);
+      if (words.length >= 2) {
+        const short = words.slice(0, 3).join(" ");
+        if (short !== clean) keywords.push(short);
+      }
+    }
+
+    // 2. Search for slug candidates
+    let slugCandidates: string[] = [];
+    for (const keyword of keywords) {
+      try {
+        const r = await fetch(
+          `${ANIMEHUB_BASE}/ajax/film/search?keyword=${encodeURIComponent(keyword)}&_=${Date.now()}`,
+          {
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              "Referer": ANIMEHUB_BASE + "/",
+              "Accept": "application/json",
+              "User-Agent": ANIMEHUB_UA,
+            },
+            signal: AbortSignal.timeout(8_000),
+          }
+        );
+        if (!r.ok) continue;
+        const d: any = await r.json();
+        const html: string = d?.html || d?.content || "";
+        const re = /href="\/anime\/([^"?#]+)"/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(html)) !== null) {
+          const slug = m[1].replace(/\/$/, "");
+          if (!slugCandidates.includes(slug)) slugCandidates.push(slug);
+        }
+        if (slugCandidates.length > 0) break;
+      } catch { /* try next keyword */ }
+    }
+    if (!slugCandidates.length) return [];
+
+    // 3. Try each slug — fetch episode info and extract HLS
+    for (const slug of slugCandidates.slice(0, 4)) {
+      try {
+        // The epr param is {slug}/{season}/{episode}; season is always 1 on animehub
+        const epr = `${slug}/1/${ep}`;
+        const epR = await fetch(
+          `${ANIMEHUB_BASE}/ajax/episode/info?epr=${encodeURIComponent(epr)}&ts=1&_=${Date.now()}`,
+          {
+            headers: {
+              "Referer": `${ANIMEHUB_BASE}/anime/${slug}`,
+              "X-Requested-With": "XMLHttpRequest",
+              "Accept": "application/json, text/javascript, */*; q=0.01",
+              "User-Agent": ANIMEHUB_UA,
+            },
+            signal: AbortSignal.timeout(10_000),
+          }
+        );
+        if (!epR.ok) continue;
+        const epData: any = await epR.json();
+        const embedUrl: string = epData?.target || epData?.link || epData?.url || "";
+        if (!embedUrl || !embedUrl.startsWith("http")) continue;
+
+        // 4. Identify embed ID and origin from the embed URL
+        const embedMatch = embedUrl.match(/\/embed-[^/]*\/([A-Za-z0-9+/=_%-]+)$/);
+        if (!embedMatch) continue;
+        const encodedId = embedMatch[1];
+        const embedOrigin = new URL(embedUrl).origin;
+
+        // 5. Fetch embed page to get session cookie
+        const embedR = await fetch(embedUrl, {
+          headers: { "User-Agent": ANIMEHUB_UA, "Referer": `${ANIMEHUB_BASE}/` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!embedR.ok) continue;
+        const rawCookie = embedR.headers.get("set-cookie") || "";
+        const cookie    = rawCookie ? rawCookie.split(";")[0].trim() : "";
+
+        // 6. Call getSources API
+        const srcR = await fetch(`${embedOrigin}/hs/getSources?id=${encodedId}`, {
+          headers: {
+            "Referer": embedUrl,
+            "Accept": "*/*",
+            "User-Agent": ANIMEHUB_UA,
+            "X-Requested-With": "XMLHttpRequest",
+            ...(cookie ? { "Cookie": cookie } : {}),
+          },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!srcR.ok) continue;
+        const srcData: any = await srcR.json();
+        if (!srcData) continue;
+
+        // 7. Extract HLS URL from response
+        let hlsUrl: string | null = null;
+        if (typeof srcData.sources === "string" && srcData.sources.startsWith("http")) {
+          hlsUrl = srcData.sources;
+        } else if (Array.isArray(srcData.sources) && srcData.sources.length > 0) {
+          const first = srcData.sources[0];
+          hlsUrl = first?.file || first?.src || first?.url || null;
+        }
+        if (!hlsUrl || !hlsUrl.startsWith("http")) continue;
+
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(embedOrigin + "/")}`;
+        return [{
+          name:        "AnimeHub · ياباني مترجم",
+          url:         proxied,
+          quality:     "1080p",
+          qualityRank: 9,
+          site:        "animehub",
+          directUrl:   proxied,
+          directType:  "hls",
+        }];
+      } catch { continue; }
+    }
+    return [];
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  ANIMEGG (www.animegg.org) — ياباني مترجم · MP4 مباشر عبر video-proxy
 //  Flow (Anivexa): /search/?q= → /series/{slug} → anm_det_pop links
 //        → data-toggle="tab" embed tabs → /embed/{id} → videoSources
@@ -4489,6 +4624,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
+      scrapeCached("animehub",     () => getAnimeHubSources(title, english, ep),               false),
       // animegg: معطّل مؤقتاً بطلب المستخدم
       // scrapeCached("animegg", () => getAnimeGGSources(title, english, ep), false),
       // allmanga: CDN تغيرت (clock.json→500, fast4speed→401) — معطّل مؤقتاً

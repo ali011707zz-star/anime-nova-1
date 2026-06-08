@@ -157,6 +157,9 @@ export default function AnimationWatch() {
   });
   const subAbortRef = useRef<AbortController | null>(null);
 
+  const [embedSources, setEmbedSources] = useState<Array<{ url: string; label: string }>>([]);
+  const [embedSrc,     setEmbedSrc]     = useState<string | null>(null);
+
   const esRef            = useRef<EventSource | null>(null);
   const seenUrls         = useRef(new Set<string>());
   const lastProgressSave = useRef(0);
@@ -278,6 +281,7 @@ export default function AnimationWatch() {
   /* ── SSE stream ── */
   useEffect(() => {
     setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
+    setEmbedSources([]); setEmbedSrc(null);
     setSubCues([]); setSubStatus("off"); setSubChoice("off"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
 
@@ -287,8 +291,15 @@ export default function AnimationWatch() {
 
     es.addEventListener("source", (e) => {
       const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
-      // Skip embed-only sources — no iframe fallback
-      if (src.isEmbed) return;
+      // Collect embed-only sources separately — shown as fallback when no direct sources found
+      if (src.isEmbed) {
+        const key = src.url;
+        if (!seenUrls.current.has(key)) {
+          seenUrls.current.add(key);
+          setEmbedSources(prev => [...prev, { url: src.url, label: src.label }]);
+        }
+        return;
+      }
 
       const key = src.directUrl || src.url;
       if (seenUrls.current.has(key)) return;
@@ -490,6 +501,38 @@ export default function AnimationWatch() {
   }, [sources]);
 
   const hasSources = sources.some(s => s.status === "ok");
+
+  /* ────────────────────────── EMBED IFRAME PLAYER ────────────────────────── */
+  if (embedSrc) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col" dir="rtl">
+        <div className="flex items-center gap-3 px-4 shrink-0"
+          style={{
+            paddingTop: "max(14px, env(safe-area-inset-top))",
+            paddingBottom: 12,
+            background: "rgba(0,0,0,0.92)",
+            borderBottom: "1px solid rgba(255,255,255,0.07)",
+          }}>
+          <button onClick={() => setEmbedSrc(null)}
+            className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-transform"
+            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
+            <ChevronRight className="w-5 h-5 text-white/70" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-white/90 text-[14px] font-black font-['Cairo'] truncate">{displayTitle}</p>
+            {type === "tv" && <p className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</p>}
+          </div>
+        </div>
+        <iframe
+          src={embedSrc}
+          className="flex-1 w-full border-none"
+          allowFullScreen
+          allow="autoplay; fullscreen; picture-in-picture"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
+        />
+      </div>
+    );
+  }
 
   /* ────────────────────────── LOADING SCREEN ─────────────────────────────── */
   if (step === "loading") {
@@ -706,14 +749,27 @@ export default function AnimationWatch() {
       <div className="flex-1 overflow-y-auto" style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
         {step === "error" || (!hasSources && sseDone) ? (
-          <NoSourcesMessage
-            type={type} ep={ep}
-            onPrevEp={type === "tv" && ep > 1 ? () => {
-              const np = new URLSearchParams(window.location.search);
-              np.set("ep", String(ep - 1));
-              navigate(`/animation/watch?${np.toString()}`);
-            } : undefined}
-          />
+          embedSources.length > 0 ? (
+            <EmbedFallbackSection
+              embedSources={embedSources}
+              onPlay={setEmbedSrc}
+              type={type} ep={ep}
+              onPrevEp={type === "tv" && ep > 1 ? () => {
+                const np = new URLSearchParams(window.location.search);
+                np.set("ep", String(ep - 1));
+                navigate(`/animation/watch?${np.toString()}`);
+              } : undefined}
+            />
+          ) : (
+            <NoSourcesMessage
+              type={type} ep={ep}
+              onPrevEp={type === "tv" && ep > 1 ? () => {
+                const np = new URLSearchParams(window.location.search);
+                np.set("ep", String(ep - 1));
+                navigate(`/animation/watch?${np.toString()}`);
+              } : undefined}
+            />
+          )
         ) : (
           <>
             {QUALITY_TIERS.map(q => {
@@ -969,6 +1025,91 @@ function SubPanel({
         )}
       </div>
     </motion.div>
+  );
+}
+
+/* ── Embed Fallback Section ─────────────────────────────────────────────── */
+function EmbedFallbackSection({
+  embedSources, onPlay, type, ep, onPrevEp,
+}: {
+  embedSources: Array<{ url: string; label: string }>;
+  onPlay: (url: string) => void;
+  type: string; ep: number;
+  onPrevEp?: () => void;
+}) {
+  const ICONS: Record<string, string> = {
+    "vidlink":  "🔗",
+    "vidking":  "👑",
+    "videasy":  "▶",
+  };
+  const getIcon = (label: string) => {
+    const low = label.toLowerCase();
+    if (low.includes("vidlink")) return ICONS.vidlink;
+    if (low.includes("vidking")) return ICONS.vidking;
+    if (low.includes("videasy")) return ICONS.videasy;
+    return "🖥";
+  };
+  return (
+    <div className="flex flex-col px-4 py-5 gap-4">
+      <div className="flex items-center gap-3 pb-1">
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.24)" }}>
+          <span className="text-[14px]">🎬</span>
+        </div>
+        <div>
+          <p className="text-white/80 text-[13px] font-black font-['Cairo'] leading-tight">
+            مشغلات بديلة
+          </p>
+          <p className="text-white/28 text-[10px] font-['Cairo']">
+            لم تُعثر على بث مباشر — تفتح في مشغل مدمج
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2.5">
+        {embedSources.map((src, i) => (
+          <button key={src.url}
+            onClick={() => onPlay(src.url)}
+            className="relative overflow-hidden flex items-center gap-3.5 px-4 py-3.5 rounded-2xl active:scale-[0.97] transition-transform text-right w-full"
+            style={{
+              background: "linear-gradient(145deg, rgba(18,12,40,0.92), rgba(12,8,28,0.96))",
+              border: "1px solid rgba(251,191,36,0.22)",
+              boxShadow: "0 4px 24px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03) inset",
+            }}>
+            <div className="absolute top-0 left-0 right-0 h-[2px]"
+              style={{ background: "linear-gradient(90deg, transparent, rgba(251,191,36,0.35), transparent)" }} />
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-[20px]"
+              style={{ background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.22)" }}>
+              {getIcon(src.label)}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white/92 text-[14px] font-black font-['Cairo'] leading-tight truncate">
+                {src.label}
+              </p>
+              <p className="text-white/28 text-[9px] font-['Cairo'] mt-0.5">مشغل مدمج · انقر للفتح</p>
+            </div>
+            <div className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl shrink-0"
+              style={{
+                background: "linear-gradient(135deg, rgba(251,191,36,0.70), rgba(217,119,6,0.85))",
+                border: "1px solid rgba(251,191,36,0.30)",
+                boxShadow: "0 2px 16px rgba(251,191,36,0.18)",
+              }}>
+              <Play className="w-3.5 h-3.5 text-white fill-white" />
+              <span className="text-white text-[12px] font-black font-['Cairo']">فتح</span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {onPrevEp && (
+        <button onClick={onPrevEp}
+          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform mt-1"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.40)" }}>
+          <ChevronRight className="w-4 h-4" />
+          جرّب الحلقة السابقة
+        </button>
+      )}
+    </div>
   );
 }
 
