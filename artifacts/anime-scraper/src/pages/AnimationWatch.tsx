@@ -297,6 +297,8 @@ export default function AnimationWatch() {
         if (!seenUrls.current.has(key)) {
           seenUrls.current.add(key);
           setEmbedSources(prev => [...prev, { url: src.url, label: src.label }]);
+          // Transition out of loading screen so fallback is visible immediately
+          setStep(prev => prev === "playing" ? prev : "sources");
         }
         return;
       }
@@ -748,28 +750,27 @@ export default function AnimationWatch() {
       {/* ── Scrollable source list ── */}
       <div className="flex-1 overflow-y-auto" style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
-        {step === "error" || (!hasSources && sseDone) ? (
-          embedSources.length > 0 ? (
-            <EmbedFallbackSection
-              embedSources={embedSources}
-              onPlay={setEmbedSrc}
-              type={type} ep={ep}
-              onPrevEp={type === "tv" && ep > 1 ? () => {
-                const np = new URLSearchParams(window.location.search);
-                np.set("ep", String(ep - 1));
-                navigate(`/animation/watch?${np.toString()}`);
-              } : undefined}
-            />
-          ) : (
-            <NoSourcesMessage
-              type={type} ep={ep}
-              onPrevEp={type === "tv" && ep > 1 ? () => {
-                const np = new URLSearchParams(window.location.search);
-                np.set("ep", String(ep - 1));
-                navigate(`/animation/watch?${np.toString()}`);
-              } : undefined}
-            />
-          )
+        {step === "error" || (!hasSources && embedSources.length > 0) ? (
+          <EmbedFallbackSection
+            embedSources={embedSources}
+            onPlay={setEmbedSrc}
+            type={type} ep={ep}
+            stillSearching={!sseDone}
+            onPrevEp={type === "tv" && ep > 1 ? () => {
+              const np = new URLSearchParams(window.location.search);
+              np.set("ep", String(ep - 1));
+              navigate(`/animation/watch?${np.toString()}`);
+            } : undefined}
+          />
+        ) : (!hasSources && sseDone) ? (
+          <NoSourcesMessage
+            type={type} ep={ep}
+            onPrevEp={type === "tv" && ep > 1 ? () => {
+              const np = new URLSearchParams(window.location.search);
+              np.set("ep", String(ep - 1));
+              navigate(`/animation/watch?${np.toString()}`);
+            } : undefined}
+          />
         ) : (
           <>
             {QUALITY_TIERS.map(q => {
@@ -1030,11 +1031,12 @@ function SubPanel({
 
 /* ── Embed Fallback Section ─────────────────────────────────────────────── */
 function EmbedFallbackSection({
-  embedSources, onPlay, type, ep, onPrevEp,
+  embedSources, onPlay, type, ep, stillSearching, onPrevEp,
 }: {
   embedSources: Array<{ url: string; label: string }>;
   onPlay: (url: string) => void;
   type: string; ep: number;
+  stillSearching?: boolean;
   onPrevEp?: () => void;
 }) {
   const ICONS: Record<string, string> = {
@@ -1056,14 +1058,21 @@ function EmbedFallbackSection({
           style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.24)" }}>
           <span className="text-[14px]">🎬</span>
         </div>
-        <div>
+        <div className="flex-1">
           <p className="text-white/80 text-[13px] font-black font-['Cairo'] leading-tight">
             مشغلات بديلة
           </p>
           <p className="text-white/28 text-[10px] font-['Cairo']">
-            لم تُعثر على بث مباشر — تفتح في مشغل مدمج
+            {stillSearching ? "جارٍ البحث عن بث مباشر…" : "لم تُعثر على بث مباشر"} — تفتح في مشغل مدمج
           </p>
         </div>
+        {stillSearching && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg shrink-0"
+            style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
+            <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+            <span className="text-violet-300/70 text-[9px] font-bold font-['Cairo']">بحث</span>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-2.5">
