@@ -86,7 +86,7 @@ function buildPopularQuery(genre: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA]${gf}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA], isAdult: false${gf}) {
       id title { romaji english } coverImage { large extraLarge }
       bannerImage averageScore episodes genres status format
     }
@@ -104,7 +104,7 @@ const SPRING_2026_QUERY = `query {
 
 const MOVIES_QUERY = `query {
   Page(perPage: 12) {
-    media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP") {
+    media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP", isAdult: false) {
       id title { romaji } coverImage { large } averageScore
     }
   }

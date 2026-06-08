@@ -45,20 +45,29 @@ const SORT_OPTIONS = [
   { label: "الأحدث",       value: "START_DATE_DESC" },
   { label: "الأقدم",       value: "START_DATE" },
 ];
+const BLOCKED_GENRES = new Set(["Hentai", "Ecchi"]);
+
 const GENRES = [
   "Action", "Adventure", "Comedy", "Drama", "Fantasy",
   "Horror", "Mystery", "Romance", "Sci-Fi", "Slice of Life",
   "Sports", "Supernatural", "Thriller", "Mecha", "Music",
-  "Psychological", "Ecchi", "Harem", "School", "Isekai",
+  "Psychological", "Harem", "School", "Isekai",
 ];
 const GENRES_AR: Record<string, string> = {
   "Action": "أكشن", "Adventure": "مغامرة", "Comedy": "كوميدي", "Drama": "دراما",
   "Fantasy": "خيال", "Horror": "رعب", "Mystery": "غموض", "Romance": "رومانسي",
   "Sci-Fi": "خيال علمي", "Slice of Life": "حياة يومية", "Sports": "رياضة",
   "Supernatural": "خوارق", "Thriller": "إثارة", "Mecha": "ميكا", "Music": "موسيقى",
-  "Psychological": "نفسي", "Ecchi": "إيتشي", "Harem": "حريم",
+  "Psychological": "نفسي", "Harem": "حريم",
   "School": "مدرسي", "Isekai": "إيسيكاي",
 };
+
+function filterSafe(list: any[]): any[] {
+  return list.filter(a => {
+    const genres: string[] = a.genres || [];
+    return !genres.some(g => BLOCKED_GENRES.has(g));
+  });
+}
 const FORMAT_AR: Record<string, string> = {
   TV: "مسلسل", MOVIE: "فيلم", OVA: "OVA", ONA: "ONA", SPECIAL: "خاص", MUSIC: "موسيقى",
 };
@@ -94,7 +103,7 @@ function buildQuery(sort: string, format: string, status: string, genre: string,
   return `
 query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: ${sortArr}${formatFilter}${statusFilter}${genreFilter}${seasonFilter}) {
+    media(search: $search, type: ANIME, sort: ${sortArr}${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false) {
       id title { romaji english native } coverImage { large }
       averageScore episodes format status startDate { year } genres
     }
@@ -221,7 +230,7 @@ export default function Search() {
           body: JSON.stringify(q),
         });
         const json = await res.json();
-        setResults(json.data?.Page?.media || []);
+        setResults(filterSafe(json.data?.Page?.media || []));
       } finally {
         setLoading(false);
       }

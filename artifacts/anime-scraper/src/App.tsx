@@ -60,6 +60,7 @@ const WatchHistory       = lazy(() => import("@/pages/WatchHistory"));
 const Browse             = lazy(() => import("@/pages/Browse"));
 const News               = lazy(() => import("@/pages/News"));
 const Settings           = lazy(() => import("@/pages/Settings"));
+const Profile            = lazy(() => import("@/pages/Profile"));
 const NotFound           = lazy(() => import("@/pages/not-found"));
 const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
 const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
@@ -77,7 +78,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/news", "/browse", "/animation/"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/news", "/browse", "/animation/"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
@@ -122,6 +123,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
             <Route path="/browse"                  component={Browse} />
             <Route path="/news"                    component={News} />
             <Route path="/settings"               component={Settings} />
+            <Route path="/profile"                component={Profile} />
             <Route path="/animations"              component={AnimationLibrary} />
             <Route path="/animation/watch"                    component={AnimationWatchWrapper} />
             <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />

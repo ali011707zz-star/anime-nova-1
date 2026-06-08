@@ -222,6 +222,24 @@
   }
 }
 
+/* ── Theme system: CSS variable defaults ── */
+:root {
+  --bg-base: #09090B;
+  --bg-card: #111116;
+}
+
+/* Override hardcoded page backgrounds so themes actually apply */
+.bg-\[\#09090B\],
+.bg-\[\#0A0A0F\],
+.bg-\[\#0a0a0f\] {
+  background-color: var(--bg-base) !important;
+}
+
+/* Keep body in sync with the theme variable */
+body {
+  background-color: var(--bg-base);
+}
+
 /**
  * Using the elevate system.
  * Automatic contrast adjustment.
