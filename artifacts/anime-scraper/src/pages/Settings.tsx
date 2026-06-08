@@ -151,12 +151,12 @@ interface DropOption { id: string; label: string; icon?: string; desc?: string; 
 
 function DropdownSelect({
   value, options, onChange, icon: Icon, iconColor = "text-primary", iconBg = "bg-primary/12",
-  label, sub,
+  label, sub, badge,
 }: {
   value: string; options: DropOption[];
   onChange: (v: string) => void;
   icon: any; iconColor?: string; iconBg?: string;
-  label: string; sub?: string;
+  label: string; sub?: string; badge?: string;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find(o => o.id === value);
@@ -169,13 +169,16 @@ function DropdownSelect({
           <Icon className={`w-4 h-4 ${iconColor}`} />
         </div>
         <div className="flex-1 min-w-0 text-right">
-          <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+          <div className="flex items-center gap-2 justify-end">
+            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+            {badge && <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(139,92,246,0.18)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.25)" }}>{badge}</span>}
+          </div>
           {sub && <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">{sub}</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[11px] font-bold text-white/40 font-['Cairo']">{current?.label}</span>
+          <span className="text-[11px] font-bold text-white/65 font-['Cairo']">{current?.label}</span>
           <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
-            <ChevronDown className="w-3.5 h-3.5 text-white/25" />
+            <ChevronDown className="w-3.5 h-3.5 text-white/30" />
           </motion.div>
         </div>
       </button>
@@ -501,7 +504,7 @@ export default function Settings() {
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[9px] text-white/30 font-bold">ANIME NOVA · v2.3</span>
+          <span className="text-[9px] text-white/30 font-bold">NOVA ANIME · v2.3</span>
         </div>
       </div>
 
@@ -625,6 +628,7 @@ export default function Settings() {
           icon={viewMode === "grid" ? LayoutGrid : List}
           iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
           label="وضع عرض القوائم" sub="طريقة عرض قوائم الأنمي"
+          badge="قريباً"
           value={viewMode} onChange={setVM}
           options={[
             { id: "grid", label: "شبكة", icon: "⊞", desc: "أيقونات كبيرة" },
@@ -646,6 +650,7 @@ export default function Settings() {
         <DropdownSelect
           icon={Star} iconColor="text-amber-400" iconBg="bg-amber-500/10"
           label="جودة التشغيل المفضّلة" sub="الجودة التي يختارها المشغّل تلقائياً"
+          badge="قريباً"
           value={quality} onChange={setQL}
           options={[
             { id: "auto",  label: "تلقائي",   icon: "⚡", desc: "أفضل جودة متاحة" },
@@ -668,7 +673,7 @@ export default function Settings() {
           iconBg={skipIntro ? "bg-cyan-500/10" : "bg-white/5"}
           label="تخطي المقدمة تلقائياً"
           sub="يتخطى مقدمة الأنمي عند توفرها"
-          badge="جديد"
+          badge="قريباً"
           on={skipIntro} onChange={setSI}
         />
         <ToggleRow
@@ -690,11 +695,13 @@ export default function Settings() {
           iconBg={autoSub ? "bg-blue-500/10" : "bg-white/5"}
           label="ترجمة تلقائية"
           sub="تحميل الترجمة العربية تلقائياً"
+          badge="قريباً"
           on={autoSub} onChange={setAS}
         />
         <DropdownSelect
           icon={Monitor} iconColor="text-cyan-400" iconBg="bg-cyan-500/10"
           label="حجم خط الترجمة" sub="حجم نص الترجمة أثناء التشغيل"
+          badge="قريباً"
           value={subSize} onChange={setSS}
           options={[
             { id: "small",  label: "صغير",  icon: "🔡", desc: "مناسب للشاشات الكبيرة" },
@@ -710,6 +717,7 @@ export default function Settings() {
         <DropdownSelect
           icon={Globe} iconColor="text-teal-400" iconBg="bg-teal-500/10"
           label="لغة المصادر المفضّلة" sub="الأولوية عند وجود أكثر من مصدر"
+          badge="قريباً"
           value={srcLang} onChange={setSL}
           options={[
             { id: "best",     label: "الأفضل تلقائياً",   icon: "⚡", desc: "يختار الأعلى جودة" },
@@ -734,6 +742,7 @@ export default function Settings() {
           iconBg={notifs ? "bg-amber-500/10" : "bg-white/5"}
           label="إشعارات الحلقات الجديدة"
           sub="تنبيه عند نزول حلقة جديدة"
+          badge="قريباً"
           on={notifs} onChange={setN}
         />
       </Card>
@@ -799,7 +808,7 @@ export default function Settings() {
         <InfoRow
           icon={Smartphone} iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
           label="إصدار التطبيق"
-          sub="ANIME NOVA · تطبيق بث الأنمي العربي"
+          sub="NOVA ANIME · تطبيق بث الأنمي العربي"
           value="v2.3.0"
         />
       </Card>
@@ -857,11 +866,11 @@ export default function Settings() {
       {/* Footer */}
       <div className="text-center pt-10 pb-4 px-6">
         <div className="inline-flex items-center gap-[5px] mb-2" dir="ltr">
-          <span className="text-[15px] font-black text-white/70" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em" }}>ANIME</span>
           <span className="text-[15px] font-black"
             style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
             NOVA
           </span>
+          <span className="text-[15px] font-black text-white/70" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em" }}>ANIME</span>
         </div>
         <p className="text-[9px] text-white/18">جميع الحقوق محفوظة · 2025 · مجاني للجميع</p>
       </div>

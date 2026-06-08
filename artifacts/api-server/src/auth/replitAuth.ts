@@ -34,10 +34,12 @@ export function getSession() {
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
     resave: false,
+    rolling: true,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
       secure: true,
+      sameSite: "none",
       maxAge: sessionTtl,
     },
   });
