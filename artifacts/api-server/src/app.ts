@@ -3,7 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { setupAuth, registerAuthRoutes } from "./auth";
+import { setupAuth, registerAuthRoutes, registerEmailAuthRoutes } from "./auth";
 
 export async function createApp(): Promise<Express> {
   const app: Express = express();
@@ -33,6 +33,7 @@ export async function createApp(): Promise<Express> {
 
   await setupAuth(app);
   registerAuthRoutes(app);
+  registerEmailAuthRoutes(app);
 
   app.use("/api", router);
 
