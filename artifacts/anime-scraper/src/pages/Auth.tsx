@@ -22,8 +22,9 @@ export function AuthModal({ onClose }: AuthModalProps) {
   const [verifying, setVerifying] = useState(false);
   const [verifyEmail, setVerifyEmail] = useState("");
   const [verifyCode, setVerifyCode] = useState("");
-  const [devCode, setDevCode] = useState("");
+  const [emailSent, setEmailSent] = useState(false);
   const [resending, setResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
   const otpInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async () => {
@@ -44,7 +45,7 @@ export function AuthModal({ onClose }: AuthModalProps) {
 
     if (result.requiresVerification) {
       setVerifyEmail(result.email || email);
-      setDevCode(result.verificationCode || "");
+      setEmailSent(!!result.emailSent);
       setVerifying(true);
       setTimeout(() => otpInputRef.current?.focus(), 300);
       return;
@@ -75,11 +76,11 @@ export function AuthModal({ onClose }: AuthModalProps) {
   };
 
   const handleResend = async () => {
-    setResending(true); setError("");
+    setResending(true); setError(""); setResendSuccess(false);
     try {
       const res = await fetch("/api/auth/resend-code", { method: "POST", credentials: "include" });
       const data = await res.json();
-      if (data.verificationCode) setDevCode(data.verificationCode);
+      if (data.ok) { setEmailSent(true); setResendSuccess(true); }
       setVerifyCode("");
       setTimeout(() => otpInputRef.current?.focus(), 100);
     } catch { /* ignore */ }
@@ -141,15 +142,14 @@ export function AuthModal({ onClose }: AuthModalProps) {
               </p>
             </div>
 
-            {/* Dev code display - shown since no email service configured */}
-            {devCode && (
+            {/* Email sent confirmation */}
+            {emailSent && (
               <motion.div
                 initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
                 className="mb-4 px-4 py-3 rounded-2xl text-center"
-                style={{ background: "rgba(124,58,237,0.10)", border: "1px solid rgba(139,92,246,0.20)" }}>
-                <p className="text-white/35 text-[10px] font-['Cairo'] mb-1">رمز التحقق الخاص بك</p>
-                <p className="text-[28px] font-black text-violet-300 tracking-[0.2em]" style={{ fontFamily: "monospace" }}>
-                  {devCode}
+                style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.20)" }}>
+                <p className="text-emerald-300 text-[12px] font-bold font-['Cairo']">
+                  ✓ {resendSuccess ? "تم إعادة إرسال الرمز إلى بريدك" : "تم إرسال الرمز إلى بريدك الإلكتروني"}
                 </p>
               </motion.div>
             )}
