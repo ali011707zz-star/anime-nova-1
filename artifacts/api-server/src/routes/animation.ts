@@ -1504,6 +1504,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
               if (!rawUrl.startsWith("http")) return;
 
+              // Skip anime-only CDN sources from Vyla (AnimeHub etc. use AniList IDs,
+              // not TMDB IDs — they return wrong content for animation/movies)
+              const sourceId = (evt.source.source || evt.source.label || "").toLowerCase();
+              if (sourceId === "animehub" || rawUrl.includes("burntburst") || rawUrl.includes("echovideo.ru")) return;
+
               const label   = `Vyla · ${evt.source.label || evt.source.source}`;
               const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
               sendSource(proxied, label, proxied, proxied);
