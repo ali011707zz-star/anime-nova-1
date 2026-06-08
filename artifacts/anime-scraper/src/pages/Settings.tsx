@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
   Bell, BellOff, Home, Monitor,
   Check, Tv, Layers, Info, Shield, Star, LogIn, LogOut, User,
@@ -36,7 +36,7 @@ function applyTheme(t: string) {
   document.body.style.backgroundColor = base;
 }
 
-/* ──────────────── Custom Dropdown (fixed-position portal) ──────────────── */
+/* ──────────────── Custom Dropdown (bottom-sheet modal) ──────────────── */
 interface DropOption { id: string; label: string; icon?: string; }
 
 function DropdownSelect({
@@ -49,95 +49,12 @@ function DropdownSelect({
   label: string; sub?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
   const current = options.find(o => o.id === value);
 
-  const openDropdown = useCallback(() => {
-    if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      setDropPos({
-        top: rect.bottom + 6,
-        left: rect.left,
-        width: rect.width,
-      });
-    }
-    setOpen(true);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as Node;
-      if (btnRef.current && !btnRef.current.contains(target)) {
-        const dropEl = document.getElementById("dropdown-portal-content");
-        if (!dropEl || !dropEl.contains(target)) setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    document.addEventListener("touchstart", handler, { passive: true });
-    return () => {
-      document.removeEventListener("mousedown", handler);
-      document.removeEventListener("touchstart", handler);
-    };
-  }, [open]);
-
-  const dropdown = open ? ReactDOM.createPortal(
-    <div id="dropdown-portal-content" style={{
-      position: "fixed",
-      top: dropPos.top,
-      left: dropPos.left,
-      width: dropPos.width,
-      zIndex: 9999,
-    }}>
-      <motion.div
-        initial={{ opacity: 0, y: -8, scaleY: 0.92 }}
-        animate={{ opacity: 1, y: 0, scaleY: 1 }}
-        exit={{ opacity: 0, y: -8, scaleY: 0.92 }}
-        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-        style={{
-          transformOrigin: "top",
-          background: "rgba(10,10,20,0.99)",
-          border: "1px solid rgba(139,92,246,0.22)",
-          backdropFilter: "blur(40px)",
-          boxShadow: "0 24px 64px rgba(0,0,0,0.85)",
-          borderRadius: "16px",
-          overflow: "hidden",
-        }}
-      >
-        {options.map((opt, i) => {
-          const active = value === opt.id;
-          return (
-            <button key={opt.id}
-              onMouseDown={(e) => { e.preventDefault(); onChange(opt.id); setOpen(false); }}
-              onTouchEnd={(e) => { e.preventDefault(); onChange(opt.id); setOpen(false); }}
-              className="w-full flex items-center gap-3 px-4 py-3.5 transition-all active:bg-white/5 text-right"
-              style={{
-                background: active ? "rgba(139,92,246,0.15)" : "transparent",
-                borderBottom: i < options.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-              }}>
-              {opt.icon && <span className="text-base shrink-0">{opt.icon}</span>}
-              <span className="flex-1 text-[13.5px] font-bold font-['Cairo']"
-                style={{ color: active ? "#e2d9fc" : "rgba(255,255,255,0.72)" }}>
-                {opt.label}
-              </span>
-              {active && (
-                <div className="w-2 h-2 rounded-full shrink-0"
-                  style={{ background: "#a78bfa", boxShadow: "0 0 8px rgba(167,139,250,0.80)" }} />
-              )}
-            </button>
-          );
-        })}
-      </motion.div>
-    </div>,
-    document.body
-  ) : null;
-
   return (
-    <div className="relative">
+    <>
       <button
-        ref={btnRef}
-        onClick={() => open ? setOpen(false) : openDropdown()}
+        onClick={() => setOpen(true)}
         className="w-full flex items-center gap-3.5 px-5 py-3.5 transition-all hover:bg-white/3 active:scale-[0.99]"
       >
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${iconBg} border-white/8`}>
@@ -154,8 +71,80 @@ function DropdownSelect({
           </motion.div>
         </div>
       </button>
-      <AnimatePresence>{dropdown}</AnimatePresence>
-    </div>
+
+      {/* ── Bottom-sheet modal ── */}
+      <AnimatePresence>
+        {open && ReactDOM.createPortal(
+          <div
+            className="fixed inset-0 z-[9999] flex flex-col justify-end"
+            style={{ direction: "rtl" }}
+            onPointerDown={() => setOpen(false)}
+          >
+            {/* backdrop */}
+            <motion.div
+              className="absolute inset-0"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(6px)" }}
+            />
+            {/* sheet */}
+            <motion.div
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              transition={{ type: "spring", stiffness: 420, damping: 38 }}
+              onPointerDown={e => e.stopPropagation()}
+              style={{
+                position: "relative",
+                background: "linear-gradient(180deg, #0E0C1A 0%, #09090B 100%)",
+                borderRadius: "2rem 2rem 0 0",
+                border: "1.5px solid rgba(139,92,246,0.22)",
+                borderBottom: "none",
+                boxShadow: "0 -32px 80px rgba(0,0,0,0.90)",
+                paddingBottom: "max(20px, env(safe-area-inset-bottom))",
+              }}
+            >
+              {/* top bar */}
+              <div className="h-[2px]" style={{ background: "linear-gradient(90deg, transparent 0%, #7C3AED 30%, #A78BFA 50%, #7C3AED 70%, transparent 100%)" }} />
+              {/* handle */}
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-[3.5px] rounded-full bg-white/12" />
+              </div>
+              {/* title */}
+              <p className="text-center text-[12px] font-black text-white/40 font-['Cairo'] pb-3 px-5">{label}</p>
+              {/* divider */}
+              <div className="h-px bg-white/[0.05] mx-5 mb-1" />
+              {/* options */}
+              {options.map((opt, i) => {
+                const active = value === opt.id;
+                return (
+                  <button key={opt.id}
+                    onPointerDown={() => { onChange(opt.id); setOpen(false); }}
+                    className="w-full flex items-center gap-3 px-6 py-4 transition-all active:bg-white/5"
+                    style={{
+                      background: active ? "rgba(139,92,246,0.12)" : "transparent",
+                      borderBottom: i < options.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                    }}>
+                    {opt.icon && <span className="text-lg shrink-0">{opt.icon}</span>}
+                    <span className="flex-1 text-[14px] font-bold font-['Cairo'] text-right"
+                      style={{ color: active ? "#e2d9fc" : "rgba(255,255,255,0.78)" }}>
+                      {opt.label}
+                    </span>
+                    {active && (
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ background: "#a78bfa", boxShadow: "0 0 10px rgba(167,139,250,0.90)" }} />
+                    )}
+                  </button>
+                );
+              })}
+            </motion.div>
+          </div>,
+          document.body
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 
@@ -369,7 +358,7 @@ export default function Settings() {
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[9px] text-white/30 font-bold">anime nova · v2.3</span>
+          <span className="text-[9px] text-white/30 font-bold">ANIME NOVA · v2.3</span>
         </div>
       </div>
 
@@ -603,7 +592,7 @@ export default function Settings() {
         <InfoRow
           icon={Smartphone} iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
           label="إصدار التطبيق"
-          sub="anime nova · تطبيق بث الأنمي العربي"
+          sub="ANIME NOVA · تطبيق بث الأنمي العربي"
           value="v2.3.0"
         />
       </Card>
@@ -647,10 +636,10 @@ export default function Settings() {
       {/* Footer */}
       <div className="text-center pt-10 pb-4 px-6">
         <div className="inline-flex items-center gap-[5px] mb-2">
-          <span className="text-[15px] font-black text-white/55" style={{ fontFamily: "'Cairo',sans-serif" }}>anime</span>
+          <span className="text-[15px] font-black text-white/70" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em" }}>ANIME</span>
           <span className="text-[15px] font-black"
-            style={{ fontFamily: "'Cairo',sans-serif", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            nova
+            style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            NOVA
           </span>
         </div>
         <p className="text-[9px] text-white/18">جميع الحقوق محفوظة · 2025 · مجاني للجميع</p>

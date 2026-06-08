@@ -1266,8 +1266,8 @@ export default function RiftPlayer({
                   className="flex items-center px-3 pt-2"
                   style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
                 >
-                  {/* Left: speed */}
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Left: speed — flex-1 so center group is truly centered */}
+                  <div className="flex items-center gap-1.5 flex-1">
 
                     {/* Speed */}
                     <div className="relative">
@@ -1310,10 +1310,10 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* Center: 10→  ⏸  ←10  (RTL: right=forward, left=back) — match center overlay size */}
-                  <div className="flex items-center gap-6 flex-1 justify-center">
+                  {/* Center: 10→  ⏸  ←10  — same gap-7 + same button sizes as center overlay */}
+                  <div className="flex items-center gap-7 flex-none">
                     <button onClick={() => { skip(10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[4px] rounded-full active:scale-90 transition-all duration-150"
+                      className="flex flex-col items-center justify-center gap-[5px] rounded-full active:scale-90 transition-all duration-150"
                       style={{
                         width: 58, height: 58,
                         background: "rgba(0,0,0,0.50)",
@@ -1326,17 +1326,17 @@ export default function RiftPlayer({
                     <button onClick={togglePlay}
                       className="rounded-full flex items-center justify-center active:scale-90 transition-transform"
                       style={{
-                        width: 68, height: 68,
+                        width: 76, height: 76,
                         background: "rgba(109,40,217,0.90)",
                         border: "2px solid rgba(167,139,250,0.60)",
                         boxShadow: "0 6px 28px rgba(139,92,246,0.55), 0 0 0 1px rgba(255,255,255,0.07) inset",
                       }}>
                       {playing
-                        ? <Pause className="w-[26px] h-[26px] text-white fill-white" />
-                        : <Play  className="w-[26px] h-[26px] text-white fill-white ml-0.5" />}
+                        ? <Pause className="w-7 h-7 text-white fill-white" />
+                        : <Play  className="w-7 h-7 text-white fill-white ml-0.5" />}
                     </button>
                     <button onClick={() => { skip(-10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[4px] rounded-full active:scale-90 transition-all duration-150"
+                      className="flex flex-col items-center justify-center gap-[5px] rounded-full active:scale-90 transition-all duration-150"
                       style={{
                         width: 58, height: 58,
                         background: "rgba(0,0,0,0.50)",
@@ -1348,8 +1348,8 @@ export default function RiftPlayer({
                     </button>
                   </div>
 
-                  {/* Right: view-mode · volume · lock */}
-                  <div className="flex items-center gap-2 shrink-0">
+                  {/* Right: view-mode · volume · lock — flex-1 justify-end so center stays centered */}
+                  <div className="flex items-center gap-2 flex-1 justify-end">
 
                     {/* ── View Mode Button ── */}
                     <button

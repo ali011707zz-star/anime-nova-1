@@ -23,6 +23,10 @@ async function verifyPassword(password: string, hash: string): Promise<boolean> 
   }
 }
 
+function generateCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
 export function registerEmailAuthRoutes(app: Express): void {
 
   // ── Sign Up ──────────────────────────────────────────────────────────────
@@ -47,6 +51,7 @@ export function registerEmailAuthRoutes(app: Express): void {
       const passwordHash = await hashPassword(password);
       const displayName = typeof name === "string" && name.trim() ? name.trim() : email.split("@")[0];
       const nameParts = displayName.split(" ");
+      const code = generateCode();
 
       const [user] = await db.insert(users).values({
         email,
@@ -54,9 +59,43 @@ export function registerEmailAuthRoutes(app: Express): void {
         displayName,
         firstName: nameParts[0] || null,
         lastName: nameParts.slice(1).join(" ") || null,
+        emailVerified: false,
+        verificationCode: code,
       }).returning();
 
-      (req.session as any).emailUserId = user.id;
+      (req.session as any).pendingVerifyId = user.id;
+
+      return res.json({
+        requiresVerification: true,
+        verificationCode: code,
+        email: user.email,
+      });
+    } catch (err: any) {
+      console.error("email-signup error:", err);
+      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
+    }
+  });
+
+  // ── Verify Email ─────────────────────────────────────────────────────────
+  app.post("/api/auth/verify-email", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any).pendingVerifyId;
+      if (!userId) return res.status(400).json({ error: "جلسة التحقق منتهية" });
+
+      const { code } = req.body || {};
+      if (!code) return res.status(400).json({ error: "رمز التحقق مطلوب" });
+
+      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
+
+      if (String(user.verificationCode) !== String(code).trim()) {
+        return res.status(400).json({ error: "رمز التحقق غير صحيح" });
+      }
+
+      await db.update(users).set({ emailVerified: true, verificationCode: null, updatedAt: new Date() }).where(eq(users.id, userId));
+
+      delete (req.session as any).pendingVerifyId;
+      (req.session as any).emailUserId = userId;
 
       return res.json({
         id: user.id,
@@ -67,8 +106,24 @@ export function registerEmailAuthRoutes(app: Express): void {
         lastName: user.lastName,
         profileImageUrl: user.profileImageCustom || user.profileImageUrl,
       });
-    } catch (err: any) {
-      console.error("email-signup error:", err);
+    } catch (err) {
+      console.error("verify-email error:", err);
+      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
+    }
+  });
+
+  // ── Resend Code ───────────────────────────────────────────────────────────
+  app.post("/api/auth/resend-code", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any).pendingVerifyId;
+      if (!userId) return res.status(400).json({ error: "جلسة التحقق منتهية" });
+
+      const code = generateCode();
+      await db.update(users).set({ verificationCode: code, updatedAt: new Date() }).where(eq(users.id, userId));
+
+      return res.json({ verificationCode: code });
+    } catch (err) {
+      console.error("resend-code error:", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
@@ -89,6 +144,17 @@ export function registerEmailAuthRoutes(app: Express): void {
       const valid = await verifyPassword(String(password), user.passwordHash);
       if (!valid) {
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
+      }
+
+      if (user.emailVerified === false) {
+        const code = generateCode();
+        await db.update(users).set({ verificationCode: code, updatedAt: new Date() }).where(eq(users.id, user.id));
+        (req.session as any).pendingVerifyId = user.id;
+        return res.json({
+          requiresVerification: true,
+          verificationCode: code,
+          email: user.email,
+        });
       }
 
       (req.session as any).emailUserId = user.id;
