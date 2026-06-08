@@ -30,7 +30,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           >
             <Menu className="w-4 h-4" />
           </button>
-          <div className="flex items-center gap-[4px]">
+          <div className="flex items-center gap-[4px]" dir="ltr">
             <span className="text-[16px] font-black tracking-tight text-white/90" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.03em" }}>ANIME</span>
             <span className="text-[16px] font-black tracking-tight" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.03em", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>NOVA</span>
           </div>

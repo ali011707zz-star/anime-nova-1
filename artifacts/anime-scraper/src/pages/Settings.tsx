@@ -856,7 +856,7 @@ export default function Settings() {
 
       {/* Footer */}
       <div className="text-center pt-10 pb-4 px-6">
-        <div className="inline-flex items-center gap-[5px] mb-2">
+        <div className="inline-flex items-center gap-[5px] mb-2" dir="ltr">
           <span className="text-[15px] font-black text-white/70" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em" }}>ANIME</span>
           <span className="text-[15px] font-black"
             style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
