@@ -297,8 +297,7 @@ export default function AnimationWatch() {
         if (!seenUrls.current.has(key)) {
           seenUrls.current.add(key);
           setEmbedSources(prev => [...prev, { url: src.url, label: src.label }]);
-          // Transition out of loading screen so fallback is visible immediately
-          setStep(prev => prev === "playing" ? prev : "sources");
+          // Stay on loading screen; iframes only shown after SSE done + no direct sources found
         }
         return;
       }
@@ -750,7 +749,7 @@ export default function AnimationWatch() {
       {/* ── Scrollable source list ── */}
       <div className="flex-1 overflow-y-auto" style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
-        {step === "error" || (!hasSources && embedSources.length > 0) ? (
+        {step === "error" || (sseDone && !hasSources && embedSources.length > 0) ? (
           <EmbedFallbackSection
             embedSources={embedSources}
             onPlay={setEmbedSrc}

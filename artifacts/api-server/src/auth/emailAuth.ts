@@ -3,6 +3,7 @@ import { db, users } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { sendVerificationEmail } from "../lib/emailSender";
 
 const scryptAsync = promisify(scrypt);
 
@@ -65,9 +66,11 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       (req.session as any).pendingVerifyId = user.id;
 
+      const sent = await sendVerificationEmail(user.email!, code);
+
       return res.json({
         requiresVerification: true,
-        verificationCode: code,
+        emailSent: sent,
         email: user.email,
       });
     } catch (err: any) {
@@ -121,7 +124,10 @@ export function registerEmailAuthRoutes(app: Express): void {
       const code = generateCode();
       await db.update(users).set({ verificationCode: code, updatedAt: new Date() }).where(eq(users.id, userId));
 
-      return res.json({ verificationCode: code });
+      const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+      if (user?.email) await sendVerificationEmail(user.email, code);
+
+      return res.json({ ok: true });
     } catch (err) {
       console.error("resend-code error:", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
@@ -150,9 +156,10 @@ export function registerEmailAuthRoutes(app: Express): void {
         const code = generateCode();
         await db.update(users).set({ verificationCode: code, updatedAt: new Date() }).where(eq(users.id, user.id));
         (req.session as any).pendingVerifyId = user.id;
+        if (user.email) await sendVerificationEmail(user.email, code);
         return res.json({
           requiresVerification: true,
-          verificationCode: code,
+          emailSent: true,
           email: user.email,
         });
       }

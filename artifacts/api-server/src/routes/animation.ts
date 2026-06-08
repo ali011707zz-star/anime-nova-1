@@ -1036,17 +1036,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   try {
     send("status", { msg: `جاري البحث عن "${title}"…` });
 
-    // ── For TV: send iframe fallback sources IMMEDIATELY so user isn't waiting 40s ──
-    if (type === "tv" && tmdbId) {
-      const tvIframes = [
-        { url: `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`,                           label: "VidLink · مشغل متكامل" },
-        { url: `https://player.videasy.net/tv/${tmdbId}/${season}/${epNum}`,                    label: "Videasy · مشغل متكامل" },
-        { url: `https://vidsrc.vip/embed/tv/${tmdbId}/${season}/${epNum}`,                      label: "VidSrc VIP · مشغل متكامل" },
-        { url: `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=tv&s=${season}&e=${epNum}`,   label: "MultiEmbed · مشغل متكامل" },
-        { url: `https://www.vidking.net/embed/tv/${tmdbId}/${season}/${epNum}`,                 label: "VidKing · مشغل متكامل" },
-      ];
-      for (const src of tvIframes) send("source", { url: src.url, label: src.label, isEmbed: true });
-    }
+
 
     // Fetch IMDB ID from TMDB (needed for some scrapers)
     let imdbId = "";
@@ -1373,7 +1363,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         const tvExtra    = type === "tv" ? `&season=${season}&episode=${epNum}` : "";
         const watchRef   = `${SC_BASE}/watch/${tmdbId}?type=${type}`;
 
-        const scHeaders = { "User-Agent": UA, "Referer": watchRef, "Accept": "application/json" };
+        const scHeaders = {
+          "User-Agent": UA,
+          "Referer": watchRef,
+          "Origin": SC_BASE,
+          "Accept": "application/json",
+          "Accept-Language": "ar,en;q=0.9",
+        };
 
         try {
           send("status", { msg: "StarCima: جاري الاستخراج…" });
@@ -1387,9 +1383,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   `${SC_VIDZEE}?tmdbId=${tmdbId}&type=${type}${tvExtra}`,
                   { headers: scHeaders, signal: AbortSignal.timeout(12_000) }
                 );
-                if (!r.ok) return;
+                if (!r.ok) {
+                  console.error(`[StarCima/vidzee] HTTP ${r.status} for tmdbId=${tmdbId}`);
+                  return;
+                }
                 const data: any = await r.json();
                 const servers: any[] = (data.servers || []);
+                if (!servers.length) console.warn(`[StarCima/vidzee] No servers returned for tmdbId=${tmdbId}`);
 
                 await Promise.allSettled(servers.map(async (srv) => {
                   if (!srv.url) return;
@@ -1408,10 +1408,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   // No probe — CDN URLs are time-sensitive and may fail HEAD from Replit IP.
                   // Player handles failures and auto-falls to next source.
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-                  const label   = srv.name || "الثريا";
+                  const label   = `الثريا · ${srv.name || "HD"}`;
                   sendSource(proxied, label, proxied, proxied);
                 }));
-              } catch { /* silent */ }
+              } catch (e) { console.error("[StarCima/vidzee] error:", e); }
             })(),
 
             // ── arabic-sources: many embed servers (streamwish, filemoon …) ─
@@ -1427,9 +1427,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   headers: scHeaders,
                   signal : AbortSignal.timeout(12_000),
                 });
-                if (!r.ok) return;
+                if (!r.ok) {
+                  console.error(`[StarCima/arabic] HTTP ${r.status}`);
+                  return;
+                }
                 const data: any = await r.json();
                 const servers: any[] = (data.servers || []);
+                if (!servers.length) console.warn("[StarCima/arabic] No arabic servers returned");
 
                 // isTopPriority first (streamwish, filemoon, dood …) — run ALL in parallel (no cap)
                 const priority = servers.filter((s: any) => s.isTopPriority);
@@ -1439,9 +1443,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 await Promise.allSettled(ordered.map(async (srv: any) => {
                   if (!srv.embedUrl) return;
                   // Try server-side extraction only — no iframe fallback
-                  await sendExtracted(srv.embedUrl, `StarCima ${srv.name || "عربي"}`);
+                  await sendExtracted(srv.embedUrl, `الثريا · ${srv.name || "عربي"}`);
                 }));
-              } catch { /* silent */ }
+              } catch (e) { console.error("[StarCima/arabic] error:", e); }
             })(),
           ]);
 
@@ -1523,21 +1527,24 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
     ]);
 
-    if (sourceCount === 0) {
+    if (sourceCount === 0 && tmdbId) {
       send("status", { msg: "لم يُعثر على مصادر مباشرة — جارٍ إرسال مشغلات بديلة…" });
-      // Iframe fallback: for TV the iframes were already sent at start; only send for movies here
-      if (tmdbId && type !== "tv") {
-        const iframeSrcs = [
-          { url: `https://vidlink.pro/movie/${tmdbId}`, label: "VidLink · مشغل متكامل" },
-          { url: `https://player.videasy.net/movie/${tmdbId}`, label: "Videasy · مشغل متكامل" },
-          { url: `https://vidsrc.vip/embed/movie/${tmdbId}`, label: "VidSrc VIP · مشغل متكامل" },
-          { url: `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=movie`, label: "MultiEmbed · مشغل متكامل" },
-          { url: `https://www.vidking.net/embed/movie/${tmdbId}`, label: "VidKing · مشغل متكامل" },
-        ];
-        for (const src of iframeSrcs) {
-          send("source", { url: src.url, label: src.label, isEmbed: true });
-        }
-      }
+      const iframeSrcs = type === "tv"
+        ? [
+            { url: `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`,                         label: "VidLink · مشغل متكامل" },
+            { url: `https://player.videasy.net/tv/${tmdbId}/${season}/${epNum}`,                  label: "Videasy · مشغل متكامل" },
+            { url: `https://vidsrc.vip/embed/tv/${tmdbId}/${season}/${epNum}`,                    label: "VidSrc VIP · مشغل متكامل" },
+            { url: `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=tv&s=${season}&e=${epNum}`, label: "MultiEmbed · مشغل متكامل" },
+            { url: `https://www.vidking.net/embed/tv/${tmdbId}/${season}/${epNum}`,               label: "VidKing · مشغل متكامل" },
+          ]
+        : [
+            { url: `https://vidlink.pro/movie/${tmdbId}`,                             label: "VidLink · مشغل متكامل" },
+            { url: `https://player.videasy.net/movie/${tmdbId}`,                      label: "Videasy · مشغل متكامل" },
+            { url: `https://vidsrc.vip/embed/movie/${tmdbId}`,                        label: "VidSrc VIP · مشغل متكامل" },
+            { url: `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=movie`,         label: "MultiEmbed · مشغل متكامل" },
+            { url: `https://www.vidking.net/embed/movie/${tmdbId}`,                   label: "VidKing · مشغل متكامل" },
+          ];
+      for (const src of iframeSrcs) send("source", { url: src.url, label: src.label, isEmbed: true });
     }
     send("done", {}); clearInterval(keepAlive); res.end();
   } catch (e) {
