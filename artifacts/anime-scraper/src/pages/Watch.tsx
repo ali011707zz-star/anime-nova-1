@@ -42,6 +42,7 @@ const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 16, color: "#ffffff", bgOp
 
 /* ══════════════════════════════════ HELPERS ══════════════════ */
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
+  if (localStorage.getItem("pref-automark") === "false") return;
   try {
     const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
     localStorage.setItem("watch-history", JSON.stringify(

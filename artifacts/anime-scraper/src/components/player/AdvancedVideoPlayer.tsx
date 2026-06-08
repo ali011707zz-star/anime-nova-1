@@ -245,6 +245,8 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setLoading(false);
+        const savedSpeed = parseFloat(localStorage.getItem("pref-speed") || "1");
+        if (!isNaN(savedSpeed) && savedSpeed > 0) video.playbackRate = savedSpeed;
         if (autoPlay) video.play();
       });
       hls.on(Hls.Events.ERROR, (event, data) => {
@@ -254,6 +256,8 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
       });
     } else if (currentSource.type === 'mp4') {
       video.src = currentSource.url;
+      const savedSpeed = parseFloat(localStorage.getItem("pref-speed") || "1");
+      if (!isNaN(savedSpeed) && savedSpeed > 0) video.playbackRate = savedSpeed;
       setLoading(false);
     }
 

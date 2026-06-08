@@ -79,3 +79,8 @@ externalPort = 3000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+EMAIL_USER = "lya482569@gmail.com"

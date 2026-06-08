@@ -297,12 +297,8 @@ export function AuthModal({ onClose }: AuthModalProps) {
               </div>
             </div>
 
-            {/* "ANIME NOVA" brand text */}
+            {/* "NOVA ANIME" brand text */}
             <div className="flex items-baseline justify-center gap-[6px] mb-1.5" dir="ltr">
-              <span className="text-[26px] font-black leading-none tracking-tight text-white/90"
-                style={{ fontFamily: "'Cairo', sans-serif", letterSpacing: "0.04em" }}>
-                ANIME
-              </span>
               <span className="text-[26px] font-black leading-none tracking-tight"
                 style={{
                   fontFamily: "'Cairo', sans-serif",
@@ -312,6 +308,10 @@ export function AuthModal({ onClose }: AuthModalProps) {
                   WebkitTextFillColor: "transparent",
                 }}>
                 NOVA
+              </span>
+              <span className="text-[26px] font-black leading-none tracking-tight text-white/90"
+                style={{ fontFamily: "'Cairo', sans-serif", letterSpacing: "0.04em" }}>
+                ANIME
               </span>
             </div>
 
