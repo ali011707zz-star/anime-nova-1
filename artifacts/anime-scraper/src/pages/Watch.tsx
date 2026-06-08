@@ -73,6 +73,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
   { site: "anineko",      name: "AniNeko",       desc: "ياباني مترجم · HLS",      tag: "AN" },
+  { site: "animehub",     name: "AnimeHub",      desc: "ياباني مترجم · 1080p",   tag: "AH" },
   { site: "animegg",      name: "AnimeGG",       desc: "ياباني مترجم · مباشر",   tag: "GG" },
 ];
 
