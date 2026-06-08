@@ -1408,7 +1408,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   // No probe — CDN URLs are time-sensitive and may fail HEAD from Replit IP.
                   // Player handles failures and auto-falls to next source.
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-                  const label   = `الثريا · ${srv.name || "HD"}`;
+                  const label   = srv.name || "الثريا";
                   sendSource(proxied, label, proxied, proxied);
                 }));
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
@@ -1509,8 +1509,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const sourceId = (evt.source.source || evt.source.label || "").toLowerCase();
               if (sourceId === "animehub" || rawUrl.includes("burntburst") || rawUrl.includes("echovideo.ru")) return;
 
-              const label   = `Vyla · ${evt.source.label || evt.source.source}`;
-              const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
+              const label = `Vyla · ${evt.source.label || evt.source.source}`;
+
+              // Route based on URL type:
+              // - HLS: URLs containing .m3u8 → hls-proxy
+              // - MP4/direct (e.g. fsharetv.cc/api/media/...): → video-proxy
+              const isHls = rawUrl.includes(".m3u8") || rawUrl.includes("/hls/");
+              const proxied = isHls
+                ? `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`
+                : `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
               sendSource(proxied, label, proxied, proxied);
 
             } catch { /* bad JSON, skip */ }
