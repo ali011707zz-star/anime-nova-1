@@ -189,6 +189,8 @@ export default function RiftPlayer({
   const [longPress,       setLongPress]       = useState(false);
   const [screenshotFlash, setScreenshotFlash] = useState(false);
   const [isEnded,         setIsEnded]         = useState(false);
+  const [showUnlockBtn,   setShowUnlockBtn]   = useState(false);
+  const unlockBtnHideRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ── auto-close sub menu when controls hide ── */
   useEffect(() => {
@@ -629,6 +631,12 @@ export default function RiftPlayer({
     }
   }
   function onTE(e: React.TouchEvent<HTMLDivElement>) {
+    if (isLocked) {
+      if (unlockBtnHideRef.current) clearTimeout(unlockBtnHideRef.current);
+      setShowUnlockBtn(true);
+      unlockBtnHideRef.current = setTimeout(() => setShowUnlockBtn(false), 3000);
+      return;
+    }
     if (longTimer.current) { clearTimeout(longTimer.current); longTimer.current = null; }
     if (longPress) {
       if (videoRef.current) videoRef.current.playbackRate = prevSpeed.current;
@@ -908,11 +916,11 @@ export default function RiftPlayer({
         </AnimatePresence>
 
         {/* ════════════════════════════════════════
-            LOCK SCREEN — persistent indicator + centered unlock overlay
+            LOCK SCREEN — persistent side indicator + tap-to-show unlock button
         ════════════════════════════════════════ */}
 
-        {/* Faint persistent lock badge — always visible when locked */}
-        {isLocked && !showCtrl && (
+        {/* Faint persistent lock badge — shown when locked and unlock button hidden */}
+        {isLocked && !showUnlockBtn && (
           <div className="absolute right-4 top-1/2 -translate-y-1/2 z-40 pointer-events-none">
             <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
               style={{ background: "rgba(0,0,0,0.42)", border: "1px solid rgba(251,191,36,0.22)" }}>
@@ -921,45 +929,35 @@ export default function RiftPlayer({
           </div>
         )}
 
-        {/* Unlock overlay — prominent centered button when controls are shown */}
+        {/* Unlock button — slides in from right side on tap, auto-hides after 3s */}
         <AnimatePresence>
-          {isLocked && showCtrl && (
-            <motion.div
-              key="lock-ui"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.18 }}
-              className="absolute inset-0 z-40 flex items-center justify-center pointer-events-auto"
-              onClick={e => e.stopPropagation()}
-              onTouchStart={e => e.stopPropagation()}
+          {isLocked && showUnlockBtn && (
+            <motion.button
+              key="unlock-btn"
+              initial={{ opacity: 0, x: 14 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 14 }}
+              transition={{ duration: 0.20, ease: [0.22, 1, 0.36, 1] }}
+              onClick={() => {
+                setIsLocked(false);
+                setShowUnlockBtn(false);
+                if (unlockBtnHideRef.current) clearTimeout(unlockBtnHideRef.current);
+              }}
               onTouchEnd={e => e.stopPropagation()}
-              style={{ background: "rgba(0,0,0,0.38)" }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-2.5 px-5 py-4 rounded-2xl active:scale-95 transition-transform pointer-events-auto"
+              style={{
+                background: "rgba(5,5,15,0.90)",
+                backdropFilter: "blur(28px) saturate(180%)",
+                border: "1.5px solid rgba(251,191,36,0.40)",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.65)",
+              }}
             >
-              <motion.button
-                onClick={() => setIsLocked(false)}
-                initial={{ scale: 0.88, y: 8 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.88, y: 8 }}
-                transition={{ duration: 0.20, ease: [0.22, 1, 0.36, 1] }}
-                className="flex flex-col items-center gap-3.5 px-10 py-6 rounded-[28px] active:scale-95 transition-transform"
-                style={{
-                  background: "rgba(5,5,15,0.90)",
-                  backdropFilter: "blur(32px) saturate(180%)",
-                  border: "1.5px solid rgba(251,191,36,0.38)",
-                  boxShadow: "0 16px 48px rgba(0,0,0,0.65), 0 0 0 1px rgba(251,191,36,0.06) inset",
-                }}
-              >
-                <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                  style={{ background: "rgba(251,191,36,0.14)", border: "1.5px solid rgba(251,191,36,0.32)" }}>
-                  <Unlock className="w-7 h-7 text-amber-300" strokeWidth={1.8} />
-                </div>
-                <div className="text-center">
-                  <p className="text-amber-200/95 text-[16px] font-black font-['Cairo'] leading-none">فتح القفل</p>
-                  <p className="text-amber-200/40 text-[11px] font-['Cairo'] mt-1">اضغط هنا للمتابعة</p>
-                </div>
-              </motion.button>
-            </motion.div>
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center"
+                style={{ background: "rgba(251,191,36,0.14)", border: "1px solid rgba(251,191,36,0.32)" }}>
+                <Unlock className="w-5 h-5 text-amber-300" strokeWidth={1.8} />
+              </div>
+              <p className="text-amber-200/90 text-[11px] font-black font-['Cairo'] leading-none">فتح القفل</p>
+            </motion.button>
           )}
         </AnimatePresence>
 
@@ -1045,6 +1043,10 @@ export default function RiftPlayer({
                       >
                         <SubtitleIcon className="w-[15px] h-[15px]"
                           style={{ color: (subEnabled || showSubMenu) ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
+                        {/* Loading spinner ring — shown while subtitle is being fetched/translated */}
+                        {!subEnabled && subNote && subNote !== "لا تتوفر ترجمة" && (
+                          <span className="absolute inset-0 rounded-full border border-t-violet-400 border-violet-400/0 animate-spin pointer-events-none" />
+                        )}
                         {showSubMenu && (
                           <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-violet-400" />
                         )}
@@ -1309,65 +1311,62 @@ export default function RiftPlayer({
                   </div>
 
                   {/* Center: 10→  ⏸  ←10  (RTL: right=forward, left=back) */}
-                  <div className="flex items-center gap-8 flex-1 justify-center">
+                  <div className="flex items-center gap-6 flex-1 justify-center">
                     <button onClick={() => { skip(10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150"
+                      className="flex flex-col items-center justify-center gap-[3px] w-9 h-9 rounded-full active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.18)" }}>
-                      <RotateCw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.9} />
-                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
+                      <RotateCw className="w-[16px] h-[16px] text-white/80" strokeWidth={1.9} />
+                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 8 }}>10ث</span>
                     </button>
                     <button onClick={togglePlay}
-                      className="w-[54px] h-[54px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                      className="w-[50px] h-[50px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
                       style={{
                         background: "rgba(109,40,217,0.85)",
                         border: "1.5px solid rgba(167,139,250,0.55)",
                         boxShadow: "0 4px 20px rgba(139,92,246,0.45), 0 0 0 1px rgba(255,255,255,0.06) inset",
                       }}>
                       {playing
-                        ? <Pause className="w-[22px] h-[22px] text-white fill-white" />
-                        : <Play  className="w-[22px] h-[22px] text-white fill-white ml-0.5" />}
+                        ? <Pause className="w-[20px] h-[20px] text-white fill-white" />
+                        : <Play  className="w-[20px] h-[20px] text-white fill-white ml-0.5" />}
                     </button>
                     <button onClick={() => { skip(-10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[4px] w-11 h-11 rounded-full active:scale-90 transition-all duration-150"
+                      className="flex flex-col items-center justify-center gap-[3px] w-9 h-9 rounded-full active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.18)" }}>
-                      <RotateCcw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.9} />
-                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
+                      <RotateCcw className="w-[16px] h-[16px] text-white/80" strokeWidth={1.9} />
+                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 8 }}>10ث</span>
                     </button>
                   </div>
 
                   {/* Right: view-mode · volume · lock */}
                   <div className="flex items-center gap-2 shrink-0">
 
-                    {/* ── View Mode Button (moved to right) ── */}
+                    {/* ── View Mode Button ── */}
                     <button
                       onClick={() => { setShowViewMode(v => !v); setShowSpeed(false); showControls(); }}
-                      className="h-9 px-2.5 flex items-center gap-1.5 rounded-xl active:bg-white/10 transition-colors"
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
                       title="وضع العرض"
-                      style={showViewMode ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)" } : {}}
+                      style={showViewMode || isZoomed || isFs
+                        ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)" }
+                        : { background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.14)" }}
                     >
                       {isFs
-                        ? <Minimize2  className="w-[15px] h-[15px] text-violet-300" />
+                        ? <Minimize2  className="w-[16px] h-[16px] text-violet-300" />
                         : isZoomed
-                        ? <Scan       className="w-[15px] h-[15px] text-violet-300" />
-                        : <Maximize2  className="w-[15px] h-[15px] text-white/75" />}
-                      <span className="text-[10px] font-black font-['Cairo']"
-                        style={{ color: (showViewMode || isZoomed || isFs) ? "#c4b5fd" : "rgba(255,255,255,0.55)" }}>
-                        {isFs ? "ملء" : isZoomed ? "تكبير" : "عرض"}
-                      </span>
+                        ? <Scan       className="w-[16px] h-[16px] text-violet-300" />
+                        : <Maximize2  className="w-[16px] h-[16px] text-white/65" />}
                     </button>
 
                     <button onClick={toggleMute}
                       className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.14)" }}>
                       {muted || volume === 0
-                        ? <VolumeX className="w-[18px] h-[18px] text-white/55" />
-                        : <Volume2 className="w-[18px] h-[18px] text-white/55" />}
+                        ? <VolumeX className="w-[16px] h-[16px] text-white/55" />
+                        : <Volume2 className="w-[16px] h-[16px] text-white/55" />}
                     </button>
-                    <button onClick={() => setIsLocked(true)}
-                      className="h-9 px-3 flex items-center gap-1.5 rounded-xl active:scale-90 transition-all duration-150"
+                    <button onClick={() => { setIsLocked(true); setShowUnlockBtn(false); }}
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(251,191,36,0.11)", border: "1px solid rgba(251,191,36,0.26)" }}>
-                      <Lock className="w-[14px] h-[14px] text-amber-300/70" strokeWidth={2.2} />
-                      <span className="text-[10px] font-black font-['Cairo'] text-amber-200/60">قفل</span>
+                      <Lock className="w-[15px] h-[15px] text-amber-300/70" strokeWidth={2.2} />
                     </button>
                   </div>
                 </div>
