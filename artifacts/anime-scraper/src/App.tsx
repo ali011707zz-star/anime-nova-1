@@ -101,12 +101,26 @@ function applyTheme(t: string) {
   }
 }
 
+function StartPageRedirect() {
+  const [location, navigate] = useLocation();
+  useEffect(() => {
+    if (location === "/" || location === "") {
+      const pref = localStorage.getItem("pref-startpage");
+      if (pref === "browse") navigate("/browse");
+      else if (pref === "animations") navigate("/animations");
+      else if (pref === "library") navigate("/library");
+    }
+  }, []);
+  return null;
+}
+
 function Router({ onMenuClick }: { onMenuClick: () => void }) {
   const [location] = useLocation();
   const hideHeader = NO_GLOBAL_HEADER.some(r => location.startsWith(r));
 
   return (
     <>
+      <StartPageRedirect />
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
       <ErrorBoundary resetKey={location}>
         <Suspense fallback={<PageLoader />}>

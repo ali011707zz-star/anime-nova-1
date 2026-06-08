@@ -369,7 +369,7 @@ export default function Settings() {
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[9px] text-white/30 font-bold">Nova v2.3</span>
+          <span className="text-[9px] text-white/30 font-bold">anime nova · v2.3</span>
         </div>
       </div>
 
@@ -534,8 +534,10 @@ export default function Settings() {
           label="صفحة البداية" sub="الصفحة التي تظهر عند فتح التطبيق"
           value={startPage} onChange={setSP}
           options={[
-            { id: "home",   label: "الرئيسية", icon: "🏠" },
-            { id: "browse", label: "تصفح",     icon: "🔍" },
+            { id: "home",       label: "الرئيسية",        icon: "🏠" },
+            { id: "browse",     label: "تصفح الأنمي",     icon: "🔍" },
+            { id: "animations", label: "الرسوم المتحركة", icon: "🎬" },
+            { id: "library",    label: "مكتبتي",          icon: "📚" },
           ]}
         />
         <ToggleRow
@@ -601,7 +603,7 @@ export default function Settings() {
         <InfoRow
           icon={Smartphone} iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
           label="إصدار التطبيق"
-          sub="Nova Anime · Arabic Streaming App"
+          sub="anime nova · تطبيق بث الأنمي العربي"
           value="v2.3.0"
         />
       </Card>
@@ -644,11 +646,11 @@ export default function Settings() {
 
       {/* Footer */}
       <div className="text-center pt-10 pb-4 px-6">
-        <div className="inline-flex items-center gap-1.5 mb-2">
-          <span className="text-[15px] font-black text-white/60">ANIME</span>
+        <div className="inline-flex items-center gap-[5px] mb-2">
+          <span className="text-[15px] font-black text-white/55" style={{ fontFamily: "'Cairo',sans-serif" }}>anime</span>
           <span className="text-[15px] font-black"
-            style={{ background: "linear-gradient(135deg,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            NOVA
+            style={{ fontFamily: "'Cairo',sans-serif", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            nova
           </span>
         </div>
         <p className="text-[9px] text-white/18">جميع الحقوق محفوظة · 2025 · مجاني للجميع</p>

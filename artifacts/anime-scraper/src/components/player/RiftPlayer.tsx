@@ -1310,30 +1310,41 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* Center: 10→  ⏸  ←10  (RTL: right=forward, left=back) — all buttons same size */}
-                  <div className="flex items-center gap-5 flex-1 justify-center">
+                  {/* Center: 10→  ⏸  ←10  (RTL: right=forward, left=back) — match center overlay size */}
+                  <div className="flex items-center gap-6 flex-1 justify-center">
                     <button onClick={() => { skip(10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[3px] w-[50px] h-[50px] rounded-full active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.18)" }}>
-                      <RotateCw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.9} />
-                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
+                      className="flex flex-col items-center justify-center gap-[4px] rounded-full active:scale-90 transition-all duration-150"
+                      style={{
+                        width: 58, height: 58,
+                        background: "rgba(0,0,0,0.50)",
+                        border: "1.5px solid rgba(255,255,255,0.22)",
+                        boxShadow: "0 4px 18px rgba(0,0,0,0.50)",
+                      }}>
+                      <RotateCw className="w-[22px] h-[22px] text-white/85" strokeWidth={1.8} />
+                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 10 }}>10ث</span>
                     </button>
                     <button onClick={togglePlay}
-                      className="w-[50px] h-[50px] rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                      className="rounded-full flex items-center justify-center active:scale-90 transition-transform"
                       style={{
-                        background: "rgba(109,40,217,0.85)",
-                        border: "1.5px solid rgba(167,139,250,0.55)",
-                        boxShadow: "0 4px 20px rgba(139,92,246,0.45), 0 0 0 1px rgba(255,255,255,0.06) inset",
+                        width: 68, height: 68,
+                        background: "rgba(109,40,217,0.90)",
+                        border: "2px solid rgba(167,139,250,0.60)",
+                        boxShadow: "0 6px 28px rgba(139,92,246,0.55), 0 0 0 1px rgba(255,255,255,0.07) inset",
                       }}>
                       {playing
-                        ? <Pause className="w-[20px] h-[20px] text-white fill-white" />
-                        : <Play  className="w-[20px] h-[20px] text-white fill-white ml-0.5" />}
+                        ? <Pause className="w-[26px] h-[26px] text-white fill-white" />
+                        : <Play  className="w-[26px] h-[26px] text-white fill-white ml-0.5" />}
                     </button>
                     <button onClick={() => { skip(-10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[3px] w-[50px] h-[50px] rounded-full active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.18)" }}>
-                      <RotateCcw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.9} />
-                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 9 }}>10ث</span>
+                      className="flex flex-col items-center justify-center gap-[4px] rounded-full active:scale-90 transition-all duration-150"
+                      style={{
+                        width: 58, height: 58,
+                        background: "rgba(0,0,0,0.50)",
+                        border: "1.5px solid rgba(255,255,255,0.22)",
+                        boxShadow: "0 4px 18px rgba(0,0,0,0.50)",
+                      }}>
+                      <RotateCcw className="w-[22px] h-[22px] text-white/85" strokeWidth={1.8} />
+                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 10 }}>10ث</span>
                     </button>
                   </div>
 
