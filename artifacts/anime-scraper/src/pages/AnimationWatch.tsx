@@ -529,7 +529,7 @@ export default function AnimationWatch() {
           className="flex-1 w-full border-none"
           allowFullScreen
           allow="autoplay; fullscreen; picture-in-picture"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
         />
       </div>
     );

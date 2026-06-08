@@ -1539,24 +1539,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
     ]);
 
-    if (sourceCount === 0 && tmdbId) {
-      send("status", { msg: "لم يُعثر على مصادر مباشرة — جارٍ إرسال مشغلات بديلة…" });
-      const iframeSrcs = type === "tv"
-        ? [
-            { url: `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`,                         label: "VidLink · مشغل متكامل" },
-            { url: `https://player.videasy.net/tv/${tmdbId}/${season}/${epNum}`,                  label: "Videasy · مشغل متكامل" },
-            { url: `https://vidsrc.vip/embed/tv/${tmdbId}/${season}/${epNum}`,                    label: "VidSrc VIP · مشغل متكامل" },
-            { url: `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=tv&s=${season}&e=${epNum}`, label: "MultiEmbed · مشغل متكامل" },
-            { url: `https://www.vidking.net/embed/tv/${tmdbId}/${season}/${epNum}`,               label: "VidKing · مشغل متكامل" },
-          ]
-        : [
-            { url: `https://vidlink.pro/movie/${tmdbId}`,                             label: "VidLink · مشغل متكامل" },
-            { url: `https://player.videasy.net/movie/${tmdbId}`,                      label: "Videasy · مشغل متكامل" },
-            { url: `https://vidsrc.vip/embed/movie/${tmdbId}`,                        label: "VidSrc VIP · مشغل متكامل" },
-            { url: `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=movie`,         label: "MultiEmbed · مشغل متكامل" },
-            { url: `https://www.vidking.net/embed/movie/${tmdbId}`,                   label: "VidKing · مشغل متكامل" },
-          ];
-      for (const src of iframeSrcs) send("source", { url: src.url, label: src.label, isEmbed: true });
+    if (tmdbId) {
+      const vidlinkUrl = type === "tv"
+        ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
+        : `https://vidlink.pro/movie/${tmdbId}`;
+      send("source", { url: vidlinkUrl, label: "VidLink · مشغل متكامل", isEmbed: true });
     }
     send("done", {}); clearInterval(keepAlive); res.end();
   } catch (e) {
