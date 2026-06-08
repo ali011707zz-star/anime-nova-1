@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Bell, BellOff, Home, Monitor,
-  Check, Tv, Layers, Info, Shield, Star, LogIn, LogOut, User,
+  Check, Layers, Shield, LogOut, User,
   Smartphone, List, LayoutGrid, Trash2, ChevronLeft,
   Settings as SettingsIcon, Palette, ChevronDown, Zap, ChevronRight,
-  Subtitles, PlayCircle, Award, BarChart3, UserCircle, Camera,
+  Subtitles, BarChart3, UserCircle, FastForward, Play,
+  Globe, Sparkles, Film, BookOpen, X, CheckCircle2,
+  SkipForward, Radio, Star,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { AuthModal } from "@/pages/Auth";
 import ReactDOM from "react-dom";
@@ -36,8 +38,116 @@ function applyTheme(t: string) {
   document.body.style.backgroundColor = base;
 }
 
+/* ──────────────── Toast ──────────────── */
+interface ToastMsg { id: number; text: string; type: "ok" | "err"; }
+let _toastId = 0;
+let _setToasts: ((fn: (prev: ToastMsg[]) => ToastMsg[]) => void) | null = null;
+
+function showToast(text: string, type: "ok" | "err" = "ok") {
+  if (!_setToasts) return;
+  const id = ++_toastId;
+  _setToasts(p => [...p, { id, text, type }]);
+  setTimeout(() => _setToasts?.(p => p.filter(t => t.id !== id)), 2600);
+}
+
+function ToastContainer() {
+  const [toasts, setToasts] = useState<ToastMsg[]>([]);
+  useEffect(() => { _setToasts = setToasts; return () => { _setToasts = null; }; }, []);
+
+  return ReactDOM.createPortal(
+    <div className="fixed top-4 left-0 right-0 z-[99999] flex flex-col items-center gap-2 pointer-events-none px-4">
+      <AnimatePresence>
+        {toasts.map(t => (
+          <motion.div key={t.id}
+            initial={{ opacity: 0, y: -16, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.92 }}
+            transition={{ type: "spring", stiffness: 420, damping: 30 }}
+            className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl"
+            style={{
+              background: t.type === "ok" ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)",
+              border: `1px solid ${t.type === "ok" ? "rgba(16,185,129,0.35)" : "rgba(239,68,68,0.35)"}`,
+              backdropFilter: "blur(20px)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.50)",
+            }}>
+            {t.type === "ok"
+              ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              : <X className="w-4 h-4 text-red-400 shrink-0" />}
+            <span className="text-[12.5px] font-bold text-white/90 font-['Cairo']">{t.text}</span>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>,
+    document.body
+  );
+}
+
+/* ──────────────── ConfirmSheet ──────────────── */
+interface ConfirmProps {
+  open: boolean;
+  title: string;
+  desc?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", cancelLabel = "إلغاء", danger = false, onConfirm, onCancel }: ConfirmProps) {
+  if (!open) return null;
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[9999] flex flex-col justify-end" style={{ direction: "rtl" }}>
+      <motion.div className="absolute inset-0"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        style={{ background: "rgba(0,0,0,0.76)", backdropFilter: "blur(8px)" }}
+        onPointerDown={onCancel} />
+      <motion.div
+        initial={{ y: "100%", opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: "100%", opacity: 0 }}
+        transition={{ type: "spring", stiffness: 440, damping: 38 }}
+        onPointerDown={e => e.stopPropagation()}
+        style={{
+          position: "relative",
+          background: "linear-gradient(180deg, #0E0C1A 0%, #09090B 100%)",
+          borderRadius: "2rem 2rem 0 0",
+          border: "1.5px solid rgba(255,255,255,0.07)",
+          borderBottom: "none",
+          boxShadow: "0 -32px 80px rgba(0,0,0,0.90)",
+          paddingBottom: "max(24px, env(safe-area-inset-bottom))",
+        }}>
+        <div className="h-[2px]" style={{ background: danger ? "linear-gradient(90deg,transparent,#ef4444,transparent)" : "linear-gradient(90deg,transparent,#7C3AED,#A78BFA,#7C3AED,transparent)" }} />
+        <div className="flex justify-center pt-3 pb-4"><div className="w-10 h-[3.5px] rounded-full bg-white/12" /></div>
+        <div className="px-6 pb-2">
+          <p className="text-[17px] font-black text-white/90 font-['Cairo'] text-center mb-2">{title}</p>
+          {desc && <p className="text-[12px] text-white/40 font-['Cairo'] text-center leading-relaxed mb-5">{desc}</p>}
+          <div className="flex gap-3">
+            <button onPointerDown={onCancel}
+              className="flex-1 py-3.5 rounded-2xl text-[13px] font-black font-['Cairo'] transition-all active:scale-95"
+              style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              {cancelLabel}
+            </button>
+            <button onPointerDown={() => { onConfirm(); onCancel(); }}
+              className="flex-1 py-3.5 rounded-2xl text-[13px] font-black font-['Cairo'] transition-all active:scale-95"
+              style={{
+                background: danger ? "rgba(239,68,68,0.18)" : "linear-gradient(135deg,#7C3AED,#6D28D9)",
+                color: danger ? "#fca5a5" : "white",
+                border: danger ? "1px solid rgba(239,68,68,0.30)" : "1px solid rgba(139,92,246,0.30)",
+                boxShadow: danger ? "none" : "0 6px 20px rgba(124,58,237,0.35)",
+              }}>
+              {confirmLabel}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>,
+    document.body
+  );
+}
+
 /* ──────────────── Custom Dropdown (bottom-sheet modal) ──────────────── */
-interface DropOption { id: string; label: string; icon?: string; }
+interface DropOption { id: string; label: string; icon?: string; desc?: string; }
 
 function DropdownSelect({
   value, options, onChange, icon: Icon, iconColor = "text-primary", iconBg = "bg-primary/12",
@@ -53,10 +163,8 @@ function DropdownSelect({
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-3.5 px-5 py-3.5 transition-all hover:bg-white/3 active:scale-[0.99]"
-      >
+      <button onClick={() => setOpen(true)}
+        className="w-full flex items-center gap-3.5 px-5 py-3.5 transition-all hover:bg-white/3 active:scale-[0.99]">
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${iconBg} border-white/8`}>
           <Icon className={`w-4 h-4 ${iconColor}`} />
         </div>
@@ -72,27 +180,16 @@ function DropdownSelect({
         </div>
       </button>
 
-      {/* ── Bottom-sheet modal ── */}
       <AnimatePresence>
         {open && ReactDOM.createPortal(
-          <div
-            className="fixed inset-0 z-[9999] flex flex-col justify-end"
-            style={{ direction: "rtl" }}
-            onPointerDown={() => setOpen(false)}
-          >
-            {/* backdrop */}
-            <motion.div
-              className="absolute inset-0"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+          <div className="fixed inset-0 z-[9999] flex flex-col justify-end" style={{ direction: "rtl" }}
+            onPointerDown={() => setOpen(false)}>
+            <motion.div className="absolute inset-0"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
-              style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(6px)" }}
-            />
-            {/* sheet */}
+              style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(6px)" }} />
             <motion.div
-              initial={{ y: "100%", opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
+              initial={{ y: "100%", opacity: 0 }} animate={{ y: 0, opacity: 1 }}
               exit={{ y: "100%", opacity: 0 }}
               transition={{ type: "spring", stiffness: 420, damping: 38 }}
               onPointerDown={e => e.stopPropagation()}
@@ -104,19 +201,11 @@ function DropdownSelect({
                 borderBottom: "none",
                 boxShadow: "0 -32px 80px rgba(0,0,0,0.90)",
                 paddingBottom: "max(20px, env(safe-area-inset-bottom))",
-              }}
-            >
-              {/* top bar */}
+              }}>
               <div className="h-[2px]" style={{ background: "linear-gradient(90deg, transparent 0%, #7C3AED 30%, #A78BFA 50%, #7C3AED 70%, transparent 100%)" }} />
-              {/* handle */}
-              <div className="flex justify-center pt-3 pb-1">
-                <div className="w-10 h-[3.5px] rounded-full bg-white/12" />
-              </div>
-              {/* title */}
+              <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-[3.5px] rounded-full bg-white/12" /></div>
               <p className="text-center text-[12px] font-black text-white/40 font-['Cairo'] pb-3 px-5">{label}</p>
-              {/* divider */}
               <div className="h-px bg-white/[0.05] mx-5 mb-1" />
-              {/* options */}
               {options.map((opt, i) => {
                 const active = value === opt.id;
                 return (
@@ -128,14 +217,14 @@ function DropdownSelect({
                       borderBottom: i < options.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
                     }}>
                     {opt.icon && <span className="text-lg shrink-0">{opt.icon}</span>}
-                    <span className="flex-1 text-[14px] font-bold font-['Cairo'] text-right"
-                      style={{ color: active ? "#e2d9fc" : "rgba(255,255,255,0.78)" }}>
-                      {opt.label}
-                    </span>
-                    {active && (
-                      <div className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ background: "#a78bfa", boxShadow: "0 0 10px rgba(167,139,250,0.90)" }} />
-                    )}
+                    <div className="flex-1 text-right">
+                      <span className="block text-[14px] font-bold font-['Cairo']"
+                        style={{ color: active ? "#e2d9fc" : "rgba(255,255,255,0.78)" }}>
+                        {opt.label}
+                      </span>
+                      {opt.desc && <span className="block text-[10px] text-white/30 mt-0.5">{opt.desc}</span>}
+                    </div>
+                    {active && <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: "#a78bfa", boxShadow: "0 0 10px rgba(167,139,250,0.90)" }} />}
                   </button>
                 );
               })}
@@ -148,28 +237,51 @@ function DropdownSelect({
   );
 }
 
+/* ──────────────── Speed Selector ──────────────── */
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+function SpeedSelector({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="px-5 py-3.5 flex items-center gap-3">
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-amber-500/10 border-white/8">
+        <FastForward className="w-4 h-4 text-amber-400" />
+      </div>
+      <div className="flex-1 text-right">
+        <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">سرعة التشغيل الافتراضية</p>
+        <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">السرعة عند بدء أي حلقة</p>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {SPEEDS.map(s => (
+          <motion.button key={s} whileTap={{ scale: 0.85 }} onClick={() => onChange(s)}
+            className="w-8 h-7 rounded-lg text-[10px] font-black transition-all"
+            style={{
+              background: value === s ? "rgba(251,191,36,0.22)" : "rgba(255,255,255,0.05)",
+              color: value === s ? "#fde68a" : "rgba(255,255,255,0.30)",
+              border: value === s ? "1px solid rgba(251,191,36,0.40)" : "1px solid rgba(255,255,255,0.07)",
+              boxShadow: value === s ? "0 0 10px rgba(251,191,36,0.20)" : "none",
+            }}>
+            {s === 1 ? "×1" : `×${s}`}
+          </motion.button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ──────────────── Toggle switch ──────────────── */
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
-    <motion.button
-      onClick={() => onChange(!on)}
+    <motion.button onClick={() => onChange(!on)}
       className="relative shrink-0 rounded-full transition-colors duration-250"
       style={{
-        width: 48,
-        height: 28,
-        background: on
-          ? "linear-gradient(135deg,#8B5CF6,#7C3AED)"
-          : "rgba(255,255,255,0.10)",
+        width: 48, height: 28,
+        background: on ? "linear-gradient(135deg,#8B5CF6,#7C3AED)" : "rgba(255,255,255,0.10)",
         boxShadow: on ? "0 0 14px rgba(139,92,246,0.50)" : "none",
         border: on ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.10)",
-      }}
-    >
-      <motion.div
-        animate={{ x: on ? 22 : 2 }}
-        transition={{ type: "spring", stiffness: 500, damping: 32 }}
+      }}>
+      <motion.div animate={{ x: on ? 22 : 2 }} transition={{ type: "spring", stiffness: 500, damping: 32 }}
         className="absolute top-[3px] w-[22px] h-[22px] bg-white rounded-full"
-        style={{ boxShadow: on ? "0 2px 8px rgba(0,0,0,0.45)" : "0 1px 4px rgba(0,0,0,0.30)" }}
-      />
+        style={{ boxShadow: on ? "0 2px 8px rgba(0,0,0,0.45)" : "0 1px 4px rgba(0,0,0,0.30)" }} />
     </motion.button>
   );
 }
@@ -181,8 +293,7 @@ function SectionHeader({ title, icon }: { title: string; icon?: string }) {
       <div className="flex items-center gap-2.5">
         <div className="h-px flex-1 bg-white/6" />
         <span className="text-[10px] font-black text-white/30 tracking-[0.15em] uppercase font-['Cairo'] flex items-center gap-1">
-          {icon && <span>{icon}</span>}
-          {title}
+          {icon && <span>{icon}</span>}{title}
         </span>
         <div className="h-px flex-1 bg-white/6" />
       </div>
@@ -193,10 +304,10 @@ function SectionHeader({ title, icon }: { title: string; icon?: string }) {
 /* ──────────────── Toggle row ──────────────── */
 function ToggleRow({
   icon: Icon, iconColor = "text-primary", iconBg = "bg-primary/12",
-  label, sub, on, onChange,
+  label, sub, on, onChange, badge,
 }: {
   icon: any; iconColor?: string; iconBg?: string;
-  label: string; sub?: string; on: boolean; onChange: (v: boolean) => void;
+  label: string; sub?: string; on: boolean; onChange: (v: boolean) => void; badge?: string;
 }) {
   return (
     <div onClick={() => onChange(!on)} role="button"
@@ -205,7 +316,10 @@ function ToggleRow({
         <Icon className={`w-4 h-4 ${iconColor}`} />
       </div>
       <div className="flex-1 min-w-0 text-right">
-        <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+        <div className="flex items-center gap-2 justify-end">
+          <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+          {badge && <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(139,92,246,0.18)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.25)" }}>{badge}</span>}
+        </div>
         {sub && <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">{sub}</p>}
       </div>
       <Toggle on={on} onChange={onChange} />
@@ -241,8 +355,8 @@ function DangerRow({ label, sub, onClick }: { label: string; sub?: string; onCli
 }
 
 /* ──────────────── Info row ──────────────── */
-function InfoRow({ icon: Icon, iconColor, iconBg, label, sub, value }: {
-  icon: any; iconColor: string; iconBg: string; label: string; sub?: string; value?: string;
+function InfoRow({ icon: Icon, iconColor, iconBg, label, sub, value, badge }: {
+  icon: any; iconColor: string; iconBg: string; label: string; sub?: string; value?: string; badge?: string;
 }) {
   return (
     <div className="flex items-center gap-3.5 px-5 py-3.5">
@@ -250,7 +364,10 @@ function InfoRow({ icon: Icon, iconColor, iconBg, label, sub, value }: {
         <Icon className={`w-4 h-4 ${iconColor}`} />
       </div>
       <div className="flex-1 min-w-0 text-right">
-        <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+        <div className="flex items-center gap-2 justify-end">
+          <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+          {badge && <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(16,185,129,0.15)", color: "#34d399", border: "1px solid rgba(16,185,129,0.25)" }}>{badge}</span>}
+        </div>
         {sub && <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">{sub}</p>}
       </div>
       {value && <span className="text-[12px] font-black text-primary shrink-0">{value}</span>}
@@ -259,8 +376,8 @@ function InfoRow({ icon: Icon, iconColor, iconBg, label, sub, value }: {
 }
 
 /* ──────────────── Nav row ──────────────── */
-function NavRow({ icon: Icon, iconColor, iconBg, label, sub, href }: {
-  icon: any; iconColor: string; iconBg: string; label: string; sub?: string; href: string;
+function NavRow({ icon: Icon, iconColor, iconBg, label, sub, href, badge }: {
+  icon: any; iconColor: string; iconBg: string; label: string; sub?: string; href: string; badge?: string;
 }) {
   return (
     <Link href={href}>
@@ -269,7 +386,10 @@ function NavRow({ icon: Icon, iconColor, iconBg, label, sub, href }: {
           <Icon className={`w-4 h-4 ${iconColor}`} />
         </div>
         <div className="flex-1 min-w-0 text-right">
-          <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+          <div className="flex items-center gap-2 justify-end">
+            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
+            {badge && <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(139,92,246,0.18)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.25)" }}>{badge}</span>}
+          </div>
           {sub && <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">{sub}</p>}
         </div>
         <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
@@ -283,8 +403,21 @@ function NavRow({ icon: Icon, iconColor, iconBg, label, sub, href }: {
 ══════════════════════════════════════════════════ */
 export default function Settings() {
   const { user, signOut } = useAuth();
+  const [, navigate] = useLocation();
   const [showAuth, setShowAuth] = useState(false);
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean; title: string; desc?: string;
+    confirmLabel?: string; danger?: boolean; onConfirm: () => void;
+  }>({ open: false, title: "", onConfirm: () => {} });
 
+  const openConfirm = useCallback((opts: Omit<typeof confirmState, "open">) => {
+    setConfirmState({ ...opts, open: true });
+  }, []);
+  const closeConfirm = useCallback(() => {
+    setConfirmState(p => ({ ...p, open: false }));
+  }, []);
+
+  /* ── Preferences ── */
   const [theme,     setTheme]     = useState(() => localStorage.getItem("pref-theme")     || "dark");
   const [notifs,    setNotifs]    = useState(() => localStorage.getItem("pref-notifs")    !== "false");
   const [autoMark,  setAutoMark]  = useState(() => localStorage.getItem("pref-automark")  !== "false");
@@ -292,44 +425,52 @@ export default function Settings() {
   const [viewMode,  setViewMode]  = useState(() => localStorage.getItem("pref-viewmode")  || "grid");
   const [subSize,   setSubSize]   = useState(() => localStorage.getItem("pref-subsize")   || "medium");
   const [autoSub,   setAutoSub]   = useState(() => localStorage.getItem("pref-autosub")   !== "false");
+  const [speed,     setSpeed]     = useState(() => parseFloat(localStorage.getItem("pref-speed") || "1"));
+  const [quality,   setQuality]   = useState(() => localStorage.getItem("pref-quality")   || "auto");
+  const [autoPlay,  setAutoPlay]  = useState(() => localStorage.getItem("pref-autoplay")  !== "false");
+  const [skipIntro, setSkipIntro] = useState(() => localStorage.getItem("pref-skipintro") === "true");
+  const [srcLang,   setSrcLang]   = useState(() => localStorage.getItem("pref-srclang")   || "best");
+  const [reduceMot, setReduceMot] = useState(() => localStorage.getItem("pref-reducemot") === "true");
 
-  const setT   = (t: string)  => { setTheme(t);     localStorage.setItem("pref-theme",     t); applyTheme(t); };
-  const setN   = (v: boolean) => { setNotifs(v);    localStorage.setItem("pref-notifs",    String(v)); };
-  const setAM  = (v: boolean) => { setAutoMark(v);  localStorage.setItem("pref-automark",  String(v)); };
-  const setSP  = (v: string)  => { setStartPage(v); localStorage.setItem("pref-startpage", v); };
-  const setVM  = (v: string)  => { setViewMode(v);  localStorage.setItem("pref-viewmode",  v); };
-  const setSS  = (v: string)  => { setSubSize(v);   localStorage.setItem("pref-subsize",   v); };
-  const setAS  = (v: boolean) => { setAutoSub(v);   localStorage.setItem("pref-autosub",   String(v)); };
+  const setT   = (t: string)  => { setTheme(t);     localStorage.setItem("pref-theme",     t); applyTheme(t); showToast("تم تغيير الثيم"); };
+  const setN   = (v: boolean) => { setNotifs(v);    localStorage.setItem("pref-notifs",    String(v)); showToast(v ? "تم تفعيل الإشعارات" : "تم إيقاف الإشعارات"); };
+  const setAM  = (v: boolean) => { setAutoMark(v);  localStorage.setItem("pref-automark",  String(v)); showToast(v ? "تم تفعيل التأشير التلقائي" : "تم إيقاف التأشير التلقائي"); };
+  const setSP  = (v: string)  => { setStartPage(v); localStorage.setItem("pref-startpage", v); showToast("تم حفظ صفحة البداية"); };
+  const setVM  = (v: string)  => { setViewMode(v);  localStorage.setItem("pref-viewmode",  v); showToast("تم تغيير طريقة العرض"); };
+  const setSS  = (v: string)  => { setSubSize(v);   localStorage.setItem("pref-subsize",   v); showToast("تم حفظ حجم الترجمة"); };
+  const setAS  = (v: boolean) => { setAutoSub(v);   localStorage.setItem("pref-autosub",   String(v)); showToast(v ? "تم تفعيل الترجمة التلقائية" : "تم إيقاف الترجمة التلقائية"); };
+  const setSPD = (v: number)  => { setSpeed(v);     localStorage.setItem("pref-speed",     String(v)); showToast(`سرعة التشغيل: ×${v}`); };
+  const setQL  = (v: string)  => { setQuality(v);   localStorage.setItem("pref-quality",   v); showToast("تم حفظ تفضيل الجودة"); };
+  const setAP  = (v: boolean) => { setAutoPlay(v);  localStorage.setItem("pref-autoplay",  String(v)); showToast(v ? "تم تفعيل التشغيل التلقائي" : "تم إيقاف التشغيل التلقائي"); };
+  const setSI  = (v: boolean) => { setSkipIntro(v); localStorage.setItem("pref-skipintro", String(v)); showToast(v ? "سيتم تخطي المقدمة تلقائياً" : "تم إيقاف تخطي المقدمة"); };
+  const setSL  = (v: string)  => { setSrcLang(v);   localStorage.setItem("pref-srclang",   v); showToast("تم حفظ تفضيل المصادر"); };
+  const setRM  = (v: boolean) => { setReduceMot(v); localStorage.setItem("pref-reducemot", String(v)); showToast(v ? "تم تقليل الحركة" : "تم تفعيل الحركة الكاملة"); };
 
-  const histCount = (() => {
-    try {
-      const a = JSON.parse(localStorage.getItem("watch-history")      || "[]").length;
-      const b = JSON.parse(localStorage.getItem("anim-watch-history") || "[]").length;
-      return a + b;
-    } catch { return 0; }
-  })();
-  const savedCount = (() => {
-    try { return JSON.parse(localStorage.getItem("savedAnime") || "[]").length; } catch { return 0; }
-  })();
-  const cacheKb = (() => {
-    try {
-      let total = 0;
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i) || "";
-        const v = localStorage.getItem(k) || "";
-        total += k.length + v.length;
-      }
-      return Math.round(total / 1024);
-    } catch { return 0; }
-  })();
+  /* ── Stats ── */
+  const [stats, setStats] = useState({ hist: 0, saved: 0, cacheKb: 0 });
+  useEffect(() => {
+    const a = (() => { try { return JSON.parse(localStorage.getItem("watch-history") || "[]").length; } catch { return 0; } })();
+    const b = (() => { try { return JSON.parse(localStorage.getItem("anim-watch-history") || "[]").length; } catch { return 0; } })();
+    const saved = (() => { try { return JSON.parse(localStorage.getItem("savedAnime") || "[]").length; } catch { return 0; } })();
+    const cacheKb = (() => {
+      try {
+        let total = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i) || "";
+          total += k.length + (localStorage.getItem(k) || "").length;
+        }
+        return Math.round(total / 1024);
+      } catch { return 0; }
+    })();
+    setStats({ hist: a + b, saved, cacheKb });
+  }, []);
 
   const currentTheme = THEMES.find(t => t.id === theme) || THEMES[0];
 
   const displayName = user
     ? (localStorage.getItem("profile-displayname") ||
        [user.firstName, user.lastName].filter(Boolean).join(" ") ||
-       user.email?.split("@")[0] ||
-       "مستخدم Nova")
+       user.email?.split("@")[0] || "مستخدم Nova")
     : null;
   const username = user
     ? (localStorage.getItem("profile-username") || `nova_${user.id?.slice(-5) || "user"}`)
@@ -338,6 +479,8 @@ export default function Settings() {
   return (
     <main className="min-h-screen text-white pb-32 font-['Cairo']"
       style={{ background: "var(--bg-base, #09090B)" }} dir="rtl">
+
+      <ToastContainer />
 
       {/* ── Header ── */}
       <div className="sticky top-0 z-20 backdrop-blur-xl px-4 py-3.5 flex items-center gap-3"
@@ -366,9 +509,9 @@ export default function Settings() {
       <div className="mx-4 mt-5">
         {user ? (
           <Link href="/profile">
-            <div className="flex items-center gap-3.5 rounded-2xl p-4 cursor-pointer active:scale-[0.98] transition-transform"
+            <motion.div whileTap={{ scale: 0.98 }}
+              className="flex items-center gap-3.5 rounded-2xl p-4 cursor-pointer"
               style={{ background: "rgba(17,17,22,0.95)", border: "1px solid rgba(255,255,255,0.07)" }}>
-              {/* Avatar */}
               <div className="relative shrink-0">
                 {user.profileImageUrl ? (
                   <img src={user.profileImageUrl} alt="" className="w-14 h-14 rounded-2xl object-cover"
@@ -383,9 +526,9 @@ export default function Settings() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[14px] font-black text-white/95 truncate">{displayName}</p>
-                <p className="text-[11px] text-white/40 mt-0.5 font-['Cairo']">@{username}</p>
+                <p className="text-[11px] text-white/40 mt-0.5">@{username}</p>
                 <div className="flex items-center gap-1.5 mt-1">
-                  <span className="text-[9px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-lg font-black">مجاني</span>
+                  <span className="text-[9px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-lg font-black">مجاني ∞</span>
                   <span className="text-[9px] text-white/25">·</span>
                   <span className="text-[9px] text-white/30">{user.email}</span>
                 </div>
@@ -394,11 +537,11 @@ export default function Settings() {
                 <ChevronLeft className="w-4 h-4 text-white/20" />
                 <span className="text-[8px] text-white/20 font-bold">ملفي</span>
               </div>
-            </div>
+            </motion.div>
           </Link>
         ) : (
-          <button onClick={() => setShowAuth(true)}
-            className="w-full flex items-center gap-3.5 rounded-2xl p-4 active:scale-[0.98] transition-transform"
+          <motion.button whileTap={{ scale: 0.98 }} onClick={() => setShowAuth(true)}
+            className="w-full flex items-center gap-3.5 rounded-2xl p-4"
             style={{ background: "rgba(17,17,22,0.95)", border: "1px solid rgba(255,255,255,0.07)" }}>
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
@@ -410,33 +553,34 @@ export default function Settings() {
             </div>
             <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl"
               style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.30)" }}>
-              <LogIn className="w-3.5 h-3.5 text-violet-300" />
+              <Sparkles className="w-3.5 h-3.5 text-violet-300" />
               <span className="text-[11px] font-black text-violet-300">دخول</span>
             </div>
-          </button>
+          </motion.button>
         )}
       </div>
 
       {/* ── Stats row ── */}
       <div className="mx-4 mt-3 grid grid-cols-4 gap-2">
         {[
-          { label: "مشاهَدة", val: histCount,       color: "text-violet-400", bg: "rgba(139,92,246,0.10)" },
-          { label: "محفوظة",  val: savedCount,      color: "text-pink-400",   bg: "rgba(236,72,153,0.10)" },
-          { label: "الكاش",   val: `${cacheKb}KB`, color: "text-cyan-400",   bg: "rgba(6,182,212,0.10)" },
-          { label: "مجاني",   val: "∞",             color: "text-emerald-400",bg: "rgba(16,185,129,0.10)" },
+          { label: "مشاهَدة", val: stats.hist, color: "text-violet-400", bg: "rgba(139,92,246,0.10)", href: "/library" },
+          { label: "محفوظة",  val: stats.saved, color: "text-pink-400",  bg: "rgba(236,72,153,0.10)", href: "/library" },
+          { label: "الكاش",   val: `${stats.cacheKb}KB`, color: "text-cyan-400", bg: "rgba(6,182,212,0.10)", href: null },
+          { label: "مجاني",   val: "∞", color: "text-emerald-400", bg: "rgba(16,185,129,0.10)", href: null },
         ].map(s => (
-          <div key={s.label} className="flex flex-col items-center gap-1 rounded-xl py-2.5"
+          <motion.div key={s.label} whileTap={{ scale: 0.93 }}
+            onClick={() => s.href && navigate(s.href)}
+            className="flex flex-col items-center gap-1 rounded-xl py-2.5 cursor-pointer"
             style={{ background: s.bg, border: "1px solid rgba(255,255,255,0.05)" }}>
             <span className={`text-base font-black ${s.color}`}>{s.val}</span>
             <span className="text-[9px] text-white/30 font-bold">{s.label}</span>
-          </div>
+          </motion.div>
         ))}
       </div>
 
       {/* ══════ المظهر ══════ */}
       <SectionHeader title="المظهر" icon="🎨" />
       <Card>
-        {/* Theme picker */}
         <div className="px-5 py-4">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
@@ -470,25 +614,70 @@ export default function Settings() {
                     )}
                   </div>
                   <span className="text-[9px] font-black leading-tight text-center"
-                    style={{ color: active ? t.dot : "rgba(255,255,255,0.30)" }}>
-                    {t.label}
-                  </span>
+                    style={{ color: active ? t.dot : "rgba(255,255,255,0.30)" }}>{t.label}</span>
                 </motion.button>
               );
             })}
           </div>
         </div>
 
-        {/* View mode */}
         <DropdownSelect
           icon={viewMode === "grid" ? LayoutGrid : List}
           iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
           label="وضع عرض القوائم" sub="طريقة عرض قوائم الأنمي"
           value={viewMode} onChange={setVM}
           options={[
-            { id: "grid", label: "شبكة (Grid)", icon: "⊞" },
-            { id: "list", label: "قائمة (List)", icon: "☰" },
+            { id: "grid", label: "شبكة", icon: "⊞", desc: "أيقونات كبيرة" },
+            { id: "list", label: "قائمة", icon: "☰", desc: "صفوف مفصّلة" },
           ]}
+        />
+        <ToggleRow
+          icon={Layers} iconColor={reduceMot ? "text-white/30" : "text-violet-400"}
+          iconBg={reduceMot ? "bg-white/5" : "bg-violet-500/10"}
+          label="تأثيرات الحركة" sub="الرسوم المتحركة والانتقالات"
+          on={!reduceMot} onChange={v => setRM(!v)}
+        />
+      </Card>
+
+      {/* ══════ التشغيل ══════ */}
+      <SectionHeader title="التشغيل" icon="▶️" />
+      <Card>
+        <SpeedSelector value={speed} onChange={setSPD} />
+        <DropdownSelect
+          icon={Star} iconColor="text-amber-400" iconBg="bg-amber-500/10"
+          label="جودة التشغيل المفضّلة" sub="الجودة التي يختارها المشغّل تلقائياً"
+          value={quality} onChange={setQL}
+          options={[
+            { id: "auto",  label: "تلقائي",   icon: "⚡", desc: "أفضل جودة متاحة" },
+            { id: "1080p", label: "FHD 1080p", icon: "🔥", desc: "جودة سينمائية" },
+            { id: "720p",  label: "HD 720p",   icon: "✨", desc: "جودة جيدة وسريعة" },
+            { id: "480p",  label: "SD 480p",   icon: "💧", desc: "توفير البيانات" },
+          ]}
+        />
+        <ToggleRow
+          icon={SkipForward}
+          iconColor={autoPlay ? "text-violet-400" : "text-white/30"}
+          iconBg={autoPlay ? "bg-violet-500/10" : "bg-white/5"}
+          label="تشغيل الحلقة التالية تلقائياً"
+          sub="تنتقل للحلقة التالية فور انتهاء الحالية"
+          on={autoPlay} onChange={setAP}
+        />
+        <ToggleRow
+          icon={FastForward}
+          iconColor={skipIntro ? "text-cyan-400" : "text-white/30"}
+          iconBg={skipIntro ? "bg-cyan-500/10" : "bg-white/5"}
+          label="تخطي المقدمة تلقائياً"
+          sub="يتخطى مقدمة الأنمي عند توفرها"
+          badge="جديد"
+          on={skipIntro} onChange={setSI}
+        />
+        <ToggleRow
+          icon={Check}
+          iconColor={autoMark ? "text-violet-400" : "text-white/30"}
+          iconBg={autoMark ? "bg-violet-500/10" : "bg-white/5"}
+          label="تأشير تلقائي للمشاهدة"
+          sub="تحديد الحلقات كمشاهَدة تلقائياً"
+          on={autoMark} onChange={setAM}
         />
       </Card>
 
@@ -508,16 +697,26 @@ export default function Settings() {
           label="حجم خط الترجمة" sub="حجم نص الترجمة أثناء التشغيل"
           value={subSize} onChange={setSS}
           options={[
-            { id: "small",  label: "صغير",  icon: "🔡" },
-            { id: "medium", label: "متوسط", icon: "🔠" },
-            { id: "large",  label: "كبير",  icon: "🅰️" },
+            { id: "small",  label: "صغير",  icon: "🔡", desc: "مناسب للشاشات الكبيرة" },
+            { id: "medium", label: "متوسط", icon: "🔠", desc: "الحجم الافتراضي" },
+            { id: "large",  label: "كبير",  icon: "🅰️", desc: "مناسب للمسافة البعيدة" },
           ]}
         />
       </Card>
 
-      {/* ══════ عام ══════ */}
-      <SectionHeader title="عام" icon="⚙️" />
+      {/* ══════ المصادر ══════ */}
+      <SectionHeader title="المصادر" icon="📡" />
       <Card>
+        <DropdownSelect
+          icon={Globe} iconColor="text-teal-400" iconBg="bg-teal-500/10"
+          label="لغة المصادر المفضّلة" sub="الأولوية عند وجود أكثر من مصدر"
+          value={srcLang} onChange={setSL}
+          options={[
+            { id: "best",     label: "الأفضل تلقائياً",   icon: "⚡", desc: "يختار الأعلى جودة" },
+            { id: "arabic",   label: "عربي بالدرجة الأولى", icon: "🇸🇦", desc: "شاهيد · أنميليك · أنيمي دار" },
+            { id: "japanese", label: "ياباني مترجم أولاً",  icon: "🇯🇵", desc: "كاواي · أنيكوتو · أنيميكو" },
+          ]}
+        />
         <DropdownSelect
           icon={Home} iconColor="text-blue-400" iconBg="bg-blue-500/10"
           label="صفحة البداية" sub="الصفحة التي تظهر عند فتح التطبيق"
@@ -530,18 +729,11 @@ export default function Settings() {
           ]}
         />
         <ToggleRow
-          icon={Check}
-          iconColor="text-violet-400" iconBg="bg-violet-500/10"
-          label="تأشير تلقائي للمشاهدة"
-          sub="تحديد الحلقات كمشاهَدة تلقائياً"
-          on={autoMark} onChange={setAM}
-        />
-        <ToggleRow
           icon={notifs ? Bell : BellOff}
           iconColor={notifs ? "text-amber-400" : "text-white/30"}
           iconBg={notifs ? "bg-amber-500/10" : "bg-white/5"}
-          label="الإشعارات"
-          sub="تفعيل إشعارات الحلقات الجديدة"
+          label="إشعارات الحلقات الجديدة"
+          sub="تنبيه عند نزول حلقة جديدة"
           on={notifs} onChange={setN}
         />
       </Card>
@@ -557,7 +749,14 @@ export default function Settings() {
               sub="الاسم · اليوزر نيم · الصورة"
               href="/profile"
             />
-            <button onClick={() => signOut()}
+            <button
+              onClick={() => openConfirm({
+                title: "تسجيل الخروج",
+                desc: "هل أنت متأكد أنك تريد تسجيل الخروج من حسابك؟",
+                confirmLabel: "خروج",
+                danger: true,
+                onConfirm: () => signOut(),
+              })}
               className="w-full flex items-center gap-3.5 px-5 py-3.5 transition-all hover:bg-red-500/5 active:scale-[0.99]">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-red-500/10 border-red-500/20">
                 <LogOut className="w-4 h-4 text-red-400" />
@@ -566,6 +765,7 @@ export default function Settings() {
                 <p className="text-[13.5px] font-bold font-['Cairo'] text-red-400/85">تسجيل الخروج</p>
                 <p className="text-[10px] text-red-400/30 font-['Cairo'] mt-0.5">{user.email}</p>
               </div>
+              <ChevronLeft className="w-4 h-4 text-red-400/25 shrink-0" />
             </button>
           </Card>
         </>
@@ -575,19 +775,26 @@ export default function Settings() {
       <SectionHeader title="عن التطبيق" icon="ℹ️" />
       <Card>
         <InfoRow
+          icon={Radio} iconColor="text-violet-400" iconBg="bg-violet-500/10"
+          label="مصادر الأنمي النشطة"
+          sub="شاهيد · أنميليك · أنيمي دار · كاواي · أنيكوتو · أنيميكو"
+          badge="6 مصادر"
+        />
+        <InfoRow
+          icon={Film} iconColor="text-pink-400" iconBg="bg-pink-500/10"
+          label="مصادر الرسوم المتحركة"
+          sub="StarCima · Wecima · StarDima · MovizTime · TopCinema"
+          badge="5 مصادر"
+        />
+        <InfoRow
           icon={Shield} iconColor="text-teal-400" iconBg="bg-teal-500/10"
-          label="الخصوصية والبيانات"
-          sub="لا نجمع أي بيانات شخصية · مجاني للجميع"
+          label="الخصوصية والأمان"
+          sub="لا نجمع بيانات · بدون إعلانات · مجاني للجميع"
         />
         <InfoRow
           icon={Zap} iconColor="text-amber-400" iconBg="bg-amber-500/10"
-          label="مصادر الأنمي النشطة"
-          sub="شاهيد · أنميليك · أنيمي دار · كاواي · أنيكوتو · أنيميكو"
-        />
-        <InfoRow
-          icon={BarChart3} iconColor="text-violet-400" iconBg="bg-violet-500/10"
-          label="مصادر الرسوم المتحركة"
-          sub="StarCima · Wecima · StarDima · MovizTime · TopCinema"
+          label="المحرّك"
+          sub="React + Vite + Node.js · AniList GraphQL · بث مباشر"
         />
         <InfoRow
           icon={Smartphone} iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
@@ -602,34 +809,48 @@ export default function Settings() {
       <Card>
         <DangerRow
           label="مسح سجل المشاهدة"
-          sub={`${histCount} حلقة مشاهَدة · لا يمكن التراجع`}
-          onClick={() => {
-            if (confirm("هل تريد مسح سجل المشاهدة كاملاً؟")) {
+          sub={`${stats.hist} حلقة مشاهَدة · لا يمكن التراجع`}
+          onClick={() => openConfirm({
+            title: "مسح سجل المشاهدة",
+            desc: `سيتم حذف ${stats.hist} حلقة من سجل مشاهدتك بشكل نهائي.`,
+            confirmLabel: "امسح السجل",
+            danger: true,
+            onConfirm: () => {
               localStorage.removeItem("watch-history");
               localStorage.removeItem("anim-watch-history");
-              window.location.reload();
-            }
-          }}
+              setStats(p => ({ ...p, hist: 0 }));
+              showToast("تم مسح سجل المشاهدة");
+            },
+          })}
         />
         <DangerRow
           label="مسح قائمة المحفوظات"
-          sub={`${savedCount} أنمي محفوظ · لا يمكن التراجع`}
-          onClick={() => {
-            if (confirm("هل تريد مسح جميع المحفوظات؟")) {
+          sub={`${stats.saved} أنمي محفوظ · لا يمكن التراجع`}
+          onClick={() => openConfirm({
+            title: "مسح المحفوظات",
+            desc: `سيتم حذف ${stats.saved} أنمي من مفضّلتك بشكل نهائي.`,
+            confirmLabel: "امسح المفضّلة",
+            danger: true,
+            onConfirm: () => {
               localStorage.removeItem("savedAnime");
-              window.location.reload();
-            }
-          }}
+              setStats(p => ({ ...p, saved: 0 }));
+              showToast("تم مسح قائمة المحفوظات");
+            },
+          })}
         />
         <DangerRow
           label="مسح الكاش والإعدادات"
-          sub={`${cacheKb}KB مُخزَّن · يعيد التطبيق للحالة الأولية`}
-          onClick={() => {
-            if (confirm("سيتم مسح جميع البيانات والإعدادات. تأكد؟")) {
+          sub={`${stats.cacheKb}KB مُخزَّن · يعيد التطبيق للحالة الأولية`}
+          onClick={() => openConfirm({
+            title: "إعادة تعيين التطبيق",
+            desc: "سيتم مسح جميع الإعدادات والبيانات المحفوظة. ستحتاج لإعادة الضبط.",
+            confirmLabel: "إعادة التعيين",
+            danger: true,
+            onConfirm: () => {
               localStorage.clear();
               window.location.reload();
-            }
-          }}
+            },
+          })}
         />
       </Card>
 
@@ -644,6 +865,21 @@ export default function Settings() {
         </div>
         <p className="text-[9px] text-white/18">جميع الحقوق محفوظة · 2025 · مجاني للجميع</p>
       </div>
+
+      {/* Confirm dialog */}
+      <AnimatePresence>
+        {confirmState.open && (
+          <ConfirmSheet
+            open={confirmState.open}
+            title={confirmState.title}
+            desc={confirmState.desc}
+            confirmLabel={confirmState.confirmLabel}
+            danger={confirmState.danger}
+            onConfirm={confirmState.onConfirm}
+            onCancel={closeConfirm}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}

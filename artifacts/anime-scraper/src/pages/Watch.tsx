@@ -1469,6 +1469,7 @@ function EpisodePlayer({
               subEnabled={subState === "ready"}
               skipIntro={skipTimes?.op}
               skipOutro={skipTimes?.ed}
+              autoPlay={localStorage.getItem("pref-autoplay") !== "false"}
               onSubtitleClick={fetchSubtitles}
               onSubSettingsChange={s => setSubSettings(s)}
               onBack={onBack}

@@ -80,6 +80,7 @@ interface Props {
   onSubSettingsChange?: (s: SubSettings) => void;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
+  autoPlay?: boolean;
   onBack?: () => void;
   onPrevEp?: () => void;
   onNextEp?: () => void;
@@ -130,7 +131,7 @@ export default function RiftPlayer({
   downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
   subNote,
   onSubtitleClick, onSubSettingsChange,
-  skipIntro, skipOutro,
+  skipIntro, skipOutro, autoPlay,
   onBack, onPrevEp, onNextEp, onRealQuality, onTimeUpdate, onDuration, onFail,
 }: Props) {
 
@@ -175,7 +176,7 @@ export default function RiftPlayer({
   const [muted,           setMuted]           = useState(false);
   const [volume,          setVolume]          = useState(1);
   const [brightness,      setBrightness]      = useState(1);
-  const [speed,           setSpeed]           = useState(1);
+  const [speed,           setSpeed]           = useState(() => parseFloat(localStorage.getItem("pref-speed") || "1"));
   const [showCtrl,        setShowCtrl]        = useState(true);
   const [isFs,            setIsFs]            = useState(false);
   const [isZoomed,        setIsZoomed]        = useState(false);
@@ -189,6 +190,7 @@ export default function RiftPlayer({
   const [longPress,       setLongPress]       = useState(false);
   const [screenshotFlash, setScreenshotFlash] = useState(false);
   const [isEnded,         setIsEnded]         = useState(false);
+  const [autoPlayCountdown, setAutoPlayCountdown] = useState(0);
   const [showUnlockBtn,   setShowUnlockBtn]   = useState(false);
   const unlockBtnHideRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -461,6 +463,19 @@ export default function RiftPlayer({
       v.removeEventListener("ended", onEnded);
     };
   }, [onTimeUpdate]);
+
+  /* ── autoPlay countdown when episode ends ── */
+  useEffect(() => {
+    if (!isEnded || !autoPlay || !onNextEp || ep >= totalEps) { setAutoPlayCountdown(0); return; }
+    setAutoPlayCountdown(5);
+    const tick = setInterval(() => {
+      setAutoPlayCountdown(c => {
+        if (c <= 1) { clearInterval(tick); onNextEp(); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [isEnded, autoPlay]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── controls ── */
   function togglePlay() {
@@ -765,10 +780,16 @@ export default function RiftPlayer({
                   </button>
                   {onNextEp && ep < totalEps && (
                     <button
-                      onPointerDown={e => { e.stopPropagation(); onNextEp?.(); }}
-                      className="flex items-center gap-2 px-5 py-3 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                      onPointerDown={e => { e.stopPropagation(); setAutoPlayCountdown(0); onNextEp?.(); }}
+                      className="relative flex items-center gap-2 px-5 py-3 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform overflow-hidden"
                       style={{ background: "rgba(139,92,246,0.92)", border: "1px solid rgba(167,139,250,0.55)", color: "white", boxShadow: "0 4px 20px rgba(139,92,246,0.4)" }}>
-                      الحلقة التالية ⏭
+                      {autoPlayCountdown > 0 && (
+                        <motion.div className="absolute inset-0 origin-left"
+                          style={{ background: "rgba(255,255,255,0.15)" }}
+                          initial={{ scaleX: 1 }} animate={{ scaleX: 0 }}
+                          transition={{ duration: autoPlayCountdown, ease: "linear" }} />
+                      )}
+                      <span className="relative">الحلقة التالية {autoPlayCountdown > 0 ? `(${autoPlayCountdown})` : "⏭"}</span>
                     </button>
                   )}
                 </div>
