@@ -841,6 +841,14 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
           if (trackUrl.startsWith("/")) trackUrl = `https://starcima.com${trackUrl}`;
           else continue; // skip unparseable URLs
         }
+        // Skip dead vdrk.site v2/v3 CDN paths — only v1 is live
+        // Also skip sub-retime wrappers that internally use v2/v3 URLs
+        if (
+          trackUrl.includes("cache.vdrk.site/v2/") ||
+          trackUrl.includes("cache.vdrk.site/v3/") ||
+          (trackUrl.includes("sub-retime") && trackUrl.includes("vdrk.site/v2")) ||
+          (trackUrl.includes("sub-retime") && trackUrl.includes("vdrk.site/v3"))
+        ) continue;
         const lCode = (s.languageCode || s.language || "").toLowerCase();
         // Only include Arabic or English tracks — skip Bengali, Malay, Russian, etc.
         const isAr = lCode.startsWith("ar");
@@ -1371,7 +1379,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const data: any = await r.json();
                 const servers: any[] = (data.servers || []);
 
-                // Probe each server — skip CDN URLs that 403/404 from our server
                 await Promise.allSettled(servers.map(async (srv) => {
                   if (!srv.url) return;
                   let rawUrl  = String(srv.url);
@@ -1386,19 +1393,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     } catch { /* keep original */ }
                   }
 
-                  // Quick probe — only send servers that actually return 200 (not 302/404/403)
-                  try {
-                    const probe = await fetch(rawUrl, {
-                      method: "HEAD",
-                      headers: { "User-Agent": UA, "Referer": referer || SC_REF_HLS },
-                      signal: AbortSignal.timeout(6_000),
-                      redirect: "follow",
-                    });
-                    if (!probe.ok) return; // skip 4xx / 5xx
-                  } catch { return; } // timeout or network error → skip
-
+                  // No probe — CDN URLs are time-sensitive and may fail HEAD from Replit IP.
+                  // Player handles failures and auto-falls to next source.
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-                  sendSource(proxied, `الثريا · ${srv.name || "HLS"}`, proxied, proxied);
+                  const label   = srv.name || "الثريا";
+                  sendSource(proxied, label, proxied, proxied);
                 }));
               } catch { /* silent */ }
             })(),
@@ -1469,11 +1468,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               if (evt.type !== "source") return;
 
               const vylaProxyUrl: string = evt.source?.url || "";
-              if (!vylaProxyUrl) return;
+              if (!vylaProxyUrl || !vylaProxyUrl.startsWith("http")) return;
 
-              // Extract raw HLS URL and Referer from Vyla's proxy wrapper
+              // Extract raw HLS URL and Referer from Vyla's proxy wrapper (?url=...&proxyHeaders=...)
+              // Keep raw URL for hls-proxy so segment paths resolve correctly against CDN base.
+              // No probe — CDN URLs may gate by IP; player handles failures automatically.
               let rawUrl  = vylaProxyUrl;
-              let referer = "";
+              let referer = "https://missourimonster-vyla.hf.space/";
               try {
                 const pu    = new URL(vylaProxyUrl);
                 const inner = pu.searchParams.get("url");
@@ -1481,22 +1482,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const phRaw = pu.searchParams.get("proxyHeaders");
                 if (phRaw) {
                   const ph: any = JSON.parse(decodeURIComponent(phRaw));
-                  referer = ph.Referer || ph.referer || "";
+                  referer = ph.Referer || ph.referer || referer;
                 }
               } catch { /* keep original */ }
 
-              if (!rawUrl || !rawUrl.startsWith("http")) return;
-
-              // Quick probe — only send sources that actually respond
-              try {
-                const probe = await fetch(rawUrl, {
-                  method : "HEAD",
-                  headers: { "User-Agent": UA, ...(referer ? { "Referer": referer } : {}) },
-                  signal : AbortSignal.timeout(6_000),
-                  redirect: "follow",
-                });
-                if (!probe.ok) return;
-              } catch { return; }
+              if (!rawUrl.startsWith("http")) return;
 
               const label   = `Vyla · ${evt.source.label || evt.source.source}`;
               const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;

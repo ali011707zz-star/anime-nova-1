@@ -73,7 +73,11 @@ function getSourceTier(src: Source): QualityTier {
   const url = src.proxyUrl || src.directUrl || src.url;
   const lbl = src.label || "";
   if (url.includes("hls-proxy")) {
-    if (lbl.includes("الثريا") || lbl.startsWith("StarCima") || lbl.includes("Smashy") || lbl.includes("multiembed")) return "1080p FHD";
+    if (
+      lbl.includes("الثريا") || lbl.startsWith("StarCima") ||
+      lbl.includes("Smashy") || lbl.includes("multiembed") ||
+      lbl === "Vyla · VidZee" || lbl === "Najm I"
+    ) return "1080p FHD";
     return "720p HD";
   }
   if (url.includes("video-proxy") || (src.directUrl || "").includes(".mp4")) return "720p HD";
