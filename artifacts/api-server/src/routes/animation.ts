@@ -1437,6 +1437,88 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
+      // ── 16. Vyla (multi-source: meowtv/vidzee/icefy/vidnest/…, TMDB ID native) ──
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "Vyla: جاري الاستخراج…" });
+          const VYLA_BASE = "https://missourimonster-vyla.hf.space";
+          const vylaUrl = type === "tv"
+            ? `${VYLA_BASE}/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
+            : `${VYLA_BASE}/movie?id=${tmdbId}`;
+
+          const ctrl  = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 28_000);
+
+          const r = await fetch(vylaUrl, {
+            signal : ctrl.signal,
+            headers: { "User-Agent": UA, "Accept": "text/event-stream" },
+          });
+
+          if (!r.ok || !r.body) { clearTimeout(timer); return; }
+
+          const reader  = (r.body as any).getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          const processLine = async (line: string) => {
+            if (!line.startsWith("data: ")) return;
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === "done") { ctrl.abort(); return; }
+              if (evt.type !== "source") return;
+
+              const vylaProxyUrl: string = evt.source?.url || "";
+              if (!vylaProxyUrl) return;
+
+              // Extract raw HLS URL and Referer from Vyla's proxy wrapper
+              let rawUrl  = vylaProxyUrl;
+              let referer = "";
+              try {
+                const pu    = new URL(vylaProxyUrl);
+                const inner = pu.searchParams.get("url");
+                if (inner) rawUrl = decodeURIComponent(inner);
+                const phRaw = pu.searchParams.get("proxyHeaders");
+                if (phRaw) {
+                  const ph: any = JSON.parse(decodeURIComponent(phRaw));
+                  referer = ph.Referer || ph.referer || "";
+                }
+              } catch { /* keep original */ }
+
+              if (!rawUrl || !rawUrl.startsWith("http")) return;
+
+              // Quick probe — only send sources that actually respond
+              try {
+                const probe = await fetch(rawUrl, {
+                  method : "HEAD",
+                  headers: { "User-Agent": UA, ...(referer ? { "Referer": referer } : {}) },
+                  signal : AbortSignal.timeout(6_000),
+                  redirect: "follow",
+                });
+                if (!probe.ok) return;
+              } catch { return; }
+
+              const label   = `Vyla · ${evt.source.label || evt.source.source}`;
+              const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
+              sendSource(proxied, label, proxied, proxied);
+
+            } catch { /* bad JSON, skip */ }
+          };
+
+          while (true) {
+            let chunk: { done: boolean; value: Uint8Array };
+            try { chunk = await reader.read(); } catch { break; }
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+            for (const line of lines) await processLine(line);
+          }
+
+          clearTimeout(timer);
+        } catch { /* silent */ }
+      })(),
+
     ]);
 
     if (sourceCount === 0) {
