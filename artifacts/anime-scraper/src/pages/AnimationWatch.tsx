@@ -340,15 +340,22 @@ export default function AnimationWatch() {
   }, []);
 
   // Translate a VTT URL → Arabic via server-side translate-vtt (cached server-side)
+  // Max 120s wait; also respects lifecycle signal (episode change / unmount)
   const translateVttUrl = useCallback(async (url: string, signal?: AbortSignal): Promise<SubCue[]> => {
     try {
-      const proxyUrl = `/api/anime/proxy-text?url=${encodeURIComponent(url)}&ref=${SC_REF}`;
-      const r = await fetch(
-        `/api/anime/translate-vtt?url=${encodeURIComponent(proxyUrl)}&from=en&to=ar`,
-        { signal: signal ?? AbortSignal.timeout(90_000) }
-      );
-      if (!r.ok) return [];
-      const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+      const mergedCtrl = new AbortController();
+      const tid = setTimeout(() => mergedCtrl.abort(), 120_000);
+      signal?.addEventListener("abort", () => mergedCtrl.abort(), { once: true });
+      let d: { cues?: Array<{ timing: string; text: string }> };
+      try {
+        const proxyUrl = `/api/anime/proxy-text?url=${encodeURIComponent(url)}&ref=${SC_REF}`;
+        const r = await fetch(
+          `/api/anime/translate-vtt?url=${encodeURIComponent(proxyUrl)}&from=en&to=ar`,
+          { signal: mergedCtrl.signal }
+        );
+        if (!r.ok) return [];
+        d = await r.json();
+      } finally { clearTimeout(tid); }
       if (!d.cues?.length) return [];
       return d.cues.map(c => {
         const [startStr, endStr] = c.timing.split(" --> ");
@@ -406,45 +413,47 @@ export default function AnimationWatch() {
     setSubTracks([]); setSubCues([]); setSubChoice("off"); setSubStatus("discovering");
     if (!tmdbId) { setSubStatus("off"); return; }
 
+    // Main ctrl: cancelled only on unmount / episode change (no hard timeout)
     const ctrl = new AbortController();
     subAbortRef.current = ctrl;
 
     (async () => {
       try {
-        // Race: 18s hard timeout so we never hang forever
-        const timeoutId = setTimeout(() => ctrl.abort(), 18_000);
-        const r = await fetch(
-          `/api/animation/subtitle-tracks?tmdbId=${encodeURIComponent(tmdbId)}&type=${type}&ep=${ep}&season=${season}`,
-          { signal: ctrl.signal }
-        );
-        clearTimeout(timeoutId);
-        if (ctrl.signal.aborted || !r.ok) { if (!ctrl.signal.aborted) setSubStatus("failed"); return; }
+        // ── Phase 1: fetch tracks list — 18s cap via a separate trackCtrl ──
+        const trackCtrl = new AbortController();
+        const trackTid = setTimeout(() => trackCtrl.abort(), 18_000);
+        ctrl.signal.addEventListener("abort", () => trackCtrl.abort(), { once: true });
+
+        let r: Response;
+        try {
+          r = await fetch(
+            `/api/animation/subtitle-tracks?tmdbId=${encodeURIComponent(tmdbId)}&type=${type}&ep=${ep}&season=${season}`,
+            { signal: trackCtrl.signal }
+          );
+        } finally { clearTimeout(trackTid); }
+
+        if (ctrl.signal.aborted) return;
+        if (!r.ok) { setSubStatus("failed"); return; }
 
         const d = await r.json() as { tracks?: SubTrack[] };
         const tracks: SubTrack[] = d.tracks || [];
         setSubTracks(tracks);
 
-        // If auto-subtitle disabled and not a forced retry → discover only, don't load
-        if (!prefAutoSub.current && !forced) {
-          setSubStatus("off");
-          return;
-        }
+        // If auto-subtitle disabled and not a forced retry → discover tracks only, don't load
+        if (!prefAutoSub.current && !forced) { setSubStatus("off"); return; }
 
-        const arTrack = tracks.find(t => t.lang === "ar");
+        // ── Phase 2: translate English → Arabic (may take ~60s; ctrl has no hard timeout) ──
+        // Always prefer translation (عربي مترجم) — more reliable than direct Arabic CDN
         const enTrack = tracks.find(t => t.lang === "en");
+        const arTrack = tracks.find(t => t.lang === "ar");
 
-        if (arTrack) {
-          setSubChoice("ar");
-          const ok = await loadSubTrack(arTrack, "direct", ctrl.signal);
-          if (!ok && !ctrl.signal.aborted && enTrack) {
-            // Arabic VTT fetch failed → fall back to translating English
-            setSubChoice("ar-translated");
-            await loadSubTrack(enTrack, "translate", ctrl.signal);
-          }
-        } else if (enTrack) {
-          // No Arabic available → auto-translate English (server-side, cached)
+        if (enTrack) {
           setSubChoice("ar-translated");
           await loadSubTrack(enTrack, "translate", ctrl.signal);
+        } else if (arTrack) {
+          // No English available → try direct Arabic as last resort
+          setSubChoice("ar");
+          await loadSubTrack(arTrack, "direct", ctrl.signal);
         } else {
           setSubStatus("failed");
         }
@@ -529,6 +538,20 @@ export default function AnimationWatch() {
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
             <p className="text-white/22 text-[11px] font-['Cairo'] tracking-[0.12em]">جاري تشغيل الحلقة</p>
+
+            {/* Subtitle preparation indicator — shown while translating during episode load */}
+            {(subStatus === "translating" || subStatus === "discovering") && (
+              <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5, duration: 0.4 }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full"
+                style={{ background: "rgba(139,92,246,0.10)", border: "1px solid rgba(139,92,246,0.20)" }}>
+                <motion.span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400/70"
+                  animate={{ opacity: [0.4, 1, 0.4] }} transition={{ duration: 1.2, repeat: Infinity }} />
+                <span className="text-violet-300/70 text-[10px] font-['Cairo'] font-semibold">
+                  {subStatus === "translating" ? "جاري تحضير الترجمة العربية…" : "يبحث عن ملف الترجمة…"}
+                </span>
+              </motion.div>
+            )}
           </motion.div>
         </div>
       </div>
