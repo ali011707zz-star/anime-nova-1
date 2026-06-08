@@ -606,7 +606,7 @@ export default function RiftPlayer({
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
       // Use videoRef.current.volume for freshest value (avoids stale React state)
       const curVol = volumeRef.current;
-      const nV = Math.max(0, Math.min(1.5, curVol + dV / 150));
+      const nV = Math.max(0, Math.min(2.0, curVol + dV / 150));
       volumeRef.current = nV;
       setVolume(nV);
       if (gainNodeRef.current) {
@@ -710,7 +710,9 @@ export default function RiftPlayer({
         className="absolute inset-0 w-full h-full"
         style={{
           objectFit: isZoomed ? "cover" : "contain",
-          filter: brightness !== 1 ? `brightness(${brightness.toFixed(3)})` : undefined,
+          filter: brightness !== 1
+            ? `brightness(${brightness.toFixed(3)}) saturate(${(1 + (brightness - 1) * 0.55).toFixed(3)}) contrast(${(1 + (brightness - 1) * 0.12).toFixed(3)})`
+            : undefined,
           transition: "filter 0.06s",
         }}
         playsInline preload="metadata"
@@ -855,12 +857,12 @@ export default function RiftPlayer({
               className="absolute right-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 pointer-events-none">
               <div className="relative rounded-full overflow-hidden" style={{ width: 4, height: 110, background: "rgba(255,255,255,0.15)" }}>
                 <div className="absolute bottom-0 left-0 right-0 rounded-full"
-                  style={{ background: feedback.value > 1 ? "rgba(167,139,250,0.90)" : "rgba(255,255,255,0.85)", height: `${Math.min(feedback.value / 1.5 * 100, 100)}%`, transition: "height 0.06s" }} />
+                  style={{ background: feedback.value > 1 ? "rgba(167,139,250,0.90)" : "rgba(255,255,255,0.85)", height: `${Math.min(feedback.value / 2.0 * 100, 100)}%`, transition: "height 0.06s" }} />
               </div>
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
                 style={{ background: "rgba(0,0,0,0.65)", border: `1px solid ${feedback.value > 1 ? "rgba(167,139,250,0.35)" : "rgba(255,255,255,0.12)"}` }}>
                 <Volume2 className="w-3 h-3" style={{ color: feedback.value > 1 ? "rgba(196,181,253,0.80)" : "rgba(255,255,255,0.65)" }} />
-                <span className="text-white/85 text-[11px] font-bold font-mono">{Math.round(feedback.value / 1.5 * 100)}%</span>
+                <span className="text-white/85 text-[11px] font-bold font-mono">{Math.round(feedback.value / 2.0 * 100)}%</span>
               </div>
             </motion.div>
           )}
@@ -906,70 +908,57 @@ export default function RiftPlayer({
         </AnimatePresence>
 
         {/* ════════════════════════════════════════
-            LOCK SCREEN — slim side pill (right edge)
+            LOCK SCREEN — persistent indicator + centered unlock overlay
         ════════════════════════════════════════ */}
+
+        {/* Faint persistent lock badge — always visible when locked */}
+        {isLocked && !showCtrl && (
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-40 pointer-events-none">
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
+              style={{ background: "rgba(0,0,0,0.42)", border: "1px solid rgba(251,191,36,0.22)" }}>
+              <Lock className="w-4 h-4 text-amber-300/50" strokeWidth={2} />
+            </div>
+          </div>
+        )}
+
+        {/* Unlock overlay — prominent centered button when controls are shown */}
         <AnimatePresence>
           {isLocked && showCtrl && (
             <motion.div
               key="lock-ui"
-              initial={{ x: 64, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 64, opacity: 0 }}
-              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 z-40 pointer-events-auto"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="absolute inset-0 z-40 flex items-center justify-center pointer-events-auto"
               onClick={e => e.stopPropagation()}
               onTouchStart={e => e.stopPropagation()}
               onTouchEnd={e => e.stopPropagation()}
+              style={{ background: "rgba(0,0,0,0.38)" }}
             >
-              <div
-                className="flex flex-col items-center gap-3 py-5 rounded-[22px]"
+              <motion.button
+                onClick={() => setIsLocked(false)}
+                initial={{ scale: 0.88, y: 8 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.88, y: 8 }}
+                transition={{ duration: 0.20, ease: [0.22, 1, 0.36, 1] }}
+                className="flex flex-col items-center gap-3.5 px-10 py-6 rounded-[28px] active:scale-95 transition-transform"
                 style={{
-                  width: 52,
-                  background: "rgba(5,5,15,0.82)",
-                  backdropFilter: "blur(28px) saturate(200%)",
-                  border: "1.5px solid rgba(251,191,36,0.32)",
-                  boxShadow: "0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(251,191,36,0.06) inset",
+                  background: "rgba(5,5,15,0.90)",
+                  backdropFilter: "blur(32px) saturate(180%)",
+                  border: "1.5px solid rgba(251,191,36,0.38)",
+                  boxShadow: "0 16px 48px rgba(0,0,0,0.65), 0 0 0 1px rgba(251,191,36,0.06) inset",
                 }}
               >
-                {/* Animated lock icon */}
-                <motion.div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center"
-                  style={{ background: "rgba(251,191,36,0.14)", border: "1px solid rgba(251,191,36,0.28)" }}
-                  animate={{ scale: [1, 1.06, 1] }}
-                  transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
-                >
-                  <Lock className="w-4 h-4 text-amber-300" strokeWidth={2} />
-                </motion.div>
-
-                {/* Vertical label */}
-                <p
-                  className="text-amber-200/80 font-black font-['Cairo'] leading-none"
-                  style={{
-                    fontSize: 10,
-                    writingMode: "vertical-rl" as React.CSSProperties["writingMode"],
-                    textOrientation: "mixed" as React.CSSProperties["textOrientation"],
-                    letterSpacing: "0.1em",
-                  }}
-                >
-                  مقفلة
-                </p>
-
-                {/* Thin divider */}
-                <div className="w-6 h-px mx-auto" style={{ background: "rgba(251,191,36,0.18)" }} />
-
-                {/* Unlock tap */}
-                <button
-                  onClick={() => setIsLocked(false)}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                  style={{
-                    background: "rgba(251,191,36,0.16)",
-                    border: "1px solid rgba(251,191,36,0.36)",
-                  }}
-                  title="فتح القفل"
-                >
-                  <Unlock className="w-4 h-4 text-amber-300" strokeWidth={2} />
-                </button>
-              </div>
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                  style={{ background: "rgba(251,191,36,0.14)", border: "1.5px solid rgba(251,191,36,0.32)" }}>
+                  <Unlock className="w-7 h-7 text-amber-300" strokeWidth={1.8} />
+                </div>
+                <div className="text-center">
+                  <p className="text-amber-200/95 text-[16px] font-black font-['Cairo'] leading-none">فتح القفل</p>
+                  <p className="text-amber-200/40 text-[11px] font-['Cairo'] mt-1">اضغط هنا للمتابعة</p>
+                </div>
+              </motion.button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1275,26 +1264,8 @@ export default function RiftPlayer({
                   className="flex items-center px-3 pt-2"
                   style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
                 >
-                  {/* Left: view-mode · speed */}
+                  {/* Left: speed */}
                   <div className="flex items-center gap-1.5 shrink-0">
-
-                    {/* ── View Mode Button (panel rendered at root level to escape overflow-hidden) ── */}
-                    <button
-                      onClick={() => { setShowViewMode(v => !v); setShowSpeed(false); showControls(); }}
-                      className="h-9 px-2.5 flex items-center gap-1.5 rounded-xl active:bg-white/10 transition-colors"
-                      title="وضع العرض"
-                      style={showViewMode ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)" } : {}}
-                    >
-                      {isFs
-                        ? <Minimize2  className="w-[15px] h-[15px] text-violet-300" />
-                        : isZoomed
-                        ? <Scan       className="w-[15px] h-[15px] text-violet-300" />
-                        : <Maximize2  className="w-[15px] h-[15px] text-white/75" />}
-                      <span className="text-[10px] font-black font-['Cairo']"
-                        style={{ color: (showViewMode || isZoomed || isFs) ? "#c4b5fd" : "rgba(255,255,255,0.55)" }}>
-                        {isFs ? "ملء" : isZoomed ? "تكبير" : "عرض"}
-                      </span>
-                    </button>
 
                     {/* Speed */}
                     <div className="relative">
@@ -1364,8 +1335,27 @@ export default function RiftPlayer({
                     </button>
                   </div>
 
-                  {/* Right: volume · lock */}
+                  {/* Right: view-mode · volume · lock */}
                   <div className="flex items-center gap-2 shrink-0">
+
+                    {/* ── View Mode Button (moved to right) ── */}
+                    <button
+                      onClick={() => { setShowViewMode(v => !v); setShowSpeed(false); showControls(); }}
+                      className="h-9 px-2.5 flex items-center gap-1.5 rounded-xl active:bg-white/10 transition-colors"
+                      title="وضع العرض"
+                      style={showViewMode ? { background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)" } : {}}
+                    >
+                      {isFs
+                        ? <Minimize2  className="w-[15px] h-[15px] text-violet-300" />
+                        : isZoomed
+                        ? <Scan       className="w-[15px] h-[15px] text-violet-300" />
+                        : <Maximize2  className="w-[15px] h-[15px] text-white/75" />}
+                      <span className="text-[10px] font-black font-['Cairo']"
+                        style={{ color: (showViewMode || isZoomed || isFs) ? "#c4b5fd" : "rgba(255,255,255,0.55)" }}>
+                        {isFs ? "ملء" : isZoomed ? "تكبير" : "عرض"}
+                      </span>
+                    </button>
+
                     <button onClick={toggleMute}
                       className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.14)" }}>
@@ -1374,9 +1364,10 @@ export default function RiftPlayer({
                         : <Volume2 className="w-[18px] h-[18px] text-white/55" />}
                     </button>
                     <button onClick={() => setIsLocked(true)}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.14)" }}>
-                      <Lock className="w-[16px] h-[16px] text-white/55" />
+                      className="h-9 px-3 flex items-center gap-1.5 rounded-xl active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(251,191,36,0.11)", border: "1px solid rgba(251,191,36,0.26)" }}>
+                      <Lock className="w-[14px] h-[14px] text-amber-300/70" strokeWidth={2.2} />
+                      <span className="text-[10px] font-black font-['Cairo'] text-amber-200/60">قفل</span>
                     </button>
                   </div>
                 </div>
@@ -1401,7 +1392,7 @@ export default function RiftPlayer({
               dir="rtl"
               style={{
                 bottom: 130,
-                left: 14,
+                right: 14,
                 width: 210,
                 background: "rgba(4,4,14,0.97)",
                 backdropFilter: "blur(40px) saturate(200%)",

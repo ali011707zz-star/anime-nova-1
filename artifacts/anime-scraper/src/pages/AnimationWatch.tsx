@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, Play, AlertTriangle,
+  ChevronRight, Play,
   MonitorPlay, Download, ChevronLeft, List, ChevronDown, SkipForward,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -125,6 +125,8 @@ export default function AnimationWatch() {
   const [sources, setSources]   = useState<Source[]>([]);
   const [selSrc, setSelSrc]     = useState<Source | null>(null);
   const [sseDone, setSseDone]   = useState(false);
+  const [embedSources, setEmbedSources] = useState<Array<{url: string; label: string}>>([]);
+  const [selIframe, setSelIframe]       = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [showEpList, setShowEpList] = useState(false);
 
@@ -268,7 +270,7 @@ export default function AnimationWatch() {
 
   /* ── SSE stream ── */
   useEffect(() => {
-    setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
+    setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false); setEmbedSources([]); setSelIframe(null);
     setSubCues([]); setSubStatus("off"); setSubChoice("off"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
 
@@ -278,8 +280,15 @@ export default function AnimationWatch() {
 
     es.addEventListener("source", (e) => {
       const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
-      // Skip embed-only sources — internal player only
-      if (src.isEmbed) return;
+      // Collect embed sources as iframe fallback
+      if (src.isEmbed) {
+        setEmbedSources(prev => [...prev, { url: src.url, label: src.label }]);
+        return;
+      }
+      // Animation: only accept "الثريا" server
+      const isThuraya = src.label.includes("الثريا");
+      if (!isThuraya) return;
+
       const key = src.directUrl || src.url;
       if (seenUrls.current.has(key)) return;
       seenUrls.current.add(key);
@@ -295,9 +304,7 @@ export default function AnimationWatch() {
         tryExtract(src.url);
       }
       sourceCountRef.current += 1;
-      // StarCima "الثريا" is always preferred — insert at front so it plays first
-      const isPreferred = src.label.includes("StarCima") || src.label.includes("الثريا");
-      setSources(prev => isPreferred ? [newSrc, ...prev] : [...prev, newSrc]);
+      setSources(prev => [newSrc, ...prev]);
     });
 
     es.addEventListener("done", () => {
@@ -501,15 +508,13 @@ export default function AnimationWatch() {
 
         <div className="relative h-full flex flex-col items-center justify-center gap-7 px-6">
           {posterUrl ? (
-            <motion.div initial={{ opacity: 0, scale: 0.85, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }} className="relative shrink-0">
-              <motion.div className="absolute -inset-4 rounded-[28px] pointer-events-none"
-                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.28) 0%, transparent 68%)" }}
-                animate={{ opacity: [0.5, 1, 0.5] }} transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }} />
+            <div className="relative shrink-0">
+              <div className="absolute -inset-4 rounded-[28px] pointer-events-none"
+                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.22) 0%, transparent 68%)" }} />
               <img src={posterUrl} alt={displayTitle}
                 className="w-44 h-[248px] rounded-2xl object-cover"
                 style={{ boxShadow: "0 28px 72px rgba(0,0,0,0.88), 0 0 0 1px rgba(255,255,255,0.08)" }} />
-            </motion.div>
+            </div>
           ) : (
             <div className="w-44 h-[248px] rounded-2xl bg-white/[0.03] flex items-center justify-center"
               style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
@@ -519,8 +524,7 @@ export default function AnimationWatch() {
             </div>
           )}
 
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.18, duration: 0.4 }} className="text-center">
+          <div className="text-center">
             {displayTitle && (
               <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-1.5"
                 style={{ textShadow: "0 2px 14px rgba(0,0,0,0.75)" }}>{displayTitle}</h2>
@@ -528,10 +532,9 @@ export default function AnimationWatch() {
             {type === "tv" && (
               <p className="text-white/35 text-[13px] font-['Cairo'] tracking-wide">الحلقة {ep}</p>
             )}
-          </motion.div>
+          </div>
 
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.30 }}
-            className="flex flex-col items-center gap-3">
+          <div className="flex flex-col items-center gap-3">
             <div className="relative w-9 h-9">
               <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
@@ -541,18 +544,16 @@ export default function AnimationWatch() {
 
             {/* Subtitle preparation indicator — shown while translating during episode load */}
             {(subStatus === "translating" || subStatus === "discovering") && (
-              <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5, duration: 0.4 }}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-full"
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full"
                 style={{ background: "rgba(139,92,246,0.10)", border: "1px solid rgba(139,92,246,0.20)" }}>
                 <motion.span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400/70"
                   animate={{ opacity: [0.4, 1, 0.4] }} transition={{ duration: 1.2, repeat: Infinity }} />
                 <span className="text-violet-300/70 text-[10px] font-['Cairo'] font-semibold">
                   {subStatus === "translating" ? "جاري تحضير الترجمة العربية…" : "يبحث عن ملف الترجمة…"}
                 </span>
-              </motion.div>
+              </div>
             )}
-          </motion.div>
+          </div>
         </div>
       </div>
     );
@@ -619,6 +620,33 @@ export default function AnimationWatch() {
             />
           )}
         </AnimatePresence>
+      </div>
+    );
+  }
+
+  /* ────────────────────────── IFRAME PLAYER ──────────────────────────────── */
+  if (selIframe) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col" dir="rtl">
+        <div className="flex items-center shrink-0 px-3 py-2"
+          style={{ background: "rgba(0,0,0,0.85)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+          <button onClick={() => setSelIframe(null)}
+            className="w-10 h-10 flex items-center justify-center rounded-xl active:scale-90 transition-transform"
+            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
+            <ChevronRight className="w-5 h-5 text-white/70" />
+          </button>
+          <p className="mr-2 text-white/60 text-[12px] font-['Cairo'] font-bold flex-1 truncate">{displayTitle}</p>
+          {type === "tv" && (
+            <span className="text-[11px] font-['Cairo'] text-white/35 ml-2">ح {ep}</span>
+          )}
+        </div>
+        <iframe
+          src={selIframe}
+          className="flex-1 border-0 bg-black"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups"
+          allow="fullscreen; autoplay; encrypted-media"
+          referrerPolicy="no-referrer"
+        />
       </div>
     );
   }
@@ -704,34 +732,16 @@ export default function AnimationWatch() {
       <div className="flex-1 overflow-y-auto" style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
         {step === "error" || (!hasSources && sseDone) ? (
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-            className="flex flex-col items-center justify-center py-14 gap-5 px-8">
-            <div className="w-16 h-16 rounded-3xl flex items-center justify-center"
-              style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)" }}>
-              <AlertTriangle className="w-7 h-7 text-red-400/60" />
-            </div>
-            <div className="text-center flex flex-col gap-2">
-              <p className="text-white/70 text-[16px] font-black font-['Cairo']">
-                {type === "tv" ? `الحلقة ${ep} غير متوفرة بعد` : "العنوان غير متوفر بعد"}
-              </p>
-              <p className="text-white/28 text-[12px] font-['Cairo'] leading-relaxed">
-                المصادر العربية تتأخر عادةً عن البث الأصلي.
-              </p>
-            </div>
-            {type === "tv" && ep > 1 && (
-              <button onClick={() => {
-                const np = new URLSearchParams(window.location.search);
-                np.set("ep", String(ep - 1));
-                navigate(`/animation/watch?${np.toString()}`);
-              }}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.30)", color: "rgba(196,181,253,0.90)" }}>
-                <ChevronRight className="w-4 h-4" />
-                جرّب الحلقة {ep - 1}
-              </button>
-            )}
-          </motion.div>
+          <IframeFallback
+            tmdbId={tmdbId} type={type} ep={ep} season={season}
+            embedSources={embedSources}
+            onSelectIframe={setSelIframe}
+            onPrevEp={type === "tv" && ep > 1 ? () => {
+              const np = new URLSearchParams(window.location.search);
+              np.set("ep", String(ep - 1));
+              navigate(`/animation/watch?${np.toString()}`);
+            } : undefined}
+          />
         ) : (
           <>
             {QUALITY_TIERS.map(q => {
@@ -990,6 +1000,97 @@ function SubPanel({
   );
 }
 
+/* ── Iframe Fallback Component ─────────────────────────────────────────── */
+function IframeFallback({
+  tmdbId, type, ep, season, embedSources, onSelectIframe, onPrevEp,
+}: {
+  tmdbId: string; type: string; ep: number; season: number;
+  embedSources: Array<{url: string; label: string}>;
+  onSelectIframe: (url: string) => void;
+  onPrevEp?: () => void;
+}) {
+  const isMovie = type === "movie";
+  const builtins = tmdbId ? [
+    {
+      label: "VidSrc",
+      sublabel: "مصدر احتياطي ١",
+      url: isMovie
+        ? `https://vidsrc.to/embed/movie/${tmdbId}`
+        : `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${ep}`,
+    },
+    {
+      label: "Embed.su",
+      sublabel: "مصدر احتياطي ٢",
+      url: isMovie
+        ? `https://embed.su/embed/movie/${tmdbId}`
+        : `https://embed.su/embed/tv/${tmdbId}/${season}/${ep}`,
+    },
+    {
+      label: "AutoEmbed",
+      sublabel: "مصدر احتياطي ٣",
+      url: isMovie
+        ? `https://player.autoembed.cc/embed/movie/${tmdbId}`
+        : `https://player.autoembed.cc/embed/tv/${tmdbId}/${season}/${ep}`,
+    },
+  ] : [];
+
+  const allOptions = [
+    ...embedSources.map(s => ({ label: s.label, sublabel: "مباشر", url: s.url })),
+    ...builtins,
+  ];
+
+  return (
+    <div className="flex flex-col items-center py-10 gap-6 px-5">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+          style={{ background: "rgba(139,92,246,0.10)", border: "1px solid rgba(139,92,246,0.22)" }}>
+          <span className="text-2xl">📺</span>
+        </div>
+        <div>
+          <p className="text-white/70 text-[15px] font-black font-['Cairo']">سيرفر الثريا غير متوفر</p>
+          <p className="text-white/28 text-[11px] font-['Cairo'] mt-1 leading-relaxed">
+            اختر مصدرًا احتياطيًا للمشاهدة عبر الإطار المدمج
+          </p>
+        </div>
+      </div>
+
+      <div className="w-full flex flex-col gap-2.5">
+        {allOptions.map((opt, i) => (
+          <button key={i} onClick={() => onSelectIframe(opt.url)}
+            className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl text-right active:scale-[0.98] transition-all"
+            style={{
+              background: "linear-gradient(145deg, rgba(18,12,40,0.92), rgba(12,8,28,0.96))",
+              border: "1px solid rgba(139,92,246,0.22)",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.30)",
+            }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: "rgba(139,92,246,0.14)", border: "1px solid rgba(139,92,246,0.28)" }}>
+              <span className="text-[15px]">🔗</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white/88 text-[14px] font-black font-['Cairo'] leading-tight">{opt.label}</p>
+              <p className="text-white/30 text-[10px] font-['Cairo'] mt-0.5">{opt.sublabel}</p>
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl shrink-0"
+              style={{ background: "rgba(124,58,237,0.80)", border: "1px solid rgba(167,139,250,0.22)" }}>
+              <span className="text-white text-[11px] font-black font-['Cairo']">فتح</span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {onPrevEp && (
+        <button onClick={onPrevEp}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.55)" }}>
+          <ChevronRight className="w-4 h-4" />
+          جرّب الحلقة السابقة
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ── Source Card Component ─────────────────────────────────────────────── */
 function AnimSourceRow({
   src, idx, qs, qShort, onPlay,
@@ -1005,13 +1106,9 @@ function AnimSourceRow({
   const hasDownload = !isHls && (url.includes(".mp4") || url.includes("video-proxy"));
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ delay: Math.min(idx * 0.06, 0.35), duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-      whileTap={{ scale: 0.975 }}
+    <div
       onClick={() => onPlay(src)}
-      className="relative overflow-hidden cursor-pointer rounded-2xl"
+      className="relative overflow-hidden cursor-pointer rounded-2xl active:scale-[0.97] transition-transform"
       style={{
         background: "linear-gradient(145deg, rgba(18,12,40,0.92), rgba(12,8,28,0.96))",
         border: `1px solid ${qs.border}`,
@@ -1075,6 +1172,6 @@ function AnimSourceRow({
         </div>
 
       </div>
-    </motion.div>
+    </div>
   );
 }
