@@ -117,9 +117,16 @@ function shouldShowSrc(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   // Remove mp4upload entirely (HEVC codec — audio plays but video fails on Linux Chrome)
   if (url.includes("mp4upload")) return false;
-  // Hide ALL embed/iframe sources — keep code, just don't display
+  // Hide embed sources (iframes) — will be shown as fallback when no direct sources
   if (src.isEmbed) return false;
   return true;
+}
+
+/* ── Embed fallback: mega/vidmoly shown only when no direct sources exist ── */
+function isEmbedFallback(src: FetchedSrc): boolean {
+  const url = (src.directUrl || src.url || "").toLowerCase();
+  if (!src.isEmbed) return false;
+  return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 
 /* ── Normalise CDN hostname for deduplication ── */
@@ -674,7 +681,20 @@ function ScraperPicker({
     return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
   });
 
-  const displaySources = allFlat;
+  /* Embed fallbacks (mega/vidmoly) — collected separately, shown only when no direct sources */
+  const embedFallbacks: FetchedSrc[] = [];
+  const seenEmbedKeys = new Set<string>();
+  for (const srcs of Object.values(slotSources)) {
+    for (const s of srcs) {
+      if (!isEmbedFallback(s)) continue;
+      const key = s.directUrl || s.url;
+      if (!key || seenEmbedKeys.has(key)) continue;
+      seenEmbedKeys.add(key);
+      embedFallbacks.push(s);
+    }
+  }
+
+  const displaySources = allFlat.length > 0 ? allFlat : embedFallbacks;
 
   /* Group by quality tier */
   const grouped: Record<Quality, FetchedSrc[]> = {
