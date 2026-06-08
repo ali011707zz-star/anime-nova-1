@@ -3800,8 +3800,18 @@ async function getAnimeHubSources(
       }
     }
 
-    // 2. Search for slug candidates
-    let slugCandidates: string[] = [];
+    // Simple title similarity helper (lower-case word overlap ratio)
+    function ahSimilarity(a: string, b: string): number {
+      const tok = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(Boolean);
+      const ta = new Set(tok(a)); const tb = new Set(tok(b));
+      if (!ta.size || !tb.size) return 0;
+      let shared = 0; ta.forEach(w => { if (tb.has(w)) shared++; });
+      return shared / Math.max(ta.size, tb.size);
+    }
+
+    // 2. Search for slug candidates — scored by title similarity, best first
+    interface AHCandidate { slug: string; displayTitle: string; score: number; }
+    let allCandidates: AHCandidate[] = [];
     for (const keyword of keywords) {
       try {
         const r = await fetch(
@@ -3819,19 +3829,30 @@ async function getAnimeHubSources(
         if (!r.ok) continue;
         const d: any = await r.json();
         const html: string = d?.html || d?.content || "";
-        const re = /href="\/anime\/([^"?#]+)"/g;
+        // Extract slug + display title from each result item
+        const itemRe = /href="\/anime\/([^"?#]+)"[^>]*>([^<]+)</g;
         let m: RegExpExecArray | null;
-        while ((m = re.exec(html)) !== null) {
-          const slug = m[1].replace(/\/$/, "");
-          if (!slugCandidates.includes(slug)) slugCandidates.push(slug);
+        while ((m = itemRe.exec(html)) !== null) {
+          const slug  = m[1].replace(/\/$/, "");
+          const dTitle = m[2].trim();
+          if (allCandidates.some(c => c.slug === slug)) continue;
+          const bestScore = Math.max(
+            ahSimilarity(dTitle, english || title),
+            ahSimilarity(dTitle, title),
+          );
+          allCandidates.push({ slug, displayTitle: dTitle, score: bestScore });
         }
-        if (slugCandidates.length > 0) break;
+        if (allCandidates.length > 0) break;
       } catch { /* try next keyword */ }
     }
-    if (!slugCandidates.length) return [];
+    if (!allCandidates.length) return [];
+
+    // Sort by similarity descending — exact/best match first
+    allCandidates.sort((a, b) => b.score - a.score);
+    const slugCandidates = allCandidates.map(c => c.slug);
 
     // 3. Try each slug — fetch episode info and extract HLS
-    for (const slug of slugCandidates.slice(0, 4)) {
+    for (const slug of slugCandidates.slice(0, 6)) {
       try {
         // The epr param is {slug}/{season}/{episode}; season is always 1 on animehub
         const epr = `${slug}/1/${ep}`;
@@ -4709,6 +4730,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animehub":    (await race(getAnimeHubSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       // case "animegg": معطّل مؤقتاً
       case "allmanga":    (await race(getAllMangaSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "reanime":     (await race(getReanímeSources(title, english, ep, anilistId),       SCRAPER_MS, [])).forEach(collectSrc); break;
