@@ -774,19 +774,20 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     if (r.ok) { const d = await r.json() as any; imdbId = String(d.imdb_id || ""); }
   } catch { /* ignore */ }
 
-  // ── 2. CDN candidates (vdrk.site v3 + v2) — verified with HEAD ──
+  // ── 2. CDN candidates (vdrk.site v1 — only v1 is live; v2/v3 return 404) ──
   const cdnPath = type === "tv" ? `tv/${tmdbId}/${season}/${ep}` : `movie/${tmdbId}`;
   const cdnBase = "https://cache.vdrk.site";
   const cdnCandidates: Track[] = [
-    { id: "ar-cdn-v3", lang: "ar", label: "عربي · CDN",      url: `${cdnBase}/v3/${cdnPath}/Arabic.vtt`  },
-    { id: "ar-cdn-v2", lang: "ar", label: "عربي · CDN v2",   url: `${cdnBase}/v2/${cdnPath}/Arabic.vtt`  },
-    { id: "en-cdn-v3", lang: "en", label: "إنجليزي · CDN",   url: `${cdnBase}/v3/${cdnPath}/English.vtt` },
-    { id: "en-cdn-v2", lang: "en", label: "إنجليزي · CDN v2",url: `${cdnBase}/v2/${cdnPath}/English.vtt` },
+    { id: "ar-cdn-v1",   lang: "ar", label: "عربي · CDN",      url: `${cdnBase}/v1/${cdnPath}/Arabic.vtt`   },
+    { id: "ar-cdn-v1-2", lang: "ar", label: "عربي · CDN 2",    url: `${cdnBase}/v1/${cdnPath}/Arabic2.vtt`  },
+    { id: "ar-cdn-v1-3", lang: "ar", label: "عربي · CDN 3",    url: `${cdnBase}/v1/${cdnPath}/Arabic3.vtt`  },
+    { id: "ar-cdn-v1-4", lang: "ar", label: "عربي · CDN 4",    url: `${cdnBase}/v1/${cdnPath}/Arabic4.vtt`  },
+    { id: "en-cdn-v1",   lang: "en", label: "إنجليزي · CDN",   url: `${cdnBase}/v1/${cdnPath}/English.vtt`  },
   ];
   const cdnFound: Track[] = [];
   await Promise.allSettled(cdnCandidates.map(async c => {
     try {
-      const r = await fetch(c.url, { method: "HEAD", signal: AbortSignal.timeout(4_000) });
+      const r = await fetch(c.url, { method: "HEAD", signal: AbortSignal.timeout(5_000) });
       if (r.ok) cdnFound.push(c);
     } catch { /* ignore */ }
   }));
@@ -858,8 +859,43 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     }
   } catch { /* ignore */ }
 
+  // ── 5. Vyla subtitle API (missourimonster-vyla.hf.space) ──
+  // Returns Arabic1–9 + English VTT from cache.vdrk.site; run in parallel with above
+  const vylaItems: Track[] = [];
+  try {
+    const vylaUrl = type === "tv"
+      ? `https://missourimonster-vyla.hf.space/api/subtitles/tv/${tmdbId}/${season}/${ep}`
+      : `https://missourimonster-vyla.hf.space/api/subtitles/movie/${tmdbId}`;
+    const r = await fetch(vylaUrl, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(9_000),
+    });
+    if (r.ok) {
+      const data = await r.json() as any[];
+      if (Array.isArray(data)) {
+        const cnt: Record<string, number> = {};
+        for (const s of data) {
+          if (!s.file || !s.label) continue;
+          const lbl = (s.label as string).toLowerCase();
+          const isAr = lbl.startsWith("arabic");
+          const isEn = lbl.startsWith("english");
+          if (!isAr && !isEn) continue;
+          const lang = isAr ? "ar" : "en";
+          const i = (cnt[lang] = (cnt[lang] ?? 0) + 1);
+          const sfx = i > 1 ? ` ${i}` : "";
+          vylaItems.push({
+            id: `${lang}-vyla-${i}`,
+            lang,
+            label: isAr ? `عربي · Vyla${sfx}` : `إنجليزي · Vyla${sfx}`,
+            url: s.file,
+          });
+        }
+      }
+    }
+  } catch { /* silent */ }
+
   // ── Merge, sort Arabic-first, deduplicate by URL ──
-  const all = [...cdnFound, ...wyzieItems, ...vidzeeItems];
+  const all = [...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems];
   all.sort((a, b) => (a.lang === "ar" && b.lang !== "ar" ? -1 : a.lang !== "ar" && b.lang === "ar" ? 1 : 0));
   const seen = new Set<string>();
   const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
