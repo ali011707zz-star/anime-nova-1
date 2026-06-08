@@ -73,10 +73,14 @@ function getSourceTier(src: Source): QualityTier {
   const url = src.proxyUrl || src.directUrl || src.url;
   const lbl = src.label || "";
   if (url.includes("hls-proxy")) {
+    // All Vyla sources are high-quality HLS
+    if (lbl.startsWith("Vyla")) return "1080p FHD";
     if (
       lbl.includes("الثريا") || lbl.startsWith("StarCima") ||
       lbl.includes("Smashy") || lbl.includes("multiembed") ||
-      lbl === "Vyla · VidZee" || lbl === "Najm I"
+      lbl.includes("Najm") || lbl.startsWith("VidSrc VIP") ||
+      lbl.startsWith("Wecima") || lbl.startsWith("TopCinema") ||
+      lbl.startsWith("Moviz") || lbl.startsWith("StarDima")
     ) return "1080p FHD";
     return "720p HD";
   }

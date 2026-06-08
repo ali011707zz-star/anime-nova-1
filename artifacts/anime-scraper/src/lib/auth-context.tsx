@@ -16,8 +16,8 @@ interface AuthContextType {
   loading: boolean;
   signIn: () => void;
   signOut: () => Promise<void>;
-  emailSignIn: (email: string, password: string) => Promise<{ error?: string }>;
-  emailSignUp: (email: string, password: string, name: string) => Promise<{ error?: string }>;
+  emailSignIn: (email: string, password: string) => Promise<{ error?: string; requiresVerification?: boolean; verificationCode?: string; email?: string }>;
+  emailSignUp: (email: string, password: string, name: string) => Promise<{ error?: string; requiresVerification?: boolean; verificationCode?: string; email?: string }>;
   updateProfile: (data: { displayName?: string; username?: string; profileImageCustom?: string | null }) => Promise<{ error?: string }>;
   refreshUser: () => Promise<void>;
 }
@@ -29,6 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => { window.location.href = "/api/logout"; },
   emailSignIn: async () => ({}),
   emailSignUp: async () => ({}),
+
   updateProfile: async () => ({}),
   refreshUser: async () => {},
 });
@@ -78,6 +79,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const data = await res.json();
       if (!res.ok) return { error: data.error || "فشل تسجيل الدخول" };
+      if (data.requiresVerification) {
+        return { requiresVerification: true, verificationCode: data.verificationCode, email: data.email };
+      }
       setUser({ ...data, authType: "email" });
       return {};
     } catch {
@@ -95,6 +99,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const data = await res.json();
       if (!res.ok) return { error: data.error || "فشل إنشاء الحساب" };
+      if (data.requiresVerification) {
+        return { requiresVerification: true, verificationCode: data.verificationCode, email: data.email };
+      }
       setUser({ ...data, authType: "email" });
       return {};
     } catch {
