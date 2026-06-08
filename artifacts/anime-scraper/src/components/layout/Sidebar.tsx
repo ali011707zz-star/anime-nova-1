@@ -103,10 +103,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   style={{ background: 'linear-gradient(135deg,#7C3AED,#4F46E5)' }}>
                   <Star className="w-4 h-4 text-white" fill="white" />
                 </div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-[16px] font-black tracking-tight"
-                    style={{ background: 'linear-gradient(135deg,#A78BFA,#7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>NOVA</span>
-                  <span className="text-[16px] font-black text-white/90 tracking-tight">ANIME</span>
+                <div className="flex items-baseline gap-[4px]">
+                  <span className="text-[16px] font-black tracking-tight text-white/80" style={{ fontFamily: "'Cairo',sans-serif" }}>anime</span>
+                  <span className="text-[16px] font-black tracking-tight" style={{ fontFamily: "'Cairo',sans-serif", background: 'linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>nova</span>
                 </div>
               </div>
               <button onClick={onClose}
