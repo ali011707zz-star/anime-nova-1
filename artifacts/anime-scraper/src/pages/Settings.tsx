@@ -468,12 +468,12 @@ export default function Settings() {
   const currentTheme = THEMES.find(t => t.id === theme) || THEMES[0];
 
   const displayName = user
-    ? (localStorage.getItem("profile-displayname") ||
+    ? (user.displayName ||
        [user.firstName, user.lastName].filter(Boolean).join(" ") ||
        user.email?.split("@")[0] || "مستخدم Nova")
     : null;
   const username = user
-    ? (localStorage.getItem("profile-username") || `nova_${user.id?.slice(-5) || "user"}`)
+    ? (user.username || `nova_${user.id?.slice(-5) || "user"}`)
     : null;
 
   return (
