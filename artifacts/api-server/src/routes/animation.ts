@@ -1142,8 +1142,63 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 13. ToonStream — DISABLED (rubystm CDN expired, as-cdn21 returns 403) ──
+      // ── 13. ToonStream — DISABLED ──
       Promise.resolve(),
+
+      // ── 19. multiembed.mov (TMDB-native, returns streamwish/filemoon) ─────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const url = type === "tv"
+            ? `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=tv&s=${season}&e=${epNum}`
+            : `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=movie`;
+          await sendExtracted(url, "multiembed · HLS");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 20. vidsrc.vip (TMDB-native, newer vidsrc mirror) ────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const url = type === "tv"
+            ? `https://vidsrc.vip/embed/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidsrc.vip/embed/movie/${tmdbId}`;
+          await sendExtracted(url, "VidSrc VIP");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 21. player.smashy.stream (TMDB-native, direct HLS) ───────────────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const url = type === "tv"
+            ? `https://player.smashy.stream/tv/${tmdbId}?s=${season}&e=${epNum}`
+            : `https://player.smashy.stream/movie/${tmdbId}`;
+          await sendExtracted(url, "Smashy · HLS");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 22. vidlink.pro (TMDB-native, often returns direct HLS) ──────────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const url = type === "tv"
+            ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidlink.pro/movie/${tmdbId}`;
+          await sendExtracted(url, "VidLink · HLS");
+        } catch { /* silent */ }
+      })(),
+
+      // ── 23. vidbinge.com (TMDB-native, streamwish backend) ───────────────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const url = type === "tv"
+            ? `https://vidbinge.com/embed/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidbinge.com/embed/movie/${tmdbId}`;
+          await sendExtracted(url, "VidBinge · HLS");
+        } catch { /* silent */ }
+      })(),
 
       // ── 16. 2embed.skin (TMDB-based, tries streamwish/filemoon extraction) ─────
       (async () => {
@@ -1307,7 +1362,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   } catch { return; } // timeout or network error → skip
 
                   const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-                  sendSource(proxied, `StarCima ${srv.name || "HLS"}`, proxied, proxied);
+                  sendSource(proxied, `الثريا · ${srv.name || "HLS"}`, proxied, proxied);
                 }));
               } catch { /* silent */ }
             })(),
