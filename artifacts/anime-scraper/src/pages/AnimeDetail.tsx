@@ -8,6 +8,19 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
 
+// ── Age rating helper ─────────────────────────────────────────────
+function getAgeRating(genres: string[], isAdult: boolean) {
+  if (isAdult) return { label: "+18", color: "#ef4444", bg: "rgba(239,68,68,0.14)", warn: null };
+  const g = (genres || []).map(x => x.toLowerCase());
+  if (g.some(x => ["ecchi"].includes(x)))
+    return { label: "+17", color: "#f97316", bg: "rgba(249,115,22,0.14)", warn: "يحتوي على محتوى للكبار (+17)" };
+  if (g.some(x => ["horror", "psychological", "thriller"].includes(x)))
+    return { label: "+17", color: "#f97316", bg: "rgba(249,115,22,0.14)", warn: "يحتوي على مشاهد عنف أو رعب (+17)" };
+  if (g.some(x => ["kids"].includes(x)))
+    return { label: "+7", color: "#22c55e", bg: "rgba(34,197,94,0.13)", warn: null };
+  return { label: "+13", color: "#a78bfa", bg: "rgba(167,139,250,0.11)", warn: null };
+}
+
 // ── AniList GraphQL ──────────────────────────────────────────────
 const DETAIL_Q = `
 query ($id: Int) {
@@ -357,6 +370,15 @@ export default function AnimeDetail() {
                 {anime.episodes} حلقة
               </span>
             )}
+            {(() => {
+              const r = getAgeRating(anime.genres || [], anime.isAdult);
+              return (
+                <span className="text-[9px] font-black px-2 py-1 rounded-lg border font-['Cairo']"
+                  style={{ color: r.color, background: r.bg, borderColor: `${r.color}33` }}>
+                  {r.label}
+                </span>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -392,6 +414,20 @@ export default function AnimeDetail() {
           مشاهدة الأنمي
         </motion.button>
       </div>
+
+      {/* ══ +17 WARNING ══════════════════════════════════════════ */}
+      {(() => {
+        const r = getAgeRating(anime.genres || [], anime.isAdult);
+        return r.warn ? (
+          <div className="mx-4 mt-2.5 flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl"
+            style={{ background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.22)" }}>
+            <span className="text-[16px] shrink-0">⚠️</span>
+            <p className="text-[11px] font-black font-['Cairo']" style={{ color: "rgba(253,186,116,0.90)" }}>
+              {r.warn}
+            </p>
+          </div>
+        ) : null;
+      })()}
 
       {/* ══ SCORE + ACTIONS GRID ═════════════════════════════════ */}
       <div className="px-4 mt-3">
