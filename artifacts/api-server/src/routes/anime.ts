@@ -3927,7 +3927,7 @@ async function getMiruroApiSources(
       const ref    = encodeURIComponent(s.referer || MIRURO_REFERER);
       const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${ref}`;
       sources.push({
-        name: `MiruroAPI · AnimePahe · ${q}`,
+        name: `MiruroAPI · AnimePahe · ${q} · (ترجمة إنجليزية)`,
         url: s.url,
         quality: q,
         qualityRank: qRank,
