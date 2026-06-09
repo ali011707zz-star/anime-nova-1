@@ -3779,36 +3779,9 @@ async function getAninekoSources(
 //  يستخدم قاعدة بيانات Firebase Firestore خاصة بتطبيق AnimeWitcher
 //  البنية: anime_list/{name}/episodes/{001}/servers/{id}
 //  يستعلم بـ aniList_id (string) ← يُعيد روابط Streamtape + Pixeldrain
+//  الوصول: قراءة عامة بدون مصادقة (Firestore rules تسمح بـ public read)
 // ════════════════════════════════════════════════════════════════════
-const AW_PROJECT = "animewitcher-1c66d";
-const AW_API_KEY = "AIzaSyAcbWRwfFNnCpoydDXlEALWnM_TYVcJOMU";
-const AW_EMAIL   = "test_nova_probe@mailinator.com";
-const AW_PASS    = "TestPass123!";
-const AW_FS_BASE = `https://firestore.googleapis.com/v1/projects/${AW_PROJECT}/databases/(default)/documents`;
-
-let awToken: string | null = null;
-let awTokenExpiry = 0;
-
-async function getAWToken(): Promise<string | null> {
-  if (awToken && Date.now() < awTokenExpiry) return awToken;
-  try {
-    const r = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${AW_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: AW_EMAIL, password: AW_PASS, returnSecureToken: true }),
-        signal: AbortSignal.timeout(10000),
-      }
-    );
-    if (!r.ok) return null;
-    const data = await r.json() as { idToken?: string; expiresIn?: string };
-    if (!data.idToken) return null;
-    awToken = data.idToken;
-    awTokenExpiry = Date.now() + (parseInt(data.expiresIn || "3600") - 300) * 1000;
-    return awToken;
-  } catch { return null; }
-}
+const AW_FS_BASE = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
 
 async function getAnimeWitcherSources(
   _title: string, _english: string | null, ep: number, anilistId?: number,
@@ -5598,15 +5571,12 @@ async function fetchAWCatalog(): Promise<any[]> {
     return AW_CATALOG_CACHE.items;
   }
   try {
-    const tok = await getAWToken();
-    if (!tok) return [];
-    const AW_FS = `https://firestore.googleapis.com/v1/projects/${AW_PROJECT}/databases/(default)/documents`;
-    // جلب حتى 1000 دوك (عدة صفحات)
+    // قراءة عامة بدون مصادقة (Firestore public read)
     const all: any[] = [];
     let pageToken = "";
     for (let i = 0; i < 5; i++) {
-      const url = `${AW_FS}/anime_list?pageSize=200${pageToken ? `&pageToken=${pageToken}` : ""}`;
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}` }, signal: AbortSignal.timeout(15_000) });
+      const url = `${AW_FS_BASE}/anime_list?pageSize=200${pageToken ? `&pageToken=${pageToken}` : ""}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
       if (!r.ok) break;
       const data: any = await r.json();
       (data.documents || []).forEach((doc: any) => {
