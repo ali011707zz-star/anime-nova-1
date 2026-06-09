@@ -3048,7 +3048,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             name: "فايل مون · 1080p",
             url: filemoonUrl,
             quality: "FHD",
-            qualityRank: 11,
+            qualityRank: 15,
             site: "animeify",
             directUrl: proxyUrl,
             directType: "hls",
@@ -3059,8 +3059,8 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
     // ── MediaFire MP4 (FRFhdQ=1080p, FRLink=720p, FRLowQ=480p) → مشغّل داخلي مباشر ──
     const mfSlots = [
-      { key: "FRFhdQ", label: "ميديافاير · FHD", quality: "FHD", qualityRank: 10 },
-      { key: "FRLink",  label: "ميديافاير · HD",  quality: "HD",  qualityRank: 9  },
+      { key: "FRFhdQ", label: "ميديافاير · FHD", quality: "FHD", qualityRank: 14 },
+      { key: "FRLink",  label: "ميديافاير · HD",  quality: "HD",  qualityRank: 13 },
       { key: "FRLowQ", label: "ميديافاير · SD",  quality: "SD",  qualityRank: 5  },
     ] as const;
 
@@ -3514,7 +3514,7 @@ async function getKawaiiAnimeSources(
         name: `كواي أنمي · ${src.quality || "1080p"} · إنجليزي`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 7,
+        qualityRank: 15,
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
@@ -3828,7 +3828,7 @@ async function getAnimeWitcherSources(
       const visible = f.visible?.booleanValue !== false;
       if (!link || !visible || !srvName) return;
 
-      const qRank = quality === "1080p" ? 11 : quality === "720p" ? 10 : 9;
+      const qRank = quality === "1080p" ? 15 : quality === "720p" ? 14 : 12;
       const qLabel = quality === "1080p" ? "FHD 1080p" : quality === "720p" ? "HD 720p" : quality;
 
       if (srvName === "PD") {

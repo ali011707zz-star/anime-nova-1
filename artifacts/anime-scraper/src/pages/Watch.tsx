@@ -328,6 +328,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
           initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           transition={{ delay: 0.32 }}
           className="flex flex-col items-center gap-3">
+          <p className="text-white/80 text-[13px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
           <div className="relative w-9 h-9">
             <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
             <motion.div
@@ -336,7 +337,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
               transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
             />
           </div>
-          <p className="text-white/22 text-[11px] font-['Cairo'] tracking-[0.12em]">جاري التشغيل</p>
+          <p className="text-white/75 text-[12px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
         </motion.div>
       </div>
     </div>
@@ -769,15 +770,13 @@ function ScraperPicker({
 
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.30 }}
             className="flex flex-col items-center gap-3">
+            <p className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
             <div className="relative w-9 h-9">
               <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
-            <p className="text-white/70 text-[12px] font-['Cairo'] tracking-[0.12em]">جاري تشغيل الحلقة</p>
-            <p className="text-white/55 text-[12px] font-['Cairo'] text-center leading-relaxed mt-1 px-4">
-              اللهم صلِّ وسلِّم على نبينا محمد ﷺ
-            </p>
+            <p className="text-white/75 text-[12px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
           </motion.div>
         </div>
       </div>

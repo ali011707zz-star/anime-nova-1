@@ -214,14 +214,18 @@ export default function AnimationWatch() {
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
   /* ── Auto-play first available "ok" source (respects pref-autoplay setting) ── */
+  /* Priority: الثريا (StarCima/vidzee) > AnimeWitcher > أول مصدر متاح */
   useEffect(() => {
     if (step === "playing" || step === "error") return;
     if (autoPlayedRef.current) return;
-    if (!prefAutoplay.current) return;             // user disabled auto-play
-    const first = sources.find(s => s.status === "ok");
-    if (!first) return;
+    if (!prefAutoplay.current) return;
+    const okSources = sources.filter(s => s.status === "ok");
+    if (!okSources.length) return;
+    const tharaya    = okSources.find(s => s.label?.includes("الثريا"));
+    const witcher    = okSources.find(s => s.label?.includes("AnimeWitcher"));
+    const preferred  = tharaya ?? witcher ?? okSources[0];
     autoPlayedRef.current = true;
-    playSource(first);
+    playSource(preferred);
   }, [sources, step, playSource]);
 
   /* Auto-upgrade disabled — sources in animation section are unreliable;
@@ -541,15 +545,13 @@ export default function AnimationWatch() {
           </div>
 
           <div className="flex flex-col items-center gap-3">
+            <p className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
             <div className="relative w-9 h-9">
               <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
-            <p className="text-white/70 text-[12px] font-['Cairo'] tracking-[0.12em]">جاري تشغيل الحلقة</p>
-            <p className="text-white/55 text-[12px] font-['Cairo'] text-center leading-relaxed px-4">
-              اللهم صلِّ وسلِّم على نبينا محمد ﷺ
-            </p>
+            <p className="text-white/75 text-[12px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
 
             {/* Subtitle preparation indicator — shown while translating during episode load */}
             {(subStatus === "translating" || subStatus === "discovering") && (
