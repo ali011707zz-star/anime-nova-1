@@ -66,6 +66,7 @@ interface Source {
   proxyUrl?: string;
   status?: "loading" | "ok" | "fail";
   tier?: QualityTier;
+  _retriedDirect?: boolean; // true after first retry with raw directUrl
 }
 
 function getSourceTier(src: Source): QualityTier {
@@ -184,16 +185,33 @@ export default function AnimationWatch() {
     setStep("playing");
   }, []);
 
-  /* Update onFail: mark source as failed, return to picker — no auto-cascade */
+  /* Update onFail: retry with raw directUrl once, then mark failed — no cascade */
   const playNext = useCallback(() => {
     setSelSrc(sel => {
-      if (sel) {
-        setSources(prev => prev.map(s => s.url === sel.url ? { ...s, status: "fail" as const } : s));
+      if (!sel) { setStep("sources"); return sel; }
+
+      // First failure: if we used a proxy URL and raw directUrl differs → retry directly
+      const hasRawFallback =
+        !sel._retriedDirect &&
+        sel.directUrl &&
+        sel.proxyUrl &&
+        sel.proxyUrl !== sel.directUrl &&
+        !sel.directUrl.startsWith("/api/"); // raw URL, not another proxy
+
+      if (hasRawFallback) {
+        // Retry: play the raw directUrl directly (browser may bypass CDN restriction)
+        const retrySrc: Source = { ...sel, proxyUrl: sel.directUrl, _retriedDirect: true };
+        setSources(prev => prev.map(s => s.url === sel.url ? retrySrc : s));
+        setTimeout(() => playSource(retrySrc), 0);
+        return retrySrc;
       }
+
+      // All attempts exhausted → mark failed, return to picker
+      setSources(prev => prev.map(s => s.url === sel.url ? { ...s, status: "fail" as const } : s));
       setStep("sources");
       return sel;
     });
-  }, []);
+  }, [playSource]);
 
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
@@ -232,11 +250,14 @@ export default function AnimationWatch() {
     try {
       const r = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(url)}`);
       const d = await r.json();
-      let direct = d.directUrl || d.url || "";
-      if (direct && direct.includes(".m3u8")) direct = wrapHls(direct, url);
+      const raw = d.directUrl || d.url || "";
+      // Keep raw URL as directUrl so retry-with-direct fallback can use it
+      let proxyUrl = raw;
+      if (raw && raw.includes(".m3u8")) proxyUrl = wrapHls(raw, url);
+      else if (raw && !raw.startsWith("/api/")) proxyUrl = wrapMp4(raw, url);
       setSources(prev => prev.map(s =>
         s.url === url
-          ? { ...s, directUrl: direct || undefined, proxyUrl: direct || undefined, status: direct ? "ok" : ("unknown" as any) }
+          ? { ...s, directUrl: raw || undefined, proxyUrl: raw ? proxyUrl : undefined, status: raw ? "ok" : ("unknown" as any) }
           : s
       ));
     } catch {
