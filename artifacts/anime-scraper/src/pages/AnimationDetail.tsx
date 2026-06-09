@@ -11,6 +11,14 @@ const IMG_W = "https://image.tmdb.org/t/p/w500";
 const IMG_O = "https://image.tmdb.org/t/p/original";
 const IMG_S = "https://image.tmdb.org/t/p/w185";
 
+const formatRuntime = (mins: number) => {
+  if (!mins || mins <= 0) return "";
+  if (mins < 60) return `${mins} دقيقة`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h} ساعة ${m} دقيقة` : `${h} ساعة`;
+};
+
 const GENRE_AR: Record<number, string> = {
   16: "رسوم متحركة", 28: "أكشن", 12: "مغامرة", 35: "كوميدي",
   80: "جريمة", 99: "وثائقي", 18: "دراما", 10751: "عائلي",
@@ -196,7 +204,7 @@ export default function AnimationDetail() {
             )}
             {runtime > 0 && (
               <span className="flex items-center gap-1 text-[9px] font-black px-2 py-1 rounded-lg border border-white/8 bg-white/5 text-white/40 font-['Cairo']">
-                <Clock className="w-2.5 h-2.5" />{runtime} دق
+                <Clock className="w-2.5 h-2.5" />{formatRuntime(runtime)}
               </span>
             )}
             {type === "tv" && detail.number_of_seasons > 0 && (
@@ -222,6 +230,30 @@ export default function AnimationDetail() {
               <Calendar className="w-3 h-3" />
               <span className="font-['Cairo']">{year}</span>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Score row ── */}
+      {score > 0 && (
+        <div className="mx-4 mt-4 rounded-2xl px-4 py-3 flex items-center gap-3"
+          style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.18)" }}>
+          <div className="flex items-center gap-1.5">
+            {[1,2,3,4,5].map(i => {
+              const filled = score / 2 >= i;
+              const half = !filled && score / 2 >= i - 0.5;
+              return (
+                <Star key={i}
+                  className={`w-4 h-4 ${filled || half ? "text-amber-400 fill-amber-400" : "text-white/15"}`}
+                  style={half ? { clipPath: "inset(0 50% 0 0)", overflow: "visible" } : undefined}
+                />
+              );
+            })}
+          </div>
+          <span className="text-amber-300 text-[15px] font-black">{score.toFixed(1)}</span>
+          <span className="text-white/30 text-[10px] font-['Cairo']">/ 10</span>
+          {detail.vote_count > 0 && (
+            <span className="text-white/25 text-[9px] font-['Cairo'] mr-auto">{detail.vote_count.toLocaleString()} تقييم</span>
           )}
         </div>
       )}

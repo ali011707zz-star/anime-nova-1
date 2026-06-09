@@ -258,7 +258,7 @@ export default function AnimationEpisodes() {
                       {epItem.runtime && (
                         <div className="flex items-center gap-1">
                           <Clock className="w-2.5 h-2.5 text-white/20" />
-                          <span className="text-[8.5px] text-white/22 font-['Cairo']">{epItem.runtime} دق</span>
+                          <span className="text-[8.5px] text-white/22 font-['Cairo']">{epItem.runtime < 60 ? `${epItem.runtime} دقيقة` : `${Math.floor(epItem.runtime/60)} ساعة${epItem.runtime%60>0?` ${epItem.runtime%60} دقيقة`:""}`}</span>
                         </div>
                       )}
                       {progressSec > 30 && !watched && (
