@@ -66,6 +66,7 @@ const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
 const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
 const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
+const Updates            = lazy(() => import("@/pages/Updates"));
 
 function PageLoader() {
   return (
@@ -136,6 +137,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
             <Route path="/history"                 component={WatchHistory} />
             <Route path="/browse"                  component={Browse} />
             <Route path="/news"                    component={News} />
+            <Route path="/updates"                 component={Updates} />
             <Route path="/settings"               component={Settings} />
             <Route path="/profile"                component={Profile} />
             <Route path="/animations"              component={AnimationLibrary} />
