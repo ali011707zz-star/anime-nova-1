@@ -3,8 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "wouter";
 import {
   ChevronRight, Play, Star, Heart, MessageSquare,
-  Send, Sparkles, ChevronDown, Flag, MoreVertical, Plus,
-  X, ArrowRight, ChevronDown as ReplyArrow,
+  Send, Sparkles, ChevronDown, Flag, MoreVertical, Plus, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
@@ -286,11 +285,18 @@ export default function AnimeDetail() {
   if (!anime) return (
     <div className="bg-[#09090B] min-h-screen flex items-center justify-center" dir="rtl">
       <div className="text-center space-y-4 px-6">
-        <p className="text-white/40 font-bold font-['Cairo']">الأنمي غير موجود</p>
-        <button onClick={() => navigate("/")}
-          className="px-6 py-2.5 bg-primary/15 border border-primary/25 text-primary rounded-2xl text-sm font-bold font-['Cairo']">
-          العودة للرئيسية
-        </button>
+        <p className="text-white/40 font-bold font-['Cairo']">تعذّر تحميل بيانات الأنمي</p>
+        <p className="text-white/25 text-sm font-['Cairo']">قد يكون هناك مشكلة في الاتصال، حاول مرة أخرى</p>
+        <div className="flex gap-3 justify-center">
+          <button onClick={() => { setLoading(true); setAnime(null); const id = params.id!; fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({query:`query($id:Int){Media(id:$id,type:ANIME){id title{romaji english arabic}coverImage{large extraLarge}bannerImage description averageScore popularity episodes status format genres startDate{year month day}endDate{year month day}nextAiringEpisode{episode airingAt}trailer{site id}idMal rankings{rank allTime type}characters{edges{role node{id name{full}image{medium}gender dateOfBirth{year month day}description bloodType siteUrl favourites}}}relations{edges{relationType node{id type title{romaji english}coverImage{medium}format status episodes averageScore}}}recommendations{nodes{mediaRecommendation{id title{romaji english}coverImage{medium}format averageScore}}}}}`,variables:{id:parseInt(id)}})}).then(r=>r.json()).then(d=>{const a=d.data?.Media;if(a)setAnime(a);setLoading(false);}).catch(()=>{setLoading(false);}); }}
+            className="px-6 py-2.5 bg-primary/15 border border-primary/25 text-primary rounded-2xl text-sm font-bold font-['Cairo']">
+            حاول مجدداً
+          </button>
+          <button onClick={() => navigate("/")}
+            className="px-6 py-2.5 bg-white/5 border border-white/10 text-white/50 rounded-2xl text-sm font-bold font-['Cairo']">
+            الرئيسية
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -403,13 +409,14 @@ export default function AnimeDetail() {
           </div>
         )}
 
-        {/* 3-col action buttons */}
-        <div className="grid grid-cols-3 gap-2 mb-2">
+        {/* 4-button action grid (2×2) */}
+        <div className="grid grid-cols-2 gap-2 mb-2">
           {[
-            { icon: Star,  label: "تقييمي",   active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true) },
-            { icon: Plus,  label: "قائمتي",   active: saved,        activeColor: "#8B5CF6", action: toggleSave },
-            { icon: Heart, label: "المفضلة",  active: saved,        activeColor: "#EC4899", action: toggleSave },
-          ].map(({ icon: Icon, label, active, activeColor, action }) => (
+            { icon: Star,         label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
+            { icon: Plus,         label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: null },
+            { icon: MessageSquare,label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => setShowComments(true), sub: comments.length > 0 ? `${comments.length} تعليق` : "اكتب تعليقاً" },
+            { icon: Heart,        label: "المفضلة",   active: saved,        activeColor: "#EC4899", action: toggleSave,                         sub: null },
+          ].map(({ icon: Icon, label, active, activeColor, action, sub }) => (
             <motion.button key={label} whileTap={{ scale: 0.94 }} onClick={action}
               className="flex flex-col items-center gap-1.5 py-3 rounded-2xl border transition-all font-['Cairo']"
               style={active
@@ -417,25 +424,19 @@ export default function AnimeDetail() {
                 : { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.45)" }}>
               <Icon className="w-4 h-4" style={active ? { fill: activeColor, color: activeColor } : {}} />
               <span className="text-[9px] font-black">{label}</span>
-              {label === "تقييمي" && myRating > 0 && (
-                <span className="text-[9px] font-black" style={{ color: activeColor }}>{myRating}/10</span>
-              )}
+              {sub && <span className="text-[9px] opacity-70">{sub}</span>}
             </motion.button>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { label: "التعليقات", sub: comments.length > 0 ? `${comments.length} تعليق` : "اكتب تعليقاً", action: () => setShowComments(true) },
-            { label: "MAL",       sub: anime.idMal ? `#${anime.idMal}` : "MyAnimeList", action: () => anime.idMal && window.open(`https://myanimelist.net/anime/${anime.idMal}`, "_blank") },
-          ].map(({ label, sub, action }) => (
-            <motion.button key={label} whileTap={{ scale: 0.94 }} onClick={action}
-              className="flex flex-col items-center gap-1 py-3 rounded-2xl border font-['Cairo'] transition-all"
-              style={{ background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.55)" }}>
-              <span className="text-[11px] font-black">{label}</span>
-              {sub && <span className="text-[9px] text-white/30">{sub}</span>}
-            </motion.button>
-          ))}
-        </div>
+        {anime.idMal && (
+          <motion.button whileTap={{ scale: 0.94 }}
+            onClick={() => window.open(`https://myanimelist.net/anime/${anime.idMal}`, "_blank")}
+            className="w-full flex flex-col items-center gap-1 py-3 rounded-2xl border font-['Cairo'] transition-all"
+            style={{ background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.55)" }}>
+            <span className="text-[11px] font-black">MAL</span>
+            <span className="text-[9px] text-white/30">#{anime.idMal}</span>
+          </motion.button>
+        )}
       </div>
 
       {/* ══ MAL STATS BOX ════════════════════════════════════════ */}
@@ -465,10 +466,7 @@ export default function AnimeDetail() {
             )}
             {anime.idMal && (
               <div className="flex-1 flex flex-col items-center justify-center py-3 px-2">
-                <button onClick={() => window.open(`https://myanimelist.net/anime/${anime.idMal}`, "_blank")}
-                  className="flex items-center gap-1 text-blue-300 text-[10px] font-black font-['Cairo']">
-                  المزيد <ArrowRight className="w-3 h-3" />
-                </button>
+                <span className="text-blue-300/50 text-[9px] font-bold font-['Cairo']">#{anime.idMal}</span>
               </div>
             )}
           </div>
@@ -750,6 +748,8 @@ export default function AnimeDetail() {
                     <div key={c.id} className="border-b border-white/5">
                       {/* Main comment */}
                       <CommentRow c={c} full
+                        myImage={user?.profileImageUrl ?? undefined}
+                        isMe={c.user === getMyName()}
                         onLike={() => toggleLike(c.id)}
                         onReply={() => {
                           setReplyingTo(isReplying ? null : c.id);
@@ -804,10 +804,14 @@ export default function AnimeDetail() {
                               {isReplying && (
                                 <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
                                   className="flex gap-2.5 items-center pt-1">
-                                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
-                                    style={{ background: avatarColor(getMyName()) }}>
-                                    {getMyName().charAt(0).toUpperCase()}
-                                  </div>
+                                  {user?.profileImageUrl ? (
+                                    <img src={user.profileImageUrl} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 border border-white/10" />
+                                  ) : (
+                                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
+                                      style={{ background: avatarColor(getMyName()) }}>
+                                      {getMyName().charAt(0).toUpperCase()}
+                                    </div>
+                                  )}
                                   <div className="flex-1 flex items-center gap-2 bg-[#111116] rounded-2xl px-3 py-2 border border-white/8">
                                     <input
                                       ref={replyRef}
@@ -838,10 +842,14 @@ export default function AnimeDetail() {
               {/* New comment input */}
               <div className="px-4 py-3 border-t border-white/6 shrink-0" dir="rtl">
                 <div className="flex items-center gap-2 bg-[#111116] rounded-2xl px-4 py-2.5 border border-white/8">
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
-                    style={{ background: avatarColor(getMyName()) }}>
-                    {getMyName().charAt(0).toUpperCase()}
-                  </div>
+                  {user?.profileImageUrl ? (
+                    <img src={user.profileImageUrl} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 border border-white/10" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
+                      style={{ background: avatarColor(getMyName()) }}>
+                      {getMyName().charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <input
                     ref={inputRef}
                     value={newComment}
@@ -966,16 +974,21 @@ function CharCard({ e, main, isFav, onToggleFav }: { e: any; main?: boolean; isF
   );
 }
 
-function CommentRow({ c, onLike, onReply, full, repliesCount, isExpanded, onToggleReplies }: {
+function CommentRow({ c, onLike, onReply, full, repliesCount, isExpanded, onToggleReplies, myImage, isMe }: {
   c: any; onLike: () => void; onReply: () => void; full?: boolean;
   repliesCount?: number; isExpanded?: boolean; onToggleReplies?: () => void;
+  myImage?: string; isMe?: boolean;
 }) {
   return (
     <div className="px-4 py-3.5 flex gap-3">
-      <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black text-white shrink-0"
-        style={{ background: avatarColor(c.user) }}>
-        {c.user.charAt(0).toUpperCase()}
-      </div>
+      {isMe && myImage ? (
+        <img src={myImage} alt="" className="w-9 h-9 rounded-full object-cover shrink-0 border border-white/10" />
+      ) : (
+        <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black text-white shrink-0"
+          style={{ background: avatarColor(c.user) }}>
+          {c.user.charAt(0).toUpperCase()}
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between mb-1">
           <div>
@@ -1003,7 +1016,7 @@ function CommentRow({ c, onLike, onReply, full, repliesCount, isExpanded, onTogg
             <button onClick={onToggleReplies}
               className="flex items-center gap-1 text-[10px] font-black font-['Cairo'] transition-colors"
               style={{ color: isExpanded ? "#c4b5fd" : "rgba(255,255,255,0.25)" }}>
-              <ReplyArrow className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+              <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
               {repliesCount ?? c.replies?.length} ردود
             </button>
           )}

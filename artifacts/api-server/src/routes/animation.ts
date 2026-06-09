@@ -12,6 +12,24 @@ const RUBY_B    = "https://rubystm.com";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// ── AnimeWitcher Firebase token cache (expires after 50 min) ────────────────
+let _awTokenCache: { token: string; expiresAt: number } | null = null;
+async function getAwToken(): Promise<string> {
+  const now = Date.now();
+  if (_awTokenCache && _awTokenCache.expiresAt > now) return _awTokenCache.token;
+  const r = await fetch(
+    "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyAcbWRwfFNnCpoydDXlEALWnM_TYVcJOMU",
+    { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "test_nova_probe@mailinator.com", password: "TestPass123!", returnSecureToken: true }),
+      signal: AbortSignal.timeout(10_000) }
+  );
+  if (!r.ok) return "";
+  const d: any = await r.json();
+  const token: string = d?.idToken || "";
+  if (token) _awTokenCache = { token, expiresAt: now + 50 * 60 * 1000 };
+  return token;
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 async function tmdb(path: string): Promise<any> {
@@ -1365,11 +1383,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       (async () => {
         if (!title) return;
         try {
-          const AW_PROJECT = "animewitcher-1c66d";
-          const AW_API_KEY = "AIzaSyAcbWRwfFNnCpoydDXlEALWnM_TYVcJOMU";
-          const AW_EMAIL   = "test_nova_probe@mailinator.com";
-          const AW_PASS    = "TestPass123!";
-          const AW_FS      = `https://firestore.googleapis.com/v1/projects/${AW_PROJECT}/databases/(default)/documents`;
+          const AW_FS = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
 
           // 1. جلب العنوان الإنجليزي من TMDB (لأن title قد يكون عربياً)
           let tmdbEnTitle = "";
@@ -1413,16 +1427,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }
           if (!anilistId) return;
 
-          // 2. مصادقة Firebase
-          const authR = await fetch(
-            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${AW_API_KEY}`,
-            { method: "POST", headers: { "Content-Type": "application/json" },
-              body  : JSON.stringify({ email: AW_EMAIL, password: AW_PASS, returnSecureToken: true }),
-              signal: AbortSignal.timeout(10_000) }
-          );
-          if (!authR.ok) return;
-          const authData: any = await authR.json();
-          const awToken: string = authData?.idToken || "";
+          // 2. مصادقة Firebase (مُخزَّنة مؤقتاً 50 دقيقة)
+          const awToken = await getAwToken();
           if (!awToken) return;
 
           // 3. ابحث عن الأنمي في Firestore بالـ aniList_id (مخزّن كـ string)
@@ -1439,7 +1445,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             signal: AbortSignal.timeout(10_000),
           });
           if (!qRes.ok) return;
-          const qData: any[] = await qRes.json();
+          const qData = await qRes.json() as any[];
           const docPath  = qData?.[0]?.document?.name;
           if (!docPath) return;
           const animeName = docPath.split("/").pop();
