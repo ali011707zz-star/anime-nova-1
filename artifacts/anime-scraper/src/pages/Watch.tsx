@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
+import EpComments from "@/components/EpComments";
 
 /* ══════════════════════════════════ ANILIST ══════════════════ */
 const ANILIST_Q = `query ($id: Int) {
@@ -280,7 +281,15 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
       )}
 
       {/* Centered content */}
-      <div className="relative h-full flex flex-col items-center justify-center gap-7 px-6">
+      <div className="relative h-full flex flex-col items-center justify-center gap-6 px-6">
+        {/* Prayer — ABOVE poster */}
+        <motion.p
+          initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05, duration: 0.4 }}
+          className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide text-center">
+          اللهم صلِّ وسلِّم على نبينا محمد ﷺ
+        </motion.p>
+
         {/* Large cover image */}
         {cover ? (
           <motion.div
@@ -328,7 +337,6 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
           initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           transition={{ delay: 0.32 }}
           className="flex flex-col items-center gap-3">
-          <p className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
           <div className="relative w-9 h-9">
             <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
             <motion.div
@@ -337,7 +345,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
               transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
             />
           </div>
-          <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة</p>
+          <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
         </motion.div>
       </div>
     </div>
@@ -647,12 +655,12 @@ function SourceRow({ src, idx, onPlaySrc }: { src: FetchedSrc; idx: number; onPl
 }
 
 function ScraperPicker({
-  cover, title, ep, totalEps,
+  cover, title, ep, totalEps, animeId,
   slotStatus, slotSources,
   onFetchSite, onPlaySrc,
   onBack, onNextEp, onPrevEp,
 }: {
-  cover: string; title: string; ep: number; totalEps: number;
+  cover: string; title: string; ep: number; totalEps: number; animeId: number;
   slotStatus: Record<string, SlotStatus>;
   slotSources: Record<string, FetchedSrc[]>;
   onFetchSite: (site: string) => void;
@@ -776,7 +784,7 @@ function ScraperPicker({
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
-            <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة</p>
+            <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
           </motion.div>
         </div>
       </div>
@@ -915,6 +923,9 @@ function ScraperPicker({
             )}
           </motion.div>
         )}
+
+        {/* ── Episode comments ── */}
+        <EpComments commKey={`nova-ep-comments-${animeId}-${ep}`} />
       </div>
     </div>
   );
@@ -1807,7 +1818,7 @@ export default function WatchPage() {
   /* Fetch AniList metadata */
   useEffect(() => {
     if (!animeId) return;
-    fetch("https://graphql.anilist.co", {
+    fetch("/api/anime/anilist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } }),
@@ -2103,6 +2114,7 @@ export default function WatchPage() {
               onFetchSite={handleFetchSite}
               onPlaySrc={handlePlaySrc}
               onBack={handleBack}
+              animeId={animeId}
               onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
               onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
             />

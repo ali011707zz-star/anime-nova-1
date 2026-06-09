@@ -52,7 +52,6 @@ export function registerEmailAuthRoutes(app: Express): void {
       const passwordHash = await hashPassword(password);
       const displayName = typeof name === "string" && name.trim() ? name.trim() : email.split("@")[0];
       const nameParts = displayName.split(" ");
-      const code = generateCode();
 
       const [user] = await db.insert(users).values({
         email,
@@ -60,20 +59,21 @@ export function registerEmailAuthRoutes(app: Express): void {
         displayName,
         firstName: nameParts[0] || null,
         lastName: nameParts.slice(1).join(" ") || null,
-        emailVerified: false,
-        verificationCode: code,
+        emailVerified: true,
+        verificationCode: null,
       }).returning();
 
-      (req.session as any).pendingVerifyId = user.id;
-
-      const sent = await sendVerificationEmail(user.email!, code);
+      (req.session as any).emailUserId = user.id;
+      req.session.cookie.maxAge = undefined as any;
 
       return res.json({
-        requiresVerification: true,
-        emailSent: sent,
+        id: user.id,
         email: user.email,
-        // Return code in response as fallback when email delivery is not configured
-        ...(sent ? {} : { verificationCode: code }),
+        displayName: user.displayName,
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profileImageUrl: user.profileImageCustom || user.profileImageUrl,
       });
     } catch (err: any) {
       console.error("email-signup error:", err);
@@ -155,18 +155,7 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
       }
 
-      if (user.emailVerified === false) {
-        const code = generateCode();
-        await db.update(users).set({ verificationCode: code, updatedAt: new Date() }).where(eq(users.id, user.id));
-        (req.session as any).pendingVerifyId = user.id;
-        const sent = user.email ? await sendVerificationEmail(user.email, code) : false;
-        return res.json({
-          requiresVerification: true,
-          emailSent: sent,
-          email: user.email,
-          ...(sent ? {} : { verificationCode: code }),
-        });
-      }
+      await db.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user.id));
 
       (req.session as any).emailUserId = user.id;
       req.session.cookie.maxAge = undefined as any;

@@ -1516,9 +1516,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 16. Vyla — DISABLED (API returns total:0 for all content) ──
+      // ── 16. Vyla SSE proxy (missourimonster-vyla.hf.space) ──
       (async () => {
-        return; // dead source
         if (!tmdbId) return;
         try {
           send("status", { msg: "Vyla: جاري الاستخراج…" });

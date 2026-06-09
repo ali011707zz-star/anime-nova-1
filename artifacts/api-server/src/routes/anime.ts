@@ -5037,6 +5037,28 @@ router.get("/anime/translate", async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════════
 //  aniskip-proxy  GET /api/anime/aniskip?malId=&ep=
+// ════════════════════════════════════════════════════════════════════
+//  AniList GraphQL proxy (avoids CORS issues from browser)
+// ════════════════════════════════════════════════════════════════════
+router.post("/anime/anilist", async (req, res) => {
+  const { query, variables } = req.body || {};
+  if (!query) { res.status(400).json({ error: "query required" }); return; }
+  try {
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(14_000),
+    });
+    if (!r.ok) { res.status(r.status).json({ error: "AniList error" }); return; }
+    const data = await r.json();
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
 //  Proxies AniSkip API to avoid CORS/network issues from browser
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/aniskip", async (req, res) => {
