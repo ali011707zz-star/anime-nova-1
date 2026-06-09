@@ -1427,14 +1427,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }
           if (!anilistId) return;
 
-          // 2. مصادقة Firebase (مُخزَّنة مؤقتاً 50 دقيقة)
-          const awToken = await getAwToken();
-          if (!awToken) return;
-
-          // 3. ابحث عن الأنمي في Firestore بالـ aniList_id (مخزّن كـ string)
+          // 2. ابحث عن الأنمي في Firestore بالـ aniList_id — الوصول العام بدون auth
           const qRes = await fetch(`${AW_FS}:runQuery`, {
             method : "POST",
-            headers: { "Authorization": `Bearer ${awToken}`, "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json" },
             body   : JSON.stringify({
               structuredQuery: {
                 from : [{ collectionId: "anime_list" }],
@@ -1455,7 +1451,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const epPad  = String(type === "movie" ? 1 : epNum).padStart(3, "0");
           const srvRes = await fetch(
             `${AW_FS}/anime_list/${encodeURIComponent(animeName)}/episodes/${epPad}/servers?pageSize=20`,
-            { headers: { "Authorization": `Bearer ${awToken}` }, signal: AbortSignal.timeout(10_000) }
+            { signal: AbortSignal.timeout(10_000) }
           );
           if (!srvRes.ok) return;
           const srvData: any = await srvRes.json();
@@ -1538,8 +1534,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 16. Vyla (multi-source: meowtv/vidzee/icefy/vidnest/…, TMDB ID native) ──
+      // ── 16. Vyla — DISABLED (API returns total:0 for all content) ──
       (async () => {
+        return; // dead source
         if (!tmdbId) return;
         try {
           send("status", { msg: "Vyla: جاري الاستخراج…" });

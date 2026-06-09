@@ -3815,13 +3815,10 @@ async function getAnimeWitcherSources(
 ): Promise<UnifiedSource[]> {
   if (!anilistId) return [];
   try {
-    const token = await getAWToken();
-    if (!token) return [];
-
-    // 1. ابحث عن الأنمي بالـ AniList ID (مخزّن كـ string)
+    // 1. ابحث عن الأنمي بالـ AniList ID (مخزّن كـ string) — الوصول العام بدون auth
     const queryR = await fetch(`${AW_FS_BASE}:runQuery`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         structuredQuery: {
           from: [{ collectionId: "anime_list" }],
@@ -3842,7 +3839,6 @@ async function getAnimeWitcherSources(
     const epPadded = String(ep).padStart(3, "0");
     const encName  = encodeURIComponent(animeName);
     const srvR = await fetch(`${AW_FS_BASE}/anime_list/${encName}/episodes/${epPadded}/servers?pageSize=20`, {
-      headers: { "Authorization": `Bearer ${token}` },
       signal: AbortSignal.timeout(10000),
     });
     if (!srvR.ok) return [];
