@@ -936,6 +936,62 @@ router.get("/animation/vidzee-meta", async (req: Request, res: Response) => {
   }
 });
 
+// ── quick-check: fast availability probe (Vyla only, 6s timeout) ─────────────
+
+const availCache = new Map<string, { ok: boolean; ts: number }>();
+const AVAIL_TTL = 2 * 60 * 60 * 1000; // 2 hours
+
+router.get("/animation/quick-check", async (req: Request, res: Response) => {
+  const tmdbId = String(req.query.tmdbId || "");
+  const type   = String(req.query.type   || "movie");
+  const season = String(req.query.season || "1");
+  const ep     = String(req.query.ep     || "1");
+  if (!tmdbId) { res.json({ available: false }); return; }
+
+  const ck = `avail:${tmdbId}:${type}:${season}:${ep}`;
+  const cached = availCache.get(ck);
+  if (cached && Date.now() - cached.ts < AVAIL_TTL) {
+    res.json({ available: cached.ok });
+    return;
+  }
+
+  let available = false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6_500);
+
+  try {
+    const sseUrl = type === "tv"
+      ? `https://missourimonster-vyla.hf.space/tv?id=${tmdbId}&season=${season}&episode=${ep}`
+      : `https://missourimonster-vyla.hf.space/movie?id=${tmdbId}`;
+
+    const r = await fetch(sseUrl, {
+      headers: { "User-Agent": UA, "Accept": "text/event-stream" },
+      signal: controller.signal,
+    });
+
+    if (r.ok && r.body) {
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        // Vyla sends {"type":"source",...} events after a large meta event
+        if (buf.includes('"type":"source"')) {
+          available = true;
+          break outer;
+        }
+      }
+      reader.cancel().catch(() => {});
+    }
+  } catch { /* timeout or network error → unavailable */ }
+
+  clearTimeout(timer);
+  availCache.set(ck, { ok: available, ts: Date.now() });
+  res.json({ available });
+});
+
 // ── SSE animation sources stream ──────────────────────────────────────────────
 
 router.get("/animation/sources-stream", async (req: Request, res: Response) => {
