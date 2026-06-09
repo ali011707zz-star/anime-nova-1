@@ -1,6 +1,6 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, ArrowLeft, ShieldCheck, RefreshCw } from "lucide-react";
+import { X, Eye, EyeOff, Mail, Lock, User, Sparkles, ArrowLeft, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 interface AuthModalProps {
@@ -18,38 +18,25 @@ export function AuthModal({ onClose }: AuthModalProps) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // OTP verification state
   const [verifying, setVerifying] = useState(false);
   const [verifyEmail, setVerifyEmail] = useState("");
-  const [verifyCode, setVerifyCode] = useState("");
-  const [emailSent, setEmailSent] = useState(false);
-  const [fallbackCode, setFallbackCode] = useState("");
-  const [resending, setResending] = useState(false);
-  const [resendSuccess, setResendSuccess] = useState(false);
-  const otpInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async () => {
     setError(""); setSuccess("");
     if (!email || !password) { setError("يرجى تعبئة جميع الحقول"); return; }
+    if (tab === "signup" && password.length < 6) { setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل"); return; }
     setLoading(true);
 
-    let result;
-    if (tab === "login") {
-      result = await emailSignIn(email, password);
-    } else {
-      if (password.length < 6) { setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل"); setLoading(false); return; }
-      result = await emailSignUp(email, password, name);
-    }
+    const result = tab === "login"
+      ? await emailSignIn(email, password)
+      : await emailSignUp(email, password, name);
 
     setLoading(false);
     if (result.error) { setError(result.error); return; }
 
     if (result.requiresVerification) {
       setVerifyEmail(result.email || email);
-      setEmailSent(!!result.emailSent);
-      setFallbackCode(result.verificationCode || "");
       setVerifying(true);
-      setTimeout(() => otpInputRef.current?.focus(), 300);
       return;
     }
 
@@ -57,42 +44,6 @@ export function AuthModal({ onClose }: AuthModalProps) {
     setTimeout(onClose, 1200);
   };
 
-  const handleVerify = async () => {
-    setError(""); setLoading(true);
-    try {
-      const res = await fetch("/api/auth/verify-email", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: verifyCode.trim() }),
-      });
-      const data = await res.json();
-      setLoading(false);
-      if (!res.ok) { setError(data.error || "رمز التحقق غير صحيح"); return; }
-      setSuccess("تم التحقق بنجاح! 🎉");
-      setTimeout(onClose, 1200);
-    } catch {
-      setLoading(false);
-      setError("خطأ في الاتصال");
-    }
-  };
-
-  const handleResend = async () => {
-    setResending(true); setError(""); setResendSuccess(false);
-    try {
-      const res = await fetch("/api/auth/resend-code", { method: "POST", credentials: "include" });
-      const data = await res.json();
-      if (data.ok) {
-        if (data.emailSent) { setEmailSent(true); setResendSuccess(true); setFallbackCode(""); }
-        else if (data.verificationCode) { setFallbackCode(data.verificationCode); setEmailSent(false); }
-      }
-      setVerifyCode("");
-      setTimeout(() => otpInputRef.current?.focus(), 100);
-    } catch { /* ignore */ }
-    setResending(false);
-  };
-
-  // ── Verification screen ──────────────────────────────────────────────────
   if (verifying) {
     return (
       <div className="fixed inset-0 z-50 flex items-end justify-center" dir="rtl">
@@ -126,10 +77,9 @@ export function AuthModal({ onClose }: AuthModalProps) {
             <X className="w-3.5 h-3.5 text-white/35" />
           </button>
 
-          <div className="px-6 pb-10 pt-4">
-            {/* Icon */}
-            <div className="flex justify-center mb-4">
-              <div className="relative w-16 h-16 rounded-2xl flex items-center justify-center"
+          <div className="px-6 pb-12 pt-4 text-center">
+            <div className="flex justify-center mb-5">
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
                 style={{
                   background: "linear-gradient(135deg, rgba(124,58,237,0.28), rgba(79,70,229,0.15))",
                   border: "1.5px solid rgba(139,92,246,0.40)",
@@ -139,124 +89,24 @@ export function AuthModal({ onClose }: AuthModalProps) {
               </div>
             </div>
 
-            <div className="text-center mb-5">
-              <h2 className="text-[20px] font-black text-white/90 font-['Cairo'] mb-1.5">تحقق من البريد الإلكتروني</h2>
-              <p className="text-white/35 text-[12px] font-['Cairo'] leading-relaxed">
-                أدخل رمز التحقق المرسَل إلى<br />
-                <span className="text-violet-300 font-bold">{verifyEmail}</span>
+            <h2 className="text-[20px] font-black text-white/90 font-['Cairo'] mb-3">تحقق من بريدك الإلكتروني</h2>
+            <p className="text-white/40 text-[13px] font-['Cairo'] leading-relaxed mb-6">
+              أرسلنا رابط تأكيد إلى<br />
+              <span className="text-violet-300 font-bold">{verifyEmail}</span><br />
+              <span className="text-white/25 text-[11px]">افتح بريدك الإلكتروني وانقر على الرابط لتفعيل حسابك</span>
+            </p>
+
+            <div className="px-4 py-3.5 rounded-2xl mb-5"
+              style={{ background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.18)" }}>
+              <p className="text-emerald-300/80 text-[12px] font-bold font-['Cairo']">
+                ✓ تم إرسال رابط التحقق إلى بريدك
               </p>
             </div>
 
-            {/* Email sent confirmation */}
-            {emailSent && (
-              <motion.div
-                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                className="mb-4 px-4 py-3 rounded-2xl text-center"
-                style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.20)" }}>
-                <p className="text-emerald-300 text-[12px] font-bold font-['Cairo']">
-                  ✓ {resendSuccess ? "تم إعادة إرسال الرمز إلى بريدك" : "تم إرسال الرمز إلى بريدك الإلكتروني"}
-                </p>
-              </motion.div>
-            )}
-
-            {/* Fallback: show code directly when email not configured */}
-            {!emailSent && fallbackCode && (
-              <motion.div
-                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                className="mb-4 px-4 py-3.5 rounded-2xl text-center"
-                style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.22)" }}>
-                <p className="text-amber-300/70 text-[10.5px] font-['Cairo'] mb-2">
-                  ⚠ لم يُرسَل الرمز بالبريد — إليك رمزك مباشرةً
-                </p>
-                <div className="flex items-center justify-center gap-2">
-                  <span className="text-[24px] font-black tracking-[0.22em] text-amber-300 font-mono">{fallbackCode}</span>
-                  <button
-                    onClick={() => { setVerifyCode(fallbackCode); }}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-black font-['Cairo'] transition-all active:scale-90"
-                    style={{ background: "rgba(251,191,36,0.15)", border: "1px solid rgba(251,191,36,0.30)", color: "#fde68a" }}>
-                    نسخ
-                  </button>
-                </div>
-              </motion.div>
-            )}
-
-            {/* OTP input */}
-            <div
-              className="relative flex items-center focus-within:ring-1 focus-within:ring-violet-500/30 transition-all mb-3"
-              style={{
-                background: "rgba(255,255,255,0.038)",
-                border: "1px solid rgba(255,255,255,0.07)",
-                borderRadius: 14,
-              }}>
-              <input
-                ref={otpInputRef}
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={6}
-                placeholder="أدخل الرمز المكوّن من 6 أرقام"
-                value={verifyCode}
-                onChange={e => { setVerifyCode(e.target.value.replace(/\D/g, "")); setError(""); }}
-                onKeyDown={e => e.key === "Enter" && verifyCode.length === 6 && handleVerify()}
-                dir="ltr"
-                className="w-full bg-transparent text-white text-[18px] font-black outline-none px-4 py-3.5 text-center tracking-[0.18em] placeholder:text-white/20 placeholder:text-[13px] placeholder:tracking-normal placeholder:font-normal placeholder:font-['Cairo']"
-                style={{ caretColor: "#A78BFA", fontFamily: "monospace" }}
-              />
-            </div>
-
-            {/* Feedback */}
-            <AnimatePresence>
-              {error && (
-                <motion.div key="err" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                  className="mb-3 px-4 py-2.5 rounded-2xl text-[12px] font-bold font-['Cairo'] text-red-300 text-center"
-                  style={{ background: "rgba(239,68,68,0.09)", border: "1px solid rgba(239,68,68,0.16)" }}>
-                  {error}
-                </motion.div>
-              )}
-              {success && (
-                <motion.div key="ok" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                  className="mb-3 px-4 py-2.5 rounded-2xl text-[12px] font-bold font-['Cairo'] text-emerald-300 text-center"
-                  style={{ background: "rgba(16,185,129,0.09)", border: "1px solid rgba(16,185,129,0.16)" }}>
-                  {success}
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Verify button */}
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={handleVerify}
-              disabled={loading || verifyCode.length < 6}
-              className="w-full py-3.5 rounded-2xl text-[14px] font-black font-['Cairo'] text-white transition-all overflow-hidden"
-              style={{
-                background: (loading || verifyCode.length < 6)
-                  ? "rgba(124,58,237,0.25)"
-                  : "linear-gradient(135deg, #7C3AED 0%, #6D28D9 50%, #4F46E5 100%)",
-                boxShadow: (loading || verifyCode.length < 6)
-                  ? "none"
-                  : "0 8px 30px rgba(124,58,237,0.42), 0 0 0 1px rgba(255,255,255,0.07) inset",
-              }}>
-              {loading ? (
-                <span className="flex items-center justify-center gap-2.5">
-                  <div className="w-4 h-4 rounded-full border-[2.5px] border-white/25 border-t-white animate-spin" />
-                  جاري التحقق...
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-2">
-                  تأكيد الرمز
-                  <ShieldCheck className="w-4 h-4 opacity-80" />
-                </span>
-              )}
-            </motion.button>
-
-            {/* Resend */}
-            <button
-              onClick={handleResend}
-              disabled={resending}
-              className="w-full mt-3 py-2.5 text-[12px] font-bold font-['Cairo'] transition-all flex items-center justify-center gap-1.5"
-              style={{ color: resending ? "rgba(255,255,255,0.15)" : "rgba(167,139,250,0.55)" }}>
-              <RefreshCw className={`w-3.5 h-3.5 ${resending ? "animate-spin" : ""}`} />
-              {resending ? "جاري الإرسال..." : "إعادة إرسال الرمز"}
+            <button onClick={onClose}
+              className="w-full py-3.5 rounded-2xl text-[13px] font-black font-['Cairo'] text-white"
+              style={{ background: "linear-gradient(135deg, #7C3AED, #4F46E5)" }}>
+              حسناً، سأتحقق من البريد
             </button>
           </div>
         </motion.div>
@@ -266,7 +116,6 @@ export function AuthModal({ onClose }: AuthModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" dir="rtl">
-      {/* Backdrop */}
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0"
@@ -274,7 +123,6 @@ export function AuthModal({ onClose }: AuthModalProps) {
         onClick={onClose}
       />
 
-      {/* Sheet */}
       <motion.div
         initial={{ opacity: 0, y: 100 }}
         animate={{ opacity: 1, y: 0 }}
@@ -290,15 +138,10 @@ export function AuthModal({ onClose }: AuthModalProps) {
           overflow: "hidden",
         }}
       >
-        {/* Top gradient bar */}
         <div className="h-[2px]" style={{ background: "linear-gradient(90deg, transparent 0%, #7C3AED 30%, #A78BFA 50%, #EC4899 70%, transparent 100%)" }} />
-
-        {/* Drag handle */}
         <div className="flex justify-center pt-3.5 pb-0.5">
           <div className="w-10 h-[3.5px] rounded-full bg-white/10" />
         </div>
-
-        {/* Close button */}
         <button onClick={onClose}
           className="absolute top-5 left-5 w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-90"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
@@ -306,9 +149,7 @@ export function AuthModal({ onClose }: AuthModalProps) {
         </button>
 
         <div className="px-6 pb-10 pt-2">
-          {/* ── Brand header ── */}
           <div className="text-center mb-6">
-            {/* Logo icon */}
             <div className="flex justify-center mb-4">
               <div className="relative w-14 h-14 rounded-2xl flex items-center justify-center"
                 style={{
@@ -317,13 +158,10 @@ export function AuthModal({ onClose }: AuthModalProps) {
                   boxShadow: "0 0 40px rgba(124,58,237,0.22), 0 0 80px rgba(124,58,237,0.06)",
                 }}>
                 <Sparkles className="w-6 h-6 text-violet-300" />
-                {/* Glow rings */}
                 <div className="absolute inset-0 rounded-2xl opacity-30"
                   style={{ background: "radial-gradient(circle at 40% 30%, rgba(167,139,250,0.6), transparent 60%)" }} />
               </div>
             </div>
-
-            {/* "NOVA ANIME" brand text */}
             <div className="flex items-baseline justify-center gap-[6px] mb-1.5" dir="ltr">
               <span className="text-[26px] font-black leading-none tracking-tight"
                 style={{
@@ -340,7 +178,6 @@ export function AuthModal({ onClose }: AuthModalProps) {
                 ANIME
               </span>
             </div>
-
             <p className="text-white/28 text-[11px] font-['Cairo']">
               {tab === "login"
                 ? "سجّل دخولك للمتابعة من حيث توقفت"
@@ -348,7 +185,6 @@ export function AuthModal({ onClose }: AuthModalProps) {
             </p>
           </div>
 
-          {/* ── Tab switcher ── */}
           <div className="flex gap-1 mb-5 p-[3px] rounded-[16px]"
             style={{ background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.055)" }}>
             {(["login", "signup"] as const).map(t => (
@@ -366,15 +202,14 @@ export function AuthModal({ onClose }: AuthModalProps) {
             ))}
           </div>
 
-          {/* ── Form fields ── */}
           <div className="space-y-3">
             <AnimatePresence>
               {tab === "signup" && (
                 <motion.div
                   key="name-field"
-                  initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                  animate={{ opacity: 1, height: "auto", marginBottom: 0 }}
-                  exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.18 }}>
                   <InputField
                     icon={<User className="w-4 h-4" />}
@@ -409,18 +244,14 @@ export function AuthModal({ onClose }: AuthModalProps) {
                 onClick={() => setShowPass(p => !p)}
                 className="absolute left-4 top-1/2 -translate-y-1/2 transition-colors"
                 style={{ color: "rgba(255,255,255,0.28)" }}>
-                {showPass
-                  ? <EyeOff className="w-[15px] h-[15px]" />
-                  : <Eye className="w-[15px] h-[15px]" />}
+                {showPass ? <EyeOff className="w-[15px] h-[15px]" /> : <Eye className="w-[15px] h-[15px]" />}
               </button>
             </div>
           </div>
 
-          {/* ── Feedback messages ── */}
           <AnimatePresence>
             {error && (
-              <motion.div
-                key="err"
+              <motion.div key="err"
                 initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                 className="mt-3 px-4 py-3 rounded-2xl text-[12px] font-bold font-['Cairo'] text-red-300 text-center"
                 style={{ background: "rgba(239,68,68,0.09)", border: "1px solid rgba(239,68,68,0.16)" }}>
@@ -428,8 +259,7 @@ export function AuthModal({ onClose }: AuthModalProps) {
               </motion.div>
             )}
             {success && (
-              <motion.div
-                key="ok"
+              <motion.div key="ok"
                 initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                 className="mt-3 px-4 py-3 rounded-2xl text-[12px] font-bold font-['Cairo'] text-emerald-300 text-center"
                 style={{ background: "rgba(16,185,129,0.09)", border: "1px solid rgba(16,185,129,0.16)" }}>
@@ -438,7 +268,6 @@ export function AuthModal({ onClose }: AuthModalProps) {
             )}
           </AnimatePresence>
 
-          {/* ── Submit button ── */}
           <motion.button
             whileTap={{ scale: 0.97 }}
             onClick={handleSubmit}
@@ -465,14 +294,12 @@ export function AuthModal({ onClose }: AuthModalProps) {
             )}
           </motion.button>
 
-          {/* ── Divider ── */}
           <div className="flex items-center gap-3 my-4">
             <div className="flex-1 h-px bg-white/[0.055]" />
             <span className="text-[10px] text-white/18 font-['Cairo'] font-bold">أو</span>
             <div className="flex-1 h-px bg-white/[0.055]" />
           </div>
 
-          {/* ── Replit SSO ── */}
           <button
             onClick={() => { signIn(); onClose(); }}
             className="w-full py-3 rounded-2xl text-[12px] font-bold font-['Cairo'] transition-all active:scale-[0.98]"

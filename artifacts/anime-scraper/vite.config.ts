@@ -14,6 +14,10 @@ if (!basePath) throw new Error("BASE_PATH environment variable is required but w
 export default defineConfig(async ({ mode }) => {
   return {
     base: basePath,
+    define: {
+      "__SUPABASE_URL__": JSON.stringify(process.env.SUPABASE_URL || ""),
+      "__SUPABASE_ANON_KEY__": JSON.stringify(process.env.SUPABASE_ANON_KEY || ""),
+    },
     plugins: [
       react(),
       tailwindcss(),
