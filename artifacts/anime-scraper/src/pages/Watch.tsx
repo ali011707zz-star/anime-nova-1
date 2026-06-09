@@ -774,9 +774,9 @@ function ScraperPicker({
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
-            <p className="text-white/22 text-[11px] font-['Cairo'] tracking-[0.12em]">جاري تشغيل الحلقة</p>
-            <p className="text-white/30 text-[11px] font-['Cairo'] text-center leading-relaxed mt-1 px-4">
-              ⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.
+            <p className="text-white/70 text-[12px] font-['Cairo'] tracking-[0.12em]">جاري تشغيل الحلقة</p>
+            <p className="text-white/55 text-[12px] font-['Cairo'] text-center leading-relaxed mt-1 px-4">
+              اللهم صلِّ وسلِّم على نبينا محمد ﷺ
             </p>
           </motion.div>
         </div>

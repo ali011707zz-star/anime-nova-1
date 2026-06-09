@@ -185,7 +185,7 @@ export default function AnimeDetail() {
 
   // ── Load anime data ──
   useEffect(() => {
-    if (!params.id) return;
+    if (!params.id) { setLoading(true); return; }
     let cancelled = false;
     const ctrl = new AbortController();
     setLoading(true); setAnime(null); setDescAr(null); setShowFull(false);
@@ -295,7 +295,7 @@ export default function AnimeDetail() {
       </motion.div>
     </div>
   );
-  if (!anime) return (
+  if (!params.id || !anime) return (
     <div className="bg-[#09090B] min-h-screen flex items-center justify-center" dir="rtl">
       <div className="text-center space-y-4 px-6">
         <p className="text-white/40 font-bold font-['Cairo']">تعذّر تحميل بيانات الأنمي</p>
