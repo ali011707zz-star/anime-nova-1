@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Search, Film, Tv, Star, ChevronDown, Loader2, SlidersHorizontal, X, TrendingUp, Calendar, Flame, Award } from "lucide-react";
+import { Search, Film, Tv, Star, ChevronDown, Loader2, SlidersHorizontal, X, Calendar, Flame, Award } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const IMG = "https://image.tmdb.org/t/p/w342";
 
 type MediaType = "movie" | "tv";
-type Avail = "unknown" | "yes" | "no";
 
 interface Genre { id: number; ar: string }
 
@@ -60,40 +59,6 @@ interface TmdbItem {
   genre_ids?: number[];
 }
 
-const availMemory = new Map<string, boolean>();
-
-async function checkAvail(id: number, type: MediaType): Promise<boolean> {
-  const key = `${id}:${type}`;
-  if (availMemory.has(key)) return availMemory.get(key)!;
-  try {
-    const r = await fetch(`/api/animation/quick-check?tmdbId=${id}&type=${type}&season=1&ep=1`);
-    const d = await r.json();
-    availMemory.set(key, !!d.available);
-    return !!d.available;
-  } catch {
-    return true;
-  }
-}
-
-async function batchCheck(
-  ids: number[],
-  type: MediaType,
-  onResult: (id: number, avail: boolean) => void,
-  signal: AbortSignal,
-  concurrency = 5
-) {
-  const queue = [...ids];
-  const workers = Array.from({ length: concurrency }, async () => {
-    while (queue.length > 0) {
-      if (signal.aborted) return;
-      const id = queue.shift()!;
-      const avail = await checkAvail(id, type);
-      if (!signal.aborted) onResult(id, avail);
-    }
-  });
-  await Promise.all(workers);
-}
-
 export default function AnimationLibrary() {
   const [, navigate]    = useLocation();
   const [type, setType] = useState<MediaType>("movie");
@@ -108,12 +73,12 @@ export default function AnimationLibrary() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<TmdbItem[]>([]);
   const [showFilters, setShowFilters] = useState(false);
-  const [availability, setAvailability] = useState<Record<number, Avail>>({});
-  const [checking, setChecking] = useState(false);
+  const [noticeDismissed, setNoticeDismissed] = useState(() =>
+    localStorage.getItem("animation-notice-dismissed") === "1"
+  );
 
   const searchRef   = useRef<HTMLInputElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const checkAbort  = useRef<AbortController | null>(null);
 
   const genres = type === "movie" ? MOVIE_GENRES : TV_GENRES;
   const sortOptions = type === "movie" ? SORT_OPTIONS : SORT_OPTIONS_TV;
@@ -129,7 +94,6 @@ export default function AnimationLibrary() {
       const data = await r.json();
       const results: TmdbItem[] = data.results || [];
       if (reset) {
-        setAvailability({});
         setItems(results);
       } else {
         setItems(prev => [...prev, ...results]);
@@ -145,38 +109,6 @@ export default function AnimationLibrary() {
     setItems([]); setPage(1); setHasMore(true);
     load(type, genre, sort, year, 1, true);
   }, [type, genre, sort, year]);
-
-  useEffect(() => {
-    if (items.length === 0) return;
-
-    if (checkAbort.current) checkAbort.current.abort();
-    const ctrl = new AbortController();
-    checkAbort.current = ctrl;
-
-    const unchecked = items.filter(it => !(it.id in availability) || availability[it.id] === "unknown").map(it => it.id);
-    if (unchecked.length === 0) return;
-
-    setChecking(true);
-    setAvailability(prev => {
-      const next = { ...prev };
-      for (const id of unchecked) if (!(id in next)) next[id] = "unknown";
-      return next;
-    });
-
-    batchCheck(
-      unchecked,
-      type,
-      (id, avail) => {
-        setAvailability(prev => ({ ...prev, [id]: avail ? "yes" : "no" }));
-      },
-      ctrl.signal,
-      5
-    ).finally(() => {
-      if (!ctrl.signal.aborted) setChecking(false);
-    });
-
-    return () => { ctrl.abort(); };
-  }, [items, type]);
 
   useEffect(() => {
     if (!searchQ.trim()) { setSearchResults([]); return; }
@@ -200,7 +132,10 @@ export default function AnimationLibrary() {
 
   const activeFilterCount = (genre !== 0 ? 1 : 0) + (sort !== "popularity.desc" ? 1 : 0) + (year ? 1 : 0);
 
-  const visibleItems = items.filter(it => availability[it.id] !== "no");
+  const dismissNotice = () => {
+    setNoticeDismissed(true);
+    localStorage.setItem("animation-notice-dismissed", "1");
+  };
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)] pb-28" dir="rtl">
@@ -216,11 +151,6 @@ export default function AnimationLibrary() {
               <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">أفلام ومسلسلات أنيميشن عالمية</p>
             </div>
             <div className="flex items-center gap-2">
-              {checking && (
-                <div className="w-5 h-5 flex items-center justify-center opacity-50">
-                  <Loader2 className="w-3.5 h-3.5 text-violet-400 animate-spin" />
-                </div>
-              )}
               <button
                 onClick={() => setShowFilters(o => !o)}
                 className="relative w-9 h-9 rounded-2xl flex items-center justify-center active:scale-90 transition-transform"
@@ -414,8 +344,40 @@ export default function AnimationLibrary() {
         </div>
       </div>
 
+      {/* ── Notice Banner ── */}
+      <AnimatePresence>
+        {!noticeDismissed && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, height: 0, marginTop: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0 }}
+            transition={{ duration: 0.25 }}
+            className="mx-4 mt-4 rounded-2xl px-4 py-3 flex items-start gap-3"
+            style={{
+              background: "rgba(251,191,36,0.08)",
+              border: "1px solid rgba(251,191,36,0.20)",
+            }}
+          >
+            <span className="text-lg shrink-0 mt-0.5">🙏🏽</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-[12px] font-black text-amber-300/90 font-['Cairo'] leading-snug mb-0.5">
+                تنبيه للمستخدمين
+              </p>
+              <p className="text-[11px] text-amber-200/50 font-['Cairo'] leading-relaxed">
+                بعض الأفلام والمسلسلات قد لا تعمل حالياً — نعمل بجد على توسيع مصادر الأنيميشن وتحسين التغطية. نقدّر صبركم واهتمامكم 🥺
+              </p>
+            </div>
+            <button onClick={dismissNotice}
+              className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center mt-0.5 active:scale-90 transition-transform"
+              style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.16)" }}>
+              <X className="w-3 h-3 text-amber-400/60" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Grid ── */}
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-4">
         {items.length === 0 && loading ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3">
             <div className="relative w-10 h-10">
@@ -425,7 +387,7 @@ export default function AnimationLibrary() {
             </div>
             <p className="text-white/25 text-xs font-['Cairo']">جارٍ التحميل…</p>
           </div>
-        ) : visibleItems.length === 0 && !loading && !checking ? (
+        ) : items.length === 0 && !loading ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3">
             <div className="w-16 h-16 rounded-3xl flex items-center justify-center"
               style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.18)" }}>
@@ -441,59 +403,47 @@ export default function AnimationLibrary() {
         ) : (
           <>
             <div className="grid grid-cols-3 gap-3">
-              <AnimatePresence>
-                {visibleItems.map((item, i) => {
-                  const avail = availability[item.id] ?? "unknown";
-                  const isChecking = avail === "unknown";
-                  return (
-                    <motion.div key={`${item.id}-${i}`}
-                      initial={{ opacity: 0, scale: 0.93 }}
-                      animate={{ opacity: isChecking ? 0.55 : 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.88 }}
-                      transition={{ delay: Math.min(i % 12, 11) * 0.03, duration: 0.25 }}>
-                      <Link href={`/animation/${type}/${item.id}`} className="block">
-                        <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/6 aspect-[2/3]"
-                          style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
-                          {item.poster_path ? (
-                            <img src={`${IMG}${item.poster_path}`} alt={displayTitle(item)}
-                              loading="lazy" className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-violet-900/10">
-                              <Film className="w-8 h-8 text-white/15" />
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/5 to-transparent" />
-                          {isChecking && (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="w-5 h-5 rounded-full border-2 border-white/20 border-t-violet-400 animate-spin" />
-                            </div>
-                          )}
-                          {(item.vote_average || 0) > 0 && !isChecking && (
-                            <div className="absolute top-1.5 left-1.5 flex items-center gap-0.5 rounded-lg px-1.5 py-0.5"
-                              style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)", border: "1px solid rgba(251,191,36,0.18)" }}>
-                              <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
-                              <span className="text-[9px] font-black text-white">{item.vote_average!.toFixed(1)}</span>
-                            </div>
-                          )}
-                          <div className="absolute bottom-0 inset-x-0 px-2 pb-2">
-                            {yearLabel(item) && (
-                              <p className="text-[8px] text-white/35 font-['Cairo'] mb-0.5">{yearLabel(item)}</p>
-                            )}
-                          </div>
+              {items.map((item, i) => (
+                <motion.div key={`${item.id}-${i}`}
+                  initial={{ opacity: 0, scale: 0.93 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: Math.min(i % 12, 11) * 0.03, duration: 0.25 }}>
+                  <Link href={`/animation/${type}/${item.id}`} className="block">
+                    <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/6 aspect-[2/3]"
+                      style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
+                      {item.poster_path ? (
+                        <img src={`${IMG}${item.poster_path}`} alt={displayTitle(item)}
+                          loading="lazy" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-violet-900/10">
+                          <Film className="w-8 h-8 text-white/15" />
                         </div>
-                        <p className="mt-1.5 text-[10.5px] font-black text-white/80 line-clamp-2 leading-snug font-['Cairo'] text-right">
-                          {displayTitle(item)}
-                        </p>
-                      </Link>
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/5 to-transparent" />
+                      {(item.vote_average || 0) > 0 && (
+                        <div className="absolute top-1.5 left-1.5 flex items-center gap-0.5 rounded-lg px-1.5 py-0.5"
+                          style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)", border: "1px solid rgba(251,191,36,0.18)" }}>
+                          <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
+                          <span className="text-[9px] font-black text-white">{item.vote_average!.toFixed(1)}</span>
+                        </div>
+                      )}
+                      <div className="absolute bottom-0 inset-x-0 px-2 pb-2">
+                        {yearLabel(item) && (
+                          <p className="text-[8px] text-white/35 font-['Cairo'] mb-0.5">{yearLabel(item)}</p>
+                        )}
+                      </div>
+                    </div>
+                    <p className="mt-1.5 text-[10.5px] font-black text-white/80 line-clamp-2 leading-snug font-['Cairo'] text-right">
+                      {displayTitle(item)}
+                    </p>
+                  </Link>
+                </motion.div>
+              ))}
             </div>
 
             {hasMore && (
               <div className="mt-8 flex justify-center">
-                <button onClick={() => load(type, genre, sort, year, page + 1)} disabled={loading || checking}
+                <button onClick={() => load(type, genre, sort, year, page + 1)} disabled={loading}
                   className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-black text-white/60 font-['Cairo'] active:scale-95 transition-transform disabled:opacity-50"
                   style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}>
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronDown className="w-4 h-4" />}
@@ -501,7 +451,7 @@ export default function AnimationLibrary() {
                 </button>
               </div>
             )}
-            {!hasMore && visibleItems.length > 0 && (
+            {!hasMore && items.length > 0 && (
               <p className="text-center text-white/15 text-xs font-['Cairo'] mt-8 pb-4">لا مزيد من النتائج</p>
             )}
           </>
