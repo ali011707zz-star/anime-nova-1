@@ -10,7 +10,7 @@ import {
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
   RotateCcw, RotateCw, Sun, Lock, Unlock,
   Scan, ScanLine, Camera, X, Zap,
-  ChevronDown, SkipBack, SkipForward,
+  ChevronDown,
 } from "lucide-react";
 
 /* ─────────────────────────────────────── helpers ─── */
@@ -373,24 +373,31 @@ export default function RiftPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120,
-        backBufferLength: 20,
+        maxBufferLength: 90,
+        maxMaxBufferLength: 200,
+        backBufferLength: 30,
+        maxBufferSize: 200 * 1000 * 1000,
         startFragPrefetch: true,
         progressive: true,
-        fragLoadingMaxRetry: 8,
-        fragLoadingRetryDelay: 300,
-        fragLoadingMaxRetryTimeout: 8000,
-        manifestLoadingMaxRetry: 5,
-        manifestLoadingRetryDelay: 800,
-        levelLoadingMaxRetry: 5,
-        highBufferWatchdogPeriod: 2,
-        nudgeOffset: 0.3,
-        nudgeMaxRetry: 8,
-        maxStarvationDelay: 3,
-        maxLoadingDelay: 3,
+        fragLoadingMaxRetry: 12,
+        fragLoadingRetryDelay: 200,
+        fragLoadingMaxRetryTimeout: 10000,
+        manifestLoadingMaxRetry: 6,
+        manifestLoadingRetryDelay: 600,
+        levelLoadingMaxRetry: 6,
+        levelLoadingRetryDelay: 400,
+        highBufferWatchdogPeriod: 3,
+        nudgeOffset: 0.5,
+        nudgeMaxRetry: 10,
+        maxStarvationDelay: 4,
+        maxLoadingDelay: 4,
         startLevel: -1,
-        abrEwmaDefaultEstimate: 1_500_000,
+        abrEwmaDefaultEstimate: 2_000_000,
+        testBandwidth: true,
+        capLevelToPlayerSize: false,
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          xhr.timeout = 30000;
+        },
       });
       hlsRef.current = hls;
       hls.loadSource(m3u8); hls.attachMedia(v);
@@ -410,9 +417,25 @@ export default function RiftPlayer({
       });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (hlsRef.current !== hls) return;
-        if (!d.fatal) return;
+        if (!d.fatal) {
+          // Non-fatal buffer stall — seek forward a tiny bit to unstick
+          if (d.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
+              d.details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
+            const v2 = videoRef.current;
+            if (v2 && v2.readyState >= 1) {
+              const ahead = v2.currentTime + 0.4;
+              if (ahead < (v2.duration || Infinity)) v2.currentTime = ahead;
+            }
+          }
+          return;
+        }
         if (d.type === Hls.ErrorTypes.MEDIA_ERROR) {
           hls.recoverMediaError();
+        } else if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          // Retry network errors up to 3 times before failing
+          const attempts = (hls as any)._netRetry = ((hls as any)._netRetry || 0) + 1;
+          if (attempts <= 3) { setTimeout(() => hls.startLoad(), 800 * attempts); }
+          else { fireOnFail(); }
         } else {
           fireOnFail();
         }
@@ -1098,69 +1121,34 @@ export default function RiftPlayer({
                 </div>
               </div>
 
-              {/* ════ CENTER ════ */}
+              {/* ════ CENTER — play/pause only ════ */}
               <div className="flex-1 flex items-center justify-center pointer-events-none">
-                <div
-                  className="flex items-center gap-7 pointer-events-auto"
+                <button onClick={togglePlay}
+                  className="flex items-center justify-center active:scale-90 transition-transform pointer-events-auto"
                   onTouchStart={e => e.stopPropagation()}
                   onTouchEnd={e => e.stopPropagation()}
-                >
-                  {/* +10s forward — first in RTL so appears on RIGHT */}
-                  <button
-                    onClick={() => { skip(10); showControls(); }}
-                    className="flex flex-col items-center justify-center gap-[5px] active:scale-90 transition-transform"
-                    style={{
-                      width: 58, height: 58, borderRadius: "50%",
-                      background: "rgba(0,0,0,0.48)",
-                      border: "1.5px solid rgba(255,255,255,0.32)",
-                      boxShadow: "0 4px 18px rgba(0,0,0,0.50)",
-                    }}
-                  >
-                    <RotateCw className="w-[22px] h-[22px] text-white/90" strokeWidth={1.8} />
-                    <span className="font-mono font-black text-white/65 leading-none" style={{ fontSize: 10 }}>10ث</span>
-                  </button>
-
-                  {/* Play / Pause */}
-                  <button onClick={togglePlay}
-                    className="flex items-center justify-center active:scale-90 transition-transform"
-                    style={{
-                      width: 76, height: 76, borderRadius: "50%",
-                      background: "rgba(0,0,0,0.54)",
-                      border: "2px solid rgba(255,255,255,0.52)",
-                      boxShadow: "0 8px 32px rgba(0,0,0,0.60), 0 0 0 6px rgba(255,255,255,0.04)",
-                    }}>
-                    <AnimatePresence mode="wait">
-                      {loading && !error ? (
-                        <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
-                          <div className="w-6 h-6 rounded-full border-2 border-white/25 border-t-white/80 animate-spin" />
-                        </motion.div>
-                      ) : playing ? (
-                        <motion.div key="p" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
-                          <Pause className="w-7 h-7 text-white fill-white" />
-                        </motion.div>
-                      ) : (
-                        <motion.div key="pl" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
-                          <Play className="w-7 h-7 text-white fill-white ml-1" />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </button>
-
-                  {/* ← 10s back — last in RTL so appears on LEFT */}
-                  <button
-                    onClick={() => { skip(-10); showControls(); }}
-                    className="flex flex-col items-center justify-center gap-[5px] active:scale-90 transition-transform"
-                    style={{
-                      width: 58, height: 58, borderRadius: "50%",
-                      background: "rgba(0,0,0,0.48)",
-                      border: "1.5px solid rgba(255,255,255,0.32)",
-                      boxShadow: "0 4px 18px rgba(0,0,0,0.50)",
-                    }}
-                  >
-                    <RotateCcw className="w-[22px] h-[22px] text-white/90" strokeWidth={1.8} />
-                    <span className="font-mono font-black text-white/65 leading-none" style={{ fontSize: 10 }}>10ث</span>
-                  </button>
-                </div>
+                  style={{
+                    width: 80, height: 80, borderRadius: "50%",
+                    background: "rgba(0,0,0,0.50)",
+                    border: "2px solid rgba(255,255,255,0.50)",
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.60), 0 0 0 6px rgba(255,255,255,0.04)",
+                  }}>
+                  <AnimatePresence mode="wait">
+                    {loading && !error ? (
+                      <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
+                        <div className="w-7 h-7 rounded-full border-2 border-white/25 border-t-white/80 animate-spin" />
+                      </motion.div>
+                    ) : playing ? (
+                      <motion.div key="p" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
+                        <Pause className="w-8 h-8 text-white fill-white" />
+                      </motion.div>
+                    ) : (
+                      <motion.div key="pl" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.1 }}>
+                        <Play className="w-8 h-8 text-white fill-white ml-1" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </button>
               </div>
 
               {/* ════ BOTTOM SECTION ════ */}
@@ -1238,46 +1226,49 @@ export default function RiftPlayer({
                   >
                     {/* Visual track */}
                     <div className="absolute left-0 right-0 rounded-full overflow-hidden pointer-events-none"
-                      style={{ height: prgHover ? 7 : 4, transition: "height 0.15s ease" }}>
-                      <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.18)" }} />
-                        {/* Intro marker — cyan, clearly visible */}
+                      style={{ height: prgHover ? 8 : 5, transition: "height 0.18s cubic-bezier(.22,1,.36,1)" }}>
+                      <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.14)" }} />
+                      {/* Intro marker */}
                       {skipIntro && duration > 0 && (
                         <div className="absolute top-0 h-full" style={{
                           left: `${(skipIntro.start / duration) * 100}%`,
                           width: `${Math.max(0, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
                           background: "rgba(6,182,212,0.90)", zIndex: 2,
-                          boxShadow: "0 0 4px rgba(6,182,212,0.60)",
+                          boxShadow: "0 0 6px rgba(6,182,212,0.70)",
                         }} />
                       )}
-                      {/* Outro marker — orange, distinct from intro */}
+                      {/* Outro marker */}
                       {skipOutro && duration > 0 && (
                         <div className="absolute top-0 h-full" style={{
                           left: `${(skipOutro.start / duration) * 100}%`,
                           width: `${Math.max(0, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
                           background: "rgba(249,115,22,0.85)", zIndex: 2,
-                          boxShadow: "0 0 4px rgba(249,115,22,0.55)",
+                          boxShadow: "0 0 6px rgba(249,115,22,0.65)",
                         }} />
                       )}
+                      {/* Buffered */}
                       <div className="absolute top-0 left-0 h-full"
-                        style={{ width: `${bufPct}%`, background: "rgba(139,92,246,0.35)", transition: "width 0.3s" }} />
+                        style={{ width: `${bufPct}%`, background: "rgba(139,92,246,0.28)", transition: "width 0.5s" }} />
+                      {/* Progress — glowing gradient */}
                       <div className="absolute top-0 left-0 h-full"
                         style={{
                           width: `${pct}%`,
-                          background: "linear-gradient(90deg, #8b5cf6, #a78bfa)",
-                          transition: (seekDrag.current || touchScrubbing.current) ? "none" : "width 0.1s",
+                          background: "linear-gradient(90deg, #7c3aed 0%, #a78bfa 100%)",
+                          boxShadow: prgHover ? "0 0 10px rgba(167,139,250,0.70)" : "0 0 4px rgba(167,139,250,0.35)",
+                          transition: (seekDrag.current || touchScrubbing.current) ? "none" : "width 0.12s, box-shadow 0.18s",
                         }} />
                     </div>
                     {/* Thumb */}
                     <div className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
                       style={{
-                        left: `calc(${pct}% - ${prgHover ? 9 : 5}px)`,
-                        width:  prgHover ? 18 : 10,
-                        height: prgHover ? 18 : 10,
-                        background: "#a78bfa",
+                        left: `calc(${pct}% - ${prgHover ? 11 : 5}px)`,
+                        width:  prgHover ? 22 : 10,
+                        height: prgHover ? 22 : 10,
+                        background: prgHover ? "#ffffff" : "#a78bfa",
                         boxShadow: prgHover
-                          ? "0 0 0 4px rgba(167,139,250,0.28), 0 2px 8px rgba(0,0,0,0.70)"
-                          : "0 0 0 2px rgba(167,139,250,0.20), 0 1px 4px rgba(0,0,0,0.55)",
-                        transition: (seekDrag.current || touchScrubbing.current) ? "none" : "left 0.1s, width 0.12s, height 0.12s",
+                          ? "0 0 0 4px rgba(167,139,250,0.40), 0 0 18px rgba(167,139,250,0.85), 0 2px 8px rgba(0,0,0,0.80)"
+                          : "0 0 0 2px rgba(167,139,250,0.25), 0 1px 6px rgba(0,0,0,0.60)",
+                        transition: (seekDrag.current || touchScrubbing.current) ? "none" : "left 0.12s, width 0.15s, height 0.15s, background 0.15s, box-shadow 0.15s",
                       }} />
                   </div>
                 </div>
@@ -1331,29 +1322,31 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* Center: skip-back · play/pause · skip-fwd */}
+                  {/* Center: -10ث · play/pause · +10ث */}
                   <div className="flex items-center gap-2">
                     <button
                       onPointerDown={e => { e.stopPropagation(); skip(-10); showControls(); }}
-                      className="flex items-center justify-center rounded-2xl active:scale-90 transition-all"
-                      style={{ width: 42, height: 42, background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.10)" }}>
-                      <SkipBack className="w-[17px] h-[17px] text-white/65" />
+                      className="flex flex-col items-center justify-center gap-[3px] rounded-2xl active:scale-90 transition-all"
+                      style={{ width: 48, height: 48, background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.14)" }}>
+                      <RotateCcw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.8} />
+                      <span className="font-mono font-black leading-none text-white/60" style={{ fontSize: 9 }}>-10ث</span>
                     </button>
                     <button
                       onPointerDown={e => { e.stopPropagation(); togglePlay(); showControls(); }}
                       className="flex items-center justify-center rounded-2xl active:scale-90 transition-all"
-                      style={{ width: 54, height: 54, background: isEnded ? "rgba(124,58,237,0.35)" : "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)", boxShadow: "0 4px 14px rgba(124,58,237,0.22)" }}>
+                      style={{ width: 56, height: 56, background: isEnded ? "rgba(124,58,237,0.35)" : "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.50)", boxShadow: "0 4px 16px rgba(124,58,237,0.28)" }}>
                       {isEnded
-                        ? <RotateCcw className="w-[22px] h-[22px] text-violet-200" />
+                        ? <RotateCcw className="w-[23px] h-[23px] text-violet-200" />
                         : playing
-                        ? <Pause className="w-[22px] h-[22px] text-violet-200" />
-                        : <Play  className="w-[22px] h-[22px] text-violet-200 mr-[-2px]" />}
+                        ? <Pause className="w-[23px] h-[23px] text-violet-200" />
+                        : <Play  className="w-[23px] h-[23px] text-violet-200 mr-[-2px]" />}
                     </button>
                     <button
                       onPointerDown={e => { e.stopPropagation(); skip(10); showControls(); }}
-                      className="flex items-center justify-center rounded-2xl active:scale-90 transition-all"
-                      style={{ width: 42, height: 42, background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.10)" }}>
-                      <SkipForward className="w-[17px] h-[17px] text-white/65" />
+                      className="flex flex-col items-center justify-center gap-[3px] rounded-2xl active:scale-90 transition-all"
+                      style={{ width: 48, height: 48, background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.14)" }}>
+                      <RotateCw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.8} />
+                      <span className="font-mono font-black leading-none text-white/60" style={{ fontSize: 9 }}>+10ث</span>
                     </button>
                   </div>
 

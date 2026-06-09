@@ -110,6 +110,15 @@ const MOVIES_QUERY = `query {
   }
 }`;
 
+const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
+  Page(page:1,perPage:25){
+    airingSchedules(airingAt_greater:$gt,airingAt_lesser:$lt,sort:[TIME_DESC]){
+      episode airingAt
+      media{id title{romaji english}coverImage{large}averageScore format isAdult}
+    }
+  }
+}`;
+
 function AnimeCard({ anime }: { anime: any }) {
   return (
     <Link href={`/anime/${anime.id}`}>
@@ -182,6 +191,7 @@ export default function Home() {
   const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
+  const [todayEps, setTodayEps] = useState<any[]>([]);
 
   /* Load continue-watching from localStorage (fast, synchronous) */
   useEffect(() => {
@@ -205,6 +215,24 @@ export default function Home() {
     })
       .then(r => r.json())
       .then(d => setSpring2026(d.data?.Page?.media || []))
+      .catch(() => {});
+  }, []);
+
+  /* Load today's airing episodes (last 36h → next 4h) */
+  useEffect(() => {
+    const now = Math.floor(Date.now() / 1000);
+    const gt  = now - 36 * 3600;
+    const lt  = now + 4  * 3600;
+    fetch("https://graphql.anilist.co", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: TODAY_EPISODES_QUERY, variables: { gt, lt } }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        const arr = (d.data?.Page?.airingSchedules || [])
+          .filter((s: any) => !s.media?.isAdult && s.media?.id);
+        setTodayEps(arr);
+      })
       .catch(() => {});
   }, []);
 
@@ -650,6 +678,62 @@ export default function Home() {
                     {/* Progress % below card */}
                     <div className="flex items-center justify-between mt-1.5 px-0.5">
                       <span className="text-[8.5px] font-black font-['Cairo']" style={{ color: `${accentColor}AA` }}>{pct}%</span>
+                    </div>
+                  </motion.div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── حلقات اليوم ── */}
+      {todayEps.length > 0 && !selectedGenre && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: "linear-gradient(135deg,#f97316,#ef4444)" }}>
+                <span className="text-white text-[14px] leading-none">📺</span>
+              </div>
+              <div>
+                <h2 className="text-[13px] font-black text-white font-['Cairo'] leading-none">حلقات اليوم</h2>
+                <p className="text-[9px] text-white/35 font-['Cairo'] mt-0.5">آخر الحلقات المنزلة</p>
+              </div>
+            </div>
+            {/* Live dot */}
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-[9px] font-black text-red-400 font-['Cairo']">LIVE</span>
+            </div>
+          </div>
+
+          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+            {todayEps.map((s: any, i: number) => {
+              const m = s.media;
+              const aired = s.airingAt * 1000 < Date.now();
+              return (
+                <Link href={`/watch?anime=${m.id}&ep=${s.episode}&title=${encodeURIComponent(m.title?.romaji || "")}&english=${encodeURIComponent(m.title?.english || "")}`} key={`${m.id}-${s.episode}-${i}`}>
+                  <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 cursor-pointer" style={{ width: 90 }}>
+                    <div className="relative rounded-xl overflow-hidden border border-white/[0.08]"
+                      style={{ aspectRatio: "2/3" }}>
+                      <img src={m.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                      {/* Episode badge */}
+                      <div className="absolute top-1.5 right-1.5 text-white text-[7px] font-black px-1.5 py-0.5 rounded-md"
+                        style={{ background: aired ? "rgba(239,68,68,0.85)" : "rgba(249,115,22,0.85)" }}>
+                        ح {s.episode}
+                      </div>
+                      {/* Aired / upcoming indicator */}
+                      <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-1.5 pt-3">
+                        <p className="text-[8.5px] text-white/90 font-black truncate leading-tight font-['Cairo']">
+                          {m.title?.romaji || m.title?.english}
+                        </p>
+                        <p className="text-[7.5px] mt-0.5 font-['Cairo']"
+                          style={{ color: aired ? "rgba(252,165,165,0.80)" : "rgba(253,186,116,0.80)" }}>
+                          {aired ? "✓ نزلت" : "قريباً"}
+                        </p>
+                      </div>
                     </div>
                   </motion.div>
                 </Link>
