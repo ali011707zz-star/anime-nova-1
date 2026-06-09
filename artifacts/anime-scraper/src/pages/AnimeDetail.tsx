@@ -195,7 +195,7 @@ export default function AnimeDetail() {
     setMyRating(parseInt(localStorage.getItem(`nova-rating-${params.id}`) || "0"));
     setComments(loadComments(params.id));
 
-    fetch("https://graphql.anilist.co", {
+    fetch("/api/anime/anilist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id) } }),

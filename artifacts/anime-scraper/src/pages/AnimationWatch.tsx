@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer, { type SubSettings } from "@/components/player/RiftPlayer";
+import EpComments from "@/components/EpComments";
 
 /* ── SubCue + SubTrack ── */
 interface SubCue  { start: number; end: number; text: string; }
@@ -516,7 +517,15 @@ export default function AnimationWatch() {
           <ChevronRight className="w-5 h-5 text-white/60" />
         </button>
 
-        <div className="relative h-full flex flex-col items-center justify-center gap-7 px-6">
+        <div className="relative h-full flex flex-col items-center justify-center gap-6 px-6">
+          {/* Prayer — ABOVE poster */}
+          <motion.p
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05, duration: 0.4 }}
+            className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide text-center">
+            اللهم صلِّ وسلِّم على نبينا محمد ﷺ
+          </motion.p>
+
           {posterUrl ? (
             <div className="relative shrink-0">
               <div className="absolute -inset-4 rounded-[28px] pointer-events-none"
@@ -545,13 +554,12 @@ export default function AnimationWatch() {
           </div>
 
           <div className="flex flex-col items-center gap-3">
-            <p className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
             <div className="relative w-9 h-9">
               <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
-            <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة</p>
+            <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
 
             {/* Subtitle preparation indicator — shown while translating during episode load */}
             {(subStatus === "translating" || subStatus === "discovering") && (
@@ -820,6 +828,11 @@ export default function AnimationWatch() {
             </AnimatePresence>
           </div>
         )}
+
+        {/* ── Episode comments ── */}
+        <EpComments commKey={type === "tv"
+          ? `nova-anim-ep-comments-${tmdbId}-s${season}e${ep}`
+          : `nova-anim-ep-comments-${tmdbId}`} />
       </div>
 
       {/* ── Subtitle Panel overlay ── */}
