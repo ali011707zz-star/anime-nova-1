@@ -317,11 +317,53 @@ export default function AnimeDetail() {
   };
 
   // ── Loading / Error ──
+  // Get cover from watch history for a better loading screen
+  const historyCover = (() => {
+    if (!params.id) return "";
+    try {
+      const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
+      const id = parseInt(params.id);
+      return h.find((e: any) => e.id === id)?.cover || "";
+    } catch { return ""; }
+  })();
+
   if (loading) return (
-    <div className="bg-[#09090B] min-h-screen flex items-center justify-center">
-      <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
-        <Sparkles className="w-8 h-8 text-primary" />
-      </motion.div>
+    <div className="bg-[#09090B] min-h-screen flex flex-col items-center justify-center relative overflow-hidden" dir="rtl">
+      {historyCover && (
+        <div className="absolute inset-0">
+          <img src={historyCover} alt="" className="w-full h-full object-cover scale-125 blur-3xl opacity-[0.12] saturate-150" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#09090B]/90 via-[#09090B]/60 to-[#09090B]" />
+        </div>
+      )}
+      <button onClick={() => navigate("/")}
+        className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+        style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
+        <ChevronRight className="w-5 h-5 text-white/60" />
+      </button>
+      <div className="relative flex flex-col items-center gap-5 px-6">
+        <motion.p initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05, duration: 0.4 }}
+          className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide text-center">
+          اللهم صلِّ وسلِّم على نبينا محمد ﷺ
+        </motion.p>
+        {historyCover && (
+          <motion.img
+            initial={{ opacity: 0, scale: 0.88, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            src={historyCover} alt=""
+            className="w-32 h-[178px] rounded-2xl object-cover"
+            style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.80), 0 0 0 1px rgba(255,255,255,0.08)" }}
+          />
+        )}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
+          className="flex flex-col items-center gap-3">
+          <div className="relative w-9 h-9">
+            <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
+            <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+              animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
+          </div>
+          <p className="text-white/55 text-[13px] font-['Cairo']">جاري تحميل بيانات الأنمي…</p>
+        </motion.div>
+      </div>
     </div>
   );
   if (!loading && !anime) return (

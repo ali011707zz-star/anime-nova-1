@@ -478,7 +478,7 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
             style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.55) 0%, transparent 100%)" }} />
         </motion.div>
 
-        {/* Title + episode + status */}
+        {/* Title + episode */}
         <motion.div
           className="text-center px-8"
           initial={{ opacity: 0, y: 14 }}
@@ -491,35 +491,27 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
             </p>
           )}
           {ep && (
-            <div className="flex items-center justify-center gap-2 mb-1.5">
-              <span className="text-white/55 text-[12px] font-bold font-['Cairo']">الحلقة {ep}</span>
-              {epTitle && (
-                <>
-                  <span className="text-white/18 text-[10px]">·</span>
-                  <span className="text-violet-300/70 text-[11px] font-bold font-['Cairo'] line-clamp-1 max-w-[180px]">{epTitle}</span>
-                </>
-              )}
-            </div>
+            <p className="text-white/35 text-[13px] font-['Cairo'] tracking-wide">الحلقة {ep}{epTitle ? ` · ${epTitle}` : ""}</p>
           )}
-          <p className="text-white/28 text-[11px] font-['Cairo'] tracking-[0.10em]">جاري تحميل الحلقة…</p>
         </motion.div>
 
-        {/* Animated loading dots */}
+        {/* Spinner + loading text — same as AnimationWatch */}
         <motion.div
-          className="flex items-center gap-2 mt-6"
+          className="flex flex-col items-center gap-3"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.35 }}
+          transition={{ delay: 0.30 }}
         >
-          {[0, 1, 2, 3].map(i => (
+          <p className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
+          <div className="relative w-9 h-9">
+            <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
             <motion.div
-              key={i}
-              className="rounded-full"
-              style={{ width: i === 1 || i === 2 ? 8 : 5, height: i === 1 || i === 2 ? 8 : 5, background: i === 1 || i === 2 ? "rgba(139,92,246,0.85)" : "rgba(139,92,246,0.35)" }}
-              animate={{ scale: [1, 1.6, 1], opacity: [0.4, 1, 0.4] }}
-              transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
+              className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
             />
-          ))}
+          </div>
+          <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
         </motion.div>
       </div>
 
