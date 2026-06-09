@@ -3885,8 +3885,17 @@ async function getAnimeWitcherSources(
         } catch {}
 
       } else if (srvName === "VT") {
-        // VidTube: مرّر عبر extractVideoDeep
-        // (سيُعالَج لاحقاً — تجاهُل مؤقت)
+        // VidTube: استخراج الرابط المباشر عبر extractVideoDeep
+        try {
+          const vtRef = link.includes("vidtube") ? "https://vidtube.xyz/" : link;
+          const vtResult = await extractVideoDeep(link, vtRef);
+          if (vtResult) {
+            const directUrl = vtResult.type === "hls"
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`
+              : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`;
+            sources.push({ name: `AnimeWitcher · ${qLabel} · VT`, url: link, quality, qualityRank: qRank, site: "animewitcher", directUrl, directType: vtResult.type });
+          }
+        } catch { /* skip VT on error */ }
 
       } else if (srvName === "MF") {
         // MediaFire: في DEAD_FILE_HOSTS → لا تُضاف
