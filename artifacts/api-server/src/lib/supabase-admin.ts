@@ -1,19 +1,11 @@
-import { createClient } from "@supabase/supabase-js";
-import ws from "ws";
+// Supabase admin client — stub. All auth is handled via Replit Auth + email sessions.
+// This file is kept so any remaining import references compile without errors.
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error("[Supabase] SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required");
-}
-
-export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+export const supabaseAdmin = {
   auth: {
-    autoRefreshToken: false,
-    persistSession: false,
+    getUser: async (_token: string) => ({ data: { user: null }, error: new Error("Supabase not configured") }),
+    admin: {
+      deleteUser: async (_id: string) => ({ error: new Error("Supabase not configured") }),
+    },
   },
-  realtime: {
-    transport: ws,
-  },
-});
+};
