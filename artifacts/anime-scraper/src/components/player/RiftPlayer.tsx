@@ -179,7 +179,9 @@ export default function RiftPlayer({
   const [speed,           setSpeed]           = useState(() => parseFloat(localStorage.getItem("pref-speed") || "1"));
   const [showCtrl,        setShowCtrl]        = useState(true);
   const [isFs,            setIsFs]            = useState(false);
-  const [isZoomed,        setIsZoomed]        = useState(false);
+  const [isZoomed,        setIsZoomed]        = useState(() =>
+    typeof window !== "undefined" && window.innerWidth < window.innerHeight && window.innerWidth < 640
+  );
   const [isLocked,        setIsLocked]        = useState(false);
   const [showSpeed,       setShowSpeed]       = useState(false);
   const [showViewMode,    setShowViewMode]    = useState(false);
@@ -1331,45 +1333,7 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* Center: 10→  ⏸  ←10  — same gap-7 + same button sizes as center overlay */}
-                  <div className="flex items-center gap-7 flex-none">
-                    <button onClick={() => { skip(10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[5px] rounded-full active:scale-90 transition-all duration-150"
-                      style={{
-                        width: 58, height: 58,
-                        background: "rgba(0,0,0,0.50)",
-                        border: "1.5px solid rgba(255,255,255,0.22)",
-                        boxShadow: "0 4px 18px rgba(0,0,0,0.50)",
-                      }}>
-                      <RotateCw className="w-[22px] h-[22px] text-white/85" strokeWidth={1.8} />
-                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 10 }}>10ث</span>
-                    </button>
-                    <button onClick={togglePlay}
-                      className="rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                      style={{
-                        width: 76, height: 76,
-                        background: "rgba(109,40,217,0.90)",
-                        border: "2px solid rgba(167,139,250,0.60)",
-                        boxShadow: "0 6px 28px rgba(139,92,246,0.55), 0 0 0 1px rgba(255,255,255,0.07) inset",
-                      }}>
-                      {playing
-                        ? <Pause className="w-7 h-7 text-white fill-white" />
-                        : <Play  className="w-7 h-7 text-white fill-white ml-0.5" />}
-                    </button>
-                    <button onClick={() => { skip(-10); showControls(); }}
-                      className="flex flex-col items-center justify-center gap-[5px] rounded-full active:scale-90 transition-all duration-150"
-                      style={{
-                        width: 58, height: 58,
-                        background: "rgba(0,0,0,0.50)",
-                        border: "1.5px solid rgba(255,255,255,0.22)",
-                        boxShadow: "0 4px 18px rgba(0,0,0,0.50)",
-                      }}>
-                      <RotateCcw className="w-[22px] h-[22px] text-white/85" strokeWidth={1.8} />
-                      <span className="font-mono font-black text-white/55 leading-none" style={{ fontSize: 10 }}>10ث</span>
-                    </button>
-                  </div>
-
-                  {/* Right: view-mode · volume · lock — flex-1 justify-end so center stays centered */}
+                  {/* Right: view-mode · volume · lock */}
                   <div className="flex items-center gap-2 flex-1 justify-end">
 
                     {/* ── View Mode Button ── */}
@@ -1422,9 +1386,10 @@ export default function RiftPlayer({
               className="absolute z-50 pointer-events-auto"
               dir="rtl"
               style={{
-                bottom: 130,
+                bottom: 90,
                 right: 14,
                 width: 210,
+                maxWidth: "calc(100% - 28px)",
                 background: "rgba(4,4,14,0.97)",
                 backdropFilter: "blur(40px) saturate(200%)",
                 border: "1px solid rgba(139,92,246,0.25)",
@@ -1541,7 +1506,7 @@ export default function RiftPlayer({
               onTouchEnd={e => e.stopPropagation()}
             >
               {/* ── Header bar ── */}
-              <div className="flex items-center justify-between px-4 py-3"
+              <div className="flex items-center justify-between px-3.5 py-2"
                 style={{ borderBottom: "1px solid rgba(139,92,246,0.12)", background: "rgba(139,92,246,0.08)" }}>
                 <div className="flex items-center gap-2">
                   <div className="w-5 h-5 rounded-lg flex items-center justify-center"
@@ -1557,7 +1522,7 @@ export default function RiftPlayer({
               </div>
 
               {/* ── Content ── */}
-              <div className="px-3.5 py-3">
+              <div className="px-3 py-2">
 
               {/* Not loaded yet */}
               {!subEnabled && (
@@ -1583,15 +1548,15 @@ export default function RiftPlayer({
                 <div className="flex flex-col gap-0">
 
                   {/* ── حجم الخط ── */}
-                  <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 10, marginBottom: 10 }}>
-                    <p className="text-[9px] font-black font-['Cairo'] mb-2 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>حجم الخط</p>
-                    <div className="flex gap-1.5">
+                  <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 7, marginBottom: 7 }}>
+                    <p className="text-[9px] font-black font-['Cairo'] mb-1.5 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>حجم الخط</p>
+                    <div className="flex gap-1">
                       {FONT_SIZES.map(f => {
                         const active = subSettings.fontSize === f.sz;
                         return (
                           <button key={f.sz}
                             onPointerDown={e => { e.stopPropagation(); updateSub({ fontSize: f.sz }); }}
-                            className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-90"
+                            className="flex-1 py-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-90"
                             style={{
                               background: active ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
                               border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
@@ -1610,15 +1575,15 @@ export default function RiftPlayer({
                   </div>
 
                   {/* ── لون الخط ── */}
-                  <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 10, marginBottom: 10 }}>
-                    <p className="text-[9px] font-black font-['Cairo'] mb-2 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>لون الخط</p>
-                    <div className="flex items-center gap-2">
+                  <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 7, marginBottom: 7 }}>
+                    <p className="text-[9px] font-black font-['Cairo'] mb-1.5 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>لون الخط</p>
+                    <div className="flex items-center gap-1">
                       {SUB_COLORS.map(c => {
                         const active = subSettings.color === c.v;
                         return (
                           <button key={c.v}
                             onPointerDown={e => { e.stopPropagation(); updateSub({ color: c.v }); }}
-                            className="flex-1 py-2 rounded-xl flex flex-col items-center gap-1 transition-all active:scale-90"
+                            className="flex-1 py-1.5 rounded-xl flex flex-col items-center gap-1 transition-all active:scale-90"
                             style={{
                               background: active ? "rgba(124,58,237,0.18)" : "rgba(255,255,255,0.04)",
                               border: `1.5px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
@@ -1639,14 +1604,14 @@ export default function RiftPlayer({
 
                   {/* ── موقع + سُمك + خلفية ── */}
                   <div>
-                    <p className="text-[9px] font-black font-['Cairo'] mb-2 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>موقع الترجمة</p>
-                    <div className="flex gap-1.5 mb-2.5">
+                    <p className="text-[9px] font-black font-['Cairo'] mb-1.5 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>موقع الترجمة</p>
+                    <div className="flex gap-1 mb-2">
                       {SUB_POSITIONS.map(p => {
                         const active = subSettings.position === p.v;
                         return (
                           <button key={p.v}
                             onPointerDown={e => { e.stopPropagation(); updateSub({ position: p.v as "top" | "center" | "bottom" }); }}
-                            className="flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-90"
+                            className="flex-1 py-1.5 rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-90"
                             style={{
                               background: active ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
                               border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
@@ -1662,10 +1627,10 @@ export default function RiftPlayer({
                     </div>
 
                     {/* سُمك + خلفية */}
-                    <div className="flex gap-1.5">
+                    <div className="flex gap-1">
                       <button
                         onPointerDown={e => { e.stopPropagation(); updateSub({ bold: !subSettings.bold }); }}
-                        className="flex-1 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-90"
+                        className="flex-1 py-1.5 rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-90"
                         style={{
                           background: subSettings.bold ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
                           border: `1px solid ${subSettings.bold ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
@@ -1682,7 +1647,7 @@ export default function RiftPlayer({
                         return (
                           <button key={v}
                             onPointerDown={e => { e.stopPropagation(); updateSub({ bgOpacity: v }); }}
-                            className="flex-1 py-2 rounded-xl flex items-center justify-center gap-1 transition-all active:scale-90"
+                            className="flex-1 py-1.5 rounded-xl flex items-center justify-center gap-1 transition-all active:scale-90"
                             style={{
                               background: active ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
                               border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
