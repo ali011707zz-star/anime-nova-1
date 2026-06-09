@@ -587,10 +587,10 @@ export default function Home() {
                 : (item.animType === "movie" ? "فيلم" : `ح ${item.ep}`);
               return (
                 <Link key={item.key} href={item.href}>
-                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 130 }}>
+                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>
                     {/* Card */}
                     <div className="relative rounded-[18px] overflow-hidden bg-[#111] shadow-xl"
-                      style={{ width: 130, height: 184, border: `1px solid ${accentColor}22` }}>
+                      style={{ width: 110, height: 156, border: `1px solid ${accentColor}22` }}>
                       {/* Poster */}
                       {item.cover
                         ? <img src={item.cover} alt="" className="w-full h-full object-cover" loading="lazy" />
@@ -729,9 +729,9 @@ export default function Home() {
               const total = anime.episodes || 0;
               return (
                 <Link key={anime.id} href={`/anime/${anime.id}`}>
-                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>
+                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                     <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50"
-                      style={{ width: 110, height: 156 }}>
+                      style={{ width: 92, height: 132 }}>
                       <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
                       {anime.averageScore > 0 && (

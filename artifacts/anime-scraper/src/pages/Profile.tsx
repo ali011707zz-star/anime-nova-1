@@ -88,7 +88,7 @@ function Field({
           </div>
         ) : (
           <button onClick={() => setEditing(true)}
-            className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform opacity-0 group-hover:opacity-100 shrink-0"
+            className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
             style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
             <Edit2 className="w-3.5 h-3.5 text-white/35" />
           </button>
