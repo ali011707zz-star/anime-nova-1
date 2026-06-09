@@ -158,8 +158,6 @@ export default function AnimationWatch() {
   });
   const subAbortRef = useRef<AbortController | null>(null);
 
-  const [embedSources, setEmbedSources] = useState<Array<{ url: string; label: string }>>([]);
-  const [embedSrc,     setEmbedSrc]     = useState<string | null>(null);
 
   const esRef            = useRef<EventSource | null>(null);
   const seenUrls         = useRef(new Set<string>());
@@ -285,7 +283,6 @@ export default function AnimationWatch() {
   /* ── SSE stream ── */
   useEffect(() => {
     setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
-    setEmbedSources([]); setEmbedSrc(null);
     setSubCues([]); setSubStatus("off"); setSubChoice("off"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
 
@@ -295,16 +292,8 @@ export default function AnimationWatch() {
 
     es.addEventListener("source", (e) => {
       const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
-      // Collect embed-only sources separately — shown as fallback when no direct sources found
-      if (src.isEmbed) {
-        const key = src.url;
-        if (!seenUrls.current.has(key)) {
-          seenUrls.current.add(key);
-          setEmbedSources(prev => [...prev, { url: src.url, label: src.label }]);
-          // Stay on loading screen; iframes only shown after SSE done + no direct sources found
-        }
-        return;
-      }
+      // Skip embed-only sources — we only play direct streams in the internal player
+      if (src.isEmbed) return;
 
       const key = src.directUrl || src.url;
       if (seenUrls.current.has(key)) return;
@@ -506,38 +495,6 @@ export default function AnimationWatch() {
   }, [sources]);
 
   const hasSources = sources.some(s => s.status === "ok");
-
-  /* ────────────────────────── EMBED IFRAME PLAYER ────────────────────────── */
-  if (embedSrc) {
-    return (
-      <div className="fixed inset-0 bg-black flex flex-col" dir="rtl">
-        <div className="flex items-center gap-3 px-4 shrink-0"
-          style={{
-            paddingTop: "max(14px, env(safe-area-inset-top))",
-            paddingBottom: 12,
-            background: "rgba(0,0,0,0.92)",
-            borderBottom: "1px solid rgba(255,255,255,0.07)",
-          }}>
-          <button onClick={() => setEmbedSrc(null)}
-            className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-transform"
-            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
-            <ChevronRight className="w-5 h-5 text-white/70" />
-          </button>
-          <div className="flex-1 min-w-0">
-            <p className="text-white/90 text-[14px] font-black font-['Cairo'] truncate">{displayTitle}</p>
-            {type === "tv" && <p className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</p>}
-          </div>
-        </div>
-        <iframe
-          src={embedSrc}
-          className="flex-1 w-full border-none"
-          allowFullScreen
-          allow="autoplay; fullscreen; picture-in-picture"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups"
-        />
-      </div>
-    );
-  }
 
   /* ────────────────────────── LOADING SCREEN ─────────────────────────────── */
   if (step === "loading") {
@@ -753,19 +710,7 @@ export default function AnimationWatch() {
       {/* ── Scrollable source list ── */}
       <div className="flex-1 overflow-y-auto" style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
-        {step === "error" || (sseDone && !hasSources && embedSources.length > 0) ? (
-          <EmbedFallbackSection
-            embedSources={embedSources}
-            onPlay={setEmbedSrc}
-            type={type} ep={ep}
-            stillSearching={!sseDone}
-            onPrevEp={type === "tv" && ep > 1 ? () => {
-              const np = new URLSearchParams(window.location.search);
-              np.set("ep", String(ep - 1));
-              navigate(`/animation/watch?${np.toString()}`);
-            } : undefined}
-          />
-        ) : (!hasSources && sseDone) ? (
+        {(!hasSources && sseDone) ? (
           <NoSourcesMessage
             type={type} ep={ep}
             onPrevEp={type === "tv" && ep > 1 ? () => {

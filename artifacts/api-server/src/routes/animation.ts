@@ -1072,119 +1072,36 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         }
       })(),
 
-      // ── 12. StarDima (title-based, Arabic content) ───────────────────────────
+      // ── 12. vidsrc.pro (TMDB-native, reliable HLS) ──────────────────────────
       (async () => {
+        if (!tmdbId) return;
         try {
-          const searchHtml = await cfGet(`${SD_BASE}/?s=${encodeURIComponent(title)}`, SD_BASE + "/");
-          const shows      = parseSDShows(searchHtml);
-          if (!shows.length) return;
-
-          const scored = shows.map(s => ({ ...s, score: titleSim(s.title, title) }));
-          scored.sort((a, b) => {
-            const sectionMatch = (type === "movie" ? "movies" : "tvshows");
-            const aBonus = a.section === sectionMatch ? 0.05 : 0;
-            const bBonus = b.section === sectionMatch ? 0.05 : 0;
-            return (b.score + bBonus) - (a.score + aBonus);
-          });
-          const best = scored[0];
-          if (best.score < 0.2) return;
-          send("status", { msg: `StarDima: وُجد "${best.title}"` });
-
-          if (best.section === "movies" || type === "movie") {
-            const movieSlug = encodeURI(best.slug);
-            const movieHtml = await cfGet(`${SD_BASE}/movies/${movieSlug}/`, SD_BASE + "/");
-            const postId = parsePostId(movieHtml);
-            const nonce  = parseNonce(movieHtml);
-            const iframes = parseIframes(movieHtml, ["stardima", "google", "histats"]);
-            for (const u of iframes) await sendExtracted(u, "StarDima فيلم");
-            if (postId) {
-              const urls = await sdDoopPlayerAjax(postId, nonce, `${SD_BASE}/movies/${movieSlug}/`);
-              for (const u of urls) await sendExtracted(u, "StarDima سيرفر");
-            }
-          } else {
-            const seriesHtml = await cfGet(`${SD_BASE}/tvshows/${encodeURI(best.slug)}/`, SD_BASE + "/");
-            let episodes = parseSDEpisodes(seriesHtml);
-            if (!episodes.length) {
-              const sMatch = seriesHtml.match(/href="https:\/\/watch\.stardima\.com\/watch\/seasons\/([^"]+)"/);
-              if (sMatch) {
-                const seasonHtml = await cfGet(`${SD_BASE}/seasons/${encodeURI(decodeURIComponent(sMatch[1]).replace(/\/$/, ""))}/`, SD_BASE + "/");
-                episodes = parseSDEpisodes(seasonHtml);
-              }
-            }
-            const target = episodes.find(e => e.num === epNum)
-              || episodes.find(e => e.title.includes(String(epNum)))
-              || (epNum <= episodes.length ? episodes[epNum - 1] : episodes[0]);
-            if (!target) return;
-
-            const epHtml = await cfGet(`${SD_BASE}/episodes/${encodeURI(target.slug)}/`, SD_BASE + "/");
-            const postId = parsePostId(epHtml);
-            const nonce  = parseNonce(epHtml);
-            const iframes = parseIframes(epHtml, ["stardima", "google", "histats"]);
-            for (const u of iframes) await sendExtracted(u, "StarDima إطار");
-            if (postId) {
-              const urls = await sdDoopPlayerAjax(postId, nonce, `${SD_BASE}/episodes/${encodeURI(target.slug)}/`);
-              for (const u of urls) await sendExtracted(u, "StarDima سيرفر");
-            }
-          }
+          const url = type === "tv"
+            ? `https://vidsrc.pro/embed/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidsrc.pro/embed/movie/${tmdbId}`;
+          await sendExtracted(url, "VidSrc Pro");
         } catch { /* silent */ }
       })(),
 
-      // ── 9. moviz-time.co (REST API title-based) ──────────────────────────────
+      // ── 9. vidsrc.icu (TMDB-native, newer mirror) ────────────────────────────
       (async () => {
+        if (!tmdbId) return;
         try {
-          // Use WordPress REST API — the /?s= search page is dynamically rendered
-          const apiUrl = `${MV_BASE}/wp-json/wp/v2/posts?search=${encodeURIComponent(title)}&per_page=8&_fields=id,link,title`;
-          const apiText = await cfGet(apiUrl, `${MV_BASE}/`);
-          const posts: any[] = JSON.parse(apiText);
-          if (!Array.isArray(posts) || !posts.length) return;
-
-          const scored = posts.map((p: any) => {
-            const t = (p.title?.rendered || "").replace(/<[^>]+>/g, "").replace(/&[a-z]+;/g, "").trim();
-            const postUrl = (p.link || "").replace(/\\\//g, "/");
-            return { url: postUrl, title: t, score: titleSim(t, title) };
-          });
-          scored.sort((a, b) => b.score - a.score);
-          const best = scored[0];
-          if (!best || best.score < 0.15) return;
-          send("status", { msg: `Moviz: وُجد "${best.title}"` });
-
-          if (type === "tv") {
-            const epUrl = await mvFindEpisode(best.url, epNum);
-            if (!epUrl) return;
-            const iframes = await mvScrapeMovie(epUrl);
-            for (const u of iframes) await sendExtracted(u, "Moviz حلقة");
-          } else {
-            const iframes = await mvScrapeMovie(best.url);
-            for (const u of iframes) await sendExtracted(u, "Moviz سيرفر");
-          }
+          const url = type === "tv"
+            ? `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidsrc.icu/embed/movie/${tmdbId}`;
+          await sendExtracted(url, "VidSrc ICU");
         } catch { /* silent */ }
       })(),
 
-      // ── 10. topcinemaa.com (title-based) ────────────────────────────────────
+      // ── 10. autoembed.cc (TMDB-native, direct HLS) ───────────────────────────
       (async () => {
+        if (!tmdbId) return;
         try {
-          const links = await tcSearch(title);
-          if (!links.length) return;
-
-          const scored = links.map(l => ({ ...l, score: titleSim(l.title, title) }));
-          scored.sort((a, b) => b.score - a.score);
-          const topScore = scored[0].score;
-          if (topScore < 0.2) return;
-
-          let target: typeof scored[0] | undefined;
-          if (type === "tv") {
-            const candidates = scored.filter(l => l.score >= topScore * 0.7);
-            target = candidates.find(l => l.epNum === epNum)
-              || candidates.find(l => l.epNum === undefined)
-              || candidates[0];
-          } else {
-            target = scored.find(l => l.epNum === undefined) || scored[0];
-          }
-          if (!target) return;
-
-          send("status", { msg: `TopCinema: وُجد "${target.title}"` });
-          const iframes = await tcScrapePlayer(target.url);
-          for (const u of iframes) await sendExtracted(u, "TopCinema سيرفر");
+          const url = type === "tv"
+            ? `https://autoembed.cc/tv/tmdb/${tmdbId}-${season}-${epNum}`
+            : `https://autoembed.cc/movie/tmdb/${tmdbId}`;
+          await sendExtracted(url, "AutoEmbed");
         } catch { /* silent */ }
       })(),
 
@@ -1276,80 +1193,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 14. wecima.show (DooPlay, Arabic) ────────────────────────────────────
+      // ── 14. moviesapi.club (IMDB-based, streamwish backend) ─────────────────
       (async () => {
-        const WC_BASE  = "https://wecima.show";
-        const WC_AJAX  = `${WC_BASE}/wp-admin/admin-ajax.php`;
+        if (!imdbId) return;
         try {
-          send("status", { msg: "Wecima: جاري البحث…" });
-          const searchHtml = await cfGet(`${WC_BASE}/?s=${encodeURIComponent(title)}`, WC_BASE + "/");
-
-          // Parse result links — wecima uses /movie/{slug}/ and /series/{slug}/
-          const seen = new Set<string>();
-          const results: { url: string; slug: string; titleStr: string }[] = [];
-          const re = /href="(https?:\/\/wecima\.show\/(movie|movies?|series|film)\/([^"/?]+)\/?)"/gi;
-          let m: RegExpExecArray | null;
-          while ((m = re.exec(searchHtml)) !== null) {
-            if (seen.has(m[1])) continue; seen.add(m[1]);
-            const slug = decodeURIComponent(m[3]).replace(/-\d{4}$/, "").replace(/-/g, " ");
-            results.push({ url: m[1], slug: m[3], titleStr: slug });
-          }
-          if (!results.length) return;
-
-          const scored = results.map(r => ({ ...r, score: titleSim(r.titleStr, title) }));
-          scored.sort((a, b) => b.score - a.score);
-          const best = scored[0];
-          if (best.score < 0.2) return;
-          send("status", { msg: `Wecima: وُجد "${best.titleStr}"` });
-
-          // For TV shows find specific episode
-          let pageUrl = best.url;
-          if (type === "tv") {
-            const seriesHtml = await cfGet(best.url, WC_BASE + "/");
-            // Episode links like /episode/{slug}-الحلقة-{N}/
-            const epRe = /href="(https?:\/\/wecima\.show\/episode\/[^"]+)"/gi;
-            const eps: { url: string; num: number }[] = [];
-            let em: RegExpExecArray | null;
-            while ((em = epRe.exec(seriesHtml)) !== null) {
-              const numM = em[1].match(/(?:الحلقة|episode)[^\d]*(\d+)/u);
-              const num = numM ? parseInt(numM[1]) : 0;
-              eps.push({ url: em[1], num });
-            }
-            const target = eps.find(e => e.num === epNum) || eps[0];
-            if (!target) return;
-            pageUrl = target.url;
-          }
-
-          const pageHtml = await cfGet(pageUrl, WC_BASE + "/");
-          // Try direct iframes first
-          const iframes = parseIframes(pageHtml, ["wecima", "google", "histats", "w3counter"]);
-          for (const u of iframes) await sendExtracted(u, "Wecima سيرفر");
-
-          // Try DooPlay AJAX
-          const postId = parsePostId(pageHtml);
-          const nonce  = parseNonce(pageHtml);
-          if (postId) {
-            await Promise.allSettled(
-              [1, 2, 3, 4].map(async (num) => {
-                try {
-                  const body = new URLSearchParams({ action: "doo_player_ajax", post_id: postId, nonce, num: String(num), g: "0" });
-                  const r = await fetch(WC_AJAX, {
-                    method : "POST",
-                    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA, "Referer": pageUrl, "X-Requested-With": "XMLHttpRequest" },
-                    body   : body.toString(),
-                    signal : AbortSignal.timeout(7_000),
-                  });
-                  if (!r.ok) return;
-                  const text = await r.text();
-                  if (!text || text === "0" || text === "false") return;
-                  let parsed: any;
-                  try { parsed = JSON.parse(text); } catch { return; }
-                  const url = parsed.embed_url || parsed.url || parsed.link || "";
-                  if (url) await sendExtracted(url, "Wecima AJAX");
-                } catch { /* skip */ }
-              })
-            );
-          }
+          const url = type === "tv"
+            ? `https://moviesapi.club/tv/${imdbId.replace("tt", "")}-${season}-${epNum}`
+            : `https://moviesapi.club/movie/${imdbId.replace("tt", "")}`;
+          await sendExtracted(url, "MoviesAPI");
         } catch { /* silent */ }
       })(),
 
@@ -1539,23 +1390,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
     ]);
 
-    if (tmdbId) {
-      // ── iframe fallbacks (clean embeds — no allow-popups in sandbox) ──────────
-      const vidlinkUrl = type === "tv"
-        ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
-        : `https://vidlink.pro/movie/${tmdbId}`;
-      send("source", { url: vidlinkUrl, label: "VidLink · مشغل متكامل", isEmbed: true });
-
-      const twoEmbedUrl = type === "tv"
-        ? `https://www.2embed.skin/embedtv/${tmdbId}&s=${season}&e=${epNum}`
-        : `https://www.2embed.skin/embed/${tmdbId}`;
-      send("source", { url: twoEmbedUrl, label: "2Embed · مشغل مدمج", isEmbed: true });
-
-      const vipUrl = type === "tv"
-        ? `https://vidsrc.vip/embed/tv/${tmdbId}/${season}/${epNum}`
-        : `https://vidsrc.vip/embed/movie/${tmdbId}`;
-      send("source", { url: vipUrl, label: "VidSrc VIP · مشغل", isEmbed: true });
-    }
     send("done", {}); clearInterval(keepAlive); res.end();
   } catch (e) {
     send("error", { msg: String(e) });
