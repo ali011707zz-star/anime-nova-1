@@ -1540,10 +1540,21 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     ]);
 
     if (tmdbId) {
+      // ── iframe fallbacks (clean embeds — no allow-popups in sandbox) ──────────
       const vidlinkUrl = type === "tv"
         ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
         : `https://vidlink.pro/movie/${tmdbId}`;
       send("source", { url: vidlinkUrl, label: "VidLink · مشغل متكامل", isEmbed: true });
+
+      const twoEmbedUrl = type === "tv"
+        ? `https://www.2embed.skin/embedtv/${tmdbId}&s=${season}&e=${epNum}`
+        : `https://www.2embed.skin/embed/${tmdbId}`;
+      send("source", { url: twoEmbedUrl, label: "2Embed · مشغل مدمج", isEmbed: true });
+
+      const vipUrl = type === "tv"
+        ? `https://vidsrc.vip/embed/tv/${tmdbId}/${season}/${epNum}`
+        : `https://vidsrc.vip/embed/movie/${tmdbId}`;
+      send("source", { url: vipUrl, label: "VidSrc VIP · مشغل", isEmbed: true });
     }
     send("done", {}); clearInterval(keepAlive); res.end();
   } catch (e) {
