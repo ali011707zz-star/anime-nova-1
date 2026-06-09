@@ -4,7 +4,7 @@ import { Link } from "wouter";
 import {
   ChevronRight, Play, Star, Bookmark, Heart, MessageSquare,
   Send, Sparkles, ChevronDown, Flag, MoreVertical, Plus,
-  ArrowRight, X, ExternalLink,
+  ArrowRight, X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -344,8 +344,26 @@ export default function AnimeDetail() {
         </motion.div>
       )}
 
-      {/* ══ SCORE + ACTIONS GRID ═════════════════════════════════ */}
+      {/* ══ PRIMARY WATCH BUTTON ════════════════════════════════ */}
       <div className="px-4 mt-5">
+        <motion.button
+          whileTap={{ scale: 0.97 }}
+          onClick={() => navigate(`/episodes/${params.id}`)}
+          className="w-full h-[52px] rounded-2xl font-black flex items-center justify-center gap-3 text-[15px] font-['Cairo'] text-white"
+          style={{
+            background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)",
+            boxShadow: "0 8px 32px rgba(109,40,217,0.5), inset 0 1px 0 rgba(255,255,255,0.15)"
+          }}
+        >
+          <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+            <Play className="w-4 h-4 fill-white text-white" />
+          </div>
+          مشاهدة الأنمي
+        </motion.button>
+      </div>
+
+      {/* ══ SCORE + ACTIONS GRID ═════════════════════════════════ */}
+      <div className="px-4 mt-3">
         {/* Score bar */}
         {score && (
           <div className="flex items-center gap-2 mb-4">
@@ -363,9 +381,9 @@ export default function AnimeDetail() {
         {/* 3-col action buttons */}
         <div className="grid grid-cols-3 gap-2 mb-2">
           {[
-            { icon: Star,          label: "اضف تقييمك",   active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true) },
-            { icon: Plus,          label: "قائمتي",        active: saved,        activeColor: "#8B5CF6", action: toggleSave },
-            { icon: Heart,         label: "المفضلة",       active: saved,        activeColor: "#EC4899", action: toggleSave },
+            { icon: Star,  label: "تقييمي",   active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true) },
+            { icon: Plus,  label: "قائمتي",   active: saved,        activeColor: "#8B5CF6", action: toggleSave },
+            { icon: Heart, label: "المفضلة",  active: saved,        activeColor: "#EC4899", action: toggleSave },
           ].map(({ icon: Icon, label, active, activeColor, action }) => (
             <motion.button key={label} whileTap={{ scale: 0.94 }} onClick={action}
               className="flex flex-col items-center gap-1.5 py-3 rounded-2xl border transition-all font-['Cairo']"
@@ -374,17 +392,16 @@ export default function AnimeDetail() {
                 : { background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.45)" }}>
               <Icon className="w-4 h-4" style={active ? { fill: activeColor, color: activeColor } : {}} />
               <span className="text-[9px] font-black">{label}</span>
-              {label === "اضف تقييمك" && myRating > 0 && (
+              {label === "تقييمي" && myRating > 0 && (
                 <span className="text-[9px] font-black" style={{ color: activeColor }}>{myRating}/10</span>
               )}
             </motion.button>
           ))}
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {[
-            { label: "تعليقات", sub: comments.length > 0 ? String(comments.length) : "", action: () => setShowComments(true) },
-            { label: "مشاهدة", sub: "",  action: () => navigate(`/episodes/${params.id}`) },
-            { label: "MAL",    sub: anime.idMal ? `#${anime.idMal}` : "", action: () => anime.idMal && window.open(`https://myanimelist.net/anime/${anime.idMal}`, "_blank") },
+            { label: "التعليقات", sub: comments.length > 0 ? `${comments.length} تعليق` : "اكتب تعليقاً", action: () => setShowComments(true) },
+            { label: "MAL",       sub: anime.idMal ? `#${anime.idMal}` : "MyAnimeList", action: () => anime.idMal && window.open(`https://myanimelist.net/anime/${anime.idMal}`, "_blank") },
           ].map(({ label, sub, action }) => (
             <motion.button key={label} whileTap={{ scale: 0.94 }} onClick={action}
               className="flex flex-col items-center gap-1 py-3 rounded-2xl border font-['Cairo'] transition-all"
@@ -489,26 +506,28 @@ export default function AnimeDetail() {
       {/* ══ TRAILER ══════════════════════════════════════════════ */}
       {trailerYT && (
         <div className="mt-5 px-4">
+          <SectionHeader title="الإعلان الدعائي" />
           <motion.button
             whileTap={{ scale: 0.97 }}
             onClick={() => setShowTrailer(true)}
-            className="w-full flex items-center gap-4 rounded-2xl overflow-hidden border border-white/8"
-            style={{ background: "rgba(255,255,255,0.035)" }}>
-            <div className="relative w-28 h-16 shrink-0">
-              <img
-                src={anime.trailer?.thumbnail || `https://img.youtube.com/vi/${trailerYT}/mqdefault.jpg`}
-                alt="trailer" className="w-full h-full object-cover" />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center shadow-lg">
-                  <Play className="w-4 h-4 text-white fill-white" />
-                </div>
+            className="w-full rounded-2xl overflow-hidden border border-white/8 relative block"
+            style={{ aspectRatio: "16/9", background: "#0d0d10" }}>
+            <img
+              src={`https://img.youtube.com/vi/${trailerYT}/maxresdefault.jpg`}
+              alt="trailer"
+              className="w-full h-full object-cover"
+              onError={e => { (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${trailerYT}/mqdefault.jpg`; }} />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/10" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center shadow-2xl"
+                style={{ boxShadow: "0 0 0 8px rgba(220,38,38,0.2), 0 8px 32px rgba(220,38,38,0.5)" }}>
+                <Play className="w-7 h-7 text-white fill-white mr-[-2px]" />
               </div>
             </div>
-            <div className="flex-1 py-3 pr-1 text-right">
-              <p className="text-white font-black text-sm font-['Cairo']">العرض الدعائي</p>
-              <p className="text-white/35 text-[10px] font-['Cairo'] mt-0.5">YouTube PV</p>
+            <div className="absolute bottom-0 right-0 left-0 px-4 pb-3">
+              <p className="text-white font-black text-[13px] font-['Cairo']">العرض الدعائي</p>
+              <p className="text-white/45 text-[10px] font-['Cairo']">انقر للمشاهدة بملء الشاشة</p>
             </div>
-            <ExternalLink className="w-4 h-4 text-white/25 ml-4 shrink-0" />
           </motion.button>
         </div>
       )}
@@ -660,29 +679,31 @@ export default function AnimeDetail() {
         )}
       </div>
 
-      {/* ══ TRAILER MODAL ════════════════════════════════════════ */}
+      {/* ══ TRAILER MODAL (fullscreen) ═══════════════════════════ */}
       <AnimatePresence>
         {showTrailer && trailerYT && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowTrailer(false)}
-              className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[110]" />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.92 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[111] rounded-2xl overflow-hidden shadow-2xl"
-              style={{ maxHeight: "60vw", aspectRatio: "16/9" }}>
-              <iframe
-                src={`https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0`}
-                className="w-full h-full"
-                allow="autoplay; fullscreen"
-                allowFullScreen />
-            </motion.div>
-            <button onClick={() => setShowTrailer(false)}
-              className="fixed top-6 left-4 z-[112] w-9 h-9 bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15">
-              <X className="w-4 h-4 text-white" />
-            </button>
-          </>
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-black flex flex-col">
+            {/* Close button */}
+            <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 pt-safe pt-4 pb-3"
+              style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)" }}>
+              <button onClick={() => setShowTrailer(false)}
+                className="w-9 h-9 bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90">
+                <X className="w-4 h-4 text-white" />
+              </button>
+              <p className="text-white text-[13px] font-black font-['Cairo'] opacity-80">الإعلان الدعائي</p>
+              <div className="w-9" />
+            </div>
+            {/* YouTube iframe fills full screen */}
+            <iframe
+              src={`https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=0`}
+              className="w-full flex-1"
+              allow="autoplay; fullscreen; picture-in-picture"
+              allowFullScreen
+              style={{ border: "none" }}
+            />
+          </motion.div>
         )}
       </AnimatePresence>
 
