@@ -140,7 +140,7 @@ export default function AnimationWatch() {
 
   /* ── User prefs (read once on mount) ── */
   const prefAutoplay = useRef(localStorage.getItem("pref-autoplay") !== "false");
-  const prefSubSize  = useRef(localStorage.getItem("pref-subsize") || "medium");
+  const prefSubSize  = useRef(localStorage.getItem("pref-subsize") || "large");
   const prefAutoSub  = useRef(localStorage.getItem("pref-autosub") !== "false");
 
   /* ── Subtitle state ── */
@@ -551,7 +551,7 @@ export default function AnimationWatch() {
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
-            <p className="text-white/75 text-[12px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
+            <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة</p>
 
             {/* Subtitle preparation indicator — shown while translating during episode load */}
             {(subStatus === "translating" || subStatus === "discovering") && (
