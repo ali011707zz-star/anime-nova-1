@@ -1359,6 +1359,158 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
+      // ── AnimeWitcher (Firebase Firestore — أنمي ياباني في قسم الانيميشن) ────────
+      // Flow: title → AniList GraphQL → aniList_id → AnimeWitcher Firestore
+      //       → episodes/{padded}/servers → PD (Pixeldrain) + ST (Streamtape) + VT
+      (async () => {
+        if (!title) return;
+        try {
+          const AW_PROJECT = "animewitcher-1c66d";
+          const AW_API_KEY = "AIzaSyAcbWRwfFNnCpoydDXlEALWnM_TYVcJOMU";
+          const AW_EMAIL   = "test_nova_probe@mailinator.com";
+          const AW_PASS    = "TestPass123!";
+          const AW_FS      = `https://firestore.googleapis.com/v1/projects/${AW_PROJECT}/databases/(default)/documents`;
+
+          // 1. جلب العنوان الإنجليزي من TMDB (لأن title قد يكون عربياً)
+          let tmdbEnTitle = "";
+          let tmdbOrigTitle = "";
+          if (tmdbId) {
+            try {
+              const tmdbEn = await fetch(
+                `${TMDB_BASE}/${type === "tv" ? "tv" : "movie"}/${tmdbId}?api_key=${TMDB_KEY}&language=en`,
+                { signal: AbortSignal.timeout(6_000) }
+              );
+              if (tmdbEn.ok) {
+                const td: any = await tmdbEn.json();
+                tmdbEnTitle   = td.title || td.name || "";
+                tmdbOrigTitle = td.original_title || td.original_name || "";
+              }
+            } catch { /* skip */ }
+          }
+
+          // 2. بحث AniList بالعنوان للحصول على aniList_id
+          //    نُجرّب: العنوان الإنجليزي من TMDB ← العنوان الأصلي ← title المُمرَّر
+          let anilistId = "";
+          const awTitles = [tmdbEnTitle, tmdbOrigTitle, title, req.query.english ? String(req.query.english) : ""]
+            .filter(Boolean)
+            .filter((v, i, a) => a.indexOf(v) === i); // dedup
+          for (const t of awTitles) {
+            try {
+              const gql = await fetch("https://graphql.anilist.co", {
+                method : "POST",
+                headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                body   : JSON.stringify({
+                  query    : "query($s:String){Media(search:$s,type:ANIME,isAdult:false){id title{romaji english}}}",
+                  variables: { s: t },
+                }),
+                signal: AbortSignal.timeout(8_000),
+              });
+              if (gql.ok) {
+                const gd: any = await gql.json();
+                if (gd?.data?.Media?.id) { anilistId = String(gd.data.Media.id); break; }
+              }
+            } catch { /* try next */ }
+          }
+          if (!anilistId) return;
+
+          // 2. مصادقة Firebase
+          const authR = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${AW_API_KEY}`,
+            { method: "POST", headers: { "Content-Type": "application/json" },
+              body  : JSON.stringify({ email: AW_EMAIL, password: AW_PASS, returnSecureToken: true }),
+              signal: AbortSignal.timeout(10_000) }
+          );
+          if (!authR.ok) return;
+          const authData: any = await authR.json();
+          const awToken: string = authData?.idToken || "";
+          if (!awToken) return;
+
+          // 3. ابحث عن الأنمي في Firestore بالـ aniList_id (مخزّن كـ string)
+          const qRes = await fetch(`${AW_FS}:runQuery`, {
+            method : "POST",
+            headers: { "Authorization": `Bearer ${awToken}`, "Content-Type": "application/json" },
+            body   : JSON.stringify({
+              structuredQuery: {
+                from : [{ collectionId: "anime_list" }],
+                where: { fieldFilter: { field: { fieldPath: "aniList_id" }, op: "EQUAL", value: { stringValue: anilistId } } },
+                limit: 1,
+              }
+            }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!qRes.ok) return;
+          const qData: any[] = await qRes.json();
+          const docPath  = qData?.[0]?.document?.name;
+          if (!docPath) return;
+          const animeName = docPath.split("/").pop();
+          if (!animeName) return;
+
+          // 4. جلب الـ servers للحلقة (مُبطّنة 3 أرقام)
+          const epPad  = String(type === "movie" ? 1 : epNum).padStart(3, "0");
+          const srvRes = await fetch(
+            `${AW_FS}/anime_list/${encodeURIComponent(animeName)}/episodes/${epPad}/servers?pageSize=20`,
+            { headers: { "Authorization": `Bearer ${awToken}` }, signal: AbortSignal.timeout(10_000) }
+          );
+          if (!srvRes.ok) return;
+          const srvData: any = await srvRes.json();
+          if (!srvData.documents?.length) return;
+
+          send("status", { msg: `AnimeWitcher: وُجد "${animeName}" — جاري الاستخراج…` });
+
+          // 5. معالجة كل سيرفر وإرسال المصادر
+          await Promise.allSettled((srvData.documents as any[]).map(async (doc) => {
+            const f       = doc.fields || {};
+            const srvName = f.name?.stringValue || "";
+            const quality = f.quality?.stringValue || "720p";
+            const link    = f.link?.stringValue || "";
+            const visible = f.visible?.booleanValue !== false;
+            if (!link || !visible || !srvName) return;
+
+            const qLabel = quality === "1080p" ? "FHD 1080p" : quality === "720p" ? "HD 720p" : quality;
+            const label  = `AnimeWitcher · ${qLabel} · ${srvName}`;
+
+            if (srvName === "PD") {
+              // Pixeldrain → رابط مباشر MP4 عبر video-proxy
+              const pdId = link.split("/").pop();
+              if (!pdId || pdId.length < 4) return;
+              const apiUrl  = `https://pixeldrain.com/api/file/${pdId}`;
+              const proxied = wrapMp4(apiUrl, "https://pixeldrain.com/");
+              sendSource(proxied, label, proxied, proxied);
+
+            } else if (srvName === "ST") {
+              // Streamtape → استخراج الرابط المباشر من صفحة HTML
+              try {
+                const stHtml = await fetch(link, {
+                  headers: { "User-Agent": UA, "Referer": "https://streamtape.com/" },
+                  signal : AbortSignal.timeout(10_000),
+                }).then(r => r.ok ? r.text() : "").catch(() => "");
+                // parseStreamtape pattern
+                const m1 = stHtml.match(/robotlink'\)\.innerHTML\s*=\s*'([^']+)'/);
+                const m2 = stHtml.match(/'([^']+)'\s*\+\s*\('([^']+)'\)/);
+                if (m1 && m2) {
+                  const stUrl   = "https:" + m1[1] + m2[2];
+                  const proxied = wrapMp4(stUrl, "https://streamtape.com/");
+                  sendSource(proxied, label, proxied, proxied);
+                }
+              } catch { /* skip */ }
+
+            } else if (srvName === "VT") {
+              // VidTube → استخراج عبر callExtractApi (extractVideoDeep)
+              try {
+                const extracted = await callExtractApi(link);
+                if (extracted?.directUrl) {
+                  const d       = extracted.directUrl;
+                  const isHls   = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
+                  const proxied = isHls ? wrapHls(d, link) : wrapMp4(d, link);
+                  sendSource(proxied, label, proxied, proxied);
+                }
+              } catch { /* skip */ }
+            }
+          }));
+
+        } catch { /* silent */ }
+      })(),
+
       // ── 16. Vyla (multi-source: meowtv/vidzee/icefy/vidnest/…, TMDB ID native) ──
       (async () => {
         if (!tmdbId) return;
