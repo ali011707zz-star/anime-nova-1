@@ -5036,6 +5036,26 @@ router.get("/anime/translate", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  aniskip-proxy  GET /api/anime/aniskip?malId=&ep=
+//  Proxies AniSkip API to avoid CORS/network issues from browser
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/aniskip", async (req, res) => {
+  const malId = String(req.query.malId || "");
+  const ep    = String(req.query.ep    || "");
+  if (!malId || !ep) { res.status(400).json({ found: false }); return; }
+  try {
+    const url = `https://api.aniskip.com/v2/skip-times/${malId}/${ep}?types[]=op&types[]=ed&episodeLength=0`;
+    const r   = await fetch(url, {
+      headers: { "User-Agent": BROWSER_UA },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!r.ok) { res.json({ found: false }); return; }
+    const data = await r.json();
+    res.json(data);
+  } catch { res.json({ found: false }); }
+});
+
+// ════════════════════════════════════════════════════════════════════
 //  proxy-text  GET /api/anime/proxy-text?url=
 //  Fetches a text file (VTT/SRT/plain) server-side and returns body
 //  Used for fetching subtitle files that block browser CORS requests

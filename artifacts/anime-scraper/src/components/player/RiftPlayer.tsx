@@ -1301,7 +1301,7 @@ export default function RiftPlayer({
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 8, scale: 0.93 }}
                             transition={{ duration: 0.14 }}
-                            className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 rounded-2xl overflow-hidden z-50 shadow-2xl"
+                            className="absolute bottom-full mb-2 left-0 rounded-2xl overflow-hidden z-50 shadow-2xl"
                             style={{ background: GLASS_PANEL, border: `1px solid ${GLASS_BORDER}`, backdropFilter: GLASS_BLUR, minWidth: 100 }}
                           >
                             {SPEEDS.map((s, i) => (
@@ -1322,14 +1322,14 @@ export default function RiftPlayer({
                     </div>
                   </div>
 
-                  {/* Center: -10ث · play/pause · +10ث */}
+                  {/* Center: +10ث · play/pause · -10ث  (RTL: تقدم على اليسار، رجوع على اليمين) */}
                   <div className="flex items-center gap-2">
                     <button
-                      onPointerDown={e => { e.stopPropagation(); skip(-10); showControls(); }}
+                      onPointerDown={e => { e.stopPropagation(); skip(10); showControls(); }}
                       className="flex flex-col items-center justify-center gap-[3px] rounded-2xl active:scale-90 transition-all"
                       style={{ width: 48, height: 48, background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.14)" }}>
-                      <RotateCcw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.8} />
-                      <span className="font-mono font-black leading-none text-white/60" style={{ fontSize: 9 }}>-10ث</span>
+                      <RotateCw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.8} />
+                      <span className="font-mono font-black leading-none text-white/60" style={{ fontSize: 9 }}>+10ث</span>
                     </button>
                     <button
                       onPointerDown={e => { e.stopPropagation(); togglePlay(); showControls(); }}
@@ -1342,11 +1342,11 @@ export default function RiftPlayer({
                         : <Play  className="w-[23px] h-[23px] text-violet-200 mr-[-2px]" />}
                     </button>
                     <button
-                      onPointerDown={e => { e.stopPropagation(); skip(10); showControls(); }}
+                      onPointerDown={e => { e.stopPropagation(); skip(-10); showControls(); }}
                       className="flex flex-col items-center justify-center gap-[3px] rounded-2xl active:scale-90 transition-all"
                       style={{ width: 48, height: 48, background: "rgba(20,20,40,0.72)", border: "1px solid rgba(255,255,255,0.14)" }}>
-                      <RotateCw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.8} />
-                      <span className="font-mono font-black leading-none text-white/60" style={{ fontSize: 9 }}>+10ث</span>
+                      <RotateCcw className="w-[18px] h-[18px] text-white/80" strokeWidth={1.8} />
+                      <span className="font-mono font-black leading-none text-white/60" style={{ fontSize: 9 }}>-10ث</span>
                     </button>
                   </div>
 
@@ -1404,7 +1404,7 @@ export default function RiftPlayer({
               dir="rtl"
               style={{
                 bottom: 90,
-                right: 14,
+                left: 14,
                 width: 210,
                 maxWidth: "calc(100% - 28px)",
                 background: "rgba(4,4,14,0.97)",
@@ -1505,7 +1505,7 @@ export default function RiftPlayer({
               dir="rtl"
               style={{
                 top: isPortrait ? 72 : 48,
-                right: 14,
+                left: 14,
                 width: isPortrait ? "calc(100% - 28px)" : 230,
                 maxWidth: 340,
                 maxHeight: isPortrait ? "calc(100vh - 110px)" : "52vh",
@@ -1515,8 +1515,9 @@ export default function RiftPlayer({
                 borderRadius: isPortrait ? 22 : 16,
                 padding: "0 0 4px",
                 boxShadow: "0 28px 72px rgba(0,0,0,0.80), 0 0 0 1px rgba(139,92,246,0.06) inset",
-                overflow: "hidden",
+                overflowX: "hidden",
                 overflowY: "auto",
+                touchAction: "pan-y",
               }}
               onClick={e => e.stopPropagation()}
               onTouchStart={e => e.stopPropagation()}

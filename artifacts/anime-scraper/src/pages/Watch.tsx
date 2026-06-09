@@ -38,7 +38,7 @@ interface SubSettings {
   bold: boolean;
   position: "top" | "center" | "bottom";  // subtitle placement
 }
-const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 16, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
 
 /* ══════════════════════════════════ HELPERS ══════════════════ */
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
@@ -328,7 +328,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
           initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           transition={{ delay: 0.32 }}
           className="flex flex-col items-center gap-3">
-          <p className="text-white/80 text-[13px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
+          <p className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
           <div className="relative w-9 h-9">
             <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
             <motion.div
@@ -337,7 +337,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
               transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
             />
           </div>
-          <p className="text-white/75 text-[12px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
+          <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة</p>
         </motion.div>
       </div>
     </div>
@@ -776,7 +776,7 @@ function ScraperPicker({
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
-            <p className="text-white/75 text-[12px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
+            <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة</p>
           </motion.div>
         </div>
       </div>
@@ -1819,10 +1819,11 @@ export default function WatchPage() {
         if (d) {
           setAnime(d);
           saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0);
-          /* ── Fetch AniSkip timestamps using MAL ID ── */
+          /* ── Fetch AniSkip timestamps via server proxy (avoids CORS) ── */
+          setSkipTimes({});
           if (d.idMal) {
-            fetch(`https://api.aniskip.com/v2/skip-times/${d.idMal}/${ep}?types[]=op&types[]=ed&episodeLength=0`, {
-              signal: AbortSignal.timeout(6000),
+            fetch(`/api/anime/aniskip?malId=${d.idMal}&ep=${ep}`, {
+              signal: AbortSignal.timeout(10000),
             })
               .then(r => r.ok ? r.json() : null)
               .then((data: any) => {

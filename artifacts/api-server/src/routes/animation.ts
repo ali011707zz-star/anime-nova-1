@@ -1288,7 +1288,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               try {
                 const r = await fetch(
                   `${SC_VIDZEE}?tmdbId=${tmdbId}&type=${type}${tvExtra}`,
-                  { headers: scHeaders, signal: AbortSignal.timeout(12_000) }
+                  { headers: scHeaders, signal: AbortSignal.timeout(28_000) }
                 );
                 if (!r.ok) {
                   console.error(`[StarCima/vidzee] HTTP ${r.status} for tmdbId=${tmdbId}`);
@@ -1332,7 +1332,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 });
                 const r = await fetch(`${SC_ARABIC}?${sp.toString()}`, {
                   headers: scHeaders,
-                  signal : AbortSignal.timeout(12_000),
+                  signal : AbortSignal.timeout(25_000),
                 });
                 if (!r.ok) {
                   console.error(`[StarCima/arabic] HTTP ${r.status}`);
