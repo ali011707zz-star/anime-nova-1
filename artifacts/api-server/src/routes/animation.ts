@@ -12,24 +12,6 @@ const RUBY_B    = "https://rubystm.com";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-// ── AnimeWitcher Firebase token cache (expires after 50 min) ────────────────
-let _awTokenCache: { token: string; expiresAt: number } | null = null;
-async function getAwToken(): Promise<string> {
-  const now = Date.now();
-  if (_awTokenCache && _awTokenCache.expiresAt > now) return _awTokenCache.token;
-  const r = await fetch(
-    "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyAcbWRwfFNnCpoydDXlEALWnM_TYVcJOMU",
-    { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "test_nova_probe@mailinator.com", password: "TestPass123!", returnSecureToken: true }),
-      signal: AbortSignal.timeout(10_000) }
-  );
-  if (!r.ok) return "";
-  const d: any = await r.json();
-  const token: string = d?.idToken || "";
-  if (token) _awTokenCache = { token, expiresAt: now + 50 * 60 * 1000 };
-  return token;
-}
-
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 async function tmdb(path: string): Promise<any> {
