@@ -12,7 +12,7 @@ const DETAIL_Q = `
 query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal title { romaji english native }
-    description bannerImage
+    description bannerImage isAdult
     coverImage { large extraLarge }
     averageScore status episodes duration seasonYear season format
     genres
@@ -54,6 +54,14 @@ const SEASON: Record<string, string> = { WINTER: "شتاء", SPRING: "ربيع",
 const FORMAT: Record<string, string> = {
   TV: "مسلسل", MOVIE: "فيلم", OVA: "OVA", ONA: "ONA", SPECIAL: "خاص", MUSIC: "موسيقي", TV_SHORT: "قصير",
 };
+const formatRuntime = (mins: number) => {
+  if (!mins || mins <= 0) return "";
+  if (mins < 60) return `${mins} دقيقة`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h} ساعة ${m} دقيقة` : `${h} ساعة`;
+};
+
 const GENRE: Record<string, string> = {
   "Action": "أكشن", "Adventure": "مغامرة", "Comedy": "كوميدي", "Drama": "دراما",
   "Fantasy": "فانتازيا", "Horror": "رعب", "Mecha": "ميكا", "Music": "موسيقى",
@@ -242,7 +250,7 @@ export default function AnimeDetail() {
           {anime.duration && (
             <div className="flex items-center gap-1.5 text-white/40 text-[10px]">
               <Clock className="w-3 h-3" />
-              <span className="font-['Cairo']">{anime.duration} دقيقة</span>
+              <span className="font-['Cairo']">{formatRuntime(anime.duration)}</span>
             </div>
           )}
           {anime.studios?.nodes?.[0] && (
@@ -269,6 +277,21 @@ export default function AnimeDetail() {
           </span>
         ))}
       </div>
+
+      {/* ── +17 Age Warning ── */}
+      {(anime.isAdult || anime.genres?.some((g: string) => ["Ecchi","Hentai","Adult Cast","Erotica"].includes(g))) && (
+        <div className="mx-4 mt-4 rounded-2xl px-4 py-3 flex items-center gap-3"
+          style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)" }}>
+            <span className="text-[13px] font-black text-red-400">+17</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[12px] font-black text-red-400 font-['Cairo']">محتوى للبالغين فقط</p>
+            <p className="text-[10px] text-red-400/60 font-['Cairo'] mt-0.5">هذا الأنمي يحتوي على مشاهد غير مناسبة لمن هم دون سن 17</p>
+          </div>
+        </div>
+      )}
 
       {/* ── CTA Buttons ── */}
       <div className="px-4 mt-5 space-y-2.5">
