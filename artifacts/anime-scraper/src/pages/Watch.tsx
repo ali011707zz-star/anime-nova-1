@@ -836,6 +836,15 @@ function ScraperPicker({
 
         {hasSources ? (
           <>
+            {/* ── Server hint banner ── */}
+            <div className="mx-4 mt-4 mb-1 px-3.5 py-2.5 rounded-xl flex items-center gap-2.5"
+              style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.16)" }}>
+              <span className="text-base shrink-0">⚠️</span>
+              <p className="text-[11px] text-amber-200/60 font-['Cairo'] leading-snug">
+                <span className="text-amber-300/80 font-black">السيرفر لا يعمل؟</span> جرّب سيرفراً آخر — بعض السيرفرات قد تكون بطيئة أو غير متاحة مؤقتاً.
+              </p>
+            </div>
+
             {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
               const srcs = grouped[q];
               if (!srcs.length) return null;
