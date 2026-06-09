@@ -70,7 +70,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
   /* ── Verification state ── */
   const [verifying,     setVerifying]     = useState(false);
   const [verifyEmail,   setVerifyEmail]   = useState("");
-  const [codeHint,      setCodeHint]      = useState(""); // shown when email not configured
   const [code,          setCode]          = useState(["", "", "", "", "", ""]);
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyError,   setVerifyError]   = useState("");
@@ -103,7 +102,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
 
     if (result.requiresVerification) {
       setVerifyEmail(result.email || email);
-      setCodeHint((result as any).verificationCode || "");
       setVerifying(true);
       return;
     }
@@ -176,7 +174,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       const data = await res.json();
       if (data.ok) {
         setResendMsg(data.emailSent ? "✓ تم إرسال رمز جديد إلى بريدك" : "");
-        if (data.verificationCode) setCodeHint(data.verificationCode);
         setCode(["", "", "", "", "", ""]);
         setTimeout(() => codeRefs[0].current?.focus(), 100);
       } else {
@@ -242,14 +239,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
             ))}
           </div>
 
-          {/* Code hint (when email not configured) */}
-          {codeHint && (
-            <div className="mb-4 px-4 py-3 rounded-2xl" style={{ background: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.2)" }}>
-              <p className="text-amber-300 text-[12px] font-bold font-['Cairo']">
-                📧 لم يُرسَل البريد — رمزك هو: <span className="font-black text-amber-200 tracking-widest">{codeHint}</span>
-              </p>
-            </div>
-          )}
 
           {/* Verify loading */}
           {verifyLoading && (
@@ -420,17 +409,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
             : <span className="flex items-center justify-center gap-2">{tab === "login" ? "تسجيل الدخول" : "إنشاء الحساب"}<ArrowLeft className="w-4 h-4 opacity-80" /></span>}
         </motion.button>
 
-        <div className="flex items-center gap-3 my-4">
-          <div className="flex-1 h-px bg-white/[0.055]" />
-          <span className="text-[10px] text-white/18 font-['Cairo'] font-bold">أو</span>
-          <div className="flex-1 h-px bg-white/[0.055]" />
-        </div>
-
-        <button onClick={() => { signIn(); onClose(); }}
-          className="w-full py-3 rounded-2xl text-[12px] font-bold font-['Cairo'] transition-all active:scale-[0.98]"
-          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.35)" }}>
-          متابعة بحساب Replit
-        </button>
       </div>
     </div>
   );

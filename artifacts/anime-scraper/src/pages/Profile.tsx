@@ -202,7 +202,11 @@ export default function Profile() {
     const result = await updateProfile(updates);
     setSaving(false);
     if (result.error) { setSaveError(result.error); setTimeout(() => setSaveError(""), 3000); }
-    else { setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    else {
+      setSaved(true); setTimeout(() => setSaved(false), 2000);
+      if (updates.displayName) localStorage.setItem("nova-username", updates.displayName);
+      if (updates.username) localStorage.setItem("nova-username", updates.username);
+    }
   }, [updateProfile]);
 
   function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -332,7 +336,7 @@ export default function Profile() {
             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             <span className="text-[10.5px] text-white/40 font-bold font-['Cairo']">
-              {user.authType === "email" ? "حساب بريد إلكتروني" : "حساب Replit"}
+              {user.authType === "email" ? "حساب بريد إلكتروني" : "حساب اجتماعي"}
             </span>
           </div>
 
@@ -387,7 +391,7 @@ export default function Profile() {
             <Field icon={Mail} iconColor="text-white/30" label="البريد الإلكتروني"
               value={user.email || "—"} placeholder="—" readOnly />
             <Field icon={Shield} iconColor="text-emerald-400" label="نوع الحساب"
-              value={user.authType === "email" ? "حساب بريد إلكتروني" : "حساب Replit"} placeholder="—" readOnly />
+              value={user.authType === "email" ? "حساب بريد إلكتروني" : "حساب اجتماعي"} placeholder="—" readOnly />
 
             {/* Change photo remove button */}
             {(photoPreview || user.profileImageUrl) && (
