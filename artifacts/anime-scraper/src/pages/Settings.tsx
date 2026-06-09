@@ -1,12 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Bell, BellOff, Home, Monitor,
-  Check, Layers, Shield, LogOut, User,
-  Smartphone, List, LayoutGrid, Trash2, ChevronLeft,
-  Settings as SettingsIcon, Palette, ChevronDown, Zap, ChevronRight,
-  Subtitles, BarChart3, UserCircle, FastForward, Play,
-  Globe, Sparkles, Film, BookOpen, X, CheckCircle2,
-  SkipForward, Radio, Star,
+  Bell, BellOff, Check, Shield, LogOut, User,
+  Trash2, ChevronLeft, Settings as SettingsIcon,
+  Palette, Zap, ChevronRight, Sparkles, X, CheckCircle2,
+  UserCircle, Crown, Smartphone, ExternalLink, MessageCircle,
+  AlertCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useLocation } from "wouter";
@@ -84,14 +82,9 @@ function ToastContainer() {
 
 /* ──────────────── ConfirmSheet ──────────────── */
 interface ConfirmProps {
-  open: boolean;
-  title: string;
-  desc?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  danger?: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
+  open: boolean; title: string; desc?: string;
+  confirmLabel?: string; cancelLabel?: string;
+  danger?: boolean; onConfirm: () => void; onCancel: () => void;
 }
 
 function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", cancelLabel = "إلغاء", danger = false, onConfirm, onCancel }: ConfirmProps) {
@@ -103,8 +96,7 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", cancelLa
         style={{ background: "rgba(0,0,0,0.76)", backdropFilter: "blur(8px)" }}
         onPointerDown={onCancel} />
       <motion.div
-        initial={{ y: "100%", opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
+        initial={{ y: "100%", opacity: 0 }} animate={{ y: 0, opacity: 1 }}
         exit={{ y: "100%", opacity: 0 }}
         transition={{ type: "spring", stiffness: 440, damping: 38 }}
         onPointerDown={e => e.stopPropagation()}
@@ -143,131 +135,6 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", cancelLa
       </motion.div>
     </div>,
     document.body
-  );
-}
-
-/* ──────────────── Custom Dropdown (bottom-sheet modal) ──────────────── */
-interface DropOption { id: string; label: string; icon?: string; desc?: string; }
-
-function DropdownSelect({
-  value, options, onChange, icon: Icon, iconColor = "text-primary", iconBg = "bg-primary/12",
-  label, sub, badge,
-}: {
-  value: string; options: DropOption[];
-  onChange: (v: string) => void;
-  icon: any; iconColor?: string; iconBg?: string;
-  label: string; sub?: string; badge?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const current = options.find(o => o.id === value);
-
-  return (
-    <>
-      <button onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-3.5 px-5 py-3.5 transition-all hover:bg-white/3 active:scale-[0.99]">
-        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${iconBg} border-white/8`}>
-          <Icon className={`w-4 h-4 ${iconColor}`} />
-        </div>
-        <div className="flex-1 min-w-0 text-right">
-          <div className="flex items-center gap-2 justify-end">
-            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
-            {badge && <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(139,92,246,0.18)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.25)" }}>{badge}</span>}
-          </div>
-          {sub && <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">{sub}</p>}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[11px] font-bold text-white/65 font-['Cairo']">{current?.label}</span>
-          <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
-            <ChevronDown className="w-3.5 h-3.5 text-white/30" />
-          </motion.div>
-        </div>
-      </button>
-
-      <AnimatePresence>
-        {open && ReactDOM.createPortal(
-          <div className="fixed inset-0 z-[9999] flex flex-col justify-end" style={{ direction: "rtl" }}
-            onPointerDown={() => setOpen(false)}>
-            <motion.div className="absolute inset-0"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.18 }}
-              style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(6px)" }} />
-            <motion.div
-              initial={{ y: "100%", opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-              exit={{ y: "100%", opacity: 0 }}
-              transition={{ type: "spring", stiffness: 420, damping: 38 }}
-              onPointerDown={e => e.stopPropagation()}
-              style={{
-                position: "relative",
-                background: "linear-gradient(180deg, #0E0C1A 0%, #09090B 100%)",
-                borderRadius: "2rem 2rem 0 0",
-                border: "1.5px solid rgba(139,92,246,0.22)",
-                borderBottom: "none",
-                boxShadow: "0 -32px 80px rgba(0,0,0,0.90)",
-                paddingBottom: "max(20px, env(safe-area-inset-bottom))",
-              }}>
-              <div className="h-[2px]" style={{ background: "linear-gradient(90deg, transparent 0%, #7C3AED 30%, #A78BFA 50%, #7C3AED 70%, transparent 100%)" }} />
-              <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-[3.5px] rounded-full bg-white/12" /></div>
-              <p className="text-center text-[12px] font-black text-white/40 font-['Cairo'] pb-3 px-5">{label}</p>
-              <div className="h-px bg-white/[0.05] mx-5 mb-1" />
-              {options.map((opt, i) => {
-                const active = value === opt.id;
-                return (
-                  <button key={opt.id}
-                    onPointerDown={() => { onChange(opt.id); setOpen(false); }}
-                    className="w-full flex items-center gap-3 px-6 py-4 transition-all active:bg-white/5"
-                    style={{
-                      background: active ? "rgba(139,92,246,0.12)" : "transparent",
-                      borderBottom: i < options.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                    }}>
-                    {opt.icon && <span className="text-lg shrink-0">{opt.icon}</span>}
-                    <div className="flex-1 text-right">
-                      <span className="block text-[14px] font-bold font-['Cairo']"
-                        style={{ color: active ? "#e2d9fc" : "rgba(255,255,255,0.78)" }}>
-                        {opt.label}
-                      </span>
-                      {opt.desc && <span className="block text-[10px] text-white/30 mt-0.5">{opt.desc}</span>}
-                    </div>
-                    {active && <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: "#a78bfa", boxShadow: "0 0 10px rgba(167,139,250,0.90)" }} />}
-                  </button>
-                );
-              })}
-            </motion.div>
-          </div>,
-          document.body
-        )}
-      </AnimatePresence>
-    </>
-  );
-}
-
-/* ──────────────── Speed Selector ──────────────── */
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
-
-function SpeedSelector({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  return (
-    <div className="px-5 py-3.5 flex items-center gap-3">
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-amber-500/10 border-white/8">
-        <FastForward className="w-4 h-4 text-amber-400" />
-      </div>
-      <div className="flex-1 text-right">
-        <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">سرعة التشغيل الافتراضية</p>
-        <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">السرعة عند بدء أي حلقة</p>
-      </div>
-      <div className="flex items-center gap-1 shrink-0">
-        {SPEEDS.map(s => (
-          <motion.button key={s} whileTap={{ scale: 0.85 }} onClick={() => onChange(s)}
-            className="w-8 h-7 rounded-lg text-[10px] font-black transition-all"
-            style={{
-              background: value === s ? "rgba(251,191,36,0.22)" : "rgba(255,255,255,0.05)",
-              color: value === s ? "#fde68a" : "rgba(255,255,255,0.30)",
-              border: value === s ? "1px solid rgba(251,191,36,0.40)" : "1px solid rgba(255,255,255,0.07)",
-              boxShadow: value === s ? "0 0 10px rgba(251,191,36,0.20)" : "none",
-            }}>
-            {s === 1 ? "×1" : `×${s}`}
-          </motion.button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -357,27 +224,6 @@ function DangerRow({ label, sub, onClick }: { label: string; sub?: string; onCli
   );
 }
 
-/* ──────────────── Info row ──────────────── */
-function InfoRow({ icon: Icon, iconColor, iconBg, label, sub, value, badge }: {
-  icon: any; iconColor: string; iconBg: string; label: string; sub?: string; value?: string; badge?: string;
-}) {
-  return (
-    <div className="flex items-center gap-3.5 px-5 py-3.5">
-      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${iconBg} border-white/8`}>
-        <Icon className={`w-4 h-4 ${iconColor}`} />
-      </div>
-      <div className="flex-1 min-w-0 text-right">
-        <div className="flex items-center gap-2 justify-end">
-          <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">{label}</p>
-          {badge && <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md" style={{ background: "rgba(16,185,129,0.15)", color: "#34d399", border: "1px solid rgba(16,185,129,0.25)" }}>{badge}</span>}
-        </div>
-        {sub && <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">{sub}</p>}
-      </div>
-      {value && <span className="text-[12px] font-black text-primary shrink-0">{value}</span>}
-    </div>
-  );
-}
-
 /* ──────────────── Nav row ──────────────── */
 function NavRow({ icon: Icon, iconColor, iconBg, label, sub, href, badge }: {
   icon: any; iconColor: string; iconBg: string; label: string; sub?: string; href: string; badge?: string;
@@ -421,33 +267,11 @@ export default function Settings() {
   }, []);
 
   /* ── Preferences ── */
-  const [theme,     setTheme]     = useState(() => localStorage.getItem("pref-theme")     || "dark");
-  const [notifs,    setNotifs]    = useState(() => localStorage.getItem("pref-notifs")    !== "false");
-  const [autoMark,  setAutoMark]  = useState(() => localStorage.getItem("pref-automark")  !== "false");
-  const [startPage, setStartPage] = useState(() => localStorage.getItem("pref-startpage") || "home");
-  const [viewMode,  setViewMode]  = useState(() => localStorage.getItem("pref-viewmode")  || "grid");
-  const [subSize,   setSubSize]   = useState(() => localStorage.getItem("pref-subsize")   || "medium");
-  const [autoSub,   setAutoSub]   = useState(() => localStorage.getItem("pref-autosub")   !== "false");
-  const [speed,     setSpeed]     = useState(() => parseFloat(localStorage.getItem("pref-speed") || "1"));
-  const [quality,   setQuality]   = useState(() => localStorage.getItem("pref-quality")   || "auto");
-  const [autoPlay,  setAutoPlay]  = useState(() => localStorage.getItem("pref-autoplay")  !== "false");
-  const [skipIntro, setSkipIntro] = useState(() => localStorage.getItem("pref-skipintro") === "true");
-  const [srcLang,   setSrcLang]   = useState(() => localStorage.getItem("pref-srclang")   || "best");
-  const [reduceMot, setReduceMot] = useState(() => localStorage.getItem("pref-reducemot") === "true");
+  const [theme,  setTheme]  = useState(() => localStorage.getItem("pref-theme")  || "dark");
+  const [notifs, setNotifs] = useState(() => localStorage.getItem("pref-notifs") !== "false");
 
-  const setT   = (t: string)  => { setTheme(t);     localStorage.setItem("pref-theme",     t); applyTheme(t); showToast("تم تغيير الثيم"); };
-  const setN   = (v: boolean) => { setNotifs(v);    localStorage.setItem("pref-notifs",    String(v)); showToast(v ? "تم تفعيل الإشعارات" : "تم إيقاف الإشعارات"); };
-  const setAM  = (v: boolean) => { setAutoMark(v);  localStorage.setItem("pref-automark",  String(v)); showToast(v ? "تم تفعيل التأشير التلقائي" : "تم إيقاف التأشير التلقائي"); };
-  const setSP  = (v: string)  => { setStartPage(v); localStorage.setItem("pref-startpage", v); showToast("تم حفظ صفحة البداية"); };
-  const setVM  = (v: string)  => { setViewMode(v);  localStorage.setItem("pref-viewmode",  v); showToast("تم تغيير طريقة العرض"); };
-  const setSS  = (v: string)  => { setSubSize(v);   localStorage.setItem("pref-subsize",   v); showToast("تم حفظ حجم الترجمة"); };
-  const setAS  = (v: boolean) => { setAutoSub(v);   localStorage.setItem("pref-autosub",   String(v)); showToast(v ? "تم تفعيل الترجمة التلقائية" : "تم إيقاف الترجمة التلقائية"); };
-  const setSPD = (v: number)  => { setSpeed(v);     localStorage.setItem("pref-speed",     String(v)); showToast(`سرعة التشغيل: ×${v}`); };
-  const setQL  = (v: string)  => { setQuality(v);   localStorage.setItem("pref-quality",   v); showToast("تم حفظ تفضيل الجودة"); };
-  const setAP  = (v: boolean) => { setAutoPlay(v);  localStorage.setItem("pref-autoplay",  String(v)); showToast(v ? "تم تفعيل التشغيل التلقائي" : "تم إيقاف التشغيل التلقائي"); };
-  const setSI  = (v: boolean) => { setSkipIntro(v); localStorage.setItem("pref-skipintro", String(v)); showToast(v ? "سيتم تخطي المقدمة تلقائياً" : "تم إيقاف تخطي المقدمة"); };
-  const setSL  = (v: string)  => { setSrcLang(v);   localStorage.setItem("pref-srclang",   v); showToast("تم حفظ تفضيل المصادر"); };
-  const setRM  = (v: boolean) => { setReduceMot(v); localStorage.setItem("pref-reducemot", String(v)); showToast(v ? "تم تقليل الحركة" : "تم تفعيل الحركة الكاملة"); };
+  const setT = (t: string)  => { setTheme(t);  localStorage.setItem("pref-theme",  t); applyTheme(t); showToast("تم تغيير الثيم"); };
+  const setN = (v: boolean) => { setNotifs(v); localStorage.setItem("pref-notifs", String(v)); showToast(v ? "تم تفعيل الإشعارات" : "تم إيقاف الإشعارات"); };
 
   /* ── Stats ── */
   const [stats, setStats] = useState({ hist: 0, saved: 0, cacheKb: 0 });
@@ -504,7 +328,7 @@ export default function Settings() {
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[9px] text-white/30 font-bold">NOVA ANIME · v2.3</span>
+          <span className="text-[9px] text-white/30 font-bold">NOVA ANIME · v2.4</span>
         </div>
       </div>
 
@@ -533,7 +357,7 @@ export default function Settings() {
                 <div className="flex items-center gap-1.5 mt-1">
                   <span className="text-[9px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-lg font-black">مجاني ∞</span>
                   <span className="text-[9px] text-white/25">·</span>
-                  <span className="text-[9px] text-white/30">{user.email}</span>
+                  <span className="text-[9px] text-white/30 truncate max-w-[120px]">{user.email}</span>
                 </div>
               </div>
               <div className="flex flex-col items-center gap-1.5">
@@ -566,10 +390,10 @@ export default function Settings() {
       {/* ── Stats row ── */}
       <div className="mx-4 mt-3 grid grid-cols-4 gap-2">
         {[
-          { label: "مشاهَدة", val: stats.hist, color: "text-violet-400", bg: "rgba(139,92,246,0.10)", href: "/library" },
-          { label: "محفوظة",  val: stats.saved, color: "text-pink-400",  bg: "rgba(236,72,153,0.10)", href: "/library" },
-          { label: "الكاش",   val: `${stats.cacheKb}KB`, color: "text-cyan-400", bg: "rgba(6,182,212,0.10)", href: null },
-          { label: "مجاني",   val: "∞", color: "text-emerald-400", bg: "rgba(16,185,129,0.10)", href: null },
+          { label: "مشاهَدة", val: stats.hist,            color: "text-violet-400", bg: "rgba(139,92,246,0.10)", href: "/library" },
+          { label: "محفوظة",  val: stats.saved,           color: "text-pink-400",   bg: "rgba(236,72,153,0.10)", href: "/library" },
+          { label: "الكاش",   val: `${stats.cacheKb}KB`, color: "text-cyan-400",   bg: "rgba(6,182,212,0.10)",  href: null },
+          { label: "مجاني",   val: "∞",                   color: "text-emerald-400",bg: "rgba(16,185,129,0.10)", href: null },
         ].map(s => (
           <motion.div key={s.label} whileTap={{ scale: 0.93 }}
             onClick={() => s.href && navigate(s.href)}
@@ -579,6 +403,47 @@ export default function Settings() {
             <span className="text-[9px] text-white/30 font-bold">{s.label}</span>
           </motion.div>
         ))}
+      </div>
+
+      {/* ══════ Nova Premium ══════ */}
+      <div className="mx-4 mt-5">
+        <motion.div whileTap={{ scale: 0.98 }}
+          className="relative rounded-2xl p-4 overflow-hidden cursor-pointer"
+          style={{
+            background: "linear-gradient(135deg, rgba(251,191,36,0.12) 0%, rgba(245,158,11,0.08) 50%, rgba(217,119,6,0.12) 100%)",
+            border: "1px solid rgba(251,191,36,0.25)",
+          }}>
+          {/* Glow */}
+          <div className="absolute inset-0 pointer-events-none"
+            style={{ background: "radial-gradient(ellipse at 80% 50%, rgba(251,191,36,0.08) 0%, transparent 60%)" }} />
+
+          <div className="flex items-center gap-3 relative">
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
+              style={{ background: "rgba(251,191,36,0.18)", border: "1px solid rgba(251,191,36,0.35)" }}>
+              <Crown className="w-5 h-5 text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className="text-[14px] font-black text-amber-300">Nova Premium</p>
+                <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
+                  style={{ background: "rgba(251,191,36,0.20)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.30)" }}>
+                  قريباً
+                </span>
+              </div>
+              <p className="text-[10px] text-amber-400/55">إزالة الإعلانات · دعم المطوّر · مميزات حصرية</p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 mt-3 relative">
+            {["بدون إعلانات", "دعم المطوّر", "مميزات قادمة"].map(f => (
+              <div key={f} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl"
+                style={{ background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.16)" }}>
+                <Check className="w-2.5 h-2.5 text-amber-400 shrink-0" strokeWidth={3} />
+                <span className="text-[8px] font-black text-amber-300/70">{f}</span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
       </div>
 
       {/* ══════ المظهر ══════ */}
@@ -623,125 +488,17 @@ export default function Settings() {
             })}
           </div>
         </div>
-
-        <DropdownSelect
-          icon={viewMode === "grid" ? LayoutGrid : List}
-          iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
-          label="وضع عرض القوائم" sub="طريقة عرض قوائم الأنمي"
-          badge="قريباً"
-          value={viewMode} onChange={setVM}
-          options={[
-            { id: "grid", label: "شبكة", icon: "⊞", desc: "أيقونات كبيرة" },
-            { id: "list", label: "قائمة", icon: "☰", desc: "صفوف مفصّلة" },
-          ]}
-        />
-        <ToggleRow
-          icon={Layers} iconColor={reduceMot ? "text-white/30" : "text-violet-400"}
-          iconBg={reduceMot ? "bg-white/5" : "bg-violet-500/10"}
-          label="تأثيرات الحركة" sub="الرسوم المتحركة والانتقالات"
-          on={!reduceMot} onChange={v => setRM(!v)}
-        />
       </Card>
 
-      {/* ══════ التشغيل ══════ */}
-      <SectionHeader title="التشغيل" icon="▶️" />
+      {/* ══════ الإشعارات ══════ */}
+      <SectionHeader title="الإشعارات" icon="🔔" />
       <Card>
-        <SpeedSelector value={speed} onChange={setSPD} />
-        <DropdownSelect
-          icon={Star} iconColor="text-amber-400" iconBg="bg-amber-500/10"
-          label="جودة التشغيل المفضّلة" sub="الجودة التي يختارها المشغّل تلقائياً"
-          badge="قريباً"
-          value={quality} onChange={setQL}
-          options={[
-            { id: "auto",  label: "تلقائي",   icon: "⚡", desc: "أفضل جودة متاحة" },
-            { id: "1080p", label: "FHD 1080p", icon: "🔥", desc: "جودة سينمائية" },
-            { id: "720p",  label: "HD 720p",   icon: "✨", desc: "جودة جيدة وسريعة" },
-            { id: "480p",  label: "SD 480p",   icon: "💧", desc: "توفير البيانات" },
-          ]}
-        />
-        <ToggleRow
-          icon={SkipForward}
-          iconColor={autoPlay ? "text-violet-400" : "text-white/30"}
-          iconBg={autoPlay ? "bg-violet-500/10" : "bg-white/5"}
-          label="تشغيل الحلقة التالية تلقائياً"
-          sub="تنتقل للحلقة التالية فور انتهاء الحالية"
-          on={autoPlay} onChange={setAP}
-        />
-        <ToggleRow
-          icon={FastForward}
-          iconColor={skipIntro ? "text-cyan-400" : "text-white/30"}
-          iconBg={skipIntro ? "bg-cyan-500/10" : "bg-white/5"}
-          label="تخطي المقدمة تلقائياً"
-          sub="يتخطى مقدمة الأنمي عند توفرها"
-          badge="قريباً"
-          on={skipIntro} onChange={setSI}
-        />
-        <ToggleRow
-          icon={Check}
-          iconColor={autoMark ? "text-violet-400" : "text-white/30"}
-          iconBg={autoMark ? "bg-violet-500/10" : "bg-white/5"}
-          label="تأشير تلقائي للمشاهدة"
-          sub="تحديد الحلقات كمشاهَدة تلقائياً"
-          on={autoMark} onChange={setAM}
-        />
-      </Card>
-
-      {/* ══════ الترجمة ══════ */}
-      <SectionHeader title="الترجمة" icon="💬" />
-      <Card>
-        <ToggleRow
-          icon={Subtitles}
-          iconColor={autoSub ? "text-blue-400" : "text-white/30"}
-          iconBg={autoSub ? "bg-blue-500/10" : "bg-white/5"}
-          label="ترجمة تلقائية"
-          sub="تحميل الترجمة العربية تلقائياً"
-          badge="قريباً"
-          on={autoSub} onChange={setAS}
-        />
-        <DropdownSelect
-          icon={Monitor} iconColor="text-cyan-400" iconBg="bg-cyan-500/10"
-          label="حجم خط الترجمة" sub="حجم نص الترجمة أثناء التشغيل"
-          badge="قريباً"
-          value={subSize} onChange={setSS}
-          options={[
-            { id: "small",  label: "صغير",  icon: "🔡", desc: "مناسب للشاشات الكبيرة" },
-            { id: "medium", label: "متوسط", icon: "🔠", desc: "الحجم الافتراضي" },
-            { id: "large",  label: "كبير",  icon: "🅰️", desc: "مناسب للمسافة البعيدة" },
-          ]}
-        />
-      </Card>
-
-      {/* ══════ المصادر ══════ */}
-      <SectionHeader title="المصادر" icon="📡" />
-      <Card>
-        <DropdownSelect
-          icon={Globe} iconColor="text-teal-400" iconBg="bg-teal-500/10"
-          label="لغة المصادر المفضّلة" sub="الأولوية عند وجود أكثر من مصدر"
-          badge="قريباً"
-          value={srcLang} onChange={setSL}
-          options={[
-            { id: "best",     label: "الأفضل تلقائياً",   icon: "⚡", desc: "يختار الأعلى جودة" },
-            { id: "arabic",   label: "عربي بالدرجة الأولى", icon: "🇸🇦", desc: "شاهيد · أنميليك · أنيمي دار" },
-            { id: "japanese", label: "ياباني مترجم أولاً",  icon: "🇯🇵", desc: "كاواي · أنيكوتو · أنيميكو" },
-          ]}
-        />
-        <DropdownSelect
-          icon={Home} iconColor="text-blue-400" iconBg="bg-blue-500/10"
-          label="صفحة البداية" sub="الصفحة التي تظهر عند فتح التطبيق"
-          value={startPage} onChange={setSP}
-          options={[
-            { id: "home",       label: "الرئيسية",        icon: "🏠" },
-            { id: "browse",     label: "تصفح الأنمي",     icon: "🔍" },
-            { id: "animations", label: "الرسوم المتحركة", icon: "🎬" },
-            { id: "library",    label: "مكتبتي",          icon: "📚" },
-          ]}
-        />
         <ToggleRow
           icon={notifs ? Bell : BellOff}
           iconColor={notifs ? "text-amber-400" : "text-white/30"}
           iconBg={notifs ? "bg-amber-500/10" : "bg-white/5"}
           label="إشعارات الحلقات الجديدة"
-          sub="تنبيه عند نزول حلقة جديدة"
+          sub="تنبيه عند نزول حلقة جديدة لأنمي متابَع"
           badge="قريباً"
           on={notifs} onChange={setN}
         />
@@ -783,37 +540,68 @@ export default function Settings() {
       {/* ══════ عن التطبيق ══════ */}
       <SectionHeader title="عن التطبيق" icon="ℹ️" />
       <Card>
-        <InfoRow
-          icon={Radio} iconColor="text-violet-400" iconBg="bg-violet-500/10"
-          label="مصادر الأنمي النشطة"
-          sub="شاهيد · أنميليك · أنيمي دار · كاواي · أنيكوتو · أنيميكو"
-          badge="6 مصادر"
-        />
-        <InfoRow
-          icon={Film} iconColor="text-pink-400" iconBg="bg-pink-500/10"
-          label="مصادر الرسوم المتحركة"
-          sub="StarCima · Wecima · StarDima · MovizTime · TopCinema"
-          badge="5 مصادر"
-        />
-        <InfoRow
-          icon={Shield} iconColor="text-teal-400" iconBg="bg-teal-500/10"
-          label="الخصوصية والأمان"
-          sub="لا نجمع بيانات · بدون إعلانات · مجاني للجميع"
-        />
-        <InfoRow
-          icon={Zap} iconColor="text-amber-400" iconBg="bg-amber-500/10"
-          label="المحرّك"
-          sub="React + Vite + Node.js · AniList GraphQL · بث مباشر"
-        />
-        <InfoRow
-          icon={Smartphone} iconColor="text-indigo-400" iconBg="bg-indigo-500/10"
-          label="إصدار التطبيق"
-          sub="NOVA ANIME · تطبيق بث الأنمي العربي"
-          value="v2.3.0"
-        />
+        <div className="flex items-center gap-3.5 px-5 py-3.5">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-violet-500/10 border-white/8">
+            <Smartphone className="w-4 h-4 text-violet-400" />
+          </div>
+          <div className="flex-1 min-w-0 text-right">
+            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">إصدار التطبيق</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">NOVA ANIME · تطبيق بث الأنمي العربي</p>
+          </div>
+          <span className="text-[12px] font-black text-primary shrink-0">v2.4.0</span>
+        </div>
+
+        <Link href="/updates">
+          <div className="flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 cursor-pointer transition-all active:scale-[0.99]">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-amber-500/10 border-white/8">
+              <Zap className="w-4 h-4 text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0 text-right">
+              <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">سجل التحديثات</p>
+              <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">آخر الميزات والإصلاحات</p>
+            </div>
+            <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
+          </div>
+        </Link>
+
+        <div className="flex items-center gap-3.5 px-5 py-3.5">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-teal-500/10 border-white/8">
+            <Shield className="w-4 h-4 text-teal-400" />
+          </div>
+          <div className="flex-1 min-w-0 text-right">
+            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">الخصوصية والأمان</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">لا نجمع بيانات · بدون إعلانات · مجاني للجميع</p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => showToast("شكراً! يمكنك التواصل معنا عبر التحديثات")}
+          className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-sky-500/10 border-white/8">
+            <AlertCircle className="w-4 h-4 text-sky-400" />
+          </div>
+          <div className="flex-1 text-right">
+            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">الإبلاغ عن مشكلة</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">أخبرنا إذا واجهت أي خلل</p>
+          </div>
+          <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
+        </button>
+
+        <button
+          onClick={() => showToast("قريباً · تواصل معنا عبر وسائل التواصل الاجتماعي")}
+          className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-pink-500/10 border-white/8">
+            <MessageCircle className="w-4 h-4 text-pink-400" />
+          </div>
+          <div className="flex-1 text-right">
+            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">تواصل معنا</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">اقتراحات · شراكات · مساعدة</p>
+          </div>
+          <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
+        </button>
       </Card>
 
-      {/* ══════ البيانات ══════ */}
+      {/* ══════ البيانات والكاش ══════ */}
       <SectionHeader title="البيانات والكاش" icon="🗑️" />
       <Card>
         <DangerRow

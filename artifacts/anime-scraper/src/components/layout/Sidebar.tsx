@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link, useLocation } from 'wouter';
+import { useLocation } from 'wouter';
 import {
   X, Home, Search, Heart, History,
-  Library, Film, Settings, CalendarDays, ChevronLeft, User, LogIn,
-  Star, Compass, ChevronRight,
+  Library, Film, Settings, CalendarDays,
+  ChevronLeft, ChevronDown, User, LogIn,
+  Star, Tv2, Zap, Bell,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 
@@ -12,6 +14,7 @@ interface SidebarProps { open: boolean; onClose: () => void; }
 export function Sidebar({ open, onClose }: SidebarProps) {
   const [location, navigate] = useLocation();
   const { user } = useAuth();
+  const [libExpanded, setLibExpanded] = useState(false);
 
   const watchCount = (() => {
     try {
@@ -24,27 +27,23 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     try { return JSON.parse(localStorage.getItem('favorites') || '[]').length; } catch { return 0; }
   })();
 
+  const hasNewUpdates = (() => {
+    try {
+      const seen = localStorage.getItem('updates-last-seen');
+      if (!seen) return true;
+      return false;
+    } catch { return false; }
+  })();
+
   const isActive = (href: string) =>
     href === '/' ? (location === '/' || location === '') : location.startsWith(href);
 
   const go = (href: string) => { onClose(); navigate(href); };
 
-  const NAV_MAIN = [
-    { icon: Home,         label: 'الرئيسية',        href: '/' },
-    { icon: Search,       label: 'البحث',            href: '/search' },
-    { icon: Compass,      label: 'تصفح الأنمي',      href: '/browse' },
-    { icon: CalendarDays, label: 'الجدول الأسبوعي',  href: '/schedule' },
-  ];
-
-  const NAV_CONTENT = [
-    { icon: Film,    label: 'الأنيميشن والأفلام', href: '/animations' },
-    { icon: Library, label: 'مكتبتي',             href: '/library' },
-    { icon: Heart,   label: 'المفضلة',            href: '/library',  badge: favCount > 0 ? favCount : null },
-    { icon: History, label: 'سجل المشاهدة',       href: '/history',  badge: watchCount > 0 ? watchCount : null },
-  ];
-
-  const NavRow = ({ icon: Icon, label, href, badge }: { icon: any; label: string; href: string; badge?: number | null }) => {
-    const active = isActive(href) && !(href === '/library' && label === 'المفضلة');
+  const NavRow = ({
+    icon: Icon, label, href, badge, dot, sub,
+  }: { icon: any; label: string; href: string; badge?: number | null; dot?: boolean; sub?: string }) => {
+    const active = isActive(href);
     return (
       <button onClick={() => go(href)}
         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all text-right
@@ -54,15 +53,21 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           border: '1px solid rgba(139,92,246,0.22)',
         } : { border: '1px solid transparent' }}>
         <Icon className={`w-[15px] h-[15px] shrink-0 ${active ? 'text-violet-400' : ''}`} strokeWidth={active ? 2.5 : 1.8} />
-        <span className="flex-1 text-[13px] font-bold font-['Cairo'] text-right">{label}</span>
-        {badge != null && (
+        <div className="flex-1 min-w-0 text-right">
+          <span className="text-[13px] font-bold font-['Cairo']">{label}</span>
+          {sub && <p className="text-[9px] text-white/22 font-['Cairo'] mt-0.5">{sub}</p>}
+        </div>
+        {dot && (
+          <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse shrink-0" />
+        )}
+        {badge != null && badge > 0 && (
           <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full font-['Cairo']"
             style={{
               background: active ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.08)',
               color:      active ? '#c4b5fd' : 'rgba(255,255,255,0.35)',
             }}>{badge}</span>
         )}
-        {active && <div className="w-1 h-1 rounded-full bg-violet-400 animate-pulse shrink-0" />}
+        {active && !dot && !badge && <div className="w-1 h-1 rounded-full bg-violet-400 animate-pulse shrink-0" />}
       </button>
     );
   };
@@ -149,8 +154,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               {/* Stats */}
               <div className="flex gap-2 mt-2.5">
                 {[
-                  { icon: History, val: watchCount, label: 'مشاهدة',  color: 'text-violet-400' },
-                  { icon: Heart,   val: favCount,   label: 'مفضلة',   color: 'text-rose-400'   },
+                  { icon: History, val: watchCount, label: 'مشاهدة', color: 'text-violet-400' },
+                  { icon: Heart,   val: favCount,   label: 'مفضلة',  color: 'text-rose-400'  },
                 ].map(({ icon: Icon, val, label, color }) => (
                   <div key={label} className="flex-1 flex items-center gap-1.5 rounded-xl px-2.5 py-1.5"
                     style={{ background: 'rgba(255,255,255,0.03)' }}>
@@ -164,49 +169,70 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             {/* ── SCROLLABLE BODY ── */}
             <div className="flex-1 overflow-y-auto py-3 space-y-4" style={{ scrollbarWidth: 'none' }}>
 
-              {/* القائمة الرئيسية */}
+              {/* الرئيسي */}
               <div className="px-3">
                 <SectionLabel>الرئيسية</SectionLabel>
                 <div className="space-y-0.5">
-                  {NAV_MAIN.map(item => <NavRow key={item.href + item.label} {...item} />)}
+                  <NavRow icon={Home}         label="الرئيسية"          href="/" />
+                  <NavRow icon={Search}       label="البحث"              href="/search" />
+                  <NavRow icon={Tv2}          label="الأنمي"             href="/browse" />
+                  <NavRow icon={Film}         label="الأنيميشن والأفلام" href="/animations" />
+                  <NavRow icon={CalendarDays} label="الجدول الأسبوعي"   href="/schedule" />
                 </div>
               </div>
 
               <Divider />
 
-              {/* المحتوى */}
+              {/* المكتبة — قابلة للطيّ */}
               <div className="px-3">
-                <SectionLabel>المحتوى</SectionLabel>
-                <div className="space-y-0.5">
-                  {NAV_CONTENT.map(item => <NavRow key={item.href + item.label} {...item} />)}
-                </div>
-              </div>
-
-              <Divider />
-
-              {/* الإعدادات — navigates directly to /settings */}
-              <div className="px-3">
-                <SectionLabel>الإعدادات</SectionLabel>
-                <button onClick={() => go('/settings')}
-                  className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98] text-right
-                    ${isActive('/settings') ? 'text-white' : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'}`}
-                  style={isActive('/settings') ? {
-                    background: 'linear-gradient(135deg,rgba(124,58,237,0.18),rgba(79,70,229,0.10))',
-                    border: '1px solid rgba(139,92,246,0.22)',
-                  } : { border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                    style={{
-                      background: isActive('/settings') ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.05)',
-                      border: isActive('/settings') ? '1px solid rgba(139,92,246,0.40)' : '1px solid rgba(255,255,255,0.08)',
-                    }}>
-                    <Settings className={`w-3.5 h-3.5 ${isActive('/settings') ? 'text-violet-300' : 'text-white/30'}`} strokeWidth={1.8} />
-                  </div>
-                  <div className="flex-1 text-right">
-                    <p className="text-[13px] font-bold font-['Cairo']">الإعدادات</p>
-                    <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">المظهر · المشغّل · الحساب</p>
-                  </div>
-                  <ChevronLeft className="w-3.5 h-3.5 text-white/20 shrink-0" />
+                <SectionLabel>مكتبتي</SectionLabel>
+                <button
+                  onClick={() => setLibExpanded(v => !v)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-right
+                    ${isActive('/library') || isActive('/history') ? 'text-white' : 'text-white/45 hover:text-white/75 hover:bg-white/[0.04]'}`}
+                  style={(isActive('/library') || isActive('/history')) ? {
+                    background: 'linear-gradient(135deg,rgba(124,58,237,0.14),rgba(79,70,229,0.08))',
+                    border: '1px solid rgba(139,92,246,0.18)',
+                  } : { border: '1px solid transparent' }}>
+                  <Library className={`w-[15px] h-[15px] shrink-0 ${(isActive('/library') || isActive('/history')) ? 'text-violet-400' : ''}`} strokeWidth={1.8} />
+                  <span className="flex-1 text-[13px] font-bold font-['Cairo'] text-right">مكتبتي</span>
+                  <motion.div animate={{ rotate: libExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                    <ChevronDown className="w-3.5 h-3.5 text-white/25 shrink-0" />
+                  </motion.div>
                 </button>
+
+                <AnimatePresence>
+                  {libExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.22, ease: 'easeInOut' }}
+                      className="overflow-hidden">
+                      <div className="pt-0.5 pr-4 space-y-0.5">
+                        <NavRow icon={Heart}   label="المفضلة"       href="/library" badge={favCount} />
+                        <NavRow icon={History} label="سجل المشاهدة" href="/history" badge={watchCount > 0 ? watchCount : null} />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <Divider />
+
+              {/* أخرى */}
+              <div className="px-3">
+                <SectionLabel>أخرى</SectionLabel>
+                <div className="space-y-0.5">
+                  <NavRow
+                    icon={Zap}
+                    label="التحديثات"
+                    href="/updates"
+                    dot={hasNewUpdates}
+                    sub="آخر الميزات والإصلاحات"
+                  />
+                  <NavRow icon={Settings} label="الإعدادات" href="/settings" sub="المظهر · الحساب · المعلومات" />
+                </div>
               </div>
 
               {/* بطاقة تعريفية */}
@@ -217,7 +243,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   <span className="text-[13px] font-black"
                     style={{ background: 'linear-gradient(135deg,#A78BFA,#7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>NOVA</span>
                 </div>
-                <p className="text-[8px] text-white/20 font-['Cairo']">الإصدار 2.2 · 10+ مصادر · مجاني تماماً</p>
+                <p className="text-[8px] text-white/20 font-['Cairo']">الإصدار 2.4 · 10+ مصادر · مجاني تماماً</p>
               </div>
             </div>
 
