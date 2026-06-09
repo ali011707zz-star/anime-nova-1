@@ -23,6 +23,7 @@ export function AuthModal({ onClose }: AuthModalProps) {
   const [verifyEmail, setVerifyEmail] = useState("");
   const [verifyCode, setVerifyCode] = useState("");
   const [emailSent, setEmailSent] = useState(false);
+  const [fallbackCode, setFallbackCode] = useState("");
   const [resending, setResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
   const otpInputRef = useRef<HTMLInputElement>(null);
@@ -46,6 +47,7 @@ export function AuthModal({ onClose }: AuthModalProps) {
     if (result.requiresVerification) {
       setVerifyEmail(result.email || email);
       setEmailSent(!!result.emailSent);
+      setFallbackCode(result.verificationCode || "");
       setVerifying(true);
       setTimeout(() => otpInputRef.current?.focus(), 300);
       return;
@@ -80,7 +82,10 @@ export function AuthModal({ onClose }: AuthModalProps) {
     try {
       const res = await fetch("/api/auth/resend-code", { method: "POST", credentials: "include" });
       const data = await res.json();
-      if (data.ok) { setEmailSent(true); setResendSuccess(true); }
+      if (data.ok) {
+        if (data.emailSent) { setEmailSent(true); setResendSuccess(true); setFallbackCode(""); }
+        else if (data.verificationCode) { setFallbackCode(data.verificationCode); setEmailSent(false); }
+      }
       setVerifyCode("");
       setTimeout(() => otpInputRef.current?.focus(), 100);
     } catch { /* ignore */ }
@@ -151,6 +156,27 @@ export function AuthModal({ onClose }: AuthModalProps) {
                 <p className="text-emerald-300 text-[12px] font-bold font-['Cairo']">
                   ✓ {resendSuccess ? "تم إعادة إرسال الرمز إلى بريدك" : "تم إرسال الرمز إلى بريدك الإلكتروني"}
                 </p>
+              </motion.div>
+            )}
+
+            {/* Fallback: show code directly when email not configured */}
+            {!emailSent && fallbackCode && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                className="mb-4 px-4 py-3.5 rounded-2xl text-center"
+                style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.22)" }}>
+                <p className="text-amber-300/70 text-[10.5px] font-['Cairo'] mb-2">
+                  ⚠ لم يُرسَل الرمز بالبريد — إليك رمزك مباشرةً
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-[24px] font-black tracking-[0.22em] text-amber-300 font-mono">{fallbackCode}</span>
+                  <button
+                    onClick={() => { setVerifyCode(fallbackCode); }}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-black font-['Cairo'] transition-all active:scale-90"
+                    style={{ background: "rgba(251,191,36,0.15)", border: "1px solid rgba(251,191,36,0.30)", color: "#fde68a" }}>
+                    نسخ
+                  </button>
+                </div>
               </motion.div>
             )}
 

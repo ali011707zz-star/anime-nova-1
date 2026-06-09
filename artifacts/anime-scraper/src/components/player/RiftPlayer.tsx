@@ -10,7 +10,7 @@ import {
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
   RotateCcw, RotateCw, Sun, Lock, Unlock,
   Scan, ScanLine, Camera, X, Zap,
-  ChevronDown,
+  ChevronDown, SkipBack, SkipForward,
 } from "lucide-react";
 
 /* ─────────────────────────────────────── helpers ─── */
@@ -294,6 +294,13 @@ export default function RiftPlayer({
       else       { (screen.orientation as any).lock?.("landscape-primary").catch?.(() => {}); }
     } catch {}
   }
+
+  /* ── Portrait rotation resets zoom to contain ── */
+  useEffect(() => {
+    if (isPortrait) {
+      setIsZoomed(false);
+    }
+  }, [isPortrait]);
 
   /* ── control hide ── */
   const schedHide = useCallback(() => {
@@ -942,15 +949,6 @@ export default function RiftPlayer({
             LOCK SCREEN — persistent side indicator + tap-to-show unlock button
         ════════════════════════════════════════ */}
 
-        {/* Faint persistent lock badge — shown when locked and unlock button hidden */}
-        {isLocked && !showUnlockBtn && (
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-40 pointer-events-none">
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
-              style={{ background: "rgba(0,0,0,0.42)", border: "1px solid rgba(251,191,36,0.22)" }}>
-              <Lock className="w-4 h-4 text-amber-300/50" strokeWidth={2} />
-            </div>
-          </div>
-        )}
 
         {/* Unlock button — slides in from right side on tap, auto-hides after 3s */}
         <AnimatePresence>
@@ -1289,7 +1287,7 @@ export default function RiftPlayer({
                   className="flex items-center px-3 pt-2"
                   style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
                 >
-                  {/* Left: speed — flex-1 so center group is truly centered */}
+                  {/* Left: speed */}
                   <div className="flex items-center gap-1.5 flex-1">
 
                     {/* Speed */}
@@ -1331,6 +1329,32 @@ export default function RiftPlayer({
                         )}
                       </AnimatePresence>
                     </div>
+                  </div>
+
+                  {/* Center: skip-back · play/pause · skip-fwd */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onPointerDown={e => { e.stopPropagation(); skip(-10); showControls(); }}
+                      className="flex items-center justify-center rounded-2xl active:scale-90 transition-all"
+                      style={{ width: 42, height: 42, background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.10)" }}>
+                      <SkipBack className="w-[17px] h-[17px] text-white/65" />
+                    </button>
+                    <button
+                      onPointerDown={e => { e.stopPropagation(); togglePlay(); showControls(); }}
+                      className="flex items-center justify-center rounded-2xl active:scale-90 transition-all"
+                      style={{ width: 54, height: 54, background: isEnded ? "rgba(124,58,237,0.35)" : "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.45)", boxShadow: "0 4px 14px rgba(124,58,237,0.22)" }}>
+                      {isEnded
+                        ? <RotateCcw className="w-[22px] h-[22px] text-violet-200" />
+                        : playing
+                        ? <Pause className="w-[22px] h-[22px] text-violet-200" />
+                        : <Play  className="w-[22px] h-[22px] text-violet-200 mr-[-2px]" />}
+                    </button>
+                    <button
+                      onPointerDown={e => { e.stopPropagation(); skip(10); showControls(); }}
+                      className="flex items-center justify-center rounded-2xl active:scale-90 transition-all"
+                      style={{ width: 42, height: 42, background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.10)" }}>
+                      <SkipForward className="w-[17px] h-[17px] text-white/65" />
+                    </button>
                   </div>
 
                   {/* Right: view-mode · volume · lock */}
