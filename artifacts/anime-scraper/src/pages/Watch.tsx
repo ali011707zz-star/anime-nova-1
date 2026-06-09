@@ -64,20 +64,21 @@ interface FetchedSrc {
 
 /* ── All known scrapers — shown immediately in picker ── */
 const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] = [
-  { site: "animephoenix", name: "أنمي فينكس",  desc: "عربي مدبلج · مباشر",      tag: "PH" },
+  // ── عربي مدبلج / مترجم ────────────────────────────────────────────
   { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH" },
   { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "AL" },
   { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD" },
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK" },
   { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS" },
-  { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "MG" },
+  // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
-  { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
-  { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW" },
   { site: "miruro",       name: "MiruroAPI",      desc: "AnimePahe · HLS مباشر",  tag: "MR" },
-  { site: "animegg",      name: "AnimeGG",        desc: "ياباني مترجم · مباشر",   tag: "GG" },
+  { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW" },
+  // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
+  { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
+  { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";

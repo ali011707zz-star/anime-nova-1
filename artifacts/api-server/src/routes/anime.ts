@@ -4796,29 +4796,31 @@ router.get("/anime/sources-stream", async (req, res) => {
 
     // جميع الكاشطات تعمل بالتوازي
     await Promise.allSettled([
-      scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
+      // ── مصادر عربية مدبلجة / مترجمة ──────────────────────────────
       scrapeCached("shahiid",      () => getShahiidSources(title, english, ep)),
       scrapeCached("animelek",     () => getAnimelekSources(title, english, ep)),
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep)),
-      scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
-      scrapeCached("toonstream",   () => getToonStreamSources(title, english, ep), false),
       scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep)),
-      // animetime: جميع روابطه ميتة — معطّل مؤقتاً
-      // scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
-      scrapeCached("witanime",     () => getWitanimeSources(title, english, ep)),
-      scrapeCached("anime3rb",     () => getAnime3rbSources(title, english, ep)),
+      // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
       scrapeCached("miruro",       () => getMiruroApiSources(title, english, ep, anilistId),     false),
-      // animehub: محذوف — ترجمة إنجليزية مدمجة في الفيديو
-      // animegg: معطّل مؤقتاً بطلب المستخدم
-      // scrapeCached("animegg", () => getAnimeGGSources(title, english, ep), false),
-      // allmanga: CDN تغيرت (clock.json→500, fast4speed→401) — معطّل مؤقتاً
-      // reanime:  FlixCloud يبلوك Replit IP بالكامل — معطّل مؤقتاً
+      // ── ياباني مترجم (بدون ID) ────────────────────────────────────
+      scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
+      // ── معطّلة ────────────────────────────────────────────────────
+      // animephoenix: الموقع ميت — timeout من Replit
+      // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
+      // witanime:     CF Managed Challenge يحجب كل IPs المراكز
+      // anime3rb:     CF Managed Challenge يحجب كل IPs المراكز
+      // animetime:    جميع روابط CDN ميتة
+      // animehub:     ترجمة إنجليزية مدمجة في الفيديو
+      // animegg:      معطّل بطلب المستخدم
+      // allmanga:     clock.json→500, fast4speed→401
+      // reanime:      FlixCloud يبلوك Replit IP
     ]);
 
   } catch (e: any) {
@@ -4883,28 +4885,21 @@ router.get("/anime/fetch-source", async (req, res) => {
 
   try {
     switch (site) {
-      case "animephoenix": await runExtract(await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, [])); break;
-      case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep),      SCRAPER_MS, [])); break;
-      case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep),     SCRAPER_MS, [])); break;
-      case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep),     SCRAPER_MS, [])); break;
-      case "mitanime":    (await race(getMitanimeSources(title, english, ep),   SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "toonstream":  (await race(getToonStreamSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep),      SCRAPER_MS, [])); break;
-      case "animetime":    await runExtract(await race(getAnimeTimeSources(title, english, ep),    SCRAPER_MS, [])); break;
-      case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "animeify":    (await race(getAnimeifySources(title, english, ep),   SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "anime4up":     await runExtract(await race(getAnime4upSources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep),   SCRAPER_MS, [])); break;
+      // ── عربي مدبلج / مترجم ────────────────────────────────────────
+      case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep),    SCRAPER_MS, [])); break;
+      case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep),    SCRAPER_MS, [])); break;
+      case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, [])); break;
+      case "animeify":    (await race(getAnimeifySources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "anineko":     (await race(getAninekoSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animewitcher": (await race(getAnimeWitcherSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "miruro":       (await race(getMiruroApiSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
-      // case "animehub": محذوف — ترجمة إنجليزية مدمجة
-      // case "animegg": معطّل مؤقتاً
-      case "allmanga":    (await race(getAllMangaSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "reanime":     (await race(getReanímeSources(title, english, ep, anilistId),       SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "miruro":      (await race(getMiruroApiSources(title, english, ep, anilistId),   SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
+      // ── ياباني مترجم (بدون ID) ────────────────────────────────────
+      case "anineko":     (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "mitanime":    (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
     res.json({ sources });
