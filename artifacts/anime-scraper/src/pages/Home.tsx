@@ -847,8 +847,7 @@ export default function Home() {
       )}
 
       {/* ── قسم الأنيميشن ── */}
-      {!selectedGenre && (
-        <div className="mt-5 px-4">
+      <div className="mt-5 px-4">
           {/* Banner */}
           <Link href="/animations">
             <motion.div
@@ -924,7 +923,6 @@ export default function Home() {
             </>
           )}
         </div>
-      )}
 
 
       {/* ── Movies ── */}

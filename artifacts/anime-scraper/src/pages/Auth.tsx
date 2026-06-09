@@ -305,9 +305,9 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
      LOGIN / SIGNUP SCREEN
   ══════════════════════════════════════════ */
   return (
-    <div className={`${isModal ? "px-6 pb-10 pt-2" : "min-h-screen flex flex-col items-center justify-center px-6 py-12"} relative`}>
+    <div className={`${isModal ? "px-6 pb-10 pt-2" : "min-h-screen flex flex-col px-6 pt-safe"} relative`}>
       {!isModal && (
-        <button onClick={onClose} className="absolute top-5 right-4 w-9 h-9 bg-white/6 border border-white/10 rounded-full flex items-center justify-center active:scale-90">
+        <button onClick={onClose} className="absolute top-5 right-4 w-9 h-9 bg-white/6 border border-white/10 rounded-full flex items-center justify-center active:scale-90 z-10">
           <ChevronRight className="w-4 h-4 text-white/60" />
         </button>
       )}
@@ -319,8 +319,37 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
         </button>
       )}
 
-      <div className={`${isModal ? "" : "w-full max-w-sm mx-auto"}`}>
-        {/* Logo */}
+      {/* ── Top logo bar (full-screen only) ── */}
+      {!isModal && (
+        <div className="flex items-center justify-center pt-14 pb-8">
+          <div className="flex flex-col items-center gap-3">
+            <div className="relative w-20 h-20 rounded-3xl flex items-center justify-center"
+              style={{
+                background: "linear-gradient(135deg,rgba(124,58,237,0.30),rgba(79,70,229,0.18))",
+                border: "1.5px solid rgba(139,92,246,0.45)",
+                boxShadow: "0 0 48px rgba(124,58,237,0.28),0 0 100px rgba(124,58,237,0.08)",
+              }}>
+              <Sparkles className="w-9 h-9 text-violet-300" />
+              <div className="absolute inset-0 rounded-3xl opacity-30"
+                style={{ background: "radial-gradient(circle at 40% 30%,rgba(167,139,250,0.6),transparent 60%)" }} />
+            </div>
+            <div className="flex items-baseline gap-[5px]" dir="ltr">
+              <span className="text-[30px] font-black leading-none"
+                style={{ fontFamily: "'Cairo',sans-serif", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                NOVA
+              </span>
+              <span className="text-[30px] font-black leading-none text-white/90" style={{ fontFamily: "'Cairo',sans-serif" }}>ANIME</span>
+            </div>
+            <p className="text-white/35 text-[12px] font-['Cairo'] tracking-wide">
+              {tab === "login" ? "سجّل دخولك للمتابعة من حيث توقفت" : "انضم وابدأ رحلتك مع الأنمي العربي"}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className={`${isModal ? "" : "w-full max-w-sm mx-auto flex-1"}`}>
+        {/* Logo (modal only) */}
+        {isModal && (
         <div className="text-center mb-7">
           <div className="flex justify-center mb-4">
             <div className="relative w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -345,6 +374,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
             {tab === "login" ? "سجّل دخولك للمتابعة من حيث توقفت" : "انضم وابدأ رحلتك مع الأنمي العربي"}
           </p>
         </div>
+        )}
 
         {/* Tab switcher */}
         <div className="flex gap-1 mb-5 p-[3px] rounded-[16px]"

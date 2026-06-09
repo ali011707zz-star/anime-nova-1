@@ -68,10 +68,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = () => { window.location.href = "/api/login"; };
 
   const signOut = async () => {
-    try {
-      await fetch("/api/auth/email-signout", { method: "POST", credentials: "include" });
-    } catch {}
-    window.location.href = "/api/logout";
+    if (user?.authType === "email") {
+      try {
+        await fetch("/api/auth/email-signout", { method: "POST", credentials: "include" });
+      } catch {}
+      setUser(null);
+      window.location.href = "/";
+    } else {
+      window.location.href = "/api/logout";
+    }
   };
 
   const emailSignIn = async (email: string, password: string) => {
