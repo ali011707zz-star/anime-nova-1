@@ -1505,6 +1505,27 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   sendSource(proxied, label, proxied, proxied);
                 }
               } catch { /* skip */ }
+
+            } else if (srvName === "MF") {
+              // MediaFire → استخراج رابط التحميل المباشر
+              try {
+                const mfHtml = await fetch(link, {
+                  headers: { "User-Agent": UA, "Referer": "https://www.mediafire.com/" },
+                  signal: AbortSignal.timeout(10_000),
+                }).then(r => r.ok ? r.text() : "").catch(() => "");
+                const mfDirect =
+                  (/(https:\/\/download\d*\.mediafire\.com\/[^"' \n<>]+)/.exec(mfHtml))?.[1] ||
+                  (/id="downloadButton"[^>]*href="([^"]+)"/.exec(mfHtml))?.[1] ||
+                  (/aria-label="[Dd]ownload [Ff]ile"[^>]*href="([^"]+)"/.exec(mfHtml))?.[1] ||
+                  null;
+                if (mfDirect) {
+                  const proxied = wrapMp4(mfDirect.replace(/&amp;/g, "&"), "https://www.mediafire.com/");
+                  sendSource(proxied, label, proxied, proxied);
+                }
+              } catch { /* skip */ }
+
+            } else if (srvName === "KF") {
+              // KrakenFiles → Cloudflare 502 من Replit → يُتخطى
             }
           }));
 
