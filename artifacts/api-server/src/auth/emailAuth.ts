@@ -191,8 +191,14 @@ export function registerEmailAuthRoutes(app: Express): void {
         if (parts.length > 1) updates.lastName = parts.slice(1).join(" ");
       }
       if (typeof username === "string") {
-        const cleaned = username.replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, "").slice(0, 20);
-        if (cleaned) updates.username = cleaned;
+        const cleaned = username.replace(/[^a-zA-Z0-9_.]/g, "").slice(0, 20);
+        if (cleaned) {
+          const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, cleaned)).limit(1);
+          if (existing.length > 0 && existing[0].id !== userId) {
+            return res.status(409).json({ error: "اسم المستخدم مستخدم مسبقاً، جرّب اسماً آخر" });
+          }
+          updates.username = cleaned;
+        }
       }
       if (typeof profileImageCustom === "string") {
         updates.profileImageCustom = profileImageCustom.slice(0, 500_000);

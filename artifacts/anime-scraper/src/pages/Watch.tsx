@@ -300,7 +300,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
             <img
               src={cover}
               alt={title}
-              className="w-52 h-[296px] rounded-2xl object-cover"
+              className="w-44 h-[248px] rounded-2xl object-cover"
               style={{ boxShadow: "0 24px 80px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.07)" }}
             />
             <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/[0.08] via-transparent to-transparent pointer-events-none" />
@@ -309,7 +309,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
         ) : (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="w-52 h-[296px] rounded-2xl bg-white/[0.04] flex items-center justify-center"
+            className="w-44 h-[248px] rounded-2xl bg-white/[0.04] flex items-center justify-center"
             style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
             <div className="w-14 h-14 rounded-full bg-violet-500/15 flex items-center justify-center">
               <div className="w-6 h-6 rounded-full bg-violet-500/35" />
@@ -317,19 +317,22 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
           </motion.div>
         )}
 
-        {/* Title + episode */}
+        {/* Title + episode badge */}
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.45 }}
           className="text-center">
           {title && (
-            <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-1.5"
+            <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-2"
               style={{ textShadow: "0 2px 12px rgba(0,0,0,0.7)" }}>
               {title}
             </h2>
           )}
-          <p className="text-white/38 text-[13px] font-['Cairo'] tracking-wide">الحلقة {ep}</p>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[12px] font-bold font-['Cairo']"
+            style={{ background: "rgba(124,58,237,0.22)", border: "1px solid rgba(139,92,246,0.30)", color: "rgba(196,181,253,0.9)" }}>
+            الحلقة {ep}
+          </span>
         </motion.div>
 
         {/* Spinning ring loader */}
@@ -1968,9 +1971,10 @@ export default function WatchPage() {
         allSrcs.push(s);
       }
     }
-    /* Play best available immediately (sorted by qualityRank desc) */
+    /* Play best available after brief delay so user sees source cards first */
     if (allSrcs.length > 0) {
       autoPlayedRef.current = true;
+      setTimeout(() => {
       allSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
       const firstSrc    = allSrcs[0];
       const clickedUrl  = firstSrc.directUrl || firstSrc.url;
@@ -1990,6 +1994,7 @@ export default function WatchPage() {
       setQuality(clickedTier);
       setInitialSrv(0);
       setPhase("player");
+      }, 1500);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotSources, phase]);

@@ -109,8 +109,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   <Star className="w-4 h-4 text-white" fill="white" />
                 </div>
                 <div className="flex items-baseline gap-[4px]">
-                  <span className="text-[16px] font-black tracking-tight text-white/80" style={{ fontFamily: "'Cairo',sans-serif" }}>anime</span>
-                  <span className="text-[16px] font-black tracking-tight" style={{ fontFamily: "'Cairo',sans-serif", background: 'linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>nova</span>
+                  <span className="text-[16px] font-black tracking-tight" style={{ fontFamily: "'Cairo',sans-serif", background: 'linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>NOVA</span>
+                  <span className="text-[16px] font-black tracking-tight text-white/80" style={{ fontFamily: "'Cairo',sans-serif" }}>ANIME</span>
                 </div>
               </div>
               <button onClick={onClose}
@@ -151,18 +151,16 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 </button>
               )}
 
-              {/* Stats */}
-              <div className="flex gap-2 mt-2.5">
-                {[
-                  { icon: History, val: watchCount, label: 'مشاهدة', color: 'text-violet-400' },
-                  { icon: Heart,   val: favCount,   label: 'مفضلة',  color: 'text-rose-400'  },
-                ].map(({ icon: Icon, val, label, color }) => (
-                  <div key={label} className="flex-1 flex items-center gap-1.5 rounded-xl px-2.5 py-1.5"
-                    style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    <Icon className={`w-3 h-3 shrink-0 ${color}`} />
-                    <span className="text-[9.5px] font-black text-white/40 font-['Cairo']">{val} {label}</span>
-                  </div>
-                ))}
+              {/* Stats — compact single line */}
+              <div className="flex gap-1.5 mt-1.5">
+                <div className="flex items-center gap-1 rounded-lg px-2 py-1" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <History className="w-2.5 h-2.5 shrink-0 text-violet-400" />
+                  <span className="text-[9px] font-black text-white/35 font-['Cairo']">{watchCount} مشاهدة</span>
+                </div>
+                <div className="flex items-center gap-1 rounded-lg px-2 py-1" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <Heart className="w-2.5 h-2.5 shrink-0 text-rose-400" />
+                  <span className="text-[9px] font-black text-white/35 font-['Cairo']">{favCount} مفضلة</span>
+                </div>
               </div>
             </div>
 

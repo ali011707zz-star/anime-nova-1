@@ -575,20 +575,20 @@ export default function Settings() {
         </div>
 
         <button
-          onClick={() => showToast("شكراً! يمكنك التواصل معنا عبر التحديثات")}
+          onClick={() => window.open("https://t.me/Anime_NOVA_0", "_blank")}
           className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-sky-500/10 border-white/8">
             <AlertCircle className="w-4 h-4 text-sky-400" />
           </div>
           <div className="flex-1 text-right">
             <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">الإبلاغ عن مشكلة</p>
-            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">أخبرنا إذا واجهت أي خلل</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">أخبرنا إذا واجهت أي خلل عبر تيليجرام</p>
           </div>
-          <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
+          <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
         </button>
 
         <button
-          onClick={() => showToast("قريباً · تواصل معنا عبر وسائل التواصل الاجتماعي")}
+          onClick={() => window.open("https://t.me/Anime_NOVA_0", "_blank")}
           className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-pink-500/10 border-white/8">
             <MessageCircle className="w-4 h-4 text-pink-400" />
@@ -597,7 +597,20 @@ export default function Settings() {
             <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">تواصل معنا</p>
             <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">اقتراحات · شراكات · مساعدة</p>
           </div>
-          <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
+          <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
+        </button>
+
+        <button
+          onClick={() => window.open("https://t.me/Anime_NOVA_0", "_blank")}
+          className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-teal-500/10 border-white/8">
+            <Smartphone className="w-4 h-4 text-teal-400" />
+          </div>
+          <div className="flex-1 text-right">
+            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">مجموعتنا الرسمية</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">انضم لقروب تيليجرام الرسمي</p>
+          </div>
+          <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
         </button>
       </Card>
 
