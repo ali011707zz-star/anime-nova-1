@@ -100,6 +100,7 @@ function Field({
 
 /* ── Password change modal ── */
 function PasswordModal({ onClose }: { onClose: () => void }) {
+  const { changePassword } = useAuth();
   const [cur, setCur] = useState(""); const [next, setNext] = useState(""); const [conf, setConf] = useState("");
   const [showCur, setShowCur] = useState(false); const [showNew, setShowNew] = useState(false);
   const [loading, setLoading] = useState(false); const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -109,17 +110,10 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
     if (next.length < 6) { setMsg({ text: "كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل", ok: false }); return; }
     if (next !== conf) { setMsg({ text: "كلمتا المرور غير متطابقتين", ok: false }); return; }
     setLoading(true);
-    try {
-      const res = await fetch("/api/auth/change-password", {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentPassword: cur, newPassword: next }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setMsg({ text: data.error || "فشل التغيير", ok: false }); }
-      else { setMsg({ text: "تم تغيير كلمة المرور بنجاح ✓", ok: true }); setTimeout(onClose, 1500); }
-    } catch { setMsg({ text: "خطأ في الاتصال", ok: false }); }
+    const result = await changePassword(cur, next);
     setLoading(false);
+    if (result.error) { setMsg({ text: result.error, ok: false }); }
+    else { setMsg({ text: "تم تغيير كلمة المرور بنجاح ✓", ok: true }); setTimeout(onClose, 1500); }
   };
 
   const iClass = "w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-[13px] font-['Cairo'] placeholder-white/20 outline-none focus:border-violet-500/50 transition-all";
