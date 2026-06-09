@@ -216,6 +216,7 @@ export default function AnimationWatch() {
 
   /* ── Auto-play first available "ok" source (respects pref-autoplay setting) ── */
   /* Priority: الثريا (StarCima/vidzee) > AnimeWitcher > أول مصدر متاح */
+  /* 1.5s delay so the user can see the source cards before auto-play fires  */
   useEffect(() => {
     if (step === "playing" || step === "error") return;
     if (autoPlayedRef.current) return;
@@ -226,7 +227,8 @@ export default function AnimationWatch() {
     const witcher    = okSources.find(s => s.label?.includes("AnimeWitcher"));
     const preferred  = tharaya ?? witcher ?? okSources[0];
     autoPlayedRef.current = true;
-    playSource(preferred);
+    const tid = setTimeout(() => playSource(preferred), 1500);
+    return () => clearTimeout(tid);
   }, [sources, step, playSource]);
 
   /* Auto-upgrade disabled — sources in animation section are unreliable;
