@@ -101,6 +101,7 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       delete (req.session as any).pendingVerifyId;
       (req.session as any).emailUserId = userId;
+      req.session.cookie.maxAge = undefined as any;
 
       return res.json({
         id: user.id,
@@ -168,6 +169,7 @@ export function registerEmailAuthRoutes(app: Express): void {
       }
 
       (req.session as any).emailUserId = user.id;
+      req.session.cookie.maxAge = undefined as any;
 
       return res.json({
         id: user.id,
