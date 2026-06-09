@@ -1,9 +1,6 @@
-import { useState } from "react";
 import { useLocation } from "wouter";
 import { Bell, LogIn } from "lucide-react";
-import { AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
-import { AuthModal } from "@/pages/Auth";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -12,7 +9,6 @@ interface HeaderProps {
 export function Header({ onMenuClick }: HeaderProps) {
   const [location, navigate] = useLocation();
   const { user } = useAuth();
-  const [showAuth, setShowAuth] = useState(false);
 
   if (location.startsWith("/watch")) return null;
 
@@ -45,7 +41,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full" />
           </button>
 
-          {user ? (
+          {user ? ( /* logged in */
             <button
               onClick={() => navigate("/profile")}
               className="relative w-9 h-9 flex items-center justify-center rounded-2xl transition-all active:scale-90 hover:scale-105 group"
@@ -76,7 +72,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             </button>
           ) : (
             <button
-              onClick={() => setShowAuth(true)}
+              onClick={() => navigate("/auth")}
               className="flex items-center gap-1.5 px-3 h-8 rounded-2xl text-[11px] font-black font-['Cairo'] text-white/80 hover:text-white transition-all active:scale-95"
               style={{
                 background: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(109,40,217,0.12))",
@@ -89,10 +85,6 @@ export function Header({ onMenuClick }: HeaderProps) {
           )}
         </div>
       </header>
-
-      <AnimatePresence>
-        {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
-      </AnimatePresence>
     </>
   );
 }
