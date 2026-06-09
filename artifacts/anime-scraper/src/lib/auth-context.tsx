@@ -16,9 +16,10 @@ interface AuthContextType {
   loading: boolean;
   signIn: () => void;
   signOut: () => Promise<void>;
-  emailSignIn: (email: string, password: string) => Promise<{ error?: string; requiresVerification?: boolean; verificationCode?: string; email?: string }>;
-  emailSignUp: (email: string, password: string, name: string) => Promise<{ error?: string; requiresVerification?: boolean; verificationCode?: string; email?: string }>;
+  emailSignIn: (email: string, password: string) => Promise<{ error?: string; requiresVerification?: boolean; verificationCode?: string; emailSent?: boolean; email?: string }>;
+  emailSignUp: (email: string, password: string, name: string) => Promise<{ error?: string; requiresVerification?: boolean; verificationCode?: string; emailSent?: boolean; email?: string }>;
   updateProfile: (data: { displayName?: string; username?: string; profileImageCustom?: string | null }) => Promise<{ error?: string }>;
+  deleteAccount: () => Promise<{ error?: string }>;
   refreshUser: () => Promise<void>;
 }
 
@@ -29,8 +30,8 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => { window.location.href = "/api/logout"; },
   emailSignIn: async () => ({}),
   emailSignUp: async () => ({}),
-
   updateProfile: async () => ({}),
+  deleteAccount: async () => ({}),
   refreshUser: async () => {},
 });
 
@@ -80,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (!res.ok) return { error: data.error || "فشل تسجيل الدخول" };
       if (data.requiresVerification) {
-        return { requiresVerification: true, verificationCode: data.verificationCode, email: data.email };
+        return { requiresVerification: true, verificationCode: data.verificationCode, emailSent: data.emailSent, email: data.email };
       }
       setUser({ ...data, authType: "email" });
       return {};
@@ -100,9 +101,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (!res.ok) return { error: data.error || "فشل إنشاء الحساب" };
       if (data.requiresVerification) {
-        return { requiresVerification: true, verificationCode: data.verificationCode, email: data.email };
+        return { requiresVerification: true, verificationCode: data.verificationCode, emailSent: data.emailSent, email: data.email };
       }
       setUser({ ...data, authType: "email" });
+      return {};
+    } catch {
+      return { error: "خطأ في الاتصال" };
+    }
+  };
+
+  const deleteAccount = async () => {
+    try {
+      const res = await fetch("/api/auth/account", { method: "DELETE", credentials: "include" });
+      const data = await res.json();
+      if (!res.ok) return { error: data.error || "فشل حذف الحساب" };
+      setUser(null);
       return {};
     } catch {
       return { error: "خطأ في الاتصال" };
@@ -127,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, emailSignIn, emailSignUp, updateProfile, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut, emailSignIn, emailSignUp, updateProfile, deleteAccount, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronRight, Camera, Check, X, Edit2, User, Mail,
   AtSign, LogOut, Star, Clock, Sparkles, Lock,
-  Eye, EyeOff, ArrowRight, Shield,
+  Eye, EyeOff, ArrowRight, Shield, Trash2, AlertTriangle,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/lib/auth-context";
@@ -175,7 +175,7 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
    MAIN PROFILE PAGE
 ══════════════════════════════════════════ */
 export default function Profile() {
-  const { user, signOut, updateProfile } = useAuth();
+  const { user, signOut, updateProfile, deleteAccount } = useAuth();
 
   const [displayName, setDisplayName] = useState(user?.displayName || [user?.firstName, user?.lastName].filter(Boolean).join(" ") || "");
   const [username, setUsername] = useState(user?.username || "");
@@ -183,6 +183,9 @@ export default function Profile() {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [showPassModal, setShowPassModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -439,7 +442,74 @@ export default function Profile() {
           <LogOut className="w-4 h-4" />
           تسجيل الخروج
         </button>
+
+        {/* ── Delete Account ── */}
+        <div>
+          <p className="text-[9.5px] font-black text-red-400/30 tracking-[0.18em] px-1 mb-2.5">⚠ منطقة الخطر</p>
+          <button onClick={() => setShowDeleteConfirm(true)}
+            className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all active:scale-[0.98]"
+            style={{ background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.15)" }}>
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.25)" }}>
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+            </div>
+            <div className="text-right flex-1">
+              <p className="text-[13px] font-black font-['Cairo'] text-red-400">حذف الحساب نهائياً</p>
+              <p className="text-[10px] text-red-400/35 font-['Cairo'] mt-0.5">هذا الإجراء لا يمكن التراجع عنه</p>
+            </div>
+          </button>
+          {deleteError && (
+            <p className="text-[11px] text-red-400 font-['Cairo'] text-center mt-2">{deleteError}</p>
+          )}
+        </div>
       </div>
+
+      {/* ── Delete Confirm Sheet ── */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex flex-col justify-end" style={{ direction: "rtl" }}>
+            <div className="absolute inset-0 bg-black/75 backdrop-blur-md" onClick={() => setShowDeleteConfirm(false)} />
+            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", stiffness: 440, damping: 38 }}
+              className="relative rounded-t-3xl px-6 pb-10 pt-5"
+              style={{ background: "#0D0B17", border: "1.5px solid rgba(239,68,68,0.20)", borderBottom: "none", boxShadow: "0 -32px 80px rgba(0,0,0,0.90)" }}
+              onClick={e => e.stopPropagation()}>
+              <div className="h-[2px] rounded-full mb-5" style={{ background: "linear-gradient(90deg,transparent,#ef4444,transparent)" }} />
+              <div className="flex justify-center mb-4">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                  style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)" }}>
+                  <AlertTriangle className="w-7 h-7 text-red-400" />
+                </div>
+              </div>
+              <p className="text-[17px] font-black text-white/90 font-['Cairo'] text-center mb-2">حذف الحساب نهائياً</p>
+              <p className="text-[12px] text-white/35 font-['Cairo'] text-center leading-relaxed mb-6">سيتم حذف حسابك وجميع بياناتك بشكل دائم ولا يمكن استعادتها</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 py-3.5 rounded-2xl text-[13px] font-black font-['Cairo']"
+                  style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  إلغاء
+                </button>
+                <button
+                  onClick={async () => {
+                    setDeletingAccount(true);
+                    const result = await deleteAccount();
+                    setDeletingAccount(false);
+                    if (result.error) { setDeleteError(result.error); setShowDeleteConfirm(false); }
+                    else { window.location.href = "/"; }
+                  }}
+                  disabled={deletingAccount}
+                  className="flex-1 py-3.5 rounded-2xl text-[13px] font-black font-['Cairo'] flex items-center justify-center gap-2"
+                  style={{ background: "rgba(239,68,68,0.18)", color: "#fca5a5", border: "1px solid rgba(239,68,68,0.30)" }}>
+                  {deletingAccount
+                    ? <div className="w-4 h-4 border-2 border-red-300/30 border-t-red-300 rounded-full animate-spin" />
+                    : <><Trash2 className="w-4 h-4" />حذف الحساب</>}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Password Modal ── */}
       <AnimatePresence>

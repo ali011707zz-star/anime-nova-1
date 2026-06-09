@@ -72,6 +72,8 @@ export function registerEmailAuthRoutes(app: Express): void {
         requiresVerification: true,
         emailSent: sent,
         email: user.email,
+        // Return code in response as fallback when email delivery is not configured
+        ...(sent ? {} : { verificationCode: code }),
       });
     } catch (err: any) {
       console.error("email-signup error:", err);
@@ -125,9 +127,9 @@ export function registerEmailAuthRoutes(app: Express): void {
       await db.update(users).set({ verificationCode: code, updatedAt: new Date() }).where(eq(users.id, userId));
 
       const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
-      if (user?.email) await sendVerificationEmail(user.email, code);
+      const sent = user?.email ? await sendVerificationEmail(user.email, code) : false;
 
-      return res.json({ ok: true });
+      return res.json({ ok: true, emailSent: sent, ...(sent ? {} : { verificationCode: code }) });
     } catch (err) {
       console.error("resend-code error:", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
@@ -156,11 +158,12 @@ export function registerEmailAuthRoutes(app: Express): void {
         const code = generateCode();
         await db.update(users).set({ verificationCode: code, updatedAt: new Date() }).where(eq(users.id, user.id));
         (req.session as any).pendingVerifyId = user.id;
-        if (user.email) await sendVerificationEmail(user.email, code);
+        const sent = user.email ? await sendVerificationEmail(user.email, code) : false;
         return res.json({
           requiresVerification: true,
-          emailSent: true,
+          emailSent: sent,
           email: user.email,
+          ...(sent ? {} : { verificationCode: code }),
         });
       }
 
@@ -248,6 +251,22 @@ export function registerEmailAuthRoutes(app: Express): void {
       return res.json({ ok: true });
     } catch (err) {
       console.error("change-password error:", err);
+      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
+    }
+  });
+
+  // ── Delete Account ────────────────────────────────────────────────────────
+  app.delete("/api/auth/account", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any).emailUserId || (req.user as any)?.claims?.sub;
+      if (!userId) return res.status(401).json({ error: "غير مصرّح" });
+
+      await db.delete(users).where(eq(users.id, userId));
+
+      req.session.destroy(() => {});
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error("delete-account error:", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
