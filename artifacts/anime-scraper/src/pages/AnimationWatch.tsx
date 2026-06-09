@@ -165,7 +165,7 @@ export default function AnimationWatch() {
   const lastProgressSave = useRef(0);
   const histSavedRef     = useRef(false);
   const autoPlayedRef      = useRef(false);
-  const upgradedToFhdRef   = useRef(false);
+  // upgradedToFhdRef removed — auto-upgrade disabled for animation section
   const sourceCountRef     = useRef(0);
 
   /* ── Navigate to detail page ── */
@@ -184,24 +184,16 @@ export default function AnimationWatch() {
     setStep("playing");
   }, []);
 
-  /* Update onFail after sources/selSrc change */
+  /* Update onFail: mark source as failed, return to picker — no auto-cascade */
   const playNext = useCallback(() => {
-    setSources(prev => {
-      setSelSrc(sel => {
-        if (!sel) { setStep("sources"); return sel; }
-        const idx  = prev.findIndex(s => s.url === sel.url);
-        const next = prev.find((s, i) => i > idx && s.status === "ok");
-        if (next) {
-          // delay to next tick to avoid setState-in-render
-          setTimeout(() => playSource(next), 0);
-        } else {
-          setStep("sources");
-        }
-        return sel;
-      });
-      return prev;
+    setSelSrc(sel => {
+      if (sel) {
+        setSources(prev => prev.map(s => s.url === sel.url ? { ...s, status: "fail" as const } : s));
+      }
+      setStep("sources");
+      return sel;
     });
-  }, [playSource]);
+  }, []);
 
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
@@ -216,17 +208,8 @@ export default function AnimationWatch() {
     playSource(first);
   }, [sources, step, playSource]);
 
-  /* ── Auto-upgrade: switch to FHD when 1080p source arrives (if started on lower quality) ── */
-  useEffect(() => { upgradedToFhdRef.current = false; }, [tmdbId, type, ep, season]);
-  useEffect(() => {
-    if (step !== "playing") return;
-    if (upgradedToFhdRef.current) return;
-    if (selSrc && getSourceTier(selSrc) === "1080p FHD") { upgradedToFhdRef.current = true; return; }
-    const fhdSrc = sources.find(s => s.status === "ok" && getSourceTier(s) === "1080p FHD");
-    if (!fhdSrc) return;
-    upgradedToFhdRef.current = true;
-    playSource(fhdSrc);
-  }, [sources, step, selSrc, playSource]);
+  /* Auto-upgrade disabled — sources in animation section are unreliable;
+     letting it run causes unwanted cascade when FHD source fails */
 
   /* ── Time update (progress + subtitle sync) ── */
   const handleTimeUpdate = useCallback((t: number) => {
@@ -1175,27 +1158,38 @@ function AnimSourceRow({
   const isHls = isHlsUrl(url);
   const hasDownload = !isHls && (url.includes(".mp4") || url.includes("video-proxy"));
 
+  const isFailed = src.status === "fail";
+
   return (
     <div
-      onClick={() => onPlay(src)}
-      className="relative overflow-hidden cursor-pointer rounded-2xl active:scale-[0.97] transition-transform"
+      onClick={() => !isFailed && onPlay(src)}
+      className="relative overflow-hidden rounded-2xl transition-transform"
       style={{
-        background: "linear-gradient(145deg, rgba(18,12,40,0.92), rgba(12,8,28,0.96))",
-        border: `1px solid ${qs.border}`,
+        cursor: isFailed ? "not-allowed" : "pointer",
+        opacity: isFailed ? 0.55 : 1,
+        background: isFailed
+          ? "linear-gradient(145deg, rgba(40,8,8,0.92), rgba(28,4,4,0.96))"
+          : "linear-gradient(145deg, rgba(18,12,40,0.92), rgba(12,8,28,0.96))",
+        border: isFailed ? "1px solid rgba(239,68,68,0.35)" : `1px solid ${qs.border}`,
         boxShadow: `0 4px 24px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03) inset`,
       }}
     >
-      {/* Subtle quality-colored glow strip */}
+      {/* Top glow strip */}
       <div className="absolute top-0 left-0 right-0 h-[2px]"
-        style={{ background: `linear-gradient(90deg, transparent, ${qs.icon}55, transparent)` }} />
+        style={{ background: isFailed
+          ? "linear-gradient(90deg, transparent, rgba(239,68,68,0.5), transparent)"
+          : `linear-gradient(90deg, transparent, ${qs.icon}55, transparent)` }} />
 
       <div className="flex items-center gap-3.5 px-4 py-3.5">
 
         {/* Icon */}
         <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 relative"
-          style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
-          <MonitorPlay className="w-[19px] h-[19px]" style={{ color: qs.icon }} />
-          {/* Format badge */}
+          style={{
+            background: isFailed ? "rgba(239,68,68,0.10)" : qs.badge,
+            border: isFailed ? "1px solid rgba(239,68,68,0.30)" : `1px solid ${qs.border}`,
+          }}>
+          <MonitorPlay className="w-[19px] h-[19px]"
+            style={{ color: isFailed ? "rgba(239,68,68,0.70)" : qs.icon }} />
           <span className="absolute -bottom-1.5 -left-1 font-mono text-[7px] font-black px-1 py-[1px] rounded-md leading-none"
             style={{ background: isHls ? "rgba(99,102,241,0.88)" : "rgba(52,211,153,0.85)", color: "white" }}>
             {isHls ? "HLS" : "MP4"}
@@ -1204,25 +1198,35 @@ function AnimSourceRow({
 
         {/* Label + quality */}
         <div className="flex-1 min-w-0">
-          <p className="text-white/92 text-[14px] font-black font-['Cairo'] leading-tight truncate">
+          <p className="text-[14px] font-black font-['Cairo'] leading-tight truncate"
+            style={{ color: isFailed ? "rgba(252,165,165,0.75)" : "rgba(255,255,255,0.92)" }}>
             {src.label}
           </p>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className="text-[9px] font-black font-mono px-2 py-[3px] rounded-lg"
-              style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
-              {qShort}
-            </span>
-            {isHls && (
-              <span className="text-[8.5px] font-['Cairo']" style={{ color: "rgba(139,92,246,0.65)" }}>
-                بث مباشر
+            {isFailed ? (
+              <span className="text-[9px] font-black font-['Cairo'] px-2 py-[3px] rounded-lg"
+                style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)", color: "rgba(252,165,165,0.80)" }}>
+                فشل التشغيل
               </span>
+            ) : (
+              <>
+                <span className="text-[9px] font-black font-mono px-2 py-[3px] rounded-lg"
+                  style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
+                  {qShort}
+                </span>
+                {isHls && (
+                  <span className="text-[8.5px] font-['Cairo']" style={{ color: "rgba(139,92,246,0.65)" }}>
+                    بث مباشر
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>
 
         {/* Actions */}
         <div className="flex items-center gap-2 shrink-0">
-          {hasDownload && (
+          {hasDownload && !isFailed && (
             <a href={url} download target="_blank" rel="noreferrer"
               onClick={e => e.stopPropagation()}
               className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
@@ -1230,15 +1234,17 @@ function AnimSourceRow({
               <Download className="w-4 h-4 text-emerald-400/80" />
             </a>
           )}
-          <div className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl active:scale-95 transition-transform"
-            style={{
-              background: "linear-gradient(135deg, rgba(124,58,237,0.88), rgba(91,33,182,0.95))",
-              border: "1px solid rgba(167,139,250,0.22)",
-              boxShadow: "0 2px 16px rgba(109,40,217,0.28)",
-            }}>
-            <Play className="w-3.5 h-3.5 text-white fill-white" />
-            <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
-          </div>
+          {!isFailed && (
+            <div className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl active:scale-95 transition-transform"
+              style={{
+                background: "linear-gradient(135deg, rgba(124,58,237,0.88), rgba(91,33,182,0.95))",
+                border: "1px solid rgba(167,139,250,0.22)",
+                boxShadow: "0 2px 16px rgba(109,40,217,0.28)",
+              }}>
+              <Play className="w-3.5 h-3.5 text-white fill-white" />
+              <span className="text-white text-[12px] font-black font-['Cairo']">تشغيل</span>
+            </div>
+          )}
         </div>
 
       </div>
