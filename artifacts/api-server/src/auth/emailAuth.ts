@@ -191,7 +191,7 @@ export function registerEmailAuthRoutes(app: Express): void {
         if (parts.length > 1) updates.lastName = parts.slice(1).join(" ");
       }
       if (typeof username === "string") {
-        const cleaned = username.replace(/[^a-zA-Z0-9_.]/g, "").slice(0, 20);
+        const cleaned = username.replace(/[^\p{Emoji_Presentation}\p{Emoji}\u{1F000}-\u{1FFFF}a-zA-Z0-9_.]/gu, "").slice(0, 20);
         if (cleaned) {
           const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, cleaned)).limit(1);
           if (existing.length > 0 && existing[0].id !== userId) {

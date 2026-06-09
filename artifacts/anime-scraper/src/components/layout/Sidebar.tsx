@@ -24,7 +24,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     } catch { return 0; }
   })();
   const favCount = (() => {
-    try { return JSON.parse(localStorage.getItem('favorites') || '[]').length; } catch { return 0; }
+    try { return JSON.parse(localStorage.getItem('savedAnime') || '[]').length; } catch { return 0; }
   })();
 
   const hasNewUpdates = (() => {
