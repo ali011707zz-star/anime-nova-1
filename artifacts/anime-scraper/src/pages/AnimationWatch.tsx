@@ -1042,12 +1042,16 @@ function EmbedFallbackSection({
     "vidlink":  "🔗",
     "vidking":  "👑",
     "videasy":  "▶",
+    "2embed":   "🎞",
+    "vidsrc":   "📡",
   };
   const getIcon = (label: string) => {
     const low = label.toLowerCase();
     if (low.includes("vidlink")) return ICONS.vidlink;
     if (low.includes("vidking")) return ICONS.vidking;
     if (low.includes("videasy")) return ICONS.videasy;
+    if (low.includes("2embed")) return ICONS["2embed"];
+    if (low.includes("vidsrc")) return ICONS.vidsrc;
     return "🖥";
   };
   return (
