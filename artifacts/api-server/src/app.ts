@@ -3,7 +3,9 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { registerSupabaseAuthRoutes } from "./auth/supabaseAuth";
+import { setupAuth } from "./auth/replitAuth";
+import { registerAuthRoutes } from "./auth/routes";
+import { registerEmailAuthRoutes } from "./auth/emailAuth";
 
 export async function createApp(): Promise<Express> {
   const app: Express = express();
@@ -31,7 +33,10 @@ export async function createApp(): Promise<Express> {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
 
-  registerSupabaseAuthRoutes(app);
+  await setupAuth(app);
+
+  registerAuthRoutes(app);
+  registerEmailAuthRoutes(app);
 
   app.use("/api", router);
 

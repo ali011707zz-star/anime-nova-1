@@ -1,20 +1,15 @@
-import { createClient } from "@supabase/supabase-js";
+// Supabase has been replaced with API-based auth via /api/auth/* endpoints.
+// This file is kept as a stub to avoid import errors in any remaining references.
 
-declare const __SUPABASE_URL__: string;
-declare const __SUPABASE_ANON_KEY__: string;
-
-const supabaseUrl = __SUPABASE_URL__;
-const supabaseAnonKey = __SUPABASE_ANON_KEY__;
-
-if (!supabaseUrl) {
-  console.error("[Supabase] SUPABASE_URL is not configured");
-}
-
-export const supabase = createClient(supabaseUrl || "https://placeholder.supabase.co", supabaseAnonKey || "placeholder", {
+export const supabase = {
   auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storageKey: "nova-anime-auth",
+    getSession: async () => ({ data: { session: null } }),
+    getUser: async () => ({ data: { user: null } }),
+    onAuthStateChange: (_event: any, _cb: any) => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    signInWithPassword: async () => ({ error: new Error("Use /api/auth/email-signin instead") }),
+    signUp: async () => ({ error: new Error("Use /api/auth/email-signup instead") }),
+    signOut: async () => ({}),
+    updateUser: async () => ({ data: { user: null }, error: null }),
+    resend: async () => ({}),
   },
-});
+};
