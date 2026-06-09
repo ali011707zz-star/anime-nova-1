@@ -3775,6 +3775,131 @@ async function getAninekoSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMEWITCHER (Firebase Firestore) — مصدر ياباني + عربي
+//  يستخدم قاعدة بيانات Firebase Firestore خاصة بتطبيق AnimeWitcher
+//  البنية: anime_list/{name}/episodes/{001}/servers/{id}
+//  يستعلم بـ aniList_id (string) ← يُعيد روابط Streamtape + Pixeldrain
+// ════════════════════════════════════════════════════════════════════
+const AW_PROJECT = "animewitcher-1c66d";
+const AW_API_KEY = "AIzaSyAcbWRwfFNnCpoydDXlEALWnM_TYVcJOMU";
+const AW_EMAIL   = "test_nova_probe@mailinator.com";
+const AW_PASS    = "TestPass123!";
+const AW_FS_BASE = `https://firestore.googleapis.com/v1/projects/${AW_PROJECT}/databases/(default)/documents`;
+
+let awToken: string | null = null;
+let awTokenExpiry = 0;
+
+async function getAWToken(): Promise<string | null> {
+  if (awToken && Date.now() < awTokenExpiry) return awToken;
+  try {
+    const r = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${AW_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: AW_EMAIL, password: AW_PASS, returnSecureToken: true }),
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+    if (!r.ok) return null;
+    const data = await r.json() as { idToken?: string; expiresIn?: string };
+    if (!data.idToken) return null;
+    awToken = data.idToken;
+    awTokenExpiry = Date.now() + (parseInt(data.expiresIn || "3600") - 300) * 1000;
+    return awToken;
+  } catch { return null; }
+}
+
+async function getAnimeWitcherSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+  try {
+    const token = await getAWToken();
+    if (!token) return [];
+
+    // 1. ابحث عن الأنمي بالـ AniList ID (مخزّن كـ string)
+    const queryR = await fetch(`${AW_FS_BASE}:runQuery`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: "anime_list" }],
+          where: { fieldFilter: { field: { fieldPath: "aniList_id" }, op: "EQUAL", value: { stringValue: String(anilistId) } } },
+          limit: 1,
+        }
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!queryR.ok) return [];
+    const queryData = await queryR.json() as Array<{ document?: { name: string } }>;
+    const docPath = queryData?.[0]?.document?.name;
+    if (!docPath) return [];
+    const animeName = docPath.split("/").pop();
+    if (!animeName) return [];
+
+    // 2. احصل على الـ servers للحلقة (3 أرقام مع صفر بادئ)
+    const epPadded = String(ep).padStart(3, "0");
+    const encName  = encodeURIComponent(animeName);
+    const srvR = await fetch(`${AW_FS_BASE}/anime_list/${encName}/episodes/${epPadded}/servers?pageSize=20`, {
+      headers: { "Authorization": `Bearer ${token}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!srvR.ok) return [];
+    const srvData = await srvR.json() as { documents?: Array<{ fields?: Record<string, { stringValue?: string; booleanValue?: boolean }> }> };
+    if (!srvData.documents?.length) return [];
+
+    const sources: UnifiedSource[] = [];
+
+    await Promise.allSettled(srvData.documents.map(async (doc) => {
+      const f       = doc.fields || {};
+      const srvName = f.name?.stringValue || "";
+      const quality = f.quality?.stringValue || "720p";
+      const link    = f.link?.stringValue || "";
+      const visible = f.visible?.booleanValue !== false;
+      if (!link || !visible || !srvName) return;
+
+      const qRank = quality === "1080p" ? 11 : quality === "720p" ? 10 : 9;
+      const qLabel = quality === "1080p" ? "FHD 1080p" : quality === "720p" ? "HD 720p" : quality;
+
+      if (srvName === "PD") {
+        // Pixeldrain: https://pixeldrain.com/u/{id} → API مباشر
+        const pdId = link.split("/").pop();
+        if (!pdId || pdId.length < 4) return;
+        const apiUrl = `https://pixeldrain.com/api/file/${pdId}`;
+        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(apiUrl)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
+        sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: link, quality, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+
+      } else if (srvName === "ST") {
+        // Streamtape: احصل على الصفحة وحلّل رابط الفيديو المباشر
+        try {
+          const stHtml = await fetch(link, {
+            headers: { ...BASE_HDRS, Referer: "https://streamtape.com/" },
+            signal: AbortSignal.timeout(10000),
+          }).then(r => r.ok ? r.text() : "").catch(() => "");
+          const stResult = parseStreamtape(stHtml);
+          if (stResult) {
+            const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(stResult.url)}&ref=${encodeURIComponent("https://streamtape.com/")}`;
+            sources.push({ name: `AnimeWitcher · ${qLabel} · ST`, url: link, quality, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+          }
+        } catch {}
+
+      } else if (srvName === "VT") {
+        // VidTube: مرّر عبر extractVideoDeep
+        // (سيُعالَج لاحقاً — تجاهُل مؤقت)
+
+      } else if (srvName === "MF") {
+        // MediaFire: في DEAD_FILE_HOSTS → لا تُضاف
+
+      }
+    }));
+
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  ANIMEHUB (123animehub.cc) — ياباني مترجم · HLS عبر echovideo.ru
 //  Flow: /ajax/film/search?keyword= → slug →
 //        /ajax/episode/info?epr={slug}/1/{ep} → target embed URL →
@@ -4645,6 +4770,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
+      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
       // animehub: محذوف — ترجمة إنجليزية مدمجة في الفيديو
       // animegg: معطّل مؤقتاً بطلب المستخدم
       // scrapeCached("animegg", () => getAnimeGGSources(title, english, ep), false),
@@ -4730,6 +4856,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":     (await race(getAninekoSources(title, english, ep),                 SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animewitcher": (await race(getAnimeWitcherSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       // case "animehub": محذوف — ترجمة إنجليزية مدمجة
       // case "animegg": معطّل مؤقتاً
       case "allmanga":    (await race(getAllMangaSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
