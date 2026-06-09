@@ -185,7 +185,11 @@ export default function AnimeDetail() {
 
   // ── Load anime data ──
   useEffect(() => {
-    if (!params.id) { setLoading(true); return; }
+    // إذا لم يوجد id صالح → العودة للرئيسية فوراً
+    if (!params.id || isNaN(parseInt(params.id))) {
+      navigate("/");
+      return;
+    }
     let cancelled = false;
     const ctrl = new AbortController();
     setLoading(true); setAnime(null); setDescAr(null); setShowFull(false);
@@ -195,32 +199,57 @@ export default function AnimeDetail() {
     setMyRating(parseInt(localStorage.getItem(`nova-rating-${params.id}`) || "0"));
     setComments(loadComments(params.id));
 
-    fetch("/api/anime/anilist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id) } }),
-      signal: ctrl.signal,
-    }).then(r => r.json()).then(d => {
-      if (cancelled) return;
-      const a = d.data?.Media;
-      setAnime(a);
-      if (!a?.description) return;
-      const cached = localStorage.getItem(`desc-ar-${params.id}`);
-      if (cached) { setDescAr(cached); return; }
-      const stripped = a.description
-        .replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
-        .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
-        .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
-        .replace(/\s+/g," ").trim().substring(0, 500);
-      fetch(`/api/anime/translate?text=${encodeURIComponent(stripped)}`, { signal: ctrl.signal })
-        .then(r2 => r2.json()).then(d2 => {
-          if (cancelled) return;
-          const t = d2.translated;
-          if (t && t !== stripped && t.length > 10) {
-            setDescAr(t); localStorage.setItem(`desc-ar-${params.id}`, t);
-          } else setDescAr(stripped);
-        }).catch(() => { if (!cancelled) setDescAr(stripped); });
-    }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false); });
+    const doFetch = (useProxy: boolean) => {
+      const p: Promise<any> = useProxy
+        ? fetch("/api/anime/anilist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id!) } }),
+            signal: ctrl.signal,
+          }).then(r => r.json())
+        : fetch("https://graphql.anilist.co", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id!) } }),
+            signal: ctrl.signal,
+          }).then(r => r.json());
+
+      p.then(d => {
+        if (cancelled) return;
+        const a = d.data?.Media;
+        if (!a) {
+          // بروكسي فشل → جرّب مباشرة
+          if (useProxy) { doFetch(false); return; }
+          setLoading(false);
+          return;
+        }
+        setAnime(a);
+        setLoading(false);
+        if (!a.description) return;
+        const cached = localStorage.getItem(`desc-ar-${params.id}`);
+        if (cached) { setDescAr(cached); return; }
+        const stripped = a.description
+          .replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
+          .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+          .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
+          .replace(/\s+/g," ").trim().substring(0, 500);
+        fetch(`/api/anime/translate?text=${encodeURIComponent(stripped)}`, { signal: ctrl.signal })
+          .then(r2 => r2.json()).then(d2 => {
+            if (cancelled) return;
+            const t = d2.translated;
+            if (t && t !== stripped && t.length > 10) {
+              setDescAr(t); localStorage.setItem(`desc-ar-${params.id}`, t);
+            } else setDescAr(stripped);
+          }).catch(() => { if (!cancelled) setDescAr(stripped); });
+      }).catch(() => {
+        if (!cancelled) {
+          if (useProxy) { doFetch(false); return; }
+          setLoading(false);
+        }
+      });
+    };
+
+    doFetch(true);
     return () => { cancelled = true; ctrl.abort(); };
   }, [params.id]);
 
@@ -295,18 +324,42 @@ export default function AnimeDetail() {
       </motion.div>
     </div>
   );
-  if (!params.id || !anime) return (
-    <div className="bg-[#09090B] min-h-screen flex items-center justify-center" dir="rtl">
-      <div className="text-center space-y-4 px-6">
-        <p className="text-white/40 font-bold font-['Cairo']">تعذّر تحميل بيانات الأنمي</p>
-        <p className="text-white/25 text-sm font-['Cairo']">قد يكون هناك مشكلة في الاتصال، حاول مرة أخرى</p>
+  if (!loading && !anime) return (
+    <div className="bg-[#09090B] min-h-screen flex flex-col items-center justify-center" dir="rtl">
+      {/* خلفية */}
+      <div className="absolute inset-0 opacity-[0.03]"
+        style={{ backgroundImage: "radial-gradient(circle at 50% 40%, #8B5CF6 0%, transparent 70%)" }} />
+      <div className="relative text-center space-y-5 px-8 max-w-xs">
+        <div className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center"
+          style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
+          <span className="text-3xl">📡</span>
+        </div>
+        <div className="space-y-2">
+          <p className="text-white/70 font-bold text-base font-['Cairo']">تعذّر تحميل بيانات الأنمي</p>
+          <p className="text-white/30 text-xs font-['Cairo'] leading-relaxed">قد يكون هناك مشكلة في الاتصال أو تأخر في الشبكة، حاول مرة أخرى</p>
+        </div>
         <div className="flex gap-3 justify-center">
-          <button onClick={() => { setLoading(true); setAnime(null); const id = params.id!; fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({query:`query($id:Int){Media(id:$id,type:ANIME){id title{romaji english arabic}coverImage{large extraLarge}bannerImage description averageScore popularity episodes status format genres startDate{year month day}endDate{year month day}nextAiringEpisode{episode airingAt}trailer{site id}idMal rankings{rank allTime type}characters{edges{role node{id name{full}image{medium}gender dateOfBirth{year month day}description bloodType siteUrl favourites}}}relations{edges{relationType node{id type title{romaji english}coverImage{medium}format status episodes averageScore}}}recommendations{nodes{mediaRecommendation{id title{romaji english}coverImage{medium}format averageScore}}}}}`,variables:{id:parseInt(id)}})}).then(r=>r.json()).then(d=>{const a=d.data?.Media;if(a)setAnime(a);setLoading(false);}).catch(()=>{setLoading(false);}); }}
-            className="px-6 py-2.5 bg-primary/15 border border-primary/25 text-primary rounded-2xl text-sm font-bold font-['Cairo']">
+          <button
+            onClick={() => {
+              if (!params.id) { navigate("/"); return; }
+              setLoading(true); setAnime(null);
+              fetch("https://graphql.anilist.co", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id) } }),
+              }).then(r => r.json()).then(d => {
+                const a = d.data?.Media;
+                if (a) setAnime(a);
+                setLoading(false);
+              }).catch(() => setLoading(false));
+            }}
+            className="px-5 py-2.5 rounded-2xl text-sm font-bold font-['Cairo']"
+            style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)", color: "#c4b5fd" }}>
             حاول مجدداً
           </button>
           <button onClick={() => navigate("/")}
-            className="px-6 py-2.5 bg-white/5 border border-white/10 text-white/50 rounded-2xl text-sm font-bold font-['Cairo']">
+            className="px-5 py-2.5 rounded-2xl text-sm font-bold font-['Cairo']"
+            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.45)" }}>
             الرئيسية
           </button>
         </div>

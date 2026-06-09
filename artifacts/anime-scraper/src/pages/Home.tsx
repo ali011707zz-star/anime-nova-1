@@ -708,31 +708,62 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
             {todayEps.map((s: any, i: number) => {
               const m = s.media;
               const aired = s.airingAt * 1000 < Date.now();
+              const accentColor = aired ? "#ef4444" : "#f97316";
+              const accentBg    = aired ? "rgba(239,68,68,0.88)" : "rgba(249,115,22,0.88)";
               return (
                 <Link href={`/watch?anime=${m.id}&ep=${s.episode}&title=${encodeURIComponent(m.title?.romaji || "")}&english=${encodeURIComponent(m.title?.english || "")}`} key={`${m.id}-${s.episode}-${i}`}>
-                  <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 cursor-pointer" style={{ width: 90 }}>
-                    <div className="relative rounded-xl overflow-hidden border border-white/[0.08]"
-                      style={{ aspectRatio: "2/3" }}>
-                      <img src={m.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                      {/* Episode badge */}
-                      <div className="absolute top-1.5 right-1.5 text-white text-[7px] font-black px-1.5 py-0.5 rounded-md"
-                        style={{ background: aired ? "rgba(239,68,68,0.85)" : "rgba(249,115,22,0.85)" }}>
-                        ح {s.episode}
+                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>
+                    {/* البطاقة */}
+                    <div className="relative rounded-[18px] overflow-hidden shadow-xl"
+                      style={{ width: 110, height: 156, border: `1px solid ${accentColor}22`, background: "#111" }}>
+                      {/* البوستر */}
+                      {m.coverImage?.large
+                        ? <img src={m.coverImage.large} alt={m.title?.romaji || ""} className="w-full h-full object-cover" loading="lazy" />
+                        : <div className="w-full h-full flex items-center justify-center" style={{ background: `${accentColor}18` }}>
+                            <span className="text-3xl">📺</span>
+                          </div>
+                      }
+                      {/* تدرج داكن من الأسفل */}
+                      <div className="absolute inset-0"
+                        style={{ background: "linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.0) 55%)" }} />
+                      {/* شارة الحلقة — أعلى اليسار */}
+                      <div className="absolute top-2 right-2">
+                        <span className="text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
+                          style={{ background: accentBg, backdropFilter: "blur(8px)" }}>
+                          ح {s.episode}
+                        </span>
                       </div>
-                      {/* Aired / upcoming indicator */}
-                      <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-1.5 pt-3">
-                        <p className="text-[8.5px] text-white/90 font-black truncate leading-tight font-['Cairo']">
+                      {/* حالة البث */}
+                      <div className="absolute top-8 right-2">
+                        <span className="text-[6.5px] font-black px-1.5 py-[3px] rounded-md"
+                          style={{ background: aired ? "rgba(239,68,68,0.18)" : "rgba(249,115,22,0.18)",
+                                   color: aired ? "#fca5a5" : "#fdba74",
+                                   border: `1px solid ${accentColor}33` }}>
+                          {aired ? "✓ نزلت" : "قريباً"}
+                        </span>
+                      </div>
+                      {/* العنوان أسفل البطاقة */}
+                      <div className="absolute bottom-0 inset-x-0 px-2 pb-2.5">
+                        <p className="text-[9px] text-white/90 font-black truncate leading-tight font-['Cairo']">
                           {m.title?.romaji || m.title?.english}
                         </p>
-                        <p className="text-[7.5px] mt-0.5 font-['Cairo']"
-                          style={{ color: aired ? "rgba(252,165,165,0.80)" : "rgba(253,186,116,0.80)" }}>
-                          {aired ? "✓ نزلت" : "قريباً"}
-                        </p>
+                        {m.title?.english && m.title.english !== m.title?.romaji && (
+                          <p className="text-[7.5px] text-white/40 truncate leading-tight font-['Cairo'] mt-0.5">
+                            {m.title.english}
+                          </p>
+                        )}
+                      </div>
+                      {/* Play overlay عند الضغط */}
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                        style={{ background: "rgba(0,0,0,0.32)" }}>
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center"
+                          style={{ background: accentBg, backdropFilter: "blur(8px)" }}>
+                          <Play className="w-4 h-4 text-white fill-white mr-[-2px]" />
+                        </div>
                       </div>
                     </div>
                   </motion.div>
