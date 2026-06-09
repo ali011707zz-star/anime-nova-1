@@ -1337,9 +1337,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const vylaProxyUrl: string = evt.source?.url || "";
               if (!vylaProxyUrl || !vylaProxyUrl.startsWith("http")) return;
 
-              // Extract raw HLS URL and Referer from Vyla's proxy wrapper (?url=...&proxyHeaders=...)
-              // Keep raw URL for hls-proxy so segment paths resolve correctly against CDN base.
-              // No probe — CDN URLs may gate by IP; player handles failures automatically.
+              // Extract raw HLS URL and Referer from Vyla's proxy wrapper:
+              //  - missourimonster-vyla.hf.space/api?url=...&proxyHeaders={Referer,Origin,...}
+              //  - toustream.xyz/tou/bp/?url=...&origin=https://spencerdevs.xyz
               let rawUrl  = vylaProxyUrl;
               let referer = "https://missourimonster-vyla.hf.space/";
               try {
@@ -1350,6 +1350,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (phRaw) {
                   const ph: any = JSON.parse(decodeURIComponent(phRaw));
                   referer = ph.Referer || ph.referer || referer;
+                } else {
+                  // TouStream style: ?origin=https://spencerdevs.xyz (no proxyHeaders JSON)
+                  const originParam = pu.searchParams.get("origin");
+                  if (originParam) referer = originParam.endsWith("/") ? originParam : originParam + "/";
                 }
               } catch { /* keep original */ }
 
@@ -1363,9 +1367,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const label = `Vyla · ${evt.source.label || evt.source.source}`;
 
               // Route based on URL type:
-              // - HLS: URLs containing .m3u8 → hls-proxy
+              // - HLS: .m3u8, /hls/, or VidZee's cf-master*.txt format → hls-proxy
               // - MP4/direct (e.g. fsharetv.cc/api/media/...): → video-proxy
-              const isHls = rawUrl.includes(".m3u8") || rawUrl.includes("/hls/");
+              const isHls = rawUrl.includes(".m3u8") || rawUrl.includes("/hls/") || /cf-master[^/]*\.txt/.test(rawUrl);
               const proxied = isHls
                 ? `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`
                 : `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
