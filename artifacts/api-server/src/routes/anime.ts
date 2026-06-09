@@ -3898,8 +3898,17 @@ async function getAnimeWitcherSources(
         } catch { /* skip VT on error */ }
 
       } else if (srvName === "MF") {
-        // MediaFire: في DEAD_FILE_HOSTS → لا تُضاف
+        // MediaFire: استخراج رابط التحميل المباشر عبر extractMediafireDirect
+        try {
+          const mfDirect = await extractMediafireDirect(link);
+          if (mfDirect) {
+            const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`;
+            sources.push({ name: `AnimeWitcher · ${qLabel} · MF`, url: link, quality, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+          }
+        } catch { /* skip MF on error */ }
 
+      } else if (srvName === "KF") {
+        // KrakenFiles: Cloudflare 502 من Replit → يُتخطى تلقائياً
       }
     }));
 
@@ -5580,6 +5589,75 @@ router.get("/anime/seg-proxy", async (req, res) => {
       res.send(body);
     }
   } catch (e: any) { if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`); }
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  ANIMEWITCHER CATALOG — قائمة أنمي ويتشر المتاحة (مع AniList IDs)
+// ══════════════════════════════════════════════════════════════════
+const AW_CATALOG_CACHE: { ts: number; items: any[] } = { ts: 0, items: [] };
+const AW_CATALOG_TTL = 15 * 60_000; // 15 دقيقة
+
+async function fetchAWCatalog(): Promise<any[]> {
+  if (Date.now() - AW_CATALOG_CACHE.ts < AW_CATALOG_TTL && AW_CATALOG_CACHE.items.length) {
+    return AW_CATALOG_CACHE.items;
+  }
+  try {
+    const tok = await getAWToken();
+    if (!tok) return [];
+    const AW_FS = `https://firestore.googleapis.com/v1/projects/${AW_PROJECT}/databases/(default)/documents`;
+    // جلب حتى 1000 دوك (عدة صفحات)
+    const all: any[] = [];
+    let pageToken = "";
+    for (let i = 0; i < 5; i++) {
+      const url = `${AW_FS}/anime_list?pageSize=200${pageToken ? `&pageToken=${pageToken}` : ""}`;
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}` }, signal: AbortSignal.timeout(15_000) });
+      if (!r.ok) break;
+      const data: any = await r.json();
+      (data.documents || []).forEach((doc: any) => {
+        const f  = doc.fields || {};
+        const id = doc.name?.split("/").pop() || "";
+        const al = f.aniList_id?.stringValue || "";
+        if (!al || al === "undefined") return;
+        all.push({
+          name   : id,
+          anilist: al,
+          type   : f.type?.stringValue || "",
+          poster : f.poster?.stringValue || f.image?.stringValue || "",
+        });
+      });
+      pageToken = data.nextPageToken || "";
+      if (!pageToken) break;
+    }
+    AW_CATALOG_CACHE.ts = Date.now();
+    AW_CATALOG_CACHE.items = all;
+    return all;
+  } catch { return []; }
+}
+
+router.get("/anime/animewitcher-catalog", async (req, res) => {
+  try {
+    const typeFilter = String(req.query.type || "all");
+    const q          = String(req.query.q || "").toLowerCase().trim();
+    const page       = Math.max(1, parseInt(String(req.query.page || "1"), 10));
+    const limit      = 60;
+
+    let items = await fetchAWCatalog();
+
+    if (typeFilter !== "all") {
+      items = items.filter(x => x.type === typeFilter);
+    }
+    if (q) {
+      items = items.filter(x => x.name.toLowerCase().includes(q));
+    }
+
+    const total  = items.length;
+    const start  = (page - 1) * limit;
+    const paged  = items.slice(start, start + limit);
+
+    res.json({ total, page, limit, has_more: start + limit < total, items: paged });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message });
+  }
 });
 
 export default router;
