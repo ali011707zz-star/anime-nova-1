@@ -2,10 +2,11 @@ import { useParams, useLocation } from "wouter";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "wouter";
 import {
-  ChevronRight, Play, Star, Bookmark, Heart, MessageSquare,
+  ChevronRight, Play, Star, Heart, MessageSquare,
   Send, Sparkles, ChevronDown, Flag, MoreVertical, Plus,
-  ArrowRight, X,
+  X, ArrowRight, ChevronDown as ReplyArrow,
 } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
 
 // ── AniList GraphQL ──────────────────────────────────────────────
@@ -114,8 +115,11 @@ function loadComments(animeId: string): Comment[] {
 function saveComments(animeId: string, c: Comment[]) {
   localStorage.setItem(`nova-comments-${animeId}`, JSON.stringify(c));
 }
-function getMyName() {
-  return localStorage.getItem("nova-username") || "مستخدم";
+function getFavChars(): any[] {
+  try { return JSON.parse(localStorage.getItem("fav-characters") || "[]"); } catch { return []; }
+}
+function saveFavChars(chars: any[]) {
+  localStorage.setItem("fav-characters", JSON.stringify(chars));
 }
 
 // ── Countdown hook ────────────────────────────────────────────────
@@ -140,6 +144,11 @@ function useCountdown(targetTs?: number) {
 export default function AnimeDetail() {
   const params = useParams<{ id: string }>();
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+
+  const getMyName = useCallback(() =>
+    user?.displayName || user?.username || localStorage.getItem("nova-username") || "مستخدم"
+  , [user]);
 
   const [anime, setAnime]           = useState<any>(null);
   const [loading, setLoading]       = useState(true);
@@ -150,12 +159,14 @@ export default function AnimeDetail() {
   const [hoverRating, setHoverRating] = useState(0);
   const [tab, setTab]               = useState<"chars"|"related"|"similar">("chars");
   const [showComments, setShowComments]   = useState(false);
-  const [showReplies, setShowReplies]     = useState<number | null>(null);
+  const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set());
+  const [replyingTo, setReplyingTo]       = useState<number | null>(null);
   const [showRatingPicker, setShowRatingPicker] = useState(false);
   const [showTrailer, setShowTrailer]     = useState(false);
   const [comments, setComments]     = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [newReply, setNewReply]     = useState("");
+  const [favChars, setFavChars]     = useState<any[]>(() => getFavChars());
   const inputRef = useRef<HTMLInputElement>(null);
   const replyRef = useRef<HTMLInputElement>(null);
   const countdown = useCountdown(anime?.nextAiringEpisode?.airingAt);
@@ -239,6 +250,20 @@ export default function AnimeDetail() {
       ? { ...c, replies: [...c.replies, reply] }
       : c);
     setComments(upd); saveComments(params.id!, upd); setNewReply("");
+    setExpandedReplies(prev => new Set([...prev, commentId]));
+    setReplyingTo(null);
+  };
+
+  const toggleCharFav = (charNode: any) => {
+    const existing = getFavChars();
+    const animeName = anime?.title?.arabic || anime?.title?.english || anime?.title?.romaji || "";
+    const animeId = params.id || "";
+    const already = existing.some((c: any) => c.id === charNode.id);
+    const upd = already
+      ? existing.filter((c: any) => c.id !== charNode.id)
+      : [...existing, { id: charNode.id, name: charNode.name?.full, image: charNode.image?.large, animeName, animeId }];
+    saveFavChars(upd);
+    setFavChars(upd);
   };
 
   const toggleReplyLike = (commentId: number, replyId: number) => {
@@ -513,10 +538,14 @@ export default function AnimeDetail() {
             className="w-full rounded-2xl overflow-hidden border border-white/8 relative block"
             style={{ aspectRatio: "16/9", background: "#0d0d10" }}>
             <img
-              src={`https://img.youtube.com/vi/${trailerYT}/maxresdefault.jpg`}
+              src={anime.trailer?.thumbnail || `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg`}
               alt="trailer"
               className="w-full h-full object-cover"
-              onError={e => { (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${trailerYT}/mqdefault.jpg`; }} />
+              onError={e => {
+                const el = e.target as HTMLImageElement;
+                if (!el.dataset.fb) { el.dataset.fb = "1"; el.src = `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg`; }
+                else if (el.dataset.fb === "1") { el.dataset.fb = "2"; el.src = `https://img.youtube.com/vi/${trailerYT}/sddefault.jpg`; }
+              }} />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/10" />
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center shadow-2xl"
@@ -560,7 +589,9 @@ export default function AnimeDetail() {
               <div>
                 <p className="text-[12px] font-black text-white/60 font-['Cairo'] mb-3 text-center">الشخصيات الرئيسية</p>
                 <div className="grid grid-cols-4 gap-2.5">
-                  {mainChars.map((e: any) => <CharCard key={e.node.id} e={e} main />)}
+                  {mainChars.map((e: any) => <CharCard key={e.node.id} e={e} main
+                    isFav={favChars.some((f: any) => f.id === e.node.id)}
+                    onToggleFav={() => toggleCharFav(e.node)} />)}
                 </div>
               </div>
             )}
@@ -568,7 +599,9 @@ export default function AnimeDetail() {
               <div>
                 <p className="text-[12px] font-black text-white/60 font-['Cairo'] mb-3 text-center">الشخصيات المساعدة</p>
                 <div className="grid grid-cols-4 gap-2.5">
-                  {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e} />)}
+                  {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e}
+                    isFav={favChars.some((f: any) => f.id === e.node.id)}
+                    onToggleFav={() => toggleCharFav(e.node)} />)}
                 </div>
               </div>
             )}
@@ -645,39 +678,6 @@ export default function AnimeDetail() {
         )}
       </div>
 
-      {/* ══ COMMENTS INLINE PREVIEW ══════════════════════════════ */}
-      <div className="mt-6 px-4">
-        <div className="flex items-center justify-between mb-3">
-          <SectionHeader title={`التعليقات${comments.length ? ` (${comments.length})` : ""}`} />
-          <button onClick={() => setShowComments(true)}
-            className="text-[10px] text-primary font-black font-['Cairo']">
-            عرض الكل
-          </button>
-        </div>
-        {comments.length === 0 ? (
-          <motion.button whileTap={{ scale: 0.97 }} onClick={() => setShowComments(true)}
-            className="w-full py-4 rounded-2xl border border-dashed border-white/10 text-white/25 text-xs font-['Cairo'] flex items-center justify-center gap-2">
-            <MessageSquare className="w-4 h-4" />
-            كن أول من يعلّق!
-          </motion.button>
-        ) : (
-          <div className="space-y-0 divide-y divide-white/5 rounded-2xl overflow-hidden border border-white/6"
-            style={{ background: "rgba(255,255,255,0.025)" }}>
-            {comments.slice(0, 3).map(c => (
-              <CommentRow key={c.id} c={c}
-                onLike={() => toggleLike(c.id)}
-                onReply={() => { setShowReplies(c.id); setShowComments(true); }}
-              />
-            ))}
-            {comments.length > 3 && (
-              <button onClick={() => setShowComments(true)}
-                className="w-full py-3 text-[11px] text-primary font-black font-['Cairo']">
-                + {comments.length - 3} تعليقات أخرى
-              </button>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* ══ TRAILER MODAL (fullscreen) ═══════════════════════════ */}
       <AnimatePresence>
@@ -721,107 +721,138 @@ export default function AnimeDetail() {
               {/* Header */}
               <div className="flex items-center justify-between px-4 pt-12 pb-3 border-b border-white/6 shrink-0">
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { setShowComments(false); setShowReplies(null); }}
+                  <button onClick={() => { setShowComments(false); setExpandedReplies(new Set()); setReplyingTo(null); }}
                     className="w-8 h-8 flex items-center justify-center active:scale-90">
                     <ChevronRight className="w-5 h-5 text-white/70" />
                   </button>
                   <h2 className="text-base font-black font-['Cairo']">
-                    {showReplies != null ? "الردود" : "التعليقات"}
+                    التعليقات {comments.length > 0 && <span className="text-white/30 text-sm">({comments.length})</span>}
                   </h2>
                 </div>
-                {showReplies == null && (
-                  <button onClick={() => { setShowReplies(null); setTimeout(() => inputRef.current?.focus(), 100); }}
-                    className="w-8 h-8 rounded-full bg-white/6 flex items-center justify-center">
-                    <Plus className="w-4 h-4 text-white/60" />
-                  </button>
-                )}
-                {showReplies != null && (
-                  <button onClick={() => setShowReplies(null)}
-                    className="text-[10px] text-primary font-black font-['Cairo']">
-                    كل التعليقات
-                  </button>
-                )}
+                <button onClick={() => setTimeout(() => inputRef.current?.focus(), 100)}
+                  className="w-8 h-8 rounded-full bg-white/6 flex items-center justify-center">
+                  <Plus className="w-4 h-4 text-white/60" />
+                </button>
               </div>
 
-              {/* Comments / Replies list */}
+              {/* Comments list */}
               <div className="flex-1 overflow-y-auto" dir="rtl">
-                {showReplies == null ? (
-                  /* Comments list */
-                  <div className="divide-y divide-white/5">
-                    {comments.length === 0 && (
-                      <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-30">
-                        <MessageSquare className="w-12 h-12" />
-                        <p className="text-sm font-bold font-['Cairo']">كن أول من يعلّق!</p>
-                      </div>
-                    )}
-                    {comments.map(c => (
-                      <CommentRow key={c.id} c={c} full
-                        onLike={() => toggleLike(c.id)}
-                        onReply={() => { setShowReplies(c.id); setTimeout(() => replyRef.current?.focus(), 100); }}
-                      />
-                    ))}
+                {comments.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-30">
+                    <MessageSquare className="w-12 h-12" />
+                    <p className="text-sm font-bold font-['Cairo']">كن أول من يعلّق!</p>
                   </div>
-                ) : (
-                  /* Replies for a specific comment */
-                  (() => {
-                    const parent = comments.find(c => c.id === showReplies);
-                    if (!parent) return null;
-                    return (
-                      <div className="divide-y divide-white/5">
-                        {/* Parent comment */}
-                        <CommentRow c={parent} full
-                          onLike={() => toggleLike(parent.id)}
-                          onReply={() => {}} isParent />
-                        <div className="px-4 py-2">
-                          <p className="text-[9px] text-white/25 font-['Cairo']">{parent.replies.length} رد</p>
-                        </div>
-                        {/* Replies */}
-                        {parent.replies.map(r => (
-                          <div key={r.id} className="px-4 py-3 flex gap-3">
-                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black text-white shrink-0"
-                              style={{ background: avatarColor(r.user) }}>
-                              {r.user.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="text-[11px] font-black font-['Cairo']">{r.user}</span>
-                                <span className="text-[9px] text-white/25 font-['Cairo']">{timeAgo(r.ts)}</span>
-                              </div>
-                              <div className="bg-[#1a1a1f] rounded-2xl rounded-tr-sm px-3 py-2.5 border border-white/6">
-                                <p className="text-[12px] text-white/80 font-['Cairo'] leading-relaxed">{r.text}</p>
-                              </div>
-                              <div className="flex items-center gap-4 mt-1.5 px-1">
-                                <button onClick={() => toggleReplyLike(parent.id, r.id)}
-                                  className="flex items-center gap-1 text-[10px]"
-                                  style={{ color: r.liked ? "#EC4899" : "rgba(255,255,255,0.3)" }}>
-                                  <Heart className={`w-3 h-3 ${r.liked ? "fill-current" : ""}`} />
-                                  {r.likes > 0 && <span>{r.likes}</span>}
-                                </button>
-                                <MoreVertical className="w-3.5 h-3.5 text-white/20" />
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()
                 )}
+                {comments.map(c => {
+                  const isExpanded = expandedReplies.has(c.id);
+                  const isReplying = replyingTo === c.id;
+                  return (
+                    <div key={c.id} className="border-b border-white/5">
+                      {/* Main comment */}
+                      <CommentRow c={c} full
+                        onLike={() => toggleLike(c.id)}
+                        onReply={() => {
+                          setReplyingTo(isReplying ? null : c.id);
+                          if (!isReplying) {
+                            setExpandedReplies(prev => new Set([...prev, c.id]));
+                            setTimeout(() => replyRef.current?.focus(), 100);
+                          }
+                        }}
+                        repliesCount={c.replies.length}
+                        isExpanded={isExpanded}
+                        onToggleReplies={() => setExpandedReplies(prev => {
+                          const next = new Set(prev);
+                          next.has(c.id) ? next.delete(c.id) : next.add(c.id);
+                          return next;
+                        })}
+                      />
+
+                      {/* Inline replies */}
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="overflow-hidden">
+                            <div className="pr-14 pl-4 pb-2 space-y-3">
+                              {c.replies.map(r => (
+                                <div key={r.id} className="flex gap-2.5">
+                                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
+                                    style={{ background: avatarColor(r.user) }}>
+                                    {r.user.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="text-[11px] font-black font-['Cairo']">{r.user}</span>
+                                      <span className="text-[9px] text-white/25 font-['Cairo']">{timeAgo(r.ts)}</span>
+                                    </div>
+                                    <div className="bg-[#1a1a1f] rounded-2xl rounded-tr-sm px-3 py-2 border border-white/6">
+                                      <p className="text-[12px] text-white/80 font-['Cairo'] leading-relaxed">{r.text}</p>
+                                    </div>
+                                    <button onClick={() => toggleReplyLike(c.id, r.id)}
+                                      className="flex items-center gap-1 text-[10px] mt-1.5 pr-1"
+                                      style={{ color: r.liked ? "#EC4899" : "rgba(255,255,255,0.3)" }}>
+                                      <Heart className={`w-3 h-3 ${r.liked ? "fill-current" : ""}`} />
+                                      {r.likes > 0 && <span>{r.likes}</span>}
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+
+                              {/* Inline reply input */}
+                              {isReplying && (
+                                <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+                                  className="flex gap-2.5 items-center pt-1">
+                                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
+                                    style={{ background: avatarColor(getMyName()) }}>
+                                    {getMyName().charAt(0).toUpperCase()}
+                                  </div>
+                                  <div className="flex-1 flex items-center gap-2 bg-[#111116] rounded-2xl px-3 py-2 border border-white/8">
+                                    <input
+                                      ref={replyRef}
+                                      value={newReply}
+                                      onChange={e => setNewReply(e.target.value)}
+                                      onKeyDown={e => e.key === "Enter" && addReply(c.id)}
+                                      placeholder="اكتب ردك..."
+                                      className="flex-1 bg-transparent text-white text-[12px] outline-none font-['Cairo'] placeholder:text-white/25"
+                                    />
+                                    <motion.button whileTap={{ scale: 0.9 }}
+                                      onClick={() => addReply(c.id)}
+                                      disabled={!newReply.trim()}
+                                      className="w-6 h-6 bg-primary rounded-lg flex items-center justify-center shrink-0 disabled:opacity-40">
+                                      <Send className="w-3 h-3 text-white" />
+                                    </motion.button>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* Input */}
+              {/* New comment input */}
               <div className="px-4 py-3 border-t border-white/6 shrink-0" dir="rtl">
                 <div className="flex items-center gap-2 bg-[#111116] rounded-2xl px-4 py-2.5 border border-white/8">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
+                    style={{ background: avatarColor(getMyName()) }}>
+                    {getMyName().charAt(0).toUpperCase()}
+                  </div>
                   <input
-                    ref={showReplies != null ? replyRef : inputRef}
-                    value={showReplies != null ? newReply : newComment}
-                    onChange={e => showReplies != null ? setNewReply(e.target.value) : setNewComment(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && (showReplies != null ? addReply(showReplies) : addComment())}
-                    placeholder={showReplies != null ? "اضافة رد..." : "اكتب تعليقك..."}
+                    ref={inputRef}
+                    value={newComment}
+                    onChange={e => setNewComment(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addComment()}
+                    placeholder="اكتب تعليقك..."
                     className="flex-1 bg-transparent text-white text-sm outline-none font-['Cairo'] placeholder:text-white/25"
                   />
                   <motion.button whileTap={{ scale: 0.9 }}
-                    onClick={() => showReplies != null ? addReply(showReplies) : addComment()}
-                    disabled={!(showReplies != null ? newReply : newComment).trim()}
+                    onClick={addComment}
+                    disabled={!newComment.trim()}
                     className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shrink-0 disabled:opacity-40">
                     <Send className="w-3.5 h-3.5 text-white" />
                   </motion.button>
@@ -906,7 +937,7 @@ function MetaRow({ label, value, badge, english }: { label: string; value: strin
   );
 }
 
-function CharCard({ e, main }: { e: any; main?: boolean }) {
+function CharCard({ e, main, isFav, onToggleFav }: { e: any; main?: boolean; isFav?: boolean; onToggleFav?: () => void }) {
   const n = e.node;
   return (
     <motion.div whileTap={{ scale: 0.93 }} className="flex flex-col items-center gap-1.5">
@@ -914,6 +945,13 @@ function CharCard({ e, main }: { e: any; main?: boolean }) {
         style={main ? { boxShadow: "0 0 0 1.5px rgba(139,92,246,0.5)" } : {}}>
         <img src={n.image?.large} alt={n.name?.full}
           className="w-full h-full object-cover object-top" loading="lazy" />
+        {/* Heart fav button */}
+        <button
+          onClick={e => { e.stopPropagation(); onToggleFav?.(); }}
+          className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-all active:scale-90"
+          style={{ background: isFav ? "rgba(236,72,153,0.85)" : "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
+          <Heart className={`w-3 h-3 ${isFav ? "fill-white text-white" : "text-white/60"}`} />
+        </button>
         {n.favourites > 0 && (
           <div className="absolute bottom-1 left-1 flex items-center gap-0.5 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded-lg">
             <Heart className="w-2 h-2 text-pink-400 fill-pink-400" />
@@ -928,8 +966,9 @@ function CharCard({ e, main }: { e: any; main?: boolean }) {
   );
 }
 
-function CommentRow({ c, onLike, onReply, full, isParent }: {
-  c: any; onLike: () => void; onReply: () => void; full?: boolean; isParent?: boolean;
+function CommentRow({ c, onLike, onReply, full, repliesCount, isExpanded, onToggleReplies }: {
+  c: any; onLike: () => void; onReply: () => void; full?: boolean;
+  repliesCount?: number; isExpanded?: boolean; onToggleReplies?: () => void;
 }) {
   return (
     <div className="px-4 py-3.5 flex gap-3">
@@ -943,7 +982,7 @@ function CommentRow({ c, onLike, onReply, full, isParent }: {
             <span className="text-[12px] font-black font-['Cairo']">{c.user}</span>
             <span className="mr-2 text-[9px] text-white/25 font-['Cairo']">{timeAgo(c.ts)}</span>
           </div>
-          {!isParent && <Flag className="w-3.5 h-3.5 text-white/15 shrink-0" />}
+          <Flag className="w-3.5 h-3.5 text-white/15 shrink-0" />
         </div>
         <p className={`text-[13px] text-white/80 font-['Cairo'] leading-relaxed ${!full ? "line-clamp-2" : ""}`}>
           {c.text}
@@ -958,8 +997,16 @@ function CommentRow({ c, onLike, onReply, full, isParent }: {
           <button onClick={onReply}
             className="flex items-center gap-1.5 text-[11px] text-white/30">
             <MessageSquare className="w-3.5 h-3.5" />
-            <span>{c.replies?.length || 0}</span>
+            <span>رد</span>
           </button>
+          {(repliesCount ?? c.replies?.length) > 0 && onToggleReplies && (
+            <button onClick={onToggleReplies}
+              className="flex items-center gap-1 text-[10px] font-black font-['Cairo'] transition-colors"
+              style={{ color: isExpanded ? "#c4b5fd" : "rgba(255,255,255,0.25)" }}>
+              <ReplyArrow className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+              {repliesCount ?? c.replies?.length} ردود
+            </button>
+          )}
         </div>
       </div>
     </div>

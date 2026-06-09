@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Link } from "wouter";
-import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Clapperboard, Search as SearchIcon, X } from "lucide-react";
+import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Heart, Clapperboard, Search as SearchIcon, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { loadWatchHistory, loadSavedIds, unsaveAnime } from "@/lib/db";
 import { motion, AnimatePresence } from "framer-motion";
@@ -82,15 +82,20 @@ function progressPct(progressSec: number, durationSec = 1440): number {
   return Math.min(Math.round((progressSec / durationSec) * 100), 99);
 }
 
+function loadFavChars(): any[] {
+  try { return JSON.parse(localStorage.getItem("fav-characters") || "[]"); } catch { return []; }
+}
+
 export default function Library() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<"continue" | "history" | "saved">("continue");
+  const [tab, setTab] = useState<"continue" | "history" | "saved" | "chars">("continue");
   const [savedAnime, setSavedAnime] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [animHistory, setAnimHistory] = useState<AnimHistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "date" | "score">("date");
   const [searchQuery, setSearchQuery] = useState("");
+  const [favChars, setFavChars] = useState<any[]>(() => loadFavChars());
 
   const loadData = useCallback(async () => {
     const hist = await loadWatchHistory(user?.id ?? null);
@@ -197,6 +202,13 @@ export default function Library() {
     continue: continueItems.length,
     history: history.length + animHistory.length,
     saved: savedAnime.length,
+    chars: favChars.length,
+  };
+
+  const removeCharFav = (charId: number) => {
+    const upd = favChars.filter((c: any) => c.id !== charId);
+    localStorage.setItem("fav-characters", JSON.stringify(upd));
+    setFavChars(upd);
   };
 
   return (
@@ -205,22 +217,23 @@ export default function Library() {
       {/* ── Header ── */}
       <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-4 pb-3">
         <h1 className="text-xl font-black font-['Cairo'] mb-3">قائمتي</h1>
-        <div className="flex gap-1.5 bg-[#18181B] p-1 rounded-2xl mb-3">
-          {(["continue", "history", "saved"] as const).map(t => {
-            const labels = { continue: "متابعة", history: "السجل", saved: "المحفوظة" };
+        <div className="flex gap-1 bg-[#18181B] p-1 rounded-2xl mb-3">
+          {(["continue", "history", "saved", "chars"] as const).map(t => {
+            const labels = { continue: "متابعة", history: "السجل", saved: "المحفوظة", chars: "الشخصيات" };
             const icons = {
-              continue: <PlayCircle className="w-3.5 h-3.5" />,
-              history: <History className="w-3.5 h-3.5" />,
-              saved: <BookMarked className="w-3.5 h-3.5" />,
+              continue: <PlayCircle className="w-3 h-3" />,
+              history: <History className="w-3 h-3" />,
+              saved: <BookMarked className="w-3 h-3" />,
+              chars: <Heart className="w-3 h-3" />,
             };
             return (
-              <button key={t} onClick={() => setTab(t)}
-                className={`flex-1 py-2.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-all flex items-center justify-center gap-1.5
+              <button key={t} onClick={() => { setTab(t); if (t === "chars") setFavChars(loadFavChars()); }}
+                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black font-['Cairo'] transition-all flex items-center justify-center gap-1
                   ${tab === t ? "bg-primary text-white shadow-lg shadow-primary/20" : "text-white/40"}`}>
                 {icons[t]}
                 {labels[t]}
                 {tabCount[t] > 0 && (
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${tab === t ? "bg-white/20" : "bg-white/8 text-white/40"}`}>
+                  <span className={`text-[8px] px-1 py-0.5 rounded-full font-black ${tab === t ? "bg-white/20" : "bg-white/8 text-white/40"}`}>
                     {tabCount[t]}
                   </span>
                 )}
@@ -615,6 +628,61 @@ export default function Library() {
                     </motion.div>
                   );
                 })}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── FAVOURITE CHARACTERS TAB ── */}
+      <AnimatePresence mode="wait">
+        {tab === "chars" && (
+          <motion.div key="chars" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="px-4 mt-4">
+            {favChars.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-5">
+                <div className="w-20 h-20 rounded-full bg-pink-500/6 border border-pink-500/15 flex items-center justify-center">
+                  <Heart className="w-9 h-9 text-pink-400/30" />
+                </div>
+                <div className="text-center">
+                  <p className="text-white/40 font-black font-['Cairo'] text-sm">لا توجد شخصيات مفضلة</p>
+                  <p className="text-white/20 text-xs font-['Cairo'] mt-1">اضغط ❤ على أي شخصية في صفحة الأنمي لحفظها</p>
+                </div>
+                <Link href="/">
+                  <button className="flex items-center gap-2 bg-pink-500/10 border border-pink-500/20 text-pink-400 px-5 py-2.5 rounded-xl text-sm font-black font-['Cairo'] active:scale-95">
+                    <Home className="w-4 h-4" /> استعرض الأنمي
+                  </button>
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-3">
+                {favChars.map((char: any, i: number) => (
+                  <motion.div key={char.id}
+                    initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: i * 0.05 }}
+                    className="flex flex-col items-center gap-1.5">
+                    <Link href={`/anime/${char.animeId}`}>
+                      <div className="relative w-full aspect-[3/4] rounded-xl overflow-hidden border border-white/8 cursor-pointer">
+                        <img src={char.image} alt={char.name}
+                          className="w-full h-full object-cover object-top" loading="lazy" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                        {/* Remove fav button */}
+                        <button
+                          onClick={e => { e.preventDefault(); e.stopPropagation(); removeCharFav(char.id); }}
+                          className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center active:scale-90"
+                          style={{ background: "rgba(236,72,153,0.85)", backdropFilter: "blur(4px)" }}>
+                          <Heart className="w-3 h-3 fill-white text-white" />
+                        </button>
+                      </div>
+                    </Link>
+                    <p className="text-[8px] text-white/60 font-bold text-center line-clamp-2 leading-tight px-0.5 w-full">
+                      {char.name}
+                    </p>
+                    <p className="text-[7px] text-primary/60 font-bold text-center line-clamp-1 px-0.5 w-full -mt-0.5">
+                      {char.animeName}
+                    </p>
+                  </motion.div>
+                ))}
               </div>
             )}
           </motion.div>
