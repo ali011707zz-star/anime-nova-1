@@ -88,8 +88,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (!res.ok) return { error: data.error || "حدث خطأ، حاول مرة أخرى" };
-      if (data.requiresVerification) return { requiresVerification: true, email: data.email };
+      if (!res.ok) {
+        if (data.requiresVerification) return { requiresVerification: true, email };
+        return { error: data.error || "حدث خطأ، حاول مرة أخرى" };
+      }
+      if (data.requiresVerification) return { requiresVerification: true, email };
       setUser(data);
       return {};
     } catch {

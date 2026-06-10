@@ -1561,6 +1561,141 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
+      // ── AnimeWitcher Dubbed (Firebase Firestore — مدبلج عربي/إنجليزي) ────────────
+      // Flow: title → titleSim match against dubbed catalog → episodes/{pad}/servers
+      (async () => {
+        if (!title) return;
+        try {
+          const AW_FS = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
+
+          // جلب كتالوج المدبلج (dubbed=true) — 116 عنوان فقط
+          const awDubRes = await fetch(`${AW_FS}:runQuery`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              structuredQuery: {
+                from : [{ collectionId: "anime_list" }],
+                where: { fieldFilter: { field: { fieldPath: "dubbed" }, op: "EQUAL", value: { booleanValue: true } } },
+                limit: 200,
+              }
+            }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!awDubRes.ok) throw new Error("dubbed catalog fetch failed");
+          const awDubData = await awDubRes.json() as any[];
+
+          // بحث بالتشابه
+          const candidates = (awDubData || [])
+            .filter((d: any) => d?.document?.name)
+            .map((d: any) => {
+              const f    = d.document.fields || {};
+              const name = d.document.name.split("/").pop() || "";
+              const titleEn  = f.title_en?.stringValue || f.title?.stringValue || f.name?.stringValue || name;
+              const titleAr  = f.title_ar?.stringValue || f.title_arabic?.stringValue || "";
+              const best = Math.max(titleSim(title, titleEn), titleSim(title, titleAr), titleSim(title, name.replace(/-/g, " ")));
+              return { name, score: best };
+            })
+            .filter(c => c.score >= 0.45)
+            .sort((a, b) => b.score - a.score);
+
+          if (!candidates.length) {
+            // fallback: إضافة TMDB English title لزيادة الاحتمالية
+            let tmdbEnTitle = "";
+            if (tmdbId) {
+              try {
+                const td = await fetch(`https://api.themoviedb.org/3/${type === "tv" ? "tv" : "movie"}/${tmdbId}?api_key=${process.env.TMDB_API_KEY || "2f7e0b0b4f5a5ae0b96c94f1e636a60f"}&language=en`, { signal: AbortSignal.timeout(4_000) });
+                if (td.ok) { const j: any = await td.json(); tmdbEnTitle = j.title || j.name || ""; }
+              } catch { /* skip */ }
+            }
+            if (!tmdbEnTitle) return;
+            const byTmdb = (awDubData || [])
+              .filter((d: any) => d?.document?.name)
+              .map((d: any) => {
+                const f    = d.document.fields || {};
+                const name = d.document.name.split("/").pop() || "";
+                const titleEn = f.title_en?.stringValue || f.title?.stringValue || name;
+                return { name, score: titleSim(tmdbEnTitle, titleEn) };
+              })
+              .filter(c => c.score >= 0.45)
+              .sort((a, b) => b.score - a.score);
+            if (!byTmdb.length) return;
+            candidates.push(...byTmdb);
+          }
+
+          const animeName = candidates[0].name;
+
+          // جلب servers للحلقة
+          const epPad  = String(type === "movie" ? 1 : epNum).padStart(3, "0");
+          const srvRes = await fetch(
+            `${AW_FS}/anime_list/${encodeURIComponent(animeName)}/episodes/${epPad}/servers?pageSize=20`,
+            { signal: AbortSignal.timeout(10_000) }
+          );
+          if (!srvRes.ok) return;
+          const srvData: any = await srvRes.json();
+          if (!srvData.documents?.length) return;
+
+          send("status", { msg: `AnimeWitcher Dubbed: "${animeName}" — جاري الاستخراج…` });
+
+          await Promise.allSettled((srvData.documents as any[]).map(async (doc) => {
+            const f       = doc.fields || {};
+            const srvName = f.name?.stringValue || "";
+            const quality = f.quality?.stringValue || "720p";
+            const link    = f.link?.stringValue || "";
+            const visible = f.visible?.booleanValue !== false;
+            if (!link || !visible || !srvName) return;
+
+            const qLabel = quality === "1080p" ? "FHD 1080p" : quality === "720p" ? "HD 720p" : quality;
+            const label  = `AW·Dubbed · ${qLabel} · ${srvName}`;
+
+            if (srvName === "PD") {
+              const pdId = link.split("/").pop();
+              if (!pdId || pdId.length < 4) return;
+              const apiUrl  = `https://pixeldrain.com/api/file/${pdId}`;
+              const proxied = wrapMp4(apiUrl, "https://pixeldrain.com/");
+              sendSource(proxied, label, proxied, proxied);
+            } else if (srvName === "ST") {
+              try {
+                const stHtml = await fetch(link, {
+                  headers: { "User-Agent": UA, "Referer": "https://streamtape.com/" },
+                  signal : AbortSignal.timeout(10_000),
+                }).then(r => r.ok ? r.text() : "").catch(() => "");
+                const m1 = stHtml.match(/robotlink'\)\.innerHTML\s*=\s*'([^']+)'/);
+                const m2 = stHtml.match(/'([^']+)'\s*\+\s*\('([^']+)'\)/);
+                if (m1 && m2) {
+                  const stUrl   = "https:" + m1[1] + m2[2];
+                  const proxied = wrapMp4(stUrl, "https://streamtape.com/");
+                  sendSource(proxied, label, proxied, proxied);
+                }
+              } catch { /* skip */ }
+            } else if (srvName === "VT") {
+              try {
+                const extracted = await callExtractApi(link);
+                if (extracted?.directUrl) {
+                  const d       = extracted.directUrl;
+                  const isHls   = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
+                  const proxied = isHls ? wrapHls(d, link) : wrapMp4(d, link);
+                  sendSource(proxied, label, proxied, proxied);
+                }
+              } catch { /* skip */ }
+            } else if (srvName === "MF") {
+              try {
+                const mfHtml = await fetch(link, {
+                  headers: { "User-Agent": UA, "Referer": "https://www.mediafire.com/" },
+                  signal: AbortSignal.timeout(10_000),
+                }).then(r => r.ok ? r.text() : "").catch(() => "");
+                const mfDirect =
+                  (/(https:\/\/download\d*\.mediafire\.com\/[^"' \n<>]+)/.exec(mfHtml))?.[1] ||
+                  (/id="downloadButton"[^>]*href="([^"]+)"/.exec(mfHtml))?.[1] || null;
+                if (mfDirect) {
+                  const proxied = wrapMp4(mfDirect.replace(/&amp;/g, "&"), "https://www.mediafire.com/");
+                  sendSource(proxied, label, proxied, proxied);
+                }
+              } catch { /* skip */ }
+            }
+          }));
+        } catch { /* silent */ }
+      })(),
+
       // ── AnimeWitcher (Firebase Firestore — أنمي ياباني في قسم الانيميشن) ────────
       // Flow: title → AniList GraphQL → aniList_id → AnimeWitcher Firestore
       //       → episodes/{padded}/servers → PD (Pixeldrain) + ST (Streamtape) + VT

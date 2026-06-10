@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   profileImageCustom: text("profile_image_custom"),
   emailVerified: boolean("email_verified").default(false),
   verificationCode: varchar("verification_code", { length: 6 }),
+  verificationExpires: timestamp("verification_expires"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
