@@ -730,12 +730,6 @@ function ScraperPicker({
         </button>
 
         <div className="relative h-full flex flex-col items-center justify-center gap-7 px-6">
-          <motion.p
-            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05, duration: 0.4 }}
-            className="text-white/55 text-[13px] font-black font-['Cairo'] tracking-wide">
-            🤍 صلِّ على محمد ﷺ
-          </motion.p>
           {cover ? (
             <motion.div
               initial={{ opacity: 0, scale: 0.85, y: 24 }}
