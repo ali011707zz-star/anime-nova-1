@@ -878,7 +878,7 @@ function ScraperPicker({
                     </span>
                   </div>
                   {srcs.map((src, i) => (
-                    <SourceRow key={`${src.site}-${(src.directUrl || src.url).slice(-32)}`}
+                    <SourceRow key={`${src.site}-${rowIdx + i}`}
                       src={src} idx={rowIdx + i} onPlaySrc={onPlaySrc} />
                   ))}
                 </div>
@@ -1850,8 +1850,13 @@ export default function WatchPage() {
   }
 
   function handleBack() {
-    /* Replace current /watch entry in history so pressing browser-back never loops back here */
-    navigate(animeId ? `/anime/${animeId}` : "/", { replace: true } as any);
+    if (phase === "player") {
+      /* From player → go back to source picker */
+      setPhase("picker");
+    } else {
+      /* From picker → go back to episode list */
+      navigate(animeId ? `/episodes/${animeId}` : "/");
+    }
   }
 
   /* ── Track in-flight fetches to prevent duplicate calls ── */
