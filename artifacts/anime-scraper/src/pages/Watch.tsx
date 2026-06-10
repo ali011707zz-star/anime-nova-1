@@ -1747,6 +1747,7 @@ export default function WatchPage() {
   const [playerSrcSite, setPlayerSrcSite] = useState<string>("");
 
   const autoFetchedRef    = useRef(false);
+  const autoPlayedRef     = useRef(false);
   const upgradedToFhdRef  = useRef(false);
   const phaseRef          = useRef<"picker" | "player">("picker");
 
@@ -1949,7 +1950,45 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Auto-play disabled — user picks source manually from the picker */
+  /* ── Auto-play: fire on first available source of any quality ── */
+  useEffect(() => {
+    if (autoPlayedRef.current) return;
+    if (phase !== "picker") return;
+    const allSrcs: FetchedSrc[] = [];
+    const seenKeys = new Set<string>();
+    for (const srcs of Object.values(slotSources)) {
+      for (const s of srcs) {
+        if (!shouldShowSrc(s)) continue;
+        const key = s.directUrl || s.url;
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        allSrcs.push(s);
+      }
+    }
+    if (allSrcs.length > 0) {
+      autoPlayedRef.current = true;
+      allSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+      const firstSrc   = allSrcs[0];
+      const clickedUrl = firstSrc.directUrl || firstSrc.url;
+      const clickedTier = getSrcQualityTier(firstSrc);
+      const srvMap: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
+      srvMap[clickedTier].push(clickedUrl);
+      for (const s of allSrcs) {
+        const u = s.directUrl || s.url;
+        if (!u || u === clickedUrl) continue;
+        const tier = getSrcQualityTier(s);
+        if (!srvMap[tier].includes(u)) srvMap[tier].push(u);
+      }
+      setPlayerDlUrl(undefined);
+      setPlayerSubUrl(firstSrc.subtitleUrl || undefined);
+      setPlayerSrcSite(firstSrc.site || "");
+      setPlayerServers(srvMap);
+      setQuality(clickedTier);
+      setInitialSrv(0);
+      setPhase("player");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotSources, phase]);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
