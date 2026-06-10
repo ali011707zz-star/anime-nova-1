@@ -1854,7 +1854,7 @@ export default function WatchPage() {
     } else {
       /* From picker → go back (avoids creating new history entry that causes infinite loop) */
       if (window.history.length > 1) {
-        navigate(-1 as any);
+        window.history.back();
       } else {
         navigate(animeId ? `/episodes/${animeId}` : "/");
       }
