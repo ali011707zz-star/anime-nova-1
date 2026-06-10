@@ -486,6 +486,42 @@ async function parseVidHls(
   }
 }
 
+// ────── VIDHIDEPRO / FILELIONS CDN ──────────────────────────────────
+// vidhidepro.com (FileLions) uses packed JS with var links={hls4,hls2,hls3}
+// hls4 is a relative /stream/... URL that follows redirects to callistanise.com CDN
+function parseVidhidePro(html: string): string | null {
+  // Enhanced packed-JS regex that handles escaped single-quotes inside the encoded string
+  const re = /eval\(function\(p,a,c,k,e,?d?\)\{[^}]+\}\('((?:[^'\\]|\\[\s\S])*)',\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:[^'\\]|\\[\s\S])*)'\s*\.split\('\|'\)/;
+  const m = html.match(re);
+  if (!m) return null;
+  try {
+    const packed = m[1].replace(/\\'/g, "'");
+    const base   = parseInt(m[2]);
+    const count  = parseInt(m[3]);
+    const k      = m[4].replace(/\\'/g, "'").split("|");
+    const toS = (n: number, b: number): string => {
+      const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
+      return n < b ? chars[n] : toS(Math.floor(n / b), b) + chars[n % b];
+    };
+    let unpacked = packed;
+    for (let i = count - 1; i >= 0; i--) {
+      if (k[i]) unpacked = unpacked.replace(new RegExp("\\b" + toS(i, base) + "\\b", "g"), k[i]);
+    }
+    // Extract var links={hls4:"/stream/...", hls2:"https://...m3u8?..."}
+    const linksM = unpacked.match(/var\s+links\s*=\s*\{([^}]+)\}/);
+    if (linksM) {
+      const ls = linksM[1];
+      // hls4 is a stable relative URL (CDN redirects: vidhidepro→vidhidefast→callistanise)
+      const hls4M = ls.match(/"hls4"\s*:\s*"(\/[^"]+)"/);
+      const hls2M = ls.match(/"hls2"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/);
+      if (hls4M) return `https://vidhidepro.com${hls4M[1]}`;
+      if (hls2M) return hls2M[1];
+    }
+    // Fallback: generic parseVideoUrl on the unpacked content
+    return parseVideoUrl(unpacked)?.url ?? null;
+  } catch { return null; }
+}
+
 async function extractVideoDeep(
   startUrl: string,
   referer?: string,
@@ -523,6 +559,11 @@ async function extractVideoDeep(
           if (v) return v;
           break;
         }
+      }
+      // vidhidepro.com = FileLions CDN: packed JS with var links={hls4,hls2}
+      if (url.includes("vidhidepro.com/v/") || url.includes("filelions.online/v/") || url.includes("filelions.to/v/")) {
+        const m3u8 = parseVidhidePro(html);
+        if (m3u8) return { url: m3u8, type: "hls" };
       }
       if (url.includes("vidbm.com") || url.includes("uptostream.com") ||
           url.includes("vidlink") || url.includes("vidhide") || url.includes("streamlare")) {
@@ -4695,6 +4736,141 @@ async function getReanímeSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIME-DAY.COM scraper  (Arabic dubbed anime — مدبلج)
+//  APK API: GET /app/anime.php    → catalog (12 entries, Arabic+English names)
+//           GET /app/servers.php  → all episode/server entries (474 entries)
+//  Video:   FileLions → vidhidepro.com (packed JS → HLS via parseVidhidePro)
+//           embedwish.com        → streamwish-family (parseStreamwish)
+// ════════════════════════════════════════════════════════════════════
+const ANIMEDAY_BASE = "https://www.anime-day.com";
+const ANIMEDAY_HDRS: Record<string, string> = {
+  ...BASE_HDRS,
+  "User-Agent": "com.anime.day/4.0 (Android)",
+};
+
+let animeDayAnimeListCache: { data: any[]; ts: number } | null = null;
+let animeDayServersCache: { data: any[]; ts: number } | null = null;
+
+async function fetchAnimeDayAnimeList(): Promise<any[]> {
+  const now = Date.now();
+  if (animeDayAnimeListCache && now - animeDayAnimeListCache.ts < 3_600_000)
+    return animeDayAnimeListCache.data;
+  try {
+    const r = await fetch(`${ANIMEDAY_BASE}/app/anime.php`, {
+      headers: ANIMEDAY_HDRS,
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!r.ok) return [];
+    const j = await r.json() as any;
+    const data: any[] = j.data ?? [];
+    animeDayAnimeListCache = { data, ts: now };
+    return data;
+  } catch { return []; }
+}
+
+async function fetchAnimeDayServers(): Promise<any[]> {
+  const now = Date.now();
+  if (animeDayServersCache && now - animeDayServersCache.ts < 3_600_000)
+    return animeDayServersCache.data;
+  try {
+    const r = await fetch(`${ANIMEDAY_BASE}/app/servers.php`, {
+      headers: ANIMEDAY_HDRS,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return [];
+    const j = await r.json() as any;
+    const data: any[] = j.data ?? (Array.isArray(j) ? j : []);
+    animeDayServersCache = { data, ts: now };
+    return data;
+  } catch { return []; }
+}
+
+async function getAnimeDaySources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const sources: UnifiedSource[] = [];
+  try {
+    const [animeList, serverList] = await Promise.all([
+      fetchAnimeDayAnimeList(),
+      fetchAnimeDayServers(),
+    ]);
+    if (!animeList.length || !serverList.length) return sources;
+
+    // ── المطابقة: ابحث في second_name (يحتوي كلمات عربية وإنجليزية) ──
+    const searchQ = (english || title).toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+    let bestAnime: any = null;
+    let bestScore = 0;
+
+    for (const anime of animeList) {
+      const sn = (anime.second_name || "").toLowerCase().replace(/[^a-z0-9\s\u0600-\u06ff]/g, " ");
+      const sc = similarity(searchQ, sn);
+      if (sc > bestScore) { bestScore = sc; bestAnime = anime; }
+    }
+
+    if (!bestAnime || bestScore < 0.18) return sources;
+
+    // ── مقطع الاسم العربي (أول كلمتين عربيتين) للمطابقة مع servers ──
+    const arabicWords = (bestAnime.name as string || "")
+      .split(/\s+/)
+      .filter((w: string) => /[\u0600-\u06FF]/.test(w));
+    const arabicPrefix = arabicWords.slice(0, 2).join(" ");
+    if (!arabicPrefix) return sources;
+
+    // ── البحث عن الحلقة في قائمة الـ servers ──
+    const epStr = `الحلقة ${ep}`;
+    const epServers = serverList.filter((s: any) => {
+      const name: string = s.name || "";
+      return name.includes(arabicPrefix) && name.includes(epStr);
+    });
+    if (!epServers.length) return sources;
+
+    // ── بناء مصادر UnifiedSource ─────────────────────────────────────
+    const seen = new Set<string>();
+    for (const server of epServers) {
+      const relUrl: string = server.url || "";
+      if (!relUrl || seen.has(relUrl)) continue;
+      seen.add(relUrl);
+
+      let fullUrl: string;
+      let quality = "مدبلج";
+      let qualityRank = 7;
+
+      if (relUrl.startsWith("/v/")) {
+        // FileLions → vidhidepro.com  (extractVideoDeep سيستخدم parseVidhidePro)
+        fullUrl = `https://vidhidepro.com${relUrl}`;
+        quality = "مدبلج HD";
+        qualityRank = 9;
+      } else if (relUrl.startsWith("/e/")) {
+        // embedwish.com أو doodstream حسب اسم السيرفر
+        const sname = (server.name || "").toLowerCase();
+        if (sname.includes("dood") || sname.includes("doodstream")) {
+          fullUrl = `https://dood.to${relUrl}`;
+        } else {
+          fullUrl = `https://embedwish.com${relUrl}`;
+          quality = "مدبلج HD";
+          qualityRank = 8;
+        }
+      } else if (relUrl.startsWith("/embed-")) {
+        fullUrl = `https://upstream.to${relUrl}`;
+      } else {
+        continue;
+      }
+
+      sources.push({
+        url: fullUrl,
+        directUrl: undefined,
+        quality,
+        qualityRank,
+        site: "animeday",
+        label: quality,
+      });
+    }
+  } catch { /* silently fail */ }
+  return sources;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -4829,6 +5005,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
+      scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
@@ -4918,6 +5095,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep),    SCRAPER_MS, [])); break;
       case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, [])); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
