@@ -52,6 +52,8 @@ export function registerEmailAuthRoutes(app: Express): void {
       const passwordHash = await hashPassword(password);
       const displayName = typeof name === "string" && name.trim() ? name.trim() : email.split("@")[0];
       const nameParts = displayName.split(" ");
+      const code = generateCode();
+      const expiresAt = new Date(Date.now() + 15 * 60_000);
 
       const [user] = await db.insert(users).values({
         email,
@@ -59,13 +61,56 @@ export function registerEmailAuthRoutes(app: Express): void {
         displayName,
         firstName: nameParts[0] || null,
         lastName: nameParts.slice(1).join(" ") || null,
-        emailVerified: true,
-        verificationCode: null,
+        emailVerified: false,
+        verificationCode: code,
+        verificationExpires: expiresAt,
+      } as any).returning();
+
+      // احفظ في session للتحقق لاحقاً
+      (req.session as any).pendingVerifyId = user.id;
+
+      // أرسل رمز التحقق
+      const sent = await sendVerificationEmail(email, code);
+      console.log(`[signup] رمز التحقق لـ ${email}: ${code} (تم الإرسال: ${sent})`);
+
+      return res.status(202).json({
+        requiresVerification: true,
+        emailSent: sent,
+        ...(sent ? {} : { verificationCode: code }),
+        message: "تم إنشاء الحساب، يرجى التحقق من بريدك الإلكتروني",
+      });
+    } catch (err: any) {
+      console.error("email-signup error:", err);
+      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
+    }
+  });
+
+  // ── Sign Up (old path kept for compat — returns user directly if verified) ─
+  app.post("/api/auth/email-signup-direct", async (req: Request, res: Response) => {
+    try {
+      const { email, password, name } = req.body || {};
+      if (!email || !password) return res.status(400).json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
+      if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+        return res.status(400).json({ error: "بريد إلكتروني غير صالح" });
+      if (typeof password !== "string" || password.length < 6)
+        return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
+
+      const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+      if (existing.length > 0) return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
+
+      const passwordHash = await hashPassword(password);
+      const displayName = typeof name === "string" && name.trim() ? name.trim() : email.split("@")[0];
+      const nameParts = displayName.split(" ");
+
+      const [user] = await db.insert(users).values({
+        email, passwordHash, displayName,
+        firstName: nameParts[0] || null,
+        lastName: nameParts.slice(1).join(" ") || null,
+        emailVerified: true, verificationCode: null,
       }).returning();
 
       (req.session as any).emailUserId = user.id;
       req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
-
       return res.json({
         id: user.id,
         email: user.email,
@@ -155,7 +200,21 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
       }
 
-      await db.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user.id));
+      // إذا لم يُتحقَّق من البريد بعد → أرسل رمزاً جديداً وأعد التحقق
+      if (!user.emailVerified) {
+        const code = generateCode();
+        const expiresAt = new Date(Date.now() + 15 * 60_000);
+        await db.update(users).set({ verificationCode: code, verificationExpires: expiresAt, updatedAt: new Date() }).where(eq(users.id, user.id));
+        (req.session as any).pendingVerifyId = user.id;
+        const sent = await sendVerificationEmail(user.email!, code);
+        console.log(`[signin] إعادة إرسال رمز التحقق لـ ${email}: ${code}`);
+        return res.status(403).json({
+          requiresVerification: true,
+          emailSent: sent,
+          ...(sent ? {} : { verificationCode: code }),
+          message: "يرجى التحقق من بريدك الإلكتروني أولاً",
+        });
+      }
 
       (req.session as any).emailUserId = user.id;
       req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
