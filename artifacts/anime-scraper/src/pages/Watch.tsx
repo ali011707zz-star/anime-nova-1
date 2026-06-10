@@ -405,8 +405,12 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
             transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
           />
         ) : (
-          <div className="absolute inset-0"
-            style={{ background: "radial-gradient(ellipse at 50% 30%, rgba(88,28,135,0.35) 0%, transparent 70%)" }} />
+          <>
+            <div className="absolute inset-0"
+              style={{ background: "radial-gradient(ellipse at 50% 20%, rgba(109,40,217,0.60) 0%, rgba(79,30,180,0.28) 40%, transparent 72%)" }} />
+            <div className="absolute inset-0"
+              style={{ background: "radial-gradient(ellipse at 50% 100%, rgba(124,58,237,0.18) 0%, transparent 55%)" }} />
+          </>
         )}
         <div className="absolute inset-0" style={{ background: "rgba(5,5,14,0.72)" }} />
       </div>
@@ -422,8 +426,12 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
         >
           {/* Glow ring */}
           <div
+            className="absolute -inset-5 rounded-[32px] pointer-events-none"
+            style={{ background: "radial-gradient(ellipse at 50% 60%, rgba(139,92,246,0.55) 0%, rgba(109,40,217,0.22) 50%, transparent 75%)" }}
+          />
+          <div
             className="absolute -inset-3 rounded-[28px] pointer-events-none"
-            style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.22) 0%, transparent 70%)", opacity: 0.7 }}
+            style={{ boxShadow: "0 0 60px 8px rgba(124,58,237,0.30), 0 0 120px 16px rgba(109,40,217,0.12)" }}
           />
           {cover ? (
             <img
@@ -731,8 +739,12 @@ function ScraperPicker({
               transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               className="relative shrink-0">
               <div
+                className="absolute -inset-6 rounded-[32px] pointer-events-none"
+                style={{ background: "radial-gradient(ellipse at 50% 65%, rgba(139,92,246,0.58) 0%, rgba(109,40,217,0.24) 48%, transparent 74%)" }}
+              />
+              <div
                 className="absolute -inset-4 rounded-[28px] pointer-events-none"
-                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.28) 0%, transparent 68%)", opacity: 0.7 }}
+                style={{ boxShadow: "0 0 70px 10px rgba(124,58,237,0.32), 0 0 130px 20px rgba(109,40,217,0.14)" }}
               />
               <img src={cover} alt={title}
                 className="w-48 h-[272px] rounded-2xl object-cover"
