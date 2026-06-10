@@ -961,8 +961,8 @@ router.get("/animation/quick-check", async (req: Request, res: Response) => {
 
   try {
     const sseUrl = type === "tv"
-      ? `https://missourimonster-vyla.hf.space/tv?id=${tmdbId}&season=${season}&episode=${ep}`
-      : `https://missourimonster-vyla.hf.space/movie?id=${tmdbId}`;
+      ? `https://missourimonster-vyla.hf.space/api/tv?id=${tmdbId}&season=${season}&episode=${ep}`
+      : `https://missourimonster-vyla.hf.space/api/movie?id=${tmdbId}`;
 
     const r = await fetch(sseUrl, {
       headers: { "User-Agent": UA, "Accept": "text/event-stream" },
@@ -1523,8 +1523,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Vyla: جاري الاستخراج…" });
           const VYLA_BASE = "https://missourimonster-vyla.hf.space";
           const vylaUrl = type === "tv"
-            ? `${VYLA_BASE}/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
-            : `${VYLA_BASE}/movie?id=${tmdbId}`;
+            ? `${VYLA_BASE}/api/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
+            : `${VYLA_BASE}/api/movie?id=${tmdbId}`;
 
           const ctrl  = new AbortController();
           const timer = setTimeout(() => ctrl.abort(), 28_000);
