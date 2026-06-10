@@ -64,7 +64,7 @@ export function registerEmailAuthRoutes(app: Express): void {
       }).returning();
 
       (req.session as any).emailUserId = user.id;
-      req.session.cookie.maxAge = undefined as any;
+      req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
 
       return res.json({
         id: user.id,
@@ -101,7 +101,7 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       delete (req.session as any).pendingVerifyId;
       (req.session as any).emailUserId = userId;
-      req.session.cookie.maxAge = undefined as any;
+      req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
 
       return res.json({
         id: user.id,
@@ -158,7 +158,7 @@ export function registerEmailAuthRoutes(app: Express): void {
       await db.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, user.id));
 
       (req.session as any).emailUserId = user.id;
-      req.session.cookie.maxAge = undefined as any;
+      req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
 
       return res.json({
         id: user.id,

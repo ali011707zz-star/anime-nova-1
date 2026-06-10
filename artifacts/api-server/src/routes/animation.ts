@@ -1197,14 +1197,40 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 22. vidlink.pro (TMDB-native, often returns direct HLS) ──────────────
+      // ── 22. vidlink.pro — direct JSON API (TMDB-native, bypasses JS render) ──
       (async () => {
         if (!tmdbId) return;
         try {
-          const url = type === "tv"
-            ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
-            : `https://vidlink.pro/movie/${tmdbId}`;
-          await sendExtracted(url, "VidLink · HLS");
+          send("status", { msg: "VidLink API: جاري الاستخراج…" });
+          const apiUrl = type === "tv"
+            ? `https://vidlink.pro/api/b/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidlink.pro/api/b/movie/${tmdbId}`;
+
+          const r = await fetch(apiUrl, {
+            headers: {
+              "User-Agent" : UA,
+              "Referer"    : "https://vidlink.pro/",
+              "Origin"     : "https://vidlink.pro",
+              "Accept"     : "application/json",
+            },
+            signal: AbortSignal.timeout(16_000),
+          });
+          if (!r.ok) return;
+          const data: any = await r.json();
+
+          // Response shape: { stream: [{ playlist: "https://...m3u8", ... }] }
+          const streams: any[] = Array.isArray(data?.stream) ? data.stream
+            : data?.playlist ? [data]
+            : [];
+
+          for (const s of streams) {
+            const m3u8 = s?.playlist || s?.url || "";
+            if (!m3u8 || !m3u8.includes(".m3u8")) continue;
+            const ref     = "https://vidlink.pro/";
+            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(ref)}`;
+            const label   = `VidLink · HLS مباشر${s?.quality ? ` · ${s.quality}` : ""}`;
+            sendSource(proxied, label, proxied, proxied);
+          }
         } catch { /* silent */ }
       })(),
 
