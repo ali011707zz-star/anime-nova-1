@@ -379,24 +379,24 @@ export default function RiftPlayer({
         maxBufferSize: 200 * 1000 * 1000,
         startFragPrefetch: true,
         progressive: true,
-        fragLoadingMaxRetry: 12,
+        fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 200,
-        fragLoadingMaxRetryTimeout: 10000,
+        fragLoadingMaxRetryTimeout: 8000,
         manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 600,
         levelLoadingMaxRetry: 6,
         levelLoadingRetryDelay: 400,
-        highBufferWatchdogPeriod: 3,
-        nudgeOffset: 0.5,
-        nudgeMaxRetry: 10,
-        maxStarvationDelay: 4,
-        maxLoadingDelay: 4,
+        highBufferWatchdogPeriod: 2,
+        nudgeOffset: 0.4,
+        nudgeMaxRetry: 8,
+        maxStarvationDelay: 2,
+        maxLoadingDelay: 2,
         startLevel: -1,
-        abrEwmaDefaultEstimate: 2_000_000,
+        abrEwmaDefaultEstimate: 1_500_000,
         testBandwidth: true,
         capLevelToPlayerSize: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
-          xhr.timeout = 30000;
+          xhr.timeout = 10000;
         },
       });
       hlsRef.current = hls;
@@ -537,10 +537,15 @@ export default function RiftPlayer({
     setSpeed(s); if (videoRef.current) videoRef.current.playbackRate = s;
     setShowSpeed(false); showControls();
   }
-  function seekFrac(f: number) {
+  function seekFrac(f: number, force = false) {
     const v = videoRef.current; if (!v || !duration) return;
     const t = Math.max(0, Math.min(1, f)) * duration;
-    v.currentTime = t; setCurrentTime(t);
+    setCurrentTime(t);
+    const now = Date.now();
+    if (force || now - seekThrottle.current > 280) {
+      seekThrottle.current = now;
+      v.currentTime = t;
+    }
   }
   function takeScreenshot() {
     const v = videoRef.current; if (!v) return;
@@ -577,13 +582,21 @@ export default function RiftPlayer({
   function handlePrgDown(e: React.MouseEvent) {
     e.stopPropagation(); seekDrag.current = true;
     const portrait = isPortrait;
+    let lastF = duration > 0 ? currentTime / duration : 0;
     const onMv = (ev: MouseEvent) => {
       const bar = progressRef.current; if (!bar) return;
       const r = bar.getBoundingClientRect();
-      if (portrait) seekFrac(Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height)));
-      else           seekFrac(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)));
+      lastF = portrait
+        ? Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height))
+        : Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      seekFrac(lastF, false);
     };
-    const onUp = () => { seekDrag.current = false; window.removeEventListener("mousemove", onMv); window.removeEventListener("mouseup", onUp); };
+    const onUp = () => {
+      seekDrag.current = false;
+      seekFrac(lastF, true);
+      window.removeEventListener("mousemove", onMv);
+      window.removeEventListener("mouseup", onUp);
+    };
     window.addEventListener("mousemove", onMv); window.addEventListener("mouseup", onUp);
   }
 

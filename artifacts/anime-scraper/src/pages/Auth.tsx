@@ -21,7 +21,7 @@ export default function AuthPage() {
 ═══════════════════════════════════════════════ */
 export function AuthModal({ onClose }: { onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" dir="rtl">
+    <div className="fixed inset-0 z-50 flex items-end justify-center pb-[12vh]" dir="rtl">
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0"

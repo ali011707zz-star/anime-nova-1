@@ -1,4 +1,5 @@
 import { useState, useEffect, lazy, Suspense, Component, ReactNode } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Switch, Route, Router as WouterRouter, useLocation, useSearch } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { Header } from "@/components/layout/Header";
@@ -126,28 +127,39 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
       <ErrorBoundary resetKey={location}>
         <Suspense fallback={<PageLoader />}>
-          <Switch>
-            <Route path="/"                        component={Home} />
-            <Route path="/anime/:id"               component={AnimeDetail} />
-            <Route path="/episodes/:id"            component={EpisodeList} />
-            <Route path="/watch/:id"               component={WatchById} />
-            <Route path="/watch"                   component={WatchWrapper} />
-            <Route path="/search"                  component={Search} />
-            <Route path="/schedule"               component={Schedule} />
-            <Route path="/library"                 component={Library} />
-            <Route path="/history"                 component={WatchHistory} />
-            <Route path="/browse"                  component={Browse} />
-            <Route path="/news"                    component={News} />
-            <Route path="/updates"                 component={Updates} />
-            <Route path="/settings"               component={Settings} />
-            <Route path="/profile"                component={Profile} />
-            <Route path="/auth"                    component={AuthPage} />
-            <Route path="/animations"              component={AnimationLibrary} />
-            <Route path="/animation/watch"                    component={AnimationWatchWrapper} />
-            <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
-            <Route path="/animation/:type/:id"             component={AnimationDetail} />
-            <Route                                 component={NotFound} />
-          </Switch>
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.div
+              key={location}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.17, ease: [0.22, 1, 0.36, 1] }}
+              style={{ minHeight: "100%" }}
+            >
+              <Switch>
+                <Route path="/"                        component={Home} />
+                <Route path="/anime/:id"               component={AnimeDetail} />
+                <Route path="/episodes/:id"            component={EpisodeList} />
+                <Route path="/watch/:id"               component={WatchById} />
+                <Route path="/watch"                   component={WatchWrapper} />
+                <Route path="/search"                  component={Search} />
+                <Route path="/schedule"               component={Schedule} />
+                <Route path="/library"                 component={Library} />
+                <Route path="/history"                 component={WatchHistory} />
+                <Route path="/browse"                  component={Browse} />
+                <Route path="/news"                    component={News} />
+                <Route path="/updates"                 component={Updates} />
+                <Route path="/settings"               component={Settings} />
+                <Route path="/profile"                component={Profile} />
+                <Route path="/auth"                    component={AuthPage} />
+                <Route path="/animations"              component={AnimationLibrary} />
+                <Route path="/animation/watch"                    component={AnimationWatchWrapper} />
+                <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
+                <Route path="/animation/:type/:id"             component={AnimationDetail} />
+                <Route                                 component={NotFound} />
+              </Switch>
+            </motion.div>
+          </AnimatePresence>
         </Suspense>
       </ErrorBoundary>
       <BottomNav />
