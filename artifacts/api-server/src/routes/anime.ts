@@ -5691,12 +5691,12 @@ async function fetchAWCatalog(): Promise<any[]> {
     return AW_CATALOG_CACHE.items;
   }
   try {
-    // قراءة عامة بدون مصادقة (Firestore public read)
+    // قراءة عامة بدون مصادقة (Firestore public read) — جلب الكتالوج كاملاً بدون حد للصفحات
     const all: any[] = [];
-    let pageToken = "";
-    for (let i = 0; i < 5; i++) {
-      const url = `${AW_FS_BASE}/anime_list?pageSize=200${pageToken ? `&pageToken=${pageToken}` : ""}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    let pageToken: string | undefined;
+    do {
+      const url = `${AW_FS_BASE}/anime_list?pageSize=300${pageToken ? `&pageToken=${pageToken}` : ""}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
       if (!r.ok) break;
       const data: any = await r.json();
       (data.documents || []).forEach((doc: any) => {
@@ -5704,16 +5704,23 @@ async function fetchAWCatalog(): Promise<any[]> {
         const id = doc.name?.split("/").pop() || "";
         const al = f.aniList_id?.stringValue || "";
         if (!al || al === "undefined") return;
+        // poster: قد يكون mapValue أو stringValue مباشرة
+        const poster =
+          f.poster?.mapValue?.fields?.large?.stringValue ||
+          f.poster?.mapValue?.fields?.medium?.stringValue ||
+          f.poster_uri?.stringValue ||
+          f.poster?.stringValue || "";
         all.push({
-          name   : id,
+          name   : id.trim(),
           anilist: al,
           type   : f.type?.stringValue || "",
-          poster : f.poster?.stringValue || f.image?.stringValue || "",
+          poster,
+          arLink : f.ar_link?.stringValue || "",
         });
       });
-      pageToken = data.nextPageToken || "";
-      if (!pageToken) break;
-    }
+      pageToken = data.nextPageToken || undefined;
+    } while (pageToken);
+
     AW_CATALOG_CACHE.ts = Date.now();
     AW_CATALOG_CACHE.items = all;
     return all;
