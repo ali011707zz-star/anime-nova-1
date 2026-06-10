@@ -768,13 +768,11 @@ function ScraperPicker({
 
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.30 }}
             className="flex flex-col items-center gap-3">
-            <p className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide">اللهم صلِّ وسلِّم على نبينا محمد ﷺ</p>
             <div className="relative w-9 h-9">
               <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
               <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
-            <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
           </motion.div>
         </div>
       </div>
@@ -1749,7 +1747,6 @@ export default function WatchPage() {
   const [playerSrcSite, setPlayerSrcSite] = useState<string>("");
 
   const autoFetchedRef    = useRef(false);
-  const autoPlayedRef     = useRef(false);
   const upgradedToFhdRef  = useRef(false);
   const phaseRef          = useRef<"picker" | "player">("picker");
 
@@ -1854,8 +1851,12 @@ export default function WatchPage() {
       /* From player → go back to source picker */
       setPhase("picker");
     } else {
-      /* From picker → go back to episode list */
-      navigate(animeId ? `/episodes/${animeId}` : "/");
+      /* From picker → go back (avoids creating new history entry that causes infinite loop) */
+      if (window.history.length > 1) {
+        navigate(-1 as any);
+      } else {
+        navigate(animeId ? `/episodes/${animeId}` : "/");
+      }
     }
   }
 
@@ -1948,48 +1949,7 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Auto-play: fire on first available source of any quality — don't wait for FHD ── */
-  useEffect(() => {
-    if (autoPlayedRef.current) return;
-    if (phase !== "picker") return;
-    const allSrcs: FetchedSrc[] = [];
-    const seenKeys = new Set<string>();
-    for (const srcs of Object.values(slotSources)) {
-      for (const s of srcs) {
-        if (!shouldShowSrc(s)) continue;
-        const key = s.directUrl || s.url;
-        if (!key || seenKeys.has(key)) continue;
-        seenKeys.add(key);
-        allSrcs.push(s);
-      }
-    }
-    /* Play best available after brief delay so user sees source cards first */
-    if (allSrcs.length > 0) {
-      autoPlayedRef.current = true;
-      setTimeout(() => {
-      allSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
-      const firstSrc    = allSrcs[0];
-      const clickedUrl  = firstSrc.directUrl || firstSrc.url;
-      const clickedTier = getSrcQualityTier(firstSrc);
-      const srvMap: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
-      srvMap[clickedTier].push(clickedUrl);
-      for (const s of allSrcs) {
-        const u = s.directUrl || s.url;
-        if (!u || u === clickedUrl) continue;
-        const tier = getSrcQualityTier(s);
-        if (!srvMap[tier].includes(u)) srvMap[tier].push(u);
-      }
-      setPlayerDlUrl(undefined);
-      setPlayerSubUrl(firstSrc.subtitleUrl || undefined);
-      setPlayerSrcSite(firstSrc.site || "");
-      setPlayerServers(srvMap);
-      setQuality(clickedTier);
-      setInitialSrv(0);
-      setPhase("player");
-      }, 1500);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slotSources, phase]);
+  /* Auto-play disabled — user picks source manually from the picker */
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
