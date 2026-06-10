@@ -372,10 +372,11 @@ export default function Profile() {
               onSave={v => { setDisplayName(v); handleSave({ displayName: v }); }}
             />
             <Field
-              icon={AtSign} iconColor="text-blue-400" label="اسم المستخدم"
-              value={username} placeholder="اكتب يوزرنيم" suffix="@"
+              icon={AtSign} iconColor="text-blue-400" label="اسم المستخدم (إنجليزي فقط)"
+              value={username} placeholder="مثال: nova_user123" suffix="@"
               onSave={v => {
-                const cleaned = v.replace(/^@/, "").replace(/[^\p{Emoji_Presentation}\p{Emoji}\u{1F000}-\u{1FFFF}a-zA-Z0-9_.]/gu, "").slice(0, 20);
+                const cleaned = v.replace(/^@/, "").replace(/[^a-zA-Z0-9_.]/g, "").slice(0, 20);
+                if (!cleaned) return;
                 setUsername(cleaned);
                 handleSave({ username: cleaned });
               }}
