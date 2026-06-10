@@ -390,7 +390,7 @@ export default function EpisodeListPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-[#09090B] via-[#09090B]/60 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#09090B]/20 to-transparent" />
 
-        <button onClick={() => { if (window.history.length > 1) { window.history.back(); } else { navigate("/"); } }}
+        <button onClick={() => { navigate(params.id ? `/anime/${params.id}` : "/"); }}
           className="absolute top-4 right-4 w-9 h-9 bg-black/50 backdrop-blur-md rounded-2xl flex items-center justify-center border border-white/10 active:scale-90 transition-transform">
           <ChevronRight className="w-4 h-4 text-white" />
         </button>

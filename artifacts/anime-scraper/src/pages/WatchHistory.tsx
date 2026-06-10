@@ -129,7 +129,7 @@ export default function WatchHistory() {
       <div className="sticky top-0 z-20 bg-[#09090B]/95 backdrop-blur-xl border-b border-white/5 px-4 pt-safe pt-4 pb-3">
         <div className="flex items-center gap-3 mb-0.5">
           <button
-            onClick={() => { if (window.history.length > 1) window.history.back(); else navigate("/"); }}
+            onClick={() => { navigate("/"); }}
             className="w-9 h-9 rounded-xl bg-white/6 border border-white/8 flex items-center justify-center active:scale-90 transition-transform shrink-0">
             <ChevronRight className="w-4 h-4 text-white/70" />
           </button>
