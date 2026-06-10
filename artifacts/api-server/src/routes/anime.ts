@@ -4746,6 +4746,29 @@ router.get("/anime/sources-stream", async (req, res) => {
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
+    // ── مساعد: probe سريع للمصادر عبر proxy الداخلي ──
+    const PORT_NUM = parseInt(String(process.env.PORT || 8080), 10);
+    async function probeOwnProxy(s: UnifiedSource): Promise<boolean> {
+      const cu = s.directUrl || s.url;
+      if (!cu.startsWith("/api/")) return true; // روابط خارجية: نثق بها
+      const localUrl = `http://127.0.0.1:${PORT_NUM}${cu}`;
+      try {
+        const pr = await fetch(localUrl, { signal: AbortSignal.timeout(6_000) });
+        return pr.ok; // 200 أو 206
+      } catch { return false; }
+    }
+
+    async function probeAndFilter(srcs: UnifiedSource[]): Promise<UnifiedSource[]> {
+      const results = await Promise.allSettled(
+        srcs.map(async s => ({ s, ok: await probeOwnProxy(s) }))
+      );
+      return results
+        .filter((r): r is PromiseFulfilledResult<{ s: UnifiedSource; ok: boolean }> =>
+          r.status === "fulfilled")
+        .filter(r => r.value.ok)
+        .map(r => r.value.s);
+    }
+
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
     async function scrapeCached(
       site: string,
@@ -4771,7 +4794,8 @@ router.get("/anime/sources-stream", async (req, res) => {
                 await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
                 if (buf.length) await setSourceCache(cKey, site, buf);
               } else {
-                await setSourceCache(cKey, site, srcs);
+                const alive = await probeAndFilter(srcs);
+                if (alive.length) await setSourceCache(cKey, site, alive);
               }
             } catch {}
           });
@@ -4789,8 +4813,10 @@ router.get("/anime/sources-stream", async (req, res) => {
         if (!closed) buf.forEach(s => sendSrc(s));
         if (buf.length) await setSourceCache(cKey, site, buf);
       } else {
-        if (!closed) srcs.forEach(s => sendSrc(s));
-        await setSourceCache(cKey, site, srcs);
+        // Probe بالتوازي قبل الإرسال — يحذف المصادر الميتة فوراً
+        const alive = await probeAndFilter(srcs);
+        if (!closed) alive.forEach(s => sendSrc(s));
+        if (alive.length) await setSourceCache(cKey, site, alive);
       }
     }
 

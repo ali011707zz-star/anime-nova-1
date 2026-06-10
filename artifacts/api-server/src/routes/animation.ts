@@ -1249,6 +1249,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       } catch { /* silent */ }
     }
 
+    // ── Hard 30s deadline — يُجبر DONE حتى لو علّق أحد الـ scrapers ──────────
+    let streamDone = false;
+    const forceClose = setTimeout(() => {
+      if (!streamDone && !res.writableEnded) {
+        streamDone = true;
+        send("done", {}); clearInterval(keepAlive); res.end();
+      }
+    }, 30_000);
+
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
 
@@ -1579,27 +1588,30 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
           // 2. بحث AniList بالعنوان للحصول على aniList_id
           //    نُجرّب: العنوان الإنجليزي من TMDB ← العنوان الأصلي ← title المُمرَّر
-          let anilistId = "";
+          // بحث AniList بالتوازي — بدلاً من تسلسلي (كل بحث 8s × 4 = 32s)
           const awTitles = [tmdbEnTitle, tmdbOrigTitle, title, req.query.english ? String(req.query.english) : ""]
             .filter(Boolean)
-            .filter((v, i, a) => a.indexOf(v) === i); // dedup
-          for (const t of awTitles) {
-            try {
-              const gql = await fetch("https://graphql.anilist.co", {
-                method : "POST",
-                headers: { "Content-Type": "application/json", "Accept": "application/json" },
-                body   : JSON.stringify({
-                  query    : "query($s:String){Media(search:$s,type:ANIME,isAdult:false){id title{romaji english}}}",
-                  variables: { s: t },
-                }),
-                signal: AbortSignal.timeout(8_000),
-              });
-              if (gql.ok) {
+            .filter((v, i, a) => a.indexOf(v) === i);
+          let anilistId = "";
+          try {
+            anilistId = await Promise.any(
+              awTitles.map(async t => {
+                const gql = await fetch("https://graphql.anilist.co", {
+                  method : "POST",
+                  headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                  body   : JSON.stringify({
+                    query    : "query($s:String){Media(search:$s,type:ANIME,isAdult:false){id title{romaji english}}}",
+                    variables: { s: t },
+                  }),
+                  signal: AbortSignal.timeout(8_000),
+                });
+                if (!gql.ok) throw new Error("not ok");
                 const gd: any = await gql.json();
-                if (gd?.data?.Media?.id) { anilistId = String(gd.data.Media.id); break; }
-              }
-            } catch { /* try next */ }
-          }
+                if (!gd?.data?.Media?.id) throw new Error("no id");
+                return String(gd.data.Media.id);
+              })
+            );
+          } catch { /* لم يُوجد في AniList */ }
           if (!anilistId) return;
 
           // 2. ابحث عن الأنمي في Firestore بالـ aniList_id — الوصول العام بدون auth
@@ -1713,14 +1725,24 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       (async () => {
         if (!tmdbId) return;
         try {
-          send("status", { msg: "Vyla: جاري الاستخراج…" });
           const VYLA_BASE = "https://missourimonster-vyla.hf.space";
+
+          // فحص سريع: HF Spaces تنام بعد الخمول → إذا لم يرد خلال 5 ثوانٍ: تجاهل فوراً
+          try {
+            const hc = await fetch(`${VYLA_BASE}/api/health`, {
+              signal: AbortSignal.timeout(5_000),
+              headers: { "User-Agent": UA },
+            });
+            if (!hc.ok) return;
+          } catch { return; } // timeout / خطأ = السيرفر نائم → تجاهل
+
+          send("status", { msg: "Vyla: جاري الاستخراج…" });
           const vylaUrl = type === "tv"
             ? `${VYLA_BASE}/api/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
             : `${VYLA_BASE}/api/movie?id=${tmdbId}`;
 
           const ctrl  = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 28_000);
+          const timer = setTimeout(() => ctrl.abort(), 15_000); // ← 28s → 15s
 
           const r = await fetch(vylaUrl, {
             signal : ctrl.signal,
@@ -1836,10 +1858,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
     ]);
 
-    send("done", {}); clearInterval(keepAlive); res.end();
+    clearTimeout(forceClose);
+    if (!streamDone && !res.writableEnded) {
+      streamDone = true;
+      send("done", {}); clearInterval(keepAlive); res.end();
+    }
   } catch (e) {
-    send("error", { msg: String(e) });
-    send("done",  {}); clearInterval(keepAlive); res.end();
+    clearTimeout(forceClose);
+    if (!res.writableEnded) {
+      send("error", { msg: String(e) });
+      send("done",  {}); clearInterval(keepAlive); res.end();
+    }
   }
 });
 
