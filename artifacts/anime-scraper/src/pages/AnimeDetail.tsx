@@ -340,28 +340,13 @@ export default function AnimeDetail() {
         style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
         <ChevronRight className="w-5 h-5 text-white/60" />
       </button>
-      <div className="relative flex flex-col items-center gap-5 px-6">
-        <motion.p initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05, duration: 0.4 }}
-          className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide text-center">
-          اللهم صلِّ وسلِّم على نبينا محمد ﷺ
-        </motion.p>
-        {historyCover && (
-          <motion.img
-            initial={{ opacity: 0, scale: 0.88, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            src={historyCover} alt=""
-            className="w-32 h-[178px] rounded-2xl object-cover"
-            style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.80), 0 0 0 1px rgba(255,255,255,0.08)" }}
-          />
-        )}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
-          className="flex flex-col items-center gap-3">
-          <div className="relative w-9 h-9">
+      <div className="relative flex flex-col items-center justify-center">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}>
+          <div className="relative w-10 h-10">
             <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
             <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
               animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
           </div>
-          <p className="text-white/55 text-[13px] font-['Cairo']">جاري تحميل بيانات الأنمي…</p>
         </motion.div>
       </div>
     </div>
@@ -431,7 +416,7 @@ export default function AnimeDetail() {
         <div className="absolute inset-0" style={{
           background: "linear-gradient(to bottom,rgba(9,9,11,.3) 0%,rgba(9,9,11,.55) 50%,rgba(9,9,11,1) 100%)"
         }} />
-        <button onClick={() => navigate(-1 as any)}
+        <button onClick={() => { if (window.history.length > 1) navigate(-1 as any); else navigate("/"); }}
           className="absolute top-5 right-4 w-9 h-9 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90">
           <ChevronRight className="w-4 h-4 text-white" />
         </button>
