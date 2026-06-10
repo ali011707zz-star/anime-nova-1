@@ -1,5 +1,4 @@
 import nodemailer from "nodemailer";
-import { supabaseAdmin } from "./supabase-admin.js";
 
 const EMAIL_USER = process.env.EMAIL_USER || "";
 const EMAIL_PASS = process.env.EMAIL_PASS || "";
