@@ -416,7 +416,7 @@ export default function AnimeDetail() {
         <div className="absolute inset-0" style={{
           background: "linear-gradient(to bottom,rgba(9,9,11,.3) 0%,rgba(9,9,11,.55) 50%,rgba(9,9,11,1) 100%)"
         }} />
-        <button onClick={() => { if (window.history.length > 1) window.history.back(); else navigate("/"); }}
+        <button onClick={() => { navigate("/"); }}
           className="absolute top-5 right-4 w-9 h-9 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90">
           <ChevronRight className="w-4 h-4 text-white" />
         </button>
