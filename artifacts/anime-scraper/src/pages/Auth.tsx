@@ -322,7 +322,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
      LOGIN / SIGNUP SCREEN
   ══════════════════════════════════════════ */
   return (
-    <div className={`${isModal ? "px-6 pb-10 pt-2" : "min-h-screen flex flex-col items-center justify-center px-6 py-10"} relative`}>
+    <div className={`${isModal ? "px-6 pb-10 pt-2" : "min-h-screen flex flex-col items-center justify-start px-6 pt-14 pb-10"} relative`}>
       {!isModal && (
         <button onClick={onClose} className="absolute top-5 right-4 w-9 h-9 bg-white/6 border border-white/10 rounded-full flex items-center justify-center active:scale-90 z-10">
           <ChevronRight className="w-4 h-4 text-white/60" />
