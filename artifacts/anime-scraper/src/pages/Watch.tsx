@@ -1853,11 +1853,7 @@ export default function WatchPage() {
       setPhase("picker");
     } else {
       /* From picker → go back (avoids creating new history entry that causes infinite loop) */
-      if (window.history.length > 1) {
-        window.history.back();
-      } else {
-        navigate(animeId ? `/episodes/${animeId}` : "/");
-      }
+      navigate(animeId ? `/episodes/${animeId}` : "/");
     }
   }
 
