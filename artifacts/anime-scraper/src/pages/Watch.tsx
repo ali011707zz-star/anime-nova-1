@@ -286,7 +286,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
         {/* Prayer — ABOVE poster */}
         <motion.p
           initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05, duration: 0.4 }}
+          transition={{ delay: 0.03, duration: 0.18 }}
           className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide text-center">
           اللهم صلِّ وسلِّم على نبينا محمد ﷺ
         </motion.p>
@@ -296,7 +296,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
           <motion.div
             initial={{ opacity: 0, scale: 0.82, y: 28 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="relative flex-shrink-0">
             <img
               src={cover}
@@ -322,7 +322,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.45 }}
+          transition={{ delay: 0.08, duration: 0.18 }}
           className="text-center">
           {title && (
             <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-2"
@@ -418,14 +418,12 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
           className="relative mb-7"
           initial={{ opacity: 0, y: 36, scale: 0.88 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.05 }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: 0.03 }}
         >
           {/* Glow ring */}
-          <motion.div
+          <div
             className="absolute -inset-3 rounded-[28px] pointer-events-none"
-            style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.22) 0%, transparent 70%)" }}
-            animate={{ opacity: [0.5, 1, 0.5] }}
-            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+            style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.22) 0%, transparent 70%)", opacity: 0.7 }}
           />
           {cover ? (
             <img
@@ -438,11 +436,9 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
             <motion.div
               className="w-44 h-[248px] rounded-2xl overflow-hidden relative flex items-center justify-center"
               style={{ boxShadow: "0 24px 60px rgba(0,0,0,0.90), 0 0 0 1px rgba(255,255,255,0.09)", background: "rgba(30,10,60,0.95)" }}>
-              <motion.div
-                className="absolute inset-0 opacity-40"
-                style={{ background: "radial-gradient(ellipse at 50% 30%, rgba(139,92,246,0.55) 0%, transparent 65%)" }}
-                animate={{ opacity: [0.3, 0.55, 0.3] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              <div
+                className="absolute inset-0"
+                style={{ background: "radial-gradient(ellipse at 50% 30%, rgba(139,92,246,0.55) 0%, transparent 65%)", opacity: 0.4 }}
               />
               <div className="relative z-10 flex flex-col items-center gap-3">
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
@@ -457,9 +453,9 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
             className="absolute inset-0 flex items-center justify-center"
             initial={{ opacity: 0, scale: 0.6 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.28, duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ delay: 0.1, duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           >
-            <motion.div
+            <div
               className="w-[60px] h-[60px] rounded-full flex items-center justify-center"
               style={{
                 background: "rgba(109,40,217,0.82)",
@@ -467,11 +463,9 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
                 border: "2px solid rgba(167,139,250,0.40)",
                 boxShadow: "0 0 40px rgba(109,40,217,0.55), 0 8px 24px rgba(0,0,0,0.60)",
               }}
-              animate={{ scale: [1, 1.08, 1] }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
             >
               <Play className="w-7 h-7 text-white fill-white ml-1" />
-            </motion.div>
+            </div>
           </motion.div>
           {/* Bottom fade on cover */}
           <div className="absolute bottom-0 left-0 right-0 h-16 rounded-b-2xl pointer-events-none"
@@ -734,13 +728,11 @@ function ScraperPicker({
             <motion.div
               initial={{ opacity: 0, scale: 0.85, y: 24 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               className="relative shrink-0">
-              <motion.div
+              <div
                 className="absolute -inset-4 rounded-[28px] pointer-events-none"
-                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.28) 0%, transparent 68%)" }}
-                animate={{ opacity: [0.5, 1, 0.5] }}
-                transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.28) 0%, transparent 68%)", opacity: 0.7 }}
               />
               <img src={cover} alt={title}
                 className="w-48 h-[272px] rounded-2xl object-cover"

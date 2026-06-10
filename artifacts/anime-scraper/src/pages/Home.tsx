@@ -354,24 +354,14 @@ export default function Home() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.9, ease: "easeInOut" }}
+              transition={{ duration: 0.35, ease: "easeInOut" }}
             >
-              <motion.img
+              <img
                 src={hero.bannerImage || hero.coverImage?.extraLarge || hero.coverImage?.large}
                 alt=""
                 className="w-full h-full object-cover"
                 draggable={false}
-                initial={{ scale: 1.12 }}
-                animate={{
-                  scale: 1.06,
-                  x: heroMouse.x * 18,
-                  y: heroMouse.y * 10,
-                }}
-                transition={{
-                  scale: { duration: 9, ease: "linear" },
-                  x: { duration: 0.8, ease: "easeOut" },
-                  y: { duration: 0.8, ease: "easeOut" },
-                }}
+                style={{ transform: "scale(1.06)" }}
               />
             </motion.div>
           </AnimatePresence>
@@ -396,14 +386,14 @@ export default function Home() {
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10, transition: { duration: 0.18 } }}
-                  transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
+                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1], delay: 0.04 }}
                 >
                   {/* Badges row */}
                   <motion.div
                     className="flex items-center gap-1.5 mb-3 flex-wrap"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 0.2 }}
+                    transition={{ duration: 0.18, delay: 0.07 }}
                   >
                     {hero.genres?.slice(0, 3).map((g: string) => (
                       <span key={g} className="text-[9px] font-black bg-white/10 backdrop-blur-md text-white/75 px-2.5 py-0.5 rounded-full border border-white/10 tracking-wide">
@@ -428,7 +418,7 @@ export default function Home() {
                     style={{ fontSize: "clamp(28px, 6vw, 42px)", textShadow: "0 4px 30px rgba(0,0,0,0.9)" }}
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.45, delay: 0.25 }}
+                    transition={{ duration: 0.18, delay: 0.09 }}
                   >
                     {hero.title?.romaji}
                   </motion.h1>
@@ -438,7 +428,7 @@ export default function Home() {
                     className="text-white/45 text-xs font-bold mb-5"
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 0.3 }}
+                    transition={{ duration: 0.18, delay: 0.11 }}
                   >
                     {hero.episodes ? `${hero.episodes} حلقة` : ""}
                     {hero.episodes && hero.format ? " · " : ""}
@@ -450,7 +440,7 @@ export default function Home() {
                     className="flex gap-2.5 items-center"
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 0.35 }}
+                    transition={{ duration: 0.18, delay: 0.13 }}
                   >
                     <Link href={`/episodes/${hero.id}`}>
                       <motion.button
@@ -459,12 +449,6 @@ export default function Home() {
                         className="relative overflow-hidden text-white text-sm font-black px-7 py-3.5 rounded-2xl flex items-center gap-2 shadow-2xl"
                         style={{ background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)", boxShadow: "0 8px 28px rgba(109,40,217,0.5)" }}
                       >
-                        <motion.span
-                          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/25 to-transparent -skew-x-12"
-                          initial={{ x: "-120%" }}
-                          animate={{ x: "220%" }}
-                          transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 3, ease: "easeInOut" }}
-                        />
                         <Play className="w-4 h-4 fill-current relative z-10" />
                         <span className="relative z-10">مشاهدة الآن</span>
                       </motion.button>
@@ -490,18 +474,17 @@ export default function Home() {
                   initial={{ opacity: 0, scale: 0.85, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-                  transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay: 0.2 }}
+                  transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: 0.08 }}
                   style={{ perspective: "600px" }}
                 >
-                  <motion.div
+                  <div
                     className="relative overflow-hidden shadow-2xl bg-[#111]"
                     style={{
                       width: "clamp(82px, 22vw, 120px)",
                       height: "clamp(118px, 31vw, 172px)",
                       borderRadius: 14,
-                      transformStyle: "preserve-3d",
                       transform: `rotateX(${posterTilt.rx}deg) rotateY(${posterTilt.ry}deg)`,
-                      transition: "transform 0.6s cubic-bezier(0.22, 1, 0.36, 1)",
+                      transition: "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
                       boxShadow: "0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.1)",
                     }}
                   >
@@ -511,13 +494,7 @@ export default function Home() {
                       className="w-full h-full object-cover"
                       draggable={false}
                     />
-                    {/* Poster shimmer */}
-                    <motion.div
-                      className="absolute inset-0 bg-gradient-to-br from-white/15 via-transparent to-transparent"
-                      animate={{ opacity: [0.3, 0.6, 0.3] }}
-                      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                    />
-                  </motion.div>
+                  </div>
                 </motion.div>
               </AnimatePresence>
             </div>
@@ -571,7 +548,7 @@ export default function Home() {
                     opacity: i === heroIdx ? 1 : 0.28,
                     backgroundColor: i === heroIdx ? "#8B5CF6" : "#ffffff",
                   }}
-                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
                   className="h-1.5 rounded-full"
                   style={{ width: 5 }}
                 />
@@ -658,7 +635,7 @@ export default function Home() {
                           <motion.div className="h-full rounded-full"
                             initial={{ width: 0 }}
                             animate={{ width: `${pct}%` }}
-                            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+                            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
                             style={{ background: `linear-gradient(90deg, ${accentColor}, ${accentColor}CC)` }} />
                         </div>
                         <p className="text-[9px] text-white/90 font-black truncate leading-tight font-['Cairo']">
