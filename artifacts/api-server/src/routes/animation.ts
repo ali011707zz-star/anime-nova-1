@@ -992,6 +992,150 @@ router.get("/animation/quick-check", async (req: Request, res: Response) => {
   res.json({ available });
 });
 
+// ── aflaam.com helpers ────────────────────────────────────────────────────────
+const AFLAAM_BASE = "https://aflaam.com";
+
+async function aflaamSearch(
+  q: string,
+  kind: "movie" | "series"
+): Promise<{ id: string; slug: string }[]> {
+  const html = await cfGet(
+    `${AFLAAM_BASE}/search?q=${encodeURIComponent(q)}`,
+    AFLAAM_BASE + "/"
+  );
+  const out: { id: string; slug: string }[] = [];
+  const re = new RegExp(
+    `href="https:\\/\\/aflaam\\.com\\/${kind}\\/(\\d+)\\/([^"]+)"`, "g"
+  );
+  let m: RegExpExecArray | null;
+  const seen = new Set<string>();
+  while ((m = re.exec(html)) !== null) {
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    out.push({ id: m[1], slug: m[2] });
+  }
+  return out;
+}
+
+function parseAflaamMp4s(html: string): { url: string; size: string }[] {
+  const out: { url: string; size: string }[] = [];
+  const seen = new Set<string>();
+  let idx = 0;
+  while (true) {
+    const s = html.indexOf("<source", idx);
+    if (s === -1) break;
+    const e = html.indexOf("/>", s);
+    if (e === -1) break;
+    const tag = html.slice(s, e + 2);
+    idx = e + 2;
+    const srcM  = /src="([^"]+)"/.exec(tag);
+    const sizeM = /size="(\d+)"/.exec(tag);
+    if (!srcM || !srcM[1].startsWith("http")) continue;
+    const url = srcM[1].trim();
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, size: sizeM ? sizeM[1] : "720" });
+  }
+  return out;
+}
+
+async function aflaamWatchSources(
+  watchUrl: string,
+  ref: string
+): Promise<{ url: string; size: string }[]> {
+  const html = await cfGet(watchUrl, ref);
+  return parseAflaamMp4s(html);
+}
+
+async function scrapeAflaamMovie(
+  title: string,
+  enTitle?: string
+): Promise<{ url: string; quality: string }[]> {
+  for (const t of [title, enTitle].filter(Boolean) as string[]) {
+    try {
+      const results = await aflaamSearch(t, "movie");
+      if (!results.length) continue;
+      const best = results
+        .map(r => ({ ...r, sc: titleSim(t, r.slug.replace(/-/g, " ")) }))
+        .sort((a, b) => b.sc - a.sc)[0];
+      if (best.sc < 0.15) continue;
+
+      const movieRef  = `${AFLAAM_BASE}/movie/${best.id}/${best.slug}`;
+      const movieHtml = await cfGet(movieRef, AFLAAM_BASE + "/");
+      const wre       = /href="(https:\/\/aflaam\.com\/watch\/\d+\/[^"]+)"/g;
+      let m: RegExpExecArray | null;
+      const watchUrls: string[] = [];
+      const ws = new Set<string>();
+      while ((m = wre.exec(movieHtml)) !== null) {
+        if (ws.has(m[1])) continue; ws.add(m[1]); watchUrls.push(m[1]);
+      }
+      if (!watchUrls.length) continue;
+
+      const srcs = await aflaamWatchSources(watchUrls[0], movieRef);
+      if (srcs.length) return srcs.map(s => ({ url: s.url, quality: s.size }));
+    } catch { continue; }
+  }
+  return [];
+}
+
+async function scrapeAflaamSeries(
+  title: string,
+  epNum: number,
+  season: number,
+  enTitle?: string
+): Promise<{ url: string; quality: string }[]> {
+  for (const t of [title, enTitle].filter(Boolean) as string[]) {
+    try {
+      const results = await aflaamSearch(t, "series");
+      if (!results.length) continue;
+
+      const best = results
+        .map(r => {
+          let sc = titleSim(t, r.slug.replace(/-/g, " "));
+          if (season > 1 && new RegExp(`-${season}(?:-|$)`).test(r.slug)) sc += 0.3;
+          return { ...r, sc };
+        })
+        .sort((a, b) => b.sc - a.sc)[0];
+      if (best.sc < 0.1) continue;
+
+      const seriesRef  = `${AFLAAM_BASE}/series/${best.id}/${best.slug}`;
+      const seriesHtml = await cfGet(seriesRef, AFLAAM_BASE + "/");
+      const epRe       = /href="https:\/\/aflaam\.com\/episode\/(\d+)\/([^"]+)"/g;
+      let m: RegExpExecArray | null;
+      const episodes: { epId: string; epSlug: string; num: number }[] = [];
+      const eseen = new Set<string>();
+      while ((m = epRe.exec(seriesHtml)) !== null) {
+        if (eseen.has(m[1])) continue; eseen.add(m[1]);
+        const decoded = decodeURIComponent(m[2]);
+        const numM    = /(\d+)\s*$/.exec(decoded);
+        episodes.push({
+          epId   : m[1],
+          epSlug : m[2],
+          num    : numM ? parseInt(numM[1]) : episodes.length + 1,
+        });
+      }
+      if (!episodes.length) continue;
+
+      const target = episodes.find(e => e.num === epNum) ?? episodes[epNum - 1];
+      if (!target) continue;
+
+      const epRef  = `${AFLAAM_BASE}/episode/${target.epId}/${target.epSlug}`;
+      const epHtml = await cfGet(epRef, seriesRef);
+      const watchUrls: string[] = [];
+      const wre   = /href="(https:\/\/aflaam\.com\/watch\/\d+\/[^"]+)"/g;
+      const wseen = new Set<string>();
+      while ((m = wre.exec(epHtml)) !== null) {
+        if (wseen.has(m[1])) continue; wseen.add(m[1]); watchUrls.push(m[1]);
+      }
+      if (!watchUrls.length) continue;
+
+      const srcs = await aflaamWatchSources(watchUrls[0], epRef);
+      if (srcs.length) return srcs.map(s => ({ url: s.url, quality: s.size }));
+    } catch { continue; }
+  }
+  return [];
+}
+
 // ── SSE animation sources stream ──────────────────────────────────────────────
 
 router.get("/animation/sources-stream", async (req: Request, res: Response) => {
@@ -1628,6 +1772,42 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }
 
           clearTimeout(timer);
+        } catch { /* silent */ }
+      })(),
+
+      // ── aflaam.com — مباشر MP4 عربي متعدد الجودات ───────────────────────────
+      (async () => {
+        if (!title) return;
+        try {
+          send("status", { msg: "aflaam: جاري البحث…" });
+
+          // Get English title from TMDB for better search accuracy
+          let enTitle = "";
+          if (tmdbId) {
+            try {
+              const r = await fetch(
+                `${TMDB_BASE}/${type === "tv" ? "tv" : "movie"}/${tmdbId}?api_key=${TMDB_KEY}&language=en`,
+                { signal: AbortSignal.timeout(6_000) }
+              );
+              if (r.ok) {
+                const d: any = await r.json();
+                enTitle = d.title || d.name || "";
+              }
+            } catch { /* skip */ }
+          }
+
+          const sources = type === "tv"
+            ? await scrapeAflaamSeries(title, epNum, season, enTitle || undefined)
+            : await scrapeAflaamMovie(title, enTitle || undefined);
+
+          for (const src of sources) {
+            const qLabel  = src.quality === "1080" ? "1080p FHD"
+              : src.quality === "720" ? "720p HD"
+              : src.quality === "480" ? "480p SD"
+              : `${src.quality}p`;
+            const proxied = wrapMp4(src.url, `${AFLAAM_BASE}/`);
+            sendSource(proxied, `aflaam · ${qLabel}`, proxied, proxied);
+          }
         } catch { /* silent */ }
       })(),
 
