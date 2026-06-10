@@ -1468,26 +1468,49 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const servers: any[] = (data.servers || []);
                 if (!servers.length) console.warn(`[StarCima/vidzee] No servers returned for tmdbId=${tmdbId}`);
 
-                await Promise.allSettled(servers.map(async (srv) => {
-                  if (!srv.url) return;
-                  let rawUrl  = String(srv.url);
-                  let referer = SC_REF_HLS;
+                // Build list of (proxied URL, label) for all servers
+                const prepared = servers
+                  .filter((srv: any) => !!srv.url)
+                  .map((srv: any) => {
+                    let rawUrl  = String(srv.url);
+                    let referer = SC_REF_HLS;
+                    if (rawUrl.includes(`${SC_BASE}/cdn/?`)) {
+                      try {
+                        const pu = new URL(rawUrl);
+                        rawUrl   = pu.searchParams.get("url")     || rawUrl;
+                        referer  = pu.searchParams.get("referer") || SC_REF_HLS;
+                      } catch { /* keep original */ }
+                    }
+                    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
+                    const label   = `StarCima · ${srv.name || "HD"}`;
+                    return { proxied, label };
+                  });
 
-                  // Unwrap starcima CDN proxy: /cdn/?url=...&referer=...
-                  if (rawUrl.includes(`${SC_BASE}/cdn/?`)) {
+                // Probe all CDN URLs in parallel — only send servers that return HTTP 200.
+                // This filters out dead workers.dev (403) and foreign CDNs (404).
+                // Fallback: if ALL fail, send all anyway (better than nothing).
+                const PROBE_PORT = process.env.PORT || 8080;
+                const probeResults = await Promise.allSettled(
+                  prepared.map(async ({ proxied, label }) => {
                     try {
-                      const pu   = new URL(rawUrl);
-                      rawUrl     = pu.searchParams.get("url")     || rawUrl;
-                      referer    = pu.searchParams.get("referer") || SC_REF_HLS;
-                    } catch { /* keep original */ }
-                  }
+                      const pr = await fetch(`http://localhost:${PROBE_PORT}${proxied}`, {
+                        signal: AbortSignal.timeout(7_000),
+                      });
+                      return { proxied, label, ok: pr.ok };
+                    } catch {
+                      return { proxied, label, ok: false };
+                    }
+                  })
+                );
 
-                  // No probe — CDN URLs are time-sensitive and may fail HEAD from Replit IP.
-                  // Player handles failures and auto-falls to next source.
-                  const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-                  const label   = srv.name || "الثريا";
+                const probed = probeResults
+                  .filter(r => r.status === "fulfilled")
+                  .map(r => (r as PromiseFulfilledResult<{ proxied: string; label: string; ok: boolean }>).value);
+
+                const working = probed.filter(s => s.ok);
+                for (const { proxied, label } of working) {
                   sendSource(proxied, label, proxied, proxied);
-                }));
+                }
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
             })(),
 
