@@ -382,7 +382,7 @@ export default function EpisodeListPage() {
         <motion.img
           initial={{ scale: 1.08, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
           src={anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large}
           alt=""
           className="w-full h-full object-cover"
@@ -431,7 +431,7 @@ export default function EpisodeListPage() {
                 className="h-full bg-primary rounded-full"
                 initial={{ width: 0 }}
                 animate={{ width: `${pct}%` }}
-                transition={{ duration: 0.6, ease: "easeOut" }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
               />
             </div>
             <span className="text-[9px] text-white/30 font-bold shrink-0">{pct}%</span>
