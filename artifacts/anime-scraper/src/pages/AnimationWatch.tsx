@@ -447,7 +447,7 @@ export default function AnimationWatch() {
         let r: Response;
         try {
           r = await fetch(
-            `/api/animation/subtitle-tracks?tmdbId=${encodeURIComponent(tmdbId)}&type=${type}&ep=${ep}&season=${season}`,
+            `/api/animation/subtitle-tracks?tmdbId=${encodeURIComponent(tmdbId)}&type=${type}&ep=${ep}&season=${season}&title=${encodeURIComponent(displayTitle)}`,
             { signal: trackCtrl.signal }
           );
         } finally { clearTimeout(trackTid); }
