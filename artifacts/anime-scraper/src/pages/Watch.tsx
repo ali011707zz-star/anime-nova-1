@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
+import { useAuth } from "@/lib/auth-context";
+import { saveProgress as saveProgressServer } from "@/lib/db";
 import {
   ChevronRight, ChevronLeft, Play, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
@@ -42,7 +44,7 @@ interface SubSettings {
 const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
 
 /* ══════════════════════════════════ HELPERS ══════════════════ */
-function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0) {
+function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0, userId?: string | null) {
   if (localStorage.getItem("pref-automark") === "false") return;
   try {
     const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
@@ -51,6 +53,14 @@ function saveHistory(id: number, title: string, cover: string, ep: number, total
        ...h.filter(x => !(x.id === id && x.ep === ep))].slice(0, 60)
     ));
   } catch {}
+  /* Server sync */
+  if (userId) {
+    fetch("/api/user/history", {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ animeId: id, animeTitle: title, animeCover: cover, animeType: "anime", episodeNumber: ep }),
+    }).catch(() => {});
+  }
 }
 
 const QUALITY_LABELS: Quality[] = ["1080p FHD", "720p HD", "360p SD"];
@@ -1017,12 +1027,14 @@ function MegaEmbedPlayer({
 function EpisodePlayer({
   servers, quality, allServers,
   title, epTitle, cover, ep, totalEps, animeTitle, animeId,
+  userId,
   initialServer, downloadUrl, subtitleUrl, subtitleSite, skipTimes,
   onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; epTitle?: string; cover: string; ep: number; totalEps: number; animeTitle: string;
   animeId: number;
+  userId?: string | null;
   initialServer?: number; downloadUrl?: string; subtitleUrl?: string; subtitleSite?: string; skipTimes?: SkipTimes;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onChangeQuality: (q: Quality) => void;
@@ -1047,8 +1059,10 @@ function EpisodePlayer({
     const t = lastTimeRef.current;
     if (t > 10) {
       try { localStorage.setItem(progressKey, String(Math.floor(t))); } catch {}
+      saveProgressServer(userId ?? null, animeId, ep, t, 0, "anime");
     }
-  }, [progressKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progressKey, userId, animeId, ep]);
 
   /* Save on: unmount, tab hidden, page unload */
   useEffect(() => {
@@ -1101,9 +1115,10 @@ function EpisodePlayer({
     if (t > 60 && now - lastSaveTs.current > 30000) {
       lastSaveTs.current = now;
       try { localStorage.setItem(progressKey, String(Math.floor(t))); } catch {}
+      saveProgressServer(userId ?? null, animeId, ep, t, 0, "anime");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progressKey]);
+  }, [progressKey, userId, animeId, ep]);
 
   /* ── Reset on quality tier change only ── */
   useEffect(() => {
@@ -1730,6 +1745,8 @@ const EMPTY_SLOTS = (): Record<string, SlotStatus> =>
 
 export default function WatchPage() {
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
 
   const sp           = useRef(new URLSearchParams(window.location.search)).current;
   const animeId      = parseInt(sp.get("anime") || "0");
@@ -1805,9 +1822,9 @@ export default function WatchPage() {
 
   /* ── Early history save using URL params — before AniList data loads ── */
   useEffect(() => {
-    if (animeId && titleParam) saveHistory(animeId, titleParam, coverParam, ep);
+    if (animeId && titleParam) saveHistory(animeId, titleParam, coverParam, ep, 0, userId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId]);
 
   /* Fetch AniList metadata */
   useEffect(() => {
@@ -1823,7 +1840,7 @@ export default function WatchPage() {
         const d = j.data?.Media;
         if (d) {
           setAnime(d);
-          saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0);
+          saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0, userId);
           /* ── Fetch AniSkip timestamps via server proxy (avoids CORS) ── */
           setSkipTimes({});
           if (d.idMal) {
@@ -2144,6 +2161,7 @@ export default function WatchPage() {
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
           onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
+          userId={userId}
           onTierExhausted={() => setPhase("picker")}
         />
       </motion.div>

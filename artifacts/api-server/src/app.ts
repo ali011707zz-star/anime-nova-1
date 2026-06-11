@@ -2,7 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
-import userRouter from "./routes/user.js";
+import userdataRouter from "./routes/userdata.js";
 import { logger } from "./lib/logger";
 import { setupAuth } from "./auth/replitAuth";
 import { registerAuthRoutes } from "./auth/routes";
@@ -40,7 +40,7 @@ export async function createApp(): Promise<Express> {
   registerEmailAuthRoutes(app);
 
   app.use("/api", router);
-  app.use("/api", userRouter);
+  app.use("/api", userdataRouter);
 
   return app;
 }

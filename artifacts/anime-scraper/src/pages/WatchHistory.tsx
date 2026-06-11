@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
 import { ChevronRight, Play, Trash2, Clock, History, Tv, Film } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/lib/auth-context";
 
 interface AnimeHistoryItem {
   kind: "anime";
+  serverId?: string;
   id: number;
   title: string;
   cover: string;
@@ -54,12 +56,12 @@ function getAnimProgress(tmdbId: string, type: string, season: number, ep: numbe
   try { return parseFloat(localStorage.getItem(`anim-wp-${tmdbId}-${type}-${season}-${ep}`) || "0") || 0; } catch { return 0; }
 }
 
-function loadHistory(): HistoryItem[] {
+function loadLocalHistory(): HistoryItem[] {
   const anime: AnimeHistoryItem[] = [];
   try {
     const raw = JSON.parse(localStorage.getItem("watch-history") || "[]");
     for (const x of raw) {
-      if (x?.id && x?.title) anime.push({ kind: "anime", ...x });
+      if (x?.id && x?.title) anime.push({ kind: "anime", id: x.id, title: x.title, cover: x.cover || "", ep: x.ep, date: x.date, totalEps: x.totalEps || 0 });
     }
   } catch { /* ignore */ }
 
@@ -70,19 +72,8 @@ function loadHistory(): HistoryItem[] {
       const tmdbId = x?.tmdbId || x?.id;
       if (!tmdbId || !x?.title) continue;
       const rawCover = x.cover || x.poster || "";
-      const fullCover = rawCover && !rawCover.startsWith("http")
-        ? `https://image.tmdb.org/t/p/w300${rawCover}`
-        : rawCover;
-      anim.push({
-        kind: "anim",
-        tmdbId: String(tmdbId),
-        type: x.type || "movie",
-        title: x.title,
-        cover: fullCover,
-        ep: x.ep || 1,
-        season: x.season || 1,
-        date: x.date || new Date().toISOString(),
-      });
+      const fullCover = rawCover && !rawCover.startsWith("http") ? `https://image.tmdb.org/t/p/w300${rawCover}` : rawCover;
+      anim.push({ kind: "anim", tmdbId: String(tmdbId), type: x.type || "movie", title: x.title, cover: fullCover, ep: x.ep || 1, season: x.season || 1, date: x.date || new Date().toISOString() });
     }
   } catch { /* ignore */ }
 
@@ -91,33 +82,81 @@ function loadHistory(): HistoryItem[] {
   return all;
 }
 
+async function loadServerHistory(): Promise<AnimeHistoryItem[]> {
+  try {
+    const res = await fetch("/api/user/history?limit=60", { credentials: "include" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.history || []).map((r: any) => ({
+      kind: "anime" as const,
+      serverId: r.id,
+      id: r.animeId,
+      title: r.animeTitle || "",
+      cover: r.animeCover || "",
+      ep: r.episodeNumber,
+      date: r.watchedAt,
+      totalEps: 0,
+    }));
+  } catch { return []; }
+}
+
 export default function WatchHistory() {
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const userId = user?.id || null;
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setHistory(loadHistory());
-  }, []);
+    async function load() {
+      setLoading(true);
+      if (userId) {
+        const server = await loadServerHistory();
+        const anim: AnimHistoryItem[] = [];
+        try {
+          const raw = JSON.parse(localStorage.getItem("anim-watch-history") || "[]");
+          for (const x of raw) {
+            const tmdbId = x?.tmdbId || x?.id;
+            if (!tmdbId || !x?.title) continue;
+            const rawCover = x.cover || x.poster || "";
+            const fullCover = rawCover && !rawCover.startsWith("http") ? `https://image.tmdb.org/t/p/w300${rawCover}` : rawCover;
+            anim.push({ kind: "anim", tmdbId: String(tmdbId), type: x.type || "movie", title: x.title, cover: fullCover, ep: x.ep || 1, season: x.season || 1, date: x.date || new Date().toISOString() });
+          }
+        } catch {}
+        const all: HistoryItem[] = [...server, ...anim];
+        all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setHistory(all);
+      } else {
+        setHistory(loadLocalHistory());
+      }
+      setLoading(false);
+    }
+    load();
+  }, [userId]);
 
-  function removeAnime(id: number, ep: number) {
+  function removeAnime(serverId: string | undefined, id: number, ep: number) {
+    if (userId && serverId) {
+      fetch(`/api/user/history/${serverId}`, { method: "DELETE", credentials: "include" }).catch(() => {});
+    }
     try {
       const raw: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
-      const updated = raw.filter(x => !(x.id === id && x.ep === ep));
-      localStorage.setItem("watch-history", JSON.stringify(updated));
-    } catch { /* ignore */ }
-    setHistory(loadHistory());
+      localStorage.setItem("watch-history", JSON.stringify(raw.filter(x => !(x.id === id && x.ep === ep))));
+    } catch {}
+    setHistory(h => h.filter(x => !(x.kind === "anime" && x.id === id && x.ep === ep)));
   }
 
   function removeAnim(tmdbId: string, type: string, ep: number, season: number) {
     try {
       const raw: any[] = JSON.parse(localStorage.getItem("anim-watch-history") || "[]");
-      const updated = raw.filter(x => !((x.id === tmdbId || x.tmdbId === tmdbId) && x.type === type && x.ep === ep && x.season === season));
-      localStorage.setItem("anim-watch-history", JSON.stringify(updated));
-    } catch { /* ignore */ }
-    setHistory(loadHistory());
+      localStorage.setItem("anim-watch-history", JSON.stringify(raw.filter(x => !((x.id === tmdbId || x.tmdbId === tmdbId) && x.type === type && x.ep === ep && x.season === season))));
+    } catch {}
+    setHistory(h => h.filter(x => !(x.kind === "anim" && x.tmdbId === tmdbId && x.type === type && x.ep === ep && x.season === season)));
   }
 
   function clearAll() {
+    if (userId) {
+      fetch("/api/user/history", { method: "DELETE", credentials: "include" }).catch(() => {});
+    }
     localStorage.removeItem("watch-history");
     localStorage.removeItem("anim-watch-history");
     setHistory([]);
@@ -143,13 +182,17 @@ export default function WatchHistory() {
           )}
         </div>
         {history.length > 0 && (
-          <p className="text-white/25 text-[11px] font-['Cairo'] mt-1 pr-1">{history.length} عنوان مشاهَد</p>
+          <p className="text-white/25 text-[11px] font-['Cairo'] mt-1 pr-1">{history.length} عنوان مشاهَد {userId && <span className="text-violet-400/60">· محفوظ بحسابك</span>}</p>
         )}
       </div>
 
       {/* Content */}
       <div className="px-4 mt-4">
-        {history.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-28">
+            <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+          </div>
+        ) : history.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
             className="flex flex-col items-center justify-center py-28 gap-5">
@@ -234,7 +277,7 @@ export default function WatchHistory() {
                           </button>
                         </Link>
                         <button
-                          onClick={() => removeAnime(item.id, item.ep)}
+                          onClick={() => removeAnime(item.serverId, item.id, item.ep)}
                           className="w-10 h-10 rounded-xl bg-white/4 border border-white/7 flex items-center justify-center active:scale-90 transition-transform">
                           <Trash2 className="w-3.5 h-3.5 text-white/25" />
                         </button>
