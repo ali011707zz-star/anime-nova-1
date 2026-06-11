@@ -114,7 +114,7 @@ const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
   Page(page:1,perPage:25){
     airingSchedules(airingAt_greater:$gt,airingAt_lesser:$lt,sort:[TIME_DESC]){
       episode airingAt
-      media{id title{romaji english}coverImage{large}averageScore format isAdult}
+      media{id title{romaji english}coverImage{large}averageScore popularity format isAdult}
     }
   }
 }`;
@@ -192,6 +192,7 @@ export default function Home() {
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>([]);
+  const [todayChecking, setTodayChecking] = useState(false);
 
   /* Load continue-watching from localStorage (fast, synchronous) */
   useEffect(() => {
@@ -218,22 +219,43 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  /* Load today's airing episodes (last 36h → next 4h) */
+  /* Load today's airing episodes (last 36h → next 4h) + verify Arabic availability */
   useEffect(() => {
     const now = Math.floor(Date.now() / 1000);
     const gt  = now - 36 * 3600;
     const lt  = now + 4  * 3600;
+    setTodayChecking(true);
     fetch("https://graphql.anilist.co", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: TODAY_EPISODES_QUERY, variables: { gt, lt } }),
     })
       .then(r => r.json())
-      .then(d => {
+      .then(async d => {
         const arr = (d.data?.Page?.airingSchedules || [])
           .filter((s: any) => !s.media?.isAdult && s.media?.id);
-        setTodayEps(arr);
+        if (!arr.length) { setTodayEps([]); setTodayChecking(false); return; }
+        // التحقق من توفر المصادر العربية
+        const titles = arr.map((s: any) => s.media?.title?.romaji || s.media?.title?.english || "").filter(Boolean);
+        try {
+          const params = new URLSearchParams();
+          titles.forEach((t: string) => params.append("t", t));
+          const checkRes = await fetch(`/api/anime/check-arabic?${params}`, { signal: AbortSignal.timeout(8000) });
+          const { available } = await checkRes.json() as { available: string[] };
+          const availSet = new Set(available.map((t: string) => t.toLowerCase().trim()));
+          const filtered = arr.filter((s: any) => {
+            const romaji  = (s.media?.title?.romaji  || "").toLowerCase().trim();
+            const english = (s.media?.title?.english || "").toLowerCase().trim();
+            return availSet.has(romaji) || availSet.has(english);
+          });
+          setTodayEps(filtered);
+        } catch {
+          // عند فشل التحقق: أظهر الأنمي الأكثر شهرة فقط (تصفية بديلة)
+          const filtered = arr.filter((s: any) => (s.media?.popularity ?? 0) >= 2000);
+          setTodayEps(filtered);
+        }
+        setTodayChecking(false);
       })
-      .catch(() => {});
+      .catch(() => { setTodayChecking(false); });
   }, []);
 
   useEffect(() => {

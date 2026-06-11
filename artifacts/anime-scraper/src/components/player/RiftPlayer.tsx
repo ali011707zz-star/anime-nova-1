@@ -150,7 +150,7 @@ export default function RiftPlayer({
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, lastX: 0, startValue: 0 });
   const volumeRef     = useRef(1);
-  const brightnessRef = useRef(1);
+  const brightnessRef = useRef(1.5);
   const lastTap      = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const longTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSpeed    = useRef(1);
@@ -175,7 +175,7 @@ export default function RiftPlayer({
   const [buffered,        setBuffered]        = useState(0);
   const [muted,           setMuted]           = useState(false);
   const [volume,          setVolume]          = useState(1);
-  const [brightness,      setBrightness]      = useState(1);
+  const [brightness,      setBrightness]      = useState(1.5);
   const [speed,           setSpeed]           = useState(() => parseFloat(localStorage.getItem("pref-speed") || "1"));
   const [showCtrl,        setShowCtrl]        = useState(true);
   const [isFs,            setIsFs]            = useState(false);
@@ -699,7 +699,7 @@ export default function RiftPlayer({
       // Same directional fix as volume
       const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
-      const nB = Math.max(0.1, Math.min(1.1, brightnessRef.current + dV / 180));
+      const nB = Math.max(0.3, Math.min(2.0, brightnessRef.current + dV / 180));
       brightnessRef.current = nB;
       setBrightness(nB); setFeedback({ type: "brightness", value: nB });
     }
@@ -963,7 +963,7 @@ export default function RiftPlayer({
               className="absolute left-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 pointer-events-none">
               <div className="relative rounded-full overflow-hidden" style={{ width: 4, height: 110, background: "rgba(255,255,255,0.15)" }}>
                 <div className="absolute bottom-0 left-0 right-0 rounded-full"
-                  style={{ background: "rgba(253,224,71,0.90)", height: `${Math.min(Math.max((feedback.value - 0.1) / 1.9 * 100, 0), 100)}%`, transition: "height 0.06s" }} />
+                  style={{ background: "rgba(253,224,71,0.90)", height: `${Math.min(Math.max((feedback.value - 0.3) / 1.7 * 100, 0), 100)}%`, transition: "height 0.06s" }} />
               </div>
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
                 style={{ background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.12)" }}>
