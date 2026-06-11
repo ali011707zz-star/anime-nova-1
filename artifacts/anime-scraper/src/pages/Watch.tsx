@@ -2041,6 +2041,9 @@ export default function WatchPage() {
   }
 
   function handleBack() {
+    document.querySelectorAll<HTMLVideoElement>("video, audio").forEach(v => {
+      try { v.pause(); v.src = ""; } catch {}
+    });
     if (phase === "player") {
       /* From player → go back to source picker */
       setPhase("picker");

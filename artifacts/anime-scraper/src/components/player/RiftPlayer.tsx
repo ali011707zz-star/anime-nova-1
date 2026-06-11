@@ -248,6 +248,7 @@ export default function RiftPlayer({
       v.addEventListener("play", resume);
       cleanup = () => {
         v.removeEventListener("play", resume);
+        try { gain.gain.cancelScheduledValues(0); gain.gain.value = 0; } catch {}
         ctx.close().catch(() => {});
         audioCtxRef.current = null;
         gainNodeRef.current = null;
@@ -1055,7 +1056,7 @@ export default function RiftPlayer({
                   paddingRight: 14,
                 }}
                 onClick={e => e.stopPropagation()}
-                onTouchStart={e => e.stopPropagation()}
+                onTouchStart={e => { e.stopPropagation(); showControls(); }}
                 onTouchEnd={e => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -1080,12 +1081,12 @@ export default function RiftPlayer({
                       {title || "Nova Player"}
                     </h1>
                     {/* Row 3: episode + episode title */}
-                    <div className="flex items-center gap-1.5 mt-[4px] flex-wrap">
-                      <span className="text-white/55 text-[12px] font-black font-['Cairo']">الحلقة {ep}</span>
+                    <div className="flex items-center gap-1.5 mt-[4px] overflow-hidden">
+                      <span className="text-white/55 text-[12px] font-black font-['Cairo'] shrink-0">الحلقة {ep}</span>
                       {epTitle && (
                         <>
-                          <span className="text-white/25 text-[10px]">·</span>
-                          <span className="text-violet-200/85 text-[12px] font-['Cairo'] line-clamp-1" style={{ maxWidth: "min(240px, 50vw)" }}>{epTitle}</span>
+                          <span className="text-white/25 text-[10px] shrink-0">·</span>
+                          <span className="text-violet-200/85 text-[12px] font-['Cairo'] truncate">{epTitle}</span>
                         </>
                       )}
                     </div>
