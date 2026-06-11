@@ -1943,6 +1943,7 @@ export default function WatchPage() {
   const autoPlayedRef     = useRef(false);
   const upgradedToFhdRef  = useRef(false);
   const phaseRef          = useRef<"picker" | "player">("picker");
+  const [autoPlayReady,   setAutoPlayReady]   = useState(false);
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -2142,9 +2143,16 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* ── 2.5s min-wait before auto-play (gives AnimeDay + other fast scrapers time to finish) ── */
+  useEffect(() => {
+    const t = setTimeout(() => setAutoPlayReady(true), 2500);
+    return () => clearTimeout(t);
+  }, []);
+
   /* ── Auto-play: fire on first available source of any quality ── */
   useEffect(() => {
     if (autoPlayedRef.current) return;
+    if (!autoPlayReady) return;
     if (phase !== "picker") return;
     const allSrcs: FetchedSrc[] = [];
     const seenKeys = new Set<string>();
@@ -2180,7 +2188,7 @@ export default function WatchPage() {
       setPhase("player");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slotSources, phase]);
+  }, [slotSources, phase, autoPlayReady]);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
