@@ -773,29 +773,17 @@ function ScraperPicker({
   const animeSeason  = anime?.seasonYear ? `${SEASON_MAP[anime.season] || ""} ${anime.seasonYear}`.trim() : "";
   const animeBanner  = anime?.bannerImage || anime?.coverImage?.extraLarge || cover;
 
-  /* ── Shared: hero section (banner + cover row) ── */
+  /* ── Shared: hero section (compact header — no large banner) ── */
   const HeroSection = (
     <>
-      {/* Banner */}
-      <div className="relative w-full overflow-hidden shrink-0" style={{ height: 220 }}>
-        {animeBanner ? (
-          <img src={animeBanner} alt="" className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full"
-            style={{ background: "linear-gradient(135deg,rgba(109,40,217,0.45) 0%,rgba(79,30,180,0.20) 60%,rgba(9,9,11,1) 100%)" }} />
-        )}
-        <div className="absolute inset-0" style={{
-          background: "linear-gradient(to bottom,rgba(7,7,13,0.25) 0%,rgba(7,7,13,0.5) 55%,rgba(7,7,13,1) 100%)"
-        }} />
-        {/* Back button */}
+      {/* Compact top bar: back + episode nav */}
+      <div className="flex items-center justify-between px-4 pb-2"
+        style={{ paddingTop: "max(16px, env(safe-area-inset-top))" }}>
         <button onClick={onBack}
-          className="absolute top-5 right-4 w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90 transition-transform"
-          style={{ marginTop: "max(0px, env(safe-area-inset-top))" }}>
+          className="w-10 h-10 bg-white/8 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90 transition-transform shrink-0">
           <ChevronRight className="w-5 h-5 text-white" />
         </button>
-        {/* Episode nav top-left */}
-        <div className="absolute top-5 left-4 flex items-center gap-2 z-10"
-          style={{ marginTop: "max(0px, env(safe-area-inset-top))" }}>
+        <div className="flex items-center gap-2">
           <button onClick={onPrevEp} disabled={ep <= 1}
             className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
             style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(10px)", color: "rgba(255,255,255,0.65)" }}>
@@ -809,15 +797,15 @@ function ScraperPicker({
         </div>
       </div>
 
-      {/* Cover + title row */}
-      <div className="px-4 -mt-[72px] relative z-10 flex gap-4 items-end">
+      {/* Small poster + title row */}
+      <div className="px-4 pt-1 flex gap-4 items-start">
         <div className="relative shrink-0">
           <div className="absolute inset-0 rounded-2xl blur-xl scale-95 translate-y-2 opacity-60"
             style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }} />
-          <div className="relative w-[90px] h-[130px] rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/80">
+          <div className="relative w-[72px] h-[102px] rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/80">
             {cover
               ? <img src={cover} alt={title} className="w-full h-full object-cover" />
-              : <div className="w-full h-full bg-white/8 flex items-center justify-center"><Play className="w-8 h-8 text-white/20 fill-white/10" /></div>
+              : <div className="w-full h-full bg-white/8 flex items-center justify-center"><Play className="w-6 h-6 text-white/20 fill-white/10" /></div>
             }
           </div>
           {anime?.format && FORMAT_MAP[anime.format] && (
@@ -1230,6 +1218,15 @@ function EpisodePlayer({
       document.removeEventListener("visibilitychange", onVisChange);
     };
   }, [saveProgress]);
+
+  /* ── Stop audio/video when player unmounts (e.g. going back to picker) ── */
+  useEffect(() => {
+    return () => {
+      document.querySelectorAll<HTMLVideoElement>("video, audio").forEach(v => {
+        try { v.pause(); v.src = ""; v.load(); } catch {}
+      });
+    };
+  }, []);
 
   /* Detect if all quality tiers have the same server list (flat mode → hide quality picker) */
   const q1 = allServers["1080p FHD"] || [];

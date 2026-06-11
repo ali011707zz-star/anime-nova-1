@@ -217,8 +217,9 @@ export default function AnimationWatch() {
   /* ── Auto-play first available "ok" source (respects pref-autoplay setting) ── */
   /* Priority: الثريا (StarCima/vidzee) > AnimeWitcher > أول مصدر متاح */
   /* 1.5s delay so the user can see the source cards before auto-play fires  */
+  /* Only fires on "sources" step — not during "loading" (prevents sources disappearing) */
   useEffect(() => {
-    if (step === "playing" || step === "error") return;
+    if (step !== "sources") return;
     if (autoPlayedRef.current) return;
     if (!prefAutoplay.current) return;
     const okSources = sources.filter(s => s.status === "ok");

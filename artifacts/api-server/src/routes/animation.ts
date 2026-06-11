@@ -1640,6 +1640,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (!awDubRes.ok) throw new Error("dubbed catalog fetch failed");
           const awDubData = await awDubRes.json() as any[];
 
+          // AW Dubbed هو كتالوج أنمي مدبلج — للأفلام الغربية (Moana, Frozen...) لا ينطبق
+          // نرفع عتبة التشابه للأفلام حتى نتجنب التطابقات الخاطئة مع عناوين الأنمي
+          const awDubThreshold = type === "movie" ? 0.72 : 0.45;
+
           // بحث بالتشابه
           const candidates = (awDubData || [])
             .filter((d: any) => d?.document?.name)
@@ -1651,7 +1655,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const best = Math.max(titleSim(title, titleEn), titleSim(title, titleAr), titleSim(title, name.replace(/-/g, " ")));
               return { name, score: best };
             })
-            .filter(c => c.score >= 0.45)
+            .filter(c => c.score >= awDubThreshold)
             .sort((a, b) => b.score - a.score);
 
           if (!candidates.length) {
@@ -1672,7 +1676,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const titleEn = f.title_en?.stringValue || f.title?.stringValue || name;
                 return { name, score: titleSim(tmdbEnTitle, titleEn) };
               })
-              .filter(c => c.score >= 0.45)
+              .filter(c => c.score >= awDubThreshold)
               .sort((a, b) => b.score - a.score);
             if (!byTmdb.length) return;
             candidates.push(...byTmdb);
