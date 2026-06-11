@@ -168,11 +168,16 @@ export default function AnimationWatch() {
   // upgradedToFhdRef removed — auto-upgrade disabled for animation section
   const sourceCountRef     = useRef(0);
 
-  /* ── Navigate to detail page ── */
+  /* ── Navigate back (episode list for TV, detail for movie) ── */
   const goToDetail = useCallback(() => {
-    if (tmdbId && type) navigate(`/animation/${type}/${tmdbId}`);
-    else navigate("/animations");
-  }, [tmdbId, type, navigate]);
+    document.querySelectorAll<HTMLVideoElement>("video, audio").forEach(v => {
+      try { v.pause(); v.src = ""; } catch {}
+    });
+    if (tmdbId && type) {
+      if (type === "tv") navigate(`/animation/${type}/${tmdbId}/episodes?season=${season}`);
+      else navigate(`/animation/${type}/${tmdbId}`);
+    } else navigate("/animations");
+  }, [tmdbId, type, season, navigate]);
 
   /* ── onFail ref pattern (prevents cascade bug) ── */
   const onFailRef    = useRef<() => void>(() => {});
@@ -215,22 +220,20 @@ export default function AnimationWatch() {
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
   /* ── Auto-play first available "ok" source (respects pref-autoplay setting) ── */
-  /* Priority: الثريا (StarCima/vidzee) > AnimeWitcher > أول مصدر متاح */
-  /* 1.5s delay so the user can see the source cards before auto-play fires  */
-  /* Only fires on "sources" step — not during "loading" (prevents sources disappearing) */
+  /* Priority: الثريا (StarCima/vidzee) > سرفر أفلام (aflaam) > AnimeWitcher > أول مصدر متاح */
+  /* يُشغَّل أول مصدر يصل فوراً — بقية المصادر تتحمّل في الخلفية */
   useEffect(() => {
-    if (step !== "sources") return;
     if (autoPlayedRef.current) return;
     if (!prefAutoplay.current) return;
     const okSources = sources.filter(s => s.status === "ok");
     if (!okSources.length) return;
-    const tharaya    = okSources.find(s => s.label?.includes("الثريا"));
-    const witcher    = okSources.find(s => s.label?.includes("AnimeWitcher"));
-    const preferred  = tharaya ?? witcher ?? okSources[0];
+    const tharaya = okSources.find(s => s.label?.includes("الثريا"));
+    const aflaam  = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
+    const witcher = okSources.find(s => s.label?.includes("AnimeWitcher"));
+    const preferred = tharaya ?? aflaam ?? witcher ?? okSources[0];
     autoPlayedRef.current = true;
-    const tid = setTimeout(() => playSource(preferred), 1500);
-    return () => clearTimeout(tid);
-  }, [sources, step, playSource]);
+    playSource(preferred);
+  }, [sources, playSource]);
 
   /* Auto-upgrade disabled — sources in animation section are unreliable;
      letting it run causes unwanted cascade when FHD source fails */
