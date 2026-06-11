@@ -692,7 +692,7 @@ export default function Home() {
               const accentColor = aired ? "#ef4444" : "#f97316";
               const accentBg    = aired ? "rgba(239,68,68,0.88)" : "rgba(249,115,22,0.88)";
               return (
-                <Link href={`/watch?anime=${m.id}&ep=${s.episode}&title=${encodeURIComponent(m.title?.romaji || "")}&english=${encodeURIComponent(m.title?.english || "")}`} key={`${m.id}-${s.episode}-${i}`}>
+                <Link href={`/watch?anime=${m.id}&ep=${s.episode}&title=${encodeURIComponent(m.title?.romaji || "")}&english=${encodeURIComponent(m.title?.english || "")}&cover=${encodeURIComponent(m.coverImage?.large || m.coverImage?.medium || "")}`} key={`${m.id}-${s.episode}-${i}`}>
                   <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>
                     {/* البطاقة */}
                     <div className="relative rounded-[18px] overflow-hidden shadow-xl"
