@@ -76,7 +76,6 @@ export function registerEmailAuthRoutes(app: Express): void {
       return res.status(202).json({
         requiresVerification: true,
         emailSent: sent,
-        ...(sent ? {} : { verificationCode: code }),
         message: "تم إنشاء الحساب، يرجى التحقق من بريدك الإلكتروني",
       });
     } catch (err: any) {
@@ -175,7 +174,7 @@ export function registerEmailAuthRoutes(app: Express): void {
       const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
       const sent = user?.email ? await sendVerificationEmail(user.email, code) : false;
 
-      return res.json({ ok: true, emailSent: sent, ...(sent ? {} : { verificationCode: code }) });
+      return res.json({ ok: true, emailSent: sent });
     } catch (err) {
       console.error("resend-code error:", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
@@ -211,7 +210,6 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(403).json({
           requiresVerification: true,
           emailSent: sent,
-          ...(sent ? {} : { verificationCode: code }),
           message: "يرجى التحقق من بريدك الإلكتروني أولاً",
         });
       }

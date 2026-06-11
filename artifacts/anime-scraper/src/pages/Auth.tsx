@@ -59,22 +59,12 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
 /* ═══════════════════════════════════════════════
    SHARED AUTH CONTENT
 ═══════════════════════════════════════════════ */
-/* ── Generate a fixed-display invite code (shown to user, must retype) ── */
-function makeInviteCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "NOVA-";
-  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-}
-const INVITE_CODE = makeInviteCode();
-
 function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: boolean }) {
   const { emailSignIn, emailSignUp, signIn, refreshUser } = useAuth();
   const [tab,         setTab]        = useState<"login" | "signup">("login");
   const [email,       setEmail]      = useState("");
   const [password,    setPassword]   = useState("");
   const [name,        setName]       = useState("");
-  const [inviteInput, setInviteInput] = useState("");
   const [showPass,    setShowPass]   = useState(false);
   const [loading,     setLoading]    = useState(false);
   const [error,       setError]      = useState("");
@@ -88,7 +78,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
   const [verifyError,   setVerifyError]   = useState("");
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMsg,     setResendMsg]     = useState("");
-  const [devCode,       setDevCode]       = useState("");
   const codeRefs = [
     useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null),
@@ -105,10 +94,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     setError(""); setSuccess("");
     if (!email || !password) { setError("يرجى تعبئة جميع الحقول"); return; }
     if (tab === "signup" && password.length < 6) { setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل"); return; }
-    if (tab === "signup" && inviteInput.trim().toUpperCase() !== INVITE_CODE) {
-      setError("كود الدعوة غير صحيح — انسخه من الأعلى وأدخله بدقة");
-      return;
-    }
     setLoading(true);
 
     const result = tab === "login"
@@ -121,9 +106,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     if (result.requiresVerification) {
       setVerifyEmail(result.email || email);
       setVerifying(true);
-      if (!result.emailSent && result.verificationCode) {
-        setDevCode(result.verificationCode);
-      }
       return;
     }
 
@@ -194,8 +176,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       });
       const data = await res.json();
       if (data.ok) {
-        setResendMsg(data.emailSent ? "✓ تم إرسال رمز جديد إلى بريدك" : "");
-        if (!data.emailSent && data.verificationCode) setDevCode(data.verificationCode);
+        setResendMsg("✓ تم إرسال رمز جديد إلى بريدك الإلكتروني");
         setCode(["", "", "", "", "", ""]);
         setTimeout(() => codeRefs[0].current?.focus(), 100);
       } else {
@@ -261,16 +242,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
             ))}
           </div>
 
-
-          {/* Dev/fallback code display — shown when email delivery fails */}
-          {devCode && (
-            <div className="mb-4 px-4 py-3 rounded-2xl text-center"
-              style={{ background: "rgba(245,158,11,0.10)", border: "1.5px solid rgba(245,158,11,0.30)" }}>
-              <p className="text-amber-300/80 text-[11px] font-['Cairo'] mb-1.5">لم يُرسل البريد — رمزك هو:</p>
-              <p className="text-amber-200 text-2xl font-black tracking-[0.35em] font-mono">{devCode}</p>
-              <p className="text-amber-400/50 text-[9px] font-['Cairo'] mt-1">أدخله في المربعات أعلاه</p>
-            </div>
-          )}
 
           {/* Verify loading */}
           {verifyLoading && (
@@ -422,34 +393,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
           ))}
         </div>
 
-        {/* ── Invite code display (signup only) ── */}
-        <AnimatePresence>
-          {tab === "signup" && (
-            <motion.div
-              key="invite-box"
-              initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.22 }}>
-              <div className="mb-4 rounded-2xl overflow-hidden"
-                style={{ background: "rgba(124,58,237,0.08)", border: "1.5px solid rgba(139,92,246,0.30)" }}>
-                <div className="flex items-center gap-2.5 px-4 pt-3.5 pb-1">
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
-                    style={{ background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.35)" }}>
-                    <ShieldCheck className="w-3.5 h-3.5 text-violet-300" />
-                  </div>
-                  <p className="text-white/55 text-[11px] font-bold font-['Cairo']">كود الدعوة المطلوب للتسجيل</p>
-                </div>
-                <div className="flex items-center justify-center py-3">
-                  <span className="text-[22px] font-black tracking-[0.22em] font-mono select-all"
-                    style={{ color: "#A78BFA", textShadow: "0 0 20px rgba(167,139,250,0.45)" }}>
-                    {INVITE_CODE}
-                  </span>
-                </div>
-                <p className="text-center text-white/28 text-[10px] font-['Cairo'] pb-3">انسخ الكود وأدخله في حقل الدعوة أدناه</p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Fields */}
         <div className="space-y-3">
           <AnimatePresence>
@@ -467,13 +410,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
               {showPass ? <EyeOff className="w-[15px] h-[15px]" /> : <Eye className="w-[15px] h-[15px]" />}
             </button>
           </div>
-          <AnimatePresence>
-            {tab === "signup" && (
-              <motion.div key="invite-field" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }}>
-                <InputField icon={<ShieldCheck className="w-4 h-4" />} type="text" placeholder="كود الدعوة" value={inviteInput} onChange={v => setInviteInput(v.toUpperCase())} onEnter={handleSubmit} />
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
 
         {/* Messages */}

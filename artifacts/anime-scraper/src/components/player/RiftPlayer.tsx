@@ -496,6 +496,20 @@ export default function RiftPlayer({
     };
   }, [onTimeUpdate]);
 
+  /* ── Black-screen detector: audio works but no picture → try next server ── */
+  useEffect(() => {
+    if (!playing) return;
+    const t = setTimeout(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      if (v.currentTime > 2 && v.videoWidth === 0 && v.videoHeight === 0 && !v.paused) {
+        setError("كودك الفيديو غير مدعوم في هذا المتصفح — جرّب مصدراً آخر");
+        try { v.pause(); } catch {}
+      }
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [playing]);
+
   /* ── autoPlay countdown when episode ends ── */
   useEffect(() => {
     if (!isEnded || !autoPlay || !onNextEp || ep >= totalEps) { setAutoPlayCountdown(0); return; }
