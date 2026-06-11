@@ -3770,7 +3770,7 @@ async function getAninekoSources(
 
       // vibeplayer.site: اشتقاق مباشر للـ HLS من الـ token بدون HTTP request إضافي
       // pattern: vibeplayer.site/TOKEN → /public/stream/TOKEN/master.m3u8
-      const vibeToken = embedUrl.match(/vibeplayer\.site\/([a-f0-9]{14,})/i)?.[1];
+      const vibeToken = embedUrl.match(/vibeplayer\.site\/([a-zA-Z0-9]{10,})/i)?.[1];
       if (vibeToken) {
         m3u8Url = `https://vibeplayer.site/public/stream/${vibeToken}/master.m3u8`;
         referer = `https://vibeplayer.site/${vibeToken}`;
