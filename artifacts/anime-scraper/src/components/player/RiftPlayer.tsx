@@ -150,7 +150,7 @@ export default function RiftPlayer({
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, lastX: 0, startValue: 0 });
   const volumeRef     = useRef(1);
-  const brightnessRef = useRef(1.5);
+  const brightnessRef = useRef(0.88);
   const lastTap      = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const longTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSpeed    = useRef(1);
@@ -175,7 +175,7 @@ export default function RiftPlayer({
   const [buffered,        setBuffered]        = useState(0);
   const [muted,           setMuted]           = useState(false);
   const [volume,          setVolume]          = useState(1);
-  const [brightness,      setBrightness]      = useState(1.5);
+  const [brightness,      setBrightness]      = useState(0.88);
   const [speed,           setSpeed]           = useState(() => parseFloat(localStorage.getItem("pref-speed") || "1"));
   const [showCtrl,        setShowCtrl]        = useState(true);
   const [isFs,            setIsFs]            = useState(false);
