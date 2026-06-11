@@ -416,7 +416,7 @@ export default function AnimeDetail() {
         <div className="absolute inset-0" style={{
           background: "linear-gradient(to bottom,rgba(9,9,11,.3) 0%,rgba(9,9,11,.55) 50%,rgba(9,9,11,1) 100%)"
         }} />
-        <button onClick={() => { navigate("/"); }}
+        <button onClick={() => { window.history.length > 1 ? window.history.back() : navigate("/"); }}
           className="absolute top-5 right-4 w-9 h-9 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90">
           <ChevronRight className="w-4 h-4 text-white" />
         </button>
@@ -511,27 +511,12 @@ export default function AnimeDetail() {
 
       {/* ══ SCORE + ACTIONS GRID ═════════════════════════════════ */}
       <div className="px-4 mt-3">
-        {/* Score bar */}
-        {score && (
-          <div className="flex items-center gap-2 mb-4">
-            <Star className="w-5 h-5 text-amber-400 fill-amber-400" />
-            <span className="text-2xl font-black text-white">{score}</span>
-            <span className="text-white/30 text-xs font-['Cairo']">/ 10</span>
-            {anime.popularity && (
-              <span className="mr-2 text-[10px] text-white/25 font-['Cairo']">
-                {anime.popularity.toLocaleString()} مستخدم
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* 4-button action grid (2×2) */}
-        <div className="grid grid-cols-2 gap-2 mb-2">
+        {/* 3-button action row */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
           {[
-            { icon: Star,         label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
-            { icon: Plus,         label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: null },
-            { icon: MessageSquare,label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => setShowComments(true), sub: comments.length > 0 ? `${comments.length} تعليق` : "اكتب تعليقاً" },
-            { icon: Heart,        label: "المفضلة",   active: saved,        activeColor: "#EC4899", action: toggleSave,                         sub: null },
+            { icon: Star,          label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
+            { icon: Plus,          label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: saved ? "مضاف" : null },
+            { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => setShowComments(true), sub: comments.length > 0 ? `${comments.length}` : null },
           ].map(({ icon: Icon, label, active, activeColor, action, sub }) => (
             <motion.button key={label} whileTap={{ scale: 0.94 }} onClick={action}
               className="flex flex-col items-center gap-1.5 py-3 rounded-2xl border transition-all font-['Cairo']"
@@ -544,24 +529,18 @@ export default function AnimeDetail() {
             </motion.button>
           ))}
         </div>
-        {anime.idMal && (
-          <motion.button whileTap={{ scale: 0.94 }}
-            onClick={() => window.open(`https://myanimelist.net/anime/${anime.idMal}`, "_blank")}
-            className="w-full flex flex-col items-center gap-1 py-3 rounded-2xl border font-['Cairo'] transition-all"
-            style={{ background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.55)" }}>
-            <span className="text-[11px] font-black">MAL</span>
-            <span className="text-[9px] text-white/30">#{anime.idMal}</span>
-          </motion.button>
-        )}
       </div>
 
       {/* ══ MAL STATS BOX ════════════════════════════════════════ */}
-      {(score || allTimeRank || anime.popularity) && (
-        <div className="mx-4 mt-5 rounded-2xl overflow-hidden"
+      {(score || allTimeRank || anime.idMal) && (
+        <div className="mx-4 rounded-2xl overflow-hidden"
           style={{ background: "linear-gradient(135deg,#1e3a5f,#1a2d4a)", border: "1px solid rgba(59,130,246,0.25)" }}>
-          <div className="px-4 py-2 border-b border-white/10">
-            <p className="text-[11px] font-black text-blue-300/80 font-['Cairo'] text-center">MyAnimeList</p>
-          </div>
+          <motion.button whileTap={{ scale: 0.98 }}
+            onClick={() => anime.idMal && window.open(`https://myanimelist.net/anime/${anime.idMal}`, "_blank")}
+            className="w-full px-4 py-2 border-b border-white/10 flex items-center justify-center gap-2">
+            <p className="text-[11px] font-black text-blue-300/80 font-['Cairo']">MyAnimeList</p>
+            {anime.idMal && <span className="text-blue-300/40 text-[9px] font-['Cairo']">#{anime.idMal}</span>}
+          </motion.button>
           <div className="flex divide-x divide-x-reverse divide-white/8">
             {score && (
               <div className="flex-1 flex flex-col items-center py-3 px-2">
@@ -570,7 +549,7 @@ export default function AnimeDetail() {
                   <span className="text-white font-black text-base">{score}</span>
                 </div>
                 {anime.popularity && (
-                  <span className="text-[9px] text-white/35 font-['Cairo']">({anime.popularity.toLocaleString()})</span>
+                  <span className="text-[9px] text-white/35 font-['Cairo']">{anime.popularity.toLocaleString()} مستخدم</span>
                 )}
               </div>
             )}
@@ -580,9 +559,10 @@ export default function AnimeDetail() {
                 <span className="text-[9px] text-white/35 font-['Cairo']">الترتيب</span>
               </div>
             )}
-            {anime.idMal && (
-              <div className="flex-1 flex flex-col items-center justify-center py-3 px-2">
-                <span className="text-blue-300/50 text-[9px] font-bold font-['Cairo']">#{anime.idMal}</span>
+            {anime.favourites > 0 && (
+              <div className="flex-1 flex flex-col items-center py-3 px-2">
+                <span className="text-white font-black text-base">{anime.favourites?.toLocaleString()}</span>
+                <span className="text-[9px] text-white/35 font-['Cairo']">المفضلة</span>
               </div>
             )}
           </div>
