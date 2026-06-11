@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { supabaseAdmin } from "./supabaseAdmin.js";
 
 const EMAIL_USER = process.env.EMAIL_USER || "";
 const EMAIL_PASS = process.env.EMAIL_PASS || "";
@@ -31,8 +32,7 @@ const EMAIL_HTML = (code: string) => `
 `;
 
 export async function sendVerificationEmail(to: string, code: string): Promise<boolean> {
-  // 1. محاولة Supabase (يرسل بريد تحقق تلقائياً)
-  // نستخدم Supabase فقط لإرسال البريد، الرمز نديره نحن
+  /* 1. Gmail SMTP (if configured) */
   try {
     const transport = createGmailTransport();
     if (transport) {
@@ -43,42 +43,39 @@ export async function sendVerificationEmail(to: string, code: string): Promise<b
         html: EMAIL_HTML(code),
         text: `رمز التحقق الخاص بك في Nova Anime: ${code}\nصالح لمدة 15 دقيقة.`,
       });
-      console.log(`[email] ✅ تم إرسال رمز التحقق إلى ${to}`);
+      console.log(`[email] ✅ Gmail → ${to}`);
       return true;
     }
   } catch (err) {
     console.error("[email] Gmail فشل:", err);
   }
 
-  // 2. fallback: إرسال عبر Supabase Auth OTP
+  /* 2. Supabase invite email (sends a real email via Supabase infrastructure) */
   try {
-    const SUPA_URL  = process.env.SUPABASE_URL || "";
-    const SUPA_KEY  = process.env.SUPABASE_SERVICE_KEY || "";
-    if (SUPA_URL && SUPA_KEY) {
-      const r = await fetch(`${SUPA_URL}/auth/v1/admin/users`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": SUPA_KEY,
-          "Authorization": `Bearer ${SUPA_KEY}`,
+    if (supabaseAdmin) {
+      const appUrl = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : (process.env.APP_URL || "https://nova-anime.repl.co");
+
+      const { error } = await supabaseAdmin.auth.admin.generateLink({
+        type: "invite",
+        email: to,
+        options: {
+          redirectTo: `${appUrl}/auth`,
+          data: { nova_verification_code: code },
         },
-        body: JSON.stringify({
-          email: to,
-          email_confirm: false,
-          user_metadata: { verification_code: code },
-        }),
-        signal: AbortSignal.timeout(8_000),
       });
-      if (r.ok) {
-        console.log(`[email] ✅ Supabase OTP أرسل إلى ${to}`);
+      if (!error) {
+        console.log(`[email] ✅ Supabase invite → ${to}`);
         return true;
       }
+      console.warn("[email] Supabase invite خطأ:", error.message);
     }
   } catch (err) {
-    console.error("[email] Supabase OTP فشل:", err);
+    console.error("[email] Supabase فشل:", err);
   }
 
-  // 3. fallback: طباعة في console للتطوير
+  /* 3. Fallback: log to console (development) */
   console.warn(`[email] ⚠️  SMTP غير مُعدَّل — رمز التحقق لـ ${to}: ${code}`);
   return false;
 }

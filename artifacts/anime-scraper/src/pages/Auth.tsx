@@ -88,6 +88,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
   const [verifyError,   setVerifyError]   = useState("");
   const [resendLoading, setResendLoading] = useState(false);
   const [resendMsg,     setResendMsg]     = useState("");
+  const [devCode,       setDevCode]       = useState("");
   const codeRefs = [
     useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null),
@@ -120,6 +121,9 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     if (result.requiresVerification) {
       setVerifyEmail(result.email || email);
       setVerifying(true);
+      if (!result.emailSent && result.verificationCode) {
+        setDevCode(result.verificationCode);
+      }
       return;
     }
 
@@ -191,6 +195,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       const data = await res.json();
       if (data.ok) {
         setResendMsg(data.emailSent ? "✓ تم إرسال رمز جديد إلى بريدك" : "");
+        if (!data.emailSent && data.verificationCode) setDevCode(data.verificationCode);
         setCode(["", "", "", "", "", ""]);
         setTimeout(() => codeRefs[0].current?.focus(), 100);
       } else {
@@ -256,6 +261,16 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
             ))}
           </div>
 
+
+          {/* Dev/fallback code display — shown when email delivery fails */}
+          {devCode && (
+            <div className="mb-4 px-4 py-3 rounded-2xl text-center"
+              style={{ background: "rgba(245,158,11,0.10)", border: "1.5px solid rgba(245,158,11,0.30)" }}>
+              <p className="text-amber-300/80 text-[11px] font-['Cairo'] mb-1.5">لم يُرسل البريد — رمزك هو:</p>
+              <p className="text-amber-200 text-2xl font-black tracking-[0.35em] font-mono">{devCode}</p>
+              <p className="text-amber-400/50 text-[9px] font-['Cairo'] mt-1">أدخله في المربعات أعلاه</p>
+            </div>
+          )}
 
           {/* Verify loading */}
           {verifyLoading && (

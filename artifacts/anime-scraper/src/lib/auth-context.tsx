@@ -17,8 +17,8 @@ interface AuthContextType {
   loading: boolean;
   signIn: () => void;
   signOut: () => Promise<void>;
-  emailSignIn: (email: string, password: string) => Promise<{ error?: string; requiresVerification?: boolean; email?: string }>;
-  emailSignUp: (email: string, password: string, name: string) => Promise<{ error?: string; requiresVerification?: boolean; email?: string }>;
+  emailSignIn: (email: string, password: string) => Promise<{ error?: string; requiresVerification?: boolean; email?: string; emailSent?: boolean; verificationCode?: string }>;
+  emailSignUp: (email: string, password: string, name: string) => Promise<{ error?: string; requiresVerification?: boolean; email?: string; emailSent?: boolean; verificationCode?: string }>;
   updateProfile: (data: { displayName?: string; username?: string; profileImageCustom?: string | null }) => Promise<{ error?: string }>;
   deleteAccount: () => Promise<{ error?: string }>;
   refreshUser: () => Promise<void>;
