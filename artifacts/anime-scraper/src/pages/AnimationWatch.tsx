@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import {
-  ChevronRight, Play,
+  ChevronRight, Play, X,
   MonitorPlay, Download, ChevronLeft, List, ChevronDown, SkipForward,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -136,6 +136,8 @@ export default function AnimationWatch() {
   const [sources, setSources]   = useState<Source[]>([]);
   const [selSrc, setSelSrc]     = useState<Source | null>(null);
   const [sseDone, setSseDone]   = useState(false);
+  const [embedSources, setEmbedSources] = useState<Array<{ url: string; label: string }>>([]);
+  const [embedIframeUrl, setEmbedIframeUrl] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [showEpList, setShowEpList] = useState(false);
 
@@ -295,6 +297,7 @@ export default function AnimationWatch() {
   /* ── SSE stream ── */
   useEffect(() => {
     setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
+    setEmbedSources([]); setEmbedIframeUrl(null);
     setSubCues([]); setSubStatus("off"); setSubChoice("off"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
 
@@ -304,8 +307,11 @@ export default function AnimationWatch() {
 
     es.addEventListener("source", (e) => {
       const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
-      // Skip embed-only sources — we only play direct streams in the internal player
-      if (src.isEmbed) return;
+      // Collect embed-only sources for EmbedPanel (vidlink / videasy / anyembed)
+      if (src.isEmbed) {
+        setEmbedSources(prev => prev.find(e => e.url === src.url) ? prev : [...prev, { url: src.url, label: src.label }]);
+        return;
+      }
 
       const key = src.directUrl || src.url;
       if (seenUrls.current.has(key)) return;
@@ -587,6 +593,29 @@ export default function AnimationWatch() {
   }
 
   /* ────────────────────────── PLAYER ─────────────────────────────────────── */
+  /* ── Embed iframe player (vidlink / videasy / anyembed) ── */
+  if (embedIframeUrl) {
+    return (
+      <div className="fixed inset-0 bg-black" dir="rtl">
+        <button
+          onClick={() => setEmbedIframeUrl(null)}
+          className="absolute top-4 right-4 z-50 w-11 h-11 flex items-center justify-center rounded-xl active:scale-90 transition-transform"
+          style={{ background: "rgba(0,0,0,0.75)", border: "1px solid rgba(255,255,255,0.18)", backdropFilter: "blur(8px)" }}>
+          <X className="w-5 h-5 text-white/85" />
+        </button>
+        <iframe
+          key={embedIframeUrl}
+          src={embedIframeUrl}
+          className="absolute inset-0 w-full h-full border-0"
+          allow="autoplay; fullscreen; encrypted-media"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+          referrerPolicy="no-referrer"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+
   if (step === "playing" && selSrc) {
 
     const { url, isHls } = getSourceInfo(selSrc);
@@ -841,6 +870,16 @@ export default function AnimationWatch() {
         <EpComments commKey={type === "tv"
           ? `nova-anim-ep-comments-${tmdbId}-s${season}e${ep}`
           : `nova-anim-ep-comments-${tmdbId}`} />
+
+        {/* ── مشغلات بديلة (embed sources: vidlink / videasy / anyembed) ── */}
+        {embedSources.length > 0 && (
+          <EmbedFallbackSection
+            embedSources={embedSources}
+            onPlay={setEmbedIframeUrl}
+            type={type} ep={ep}
+            stillSearching={!sseDone}
+          />
+        )}
       </div>
 
       {/* ── Subtitle Panel overlay ── */}

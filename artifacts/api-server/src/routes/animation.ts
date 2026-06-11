@@ -1834,6 +1834,33 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
+      // ── 25. vidlink.pro (TMDB-native — iframe embed نظيف بدون إعلانات) ─────
+      (async () => {
+        if (!tmdbId) return;
+        const url = type === "tv"
+          ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
+          : `https://vidlink.pro/movie/${tmdbId}`;
+        send("source", { url, label: "VidLink · مشغل مدمج", isEmbed: true });
+      })(),
+
+      // ── 26. player.videasy.to (TMDB-native — iframe embed نظيف بدون إعلانات) ─
+      (async () => {
+        if (!tmdbId) return;
+        const url = type === "tv"
+          ? `https://player.videasy.to/tv/${tmdbId}?season=${season}&episode=${epNum}`
+          : `https://player.videasy.to/movie/${tmdbId}`;
+        send("source", { url, label: "Videasy · مشغل مدمج", isEmbed: true });
+      })(),
+
+      // ── 27. anyembed.xyz (TMDB-native — iframe embed) ────────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        const url = type === "tv"
+          ? `https://anyembed.xyz/embed/tmdb-tv-${tmdbId}-${season}-${epNum}`
+          : `https://anyembed.xyz/embed/tmdb-movie-${tmdbId}`;
+        send("source", { url, label: "AnyEmbed · مشغل مدمج", isEmbed: true });
+      })(),
+
       // ── 16. Vyla SSE proxy (missourimonster-vyla.hf.space) ──
       (async () => {
         if (!tmdbId) return;
