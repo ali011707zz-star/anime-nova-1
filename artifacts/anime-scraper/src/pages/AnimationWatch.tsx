@@ -155,9 +155,8 @@ export default function AnimationWatch() {
   const [showSubPanel, setShowSubPanel] = useState(false);
   const [hlsTime,     setHlsTime]     = useState(0);
 
-  const subFontSize = prefSubSize.current === "small" ? 13 : prefSubSize.current === "large" ? 20 : 16;
   const [subSettings, setSubSettings] = useState<SubSettings>({
-    fontSize: subFontSize, color: "#ffffff", bgOpacity: 0, bold: false, position: "bottom",
+    fontSize: 24, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom",
   });
   const subAbortRef = useRef<AbortController | null>(null);
 
