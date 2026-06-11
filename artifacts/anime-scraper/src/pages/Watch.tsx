@@ -747,7 +747,8 @@ function ScraperPicker({
     }
   }
 
-  const displaySources = allFlat.length > 0 ? allFlat : embedFallbacks;
+  /* Show embed fallbacks (mega/vidmoly) whenever direct sources are fewer than 3 */
+  const displaySources = allFlat.length >= 3 ? allFlat : [...allFlat, ...embedFallbacks];
 
   /* Group by quality tier */
   const grouped: Record<Quality, FetchedSrc[]> = {
