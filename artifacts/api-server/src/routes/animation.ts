@@ -1277,16 +1277,33 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
 
 
-    // Fetch IMDB ID from TMDB (needed for some scrapers)
+    // Fetch IMDB ID + English title from TMDB in parallel (needed for multiple scrapers)
     let imdbId = "";
-    if (tmdbId) {
-      try {
-        const extUrl = `https://api.themoviedb.org/3/${type === "tv" ? "tv" : "movie"}/${tmdbId}/external_ids?api_key=${TMDB_KEY}`;
-        const extHtml = await cfGet(extUrl, "");
-        const extJson = JSON.parse(extHtml);
-        imdbId = extJson.imdb_id || "";
-      } catch { /* silent */ }
-    }
+    let enTitlePrefetched = "";
+    await Promise.allSettled([
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const extUrl = `https://api.themoviedb.org/3/${type === "tv" ? "tv" : "movie"}/${tmdbId}/external_ids?api_key=${TMDB_KEY}`;
+          const extHtml = await cfGet(extUrl, "");
+          const extJson = JSON.parse(extHtml);
+          imdbId = extJson.imdb_id || "";
+        } catch { /* silent */ }
+      })(),
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const r = await fetch(
+            `${TMDB_BASE}/${type === "tv" ? "tv" : "movie"}/${tmdbId}?api_key=${TMDB_KEY}&language=en`,
+            { signal: AbortSignal.timeout(6_000) }
+          );
+          if (r.ok) {
+            const d: any = await r.json();
+            enTitlePrefetched = d.title || d.name || "";
+          }
+        } catch { /* silent */ }
+      })(),
+    ]);
 
     // ── Hard 30s deadline — يُجبر DONE حتى لو علّق أحد الـ scrapers ──────────
     let streamDone = false;
@@ -2096,14 +2113,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const animeName: string = bestAnime.name || "";
           const showNamePart = animeName.toLowerCase()
             .replace(/\s*(season|الموسم)\s+.*/i, "").trim();
-          const epFilter = type === "tv"
-            ? `season ${season} eps ${epNum}`
-            : showNamePart.slice(0, 12); // movies: match by show name prefix
-
           const matched = serverList.filter((s: any) => {
             const sn = (s.name || "").toLowerCase();
-            return sn.includes(showNamePart.split(" ")[0]) &&
-                   sn.includes(epFilter);
+            if (!sn.includes(showNamePart.split(" ")[0])) return false;
+            if (type === "tv") {
+              // Use regex with word boundary so ep 5 doesn't match ep 50/55
+              return sn.includes(`season ${season}`) &&
+                     new RegExp(`\\beps\\s+${epNum}(?:\\s|$)`).test(sn);
+            }
+            return sn.includes(showNamePart.slice(0, 12));
           });
           if (!matched.length) return;
 
@@ -2125,24 +2143,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         try {
           send("status", { msg: "aflaam: جاري البحث…" });
 
-          // Get English title from TMDB for better search accuracy
-          let enTitle = "";
-          if (tmdbId) {
-            try {
-              const r = await fetch(
-                `${TMDB_BASE}/${type === "tv" ? "tv" : "movie"}/${tmdbId}?api_key=${TMDB_KEY}&language=en`,
-                { signal: AbortSignal.timeout(6_000) }
-              );
-              if (r.ok) {
-                const d: any = await r.json();
-                enTitle = d.title || d.name || "";
-              }
-            } catch { /* skip */ }
-          }
-
+          // Use pre-fetched English title (already resolved before Promise.allSettled)
           const sources = type === "tv"
-            ? await scrapeAflaamSeries(title, epNum, season, enTitle || undefined)
-            : await scrapeAflaamMovie(title, enTitle || undefined);
+            ? await scrapeAflaamSeries(title, epNum, season, enTitlePrefetched || undefined)
+            : await scrapeAflaamMovie(title, enTitlePrefetched || undefined);
 
           for (const src of sources) {
             const qLabel  = src.quality === "1080" ? "1080p FHD"
