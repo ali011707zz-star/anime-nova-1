@@ -1,5 +1,6 @@
 - [Active anime sources 2026-06](active-sources-2026-06.md) — miruro deleted 2026-06; active: shahiid/animelek/animedar/okanime/ristoanime/animeify/animeday/kawaii/anikoto/anineko/animewitcher/mitanime
-- [Animation dead sources 2026-06](animation-dead-2026-06.md) — vidsrc.pro(→embed.su redirect), vidsrc.icu, vidsrc.vip, smashy, vidbinge, moviesapi.club, vidlink.pro API all disabled; only aflaam+StarCima reliably work
+- [Animation dead sources 2026-06](animation-dead-2026-06.md) — vidsrc.pro/icu/vip, smashy, vidbinge, moviesapi.club disabled; GogoAnime ALL domains CF-blocked from Replit (→survey-smiles.com); only aflaam+StarCima+embed trio reliable
+- [Animation embed trio](animation-embed-trio.md) — vidlink.pro/videasy.to/anyembed.xyz: isEmbed:true sources; EmbedFallbackSection in AnimationWatch; sandboxed iframe (no allow-popups) with X button; TMDB ID native; all return HTTP 200
 - [AniméDay scraper](animeday-scraper.md) — anime-day.com Android app API; vidhidepro/filelions only live server; all dood/kerapoxy/upstream/segavid expired; JJK ep1 confirmed working; cartoons in DB but links dead
 - [AnimeDetail params.id guard](animedetail-params-guard.md) — when !params.id → navigate("/") immediately; retry AniList fetch via direct graphql.anilist.co when proxy returns no Media
 - [Playwright kills Replit workflows](playwright-replit-kill.md) — pkill -9 -f chromium in workflow command kills Replit's own browser processes; Playwright too heavy for inline scraping; use cfGet (HTTP+headers) instead
