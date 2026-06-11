@@ -1,4 +1,5 @@
 - [Active anime sources 2026-06](active-sources-2026-06.md) — 12 active scrapers in sources-stream; animephoenix/witanime/anime3rb/toonstream disabled; SCRAPER_DEFS synced
+- [AniméDay scraper](animeday-scraper.md) — anime-day.com Android app API; vidhidepro/filelions only live server; all dood/kerapoxy/upstream/segavid expired; JJK ep1 confirmed working; cartoons in DB but links dead
 - [AnimeDetail params.id guard](animedetail-params-guard.md) — when !params.id → navigate("/") immediately; retry AniList fetch via direct graphql.anilist.co when proxy returns no Media
 - [Playwright kills Replit workflows](playwright-replit-kill.md) — pkill -9 -f chromium in workflow command kills Replit's own browser processes; Playwright too heavy for inline scraping; use cfGet (HTTP+headers) instead
 - [ShareMax/Megamax Inertia extraction](sharmax-inertia.md) — share4max.com & megamax.me use Inertia.js; video URL requires partial reload, not HTML parsing

@@ -4785,6 +4785,49 @@ async function fetchAnimeDayServers(): Promise<any[]> {
   } catch { return []; }
 }
 
+/**
+ * يحوّل URL نسبي من servers.php إلى URL كامل باستخدام اسم السيرفر
+ * للتمييز بين المزودين الذين يشتركون في نفس نمط الـ URL.
+ */
+function animeDayResolveUrl(server: any): string | null {
+  const url: string   = server.url || "";
+  const name: string  = (server.name || "").toLowerCase();
+  const provider      = name.split(" ").pop() || "";
+
+  if (!url) return null;
+  if (url.startsWith("https://")) return url; // direct URL
+
+  // ── /v/{code} → FileLions (vidhidepro.com) ──────────────────────────────
+  if (url.startsWith("/v/")) return `https://vidhidepro.com${url}`;
+
+  // ── /e/{code}[.html] → بحسب المزود ──────────────────────────────────────
+  if (/^\/e\//.test(url)) {
+    if (provider === "dood" || name.includes("doodstream"))
+      return `https://dood.to${url}`;
+    if (provider === "mixdrop")  return `https://mixdrop.ag${url}`;
+    if (provider === "kerapoxy") return `https://kerapoxy.cc${url}`;
+    if (provider === "filemoon") return `https://filemoon.sx${url}`;
+    if (provider === "voe_sx" || provider === "voe") return `https://voe.sx${url}`;
+    if (provider === "wish")     return `https://embedwish.com${url}`;
+    // افتراضي: embedwish (wish-family)
+    return `https://embedwish.com${url}`;
+  }
+
+  // ── /embed-{code}.html → بحسب المزود ────────────────────────────────────
+  if (/^\/embed-[^/]+\.html$/.test(url)) {
+    if (provider === "upstream")  return `https://upstream.to${url}`;
+    if (provider === "uqload")    return `https://uqload.co${url}`;
+    if (provider === "vadbam")    return `https://vadbam.net${url}`;
+    if (provider === "viidshar")  return `https://viidshar.com${url}`;
+    if (provider === "segavid")   return `https://segavid.com${url}`;
+    if (provider === "mp4upload") return `https://www.mp4upload.com${url}`;
+    return `https://upstream.to${url}`; // افتراضي
+  }
+
+  // ── /ajax/ , /tv/ , /watch/ → كلها ميتة أو JS-rendered ──────────────────
+  return null;
+}
+
 async function getAnimeDaySources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
@@ -4802,67 +4845,83 @@ async function getAnimeDaySources(
     let bestScore = 0;
 
     for (const anime of animeList) {
+      // حاول المطابقة عبر second_name (بدائل إنجليزية/عربية)
       const sn = (anime.second_name || "").toLowerCase().replace(/[^a-z0-9\s\u0600-\u06ff]/g, " ");
-      const sc = similarity(searchQ, sn);
+      // وأيضًا الاسم الرئيسي بعد حذف "الموسم/Season N"
+      const nm = (anime.name || "").toLowerCase().replace(/\s*(season|الموسم)\s+\d+.*/i, "").replace(/[^a-z0-9\s\u0600-\u06ff]/g, " ").trim();
+      const sc = Math.max(similarity(searchQ, sn), similarity(searchQ, nm));
       if (sc > bestScore) { bestScore = sc; bestAnime = anime; }
     }
 
     if (!bestAnime || bestScore < 0.18) return sources;
 
-    // ── مقطع الاسم العربي (أول كلمتين عربيتين) للمطابقة مع servers ──
-    const arabicWords = (bestAnime.name as string || "")
-      .split(/\s+/)
-      .filter((w: string) => /[\u0600-\u06FF]/.test(w));
-    const arabicPrefix = arabicWords.slice(0, 2).join(" ");
-    if (!arabicPrefix) return sources;
+    // ── ابنِ prefix المطابقة حسب نوع الأنمي ───────────────────────────────
+    const animeName: string = bestAnime.name || "";
+    // العنوان عربي إذا بدأ بحرف عربي (لا مجرد احتواء "الموسم")
+    const firstWord = animeName.split(/\s+/)[0] || "";
+    const isArabic = /[\u0600-\u06FF]/.test(firstWord);
 
-    // ── البحث عن الحلقة في قائمة الـ servers ──
-    const epStr = `الحلقة ${ep}`;
+    let matchPrefix: string;
+    let epStr: string;
+    if (isArabic) {
+      // اسم عربي مثل "جوجوتسو كايسن" — servers تطابق بـ "الحلقة N"
+      const arabicWords = animeName.split(/\s+/).filter((w: string) => /[\u0600-\u06FF]/.test(w));
+      matchPrefix = arabicWords.slice(0, 2).join(" ");
+      epStr = `الحلقة ${ep}`;
+    } else {
+      // اسم إنجليزي مثل "Regular Show" — servers: "regular show season N eps M"
+      matchPrefix = animeName.toLowerCase().replace(/\s+(season|الموسم)\s+.*/i, "").trim();
+      // نُحدد الـ season من الاسم (رقم عادي أو كلمة عربية)
+      const arOrdinal: Record<string, number> = {
+        'الأول':1,'الاول':1,'الأولى':1,'الأولي':1,
+        'الثاني':2,'الثانى':2,'الثانية':2,
+        'الثالث':3,'الثالثة':3,'الرابع':4,'الرابعة':4,
+        'الخامس':5,'السادس':6,'السابع':7,'الثامن':8,'التاسع':9,'العاشر':10,
+      };
+      let season = 1;
+      const digitSeason = animeName.match(/(?:season)\s+(\d+)/i);
+      if (digitSeason) {
+        season = parseInt(digitSeason[1], 10);
+      } else {
+        const arabicSeason = animeName.match(/الموسم\s+(\S+)/);
+        if (arabicSeason) season = arOrdinal[arabicSeason[1]] ?? 1;
+      }
+      epStr = `season ${season} eps ${ep}`;
+    }
+    if (!matchPrefix) return sources;
+
+    // ── فلترة السيرفرات المطابقة ───────────────────────────────────────────
     const epServers = serverList.filter((s: any) => {
-      const name: string = s.name || "";
-      return name.includes(arabicPrefix) && name.includes(epStr);
+      const name: string = (s.name || "").toLowerCase();
+      return name.includes(matchPrefix.toLowerCase()) && name.includes(epStr.toLowerCase());
     });
     if (!epServers.length) return sources;
 
-    // ── بناء مصادر UnifiedSource ─────────────────────────────────────
+    // ── بناء مصادر UnifiedSource لكل سيرفر ────────────────────────────────
     const seen = new Set<string>();
     for (const server of epServers) {
       const relUrl: string = server.url || "";
       if (!relUrl || seen.has(relUrl)) continue;
       seen.add(relUrl);
 
-      let fullUrl: string;
-      let quality = "مدبلج";
-      let qualityRank = 7;
+      const fullUrl = animeDayResolveUrl(server);
+      if (!fullUrl) continue;
 
-      if (relUrl.startsWith("/v/")) {
-        // FileLions → vidhidepro.com  (extractVideoDeep سيستخدم parseVidhidePro)
-        fullUrl = `https://vidhidepro.com${relUrl}`;
-        quality = "مدبلج HD";
-        qualityRank = 9;
-      } else if (relUrl.startsWith("/e/")) {
-        // embedwish.com أو doodstream حسب اسم السيرفر
-        const sname = (server.name || "").toLowerCase();
-        if (sname.includes("dood") || sname.includes("doodstream")) {
-          fullUrl = `https://dood.to${relUrl}`;
-        } else {
-          fullUrl = `https://embedwish.com${relUrl}`;
-          quality = "مدبلج HD";
-          qualityRank = 8;
-        }
-      } else if (relUrl.startsWith("/embed-")) {
-        fullUrl = `https://upstream.to${relUrl}`;
-      } else {
-        continue;
-      }
+      const provName = (server.name || "").split(" ").pop() || "";
+      const quality  = isArabic ? "مدبلج HD" : "HD";
+      const qRank    = fullUrl.includes("vidhidepro") ? 9
+                     : fullUrl.includes("filemoon")   ? 8
+                     : fullUrl.includes("dood")        ? 7
+                     : fullUrl.includes("mixdrop")     ? 7
+                     : 6;
 
       sources.push({
-        url: fullUrl,
+        url      : fullUrl,
         directUrl: undefined,
-        quality,
-        qualityRank,
-        site: "animeday",
-        label: quality,
+        quality  : `${quality} · ${provName}`,
+        qualityRank: qRank,
+        site     : "animeday",
+        label    : `أنمي داي · ${provName}`,
       });
     }
   } catch { /* silently fail */ }
