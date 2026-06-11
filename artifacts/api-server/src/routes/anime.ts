@@ -3816,6 +3816,63 @@ async function getAninekoSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMEPAHE (via Miruro Kiwi) — صوت ياباني + ترجمة إنجليزية مدمجة
+//  CDN: vault-*.owocdn.top / vault-*.uwucdn.top — AES-128 HLS — CORS open
+//  Endpoint: mirurotvapi.vercel.app/api/watch/kiwi/{anilistId}/sub/animepahe-{ep}
+// ════════════════════════════════════════════════════════════════════
+const ANIMEPAHE_KIWI_BASE = "https://mirurotvapi.vercel.app";
+
+async function getAnimePaheSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+  try {
+    const r = await fetch(
+      `${ANIMEPAHE_KIWI_BASE}/api/watch/kiwi/${anilistId}/sub/animepahe-${ep}`,
+      { signal: AbortSignal.timeout(18000) },
+    );
+    if (!r.ok) return [];
+    const data = await r.json() as {
+      success: boolean;
+      results?: {
+        streams?: Array<{
+          url: string; type: string; quality: string;
+          isActive: boolean; referer?: string; fansub?: string;
+        }>;
+      };
+    };
+    if (!data.success || !data.results?.streams?.length) return [];
+
+    const sources: UnifiedSource[] = [];
+    const qualityRankMap: Record<string, number> = { "1080p": 11, "720p": 10, "480p": 9, "360p": 8 };
+
+    for (const stream of data.results.streams) {
+      if (stream.type !== "hls") continue;
+      if (!stream.isActive) continue;
+      const isOwoCdn = stream.url.includes("owocdn.top") || stream.url.includes("uwucdn.top");
+      if (!isOwoCdn) continue;
+
+      const referer  = stream.referer || "https://kwik.cx/";
+      const proxied  = `/api/anime/hls-proxy?url=${encodeURIComponent(stream.url)}&ref=${encodeURIComponent(referer)}`;
+      const qRank    = qualityRankMap[stream.quality] ?? 9;
+      const fansub   = stream.fansub ? ` · ${stream.fansub}` : "";
+
+      sources.push({
+        name: `AnimePahe · ${stream.quality}${fansub} · ياباني مترجم`,
+        url:         stream.url,
+        quality:     stream.quality,
+        qualityRank: qRank,
+        site:        "animepahe",
+        directUrl:   proxied,
+        directType:  "hls",
+      });
+    }
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  ANIMEWITCHER (Firebase Firestore) — مصدر ياباني + عربي
 //  يستخدم قاعدة بيانات Firebase Firestore خاصة بتطبيق AnimeWitcher
 //  البنية: anime_list/{name}/episodes/{001}/servers/{id}
@@ -5014,6 +5071,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
+      scrapeCached("animepahe",    () => getAnimePaheSources(title, english, ep, anilistId),    false),
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
@@ -5103,6 +5161,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animepahe":   (await race(getAnimePaheSources(title, english, ep, anilistId),   SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       case "anineko":     (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
