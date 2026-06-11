@@ -49,4 +49,22 @@ description: anime-day.com Android app API — server structure, coverage, what 
 - Watch.tsx SCRAPER_DEFS: `{site:"animeday", tag:"DY"}`
 - Both SSE endpoints fire AniméDay correctly
 
+## GitHub Subtitle Library (PRIMARY VALUE)
+The real value of anime-day.com is Arabic subtitle VTT files hosted on GitHub Pages (adnango1.github.io):
+
+| Show | GitHub repo | Pattern | Episodes |
+|------|-------------|---------|----------|
+| Regular Show S1+S2 | Regular-Show | `eps{N}season{S}.vtt` | S1:12 + S2:28 |
+| Sym-Bionic Titan | symbionic | `eps{N}.vtt` | 20 eps |
+| Primal S2 | primal2 | `eps{N}season1.vtt` | 2 eps |
+| The Demon Hunter | thedemonhunter | `eps{N}season{S}.vtt` | S1:1 |
+| Martial God Asura | MARTIALGODASURA | `eps{N}season{S}` (no .vtt) | S1:1 |
+| Ben 10: Secret of Omnitrix | ben10SecretoftheOmnitrix | `movie` (no .vtt) | movie |
+| Regular Show: The Movie | RegularShowMovie | `movie` (no .vtt) | movie |
+
+All files: CORS *, confirmed live 2026-06.
+Function: `getAnimeDaySubtitleUrl(title, season, ep)` in animation.ts.
+Injected into: subtitle-tracks (Arabic track "عربي · أنمي داي") + sources-stream sendSource (subtitleUrl field).
+AnimationWatch.tsx passes &title= to subtitle-tracks endpoint.
+
 **Why kept:** Even though 95% of content has expired links, the vidhidepro server is live and the app API is stable. When anime-day.com adds new content with fresh servers, the scraper will work immediately.

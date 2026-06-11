@@ -601,6 +601,31 @@ async function scrapeEmbedForStreams(
   return out;
 }
 
+// ── Anime-Day GitHub subtitle library ────────────────────────────────────────
+// فريق أنمي داي ترجم هذه العروض للعربية ورفع ملفات VTT على GitHub Pages
+// جميعها مع CORS * وحية تماماً (تحقق 2026-06)
+function getAnimeDaySubtitleUrl(title: string, season: number, ep: number): string | null {
+  const tl = (title || "").toLowerCase().replace(/[^\w\s]/g, " ").trim();
+  const gh = "https://adnango1.github.io";
+
+  if (/regular\s+show/.test(tl) && /movie/.test(tl))
+    return `${gh}/RegularShowMovie/movie`;
+  if (/regular\s+show/.test(tl))
+    return `${gh}/Regular-Show/eps${ep}season${season}.vtt`;
+  if (/sym.?bionic/.test(tl))
+    return `${gh}/symbionic/eps${ep}.vtt`;
+  if (/\bprimal\b/.test(tl) && season === 2)
+    return `${gh}/primal2/eps${ep}season1.vtt`;
+  if (/demon\s+hunter/.test(tl))
+    return `${gh}/thedemonhunter/eps${ep}season${season}.vtt`;
+  if (/martial\s+god\s+asura/.test(tl))
+    return `${gh}/MARTIALGODASURA/eps${ep}season${season}`;
+  if (/ben\s*10.*omnitrix|omnitrix.*ben\s*10/.test(tl))
+    return `${gh}/ben10SecretoftheOmnitrix/movie`;
+
+  return null;
+}
+
 // ── Animation subtitle local cache ──────────────────────────────────────────
 const animSubCache = new Map<string, { content: string | null; language?: string; ts: number }>();
 const ANIM_SUB_TTL      = 60 * 60 * 1000; // 1 hour  (success)
@@ -757,6 +782,7 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
   const type   = String(req.query.type   || "movie");
   const ep     = parseInt(String(req.query.ep     || "1"), 10) || 1;
   const season = parseInt(String(req.query.season || "1"), 10) || 1;
+  const title  = String(req.query.title  || "");
   if (!tmdbId) { res.json({ tracks: [] }); return; }
 
   const ck = `tracks:${tmdbId}:${type}:${season}:${ep}`;
@@ -902,8 +928,17 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     }
   } catch { /* silent */ }
 
+  // ── Anime-Day GitHub subtitles (Arabic, hosted on GitHub Pages) ──
+  const adGhUrl = getAnimeDaySubtitleUrl(title, season, ep);
+  const adItems: Track[] = adGhUrl ? [{
+    id: "ar-animeday-gh",
+    lang: "ar",
+    label: "عربي · أنمي داي",
+    url: adGhUrl,
+  }] : [];
+
   // ── Merge, sort Arabic-first, deduplicate by URL ──
-  const all = [...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems];
+  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems];
   all.sort((a, b) => (a.lang === "ar" && b.lang !== "ar" ? -1 : a.lang !== "ar" && b.lang === "ar" ? 1 : 0));
   const seen = new Set<string>();
   const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
@@ -1161,12 +1196,16 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   const seenUrls = new Set<string>();
   let sourceCount = 0;
 
+  // Anime-Day GitHub Arabic subtitle for this show (if known)
+  const adSub = getAnimeDaySubtitleUrl(title, season, epNum);
+
   // Send a source; directUrl = already-extracted stream URL, proxyUrl = proxied version
   const sendSource = (url: string, label: string, directUrl?: string, proxyUrl?: string) => {
     if (!url || seenUrls.has(url)) return;
     seenUrls.add(url);
     sourceCount++;
-    send("source", { url, label, directUrl, proxyUrl });
+    const extra = adSub ? { subtitleUrl: adSub } : {};
+    send("source", { url, label, directUrl, proxyUrl, ...extra });
   };
 
   // Try embed URL → extract stream → probe → sendSource
