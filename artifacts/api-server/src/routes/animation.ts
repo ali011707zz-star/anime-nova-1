@@ -1955,6 +1955,131 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
+      // ── anime-day.com — أنمي داي (كرتون غربي/أنمي صيني) ────────────────────
+      (async () => {
+        if (!title) return;
+        try {
+          send("status", { msg: "AniméDay: جاري البحث…" });
+          const ADBASE  = "https://www.anime-day.com";
+          const AD_UA   = "com.anime.day/4.0 (Android)";
+
+          // ── resolve relative URL → full URL using server name ──────────────
+          const adResolve = (srv: any): string | null => {
+            const u: string = srv.url || "";
+            const p: string = ((srv.name || "").toLowerCase().split(" ").pop() || "");
+            if (!u) return null;
+            if (u.startsWith("https://")) return u;
+            if (u.startsWith("/v/"))          return `https://vidhidepro.com${u}`;
+            if (/^\/e\//.test(u)) {
+              if (p === "dood")     return `https://dood.to${u}`;
+              if (p === "mixdrop")  return `https://mixdrop.ag${u}`;
+              if (p === "kerapoxy") return `https://kerapoxy.cc${u}`;
+              if (p === "filemoon") return `https://filemoon.sx${u}`;
+              if (p === "voe_sx" || p === "voe") return `https://voe.sx${u}`;
+              return `https://embedwish.com${u}`;
+            }
+            if (/^\/embed-[^/]+\.html$/.test(u)) {
+              if (p === "upstream")  return `https://upstream.to${u}`;
+              if (p === "uqload")    return `https://uqload.co${u}`;
+              if (p === "vadbam")    return `https://vadbam.net${u}`;
+              if (p === "viidshar")  return `https://viidshar.com${u}`;
+              if (p === "mp4upload") return `https://www.mp4upload.com${u}`;
+              return `https://upstream.to${u}`;
+            }
+            return null;
+          };
+
+          // ── fetch anime list + servers in parallel ──────────────────────────
+          const [animeR, servR] = await Promise.all([
+            fetch(`${ADBASE}/app/anime.php`, {
+              headers: { "User-Agent": AD_UA, "Accept": "application/json" },
+              signal : AbortSignal.timeout(8_000),
+            }),
+            fetch(`${ADBASE}/app/servers.php`, {
+              headers: { "User-Agent": AD_UA, "Accept": "application/json" },
+              signal : AbortSignal.timeout(10_000),
+            }),
+          ]);
+          if (!animeR.ok || !servR.ok) return;
+          const animeList: any[] = ((await animeR.json() as any).data ?? []);
+          const serverList: any[] = ((await servR.json() as any).data ?? []);
+          if (!animeList.length || !serverList.length) return;
+
+          // ── Arabic ordinal → digit (الأول=1, الثاني=2, …) ──────────────────
+          const AR_ORDINAL: Record<string, number> = {
+            'الأول':1,'الاول':1,'الأولى':1,'الأولي':1,
+            'الثاني':2,'الثانى':2,'الثانية':2,
+            'الثالث':3,'الثالثة':3,
+            'الرابع':4,'الرابعة':4,
+            'الخامس':5,'الخامسة':5,
+            'السادس':6,'السابع':7,'الثامن':8,'التاسع':9,'العاشر':10,
+          };
+          const parseSeasonNum = (nm: string): number => {
+            const d = nm.match(/(?:season)\s+(\d+)/i);
+            if (d) return parseInt(d[1], 10);
+            const ar = nm.match(/الموسم\s+(\S+)/);
+            if (ar) return AR_ORDINAL[ar[1]] ?? 1;
+            return 1;
+          };
+
+          // ── title matching: use titleSim against name (strip season) ─────────
+          const searchQ = title.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+
+          // Collect ALL entries that match title (multiple seasons)
+          const candidates: { anime: any; seasonNum: number; score: number }[] = [];
+          for (const anime of animeList) {
+            const nm = (anime.name || "")
+              .toLowerCase()
+              .replace(/\s*(season|الموسم)\s+.*/i, "")
+              .replace(/[^a-z0-9\s]/g, " ").trim();
+            const sn = (anime.second_name || "")
+              .toLowerCase().replace(/[^a-z0-9\s]/g, " ");
+            const sc = Math.max(titleSim(searchQ, nm), titleSim(searchQ, sn));
+            if (sc >= 0.5) {
+              const sNum = parseSeasonNum(anime.name || "");
+              candidates.push({ anime, seasonNum: sNum, score: sc });
+            }
+          }
+          if (!candidates.length) return;
+
+          // For TV: prefer the entry whose season matches; for movie: highest score
+          let bestCandidate = candidates[0];
+          if (type === "tv") {
+            const exact = candidates.find(c => c.seasonNum === season);
+            if (exact) bestCandidate = exact;
+            else return; // season not available
+          } else {
+            bestCandidate = candidates.reduce((a, b) => a.score >= b.score ? a : b);
+          }
+          const bestAnime = bestCandidate.anime;
+          if (!bestAnime) return;
+
+          const animeName: string = bestAnime.name || "";
+          const showNamePart = animeName.toLowerCase()
+            .replace(/\s*(season|الموسم)\s+.*/i, "").trim();
+          const epFilter = type === "tv"
+            ? `season ${season} eps ${epNum}`
+            : showNamePart.slice(0, 12); // movies: match by show name prefix
+
+          const matched = serverList.filter((s: any) => {
+            const sn = (s.name || "").toLowerCase();
+            return sn.includes(showNamePart.split(" ")[0]) &&
+                   sn.includes(epFilter);
+          });
+          if (!matched.length) return;
+
+          // ── try each server, send extracted streams ─────────────────────────
+          const seen = new Set<string>();
+          for (const srv of matched.slice(0, 10)) {
+            const full = adResolve(srv);
+            if (!full || seen.has(full)) continue;
+            seen.add(full);
+            const prov = (srv.name || "").toLowerCase().split(" ").pop() || "animeday";
+            await sendExtracted(full, `AniméDay · ${prov}`);
+          }
+        } catch { /* silent */ }
+      })(),
+
       // ── aflaam.com — مباشر MP4 عربي متعدد الجودات ───────────────────────────
       (async () => {
         if (!title) return;
