@@ -1559,8 +1559,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const awDubData = await awDubRes.json() as any[];
 
           // AW Dubbed هو كتالوج أنمي مدبلج — للأفلام الغربية (Moana, Frozen...) لا ينطبق
-          // نرفع عتبة التشابه للأفلام حتى نتجنب التطابقات الخاطئة مع عناوين الأنمي
-          const awDubThreshold = type === "movie" ? 0.72 : 0.45;
+          // عتبة عالية جداً لتجنب التطابقات الخاطئة بين عناوين الأنمي وعناوين الأنيميشن
+          const awDubThreshold = 0.82;
 
           // بحث بالتشابه
           const candidates = (awDubData || [])
@@ -1674,10 +1674,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── AnimeWitcher (Firebase Firestore — أنمي ياباني في قسم الانيميشن) ────────
-      // Flow: title → AniList GraphQL → aniList_id → AnimeWitcher Firestore
-      //       → episodes/{padded}/servers → PD (Pixeldrain) + ST (Streamtape) + VT
-      (async () => {
+      // ── AnimeWitcher (AniList-based) → DISABLED ───────────────────────────────
+      // يبحث في AniList عن عنوان TMDB فيُعيد أنمي ياباني لا علاقة له بالأنيميشن
+      // يسبب ظهور حلقات أنمي خاطئة داخل قسم الأنيميشن الغربي → مُعطَّل
+      Promise.resolve() || (async () => {
         if (!title) return;
         try {
           const AW_FS = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";

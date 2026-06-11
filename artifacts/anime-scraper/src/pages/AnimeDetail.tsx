@@ -514,9 +514,9 @@ export default function AnimeDetail() {
         {/* 3-button action row */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           {[
-            { icon: Star,          label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
-            { icon: Plus,          label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: saved ? "مضاف" : null },
             { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => setShowComments(true), sub: comments.length > 0 ? `${comments.length}` : null },
+            { icon: Plus,          label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: saved ? "مضاف" : null },
+            { icon: Star,          label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
           ].map(({ icon: Icon, label, active, activeColor, action, sub }) => (
             <motion.button key={label} whileTap={{ scale: 0.94 }} onClick={action}
               className="flex flex-col items-center gap-1.5 py-3 rounded-2xl border transition-all font-['Cairo']"

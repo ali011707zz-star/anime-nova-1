@@ -1033,6 +1033,20 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
+        {/* ── Standalone loading spinner — shown even when controls are hidden ── */}
+        <AnimatePresence>
+          {loading && !error && !playing && (
+            <motion.div
+              key="buf-overlay"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none"
+            >
+              <div className="w-12 h-12 rounded-full border-2 border-white/20 border-t-white/80 animate-spin" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* ════════════════════════════════════════
             MAIN CONTROLS — GLASSY v5
         ════════════════════════════════════════ */}
