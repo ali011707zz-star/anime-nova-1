@@ -822,7 +822,7 @@ function ScraperPicker({
           <div className="flex flex-wrap gap-1.5">
             <span className="px-2 py-1 rounded-lg text-[9px] font-black font-['Cairo']"
               style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.32)", color: "rgba(196,181,253,0.92)" }}>
-              الحلقة {ep}{totalEps > 0 ? ` / ${totalEps}` : ""}
+              الحلقة {ep}
             </span>
             {animeStatus && (
               <span className={`text-[9px] font-black px-2 py-1 rounded-lg border font-['Cairo'] ${STATUS_MAP[anime?.status]?.color || "text-white/50 bg-white/8 border-white/10"}`}>
@@ -957,7 +957,7 @@ function ScraperPicker({
             )}
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[12px] font-bold font-['Cairo']"
               style={{ background: "rgba(124,58,237,0.22)", border: "1px solid rgba(139,92,246,0.30)", color: "rgba(196,181,253,0.9)" }}>
-              الحلقة {ep}{totalEps > 0 ? ` / ${totalEps}` : ""}
+              الحلقة {ep}
             </span>
           </motion.div>
 

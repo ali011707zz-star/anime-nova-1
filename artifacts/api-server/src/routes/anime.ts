@@ -3968,7 +3968,7 @@ async function getMiruroApiSources(
       const ref    = encodeURIComponent(s.referer || MIRURO_REFERER);
       const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${ref}`;
       sources.push({
-        name: `MiruroAPI · AnimePahe · ${q} · (ترجمة إنجليزية)`,
+        name: `AnimePahe · ياباني · ${q}`,
         url: s.url,
         quality: q,
         qualityRank: qRank,
@@ -5171,6 +5171,41 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 });
 
+
+// ════════════════════════════════════════════════════════════════════
+//  Check Arabic availability  GET /api/anime/check-arabic?t[]=title1&t[]=title2
+// ════════════════════════════════════════════════════════════════════
+const _arabicCheckCache = new Map<string, { time: number; ok: boolean }>();
+const ARABIC_CACHE_TTL = 12 * 3600 * 1000; // 12h
+
+router.get("/anime/check-arabic", async (req, res) => {
+  const raw = req.query.t;
+  const titles: string[] = Array.isArray(raw) ? (raw as string[]) : raw ? [raw as string] : [];
+  if (!titles.length) { res.json({ available: [] }); return; }
+  const now = Date.now();
+  const results = await Promise.all(
+    titles.map(async (t) => {
+      const key = t.toLowerCase().trim();
+      const cached = _arabicCheckCache.get(key);
+      if (cached && now - cached.time < ARABIC_CACHE_TTL) return { t, ok: cached.ok };
+      try {
+        const resp = await fetch("https://shahiid-anime.net/wp-admin/admin-ajax.php", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": BROWSER_UA, "Referer": "https://shahiid-anime.net/" },
+          body: `action=data_fetch&keyword=${encodeURIComponent(t)}`,
+          signal: AbortSignal.timeout(3500),
+        });
+        const json = await resp.json().catch(() => []) as any[];
+        const ok = Array.isArray(json) && json.length > 0;
+        _arabicCheckCache.set(key, { time: now, ok });
+        return { t, ok };
+      } catch {
+        return { t, ok: false };
+      }
+    })
+  );
+  res.json({ available: results.filter(r => r.ok).map(r => r.t) });
+});
 
 // ════════════════════════════════════════════════════════════════════
 //  Probe  GET /api/anime/probe?url=
