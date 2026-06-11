@@ -6,6 +6,7 @@ import {
   ChevronRight, ChevronLeft, Play, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
   Settings, Subtitles, MonitorPlay, Tv2, Download,
+  Star, Calendar, Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
@@ -14,13 +15,42 @@ import EpComments from "@/components/EpComments";
 /* ══════════════════════════════════ ANILIST ══════════════════ */
 const ANILIST_Q = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
-    id idMal title { romaji english }
+    id idMal title { romaji english native }
     episodes coverImage { large extraLarge }
     nextAiringEpisode { episode }
-    bannerImage genres
+    bannerImage genres averageScore popularity
+    format status season seasonYear description(asHtml: false)
+    studios(isMain: true) { nodes { name } }
     streamingEpisodes { title episode }
   }
 }`;
+
+/* ══════════════════════════════════ MAPS ═════════════════════ */
+const STATUS_MAP: Record<string, { label: string; color: string }> = {
+  RELEASING        : { label: "يُبث الآن", color: "text-emerald-400 bg-emerald-500/15 border-emerald-500/30" },
+  FINISHED         : { label: "مكتمل",     color: "text-blue-400   bg-blue-500/15    border-blue-500/30"    },
+  NOT_YET_RELEASED : { label: "قريباً",    color: "text-amber-400  bg-amber-500/15   border-amber-500/30"   },
+  CANCELLED        : { label: "ملغى",      color: "text-red-400    bg-red-500/15     border-red-500/30"     },
+  HIATUS           : { label: "متوقف",     color: "text-orange-400 bg-orange-500/15  border-orange-500/30"  },
+};
+const FORMAT_MAP: Record<string, string> = {
+  TV: "مسلسل", MOVIE: "فيلم", OVA: "OVA", ONA: "ONA",
+  SPECIAL: "خاص", MUSIC: "موسيقي", TV_SHORT: "قصير",
+};
+const SEASON_MAP: Record<string, string> = {
+  WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
+};
+const GENRE_MAP: Record<string, string> = {
+  "Action": "أكشن", "Adventure": "مغامرة", "Comedy": "كوميدي",
+  "Drama": "دراما", "Fantasy": "فانتازيا", "Horror": "رعب",
+  "Mecha": "ميكا", "Music": "موسيقى", "Mystery": "غموض",
+  "Psychological": "نفسي", "Romance": "رومانسي", "Sci-Fi": "خيال علمي",
+  "Slice of Life": "حياة يومية", "Sports": "رياضي", "Supernatural": "خوارق",
+  "Thriller": "إثارة", "Ecchi": "إيتشي", "Isekai": "إيسيكاي",
+  "Military": "عسكري", "School": "مدرسي", "Magic": "سحر",
+  "Historical": "تاريخي", "Shounen": "شونين", "Seinen": "سيينين",
+  "Shoujo": "شوجو", "Kids": "أطفال", "Game": "ألعاب",
+};
 
 /* ══════════════════════════════════ TYPES ════════════════════ */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
@@ -665,12 +695,13 @@ function SourceRow({ src, idx, onPlaySrc }: { src: FetchedSrc; idx: number; onPl
 }
 
 function ScraperPicker({
-  cover, title, ep, totalEps, animeId,
+  cover, title, ep, totalEps, animeId, anime,
   slotStatus, slotSources,
   onFetchSite, onPlaySrc,
   onBack, onNextEp, onPrevEp,
 }: {
   cover: string; title: string; ep: number; totalEps: number; animeId: number;
+  anime?: any;
   slotStatus: Record<string, SlotStatus>;
   slotSources: Record<string, FetchedSrc[]>;
   onFetchSite: (site: string) => void;
@@ -727,146 +758,226 @@ function ScraperPicker({
 
   const hasSources = displaySources.length > 0;
 
-  /* ── While scrapers are still running: show full-screen loading poster ── */
+  /* ── Shared: extract anime metadata ── */
+  const animeScore   = anime?.averageScore ? (anime.averageScore / 10) : 0;
+  const animeGenres: string[] = anime?.genres?.slice(0, 6) || [];
+  const animeDesc    = (() => {
+    const raw = anime?.description || "";
+    return raw.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
+      .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+      .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
+      .replace(/\s+/g," ").trim().substring(0, 400);
+  })();
+  const animeStatus  = anime?.status ? (STATUS_MAP[anime.status]?.label || "") : "";
+  const animeStudio  = anime?.studios?.nodes?.[0]?.name || "";
+  const animeSeason  = anime?.seasonYear ? `${SEASON_MAP[anime.season] || ""} ${anime.seasonYear}`.trim() : "";
+  const animeBanner  = anime?.bannerImage || anime?.coverImage?.extraLarge || cover;
+
+  /* ── Shared: hero section (banner + cover row) ── */
+  const HeroSection = (
+    <>
+      {/* Banner */}
+      <div className="relative w-full overflow-hidden shrink-0" style={{ height: 220 }}>
+        {animeBanner ? (
+          <img src={animeBanner} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full"
+            style={{ background: "linear-gradient(135deg,rgba(109,40,217,0.45) 0%,rgba(79,30,180,0.20) 60%,rgba(9,9,11,1) 100%)" }} />
+        )}
+        <div className="absolute inset-0" style={{
+          background: "linear-gradient(to bottom,rgba(7,7,13,0.25) 0%,rgba(7,7,13,0.5) 55%,rgba(7,7,13,1) 100%)"
+        }} />
+        {/* Back button */}
+        <button onClick={onBack}
+          className="absolute top-5 right-4 w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90 transition-transform"
+          style={{ marginTop: "max(0px, env(safe-area-inset-top))" }}>
+          <ChevronRight className="w-5 h-5 text-white" />
+        </button>
+        {/* Episode nav top-left */}
+        <div className="absolute top-5 left-4 flex items-center gap-2 z-10"
+          style={{ marginTop: "max(0px, env(safe-area-inset-top))" }}>
+          <button onClick={onPrevEp} disabled={ep <= 1}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
+            style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(10px)", color: "rgba(255,255,255,0.65)" }}>
+            <ChevronRight className="w-3.5 h-3.5" />السابقة
+          </button>
+          <button onClick={onNextEp} disabled={ep >= totalEps}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
+            style={{ background: "rgba(109,40,217,0.55)", border: "1px solid rgba(139,92,246,0.38)", backdropFilter: "blur(10px)", color: "rgba(196,181,253,0.92)" }}>
+            التالية<ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Cover + title row */}
+      <div className="px-4 -mt-[72px] relative z-10 flex gap-4 items-end">
+        <div className="relative shrink-0">
+          <div className="absolute inset-0 rounded-2xl blur-xl scale-95 translate-y-2 opacity-60"
+            style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }} />
+          <div className="relative w-[90px] h-[130px] rounded-2xl overflow-hidden border border-white/15 shadow-2xl shadow-black/80">
+            {cover
+              ? <img src={cover} alt={title} className="w-full h-full object-cover" />
+              : <div className="w-full h-full bg-white/8 flex items-center justify-center"><Play className="w-8 h-8 text-white/20 fill-white/10" /></div>
+            }
+          </div>
+          {anime?.format && FORMAT_MAP[anime.format] && (
+            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#1C1C22] border border-white/12 text-white/60 text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap font-['Cairo']">
+              {FORMAT_MAP[anime.format]}
+            </div>
+          )}
+        </div>
+        <div className="flex-1 pb-3 min-w-0 space-y-1.5">
+          <h1 className="text-[17px] font-black text-white leading-snug font-['Cairo'] line-clamp-2">{title}</h1>
+          <p className="text-[10px] text-white/35 font-['Cairo']">
+            {anime?.title?.native || anime?.title?.romaji || ""}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            <span className="px-2 py-1 rounded-lg text-[9px] font-black font-['Cairo']"
+              style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.32)", color: "rgba(196,181,253,0.92)" }}>
+              الحلقة {ep}{totalEps > 0 ? ` / ${totalEps}` : ""}
+            </span>
+            {animeStatus && (
+              <span className={`text-[9px] font-black px-2 py-1 rounded-lg border font-['Cairo'] ${STATUS_MAP[anime?.status]?.color || "text-white/50 bg-white/8 border-white/10"}`}>
+                {animeStatus}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Score row */}
+      {animeScore > 0 && (
+        <div className="mx-4 mt-4 rounded-2xl px-4 py-2.5 flex items-center gap-3"
+          style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.16)" }}>
+          <div className="flex items-center gap-0.5">
+            {[1,2,3,4,5].map(i => (
+              <Star key={i} className={`w-3.5 h-3.5 ${animeScore/2 >= i ? "text-amber-400 fill-amber-400" : "text-white/15"}`} />
+            ))}
+          </div>
+          <span className="text-amber-300 text-[15px] font-black">{animeScore.toFixed(1)}</span>
+          <span className="text-white/30 text-[10px] font-['Cairo']">/ 10</span>
+          {anime?.popularity > 0 && (
+            <span className="mr-auto text-white/25 text-[9px] font-['Cairo']">{anime.popularity.toLocaleString()} مستخدم</span>
+          )}
+        </div>
+      )}
+
+      {/* Genre tags */}
+      {animeGenres.length > 0 && (
+        <div className="mt-3 px-4 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+          {animeGenres.map((g: string) => (
+            <span key={g}
+              className="shrink-0 text-[10px] font-bold bg-[#18181B] text-white/55 px-3 py-1.5 rounded-xl border border-white/6 font-['Cairo'] whitespace-nowrap">
+              {GENRE_MAP[g] || g}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Studio + season */}
+      {(animeStudio || animeSeason) && (
+        <div className="px-4 mt-3 flex gap-3 flex-wrap">
+          {animeStudio && (
+            <div className="flex items-center gap-1.5 text-white/35 text-[10px] font-['Cairo']">
+              <Sparkles className="w-3 h-3" />{animeStudio}
+            </div>
+          )}
+          {animeSeason && (
+            <div className="flex items-center gap-1.5 text-white/35 text-[10px] font-['Cairo']">
+              <Calendar className="w-3 h-3" />{animeSeason}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Synopsis */}
+      {animeDesc && (
+        <div className="mt-4 px-4">
+          <div className="flex items-center mb-2">
+            <div className="w-1 h-4 bg-primary rounded-full ml-2" />
+            <h2 className="text-[13px] font-black font-['Cairo']">القصة</h2>
+          </div>
+          <div className="bg-[#111116] border border-white/6 rounded-2xl p-3.5">
+            <p className="text-[#B4B4B8] leading-relaxed text-[12px] font-['Cairo'] line-clamp-4">{animeDesc}</p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  /* ── While scrapers are still running: show AnimationDetail-style page ── */
   if (!allDone) {
     return (
-      <div className="fixed inset-0 z-50 overflow-hidden bg-[#07070d]" dir="rtl">
-        {cover && (
-          <div className="absolute inset-0">
-            <img src={cover} alt="" className="w-full h-full object-cover scale-125 blur-3xl opacity-[0.15] saturate-150" />
-            <div className="absolute inset-0 bg-gradient-to-b from-[#07070d]/85 via-[#07070d]/50 to-[#07070d]/92" />
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-[#07070d]" dir="rtl"
+        style={{ scrollbarWidth: "none" }}>
+        {HeroSection}
+
+        {/* Loading indicator */}
+        <div className="flex flex-col items-center gap-4 py-10 px-6">
+          <div className="relative w-10 h-10">
+            <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
+            <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+              animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
           </div>
-        )}
-        <button onClick={onBack}
-          className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-          style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
-          <ChevronRight className="w-5 h-5 text-white/60" />
-        </button>
+          <p className="text-white/50 text-[12px] font-['Cairo'] text-center">⏳ جاري البحث عن مصادر الحلقة…</p>
 
-        <div className="relative h-full flex flex-col items-center justify-center gap-7 px-6">
-          {cover ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.85, y: 24 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-              className="relative shrink-0">
-              <div
-                className="absolute -inset-6 rounded-[32px] pointer-events-none"
-                style={{ background: "radial-gradient(ellipse at 50% 65%, rgba(139,92,246,0.58) 0%, rgba(109,40,217,0.24) 48%, transparent 74%)" }}
-              />
-              <div
-                className="absolute -inset-4 rounded-[28px] pointer-events-none"
-                style={{ boxShadow: "0 0 70px 10px rgba(124,58,237,0.32), 0 0 130px 20px rgba(109,40,217,0.14)" }}
-              />
-              <img src={cover} alt={title}
-                className="w-48 h-[272px] rounded-2xl object-cover"
-                style={{ boxShadow: "0 28px 72px rgba(0,0,0,0.88), 0 0 0 1px rgba(255,255,255,0.08)" }}
-              />
-            </motion.div>
-          ) : (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              className="w-48 h-[272px] rounded-2xl bg-white/[0.03] flex items-center justify-center"
-              style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
-              <div className="w-16 h-16 rounded-full bg-violet-500/15 flex items-center justify-center">
-                <div className="w-7 h-7 rounded-full bg-violet-500/35" />
-              </div>
-            </motion.div>
-          )}
-
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.18, duration: 0.4 }} className="text-center">
-            {title && (
-              <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-1.5"
-                style={{ textShadow: "0 2px 14px rgba(0,0,0,0.75)" }}>{title}</h2>
-            )}
-            <p className="text-white/35 text-[13px] font-['Cairo'] tracking-wide">الحلقة {ep}</p>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.30 }}
-            className="flex flex-col items-center gap-3">
-            <div className="relative w-9 h-9">
-              <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
-              <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
-                animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
-            </div>
-          </motion.div>
+          {/* Scraper status dots */}
+          <div className="flex flex-wrap justify-center gap-2 max-w-xs">
+            {SCRAPER_DEFS.map(d => {
+              const st = slotStatus[d.site];
+              const color = st === "ready" ? "#34d399" : st === "failed" ? "#f87171" : st === "fetching" ? "#a78bfa" : "rgba(255,255,255,0.15)";
+              return (
+                <div key={d.site} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl"
+                  style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${color}28` }}>
+                  <div className="w-1.5 h-1.5 rounded-full"
+                    style={{ background: color, boxShadow: st === "fetching" ? `0 0 6px ${color}` : "none" }} />
+                  <span className="text-[9px] font-bold font-['Cairo']"
+                    style={{ color: st === "fetching" ? color : "rgba(255,255,255,0.35)" }}>
+                    {d.tag}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
+        <div style={{ height: "max(32px, env(safe-area-inset-bottom))" }} />
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#06060c]" dir="rtl">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#07070d]" dir="rtl">
+      {/* ── Scrollable content ── */}
+      <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
+        {HeroSection}
 
-      {/* ── Nav bar ── */}
-      <div className="flex items-center shrink-0"
-        style={{
-          borderBottom: "1px solid rgba(255,255,255,0.05)",
-          paddingTop: "max(16px, env(safe-area-inset-top))",
-          paddingBottom: 14,
-          paddingRight: 4,
-          paddingLeft: 14,
-        }}>
-        <button onClick={onBack}
-          className="w-11 h-11 flex items-center justify-center active:scale-90 shrink-0 rounded-xl transition-all"
-          style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.11)" }}>
-          <ChevronRight className="w-5 h-5 text-white/70" />
-        </button>
-
-        {cover && (
-          <img src={cover} alt="" className="w-7 h-9 rounded-lg object-cover opacity-55 shrink-0 ml-1" />
-        )}
-
-        <div className="flex-1 min-w-0 px-2">
-          <p className="text-white font-black text-[15px] font-['Cairo'] truncate leading-tight"
-            style={{ textShadow: "0 1px 8px rgba(0,0,0,0.6)" }}>
-            {title}
-          </p>
-          <div className="flex items-center gap-1.5 mt-[5px] flex-wrap">
-            <span className="px-2 py-[3px] rounded-full text-[10px] font-black font-['Cairo']"
-              style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.32)", color: "rgba(196,181,253,0.92)" }}>
-              الحلقة {ep}
-            </span>
+        {/* ── Watch / Sources section header ── */}
+        <div className="px-4 mt-6 mb-1">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <div className="w-1 h-4 bg-primary rounded-full" />
+              <h2 className="text-[13px] font-black font-['Cairo']">مصادر المشاهدة</h2>
+            </div>
             {hasSources && (
-              <span className="px-2 py-[3px] rounded-full text-[10px] font-black font-['Cairo']"
+              <span className="px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo']"
                 style={{ background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.26)", color: "rgba(110,231,183,0.82)" }}>
                 {displaySources.length} مصدر
               </span>
             )}
           </div>
+          {hasSources && (
+            <div className="px-3 py-2.5 rounded-xl flex items-center gap-2.5 mb-3"
+              style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.15)" }}>
+              <span className="text-sm shrink-0">⚠️</span>
+              <p className="text-[10px] text-amber-200/55 font-['Cairo'] leading-snug">
+                <span className="text-amber-300/75 font-black">السيرفر لا يعمل؟</span> جرّب سيرفراً آخر.
+              </p>
+            </div>
+          )}
         </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={onPrevEp} disabled={ep <= 1}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl transition-all active:scale-90 disabled:opacity-20"
-            style={{ background: "rgba(255,255,255,0.09)", border: "1px solid rgba(255,255,255,0.13)" }}>
-            <ChevronRight className="w-4 h-4 text-white/70" />
-            <span className="text-white/65 text-[12px] font-bold font-['Cairo'] leading-none">السابقة</span>
-          </button>
-          <button onClick={onNextEp} disabled={ep >= totalEps}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl transition-all active:scale-90 disabled:opacity-20"
-            style={{ background: "rgba(124,58,237,0.22)", border: "1px solid rgba(124,58,237,0.38)" }}>
-            <span className="text-violet-300/90 text-[12px] font-bold font-['Cairo'] leading-none">التالية</span>
-            <ChevronLeft className="w-4 h-4 text-violet-300/80" />
-          </button>
-        </div>
-      </div>
-
-      {/* ── Scrollable source list ── */}
-      <div className="flex-1 overflow-y-auto"
-        style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
         {hasSources ? (
           <>
-            {/* ── Server hint banner ── */}
-            <div className="mx-4 mt-4 mb-1 px-3.5 py-2.5 rounded-xl flex items-center gap-2.5"
-              style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.16)" }}>
-              <span className="text-base shrink-0">⚠️</span>
-              <p className="text-[11px] text-amber-200/60 font-['Cairo'] leading-snug">
-                <span className="text-amber-300/80 font-black">السيرفر لا يعمل؟</span> جرّب سيرفراً آخر — بعض السيرفرات قد تكون بطيئة أو غير متاحة مؤقتاً.
-              </p>
-            </div>
-
             {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
               const srcs = grouped[q];
               if (!srcs.length) return null;
@@ -878,12 +989,10 @@ function ScraperPicker({
               }
               return (
                 <div key={q}>
-                  {/* Quality group header */}
-                  <div className="flex items-center gap-2 px-4 pt-5 pb-2">
+                  <div className="flex items-center gap-2 px-4 pt-3 pb-2">
                     <div className="w-1.5 h-1.5 rounded-full shrink-0"
                       style={{ background: qs.dot, boxShadow: `0 0 6px ${qs.dot}88` }} />
-                    <span className="text-[10px] font-bold font-['Cairo'] tracking-wider"
-                      style={{ color: qs.text }}>
+                    <span className="text-[10px] font-bold font-['Cairo'] tracking-wider" style={{ color: qs.text }}>
                       {Q_LABEL[q]}
                     </span>
                     <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
@@ -892,27 +1001,22 @@ function ScraperPicker({
                     </span>
                   </div>
                   {srcs.map((src, i) => (
-                    <SourceRow key={`${src.site}-${rowIdx + i}`}
-                      src={src} idx={rowIdx + i} onPlaySrc={onPlaySrc} />
+                    <SourceRow key={`${src.site}-${rowIdx + i}`} src={src} idx={rowIdx + i} onPlaySrc={onPlaySrc} />
                   ))}
                 </div>
               );
             })}
           </>
         ) : (
-          /* No sources found after all scrapers done */
           <motion.div
-            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-            className="flex flex-col items-center justify-center py-14 gap-5 px-8">
+            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
+            className="flex flex-col items-center justify-center py-10 gap-5 px-8">
             <div className="w-16 h-16 rounded-3xl flex items-center justify-center"
               style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)" }}>
               <AlertTriangle className="w-7 h-7 text-red-400/60" />
             </div>
             <div className="text-center flex flex-col gap-2">
-              <p className="text-white/70 text-[16px] font-black font-['Cairo']">
-                الحلقة {ep} غير متوفرة بعد
-              </p>
+              <p className="text-white/70 text-[16px] font-black font-['Cairo']">الحلقة {ep} غير متوفرة بعد</p>
               <p className="text-white/28 text-[12px] font-['Cairo'] leading-relaxed">
                 المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.
               </p>
@@ -921,15 +1025,15 @@ function ScraperPicker({
               <button onClick={onPrevEp}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
                 style={{ background: "rgba(124,58,237,0.18)", border: "1px solid rgba(124,58,237,0.30)", color: "rgba(196,181,253,0.90)" }}>
-                <ChevronRight className="w-4 h-4" />
-                جرّب الحلقة {ep - 1}
+                <ChevronRight className="w-4 h-4" />جرّب الحلقة {ep - 1}
               </button>
             )}
           </motion.div>
         )}
 
-        {/* ── Episode comments ── */}
+        {/* Episode comments */}
         <EpComments commKey={`nova-ep-comments-${animeId}-${ep}`} />
+        <div style={{ height: "max(32px, env(safe-area-inset-bottom))" }} />
       </div>
     </div>
   );
@@ -2125,6 +2229,7 @@ export default function WatchPage() {
             transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
             <ScraperPicker
               cover={cover} title={title} ep={ep} totalEps={totalEps}
+              anime={anime}
               slotStatus={slotStatus} slotSources={slotSources}
               onFetchSite={handleFetchSite}
               onPlaySrc={handlePlaySrc}
