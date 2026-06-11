@@ -168,6 +168,7 @@ export default function RiftPlayer({
     typeof window !== "undefined" && window.innerHeight > window.innerWidth
   );
   const [loading,         setLoading]         = useState(true);
+  const [buffering,       setBuffering]       = useState(false);
   const [error,           setError]           = useState<string | null>(null);
   const [playing,         setPlaying]         = useState(false);
   const [currentTime,     setCurrentTime]     = useState(0);
@@ -314,7 +315,7 @@ export default function RiftPlayer({
   const fireOnFail = useCallback(() => {
     if (failFired.current) return;
     failFired.current = true;
-    setLoading(true); setError(null);
+    setLoading(true); setBuffering(false); setError(null);
     if (failTimer.current) clearTimeout(failTimer.current);
     failTimer.current = setTimeout(() => onFailRef.current?.(), 800);
   }, []);
@@ -324,7 +325,7 @@ export default function RiftPlayer({
     const v = videoRef.current; if (!v) return;
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     v.src = "";
-    setLoading(true); setError(null); setCurrentTime(0); setDuration(0); setPlaying(false); setIsEnded(false);
+    setLoading(true); setBuffering(false); setError(null); setCurrentTime(0); setDuration(0); setPlaying(false); setIsEnded(false);
     failFired.current = false;
     resumedRef.current = false;
     if (failTimer.current) { clearTimeout(failTimer.current); failTimer.current = null; }
@@ -393,8 +394,8 @@ export default function RiftPlayer({
         maxStarvationDelay: 2,
         maxLoadingDelay: 2,
         startLevel: -1,
-        abrEwmaDefaultEstimate: 1_500_000,
-        testBandwidth: true,
+        abrEwmaDefaultEstimate: 3_000_000,
+        testBandwidth: false,
         capLevelToPlayerSize: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
           xhr.timeout = 10000;
@@ -482,8 +483,12 @@ export default function RiftPlayer({
       onTimeUpdate?.(v.currentTime);
     };
     const onDur   = () => { setDuration(v.duration); if (v.duration > 0) onDuration?.(v.duration); };
-    const onWait  = () => setLoading(true);
-    const onPlay2 = () => setLoading(false);
+    const onWait  = () => {
+      const v2 = videoRef.current;
+      if (v2 && v2.currentTime > 1) setBuffering(true);
+      else setLoading(true);
+    };
+    const onPlay2 = () => { setLoading(false); setBuffering(false); };
     const onEnded = () => { setIsEnded(true); setPlaying(false); setShowCtrl(true); };
     v.addEventListener("play", onPlay); v.addEventListener("pause", onPause);
     v.addEventListener("timeupdate", onTime); v.addEventListener("durationchange", onDur);
@@ -1033,9 +1038,9 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── Standalone loading spinner — shown even when controls are hidden ── */}
+        {/* ── Standalone loading spinner — shown only when controls are hidden ── */}
         <AnimatePresence>
-          {loading && !error && !playing && (
+          {(loading || buffering) && !error && !playing && !showCtrl && (
             <motion.div
               key="buf-overlay"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -1176,7 +1181,7 @@ export default function RiftPlayer({
                     boxShadow: "0 8px 32px rgba(0,0,0,0.60), 0 0 0 6px rgba(255,255,255,0.04)",
                   }}>
                   <AnimatePresence mode="wait">
-                    {loading && !error ? (
+                    {(loading || buffering) && !error ? (
                       <motion.div key="buf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
                         <div className="w-7 h-7 rounded-full border-2 border-white/25 border-t-white/80 animate-spin" />
                       </motion.div>
