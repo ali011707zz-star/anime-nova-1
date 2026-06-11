@@ -606,9 +606,7 @@ export default function AnimationWatch() {
           key={embedIframeUrl}
           src={embedIframeUrl}
           className="absolute inset-0 w-full h-full border-0"
-          allow="autoplay; fullscreen; encrypted-media"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
-          referrerPolicy="no-referrer"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
           allowFullScreen
         />
       </div>
