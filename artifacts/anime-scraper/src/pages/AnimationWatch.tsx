@@ -260,13 +260,14 @@ export default function AnimationWatch() {
       let proxyUrl = raw;
       if (raw && raw.includes(".m3u8")) proxyUrl = wrapHls(raw, url);
       else if (raw && !raw.startsWith("/api/")) proxyUrl = wrapMp4(raw, url);
+      // On failure → "fail" (not "unknown") so source remains visible in picker
       setSources(prev => prev.map(s =>
         s.url === url
-          ? { ...s, directUrl: raw || undefined, proxyUrl: raw ? proxyUrl : undefined, status: raw ? "ok" : ("unknown" as any) }
+          ? { ...s, directUrl: raw || undefined, proxyUrl: raw ? proxyUrl : undefined, status: raw ? "ok" : "fail" as const }
           : s
       ));
     } catch {
-      setSources(prev => prev.map(s => s.url === url ? { ...s, status: ("unknown" as any) } : s));
+      setSources(prev => prev.map(s => s.url === url ? { ...s, status: "fail" as const } : s));
     }
   }, []);
 
@@ -495,13 +496,14 @@ export default function AnimationWatch() {
   const grouped = useMemo(() => {
     const g: Record<QualityTier, Source[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
     for (const s of sources) {
-      if (s.status !== "ok") continue;
+      // Show ok + fail sources; skip loading (shown as spinner) and skip unknown only if no url
+      if (s.status === "loading") continue;
       g[getSourceTier(s)].push(s);
     }
     return g;
   }, [sources]);
 
-  const hasSources = sources.some(s => s.status === "ok");
+  const hasSources = sources.some(s => s.status !== "loading");
 
   /* ────────────────────────── LOADING SCREEN ─────────────────────────────── */
   if (step === "loading") {
