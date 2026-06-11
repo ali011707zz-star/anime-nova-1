@@ -3927,60 +3927,6 @@ async function getAnimeWitcherSources(
 }
 
 
-// ════════════════════════════════════════════════════════════════════
-//  MIRURO API (mirurotvapi.vercel.app) — ياباني مترجم · AnimePahe CDN
-//  Flow: /api/watch/kiwi/{anilistId}/sub/animepahe-{ep}
-//        → streams[] با isActive=true + type=hls → HLS m3u8 مباشر
-//  CDN: vault-*.owocdn.top / vault-*.uwucdn.top — CORS *, cached 1yr
-//  لا توجد ملفات ترجمة منفصلة (سبتايتل انجليزي مضمّن في الفيديو)
-// ════════════════════════════════════════════════════════════════════
-const MIRURO_API_BASE = "https://mirurotvapi.vercel.app/api";
-const MIRURO_REFERER  = "https://kwik.cx/";
-
-async function getMiruroApiSources(
-  _title: string, _english: string | null, ep: number, anilistId?: number,
-): Promise<UnifiedSource[]> {
-  if (!anilistId) return [];
-  try {
-    const slug = `animepahe-${ep}`;
-    const url  = `${MIRURO_API_BASE}/watch/kiwi/${anilistId}/sub/${slug}`;
-    const r    = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!r.ok) return [];
-    const data = await r.json() as {
-      success: boolean;
-      results?: {
-        streams?: Array<{
-          url: string; type: string; quality: string;
-          isActive: boolean; referer?: string;
-        }>;
-      };
-    };
-    if (!data.success || !data.results?.streams) return [];
-
-    const sources: UnifiedSource[] = [];
-    for (const s of data.results.streams) {
-      if (s.type !== "hls" || !s.isActive || !s.url) continue;
-      const q      = s.quality || "720p";
-      const qRank  = q.startsWith("1080") ? 11 : q.startsWith("720") ? 10 : 9;
-      const ref    = encodeURIComponent(s.referer || MIRURO_REFERER);
-      const proxyUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${ref}`;
-      sources.push({
-        name: `AnimePahe · ياباني · ${q}`,
-        url: s.url,
-        quality: q,
-        qualityRank: qRank,
-        site: "miruro",
-        directUrl: proxyUrl,
-        directType: "hls",
-      });
-    }
-    return sources;
-  } catch { return []; }
-}
-
 
 // ════════════════════════════════════════════════════════════════════
 //  ANIMEHUB (123animehub.cc) — ياباني مترجم · HLS عبر echovideo.ru
@@ -5070,7 +5016,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
-      scrapeCached("miruro",       () => getMiruroApiSources(title, english, ep, anilistId),     false),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       // ── معطّلة ────────────────────────────────────────────────────
@@ -5158,7 +5103,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "miruro":      (await race(getMiruroApiSources(title, english, ep, anilistId),   SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       case "anineko":     (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;

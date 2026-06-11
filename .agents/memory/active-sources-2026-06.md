@@ -11,17 +11,18 @@ description: Which scrapers are active/disabled in sources-stream and why, as of
 | animelek | Arabic dubbed/sub | working |
 | animedar | Arabic sub | working |
 | okanime | Arabic sub | working |
-| ristoanime | Arabic sub | working |
+| ristoanime | Arabic sub | working — small/new site, recent anime only |
 | animeify | Arabic · MediaFire MP4 | working |
+| animeday | Arabic dubbed | working |
 | kawaii | JP sub, AniList ID | 1080p MP4, works well |
 | anikoto | JP sub, AniList ID | HLS megaplay.buzz |
-| miruro | JP sub, AniList ID | AnimePahe HLS |
 | animewitcher | JP sub, AniList ID | Firestore, small library |
 | anineko | JP sub, title search | HLS vibeplayer/bibiemb |
 | mitanime | JP sub, title search | RSC endpoint, mega/videa |
 
 ## Disabled and why
 
+- **miruro** — DELETED 2026-06 (user request to remove entirely)
 - **animephoenix** — site timeout from Replit datacenter IPs (dead)
 - **witanime** — CF Managed Challenge blocks ALL datacenter IPs
 - **anime3rb** — CF Managed Challenge blocks ALL datacenter IPs

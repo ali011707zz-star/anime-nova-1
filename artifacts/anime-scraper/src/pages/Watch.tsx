@@ -114,7 +114,6 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
-  { site: "miruro",       name: "MiruroAPI",      desc: "AnimePahe · HLS مباشر",  tag: "MR" },
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW" },
   // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },

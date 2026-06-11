@@ -1337,27 +1337,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         }
       })(),
 
-      // ── 12. vidsrc.pro (TMDB-native, reliable HLS) ──────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const url = type === "tv"
-            ? `https://vidsrc.pro/embed/tv/${tmdbId}/${season}/${epNum}`
-            : `https://vidsrc.pro/embed/movie/${tmdbId}`;
-          await sendExtracted(url, "VidSrc Pro");
-        } catch { /* silent */ }
-      })(),
+      // ── 12. vidsrc.pro → DISABLED (redirects to embed.su, already handled below) ─
+      Promise.resolve(),
 
-      // ── 9. vidsrc.icu (TMDB-native, newer mirror) ────────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const url = type === "tv"
-            ? `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${epNum}`
-            : `https://vidsrc.icu/embed/movie/${tmdbId}`;
-          await sendExtracted(url, "VidSrc ICU");
-        } catch { /* silent */ }
-      })(),
+      // ── 9. vidsrc.icu → DISABLED (timeout from datacenter IPs) ──────────────
+      Promise.resolve(),
 
       // ── 10. autoembed.cc (TMDB-native, direct HLS) ───────────────────────────
       (async () => {
@@ -1384,75 +1368,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 20. vidsrc.vip (TMDB-native, newer vidsrc mirror) ────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const url = type === "tv"
-            ? `https://vidsrc.vip/embed/tv/${tmdbId}/${season}/${epNum}`
-            : `https://vidsrc.vip/embed/movie/${tmdbId}`;
-          await sendExtracted(url, "VidSrc VIP");
-        } catch { /* silent */ }
-      })(),
+      // ── 20. vidsrc.vip → DISABLED (timeout from datacenter IPs) ─────────────
+      Promise.resolve(),
 
-      // ── 21. player.smashy.stream (TMDB-native, direct HLS) ───────────────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const url = type === "tv"
-            ? `https://player.smashy.stream/tv/${tmdbId}?s=${season}&e=${epNum}`
-            : `https://player.smashy.stream/movie/${tmdbId}`;
-          await sendExtracted(url, "Smashy · HLS");
-        } catch { /* silent */ }
-      })(),
+      // ── 21. smashy → DISABLED (timeout from datacenter IPs) ─────────────────
+      Promise.resolve(),
 
-      // ── 22. vidlink.pro — direct JSON API (TMDB-native, bypasses JS render) ──
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          send("status", { msg: "VidLink API: جاري الاستخراج…" });
-          const apiUrl = type === "tv"
-            ? `https://vidlink.pro/api/b/tv/${tmdbId}/${season}/${epNum}`
-            : `https://vidlink.pro/api/b/movie/${tmdbId}`;
+      // ── 22. VidLink → DISABLED (returns 0 bytes from Replit datacenter IPs) ─
+      Promise.resolve(),
 
-          const r = await fetch(apiUrl, {
-            headers: {
-              "User-Agent" : UA,
-              "Referer"    : "https://vidlink.pro/",
-              "Origin"     : "https://vidlink.pro",
-              "Accept"     : "application/json",
-            },
-            signal: AbortSignal.timeout(16_000),
-          });
-          if (!r.ok) return;
-          const data: any = await r.json();
-
-          // Response shape: { stream: [{ playlist: "https://...m3u8", ... }] }
-          const streams: any[] = Array.isArray(data?.stream) ? data.stream
-            : data?.playlist ? [data]
-            : [];
-
-          for (const s of streams) {
-            const m3u8 = s?.playlist || s?.url || "";
-            if (!m3u8 || !m3u8.includes(".m3u8")) continue;
-            const ref     = "https://vidlink.pro/";
-            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(ref)}`;
-            const label   = `VidLink · HLS مباشر${s?.quality ? ` · ${s.quality}` : ""}`;
-            sendSource(proxied, label, proxied, proxied);
-          }
-        } catch { /* silent */ }
-      })(),
-
-      // ── 23. vidbinge.com (TMDB-native, streamwish backend) ───────────────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const url = type === "tv"
-            ? `https://vidbinge.com/embed/tv/${tmdbId}/${season}/${epNum}`
-            : `https://vidbinge.com/embed/movie/${tmdbId}`;
-          await sendExtracted(url, "VidBinge · HLS");
-        } catch { /* silent */ }
-      })(),
+      // ── 23. vidbinge → DISABLED (timeout from datacenter IPs) ───────────────
+      Promise.resolve(),
 
       // ── 16. 2embed.skin (TMDB-based, tries streamwish/filemoon extraction) ─────
       (async () => {
@@ -1484,16 +1410,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 14. moviesapi.club (IMDB-based, streamwish backend) ─────────────────
-      (async () => {
-        if (!imdbId) return;
-        try {
-          const url = type === "tv"
-            ? `https://moviesapi.club/tv/${imdbId.replace("tt", "")}-${season}-${epNum}`
-            : `https://moviesapi.club/movie/${imdbId.replace("tt", "")}`;
-          await sendExtracted(url, "MoviesAPI");
-        } catch { /* silent */ }
-      })(),
+      // ── 14. moviesapi.club → DISABLED (domain dead — redirects to alliance4creativity.com) ─
+      Promise.resolve(),
 
       // ── 15. StarCima (vidzee HLS direct + arabic-sources embeds, TMDB ID native) ─
       (async () => {
