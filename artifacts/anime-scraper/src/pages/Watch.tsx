@@ -1664,7 +1664,7 @@ function EpisodePlayer({
               skipIntro={skipTimes?.op}
               skipOutro={skipTimes?.ed}
               autoPlay={localStorage.getItem("pref-autoplay") !== "false"}
-              onSubtitleClick={fetchSubtitles}
+              onSubtitleClick={["shahiid","animelek","animedar","okanime","ristoanime","animeday","akwam","anime4up"].includes(subtitleSite||"") ? undefined : fetchSubtitles}
               onSubSettingsChange={s => setSubSettings(s)}
               onBack={onBack}
               onPrevEp={onPrevEp}
@@ -1883,6 +1883,16 @@ function EpisodePlayer({
                     )}
                   </div>
 
+                  {/* ── Turn off subtitles ── */}
+                  <div className="pt-2 mt-1 border-t border-white/[0.06]">
+                    <button
+                      onClick={() => { setSubCues([]); setSubState("idle"); setShowSubPanel(false); }}
+                      className="w-full py-2 rounded-xl text-[12px] font-bold font-['Cairo'] transition-all active:scale-95"
+                      style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(239,100,100,0.85)" }}>
+                      إيقاف الترجمة
+                    </button>
+                  </div>
+
                 </div>
               )}
             </div>
@@ -1919,6 +1929,15 @@ export default function WatchPage() {
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  /* ── Stop all audio/video when leaving Watch page ── */
+  useEffect(() => {
+    return () => {
+      document.querySelectorAll<HTMLVideoElement>("video").forEach(v => {
+        try { v.pause(); v.src = ""; } catch {}
+      });
+    };
+  }, []);
   const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
   const [playerSubUrl, setPlayerSubUrl] = useState<string | undefined>(undefined);
   const [playerSrcSite, setPlayerSrcSite] = useState<string>("");
