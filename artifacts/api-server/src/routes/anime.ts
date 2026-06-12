@@ -121,6 +121,48 @@ async function cfGet(url: string, extraHdrs: Record<string, string> = {}): Promi
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  cfProxyGet — fetches via Python curl_cffi proxy (port 8000)
+//  Used for sites that block Node.js fetch but allow real Chrome TLS.
+//  Falls back to cfGet if proxy is unavailable.
+// ════════════════════════════════════════════════════════════════════
+const CF_PROXY_PORT = process.env.CF_PROXY_PORT || "8000";
+const CF_PROXY_BASE = `http://localhost:${CF_PROXY_PORT}`;
+let _cfProxyAlive: boolean | null = null;
+let _cfProxyCheckedAt = 0;
+
+async function cfProxyGet(
+  url: string,
+  referer?: string,
+  timeoutMs = 18000,
+): Promise<string | null> {
+  // Health-check proxy once per 60s
+  const now = Date.now();
+  if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
+    try {
+      const h = await fetch(`${CF_PROXY_BASE}/health`, { signal: AbortSignal.timeout(2000) });
+      _cfProxyAlive = h.ok;
+    } catch { _cfProxyAlive = false; }
+    _cfProxyCheckedAt = now;
+  }
+
+  if (_cfProxyAlive) {
+    try {
+      const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
+      proxyUrl.searchParams.set("url", url);
+      if (referer) proxyUrl.searchParams.set("ref", referer);
+      proxyUrl.searchParams.set("timeout", String(Math.floor(timeoutMs / 1000)));
+      const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(timeoutMs + 2000) });
+      const cfBlocked = r.headers.get("x-cf-blocked") === "1";
+      if (!r.ok || cfBlocked) return null;
+      return await r.text();
+    } catch { _cfProxyAlive = false; }
+  }
+
+  // Fallback to regular cfGet
+  return cfGet(url, referer ? { Referer: referer } : {});
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  UTILITIES
 // ════════════════════════════════════════════════════════════════════
 
@@ -1603,19 +1645,10 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
   }
   for (const slug of [...new Set(slugCandidates)]) {
     try {
-      const r = await fetch(`${APH_BASE}/animes/${slug}`, {
-        headers: APH_HDRS,
-        signal: AbortSignal.timeout(7000),
-        redirect: "follow",
-      });
-      if (r.ok) {
-        const html = await r.text();
-        // Verify this is a real series page (soft-404 returns homepage with 200)
-        // Must contain episode links for this specific slug
-        if (!isCloudflareBlock(html) && html.includes(`/episodes/${slug}-episode-`)) {
-          aphSlugCache.set(ck, { slug, ts: Date.now() });
-          return slug;
-        }
+      const html = await cfProxyGet(`${APH_BASE}/animes/${slug}`, `${APH_BASE}/`, 10000);
+      if (html && html.includes(`/episodes/${slug}-episode-`)) {
+        aphSlugCache.set(ck, { slug, ts: Date.now() });
+        return slug;
       }
     } catch {}
   }
@@ -1627,14 +1660,8 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
       `${APH_BASE}/?s=${encodeURIComponent(q as string)}`,
     ]) {
       try {
-        const r = await fetch(searchUrl, {
-          headers: APH_HDRS,
-          signal: AbortSignal.timeout(8000),
-          redirect: "follow",
-        });
-        if (!r.ok) continue;
-        const html = await r.text();
-        if (isCloudflareBlock(html)) continue;
+        const html = await cfProxyGet(searchUrl, `${APH_BASE}/`, 10000);
+        if (!html) continue;
         // Skip if redirected to homepage (no search results)
         if (html.includes('<div class="home-slider"') && !html.includes("/animes/")) continue;
 
@@ -1721,10 +1748,39 @@ function parseAnimePhoenixVideo(html: string): Array<{ url: string; label: strin
 }
 
 async function getAnimePhoenixSources(
-  _title: string, _english: string | null, _ep: number,
+  title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
-  // Site is dead — connection times out from datacenter IPs (Replit blocked)
-  return [];
+  const cKey = `phoenix:${title}|${english ?? ""}|${ep}`;
+  const cached = aphSrcCache.get(cKey);
+  if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
+
+  const slug = await searchAnimePhoenix(title, english);
+  if (!slug) { aphSrcCache.set(cKey, { sources: [], ts: Date.now() }); return []; }
+
+  const epUrl = `${APH_BASE}/episodes/${slug}-episode-${ep}/`;
+  const html = await cfProxyGet(epUrl, `${APH_BASE}/`, 18000);
+  if (!html) { aphSrcCache.set(cKey, { sources: [], ts: Date.now() }); return []; }
+
+  const videos = parseAnimePhoenixVideo(html);
+  if (!videos.length) { aphSrcCache.set(cKey, { sources: [], ts: Date.now() }); return []; }
+
+  const sources: UnifiedSource[] = videos.slice(0, 5).map((v, i) => {
+    // Wrap with video-proxy for Range support (MKV seeking requires it)
+    const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(APH_BASE + "/")}`;
+    return {
+      name: v.label || `Phoenix ${i + 1}`,
+      url: proxied,
+      directUrl: proxied,
+      directType: "mp4" as const,
+      quality: "1080p",
+      qualityRank: 13,
+      site: "animephoenix",
+      isEmbed: false,
+    };
+  });
+
+  aphSrcCache.set(cKey, { sources, ts: Date.now() });
+  return sources;
 }
 
 
@@ -5511,11 +5567,11 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
+      scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
       // ── معطّلة ────────────────────────────────────────────────────
-      // animephoenix: الموقع ميت — timeout من Replit
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
-      // witanime:     CF Managed Challenge يحجب كل IPs المراكز
-      // anime3rb:     CF Managed Challenge يحجب كل IPs المراكز
+      // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
+      // anime3rb:     CF IP block حقيقي، curl_cffi لا تنفع
       // animetime:    جميع روابط CDN ميتة
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم

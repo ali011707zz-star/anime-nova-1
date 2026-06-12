@@ -24,6 +24,10 @@ args = "Start application"
 task = "workflow.run"
 args = "Start API Server"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "CF Proxy"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -47,6 +51,18 @@ outputType = "console"
 task = "shell.exec"
 args = "pnpm install && cd artifacts/api-server && pnpm run build && PORT=8080 node --enable-source-maps ./dist/index.mjs"
 waitForPort = 8080
+
+[[workflows.workflow]]
+name = "CF Proxy"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pip install flask curl_cffi -q && CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py"
+waitForPort = 8000
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -80,6 +96,10 @@ externalPort = 3001
 [[ports]]
 localPort = 24968
 externalPort = 3000
+
+[[ports]]
+localPort = 8000
+externalPort = 8000
 
 [nix]
 channel = "stable-25_05"
