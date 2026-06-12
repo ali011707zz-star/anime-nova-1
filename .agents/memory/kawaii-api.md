@@ -1,6 +1,6 @@
 ---
 name: kawaii-anime.com API
-description: How to scrape kawaii-anime.com — uses AniList IDs natively, has a clean JSON API
+description: How to scrape kawaii-anime.com — uses AniList IDs natively, has Arabic subtitles for newer anime
 ---
 
 ## API Endpoint
@@ -11,7 +11,10 @@ description: How to scrape kawaii-anime.com — uses AniList IDs natively, has a
 {
   "source": "cache",
   "sources": [{"url": "https://video.kawaii-anime.com/video/21-ep1", "quality": "1080p", "isM3U8": false, "type": "mp4"}],
-  "subtitles": [{"url": "...", "lang": "English"}],
+  "subtitles": [
+    {"url": "https://video.kawaii-anime.com/subtitle/113415-ep1-Arabic-0.vtt", "lang": "Arabic"},
+    {"url": "https://video.kawaii-anime.com/subtitle/113415-ep1-English-1.vtt", "lang": "English"}
+  ],
   "headers": {"Referer": "https://www.kawaii-anime.com/"},
   "intro": {"start": 31, "end": 111},
   "outro": {"start": 1376, "end": 1447}
@@ -25,12 +28,17 @@ description: How to scrape kawaii-anime.com — uses AniList IDs natively, has a
 - Auth: None required
 - Range: `accept-ranges: bytes` (seeking works)
 
-## Key Points
-- **AniList IDs are used natively** — the anilistId we already have from the watch URL matches exactly
-- No slug lookup needed — pass anilistId directly
-- Works for all anime that have AniList IDs (which is all of them)
-- qualityRank = 14 (highest priority, direct MP4)
-- SSE endpoint needs `req.query.anime` extracted as anilistId and passed to the scraper
-- Watch.tsx fetch-source calls need `anime: String(animeId || 0)` in URLSearchParams
+## Arabic Subtitle Support
+- **Newer anime have Arabic subtitles** (2020+): JJK (113415, 145064), Demon Slayer (101922) confirmed ✓
+- **Older anime English only**: Naruto (20), One Piece (21), AOT (16498), MHA (21459)
+- Subtitle URL pattern: `/subtitle/{anilistId}-ep{N}-Arabic-0.vtt`
+- Code must prefer Arabic first: `findSub("arabic") || findSub("arab") || findSub("ar") || findSub("english") || ...`
 
-**Why:** kawaii's Next.js App Router uses client-side search (module 913 / cd() function) that hits their internal API. Watch URL format is `/watch/{animeId}?ep={episodeId}&num={epNum}` but the server-side API `/api/watch` accepts anilistId+ep directly.
+## Key Points
+- **AniList IDs are used natively** — no slug lookup needed
+- qualityRank = 15 (highest priority, direct MP4)
+- Source name label should reflect subtitle language: "كواي أنمي · 1080p · عربي" vs "إنجليزي"
+- SSE endpoint needs `req.query.anime` extracted as anilistId
+- `lang` vs `label` field inconsistency possible → check both
+
+**Why:** kawaii's API returns both Arabic and English subtitles for new anime. Old code only looked for English and missed Arabic entirely.
