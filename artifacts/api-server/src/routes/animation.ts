@@ -1580,13 +1580,12 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const servers: any[] = (data.servers || []);
                 if (!servers.length) console.warn(`[StarCima/vidzee] No servers returned for tmdbId=${tmdbId}`);
 
-                // Sort: Atlas (4K) first, then isMain, then Najm, then rest
+                // Sort: isMain first (الثريا), then others, then Najm (lower CDN)
                 const srvSorted = [...servers].sort((a: any, b: any) => {
                   const rank = (s: any) =>
-                    (s.name || "").startsWith("Atlas") ? 0
-                    : s.isMain ? 1
-                    : (s.name || "").startsWith("Najm") ? 3
-                    : 2;
+                    s.isMain ? 0
+                    : (s.name || "").startsWith("Najm") ? 2
+                    : 1;
                   return rank(a) - rank(b);
                 });
 
@@ -1604,11 +1603,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                       } catch { /* keep original */ }
                     }
                     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-                    const isAtlas = (srv.name || "").startsWith("Atlas");
-                    const label   = isAtlas
-                      ? `StarCima · ${srv.name} · 4K`
-                      : `StarCima · ${srv.name || "HD"}`;
-                    return { proxied, label, isAtlas };
+                    const label   = `StarCima · ${srv.name || "HD"}`;
+                    return { proxied, label, isAtlas: false };
                   });
 
                 // Probe all CDN URLs in parallel.

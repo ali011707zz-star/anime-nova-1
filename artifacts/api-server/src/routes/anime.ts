@@ -3648,7 +3648,7 @@ async function getAniKotoSources(
     const embedUrl = `${MEGAPLAY_BASE}/stream/ani/${anilistId}/${ep}/sub`;
     let html = await fetch(embedUrl, {
       headers: { ...BASE_HDRS, Referer: MEGAPLAY_SPOOF_REF, "Accept-Language": "en-US,en;q=0.9" },
-      signal: AbortSignal.timeout(14000),
+      signal: AbortSignal.timeout(10000),
     }).then(r => r.ok ? r.text() : "").catch(() => "");
 
     // تتبع iframe داخلي إذا لزم الأمر
@@ -3658,7 +3658,7 @@ async function getAniKotoSources(
       actualEmbedUrl = frameSrc.startsWith("http") ? frameSrc : `${MEGAPLAY_BASE}${frameSrc}`;
       html = await fetch(actualEmbedUrl, {
         headers: { ...BASE_HDRS, Referer: MEGAPLAY_SPOOF_REF },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(8000),
       }).then(r => r.ok ? r.text() : "").catch(() => "");
     }
 
@@ -3673,7 +3673,7 @@ async function getAniKotoSources(
         "X-Requested-With": "XMLHttpRequest",
         Accept: "application/json, */*",
       },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(8000),
     }).then(r => r.ok ? r.json() : null).catch(() => null) as {
       sources?: { file?: string };
       tracks?: Array<{ file: string; label?: string; kind?: string; default?: boolean }>;
@@ -3683,25 +3683,24 @@ async function getAniKotoSources(
 
     const m3u8Url = data.sources.file;
 
-    // اختر أفضل ترجمة إنجليزية VTT
-    const subTrack = data.tracks?.find(t =>
-      t.kind !== "thumbnails" && (
-        (t.label || "").toLowerCase().includes("english") ||
-        (t.label || "").toLowerCase().includes("eng")
-      )
-    ) || data.tracks?.find(t => t.kind !== "thumbnails");
-    // وجّه الـ subtitle عبر proxy-text (تجاوز CDN) ثم translate-vtt (ترجمة عربية)
-    const rawSubProxy = subTrack?.file
+    // اختر الـ subtitle المتاحة — بدون ترجمة فورية (ثقيلة)
+    // نعطي الأولوية للعربية ثم الإنجليزية — عرضها مباشرة عبر proxy-text فقط
+    const subTrack =
+      data.tracks?.find(t => t.kind !== "thumbnails" && /(arabic|arab|\bar\b)/i.test(t.label || "")) ||
+      data.tracks?.find(t => t.kind !== "thumbnails" && /(english|eng)/i.test(t.label || "")) ||
+      data.tracks?.find(t => t.kind !== "thumbnails");
+    // proxy-text فقط لتجاوز CORS — بدون translate-vtt الثقيل
+    const subtitleUrl = subTrack?.file
       ? `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(origin + "/")}`
-      : null;
-    const subtitleUrl = rawSubProxy
-      ? `/api/anime/translate-vtt?url=${encodeURIComponent(rawSubProxy)}&from=en&to=ar`
       : undefined;
+    const subLang = subTrack
+      ? (/(arabic|arab|\bar\b)/i.test(subTrack.label || "") ? "عربي" : "إنجليزي")
+      : "";
 
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(origin + "/")}`;
 
     return [{
-      name: "AniKoto · 1080p · ياباني مترجم",
+      name: `AniKoto · 1080p · ياباني${subLang ? " · " + subLang : ""}`,
       url: m3u8Url,
       quality: "1080p",
       qualityRank: 10,
@@ -5562,7 +5561,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
-      // anikoto: megaplay.buzz — 3 طلبات متسلسلة (34ث مجموع) — ثقيل
+      scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
@@ -5578,7 +5577,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animegg:      معطّل بطلب المستخدم
       // allmanga:     clock.json→500, fast4speed→401
       // reanime:      FlixCloud يبلوك Replit IP
-      // anikoto:      megaplay.buzz — 3 طلبات متسلسلة (~34ث) — ثقيل جداً في التشغيل
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
     ]);
 
@@ -5656,6 +5654,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       case "anineko":     (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
