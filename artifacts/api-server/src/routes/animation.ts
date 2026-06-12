@@ -105,14 +105,36 @@ function asDecode(raw: string): string {
             .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
+// CF proxy helper — يمرر الطلب عبر curl_cffi (يتجاوز حجب IP من Replit)
+async function cfProxyGet(url: string): Promise<string> {
+  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
+  const proxyUrl = `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`;
+  const r = await fetch(proxyUrl, {
+    headers: { "User-Agent": UA },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!r.ok) throw new Error(`CF proxy HTTP ${r.status}`);
+  return r.text();
+}
+
 async function asFetchPosts(params: string): Promise<Array<{ id: number; link: string; title: { rendered: string } }>> {
   try {
-    const r = await fetch(`${AS_BASE}/wp-json/wp/v2/posts?${params}&_fields=id,link,title`, {
-      headers: { "User-Agent": UA, Accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!r.ok) return [];
-    return r.json() as Promise<Array<{ id: number; link: string; title: { rendered: string } }>>;
+    const url = `${AS_BASE}/wp-json/wp/v2/posts?${params}&_fields=id,link,title`;
+    let text: string;
+    try {
+      // ArabSeed WP REST يرجع [] للطلبات المباشرة من Replit IPs — نستخدم CF proxy
+      text = await cfProxyGet(url);
+    } catch {
+      // fallback للطلب المباشر
+      const r = await fetch(url, {
+        headers: { "User-Agent": UA, Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!r.ok) return [];
+      text = await r.text();
+    }
+    if (!text.trim().startsWith("[")) return [];
+    return JSON.parse(text) as Array<{ id: number; link: string; title: { rendered: string } }>;
   } catch { return []; }
 }
 
@@ -1988,102 +2010,48 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── 27. anyembed.xyz — مُعطَّل (iframe مُزال من الواجهة) ─────────────────
       Promise.resolve(),
 
-      // ── 16. Vyla SSE proxy (missourimonster-vyla.hf.space) ──
+      // ── 16. Vyla downloads (missourimonster-vyla.hf.space) ──
+      // SSE /movie/ لا تُرجع sources بعد الآن — نستخدم downloads API
+      // تندرج.com/tgstream MKV: HTTP 200 مؤكد من سيرفر Replit
       (async () => {
         if (!tmdbId) return;
+        const VYLA_BASE = "https://missourimonster-vyla.hf.space";
         try {
-          const VYLA_BASE = "https://missourimonster-vyla.hf.space";
-
-          // فحص سريع: HF Spaces تنام بعد الخمول → إذا لم يرد خلال 5 ثوانٍ: تجاهل فوراً
+          // فحص سريع: HF Spaces تنام بعد الخمول
           try {
             const hc = await fetch(`${VYLA_BASE}/api/health`, {
               signal: AbortSignal.timeout(5_000),
               headers: { "User-Agent": UA },
             });
             if (!hc.ok) return;
-          } catch { return; } // timeout / خطأ = السيرفر نائم → تجاهل
+          } catch { return; }
 
-          send("status", { msg: "Vyla: جاري الاستخراج…" });
-          const vylaUrl = type === "tv"
-            ? `${VYLA_BASE}/api/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
-            : `${VYLA_BASE}/api/movie?id=${tmdbId}`;
+          // TV episodes قد لا تتوفر — نحاول فقط الأفلام
+          // (downloads/tv يرجع [] لمعظم المسلسلات)
+          const dlUrl = type === "tv"
+            ? `${VYLA_BASE}/api/downloads/tv/${tmdbId}/${season}/${epNum}`
+            : `${VYLA_BASE}/api/downloads/movie/${tmdbId}`;
 
-          const ctrl  = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 15_000); // ← 28s → 15s
+          send("status", { msg: "Vyla: جاري جلب الروابط…" });
 
-          const r = await fetch(vylaUrl, {
-            signal : ctrl.signal,
-            headers: { "User-Agent": UA, "Accept": "text/event-stream" },
+          const r = await fetch(dlUrl, {
+            signal: AbortSignal.timeout(12_000),
+            headers: { "User-Agent": UA },
           });
+          if (!r.ok) return;
 
-          if (!r.ok || !r.body) { clearTimeout(timer); return; }
+          const data: any = await r.json();
+          const downloads: any[] = (data.downloads || [])
+            .filter((d: any) => d.active !== false && !!d.url?.startsWith("http"));
 
-          const reader  = (r.body as any).getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
+          if (!downloads.length) return;
 
-          const processLine = async (line: string) => {
-            if (!line.startsWith("data: ")) return;
-            try {
-              const evt = JSON.parse(line.slice(6));
-              if (evt.type === "done") { ctrl.abort(); return; }
-              if (evt.type !== "source") return;
-
-              const vylaProxyUrl: string = evt.source?.url || "";
-              if (!vylaProxyUrl || !vylaProxyUrl.startsWith("http")) return;
-
-              // Extract raw HLS URL and Referer from Vyla's proxy wrapper:
-              //  - missourimonster-vyla.hf.space/api?url=...&proxyHeaders={Referer,Origin,...}
-              //  - toustream.xyz/tou/bp/?url=...&origin=https://spencerdevs.xyz
-              let rawUrl  = vylaProxyUrl;
-              let referer = "https://missourimonster-vyla.hf.space/";
-              try {
-                const pu    = new URL(vylaProxyUrl);
-                const inner = pu.searchParams.get("url");
-                if (inner) rawUrl = decodeURIComponent(inner);
-                const phRaw = pu.searchParams.get("proxyHeaders");
-                if (phRaw) {
-                  const ph: any = JSON.parse(decodeURIComponent(phRaw));
-                  referer = ph.Referer || ph.referer || referer;
-                } else {
-                  // TouStream style: ?origin=https://spencerdevs.xyz (no proxyHeaders JSON)
-                  const originParam = pu.searchParams.get("origin");
-                  if (originParam) referer = originParam.endsWith("/") ? originParam : originParam + "/";
-                }
-              } catch { /* keep original */ }
-
-              if (!rawUrl.startsWith("http")) return;
-
-              // Skip anime-only CDN sources from Vyla (AnimeHub etc. use AniList IDs,
-              // not TMDB IDs — they return wrong content for animation/movies)
-              const sourceId = (evt.source.source || evt.source.label || "").toLowerCase();
-              if (sourceId === "animehub" || rawUrl.includes("burntburst") || rawUrl.includes("echovideo.ru")) return;
-
-              const label = `Vyla · ${evt.source.label || evt.source.source}`;
-
-              // Route based on URL type:
-              // - HLS: .m3u8, /hls/, or VidZee's cf-master*.txt format → hls-proxy
-              // - MP4/direct (e.g. fsharetv.cc/api/media/...): → video-proxy
-              const isHls = rawUrl.includes(".m3u8") || rawUrl.includes("/hls/") || /cf-master[^/]*\.txt/.test(rawUrl);
-              const proxied = isHls
-                ? `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`
-                : `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-              sendSource(proxied, label, proxied, proxied);
-
-            } catch { /* bad JSON, skip */ }
-          };
-
-          while (true) {
-            let chunk: { done: boolean; value: Uint8Array };
-            try { chunk = await reader.read(); } catch { break; }
-            if (chunk.done) break;
-            buffer += decoder.decode(chunk.value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-            for (const line of lines) await processLine(line);
+          for (const dl of downloads) {
+            const proxied = wrapMp4(dl.url, `${VYLA_BASE}/`);
+            const qLabel  = dl.quality || "HD";
+            const typeTag = dl.type === "mkv" ? " · MKV" : "";
+            sendSource(proxied, `Vyla · ${qLabel}${typeTag}`, proxied, proxied);
           }
-
-          clearTimeout(timer);
         } catch { /* silent */ }
       })(),
 
@@ -2367,6 +2335,31 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               }
             } catch { /* skip */ }
           })()));
+        } catch { /* silent */ }
+      })(),
+
+      // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
+      (async () => {
+        const q = enTitlePrefetched || title;
+        if (!q) return;
+        try {
+          send("status", { msg: "AnimePhoenix: جاري البحث…" });
+          const epN  = type === "movie" ? 1 : epNum;
+          const PORT = process.env["PORT"] || "8080";
+          const fsUrl = `http://localhost:${PORT}/api/anime/fetch-source?site=animephoenix`
+            + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${epN}`;
+          const r = await fetch(fsUrl, { signal: AbortSignal.timeout(20_000) });
+          if (!r.ok) return;
+          const { sources } = await r.json() as {
+            sources?: Array<{ directUrl?: string; quality?: string }>;
+          };
+          for (const src of sources || []) {
+            if (!src.directUrl) continue;
+            const proxied = src.directUrl.startsWith("/api/")
+              ? src.directUrl
+              : wrapMp4(src.directUrl, "https://anime-phoenix.com/");
+            sendSource(proxied, `AnimePhoenix · ${src.quality || "1080p"} · مدبلج`, proxied, proxied);
+          }
         } catch { /* silent */ }
       })(),
 
