@@ -262,7 +262,7 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
   const epHtml = await asGet(epUrl, `${ARABSEED_BASE}/`);
   if (!epHtml) return [];
 
-  // Extract post ID (try multiple patterns)
+  // Extract post ID from object__info (psot_id) and csrf token from main__obj
   const postIdM = epHtml.match(/['"]psot_id['"]\s*:\s*['"]?(\d{4,9})['"]?/)
                 || epHtml.match(/data-post-id=["'](\d{4,9})["']/)
                 || epHtml.match(/psot_id[^\d]*(\d{4,9})/);
@@ -270,104 +270,106 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
 
   const sources: any[] = [];
 
-  // ── Strategy 1: AJAX with multiple quality levels ──
+  // ── Strategy 1: AJAX — site uses numeric quality strings (720, 480, 1080, 360) ──
   if (postIdM?.[1] && csrfM?.[1]) {
     const postId  = postIdM[1];
     const csrfTok = csrfM[1];
 
-    // Try all quality names (site uses different labels)
-    const qualities = ["FHD", "HD", "SD", "1080", "720", "480"];
-    let serverIndices: number[] = [];
-    let directServer: string | null = null;
+    // Try numeric quality labels first (site standard), then named fallbacks
+    const qualityCandidates = ["720", "480", "1080", "360", "FHD", "HD", "SD"];
+    let serverList: Array<{ idx: string; qu: string; name: string }> = [];
+    let workingQu = "720";
 
-    for (const quality of qualities) {
+    for (const qu of qualityCandidates) {
       const qData = await asPost(
         "/get__quality__servers/",
-        new URLSearchParams({ post_id: postId, quality, csrf_token: csrfTok }),
+        new URLSearchParams({ post_id: postId, quality: qu, csrf_token: csrfTok }),
         epUrl,
       );
       if (!qData) continue;
-      const btnHtml = qData.html || "";
-      const indices = [...btnHtml.matchAll(/data-server=["'](\d+)["']/gi)]
-        .map((m: RegExpMatchArray) => parseInt(m[1], 10));
-      if (indices.length) { serverIndices = indices; break; }
-      if (qData.server) { directServer = qData.server as string; break; }
-    }
 
-    // If got direct server URL
-    if (directServer) {
-      const extracted = await extractMp4FromEmbed(directServer, epUrl);
-      if (extracted) {
-        sources.push({
-          url: extracted.proxyUrl, label: `كرتون · ح${ep}`,
-          directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl,
-        });
+      // Direct server URL in response (some episodes)
+      if (qData.server) {
+        const embedUrl = qData.server as string;
+        const extracted = await extractMp4FromEmbed(embedUrl, epUrl);
+        if (extracted) {
+          sources.push({ url: extracted.proxyUrl, label: `عرب سيد · ح${ep}`, directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl });
+        } else {
+          sources.push({ url: embedUrl, label: `عرب سيد · ح${ep}` });
+        }
+        break;
+      }
+
+      const btnHtml = qData.html || "";
+      if (!btnHtml.trim()) continue;
+
+      // Extract server entries: data-server + data-qu + label
+      // HTML: <li data-post="..." data-server="0" data-qu="720" ...><span>سيرفر عرب سيد</span>
+      const liMatches = [...btnHtml.matchAll(/<li[^>]*data-server=["'](\d+)["'][^>]*data-qu=["']([^"']+)["'][^>]*>[\s\S]*?<span>([^<]*)<\/span>/gi)];
+      if (liMatches.length) {
+        serverList = liMatches.map((m: RegExpMatchArray) => ({ idx: m[1], qu: m[2], name: m[3].trim() }));
+        workingQu = serverList[0].qu;
+        break;
+      }
+
+      // Fallback: extract data-server indices only (use the quality that worked)
+      const idxMatches = [...btnHtml.matchAll(/data-server=["'](\d+)["']/gi)];
+      if (idxMatches.length) {
+        serverList = idxMatches.map((m: RegExpMatchArray) => ({ idx: m[1], qu, name: `سيرفر ${m[1]}` }));
+        workingQu = qu;
+        break;
       }
     }
 
-    // Fetch each server embed
-    for (const idx of serverIndices.slice(0, 5)) {
-      if (sources.length >= 3) break;
+    // Fetch embed URL for each server and add as source
+    for (const { idx, qu, name } of serverList.slice(0, 4)) {
+      if (sources.length >= 4) break;
       const sData = await asPost(
         "/get__watch__server/",
-        new URLSearchParams({ post_id: postId, quality: "HD", server: String(idx), csrf_token: csrfTok }),
+        new URLSearchParams({ post_id: postId, quality: qu || workingQu, server: idx, csrf_token: csrfTok }),
         epUrl,
       );
       const embedUrl = sData?.server as string | undefined;
-      if (!embedUrl) continue;
+      if (!embedUrl?.startsWith("http")) continue;
+
+      // Try fast server-side extraction (source tags, direct HLS/MP4)
       const extracted = await extractMp4FromEmbed(embedUrl, epUrl);
       if (extracted) {
         sources.push({
-          url: extracted.proxyUrl, label: `كرتون · س${idx} · ح${ep}`,
+          url: extracted.proxyUrl, label: `عرب سيد · ${name}`,
           directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl,
         });
+      } else {
+        // Send embed URL — client will attempt deep extraction via /api/anime/extract-video
+        sources.push({ url: embedUrl, label: `عرب سيد · ${name}` });
       }
     }
   }
 
-  // ── Strategy 2: Direct iframe extraction from episode HTML ──
+  // ── Strategy 2: Fallback — look for direct video in page HTML ──
   if (sources.length === 0) {
-    // Look for iframes embedded in the player section
-    const iframeRe = /<iframe[^>]+src=["'](https?:\/\/[^"']+)["'][^>]*>/gi;
-    let iframeMatch: RegExpExecArray | null;
-    const embedsFromPage: string[] = [];
-    while ((iframeMatch = iframeRe.exec(epHtml)) !== null) {
-      const u = iframeMatch[1];
-      if (!u.includes("google") && !u.includes("facebook") && !u.includes("disqus")) {
-        embedsFromPage.push(u);
-      }
-    }
-
-    // Also check for data-src attributes
-    const dataSrcRe = /data-src=["'](https?:\/\/[^"']+)["']/gi;
-    let dsMatch: RegExpExecArray | null;
-    while ((dsMatch = dataSrcRe.exec(epHtml)) !== null) {
-      const u = dsMatch[1];
-      if (u.includes("watch") || u.includes("embed") || u.includes("play") || u.includes("stream")) {
-        embedsFromPage.push(u);
-      }
-    }
-
-    // Look for direct video/source tags in the page
     const srcM = epHtml.match(/<source[^>]+src=["'](https?:\/\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/i);
     if (srcM) {
       const directUrl = srcM[1];
-      const isHls     = directUrl.includes(".m3u8");
-      const proxyUrl  = isHls
+      const isHls = directUrl.includes(".m3u8");
+      const proxyUrl = isHls
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(epUrl)}`
         : `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(epUrl)}`;
-      sources.push({ url: proxyUrl, label: `كرتون · ح${ep}`, directUrl, proxyUrl });
+      sources.push({ url: proxyUrl, label: `عرب سيد · ح${ep}`, directUrl, proxyUrl });
     }
 
-    // Try extracting from iframes found in the page
-    for (const embedUrl of [...new Set(embedsFromPage)].slice(0, 4)) {
-      if (sources.length >= 3) break;
-      const extracted = await extractMp4FromEmbed(embedUrl, epUrl);
+    // Iframes/data-src in page → send for client deep extraction
+    const iframeUrls: string[] = [];
+    for (const m of epHtml.matchAll(/<iframe[^>]+src=["'](https?:\/\/[^"']+)["']/gi)) {
+      const u = m[1];
+      if (!u.includes("google") && !u.includes("facebook") && !u.includes("disqus")) iframeUrls.push(u);
+    }
+    for (const u of [...new Set(iframeUrls)].slice(0, 3)) {
+      const extracted = await extractMp4FromEmbed(u, epUrl);
       if (extracted) {
-        sources.push({
-          url: extracted.proxyUrl, label: `كرتون · ح${ep}`,
-          directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl,
-        });
+        sources.push({ url: extracted.proxyUrl, label: `عرب سيد · ح${ep}`, directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl });
+      } else {
+        sources.push({ url: u, label: `عرب سيد · ح${ep}` });
       }
     }
   }
