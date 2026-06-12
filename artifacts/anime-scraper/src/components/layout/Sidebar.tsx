@@ -175,7 +175,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   <NavRow icon={Search}       label="البحث"              href="/search" />
                   <NavRow icon={Tv2}          label="الأنمي"             href="/browse" />
                   <NavRow icon={Film}         label="الأنيميشن والأفلام" href="/animations" />
-                  <NavRow icon={Tv}           label="مسلسلات كرتون"     href="/kartouns" sub="عرب سيد · مدبلج" />
+                  <NavRow icon={Tv}           label="مسلسلات كرتون"     href="/kartouns" sub="كرتون مدبلج" />
                   <NavRow icon={CalendarDays} label="الجدول الأسبوعي"   href="/schedule" />
                 </div>
               </div>

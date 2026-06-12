@@ -981,7 +981,7 @@ export default function Home() {
                     <div className="w-6 h-6 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg,#f97316,#ea580c)" }}>
                       <Tv className="w-3 h-3 text-white" />
                     </div>
-                    <span className="text-[9px] text-white/40 font-['Cairo'] tracking-wider">عرب سيد · مدبلج</span>
+                    <span className="text-[9px] text-white/40 font-['Cairo'] tracking-wider">كرتون · مدبلج</span>
                   </div>
                   <h3 className="text-[18px] font-black text-white font-['Cairo'] leading-tight">مسلسلات كرتون</h3>
                 </div>
