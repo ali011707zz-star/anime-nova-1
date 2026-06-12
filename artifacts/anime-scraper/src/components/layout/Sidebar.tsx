@@ -5,7 +5,7 @@ import {
   X, Home, Search, Heart, History,
   Library, Film, Settings, CalendarDays,
   ChevronLeft, ChevronDown, User, LogIn,
-  Star, Tv2, Zap, Bell,
+  Star, Tv2, Tv, Zap, Bell,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 
@@ -175,6 +175,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   <NavRow icon={Search}       label="البحث"              href="/search" />
                   <NavRow icon={Tv2}          label="الأنمي"             href="/browse" />
                   <NavRow icon={Film}         label="الأنيميشن والأفلام" href="/animations" />
+                  <NavRow icon={Tv}           label="مسلسلات كرتون"     href="/kartouns" sub="عرب سيد · مدبلج" />
                   <NavRow icon={CalendarDays} label="الجدول الأسبوعي"   href="/schedule" />
                 </div>
               </div>

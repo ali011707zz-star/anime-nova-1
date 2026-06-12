@@ -48,6 +48,10 @@ function AnimationWatchWrapper() {
   const search = useSearch();
   return <AnimationWatch key={search} />;
 }
+function KartoonWatchWrapper() {
+  const search = useSearch();
+  return <KartoonWatch key={search} />;
+}
 
 const Home               = lazy(() => import("@/pages/Home"));
 const AnimeDetail        = lazy(() => import("@/pages/AnimeDetail"));
@@ -67,6 +71,9 @@ const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
 const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
 const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
+const KartoonLibrary     = lazy(() => import("@/pages/KartoonLibrary"));
+const KartoonDetail      = lazy(() => import("@/pages/KartoonDetail"));
+const KartoonWatch       = lazy(() => import("@/pages/KartoonWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
 
@@ -81,7 +88,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/news", "/browse", "/animation/", "/auth"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/news", "/browse", "/animation/", "/auth", "/kartoon/"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
@@ -159,6 +166,9 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/animation/watch"                    component={AnimationWatchWrapper} />
                 <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
                 <Route path="/animation/:type/:id"             component={AnimationDetail} />
+                <Route path="/kartouns"                component={KartoonLibrary} />
+                <Route path="/kartoon/watch"           component={KartoonWatchWrapper} />
+                <Route path="/kartoon/series"          component={KartoonDetail} />
                 <Route                                 component={NotFound} />
               </Switch>
             </motion.div>
