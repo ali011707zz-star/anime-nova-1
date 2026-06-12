@@ -1609,8 +1609,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       })(),
 
       // ── AnimeWitcher Dubbed (Firebase Firestore — مدبلج عربي/إنجليزي) ────────────
-      // Flow: title → titleSim match against dubbed catalog → episodes/{pad}/servers
-      (async () => {
+      // يُعيد أنمي مدبلج لا علاقة له بالأنيميشن الغربي → مُعطَّل
+      Promise.resolve() || (async () => {
         if (!title) return;
         try {
           const AW_FS = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
@@ -1907,32 +1907,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 25. vidlink.pro (TMDB-native — iframe embed نظيف بدون إعلانات) ─────
-      (async () => {
-        if (!tmdbId) return;
-        const url = type === "tv"
-          ? `https://vidlink.pro/tv/${tmdbId}/${season}/${epNum}`
-          : `https://vidlink.pro/movie/${tmdbId}`;
-        send("source", { url, label: "VidLink · مشغل مدمج", isEmbed: true });
-      })(),
+      // ── 25. vidlink.pro — مُعطَّل (iframe مُزال من الواجهة) ──────────────────
+      Promise.resolve(),
 
-      // ── 26. player.videasy.to (TMDB-native — iframe embed نظيف بدون إعلانات) ─
-      (async () => {
-        if (!tmdbId) return;
-        const url = type === "tv"
-          ? `https://player.videasy.to/tv/${tmdbId}?season=${season}&episode=${epNum}`
-          : `https://player.videasy.to/movie/${tmdbId}`;
-        send("source", { url, label: "Videasy · مشغل مدمج", isEmbed: true });
-      })(),
+      // ── 26. player.videasy.to — مُعطَّل (iframe مُزال من الواجهة) ────────────
+      Promise.resolve(),
 
-      // ── 27. anyembed.xyz (TMDB-native — iframe embed) ────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        const url = type === "tv"
-          ? `https://anyembed.xyz/embed/tmdb-tv-${tmdbId}-${season}-${epNum}`
-          : `https://anyembed.xyz/embed/tmdb-movie-${tmdbId}`;
-        send("source", { url, label: "AnyEmbed · مشغل مدمج", isEmbed: true });
-      })(),
+      // ── 27. anyembed.xyz — مُعطَّل (iframe مُزال من الواجهة) ─────────────────
+      Promise.resolve(),
 
       // ── 16. Vyla SSE proxy (missourimonster-vyla.hf.space) ──
       (async () => {
@@ -2215,7 +2197,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
           if (!candidates.length) return;
 
-          candidates.sort((a, b) =>
+          // Filter by content type: movie requests only match movie posters; tv only series
+          const typeFiltered = candidates.filter(({ poster }) =>
+            type === "movie" ? poster.type === "movie" : poster.type !== "movie",
+          );
+          const finalCandidates = typeFiltered.length ? typeFiltered : candidates;
+
+          finalCandidates.sort((a, b) =>
             b.score !== a.score ? b.score - a.score :
             (a.poster.type === "movie" && type === "movie" ? -1 : 1),
           );
@@ -2223,7 +2211,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           // Episode index for TV; 1 for movies/OVAs
           const epIdx = type === "movie" ? 1 : epNum;
 
-          for (const { poster } of candidates.slice(0, 4)) {
+          for (const { poster } of finalCandidates.slice(0, 4)) {
             const srcs = await spGetSources(poster, epIdx);
             if (!srcs.length) continue;
 

@@ -127,6 +127,9 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
       <ErrorBoundary resetKey={location}>
         <Suspense fallback={<PageLoader />}>
+          {/* position:relative + overflow-x:hidden clips the absolutely-positioned
+              exiting page so it doesn't appear below the fold when scrolling */}
+          <div style={{ position: "relative", overflowX: "hidden" }}>
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.div
               key={location}
@@ -160,6 +163,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
               </Switch>
             </motion.div>
           </AnimatePresence>
+          </div>
         </Suspense>
       </ErrorBoundary>
       <BottomNav />
