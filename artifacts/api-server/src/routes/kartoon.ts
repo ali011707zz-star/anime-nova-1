@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from "express";
 const router = Router();
 
 const ARABSEED_BASE = "https://m.asd.ink";
-const AS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const AS_UA = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 const CARTOON_CAT = 2496;
 const ZAMAAN_CAT  = 230926;
 
@@ -15,12 +15,12 @@ interface ASPost {
 }
 
 function decodeTitle(raw: string): string {
-  return (raw || "").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&amp;/g, "&");
+  return (raw || "").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&amp;/g, "&").replace(/&nbsp;/g, " ");
 }
 
 function extractSeriesName(raw: string): string {
   const t = decodeTitle(raw);
-  let s = t.replace(/^(?:انمي\s+|مسلسل\s+|فيلم\s+)/u, "");
+  let s = t.replace(/^(?:انمي\s+|مسلسل\s+|فيلم\s+|كرتون\s+)/u, "");
   s = s.replace(/\s+الحلقة\s+.*/u, "");
   s = s.replace(/\s+(?:مترجم[ةه]?|مدبلج[ةه]?|كامل|HD|FHD|720|1080)\s*$/iu, "");
   s = s.replace(/\s+الموسم\s+.*/u, "");
@@ -91,11 +91,13 @@ router.get("/kartoon/browse", async (req: Request, res: Response) => {
         existing.latestEp = ep;
         if (thumb) existing.thumbnail = thumb;
       }
+      if (!existing.thumbnail && thumb) existing.thumbnail = thumb;
     }
   }
 
-  const series = Array.from(seriesMap.values()).filter(s => s.thumbnail);
-  res.json({ series, total: series.length });
+  // Don't filter by thumbnail — include all series
+  const series = Array.from(seriesMap.values());
+  res.json({ series, total: series.length, hasMore: posts.length >= 100 });
 });
 
 /* ── Episodes of a series ────────────────────────────────────────────── */
@@ -106,35 +108,55 @@ router.get("/kartoon/episodes", async (req: Request, res: Response) => {
 
   if (!q) { res.json({ episodes: [], total: 0 }); return; }
 
-  const params = `search=${encodeURIComponent(q)}&categories=${cat}&per_page=100&orderby=date&order=asc&page=${page}`;
-  const posts  = await asFetch(params);
+  // Try multiple search strategies in parallel
+  const qLow   = q.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/gu, "");
+  const qWords  = q.split(/\s+/).filter(w => w.length > 1);
+
+  // Build search term — try exact title + Arabic episode keyword for better results
+  const [byExact, byWords, byAsc] = await Promise.all([
+    asFetch(`search=${encodeURIComponent(q)}&categories=${cat}&per_page=100&orderby=date&order=desc&page=${page}`),
+    qWords.length > 1 ? asFetch(`search=${encodeURIComponent(qWords[0])}&categories=${cat}&per_page=100&orderby=date&order=asc`) : Promise.resolve([] as ASPost[]),
+    asFetch(`search=${encodeURIComponent(q)}&categories=${cat}&per_page=100&orderby=date&order=asc&page=${page}`),
+  ]);
 
   const EP_RE = /الحلقة\s+(\d+)/u;
-  const episodes: { id: number; num: number; title: string; link: string; thumb: string }[] = [];
   const seenNums = new Set<number>();
+  const episodes: { id: number; num: number; title: string; link: string; thumb: string }[] = [];
 
-  const qLow = q.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-  for (const post of posts) {
+  function processPost(post: ASPost) {
     const raw     = post.title?.rendered || "";
     const decoded = decodeTitle(raw);
     const epM     = EP_RE.exec(decoded);
-    if (!epM) continue;
+    if (!epM) return;
     const epNum = parseInt(epM[1], 10);
-    if (!epNum || seenNums.has(epNum)) continue;
+    if (!epNum || seenNums.has(epNum)) return;
 
-    const series  = extractSeriesName(raw).toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (qLow.length > 2 && series.length > 2 && !series.includes(qLow) && !qLow.includes(series)) continue;
+    // Filter: series name must overlap with query
+    const seriesName = extractSeriesName(raw).toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/gu, "");
+    const overlap    = seriesName.includes(qLow) || qLow.includes(seriesName) ||
+                       qWords.some(w => seriesName.includes(w.toLowerCase()) || decoded.includes(w));
+    if (qLow.length > 2 && seriesName.length > 2 && !overlap) return;
 
     seenNums.add(epNum);
     episodes.push({ id: post.id, num: epNum, title: decoded, link: post.link, thumb: getThumbnail(post) });
   }
 
+  for (const post of [...byExact, ...byAsc, ...byWords]) processPost(post);
   episodes.sort((a, b) => a.num - b.num);
   res.json({ episodes, total: episodes.length });
 });
 
 /* ── ArabSeed scraper helpers ─────────────────────────────────────────── */
+async function asGet(url: string, referer = ARABSEED_BASE + "/"): Promise<string> {
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": AS_UA, "Referer": referer, "Accept": "text/html,application/xhtml+xml" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    return r.ok ? r.text() : "";
+  } catch { return ""; }
+}
+
 async function asPost(path: string, body: URLSearchParams, ref: string): Promise<any | null> {
   try {
     const r = await fetch(`${ARABSEED_BASE}${path}`, {
@@ -143,6 +165,7 @@ async function asPost(path: string, body: URLSearchParams, ref: string): Promise
         "User-Agent": AS_UA, "Referer": ref,
         "Content-Type": "application/x-www-form-urlencoded",
         "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json",
       },
       body: body.toString(),
       signal: AbortSignal.timeout(10_000),
@@ -152,25 +175,27 @@ async function asPost(path: string, body: URLSearchParams, ref: string): Promise
   } catch { return null; }
 }
 
-async function extractMp4FromEmbed(embedUrl: string): Promise<{ directUrl: string; proxyUrl: string } | null> {
+async function extractMp4FromEmbed(embedUrl: string, srcRef: string): Promise<{ directUrl: string; proxyUrl: string } | null> {
   if (!embedUrl?.startsWith("http")) return null;
   try {
     const html = await fetch(embedUrl, {
-      headers: { "User-Agent": AS_UA, "Referer": `${ARABSEED_BASE}/` },
+      headers: { "User-Agent": AS_UA, "Referer": srcRef },
       signal: AbortSignal.timeout(10_000),
-    }).then(r => r.ok ? r.text() : "");
+    }).then(r => r.ok ? r.text() : "").catch(() => "");
     if (!html) return null;
 
+    // Direct source tag
     const srcM = html.match(/<source[^>]+src=["'](https?:\/\/[^"']+)["']/i);
     if (srcM) {
       const directUrl = srcM[1];
-      const isHls = directUrl.includes(".m3u8");
-      const proxyUrl = isHls
+      const isHls     = directUrl.includes(".m3u8");
+      const proxyUrl  = isHls
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(embedUrl)}`
         : `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(embedUrl)}`;
       return { directUrl, proxyUrl };
     }
 
+    // HLS m3u8 in JS
     const m3u8M = html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
     if (m3u8M) {
       const directUrl = m3u8M[1];
@@ -179,19 +204,29 @@ async function extractMp4FromEmbed(embedUrl: string): Promise<{ directUrl: strin
         proxyUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(embedUrl)}`,
       };
     }
+
+    // MP4 in JS
+    const mp4M = html.match(/["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i);
+    if (mp4M) {
+      const directUrl = mp4M[1];
+      return {
+        directUrl,
+        proxyUrl: `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(embedUrl)}`,
+      };
+    }
   } catch {}
   return null;
 }
 
 async function findEpUrl(title: string, ep: number): Promise<string | null> {
-  const EP_RE = /الحلقة\s+(\d+)/u;
-  const enc   = encodeURIComponent(title);
+  const EP_RE  = /الحلقة\s+(\d+)/u;
   const qWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 2);
 
+  // Try both targeted and broad searches in parallel
   const [targeted, asc, desc] = await Promise.all([
     asFetch(`search=${encodeURIComponent(title + " الحلقة " + ep)}&per_page=20`),
-    asFetch(`search=${enc}&per_page=100&orderby=date&order=asc`),
-    asFetch(`search=${enc}&per_page=100&orderby=date&order=desc`),
+    asFetch(`search=${encodeURIComponent(title)}&per_page=100&orderby=date&order=asc`),
+    asFetch(`search=${encodeURIComponent(title)}&per_page=100&orderby=date&order=desc`),
   ]);
 
   function matchEp(posts: ASPost[]): string | null {
@@ -212,57 +247,117 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
   const epUrl = await findEpUrl(title, ep);
   if (!epUrl) return [];
 
-  const referer = `${ARABSEED_BASE}/`;
-  const epHtml  = await fetch(epUrl, {
-    headers: { "User-Agent": AS_UA, "Referer": referer },
-    signal: AbortSignal.timeout(12_000),
-  }).then(r => r.ok ? r.text() : "").catch(() => "");
+  const epHtml = await asGet(epUrl, `${ARABSEED_BASE}/`);
   if (!epHtml) return [];
 
-  const psotM = epHtml.match(/psot_id['":\s]*(\d{4,9})/) || epHtml.match(/psot_id[^'"0-9]*(\d{4,9})/);
-  const csrfM = epHtml.match(/csrf__token['":\s]*["']([a-zA-Z0-9_/\-]{4,80})["']/);
-  if (!psotM?.[1] || !csrfM?.[1]) return [];
+  // Extract post ID (try multiple patterns)
+  const postIdM = epHtml.match(/['"]psot_id['"]\s*:\s*['"]?(\d{4,9})['"]?/)
+                || epHtml.match(/data-post-id=["'](\d{4,9})["']/)
+                || epHtml.match(/psot_id[^\d]*(\d{4,9})/);
+  const csrfM   = epHtml.match(/csrf__token['":\s]*["']([a-zA-Z0-9_/+\-]{4,120})["']/);
 
-  const postId  = psotM[1];
-  const csrfTok = csrfM[1];
+  const sources: any[] = [];
 
-  const qData = await asPost(
-    "/get__quality__servers/",
-    new URLSearchParams({ post_id: postId, quality: "1080", csrf_token: csrfTok }),
-    epUrl,
-  );
-  if (!qData) return [];
+  // ── Strategy 1: AJAX with multiple quality levels ──
+  if (postIdM?.[1] && csrfM?.[1]) {
+    const postId  = postIdM[1];
+    const csrfTok = csrfM[1];
 
-  const btnHtml      = qData.html || "";
-  const serverIndices: number[] = [...btnHtml.matchAll(/data-server=["'](\d+)["']/gi)]
-    .map((m: RegExpMatchArray) => parseInt(m[1], 10));
+    // Try all quality names (site uses different labels)
+    const qualities = ["FHD", "HD", "SD", "1080", "720", "480"];
+    let serverIndices: number[] = [];
+    let directServer: string | null = null;
 
-  const embedUrls: string[] = [];
-  if (!serverIndices.length && qData.server) {
-    embedUrls.push(qData.server as string);
-  } else {
-    for (const idx of serverIndices.slice(0, 5)) {
-      const sData = await asPost(
-        "/get__watch__server/",
-        new URLSearchParams({ post_id: postId, quality: "1080", server: String(idx), csrf_token: csrfTok }),
+    for (const quality of qualities) {
+      const qData = await asPost(
+        "/get__quality__servers/",
+        new URLSearchParams({ post_id: postId, quality, csrf_token: csrfTok }),
         epUrl,
       );
-      if (sData?.server) embedUrls.push(sData.server as string);
+      if (!qData) continue;
+      const btnHtml = qData.html || "";
+      const indices = [...btnHtml.matchAll(/data-server=["'](\d+)["']/gi)]
+        .map((m: RegExpMatchArray) => parseInt(m[1], 10));
+      if (indices.length) { serverIndices = indices; break; }
+      if (qData.server) { directServer = qData.server as string; break; }
+    }
+
+    // If got direct server URL
+    if (directServer) {
+      const extracted = await extractMp4FromEmbed(directServer, epUrl);
+      if (extracted) {
+        sources.push({
+          url: extracted.proxyUrl, label: `كرتون · ح${ep}`,
+          directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl,
+        });
+      }
+    }
+
+    // Fetch each server embed
+    for (const idx of serverIndices.slice(0, 5)) {
+      if (sources.length >= 3) break;
+      const sData = await asPost(
+        "/get__watch__server/",
+        new URLSearchParams({ post_id: postId, quality: "HD", server: String(idx), csrf_token: csrfTok }),
+        epUrl,
+      );
+      const embedUrl = sData?.server as string | undefined;
+      if (!embedUrl) continue;
+      const extracted = await extractMp4FromEmbed(embedUrl, epUrl);
+      if (extracted) {
+        sources.push({
+          url: extracted.proxyUrl, label: `كرتون · س${idx} · ح${ep}`,
+          directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl,
+        });
+      }
     }
   }
 
-  const sources: any[] = [];
-  for (const embedUrl of embedUrls) {
-    const extracted = await extractMp4FromEmbed(embedUrl);
-    if (extracted) {
-      sources.push({
-        url: extracted.directUrl,
-        label: `عرب سيد · ح${ep}`,
-        directUrl: extracted.directUrl,
-        proxyUrl:  extracted.proxyUrl,
-      });
+  // ── Strategy 2: Direct iframe extraction from episode HTML ──
+  if (sources.length === 0) {
+    // Look for iframes embedded in the player section
+    const iframeRe = /<iframe[^>]+src=["'](https?:\/\/[^"']+)["'][^>]*>/gi;
+    let iframeMatch: RegExpExecArray | null;
+    const embedsFromPage: string[] = [];
+    while ((iframeMatch = iframeRe.exec(epHtml)) !== null) {
+      const u = iframeMatch[1];
+      if (!u.includes("google") && !u.includes("facebook") && !u.includes("disqus")) {
+        embedsFromPage.push(u);
+      }
     }
-    if (sources.length >= 3) break;
+
+    // Also check for data-src attributes
+    const dataSrcRe = /data-src=["'](https?:\/\/[^"']+)["']/gi;
+    let dsMatch: RegExpExecArray | null;
+    while ((dsMatch = dataSrcRe.exec(epHtml)) !== null) {
+      const u = dsMatch[1];
+      if (u.includes("watch") || u.includes("embed") || u.includes("play") || u.includes("stream")) {
+        embedsFromPage.push(u);
+      }
+    }
+
+    // Look for direct video/source tags in the page
+    const srcM = epHtml.match(/<source[^>]+src=["'](https?:\/\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/i);
+    if (srcM) {
+      const directUrl = srcM[1];
+      const isHls     = directUrl.includes(".m3u8");
+      const proxyUrl  = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(epUrl)}`
+        : `/api/anime/video-proxy?url=${encodeURIComponent(directUrl)}&ref=${encodeURIComponent(epUrl)}`;
+      sources.push({ url: proxyUrl, label: `كرتون · ح${ep}`, directUrl, proxyUrl });
+    }
+
+    // Try extracting from iframes found in the page
+    for (const embedUrl of [...new Set(embedsFromPage)].slice(0, 4)) {
+      if (sources.length >= 3) break;
+      const extracted = await extractMp4FromEmbed(embedUrl, epUrl);
+      if (extracted) {
+        sources.push({
+          url: extracted.proxyUrl, label: `كرتون · ح${ep}`,
+          directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl,
+        });
+      }
+    }
   }
 
   return sources;
@@ -290,7 +385,7 @@ router.get("/kartoon/sources-stream", async (req: Request, res: Response) => {
     clearInterval(keepAlive);
     send("done", { total: 0 });
     try { res.end(); } catch {}
-  }, 28_000);
+  }, 35_000);
 
   try {
     if (!title) { send("done", { total: 0 }); return; }

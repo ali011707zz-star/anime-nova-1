@@ -172,7 +172,7 @@ export default function KartoonDetail() {
                 {epCount}+ حلقة
               </span>
             )}
-            <span className="text-[9px] font-black px-2 py-1 rounded-lg border border-white/8 bg-white/5 text-white/40 font-['Cairo']">عرب سيد</span>
+            <span className="text-[9px] font-black px-2 py-1 rounded-lg border border-white/8 bg-white/5 text-white/40 font-['Cairo']">كرتون</span>
             <span className="text-[9px] font-black px-2 py-1 rounded-lg border border-white/8 bg-white/5 text-white/40 font-['Cairo']">مترجم</span>
           </div>
         </div>
@@ -357,7 +357,7 @@ export default function KartoonDetail() {
         <div className="bg-[#111116] border border-white/6 rounded-2xl p-4 space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-white/35 font-['Cairo']">المصدر</span>
-            <span className="text-[11px] font-black text-white/70 font-['Cairo']">عرب سيد</span>
+            <span className="text-[11px] font-black text-white/70 font-['Cairo']">مجمعة</span>
           </div>
           {epCount !== null && (
             <div className="flex items-center justify-between">

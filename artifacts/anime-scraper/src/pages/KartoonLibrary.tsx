@@ -52,7 +52,7 @@ export default function KartoonLibrary() {
         const ids = new Set(prev.map(i => i.slug));
         return [...prev, ...results.filter(i => !ids.has(i.slug))];
       });
-      setHasMore(results.length >= 20);
+      setHasMore(data.hasMore === true);
       setPage(p);
     } catch (e: any) {
       if (e?.name === "AbortError") return;
@@ -94,7 +94,7 @@ export default function KartoonLibrary() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-[22px] font-black text-white font-['Cairo'] leading-none">مسلسلات كرتون</h1>
-              <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">أنمي ومسلسلات كرتون مدبلجة · عرب سيد</p>
+              <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">مسلسلات كرتون مدبلجة ومترجمة</p>
             </div>
             <button
               onClick={() => { setSearchOpen(o => !o); setTimeout(() => searchRef.current?.focus(), 100); }}
