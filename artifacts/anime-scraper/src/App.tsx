@@ -127,9 +127,9 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
       <ErrorBoundary resetKey={location}>
         <Suspense fallback={<PageLoader />}>
-          {/* position:relative + overflow-x:hidden clips the absolutely-positioned
-              exiting page so it doesn't appear below the fold when scrolling */}
-          <div style={{ position: "relative", overflowX: "hidden" }}>
+          {/* overflow:clip clips the absolutely-positioned exiting page in both
+              axes without creating a scroll container, so sticky headers still work */}
+          <div style={{ position: "relative", overflow: "clip" }}>
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.div
               key={location}
