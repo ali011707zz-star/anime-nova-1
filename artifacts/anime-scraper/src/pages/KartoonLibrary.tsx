@@ -43,7 +43,6 @@ export default function KartoonLibrary() {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       const r = await fetch(`/api/kartoon/browse?cat=${catId}&page=${p}`, { signal: ctrl.signal });
-      if (genRef.current !== gen) return;
       const data = await r.json();
       if (genRef.current !== gen) return;
       const results: SeriesItem[] = data.series || [];
@@ -54,10 +53,11 @@ export default function KartoonLibrary() {
       });
       setHasMore(data.hasMore === true);
       setPage(p);
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
+    } catch {
+      // abort or network error — swallow silently
+    } finally {
+      if (genRef.current === gen) setLoading(false);
     }
-    if (genRef.current === gen) setLoading(false);
   }, []);
 
   useEffect(() => {

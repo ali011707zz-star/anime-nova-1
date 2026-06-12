@@ -63,11 +63,21 @@ router.get("/kartoon/browse", async (req: Request, res: Response) => {
   const page   = parseInt(String(req.query.page || "1"), 10) || 1;
   const search = String(req.query.search || "").trim();
 
-  const params = search
-    ? `search=${encodeURIComponent(search)}&categories=${cat}&per_page=100&orderby=date&order=desc`
-    : `categories=${cat}&per_page=100&orderby=date&order=desc&page=${page}`;
+  let posts: ASPost[];
 
-  const posts = await asFetch(params);
+  if (search) {
+    posts = await asFetch(`search=${encodeURIComponent(search)}&categories=${cat}&per_page=100&orderby=date&order=desc`);
+  } else if (cat === ZAMAAN_CAT) {
+    // Zamaan has ~207 posts — fetch all 3 pages in parallel so all series appear
+    const [p1, p2, p3] = await Promise.all([
+      asFetch(`categories=${cat}&per_page=100&orderby=date&order=desc&page=1`),
+      asFetch(`categories=${cat}&per_page=100&orderby=date&order=desc&page=2`),
+      asFetch(`categories=${cat}&per_page=100&orderby=date&order=desc&page=3`),
+    ]);
+    posts = [...p1, ...p2, ...p3];
+  } else {
+    posts = await asFetch(`categories=${cat}&per_page=100&orderby=date&order=desc&page=${page}`);
+  }
 
   const seriesMap = new Map<string, {
     slug: string; title: string; thumbnail: string;
@@ -97,7 +107,9 @@ router.get("/kartoon/browse", async (req: Request, res: Response) => {
 
   // Don't filter by thumbnail — include all series
   const series = Array.from(seriesMap.values());
-  res.json({ series, total: series.length, hasMore: posts.length >= 100 });
+  // For Zamaan we already fetched all pages — no more pages to load
+  const hasMore = cat === ZAMAAN_CAT ? false : posts.length >= 100;
+  res.json({ series, total: series.length, hasMore });
 });
 
 /* ── Episodes of a series ────────────────────────────────────────────── */
