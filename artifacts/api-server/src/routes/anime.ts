@@ -4923,7 +4923,7 @@ async function getAnimeDaySources(
       if (sc > bestScore) { bestScore = sc; bestAnime = anime; }
     }
 
-    if (!bestAnime || bestScore < 0.18) return sources;
+    if (!bestAnime || bestScore < 0.38) return sources;
 
     // ── ابنِ prefix المطابقة حسب نوع الأنمي ───────────────────────────────
     const animeName: string = bestAnime.name || "";
@@ -4935,8 +4935,9 @@ async function getAnimeDaySources(
     let epStr: string;
     if (isArabic) {
       // اسم عربي مثل "جوجوتسو كايسن" — servers تطابق بـ "الحلقة N"
+      // نستخدم 3 كلمات عربية على الأقل لتجنب التقاطع بين عناوين متشابهة
       const arabicWords = animeName.split(/\s+/).filter((w: string) => /[\u0600-\u06FF]/.test(w));
-      matchPrefix = arabicWords.slice(0, 2).join(" ");
+      matchPrefix = arabicWords.slice(0, Math.min(4, arabicWords.length)).join(" ");
       epStr = `الحلقة ${ep}`;
     } else {
       // اسم إنجليزي مثل "Regular Show" — servers: "regular show season N eps M"
@@ -5561,14 +5562,14 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
-      scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
-      scrapeCached("animepahe",    () => getAnimePaheSources(title, english, ep, anilistId),    false),
+      // anikoto: megaplay.buzz — 3 طلبات متسلسلة (34ث مجموع) — ثقيل
+      // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
-      // ── معطّلة ────────────────────────────────────────────────────
+      // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
       // anime3rb:     CF IP block حقيقي، curl_cffi لا تنفع
@@ -5577,6 +5578,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animegg:      معطّل بطلب المستخدم
       // allmanga:     clock.json→500, fast4speed→401
       // reanime:      FlixCloud يبلوك Replit IP
+      // anikoto:      megaplay.buzz — 3 طلبات متسلسلة (~34ث) — ثقيل جداً في التشغيل
+      // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
     ]);
 
   } catch (e: any) {
@@ -5653,8 +5656,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animepahe":   (await race(getAnimePaheSources(title, english, ep, anilistId),   SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       case "anineko":     (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
