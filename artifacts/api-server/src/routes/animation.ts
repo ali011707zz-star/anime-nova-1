@@ -1525,8 +1525,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const servers: any[] = (data.servers || []);
                 if (!servers.length) console.warn(`[StarCima/vidzee] No servers returned for tmdbId=${tmdbId}`);
 
+                // Sort: Atlas (4K) first, then isMain, then Najm, then rest
+                const srvSorted = [...servers].sort((a: any, b: any) => {
+                  const rank = (s: any) =>
+                    (s.name || "").startsWith("Atlas") ? 0
+                    : s.isMain ? 1
+                    : (s.name || "").startsWith("Najm") ? 3
+                    : 2;
+                  return rank(a) - rank(b);
+                });
+
                 // Build list of (proxied URL, label) for all servers
-                const prepared = servers
+                const prepared = srvSorted
                   .filter((srv: any) => !!srv.url)
                   .map((srv: any) => {
                     let rawUrl  = String(srv.url);
@@ -1539,33 +1549,43 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                       } catch { /* keep original */ }
                     }
                     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-                    const label   = `StarCima · ${srv.name || "HD"}`;
-                    return { proxied, label };
+                    const isAtlas = (srv.name || "").startsWith("Atlas");
+                    const label   = isAtlas
+                      ? `StarCima · ${srv.name} · 4K`
+                      : `StarCima · ${srv.name || "HD"}`;
+                    return { proxied, label, isAtlas };
                   });
 
-                // Probe all CDN URLs in parallel — only send servers that return HTTP 200.
-                // This filters out dead workers.dev (403) and foreign CDNs (404).
-                // Fallback: if ALL fail, send all anyway (better than nothing).
+                // Probe all CDN URLs in parallel.
+                // Atlas CDNs may return 403 for server-side HEAD but still work from the client
+                // — treat 200/206/403/405 as ok for Atlas, only 200 for others.
+                // Fallback: if ALL non-Atlas fail, send them anyway (better than nothing).
                 const PROBE_PORT = process.env.PORT || 8080;
                 const probeResults = await Promise.allSettled(
-                  prepared.map(async ({ proxied, label }) => {
+                  prepared.map(async ({ proxied, label, isAtlas }) => {
                     try {
                       const pr = await fetch(`http://localhost:${PROBE_PORT}${proxied}`, {
-                        signal: AbortSignal.timeout(7_000),
+                        signal: AbortSignal.timeout(8_000),
                       });
-                      return { proxied, label, ok: pr.ok };
+                      const ok = isAtlas
+                        ? (pr.ok || pr.status === 206 || pr.status === 403 || pr.status === 405)
+                        : pr.ok;
+                      return { proxied, label, isAtlas, ok };
                     } catch {
-                      return { proxied, label, ok: false };
+                      // Network error probing — Atlas gets benefit of the doubt
+                      return { proxied, label, isAtlas, ok: isAtlas };
                     }
                   })
                 );
 
                 const probed = probeResults
                   .filter(r => r.status === "fulfilled")
-                  .map(r => (r as PromiseFulfilledResult<{ proxied: string; label: string; ok: boolean }>).value);
+                  .map(r => (r as PromiseFulfilledResult<{ proxied: string; label: string; isAtlas: boolean; ok: boolean }>).value);
 
                 const working = probed.filter(s => s.ok);
-                for (const { proxied, label } of working) {
+                // Fallback: if ALL fail, send all anyway (better than nothing)
+                const toSend = working.length > 0 ? working : probed;
+                for (const { proxied, label } of toSend) {
                   sendSource(proxied, label, proxied, proxied);
                 }
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
