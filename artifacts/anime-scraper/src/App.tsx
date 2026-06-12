@@ -73,6 +73,7 @@ const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
 const KartoonLibrary     = lazy(() => import("@/pages/KartoonLibrary"));
 const KartoonDetail      = lazy(() => import("@/pages/KartoonDetail"));
+const KartoonEpisodes    = lazy(() => import("@/pages/KartoonEpisodes"));
 const KartoonWatch       = lazy(() => import("@/pages/KartoonWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
@@ -168,6 +169,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/animation/:type/:id"             component={AnimationDetail} />
                 <Route path="/kartouns"                component={KartoonLibrary} />
                 <Route path="/kartoon/watch"           component={KartoonWatchWrapper} />
+                <Route path="/kartoon/episodes"        component={KartoonEpisodes} />
                 <Route path="/kartoon/series"          component={KartoonDetail} />
                 <Route                                 component={NotFound} />
               </Switch>

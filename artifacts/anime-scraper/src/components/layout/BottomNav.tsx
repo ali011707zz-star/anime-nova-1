@@ -10,7 +10,7 @@ const navItems = [
   { icon: Search,    label: "بحث",      href: "/search" },
 ];
 
-const HIDE_ON = ["/watch", "/animation/watch"];
+const HIDE_ON = ["/watch", "/animation/watch", "/kartoon/watch"];
 
 export function BottomNav() {
   const [location] = useLocation();
