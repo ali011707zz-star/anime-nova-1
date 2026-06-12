@@ -92,7 +92,12 @@ export default function AnimationLibrary() {
       const gParam = g === 0 ? "16" : `${g}`;
       const r = await fetch(`/api/animation/browse?type=${t}&genre=${gParam}&sort=${encodeURIComponent(s)}&year=${y}&page=${p}`);
       const data = await r.json();
-      const results: TmdbItem[] = data.results || [];
+      const hasCjk = (s: string) => /[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/u.test(s);
+      const results: TmdbItem[] = (data.results || []).filter((item: TmdbItem) => {
+        const orig = item.original_title || item.original_name || "";
+        const disp = item.title || item.name || "";
+        return !hasCjk(orig) || !hasCjk(disp);
+      });
       if (reset) {
         setItems(results);
       } else {
@@ -117,7 +122,13 @@ export default function AnimationLibrary() {
       try {
         const r = await fetch(`/api/animation/search?q=${encodeURIComponent(searchQ)}&type=${type}`);
         const d = await r.json();
-        setSearchResults((d.results || []).slice(0, 8));
+        const hasCjk = (s: string) => /[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/u.test(s);
+        const filtered = (d.results || []).filter((item: TmdbItem) => {
+          const orig = item.original_title || item.original_name || "";
+          const disp = item.title || item.name || "";
+          return !hasCjk(orig) || !hasCjk(disp);
+        });
+        setSearchResults(filtered.slice(0, 8));
       } catch { setSearchResults([]); }
     }, 350);
   }, [searchQ, type]);
