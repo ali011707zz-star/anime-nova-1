@@ -547,7 +547,13 @@ async function extractVideoDeep(
         const v = parseStreamtape(html); if (v) return v;
       }
       if (url.includes("streamwish") || url.includes("wishembed") || url.includes("filemoon") ||
-          url.includes("swdyu") || url.includes("awish") || url.includes("playerwish")) {
+          url.includes("swdyu") || url.includes("awish") || url.includes("playerwish") ||
+          url.includes("hlswish.com") || url.includes("vidspeed.org") ||
+          url.includes("1vid.xyz") || url.includes("1vid1shar.space") ||
+          url.includes("uqload.is") || url.includes("uqload.co") ||
+          url.includes("voe.sx") || url.includes("vidoza.net") ||
+          url.includes("bigwarp.io") || url.includes("forafile.com") ||
+          url.includes("anafast.com") || url.includes("listeamed.net")) {
         const v = parseStreamwish(html); if (v) return v;
       }
       if (url.includes("share4max.com/iframe/") || url.includes("megamax.me/iframe/")) {
@@ -5017,6 +5023,20 @@ function seepanelHostLabel(url: string): string {
   return new URL(url).hostname.replace(/^www\./, "").split(".")[0];
 }
 
+// Hosts that return empty / HTML pages / are blocked from server-side extraction
+const SEEPANEL_DEAD_HOSTS = [
+  "wecima.video",          // dead → MPAA redirect
+  "dailymotion",           // iframe-only
+  "faselhds.life",         // Arabic HTML page (162 bytes), not an embed
+  "goveed1.space",         // empty response from Replit
+  "vdbtm.shop",            // empty response from Replit
+  "okprime.site",          // 40-byte redirect/empty
+  "vk.com",                // VK social media video_ext
+  "hgcloud.to",            // CF-protected, blocks server-side extraction
+  "vidhideplus.com",       // CF-protected, blocks server-side extraction
+  "mixdrop",               // embed-only, no server extraction
+];
+
 function seepanelBuildSources(
   rawSrcs: SeepanelSource[], siteName: string, labelPrefix: string,
 ): UnifiedSource[] {
@@ -5027,8 +5047,7 @@ function seepanelBuildSources(
     if (!url || !url.startsWith("http")) continue;
     if (seen.has(url)) continue;
     seen.add(url);
-    // skip wecima (dead → MPAA redirect) and dailymotion
-    if (url.includes("wecima.video") || url.includes("dailymotion")) continue;
+    if (SEEPANEL_DEAD_HOSTS.some(h => url.includes(h))) continue;
     try {
       out.push({
         name: `${labelPrefix} · ${seepanelHostLabel(url)} · ${src.quality}`,
@@ -5042,64 +5061,107 @@ function seepanelBuildSources(
   return out;
 }
 
+// Extract episode sources from a known SeePanal serie ID
+async function seepanelGetEpSources(
+  poster: SeepanelPoster, ep: number, labelPrefix: string,
+): Promise<UnifiedSource[]> {
+  if (poster.type === "movie") {
+    const movie = await seepanelFetch<SeepanelMovie>(`movie/by/${poster.id}`);
+    if (!movie?.sources?.length) return [];
+    return seepanelBuildSources(movie.sources, "seepanel", labelPrefix);
+  }
+
+  const seasons = await seepanelFetch<SeepanelSeason[]>(
+    `season/by/serie/${poster.id}`,
+  );
+  if (!seasons?.length) return [];
+
+  const activeSeasons = seasons
+    .filter(s => !s.title.includes("قريبا") && s.episodes.some(e => e.sources?.length))
+    .sort((a, b) => a.id - b.id);
+
+  // First pass: match by episode number embedded in title (e.g. "الحلقة : 800" or "الحلقة 800")
+  const EP_NUM_RE = /الحلقة\s*:?\s*(\d+)/;
+  for (const season of activeSeasons) {
+    for (const episode of season.episodes) {
+      if (!episode.sources?.length) continue;
+      const m = EP_NUM_RE.exec(episode.title ?? "");
+      if (m && parseInt(m[1], 10) === ep) {
+        return seepanelBuildSources(
+          episode.sources, "seepanel",
+          `${labelPrefix} · ${season.title}`,
+        );
+      }
+    }
+  }
+
+  // Second pass: fallback to global sequential index (works for series stored in order, e.g. DBZ)
+  let globalIdx = 0;
+  for (const season of activeSeasons) {
+    for (const episode of season.episodes) {
+      if (!episode.sources?.length) continue;
+      globalIdx++;
+      if (globalIdx === ep) {
+        return seepanelBuildSources(
+          episode.sources, "seepanel",
+          `${labelPrefix} · ${season.title}`,
+        );
+      }
+    }
+  }
+  return [];
+}
+
 async function getSeepanelSources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
   try {
-    // Search with both romaji and english titles
     const queries = [title, english].filter(Boolean) as string[];
-    let bestPoster: SeepanelPoster | null = null;
-    let bestScore = 0;
+    const seen = new Set<number>();
+    // Map: posterId → score
+    const candidates: Array<{ poster: SeepanelPoster; score: number }> = [];
 
     for (const q of queries) {
       const posters = await seepanelSearch(q);
       for (const p of posters) {
-        // similarity against romaji, english, and seepanel title
-        const spTitle = p.title.replace(/\s*-\s*[^\-]+$/, "").trim(); // strip Arabic subtitle
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        const spTitle = p.title.replace(/\s*-\s*[\u0600-\u06ff].*$/u, "").trim();
+        const spLow = spTitle.toLowerCase();
+        const tLow  = title.toLowerCase();
+        const eLow  = english?.toLowerCase() ?? "";
         const score = Math.max(
-          similarity(title.toLowerCase(), spTitle.toLowerCase()),
-          english ? similarity(english.toLowerCase(), spTitle.toLowerCase()) : 0,
+          similarity(tLow, spLow),
+          eLow ? similarity(eLow, spLow) : 0,
           asciiSimilarity(spTitle, title),
-          english ? asciiSimilarity(spTitle, english) : 0,
+          eLow ? asciiSimilarity(spTitle, english!) : 0,
+          // Substring bonus: if the search title appears inside the SeePanal title
+          // (e.g. "one piece" inside "Anime One Piece Egghead Saga Arc") → 0.55
+          (spLow.includes(tLow) || (eLow && spLow.includes(eLow))) ? 0.55 : 0,
         );
-        if (score > bestScore) { bestScore = score; bestPoster = p; }
+        if (score >= 0.35) candidates.push({ poster: p, score });
       }
-      if (bestScore > 0.8) break;
     }
 
-    if (!bestPoster || bestScore < 0.35) return [];
+    if (!candidates.length) return [];
 
-    if (bestPoster.type === "movie") {
-      const movie = await seepanelFetch<SeepanelMovie>(`movie/by/${bestPoster.id}`);
-      if (!movie?.sources?.length) return [];
-      return seepanelBuildSources(movie.sources, "seepanel", "SeePanal · مدبلج");
-    }
-
-    // serie → get seasons → find episode
-    const seasons = await seepanelFetch<SeepanelSeason[]>(
-      `season/by/serie/${bestPoster.id}`,
+    // Sort: highest similarity first; ties → prefer serie over movie (more likely to have ep)
+    candidates.sort((a, b) =>
+      b.score !== a.score ? b.score - a.score :
+      (a.poster.type === "serie" ? -1 : 1),
     );
-    if (!seasons?.length) return [];
 
-    // Sort seasons by ID ascending (oldest first) and exclude placeholder "قريبا" seasons
-    const activeSeasons = seasons
-      .filter(s => !s.title.includes("قريبا") && s.episodes.some(e => e.sources?.length))
-      .sort((a, b) => a.id - b.id);
+    // Try each candidate — return the first that has the requested episode
+    // For ep > 1, skip movie-type posters (they only have 1 episode)
+    const filtered = ep > 1
+      ? candidates.filter(c => c.poster.type !== "movie")
+      : candidates;
 
-    // Flatten all episodes into a list with global episode index
-    let globalIdx = 0;
-    for (const season of activeSeasons) {
-      for (const episode of season.episodes) {
-        // Skip episodes with no sources (placeholders)
-        if (!episode.sources?.length) continue;
-        globalIdx++;
-        if (globalIdx === ep) {
-          return seepanelBuildSources(
-            episode.sources, "seepanel",
-            `SeePanal · مدبلج · ${season.title}`,
-          );
-        }
-      }
+    for (const { poster } of filtered.slice(0, 6)) {
+      const srcs = await seepanelGetEpSources(
+        poster, ep, `SeePanal · مدبلج`,
+      );
+      if (srcs.length > 0) return srcs;
     }
     return [];
   } catch { return []; }

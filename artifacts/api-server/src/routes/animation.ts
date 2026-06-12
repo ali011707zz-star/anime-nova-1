@@ -10,6 +10,79 @@ const MV_BASE   = "https://moviz-time.co";
 const AS_CDN_B  = "https://as-cdn21.top";
 const RUBY_B    = "https://rubystm.com";
 
+// ── SeePanal (panel.seepanel.top) ─────────────────────────────────────────────
+const SP_BASE = "https://panel.seepanel.top/api";
+const SP_KEY  = "4F5A9C3D9A86FA54EACEDDD635185";
+const SP_UUID = "d506abfd-9fe2-4b71-b979-feff21bcad13";
+const spSearchCache = new Map<string, { data: any; ts: number }>();
+const SP_TTL = 3_600_000;
+// Dead / empty hosts on SeePanal
+const SP_DEAD = [
+  "wecima.video","dailymotion","faselhds.life","goveed1.space","vdbtm.shop",
+  "okprime.site","vk.com","hgcloud.to","vidhideplus.com","mixdrop",
+];
+
+async function spFetch<T>(path: string): Promise<T | null> {
+  try {
+    const r = await fetch(`${SP_BASE}/${path}/${SP_KEY}/${SP_UUID}/`, {
+      headers: { "User-Agent": "okhttp/4.12.0", Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    if (text.startsWith("<!")) return null;
+    return JSON.parse(text) as T;
+  } catch { return null; }
+}
+
+async function spSearch(query: string): Promise<any[]> {
+  const cKey = `sp:${query.toLowerCase()}`;
+  const cached = spSearchCache.get(cKey);
+  if (cached && Date.now() - cached.ts < SP_TTL) return cached.data;
+  const data = await spFetch<{ posters: any[] }>(`search/${encodeURIComponent(query)}`);
+  const posters = data?.posters ?? [];
+  spSearchCache.set(cKey, { data: posters, ts: Date.now() });
+  return posters;
+}
+
+function spTitleSim(a: string, b: string): number {
+  const norm = (s: string) => s.toLowerCase()
+    .replace(/\s*-\s*[\u0600-\u06ff].*/u, "")  // strip Arabic subtitle after dash
+    .replace(/[^a-z0-9\u0600-\u06ff ]/g, " ").replace(/\s+/g, " ").trim();
+  return titleSim(norm(a), norm(b));
+}
+
+// Extract live sources from a SeePanal entry (serie or movie)
+// Returns array of { url, quality } for each working server
+async function spGetSources(
+  poster: any, epIdx: number,
+): Promise<Array<{ url: string; quality: string }>> {
+  if (poster.type === "movie") {
+    const movie = await spFetch<{ sources?: any[] }>(`movie/by/${poster.id}`);
+    return (movie?.sources ?? [])
+      .filter((s: any) => s.url?.startsWith("http") && !SP_DEAD.some(h => s.url.includes(h)))
+      .map((s: any) => ({ url: s.url, quality: s.quality || "HD" }));
+  }
+  const seasons: any[] | null = await spFetch(`season/by/serie/${poster.id}`);
+  if (!seasons?.length) return [];
+  const active = seasons
+    .filter((s: any) => !s.title?.includes("قريبا") && s.episodes?.some((e: any) => e.sources?.length))
+    .sort((a: any, b: any) => a.id - b.id);
+  let idx = 0;
+  for (const season of active) {
+    for (const ep of season.episodes) {
+      if (!ep.sources?.length) continue;
+      idx++;
+      if (idx === epIdx) {
+        return (ep.sources as any[])
+          .filter((s: any) => s.url?.startsWith("http") && !SP_DEAD.some(h => s.url.includes(h)))
+          .map((s: any) => ({ url: s.url, quality: s.quality || "HD" }));
+      }
+    }
+  }
+  return [];
+}
+
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -2104,6 +2177,72 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               : `${src.quality}p`;
             const proxied = wrapMp4(src.url, `${AFLAAM_BASE}/`);
             sendSource(proxied, `aflaam · ${qLabel}`, proxied, proxied);
+          }
+        } catch { /* silent */ }
+      })(),
+
+      // ── SeePanal — أنيميشن وكرتون مدبلج عربي ─────────────────────────────────
+      (async () => {
+        if (!title) return;
+        try {
+          send("status", { msg: "SeePanal: جاري البحث…" });
+
+          // Build search queries: TMDB title + English alternative title
+          const queries = [title, enTitlePrefetched].filter(Boolean) as string[];
+          const seenIds = new Set<number>();
+          const candidates: Array<{ poster: any; score: number }> = [];
+
+          for (const q of queries) {
+            const posters = await spSearch(q);
+            for (const p of posters) {
+              if (seenIds.has(p.id)) continue;
+              seenIds.add(p.id);
+              const spNorm = p.title
+                .replace(/\s*-\s*[\u0600-\u06ff].*$/u, "")
+                .toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+              const qNorm  = q.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+              const tNorm  = title.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+              const score = Math.max(
+                spTitleSim(p.title, q),
+                spTitleSim(p.title, title),
+                // Substring bonus: title inside SeePanal title (e.g. "kung fu panda" in title)
+                (spNorm.includes(qNorm) || spNorm.includes(tNorm) ||
+                 qNorm.includes(spNorm) || tNorm.includes(spNorm)) ? 0.6 : 0,
+              );
+              if (score >= 0.4) candidates.push({ poster: p, score });
+            }
+          }
+
+          if (!candidates.length) return;
+
+          candidates.sort((a, b) =>
+            b.score !== a.score ? b.score - a.score :
+            (a.poster.type === "movie" && type === "movie" ? -1 : 1),
+          );
+
+          // Episode index for TV; 1 for movies/OVAs
+          const epIdx = type === "movie" ? 1 : epNum;
+
+          for (const { poster } of candidates.slice(0, 4)) {
+            const srcs = await spGetSources(poster, epIdx);
+            if (!srcs.length) continue;
+
+            // Extract each source via extractVideoDeep (handles vidspeed/hlswish/1vid/uqload)
+            await Promise.allSettled(srcs.map(async (src) => {
+              try {
+                const extracted = await callExtractApi(src.url);
+                if (!extracted?.directUrl) return;
+                const d = extracted.directUrl;
+                const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
+                const proxied = isHls
+                  ? (d.startsWith("/") ? d : wrapHls(d, src.url))
+                  : wrapMp4(d, src.url);
+                sendSource(proxied, `SeePanal · مدبلج · ${src.quality}`, proxied, proxied);
+              } catch { /* skip */ }
+            }));
+
+            // Stop if we got at least one source from this poster
+            if (sourceCount > 0) break;
           }
         } catch { /* silent */ }
       })(),
