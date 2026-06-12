@@ -155,12 +155,31 @@ def test_site(name, base_url):
     }
 
 SITES = [
-    ("anime-time.live",  "https://anime-time.live/"),
-    ("4h.y9x3c6v.shop",  "https://4h.y9x3c6v.shop/"),
-    ("animerco",         "https://eta.animerco.org/"),
-    ("anime3rb",         "https://anime3rb.com/"),
-    ("witanime",         "https://witanime.life/"),
-    ("anime-phoenix",    "https://anime-phoenix.com/"),
+    # --- محجوبة بـ Cloudflare ---
+    ("witanime.life",       "https://witanime.life/"),
+    ("witanime.cyou",       "https://witanime.cyou/"),
+    ("anime3rb.com",        "https://anime3rb.com/"),
+    ("animerco.org",        "https://animerco.org/"),
+    ("eta.animerco.org",    "https://eta.animerco.org/"),
+    ("anime4up.cam",        "https://anime4up.cam/"),
+    ("w1.anime4up.rest",    "https://w1.anime4up.rest/"),
+    ("anime4up.rest",       "https://anime4up.rest/"),
+    # --- 403/ميتة ---
+    ("animeblkom.net",      "https://animeblkom.net/"),
+    ("animeiat.net",        "https://animeiat.net/"),
+    ("animerco-eta",        "https://eta.animerco.org/anime/one-piece/"),
+    # --- JS SPA / Next.js ---
+    ("anime-arabe.com",     "https://anime-arabe.com/"),
+    # --- تايم آوت قديم ---
+    ("anime-phoenix.com",   "https://anime-phoenix.com/"),
+    ("anime-time.live",     "https://anime-time.live/"),
+    # --- مواقع جديدة يستحق اختبارها ---
+    ("animekhobar.com",     "https://animekhobar.com/"),
+    ("shash4u.com",         "https://shash4u.com/"),
+    ("arabseed.ink",        "https://m.asd.ink/"),
+    ("animelek.me",         "https://animelek.me/"),
+    ("animeflv.net",        "https://www3.animeflv.net/"),
+    ("gogoanime.so",        "https://gogoanime.so/"),
 ]
 
 def main():

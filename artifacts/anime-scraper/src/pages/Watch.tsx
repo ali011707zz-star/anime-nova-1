@@ -125,6 +125,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "seepanel",     name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",   tag: "SP" },
   // ── عربي مدبلج (ArabSeed m.asd.ink) ──────────────────────────────
   { site: "arabseed",     name: "كرتون مدبلج",   desc: "عربي مدبلج · MP4 مباشر",  tag: "AS" },
+  // ── 1080p مباشر (Anime-Phoenix) ───────────────────────────────────
+  { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
