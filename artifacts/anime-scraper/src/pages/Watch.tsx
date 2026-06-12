@@ -123,6 +123,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY" },
   // ── عربي مدبلج (SeeDrama APK) ─────────────────────────────────────
   { site: "seepanel",     name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",   tag: "SP" },
+  // ── عربي مدبلج (ArabSeed m.asd.ink) ──────────────────────────────
+  { site: "arabseed",     name: "عرب سيد",      desc: "عربي مدبلج · MP4 مباشر",  tag: "AS" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";

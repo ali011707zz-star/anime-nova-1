@@ -5174,6 +5174,198 @@ async function getSeepanelSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ARABSEED (m.asd.ink) — Arabic dubbed/subbed anime (مدبلج/مترجم)
+//  WordPress site — mirror of m.arabseed.show
+//  Search:  GET /wp-json/wp/v2/posts?search={title}+الحلقة+{ep}&per_page=10
+//           → episode posts with "الحلقة N" in title (exact URL per ep)
+//  Servers: POST /get__quality__servers/ → server list HTML
+//           POST /get__watch__server/    → embed URL per server index
+//  Server 0: m.reviewrate.net → <source src> direct MP4 via video-proxy
+// ════════════════════════════════════════════════════════════════════
+const ARABSEED_BASE = "https://m.asd.ink";
+const ARABSEED_HDRS: Record<string, string> = {
+  ...BASE_HDRS,
+  "Referer": `${ARABSEED_BASE}/`,
+  "Origin": ARABSEED_BASE,
+};
+
+type ArabseedPost = { id: number; link: string; title: { rendered: string } };
+
+function arabseedDecodeTitle(raw: string): string {
+  return raw.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+            .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+
+async function arabseedFetchPosts(params: string): Promise<ArabseedPost[]> {
+  const url = `${ARABSEED_BASE}/wp-json/wp/v2/posts?${params}&_fields=id,link,title`;
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return [];
+    const data = await r.json() as ArabseedPost[];
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+/** Find the direct episode page URL via WP REST API.
+ *  Three parallel search strategies to cover all episode ranges:
+ *  1. Targeted: "{title} الحلقة {ep}" — best for mid-range eps
+ *  2. ASC date order: oldest first — covers ep 1-100
+ *  3. DESC date order: newest first — covers last 100 eps */
+async function arabseedFindEpisodeUrl(q: string, ep: number): Promise<string | null> {
+  const EP_RE = /الحلقة\s+(\d+)/;
+  const qWords = q.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+  function matchEp(posts: ArabseedPost[]): string | null {
+    for (const post of posts) {
+      const title = arabseedDecodeTitle(post.title?.rendered || "");
+      const epM   = EP_RE.exec(title);
+      if (!epM || parseInt(epM[1], 10) !== ep) continue;
+      const titleLow = title.toLowerCase();
+      if (qWords.some(w => titleLow.includes(w))) return post.link;
+    }
+    return null;
+  }
+
+  const enc = encodeURIComponent(q);
+  // Run all three searches in parallel
+  const [targeted, asc, desc] = await Promise.all([
+    arabseedFetchPosts(`search=${encodeURIComponent(q + " الحلقة " + ep)}&per_page=20`),
+    arabseedFetchPosts(`search=${enc}&per_page=100&orderby=date&order=asc`),
+    arabseedFetchPosts(`search=${enc}&per_page=100&orderby=date&order=desc`),
+  ]);
+
+  // Try targeted first (most precise), then asc (early eps), then desc (recent)
+  return matchEp(targeted) ?? matchEp(asc) ?? matchEp(desc) ?? null;
+}
+
+async function getArabSeedSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    // Try English title first (most reliable), then romaji
+    const queries = [english, title].filter((q): q is string => !!q && q.trim().length > 0);
+    let epUrl: string | null = null;
+    for (const q of queries) {
+      epUrl = await arabseedFindEpisodeUrl(q, ep);
+      if (epUrl) break;
+    }
+    if (!epUrl) return [];
+
+    // Fetch episode page → extract psot_id and csrf_token
+    const epHtml = await cfGet(epUrl, { ...ARABSEED_HDRS, "Referer": `${ARABSEED_BASE}/` });
+    if (!epHtml) return [];
+
+    // psot_id: object__info = {'psot_id': '12345'} or psot_id: "12345"
+    const psotMatch = epHtml.match(/psot_id['"]?\s*[:']\s*['"](\d+)['"]/i);
+    if (!psotMatch) return [];
+    const psotId = psotMatch[1];
+
+    // csrf__token: main__obj = {'csrf__token': "87c547ce81"} — typically ~10 hex chars
+    const csrfMatch = epHtml.match(/csrf[_]{1,2}token['"]?\s*[:']\s*["']([a-zA-Z0-9_/-]{4,80})["']/i);
+    if (!csrfMatch) return [];
+    const csrf = csrfMatch[1];
+
+    const ajaxHdrs: Record<string, string> = {
+      ...ARABSEED_HDRS,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Requested-With": "XMLHttpRequest",
+      "Referer": epUrl,
+    };
+
+    // POST /get__quality__servers/ → {html: serverButtonsHtml, server: firstEmbedUrl}
+    let serverIndices: number[] = [];
+    let firstEmbedUrl = "";
+    try {
+      const qRes = await fetch(`${ARABSEED_BASE}/get__quality__servers/`, {
+        method: "POST",
+        headers: ajaxHdrs,
+        body: new URLSearchParams({ post_id: psotId, quality: "1080", csrf_token: csrf }).toString(),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (qRes.ok) {
+        const qData = await qRes.json() as { html?: string; server?: string };
+        firstEmbedUrl = qData.server || "";
+        const btnHtml = qData.html || "";
+        for (const m of btnHtml.matchAll(/data-server=["'](\d+)["']/gi)) {
+          const idx = parseInt(m[1], 10);
+          if (!serverIndices.includes(idx)) serverIndices.push(idx);
+        }
+      }
+    } catch { /* use fallback indices */ }
+
+    if (!serverIndices.length) serverIndices = [0, 1, 2, 3, 4];
+
+    const sources: UnifiedSource[] = [];
+
+    await Promise.allSettled(serverIndices.slice(0, 5).map(async (serverIdx) => {
+      try {
+        // POST /get__watch__server/ → {type, server: embedUrl}
+        const sRes = await fetch(`${ARABSEED_BASE}/get__watch__server/`, {
+          method: "POST",
+          headers: ajaxHdrs,
+          body: new URLSearchParams({
+            post_id: psotId, quality: "1080",
+            server: String(serverIdx), csrf_token: csrf,
+          }).toString(),
+          signal: AbortSignal.timeout(9000),
+        });
+        if (!sRes.ok) return;
+        const sData = await sRes.json() as { type?: string; server?: string };
+        const embedUrl: string = sData.server || (serverIdx === 0 ? firstEmbedUrl : "");
+        if (!embedUrl || !embedUrl.startsWith("http")) return;
+
+        // Skip dead/blocked servers
+        if (embedUrl.includes("luluvid")) return;
+
+        const srvLabel = `عرب سيد · سيرفر ${serverIdx + 1} · 1080p FHD`;
+
+        // m.reviewrate.net → extract <source src="..."> → direct MP4 via video-proxy
+        if (embedUrl.includes("reviewrate.net")) {
+          const rvHtml = await fetch(embedUrl, {
+            headers: { ...ARABSEED_HDRS, "Referer": epUrl! },
+            signal: AbortSignal.timeout(8000),
+          }).then(r2 => r2.ok ? r2.text() : "").catch(() => "");
+          const srcMatch = rvHtml.match(/<source\b[^>]*src=["'](https?:\/\/[^"']+)["']/i);
+          if (srcMatch) {
+            const mp4Url = srcMatch[1];
+            const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(mp4Url)}&ref=${encodeURIComponent(embedUrl)}`;
+            sources.push({
+              name: `عرب سيد · ReviewRate · 1080p FHD · مترجم عربي`,
+              url: mp4Url, quality: "1080p", qualityRank: 12,
+              site: "arabseed", directUrl: proxied, directType: "mp4",
+            });
+          }
+          return;
+        }
+
+        // vidmoly → embed-only (allowed by iframe policy)
+        if (VIDMOLY_HOSTS.some(h => embedUrl.includes(h))) {
+          sources.push({
+            name: `${srvLabel} · VidMoly · مترجم عربي`,
+            url: embedUrl, quality: "1080p", qualityRank: 10,
+            site: "arabseed", directUrl: embedUrl, directType: "mp4", isEmbed: true,
+          });
+          return;
+        }
+
+        // vidaraa / bysezejataos / other → push for extractAndCollect
+        sources.push({
+          name: `${srvLabel} · مترجم عربي`,
+          url: embedUrl, quality: "1080p", qualityRank: 10,
+          site: "arabseed",
+        });
+      } catch { /* skip failing server */ }
+    }));
+
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -5310,6 +5502,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
       scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep)),
+      scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
@@ -5401,6 +5594,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
