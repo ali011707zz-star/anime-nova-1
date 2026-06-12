@@ -925,7 +925,7 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
   try {
     const tvExtra = type === "tv" ? `&season=${season}&episode=${ep}` : "";
     const r = await fetch(
-      `https://starcima.com/api/vidzee?tmdbId=${tmdbId}&type=${type}${tvExtra}`,
+      `https://starcima.com/api/vidzee?tmdbId=${tmdbId}&type=${type}&title=${encodeURIComponent(title)}${tvExtra}`,
       { headers: { "User-Agent": UA, Referer: "https://starcima.com/", Accept: "application/json" }, signal: AbortSignal.timeout(8_000) },
     );
     if (r.ok) {
@@ -1027,10 +1027,11 @@ router.get("/animation/vidzee-meta", async (req: Request, res: Response) => {
   const type   = String(req.query.type   || "movie");
   const ep     = String(req.query.ep     || "1");
   const season = String(req.query.season || "1");
+  const title  = String(req.query.title  || "");
   if (!tmdbId) { res.status(400).json({ error: "tmdbId required" }); return; }
 
   const tvExtra = type === "tv" ? `&season=${season}&episode=${ep}` : "";
-  const url = `https://starcima.com/api/vidzee?tmdbId=${tmdbId}&type=${type}${tvExtra}`;
+  const url = `https://starcima.com/api/vidzee?tmdbId=${tmdbId}&type=${type}&title=${encodeURIComponent(title)}${tvExtra}`;
   try {
     const r = await fetch(url, {
       headers: { "User-Agent": UA, "Referer": `https://starcima.com/watch/${tmdbId}?type=${type}`, "Accept": "application/json" },
@@ -1513,7 +1514,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             (async () => {
               try {
                 const r = await fetch(
-                  `${SC_VIDZEE}?tmdbId=${tmdbId}&type=${type}${tvExtra}`,
+                  `${SC_VIDZEE}?tmdbId=${tmdbId}&type=${type}&title=${encodeURIComponent(title)}${tvExtra}`,
                   { headers: scHeaders, signal: AbortSignal.timeout(28_000) }
                 );
                 if (!r.ok) {

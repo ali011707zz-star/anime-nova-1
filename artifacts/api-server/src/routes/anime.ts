@@ -3543,12 +3543,17 @@ async function getKawaiiAnimeSources(
     };
     if (!data.sources?.length) return [];
 
-    // Pick first English subtitle VTT if available
-    const subEntry = data.subtitles?.find(s =>
-      (s.lang || s.label || "").toLowerCase().includes("english") ||
-      (s.lang || s.label || "").toLowerCase().includes("eng")
-    ) || data.subtitles?.[0];
-    const subtitleUrl = subEntry?.url || undefined;
+    // Prefer Arabic subtitle, fall back to English, then first available
+    const findSub = (tag: string) => data.subtitles?.find(s =>
+      (s.lang || s.label || "").toLowerCase().includes(tag)
+    );
+    const subEntry = findSub("arabic") || findSub("arab") || findSub("ar")
+                  || findSub("english") || findSub("eng")
+                  || data.subtitles?.[0];
+    const subtitleUrl  = subEntry?.url || undefined;
+    const subLangLabel = subEntry
+      ? (/(arabic|arab|\bar\b)/i.test(subEntry.lang || subEntry.label || "") ? "عربي" : "إنجليزي")
+      : "إنجليزي";
 
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
@@ -3558,7 +3563,7 @@ async function getKawaiiAnimeSources(
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`
         : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
       return {
-        name: `كواي أنمي · ${src.quality || "1080p"} · إنجليزي`,
+        name: `كواي أنمي · ${src.quality || "1080p"} · ${subLangLabel}`,
         url: src.url,
         quality: src.quality || "1080p",
         qualityRank: 15,
