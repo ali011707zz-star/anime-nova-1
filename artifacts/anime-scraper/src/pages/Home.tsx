@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
-import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard, Tv2, Tv } from "lucide-react";
+import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard, Tv2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* ── Module-level cache — survives component unmount/remount so categories
@@ -190,7 +190,6 @@ export default function Home() {
 
   const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
-  const [kartoonSeries, setKartoonSeries] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>([]);
   const [todayChecking, setTodayChecking] = useState(false);
@@ -206,14 +205,6 @@ export default function Home() {
     fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
       .then(d => setAnimationMovies((d.results || []).slice(0, 10)))
-      .catch(() => {});
-  }, []);
-
-  /* Load recent cartoon series from ArabSeed */
-  useEffect(() => {
-    fetch("/api/kartoon/browse?cat=2496&page=1")
-      .then(r => r.json())
-      .then(d => setKartoonSeries((d.series || []).filter((s: any) => s.thumbnail).slice(0, 12)))
       .catch(() => {});
   }, []);
 
@@ -963,76 +954,6 @@ export default function Home() {
           )}
         </div>
 
-
-      {/* ── مسلسلات كرتون ── */}
-      {kartoonSeries.length > 0 && !selectedGenre && (
-        <div className="mt-5 px-4">
-          <Link href="/kartouns">
-            <motion.div
-              whileTap={{ scale: 0.97 }}
-              className="relative w-full h-[90px] rounded-3xl overflow-hidden cursor-pointer mb-3 shadow-2xl shadow-black/60"
-              style={{ background: "linear-gradient(135deg,#1a0800 0%,#431407 40%,#1a1200 100%)" }}
-            >
-              <div className="absolute -top-6 -left-6 w-36 h-36 rounded-full opacity-25" style={{ background: "radial-gradient(circle,#f97316,transparent)" }} />
-              <div className="absolute -bottom-4 -right-4 w-28 h-28 rounded-full opacity-15" style={{ background: "radial-gradient(circle,#fbbf24,transparent)" }} />
-              <div className="absolute inset-0 flex items-center justify-between px-5">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg,#f97316,#ea580c)" }}>
-                      <Tv className="w-3 h-3 text-white" />
-                    </div>
-                    <span className="text-[9px] text-white/40 font-['Cairo'] tracking-wider">كرتون · مدبلج</span>
-                  </div>
-                  <h3 className="text-[18px] font-black text-white font-['Cairo'] leading-tight">مسلسلات كرتون</h3>
-                </div>
-                <div className="flex items-center gap-1.5 border border-white/20 px-3 py-1.5 rounded-2xl" style={{ background: "rgba(255,255,255,0.07)", backdropFilter: "blur(12px)" }}>
-                  <span className="text-[11px] font-black text-white font-['Cairo']">اكتشف</span>
-                  <ChevronLeft className="w-3.5 h-3.5 text-white" />
-                </div>
-              </div>
-            </motion.div>
-          </Link>
-
-          <div className="flex items-center justify-between mb-2.5">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#f97316,#ea580c)" }}>
-                <Tv className="w-3.5 h-3.5 text-white" />
-              </div>
-              <h2 className="text-[13px] font-black font-['Cairo'] text-white">مسلسلات كرتون حديثة</h2>
-            </div>
-            <Link href="/kartouns">
-              <button className="text-[10px] text-orange-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-orange-500/8 px-2.5 py-1 rounded-xl border border-orange-500/15">
-                عرض الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-
-          <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-            {kartoonSeries.map((s: any, i: number) => (
-              <Link key={s.slug + i} href={`/kartoon/series?q=${encodeURIComponent(s.title)}&thumb=${encodeURIComponent(s.thumbnail)}&cat=2496`}>
-                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[100px] cursor-pointer">
-                  <div className="relative w-[100px] h-[140px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    {s.thumbnail
-                      ? <img src={s.thumbnail} alt={s.title} className="w-full h-full object-cover" loading="lazy" />
-                      : <div className="w-full h-full flex items-center justify-center" style={{ background: "rgba(249,115,22,0.08)" }}><Tv className="w-8 h-8 text-orange-500/30" /></div>
-                    }
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                    {s.latestEp > 0 && (
-                      <div className="absolute top-2 right-2 text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
-                        style={{ background: "rgba(249,115,22,0.85)" }}>
-                        ح {s.latestEp}
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                      <p className="text-[8.5px] text-white/90 font-bold line-clamp-2 leading-tight font-['Cairo']">{s.title}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── Movies ── */}
       {movies.length > 0 && !selectedGenre && (

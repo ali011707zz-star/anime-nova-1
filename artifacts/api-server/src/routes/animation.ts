@@ -95,6 +95,61 @@ async function tmdb(path: string): Promise<any> {
   return r.json() as Promise<any>;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  ARABSEED (m.asd.ink) — Arabic dubbed/subbed content
+// ═══════════════════════════════════════════════════════════════════
+const AS_BASE = "https://m.asd.ink";
+
+function asDecode(raw: string): string {
+  return raw.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+            .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+
+async function asFetchPosts(params: string): Promise<Array<{ id: number; link: string; title: { rendered: string } }>> {
+  try {
+    const r = await fetch(`${AS_BASE}/wp-json/wp/v2/posts?${params}&_fields=id,link,title`, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return [];
+    return r.json() as Promise<Array<{ id: number; link: string; title: { rendered: string } }>>;
+  } catch { return []; }
+}
+
+async function asFindEpisodeUrl(q: string, ep: number): Promise<string | null> {
+  const EP_RE = /الحلقة\s+(\d+)/;
+  const qWords = q.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  function matchEp(posts: Array<{ id: number; link: string; title: { rendered: string } }>): string | null {
+    for (const post of posts) {
+      const title = asDecode(post.title?.rendered || "");
+      const epM = EP_RE.exec(title);
+      if (!epM || parseInt(epM[1], 10) !== ep) continue;
+      const titleLow = title.toLowerCase();
+      if (qWords.some(w => titleLow.includes(w))) return post.link;
+    }
+    return null;
+  }
+  const enc = encodeURIComponent(q);
+  const [targeted, asc, desc] = await Promise.all([
+    asFetchPosts(`search=${encodeURIComponent(q + " الحلقة " + ep)}&per_page=20`),
+    asFetchPosts(`search=${enc}&per_page=100&orderby=date&order=asc`),
+    asFetchPosts(`search=${enc}&per_page=100&orderby=date&order=desc`),
+  ]);
+  return matchEp(targeted) ?? matchEp(asc) ?? matchEp(desc) ?? null;
+}
+
+async function asFindMovieUrl(q: string): Promise<string | null> {
+  const qWords = q.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  try {
+    const posts = await asFetchPosts(`search=${encodeURIComponent(q)}&per_page=20&orderby=relevance`);
+    for (const post of posts) {
+      const title = asDecode(post.title?.rendered || "").toLowerCase();
+      if (qWords.some(w => title.includes(w))) return post.link;
+    }
+  } catch {}
+  return null;
+}
+
 async function cfGet(url: string, referer?: string): Promise<string> {
   const r = await fetch(url, {
     headers: {
@@ -2253,6 +2308,69 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             // Stop if we got at least one source from this poster
             if (sourceCount > 0) break;
           }
+        } catch { /* silent */ }
+      })(),
+
+      // ── ArabSeed (m.asd.ink) — Arabic dubbed/subbed content ──────────────────
+      (async () => {
+        if (!title) return;
+        try {
+          send("status", { msg: "عرب سيد: جاري البحث…" });
+          const queries = [enTitlePrefetched, title].filter(Boolean) as string[];
+          let epUrl: string | null = null;
+          for (const q of queries) {
+            epUrl = type === "movie"
+              ? await asFindMovieUrl(q)
+              : await asFindEpisodeUrl(q, epNum);
+            if (epUrl) break;
+          }
+          if (!epUrl) return;
+
+          const AS_HDRS: Record<string, string> = {
+            "User-Agent": UA, "Referer": `${AS_BASE}/`, "Origin": AS_BASE,
+          };
+
+          const epHtml = await cfGet(epUrl, `${AS_BASE}/`);
+          if (!epHtml) return;
+
+          const postIdM = epHtml.match(/var\s+post_id\s*=\s*['"]?(\d+)/i) || epHtml.match(/data-post[_-]id=["'](\d+)/i);
+          const nonceM  = epHtml.match(/var\s+nonce\s*=\s*["']([a-f0-9]+)["']/i) || epHtml.match(/nonce["']\s*:\s*["']([a-f0-9]+)["']/i);
+          if (!postIdM) return;
+          const postId = postIdM[1];
+          const nonce  = nonceM?.[1] || "";
+
+          const qResp = await fetch(`${AS_BASE}/wp-admin/admin-ajax.php`, {
+            method: "POST",
+            headers: { ...AS_HDRS, "Content-Type": "application/x-www-form-urlencoded" },
+            body: `action=get__quality__servers&post_id=${postId}&nonce=${nonce}`,
+            signal: AbortSignal.timeout(8_000),
+          }).catch(() => null);
+          if (!qResp?.ok) return;
+          const qHtml = await qResp.text();
+
+          const serverCount = (qHtml.match(/class="[^"]*btn[^"]*server/gi) || []).length || 3;
+          await Promise.allSettled(Array.from({ length: serverCount }, (_, idx) => (async () => {
+            try {
+              const sResp = await fetch(`${AS_BASE}/wp-admin/admin-ajax.php`, {
+                method: "POST",
+                headers: { ...AS_HDRS, "Content-Type": "application/x-www-form-urlencoded" },
+                body: `action=get__watch__server&post_id=${postId}&server_id=${idx + 1}&nonce=${nonce}`,
+                signal: AbortSignal.timeout(8_000),
+              });
+              if (!sResp.ok) return;
+              const sData = await sResp.json() as any;
+              const embedUrl: string = sData?.embed_url || sData?.url || sData?.link || "";
+              if (!embedUrl?.startsWith("http")) return;
+              const srvLabel = `عرب سيد · سيرفر ${idx + 1}`;
+              const extracted = await callExtractApi(embedUrl);
+              if (extracted?.directUrl) {
+                const d = extracted.directUrl;
+                const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
+                const proxied = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : wrapMp4(d, embedUrl);
+                sendSource(embedUrl, srvLabel, d, proxied);
+              }
+            } catch { /* skip */ }
+          })()));
         } catch { /* silent */ }
       })(),
 

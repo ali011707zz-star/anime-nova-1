@@ -61,9 +61,14 @@ interface TmdbItem {
 
 export default function AnimationLibrary() {
   const [, navigate]    = useLocation();
-  const type: MediaType = "movie";
+  const [type, setType]    = useState<MediaType>("movie");
   const [genre, setGenre]  = useState<number>(0);
   const [sort, setSort]    = useState("popularity.desc");
+
+  const handleTypeChange = (t: MediaType) => {
+    if (t === type) return;
+    setType(t); setGenre(0); setSort("popularity.desc"); setYear(""); setPage(1);
+  };
   const [year, setYear]    = useState("");
   const [items, setItems]  = useState<TmdbItem[]>([]);
   const [page, setPage]    = useState(1);
@@ -172,10 +177,10 @@ export default function AnimationLibrary() {
         <div className="px-4 pt-12 pb-3">
 
           {/* Title row */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <div>
               <h1 className="text-[22px] font-black text-white font-['Cairo'] leading-none">رسوم متحركة</h1>
-              <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">أفلام أنيميشن عالمية</p>
+              <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">{type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}</p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -199,6 +204,22 @@ export default function AnimationLibrary() {
                 <Search className="w-4 h-4" style={{ color: searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)" }} />
               </button>
             </div>
+          </div>
+
+          {/* Movie / TV tabs */}
+          <div className="flex gap-2 mb-2">
+            {([ { val: "movie" as MediaType, label: "أفلام" }, { val: "tv" as MediaType, label: "مسلسلات" } ]).map(({ val, label }) => (
+              <button
+                key={val}
+                onClick={() => handleTypeChange(val)}
+                className="flex-1 py-1.5 rounded-2xl text-[13px] font-black font-['Cairo'] transition-all active:scale-95"
+                style={{
+                  background: type === val ? "linear-gradient(135deg,#8B5CF6,#6D28D9)" : "rgba(255,255,255,0.06)",
+                  color: type === val ? "#fff" : "rgba(255,255,255,0.45)",
+                  border: `1px solid ${type === val ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.08)"}`,
+                }}
+              >{label}</button>
+            ))}
           </div>
 
 

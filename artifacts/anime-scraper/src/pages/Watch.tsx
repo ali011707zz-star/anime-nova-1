@@ -123,8 +123,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY" },
   // ── عربي مدبلج (SeeDrama APK) ─────────────────────────────────────
   { site: "seepanel",     name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",   tag: "SP" },
-  // ── عربي مدبلج (ArabSeed m.asd.ink) ──────────────────────────────
-  { site: "arabseed",     name: "كرتون مدبلج",   desc: "عربي مدبلج · MP4 مباشر",  tag: "AS" },
+  // ── عربي مدبلج / مترجم (ArabSeed m.asd.ink) ─────────────────────
+  { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS" },
   // ── 1080p مباشر (Anime-Phoenix) ───────────────────────────────────
   { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH" },
 ];
