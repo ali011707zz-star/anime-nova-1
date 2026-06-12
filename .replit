@@ -37,7 +37,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm install && PORT=5000 BASE_PATH=/ pnpm --filter @workspace/anime-scraper run dev"
+args = "cd artifacts/anime-scraper && pnpm install && PORT=5000 BASE_PATH=/ pnpm run dev"
 waitForPort = 5000
 
 [[workflows.workflow]]
