@@ -44,6 +44,13 @@ function getThumbnail(post: ASPost): string {
   } catch { return ""; }
 }
 
+function titleMatch(raw: string, qLow: string, qWords: string[]): boolean {
+  const series = extractSeriesName(raw).toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/gu, "");
+  return series.includes(qLow) || qLow.includes(series) ||
+    qWords.some(w => w.length > 1 && series.includes(w.toLowerCase()));
+}
+
+/* ── Fetch by category only (search= is blocked from server IPs) ─────── */
 async function asFetch(params: string): Promise<ASPost[]> {
   try {
     const url = `${ARABSEED_BASE}/wp-json/wp/v2/posts?${params}&_embed`;
@@ -57,6 +64,17 @@ async function asFetch(params: string): Promise<ASPost[]> {
   } catch { return []; }
 }
 
+/* ── Fetch ALL posts from a category (no search param) ──────────────── */
+async function fetchAllByCategory(cat: number, maxPages = 5): Promise<ASPost[]> {
+  const pageNums = Array.from({ length: maxPages }, (_, i) => i + 1);
+  const pages = await Promise.all(
+    pageNums.map(page =>
+      asFetch(`categories=${cat}&per_page=100&orderby=date&order=desc&page=${page}`)
+    )
+  );
+  return pages.flat();
+}
+
 /* ── Browse — returns deduplicated series list ───────────────────────── */
 router.get("/kartoon/browse", async (req: Request, res: Response) => {
   const cat    = parseInt(String(req.query.cat  || String(CARTOON_CAT)), 10) || CARTOON_CAT;
@@ -65,10 +83,8 @@ router.get("/kartoon/browse", async (req: Request, res: Response) => {
 
   let posts: ASPost[];
 
-  if (search) {
-    posts = await asFetch(`search=${encodeURIComponent(search)}&categories=${cat}&per_page=100&orderby=date&order=desc`);
-  } else if (cat === ZAMAAN_CAT) {
-    // Zamaan has ~207 posts — fetch all 3 pages in parallel so all series appear
+  if (cat === ZAMAAN_CAT) {
+    // Zamaan has ~207 posts — fetch all 3 pages in parallel
     const [p1, p2, p3] = await Promise.all([
       asFetch(`categories=${cat}&per_page=100&orderby=date&order=desc&page=1`),
       asFetch(`categories=${cat}&per_page=100&orderby=date&order=desc&page=2`),
@@ -79,6 +95,9 @@ router.get("/kartoon/browse", async (req: Request, res: Response) => {
     posts = await asFetch(`categories=${cat}&per_page=100&orderby=date&order=desc&page=${page}`);
   }
 
+  const qLow   = search.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/gu, "");
+  const qWords = search.split(/\s+/).filter(w => w.length > 1);
+
   const seriesMap = new Map<string, {
     slug: string; title: string; thumbnail: string;
     epCount: number; latestEp: number; postId: number; cat: number;
@@ -88,6 +107,10 @@ router.get("/kartoon/browse", async (req: Request, res: Response) => {
     const raw    = post.title?.rendered || "";
     const series = extractSeriesName(raw);
     if (!series || series.length < 2) continue;
+
+    // Filter by search if provided
+    if (search && !titleMatch(raw, qLow, qWords)) continue;
+
     const ep    = extractEpNum(raw);
     const slug  = titleToSlug(series);
     const thumb = getThumbnail(post);
@@ -105,9 +128,7 @@ router.get("/kartoon/browse", async (req: Request, res: Response) => {
     }
   }
 
-  // Don't filter by thumbnail — include all series
   const series = Array.from(seriesMap.values());
-  // For Zamaan we already fetched all pages — no more pages to load
   const hasMore = cat === ZAMAAN_CAT ? false : posts.length >= 100;
   res.json({ series, total: series.length, hasMore });
 });
@@ -116,44 +137,33 @@ router.get("/kartoon/browse", async (req: Request, res: Response) => {
 router.get("/kartoon/episodes", async (req: Request, res: Response) => {
   const q    = String(req.query.q   || "").trim();
   const cat  = parseInt(String(req.query.cat || String(CARTOON_CAT)), 10) || CARTOON_CAT;
-  const page = parseInt(String(req.query.page || "1"), 10) || 1;
 
   if (!q) { res.json({ episodes: [], total: 0 }); return; }
 
-  // Try multiple search strategies in parallel
   const qLow   = q.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/gu, "");
   const qWords  = q.split(/\s+/).filter(w => w.length > 1);
 
-  // Build search term — try exact title + Arabic episode keyword for better results
-  const [byExact, byWords, byAsc] = await Promise.all([
-    asFetch(`search=${encodeURIComponent(q)}&categories=${cat}&per_page=100&orderby=date&order=desc&page=${page}`),
-    qWords.length > 1 ? asFetch(`search=${encodeURIComponent(qWords[0])}&categories=${cat}&per_page=100&orderby=date&order=asc`) : Promise.resolve([] as ASPost[]),
-    asFetch(`search=${encodeURIComponent(q)}&categories=${cat}&per_page=100&orderby=date&order=asc&page=${page}`),
-  ]);
+  // Search= is blocked from Replit server IPs — fetch ALL posts from category instead
+  const maxPages = cat === ZAMAAN_CAT ? 3 : 5;
+  const posts = await fetchAllByCategory(cat, maxPages);
 
   const EP_RE = /الحلقة\s+(\d+)/u;
   const seenNums = new Set<number>();
   const episodes: { id: number; num: number; title: string; link: string; thumb: string }[] = [];
 
-  function processPost(post: ASPost) {
+  for (const post of posts) {
     const raw     = post.title?.rendered || "";
     const decoded = decodeTitle(raw);
     const epM     = EP_RE.exec(decoded);
-    if (!epM) return;
+    if (!epM) continue;
     const epNum = parseInt(epM[1], 10);
-    if (!epNum || seenNums.has(epNum)) return;
-
-    // Filter: series name must overlap with query
-    const seriesName = extractSeriesName(raw).toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/gu, "");
-    const overlap    = seriesName.includes(qLow) || qLow.includes(seriesName) ||
-                       qWords.some(w => seriesName.includes(w.toLowerCase()) || decoded.includes(w));
-    if (qLow.length > 2 && seriesName.length > 2 && !overlap) return;
+    if (!epNum || seenNums.has(epNum)) continue;
+    if (!titleMatch(raw, qLow, qWords)) continue;
 
     seenNums.add(epNum);
     episodes.push({ id: post.id, num: epNum, title: decoded, link: post.link, thumb: getThumbnail(post) });
   }
 
-  for (const post of [...byExact, ...byAsc, ...byWords]) processPost(post);
   episodes.sort((a, b) => a.num - b.num);
   res.json({ episodes, total: episodes.length });
 });
@@ -196,7 +206,6 @@ async function extractMp4FromEmbed(embedUrl: string, srcRef: string): Promise<{ 
     }).then(r => r.ok ? r.text() : "").catch(() => "");
     if (!html) return null;
 
-    // Direct source tag
     const srcM = html.match(/<source[^>]+src=["'](https?:\/\/[^"']+)["']/i);
     if (srcM) {
       const directUrl = srcM[1];
@@ -207,7 +216,6 @@ async function extractMp4FromEmbed(embedUrl: string, srcRef: string): Promise<{ 
       return { directUrl, proxyUrl };
     }
 
-    // HLS m3u8 in JS
     const m3u8M = html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
     if (m3u8M) {
       const directUrl = m3u8M[1];
@@ -217,7 +225,6 @@ async function extractMp4FromEmbed(embedUrl: string, srcRef: string): Promise<{ 
       };
     }
 
-    // MP4 in JS
     const mp4M = html.match(/["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i);
     if (mp4M) {
       const directUrl = mp4M[1];
@@ -230,39 +237,32 @@ async function extractMp4FromEmbed(embedUrl: string, srcRef: string): Promise<{ 
   return null;
 }
 
-async function findEpUrl(title: string, ep: number): Promise<string | null> {
+/* ── Find episode URL by fetching category posts (no search) ─────────── */
+async function findEpUrl(title: string, ep: number, cat: number): Promise<string | null> {
+  const qLow   = title.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/gu, "");
+  const qWords = title.split(/\s+/).filter(w => w.length > 1);
   const EP_RE  = /الحلقة\s+(\d+)/u;
-  const qWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 2);
 
-  // Try both targeted and broad searches in parallel
-  const [targeted, asc, desc] = await Promise.all([
-    asFetch(`search=${encodeURIComponent(title + " الحلقة " + ep)}&per_page=20`),
-    asFetch(`search=${encodeURIComponent(title)}&per_page=100&orderby=date&order=asc`),
-    asFetch(`search=${encodeURIComponent(title)}&per_page=100&orderby=date&order=desc`),
-  ]);
+  const maxPages = cat === ZAMAAN_CAT ? 3 : 5;
+  const posts = await fetchAllByCategory(cat, maxPages);
 
-  function matchEp(posts: ASPost[]): string | null {
-    for (const post of posts) {
-      const decoded = decodeTitle(post.title?.rendered || "");
-      const m = EP_RE.exec(decoded);
-      if (!m || parseInt(m[1], 10) !== ep) continue;
-      const series = extractSeriesName(post.title?.rendered || "").toLowerCase();
-      if (qWords.some(w => series.includes(w) || decoded.toLowerCase().includes(w))) return post.link;
-    }
-    return null;
+  for (const post of posts) {
+    const decoded = decodeTitle(post.title?.rendered || "");
+    const m = EP_RE.exec(decoded);
+    if (!m || parseInt(m[1], 10) !== ep) continue;
+    if (!titleMatch(post.title?.rendered || "", qLow, qWords)) continue;
+    return post.link;
   }
-
-  return matchEp(targeted) ?? matchEp(asc) ?? matchEp(desc);
+  return null;
 }
 
-async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
-  const epUrl = await findEpUrl(title, ep);
+async function getArabSeedSources(title: string, ep: number, cat: number): Promise<any[]> {
+  const epUrl = await findEpUrl(title, ep, cat);
   if (!epUrl) return [];
 
   const epHtml = await asGet(epUrl, `${ARABSEED_BASE}/`);
   if (!epHtml) return [];
 
-  // Extract post ID from object__info (psot_id) and csrf token from main__obj
   const postIdM = epHtml.match(/['"]psot_id['"]\s*:\s*['"]?(\d{4,9})['"]?/)
                 || epHtml.match(/data-post-id=["'](\d{4,9})["']/)
                 || epHtml.match(/psot_id[^\d]*(\d{4,9})/);
@@ -270,12 +270,11 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
 
   const sources: any[] = [];
 
-  // ── Strategy 1: AJAX — site uses numeric quality strings (720, 480, 1080, 360) ──
+  // ── Strategy 1: AJAX ──
   if (postIdM?.[1] && csrfM?.[1]) {
     const postId  = postIdM[1];
     const csrfTok = csrfM[1];
 
-    // Try numeric quality labels first (site standard), then named fallbacks
     const qualityCandidates = ["720", "480", "1080", "360", "FHD", "HD", "SD"];
     let serverList: Array<{ idx: string; qu: string; name: string }> = [];
     let workingQu = "720";
@@ -288,7 +287,6 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
       );
       if (!qData) continue;
 
-      // Direct server URL in response (some episodes)
       if (qData.server) {
         const embedUrl = qData.server as string;
         const extracted = await extractMp4FromEmbed(embedUrl, epUrl);
@@ -303,8 +301,6 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
       const btnHtml = qData.html || "";
       if (!btnHtml.trim()) continue;
 
-      // Extract server entries: data-server + data-qu + label
-      // HTML: <li data-post="..." data-server="0" data-qu="720" ...><span>سيرفر عرب سيد</span>
       const liMatches = [...btnHtml.matchAll(/<li[^>]*data-server=["'](\d+)["'][^>]*data-qu=["']([^"']+)["'][^>]*>[\s\S]*?<span>([^<]*)<\/span>/gi)];
       if (liMatches.length) {
         serverList = liMatches.map((m: RegExpMatchArray) => ({ idx: m[1], qu: m[2], name: m[3].trim() }));
@@ -312,7 +308,6 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
         break;
       }
 
-      // Fallback: extract data-server indices only (use the quality that worked)
       const idxMatches = [...btnHtml.matchAll(/data-server=["'](\d+)["']/gi)];
       if (idxMatches.length) {
         serverList = idxMatches.map((m: RegExpMatchArray) => ({ idx: m[1], qu, name: `سيرفر ${m[1]}` }));
@@ -321,7 +316,6 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
       }
     }
 
-    // Fetch embed URL for each server and add as source
     for (const { idx, qu, name } of serverList.slice(0, 4)) {
       if (sources.length >= 4) break;
       const sData = await asPost(
@@ -332,7 +326,6 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
       const embedUrl = sData?.server as string | undefined;
       if (!embedUrl?.startsWith("http")) continue;
 
-      // Try fast server-side extraction (source tags, direct HLS/MP4)
       const extracted = await extractMp4FromEmbed(embedUrl, epUrl);
       if (extracted) {
         sources.push({
@@ -340,13 +333,12 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
           directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl,
         });
       } else {
-        // Send embed URL — client will attempt deep extraction via /api/anime/extract-video
         sources.push({ url: embedUrl, label: `عرب سيد · ${name}` });
       }
     }
   }
 
-  // ── Strategy 2: Fallback — look for direct video in page HTML ──
+  // ── Strategy 2: Fallback — direct video in HTML ──
   if (sources.length === 0) {
     const srcM = epHtml.match(/<source[^>]+src=["'](https?:\/\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/i);
     if (srcM) {
@@ -358,19 +350,16 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
       sources.push({ url: proxyUrl, label: `عرب سيد · ح${ep}`, directUrl, proxyUrl });
     }
 
-    // Iframes/data-src in page → send for client deep extraction
-    const iframeUrls: string[] = [];
     for (const m of epHtml.matchAll(/<iframe[^>]+src=["'](https?:\/\/[^"']+)["']/gi)) {
       const u = m[1];
-      if (!u.includes("google") && !u.includes("facebook") && !u.includes("disqus")) iframeUrls.push(u);
-    }
-    for (const u of [...new Set(iframeUrls)].slice(0, 3)) {
+      if (u.includes("google") || u.includes("facebook") || u.includes("disqus")) continue;
       const extracted = await extractMp4FromEmbed(u, epUrl);
       if (extracted) {
         sources.push({ url: extracted.proxyUrl, label: `عرب سيد · ح${ep}`, directUrl: extracted.directUrl, proxyUrl: extracted.proxyUrl });
       } else {
         sources.push({ url: u, label: `عرب سيد · ح${ep}` });
       }
+      if (sources.length >= 3) break;
     }
   }
 
@@ -381,6 +370,7 @@ async function getArabSeedSources(title: string, ep: number): Promise<any[]> {
 router.get("/kartoon/sources-stream", async (req: Request, res: Response) => {
   const title = String(req.query.title || "").trim();
   const ep    = parseInt(String(req.query.ep || "1"), 10) || 1;
+  const cat   = parseInt(String(req.query.cat || String(CARTOON_CAT)), 10) || CARTOON_CAT;
 
   res.setHeader("Content-Type",      "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control",     "no-cache");
@@ -399,13 +389,13 @@ router.get("/kartoon/sources-stream", async (req: Request, res: Response) => {
     clearInterval(keepAlive);
     send("done", { total: 0 });
     try { res.end(); } catch {}
-  }, 35_000);
+  }, 40_000);
 
   try {
     if (!title) { send("done", { total: 0 }); return; }
     send("status", { msg: `جاري البحث عن "${title}" الحلقة ${ep}…` });
 
-    const sources = await getArabSeedSources(title, ep);
+    const sources = await getArabSeedSources(title, ep, cat);
 
     for (const src of sources) {
       send("source", src);

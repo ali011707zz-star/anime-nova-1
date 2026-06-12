@@ -99,3 +99,4 @@
 - [aflaam.com scraper](aflaam-scraper.md) — direct MP4 via af3/af1.downet.net (CORS *, Accept-Ranges); search→movie/series→watch page→source tags; active in animation.ts; f2h7y.sbs=DEAD (CF blocks datacenter IPs)
 - [EgyBest APK analysis](egybest-apk-analysis.md) — EasyPlex framework; API paywalled (non-premium=empty); FaselHDS=WebView-only; NOT integrated (Egyptian movies not anime)
 - [SeePanal scraper (APK)](seepanel-scraper.md) — panel.seepanel.top REST API from SeeDrama APK v4.3; hlswish+vidspeed extractable; hgcloud/vidhideplus fail; empty "قريبا" seasons must be filtered by ID sort
+- [ArabSeed WP search blocked](arabseed-search-blocked.md) — m.asd.ink WP REST API: search= param returns [] from Replit server IPs; ONLY categories= (no search) works; fix: fetchAllByCategory(cat,maxPages) + JS title filter
