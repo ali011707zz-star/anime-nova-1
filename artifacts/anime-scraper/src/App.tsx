@@ -135,17 +135,13 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
       <ErrorBoundary resetKey={location}>
         <Suspense fallback={<PageLoader />}>
-          {/* overflow:clip clips the absolutely-positioned exiting page in both
-              axes without creating a scroll container, so sticky headers still work */}
-          <div style={{ position: "relative", overflow: "clip" }}>
-          <AnimatePresence mode="popLayout" initial={false}>
+          <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={location}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.17, ease: [0.22, 1, 0.36, 1] }}
-              style={{ minHeight: "100%" }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12, ease: "easeOut" }}
             >
               <Switch>
                 <Route path="/"                        component={Home} />
@@ -175,7 +171,6 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
               </Switch>
             </motion.div>
           </AnimatePresence>
-          </div>
         </Suspense>
       </ErrorBoundary>
       <BottomNav />
