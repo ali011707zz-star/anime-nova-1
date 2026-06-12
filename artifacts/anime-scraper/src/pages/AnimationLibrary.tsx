@@ -83,36 +83,52 @@ export default function AnimationLibrary() {
   const genres = type === "movie" ? MOVIE_GENRES : TV_GENRES;
   const sortOptions = type === "movie" ? SORT_OPTIONS : SORT_OPTIONS_TV;
 
-  const loadingRef = useRef(false);
-  const load = useCallback(async (t: MediaType, g: number, s: string, y: string, p: number, reset = false) => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
+  const genRef     = useRef(0);
+  const abortRef   = useRef<AbortController | null>(null);
+
+  const load = useCallback(async (t: MediaType, g: number, s: string, y: string, p: number, gen: number) => {
     setLoading(true);
     try {
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+
       const gParam = g === 0 ? "16" : `${g}`;
-      const r = await fetch(`/api/animation/browse?type=${t}&genre=${gParam}&sort=${encodeURIComponent(s)}&year=${y}&page=${p}`);
+      const r = await fetch(
+        `/api/animation/browse?type=${t}&genre=${gParam}&sort=${encodeURIComponent(s)}&year=${y}&page=${p}`,
+        { signal: ctrl.signal }
+      );
+      if (genRef.current !== gen) return;
       const data = await r.json();
-      const hasCjk = (s: string) => /[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/u.test(s);
+      if (genRef.current !== gen) return;
+
+      const hasCjk = (str: string) => /[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/u.test(str);
       const results: TmdbItem[] = (data.results || []).filter((item: TmdbItem) => {
         const orig = item.original_title || item.original_name || "";
         const disp = item.title || item.name || "";
         return !hasCjk(orig) || !hasCjk(disp);
       });
-      if (reset) {
+
+      if (p === 1) {
         setItems(results);
       } else {
-        setItems(prev => [...prev, ...results]);
+        setItems(prev => {
+          const existingIds = new Set(prev.map(i => i.id));
+          return [...prev, ...results.filter(i => !existingIds.has(i.id))];
+        });
       }
       setHasMore(p < (data.total_pages || 1));
       setPage(p);
-    } catch { /* skip */ }
-    loadingRef.current = false;
-    setLoading(false);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+    }
+    if (genRef.current === gen) setLoading(false);
   }, []);
 
   useEffect(() => {
-    setItems([]); setPage(1); setHasMore(true);
-    load(type, genre, sort, year, 1, true);
+    const gen = ++genRef.current;
+    setItems([]); setPage(1); setHasMore(true); setLoading(false);
+    load(type, genre, sort, year, 1, gen);
   }, [type, genre, sort, year]);
 
   useEffect(() => {
@@ -454,7 +470,7 @@ export default function AnimationLibrary() {
 
             {hasMore && (
               <div className="mt-8 flex justify-center">
-                <button onClick={() => load(type, genre, sort, year, page + 1)} disabled={loading}
+                <button onClick={() => load(type, genre, sort, year, page + 1, genRef.current)} disabled={loading}
                   className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-black text-white/60 font-['Cairo'] active:scale-95 transition-transform disabled:opacity-50"
                   style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}>
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronDown className="w-4 h-4" />}
