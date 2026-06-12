@@ -121,6 +121,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
   // ── عربي مدبلج (AniméDay APK) ─────────────────────────────────────
   { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY" },
+  // ── عربي مدبلج (SeeDrama APK) ─────────────────────────────────────
+  { site: "seepanel",     name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",   tag: "SP" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
