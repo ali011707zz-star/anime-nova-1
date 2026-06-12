@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Search, Film, Tv, Star, ChevronDown, Loader2, SlidersHorizontal, X, Calendar, Flame, Award } from "lucide-react";
+import { Search, Film, Star, ChevronDown, Loader2, SlidersHorizontal, X, Calendar, Flame, Award } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const IMG = "https://image.tmdb.org/t/p/w342";
@@ -61,7 +61,7 @@ interface TmdbItem {
 
 export default function AnimationLibrary() {
   const [, navigate]    = useLocation();
-  const [type, setType] = useState<MediaType>("movie");
+  const type: MediaType = "movie";
   const [genre, setGenre]  = useState<number>(0);
   const [sort, setSort]    = useState("popularity.desc");
   const [year, setYear]    = useState("");
@@ -175,7 +175,7 @@ export default function AnimationLibrary() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-[22px] font-black text-white font-['Cairo'] leading-none">رسوم متحركة</h1>
-              <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">أفلام ومسلسلات أنيميشن عالمية</p>
+              <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">أفلام أنيميشن عالمية</p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -201,19 +201,6 @@ export default function AnimationLibrary() {
             </div>
           </div>
 
-          {/* Type tabs */}
-          <div className="flex gap-2 mb-3">
-            {(["movie", "tv"] as MediaType[]).map(t => (
-              <button key={t} onClick={() => { setType(t); setGenre(0); setSort("popularity.desc"); }}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-black font-['Cairo'] transition-all duration-200"
-                style={type === t
-                  ? { background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", color: "#fff", boxShadow: "0 4px 16px rgba(109,40,217,0.35)" }
-                  : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                {t === "movie" ? <Film className="w-3.5 h-3.5" /> : <Tv className="w-3.5 h-3.5" />}
-                {t === "movie" ? "أفلام" : "مسلسلات"}
-              </button>
-            ))}
-          </div>
 
           {/* Search bar */}
           <AnimatePresence>
