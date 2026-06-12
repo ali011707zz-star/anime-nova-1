@@ -4933,6 +4933,180 @@ async function getAnimeDaySources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  SEEPANEL (panel.seepanel.top) — Arabic dubbed/subbed anime + movies
+//  API key + UUID hardcoded in APK (com.seedrama.orgs v4.3)
+//  Sources: hlswish (streamwish), vidhideplus, uqload, hgcloud, etc.
+// ════════════════════════════════════════════════════════════════════
+const SEEPANEL_BASE = "https://panel.seepanel.top/api";
+const SEEPANEL_KEY  = "4F5A9C3D9A86FA54EACEDDD635185";
+const SEEPANEL_UUID = "d506abfd-9fe2-4b71-b979-feff21bcad13";
+const seepanelSearchCache = new Map<string, { data: any; ts: number }>();
+const SEEPANEL_SEARCH_TTL = 3_600_000; // 1h
+
+async function seepanelFetch<T>(path: string): Promise<T | null> {
+  try {
+    const r = await fetch(
+      `${SEEPANEL_BASE}/${path}/${SEEPANEL_KEY}/${SEEPANEL_UUID}/`,
+      {
+        headers: { "User-Agent": "okhttp/4.12.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    if (!r.ok) return null;
+    const text = await r.text();
+    if (text.startsWith("<!")) return null; // HTML 404 page
+    return JSON.parse(text) as T;
+  } catch { return null; }
+}
+
+interface SeepanelSource {
+  id: number; type: string; quality: string;
+  premium: string; external: boolean; url: string;
+}
+interface SeepanelEpisode {
+  id: number; title: string; sources: SeepanelSource[];
+}
+interface SeepanelSeason {
+  id: number; title: string; episodes: SeepanelEpisode[];
+}
+interface SeepanelPoster {
+  id: number; title: string; type: "serie" | "movie"; year?: number;
+}
+interface SeepanelSearchResult {
+  posters: SeepanelPoster[];
+  channels: any[];
+}
+interface SeepanelMovie {
+  id: number; title: string; type: string; sources: SeepanelSource[];
+}
+
+async function seepanelSearch(query: string): Promise<SeepanelPoster[]> {
+  const cKey = `sp:search:${query.toLowerCase()}`;
+  const cached = seepanelSearchCache.get(cKey);
+  if (cached && Date.now() - cached.ts < SEEPANEL_SEARCH_TTL) return cached.data;
+  const data = await seepanelFetch<SeepanelSearchResult>(
+    `search/${encodeURIComponent(query)}`,
+  );
+  const posters = data?.posters ?? [];
+  seepanelSearchCache.set(cKey, { data: posters, ts: Date.now() });
+  return posters;
+}
+
+function seepanelQualityRank(q: string): number {
+  const u = q.toUpperCase();
+  if (u.includes("1080")) return 11;
+  if (u.includes("720") || u.includes("متعدد")) return 10;
+  if (u.includes("480")) return 9;
+  return 8;
+}
+
+// hostLabel for the source name
+function seepanelHostLabel(url: string): string {
+  if (url.includes("hlswish"))      return "HLSwish";
+  if (url.includes("vidhideplus"))  return "VidHidePlus";
+  if (url.includes("vidspeed"))     return "VidSpeed";
+  if (url.includes("uqload"))       return "UQLoad";
+  if (url.includes("hgcloud"))      return "HGCloud";
+  if (url.includes("bigwarp"))      return "BigWarp";
+  if (url.includes("filemoon"))     return "Filemoon";
+  if (url.includes("1vid"))         return "1Vid";
+  if (url.includes("goveed"))       return "GovEed";
+  if (url.includes("vdbtm"))        return "VidBTM";
+  if (url.includes("forafile"))     return "ForaFile";
+  if (url.includes("okprime"))      return "OKPrime";
+  return new URL(url).hostname.replace(/^www\./, "").split(".")[0];
+}
+
+function seepanelBuildSources(
+  rawSrcs: SeepanelSource[], siteName: string, labelPrefix: string,
+): UnifiedSource[] {
+  const out: UnifiedSource[] = [];
+  const seen = new Set<string>();
+  for (const src of rawSrcs) {
+    const url = src.url || "";
+    if (!url || !url.startsWith("http")) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    // skip wecima (dead → MPAA redirect) and dailymotion
+    if (url.includes("wecima.video") || url.includes("dailymotion")) continue;
+    try {
+      out.push({
+        name: `${labelPrefix} · ${seepanelHostLabel(url)} · ${src.quality}`,
+        url,
+        quality: src.quality,
+        qualityRank: seepanelQualityRank(src.quality),
+        site: siteName,
+      });
+    } catch { /* bad URL */ }
+  }
+  return out;
+}
+
+async function getSeepanelSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    // Search with both romaji and english titles
+    const queries = [title, english].filter(Boolean) as string[];
+    let bestPoster: SeepanelPoster | null = null;
+    let bestScore = 0;
+
+    for (const q of queries) {
+      const posters = await seepanelSearch(q);
+      for (const p of posters) {
+        // similarity against romaji, english, and seepanel title
+        const spTitle = p.title.replace(/\s*-\s*[^\-]+$/, "").trim(); // strip Arabic subtitle
+        const score = Math.max(
+          similarity(title.toLowerCase(), spTitle.toLowerCase()),
+          english ? similarity(english.toLowerCase(), spTitle.toLowerCase()) : 0,
+          asciiSimilarity(spTitle, title),
+          english ? asciiSimilarity(spTitle, english) : 0,
+        );
+        if (score > bestScore) { bestScore = score; bestPoster = p; }
+      }
+      if (bestScore > 0.8) break;
+    }
+
+    if (!bestPoster || bestScore < 0.35) return [];
+
+    if (bestPoster.type === "movie") {
+      const movie = await seepanelFetch<SeepanelMovie>(`movie/by/${bestPoster.id}`);
+      if (!movie?.sources?.length) return [];
+      return seepanelBuildSources(movie.sources, "seepanel", "SeePanal · مدبلج");
+    }
+
+    // serie → get seasons → find episode
+    const seasons = await seepanelFetch<SeepanelSeason[]>(
+      `season/by/serie/${bestPoster.id}`,
+    );
+    if (!seasons?.length) return [];
+
+    // Sort seasons by ID ascending (oldest first) and exclude placeholder "قريبا" seasons
+    const activeSeasons = seasons
+      .filter(s => !s.title.includes("قريبا") && s.episodes.some(e => e.sources?.length))
+      .sort((a, b) => a.id - b.id);
+
+    // Flatten all episodes into a list with global episode index
+    let globalIdx = 0;
+    for (const season of activeSeasons) {
+      for (const episode of season.episodes) {
+        // Skip episodes with no sources (placeholders)
+        if (!episode.sources?.length) continue;
+        globalIdx++;
+        if (globalIdx === ep) {
+          return seepanelBuildSources(
+            episode.sources, "seepanel",
+            `SeePanal · مدبلج · ${season.title}`,
+          );
+        }
+      }
+    }
+    return [];
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -5068,6 +5242,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
+      scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
@@ -5158,6 +5333,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, [])); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep),   SCRAPER_MS, [])); break;
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;

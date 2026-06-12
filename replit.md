@@ -2,7 +2,7 @@
 
 تطبيق بث أنمي عربي يجمع مصادر من 4 مصادر متوازية ويُشغّلها في مشغّل داخلي.
 
-المصادر الفعّالة: **shahiid-anime.net (عربي)** · **animelek.top (عربي)** · **animedar.net (عربي)** · **kawaii-anime.com (ياباني مترجم)** · **AniKoto/megaplay.buzz (ياباني مترجم + ترجمة VTT)** · **AniNeko/anineko.to (ياباني مترجم HLS متعدد الجودات)**
+المصادر الفعّالة: **shahiid-anime.net (عربي)** · **animelek.top (عربي)** · **animedar.net (عربي)** · **seepanel.top/SeeDrama APK (عربي مدبلج)** · **kawaii-anime.com (ياباني مترجم)** · **AniKoto/megaplay.buzz (ياباني مترجم + ترجمة VTT)** · **AniNeko/anineko.to (ياباني مترجم HLS متعدد الجودات)**
 
 ## Run & Operate
 
