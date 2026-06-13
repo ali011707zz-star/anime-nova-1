@@ -753,10 +753,10 @@ function ScraperPicker({
     }
   }
 
-  /* Show embed fallbacks (mega/vidmoly) whenever direct sources are fewer than 3 */
-  const displaySources = allFlat.length >= 3 ? allFlat : [...allFlat, ...embedFallbacks];
+  /* Direct sources only in main section; embed sources always in backup section */
+  const displaySources = allFlat;
 
-  /* Group by quality tier */
+  /* Group direct sources by quality tier */
   const grouped: Record<Quality, FetchedSrc[]> = {
     "1080p FHD": displaySources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
     "720p HD":   displaySources.filter(s => getSrcQualityTier(s) === "720p HD"),
@@ -764,6 +764,7 @@ function ScraperPicker({
   };
 
   const hasSources = displaySources.length > 0;
+  const hasBackupSources = embedFallbacks.length > 0;
 
   /* ── Shared: extract anime metadata ── */
   const animeScore   = anime?.averageScore ? (anime.averageScore / 10) : 0;
@@ -1003,14 +1004,14 @@ function ScraperPicker({
               <div className="w-1 h-4 bg-primary rounded-full" />
               <h2 className="text-[13px] font-black font-['Cairo']">مصادر المشاهدة</h2>
             </div>
-            {hasSources && (
+            {(hasSources || hasBackupSources) && (
               <span className="px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo']"
                 style={{ background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.26)", color: "rgba(110,231,183,0.82)" }}>
-                {displaySources.length} مصدر
+                {displaySources.length + embedFallbacks.length} مصدر
               </span>
             )}
           </div>
-          {hasSources && (
+          {(hasSources || hasBackupSources) && (
             <div className="px-3 py-2.5 rounded-xl flex items-center gap-2.5 mb-3"
               style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.15)" }}>
               <span className="text-sm shrink-0">⚠️</span>
@@ -1021,7 +1022,7 @@ function ScraperPicker({
           )}
         </div>
 
-        {hasSources ? (
+        {(hasSources || hasBackupSources) ? (
           <>
             {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
               const srcs = grouped[q];
@@ -1051,6 +1052,33 @@ function ScraperPicker({
                 </div>
               );
             })}
+
+            {/* ── Backup / embed sources section (mega / vidmoly) ── */}
+            {hasBackupSources && (
+              <div className="mt-5 px-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-1 h-4 rounded-full" style={{ background: "rgba(99,102,241,0.85)" }} />
+                  <h2 className="text-[13px] font-black font-['Cairo']">سيرفرات احتياطية</h2>
+                  <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
+                    style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.28)", color: "rgba(165,180,252,0.80)" }}>
+                    {embedFallbacks.length}
+                  </span>
+                </div>
+                <div className="px-3 py-2 rounded-xl flex items-center gap-2 mb-2"
+                  style={{ background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.18)" }}>
+                  <span className="text-sm shrink-0">ℹ️</span>
+                  <p className="text-[10px] font-['Cairo'] leading-snug" style={{ color: "rgba(165,180,252,0.60)" }}>
+                    تُشغَّل داخل مشغّل مدمج — جرّبها إن لم تعمل المصادر المباشرة
+                  </p>
+                </div>
+                <div className="rounded-2xl overflow-hidden"
+                  style={{ border: "1px solid rgba(99,102,241,0.15)", background: "rgba(99,102,241,0.04)" }}>
+                  {embedFallbacks.map((src, i) => (
+                    <SourceRow key={`embed-backup-${i}`} src={src} idx={i} onPlaySrc={onPlaySrc} />
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <motion.div
