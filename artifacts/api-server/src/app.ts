@@ -5,7 +5,7 @@ import router from "./routes";
 import userdataRouter from "./routes/userdata.js";
 import commentsRouter from "./routes/comments.js";
 import { logger } from "./lib/logger";
-import { setupSession, registerEmailAuthRoutes } from "./auth/index.js";
+import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes } from "./auth/index.js";
 
 export async function createApp(): Promise<Express> {
   const app: Express = express();
@@ -29,6 +29,7 @@ export async function createApp(): Promise<Express> {
 
   setupSession(app);
   registerEmailAuthRoutes(app);
+  registerGoogleAuthRoutes(app);
 
   app.use("/api", router);
   app.use("/api", userdataRouter);
