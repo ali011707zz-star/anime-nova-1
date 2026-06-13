@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════
---  Nova Anime — Supabase Migration  001
+--  Anime NOVA — Supabase Migration 001
 --  Run this ONCE in: Supabase Dashboard → SQL Editor → Run
 -- ══════════════════════════════════════════════════════════════════
 
