@@ -287,7 +287,7 @@ export default function CommentsPage() {
       </div>
 
       {/* ── CONTENT ── */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-36">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-52">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <Loader2 className="w-8 h-8 text-primary animate-spin" />
