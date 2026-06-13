@@ -219,20 +219,23 @@ export default function AnimationWatch() {
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
   /* ── Auto-play first available "ok" source (respects pref-autoplay setting) ── */
-  /* Priority: الثريا (StarCima/vidzee) > سرفر أفلام (aflaam) > AnimeWitcher > أول مصدر متاح */
-  /* يُشغَّل أول مصدر يصل فوراً — بقية المصادر تتحمّل في الخلفية */
+  /* Priority: Vyla > EzVidAPI > aflaam > AnimeWitcher > أول مصدر متاح */
+  /* لا نبدأ تلقائياً إلا إذا وصل مصدر موثوق (Vyla/EzVidAPI/aflaam) أو انتهى SSE */
   useEffect(() => {
     if (autoPlayedRef.current) return;
     if (!prefAutoplay.current) return;
     const okSources = sources.filter(s => s.status === "ok");
     if (!okSources.length) return;
-    const tharaya = okSources.find(s => s.label?.includes("الثريا"));
+    const vyla    = okSources.find(s => s.label?.startsWith("Vyla"));
+    const ezv     = okSources.find(s => s.label?.startsWith("EzVidAPI"));
     const aflaam  = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
     const witcher = okSources.find(s => s.label?.includes("AnimeWitcher"));
-    const preferred = tharaya ?? aflaam ?? witcher ?? okSources[0];
+    // Only auto-play if a reliable source is available, OR SSE is done (all sources arrived)
+    const preferred = vyla ?? ezv ?? aflaam ?? witcher ?? (sseDone ? okSources[0] : null);
+    if (!preferred) return;
     autoPlayedRef.current = true;
     playSource(preferred);
-  }, [sources, playSource]);
+  }, [sources, sseDone, playSource]);
 
   /* Auto-upgrade disabled — sources in animation section are unreliable;
      letting it run causes unwanted cascade when FHD source fails */

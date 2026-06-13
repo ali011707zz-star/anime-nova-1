@@ -1559,7 +1559,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   return rank(a) - rank(b);
                 });
 
-                // Build list of (proxied URL, label) for all servers
+                // Build list of (proxied URL, raw URL, label) for all servers
                 const prepared = srvSorted
                   .filter((srv: any) => !!srv.url)
                   .map((srv: any) => {
@@ -1574,7 +1574,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     }
                     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
                     const label   = `StarCima · ${srv.name || "HD"}`;
-                    return { proxied, label, isAtlas: false };
+                    return { proxied, rawUrl, label, isAtlas: false };
                   });
 
                 // Probe all CDN URLs in parallel.
@@ -1583,7 +1583,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 // Fallback: if ALL non-Atlas fail, send them anyway (better than nothing).
                 const PROBE_PORT = process.env.PORT || 8080;
                 const probeResults = await Promise.allSettled(
-                  prepared.map(async ({ proxied, label, isAtlas }) => {
+                  prepared.map(async ({ proxied, rawUrl: pRaw, label, isAtlas }) => {
                     try {
                       const pr = await fetch(`http://localhost:${PROBE_PORT}${proxied}`, {
                         signal: AbortSignal.timeout(8_000),
@@ -1591,23 +1591,24 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                       const ok = isAtlas
                         ? (pr.ok || pr.status === 206 || pr.status === 403 || pr.status === 405)
                         : pr.ok;
-                      return { proxied, label, isAtlas, ok };
+                      return { proxied, rawUrl: pRaw, label, isAtlas, ok };
                     } catch {
                       // Network error probing — Atlas gets benefit of the doubt
-                      return { proxied, label, isAtlas, ok: isAtlas };
+                      return { proxied, rawUrl: pRaw, label, isAtlas, ok: isAtlas };
                     }
                   })
                 );
 
                 const probed = probeResults
                   .filter(r => r.status === "fulfilled")
-                  .map(r => (r as PromiseFulfilledResult<{ proxied: string; label: string; isAtlas: boolean; ok: boolean }>).value);
+                  .map(r => (r as PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; isAtlas: boolean; ok: boolean }>).value);
 
                 const working = probed.filter(s => s.ok);
                 // Fallback: if ALL fail, send all anyway (better than nothing)
                 const toSend = working.length > 0 ? working : probed;
-                for (const { proxied, label } of toSend) {
-                  sendSource(proxied, label, proxied, proxied);
+                for (const { proxied, rawUrl: sRaw, label } of toSend) {
+                  // directUrl = raw CDN URL so browser can retry directly if hls-proxy 403s
+                  sendSource(proxied, label, sRaw, proxied);
                 }
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
             })(),
