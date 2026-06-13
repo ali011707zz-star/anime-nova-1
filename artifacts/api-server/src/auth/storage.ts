@@ -1,4 +1,6 @@
-import { sbGet, sbUpsert } from "../lib/sb.js";
+import { db } from "../lib/db.js";
+import { users } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 export interface User {
   id: string;
@@ -28,23 +30,29 @@ export interface IAuthStorage {
 
 class AuthStorage implements IAuthStorage {
   async getUser(id: string): Promise<User | undefined> {
-    const rows = await sbGet<User>("users", { "id": `eq.${id}` });
-    return rows[0];
+    const rows = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    return rows[0] as any;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const rows = await sbGet<User>("users", { "email": `eq.${email}` });
-    return rows[0];
+    const rows = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    return rows[0] as any;
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    const payload = { ...userData, updated_at: new Date().toISOString() };
+    const now = new Date();
+    const payload: any = { ...userData, updatedAt: now };
     if (!payload.id) {
-      // New user — let Supabase gen UUID
       delete payload.id;
+      const rows = await db.insert(users).values(payload).returning();
+      return rows[0] as any;
     }
-    const rows = await sbUpsert<User>("users", payload);
-    return rows[0]!;
+    const rows = await db
+      .insert(users)
+      .values(payload)
+      .onConflictDoUpdate({ target: users.id, set: { ...payload } })
+      .returning();
+    return rows[0] as any;
   }
 }
 
