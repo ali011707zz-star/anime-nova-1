@@ -3,10 +3,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "wouter";
 import {
   ChevronRight, Play, Star, Heart, MessageSquare,
-  Send, Sparkles, ChevronDown, Flag, MoreVertical, Plus, X,
+  Send, Sparkles, ChevronDown, Flag, Plus, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
+import CommentsSheet from "@/components/CommentsSheet";
 
 // ── Age rating helper ─────────────────────────────────────────────
 function getAgeRating(genres: string[], isAdult: boolean) {
@@ -801,171 +802,12 @@ export default function AnimeDetail() {
         )}
       </AnimatePresence>
 
-      {/* ══ COMMENTS FULL SCREEN ═════════════════════════════════ */}
-      <AnimatePresence>
-        {showComments && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-[#0d0d10] z-[100]" />
-            <motion.div
-              initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed inset-0 bg-[#0d0d10] z-[101] flex flex-col" dir="rtl">
-
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 pt-12 pb-3 border-b border-white/6 shrink-0">
-                <div className="flex items-center gap-2">
-                  <button onClick={() => { setShowComments(false); setExpandedReplies(new Set()); setReplyingTo(null); }}
-                    className="w-8 h-8 flex items-center justify-center active:scale-90">
-                    <ChevronRight className="w-5 h-5 text-white/70" />
-                  </button>
-                  <h2 className="text-base font-black font-['Cairo']">
-                    التعليقات {comments.length > 0 && <span className="text-white/30 text-sm">({comments.length})</span>}
-                  </h2>
-                </div>
-                <button onClick={() => setTimeout(() => inputRef.current?.focus(), 100)}
-                  className="w-8 h-8 rounded-full bg-white/6 flex items-center justify-center">
-                  <Plus className="w-4 h-4 text-white/60" />
-                </button>
-              </div>
-
-              {/* Comments list */}
-              <div className="flex-1 overflow-y-auto" dir="rtl">
-                {comments.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-30">
-                    <MessageSquare className="w-12 h-12" />
-                    <p className="text-sm font-bold font-['Cairo']">كن أول من يعلّق!</p>
-                  </div>
-                )}
-                {comments.map(c => {
-                  const isExpanded = expandedReplies.has(c.id);
-                  const isReplying = replyingTo === c.id;
-                  return (
-                    <div key={c.id} className="border-b border-white/5">
-                      {/* Main comment */}
-                      <CommentRow c={c} full
-                        myImage={user?.profileImageUrl ?? undefined}
-                        isMe={c.user === getMyName()}
-                        onLike={() => toggleLike(c.id)}
-                        onReply={() => {
-                          setReplyingTo(isReplying ? null : c.id);
-                          if (!isReplying) {
-                            setExpandedReplies(prev => new Set([...prev, c.id]));
-                            setTimeout(() => replyRef.current?.focus(), 100);
-                          }
-                        }}
-                        repliesCount={c.replies.length}
-                        isExpanded={isExpanded}
-                        onToggleReplies={() => setExpandedReplies(prev => {
-                          const next = new Set(prev);
-                          next.has(c.id) ? next.delete(c.id) : next.add(c.id);
-                          return next;
-                        })}
-                      />
-
-                      {/* Inline replies */}
-                      <AnimatePresence>
-                        {isExpanded && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="overflow-hidden">
-                            <div className="pr-14 pl-4 pb-2 space-y-3">
-                              {c.replies.map(r => (
-                                <div key={r.id} className="flex gap-2.5">
-                                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
-                                    style={{ background: avatarColor(r.user) }}>
-                                    {r.user.charAt(0).toUpperCase()}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className="text-[11px] font-black font-['Cairo']">{r.user}</span>
-                                      <span className="text-[9px] text-white/25 font-['Cairo']">{timeAgo(r.ts)}</span>
-                                    </div>
-                                    <div className="bg-[#1a1a1f] rounded-2xl rounded-tr-sm px-3 py-2 border border-white/6">
-                                      <p className="text-[12px] text-white/80 font-['Cairo'] leading-relaxed">{r.text}</p>
-                                    </div>
-                                    <button onClick={() => toggleReplyLike(c.id, r.id)}
-                                      className="flex items-center gap-1 text-[10px] mt-1.5 pr-1"
-                                      style={{ color: r.liked ? "#EC4899" : "rgba(255,255,255,0.3)" }}>
-                                      <Heart className={`w-3 h-3 ${r.liked ? "fill-current" : ""}`} />
-                                      {r.likes > 0 && <span>{r.likes}</span>}
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-
-                              {/* Inline reply input */}
-                              {isReplying && (
-                                <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-                                  className="flex gap-2.5 items-center pt-1">
-                                  {user?.profileImageUrl ? (
-                                    <img src={user.profileImageUrl} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 border border-white/10" />
-                                  ) : (
-                                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
-                                      style={{ background: avatarColor(getMyName()) }}>
-                                      {getMyName().charAt(0).toUpperCase()}
-                                    </div>
-                                  )}
-                                  <div className="flex-1 flex items-center gap-2 bg-[#111116] rounded-2xl px-3 py-2 border border-white/8">
-                                    <input
-                                      ref={replyRef}
-                                      value={newReply}
-                                      onChange={e => setNewReply(e.target.value)}
-                                      onKeyDown={e => e.key === "Enter" && addReply(c.id)}
-                                      placeholder="اكتب ردك..."
-                                      className="flex-1 bg-transparent text-white text-[12px] outline-none font-['Cairo'] placeholder:text-white/25"
-                                    />
-                                    <motion.button whileTap={{ scale: 0.9 }}
-                                      onClick={() => addReply(c.id)}
-                                      disabled={!newReply.trim()}
-                                      className="w-6 h-6 bg-primary rounded-lg flex items-center justify-center shrink-0 disabled:opacity-40">
-                                      <Send className="w-3 h-3 text-white" />
-                                    </motion.button>
-                                  </div>
-                                </motion.div>
-                              )}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* New comment input */}
-              <div className="px-4 py-3 border-t border-white/6 shrink-0" dir="rtl">
-                <div className="flex items-center gap-2 bg-[#111116] rounded-2xl px-4 py-2.5 border border-white/8">
-                  {user?.profileImageUrl ? (
-                    <img src={user.profileImageUrl} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 border border-white/10" />
-                  ) : (
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
-                      style={{ background: avatarColor(getMyName()) }}>
-                      {getMyName().charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                  <input
-                    ref={inputRef}
-                    value={newComment}
-                    onChange={e => setNewComment(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && addComment()}
-                    placeholder="اكتب تعليقك..."
-                    className="flex-1 bg-transparent text-white text-sm outline-none font-['Cairo'] placeholder:text-white/25"
-                  />
-                  <motion.button whileTap={{ scale: 0.9 }}
-                    onClick={addComment}
-                    disabled={!newComment.trim()}
-                    className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shrink-0 disabled:opacity-40">
-                    <Send className="w-3.5 h-3.5 text-white" />
-                  </motion.button>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <CommentsSheet
+        commKey={`nova-comments-${params.id}`}
+        open={showComments}
+        onClose={() => setShowComments(false)}
+        title={anime?.title?.english || anime?.title?.romaji || ""}
+      />
 
       {/* ══ RATING PICKER ════════════════════════════════════════ */}
       <AnimatePresence>
