@@ -70,8 +70,11 @@ export function computeExpiry(site: string, sources: any[]): number {
       let url = rawField;
       if (url.startsWith("/api/")) {
         try {
-          const u = new URLSearchParams(url.split("?")[1] ?? "");
-          url = decodeURIComponent(u.get("url") ?? "");
+          // URLSearchParams already decodes — no extra decodeURIComponent needed
+          const u   = new URLSearchParams(url.split("?")[1] ?? "");
+          const inner = u.get("url");
+          if (!inner) continue;
+          url = inner;
         } catch { continue; }
       }
       const exp = parseUrlExpiry(url);

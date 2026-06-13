@@ -5607,6 +5607,14 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
 
+  // ── فحص الكاش أولاً ─────────────────────────────────────────────
+  const cKey = makeSourceCacheKey(site, title, ep);
+  const cached = await getFromSourceCache(cKey);
+  if (cached && !shouldRefreshCache(cached.expiresAt)) {
+    res.json({ sources: cached.sources, fromCache: true });
+    return;
+  }
+
   const SCRAPER_MS = 20000;
   const EXTRACT_MS = 15000;
   const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
@@ -5617,7 +5625,6 @@ router.get("/anime/fetch-source", async (req, res) => {
 
   function collectSrc(s: UnifiedSource) {
     if (!s.directUrl && !s.isEmbed) return;
-    // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
     if (s.isEmbed) {
       const eu = (s.directUrl || s.url).toLowerCase();
       if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h))) return;
@@ -5640,9 +5647,11 @@ router.get("/anime/fetch-source", async (req, res) => {
     buf.forEach(collectSrc);
   }
 
+  // scrapers that use probe-only (no deep extraction)
+  const probeOnly = new Set(["animeify","kawaii","anikoto","animewitcher","anineko","mitanime"]);
+
   try {
     switch (site) {
-      // ── عربي مدبلج / مترجم ────────────────────────────────────────
       case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep),    SCRAPER_MS, [])); break;
       case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep),   SCRAPER_MS, [])); break;
@@ -5652,16 +5661,20 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
-      // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
-      // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, [])); break;
       default: break;
     }
+
+    // ── حفظ في الكاش بعد الكشط ──────────────────────────────────
+    if (sources.length) {
+      setSourceCache(cKey, site, sources).catch(() => {});
+    }
+
     res.json({ sources });
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? String(e), sources: [] });
