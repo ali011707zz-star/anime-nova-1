@@ -1,4 +1,10 @@
 import { Router, type Request, type Response } from "express";
+import {
+  makeAnimCacheKey,
+  getFromSourceCache,
+  setSourceCache,
+  shouldRefreshCache,
+} from "../lib/sourceCache.js";
 
 const router = Router();
 
@@ -1345,14 +1351,66 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // Anime-Day GitHub Arabic subtitle for this show (if known)
   const adSub = getAnimeDaySubtitleUrl(title, season, epNum);
 
+  // ── كاش capture: عند تفعيله يُسجّل المصادر المُرسَلة ──
+  let _captureKey: string | null = null;
+  const _capturedSources = new Map<string, any[]>();
+
   // Send a source; directUrl = already-extracted stream URL, proxyUrl = proxied version
-  const sendSource = (url: string, label: string, directUrl?: string, proxyUrl?: string) => {
+  const sendSource = (url: string, label: string, directUrl?: string, proxyUrl?: string, extra2?: Record<string, any>) => {
     if (!url || seenUrls.has(url)) return;
     seenUrls.add(url);
     sourceCount++;
-    const extra = adSub ? { subtitleUrl: adSub } : {};
+    const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}) };
     send("source", { url, label, directUrl, proxyUrl, ...extra });
+    // capture for caching
+    if (_captureKey) {
+      const arr = _capturedSources.get(_captureKey) ?? [];
+      arr.push({ url, label, directUrl, proxyUrl, ...extra });
+      _capturedSources.set(_captureKey, arr);
+    }
   };
+
+  // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
+  async function scrapeAnimCached(
+    site: string,
+    scrape: () => Promise<void>,
+  ) {
+    const cKey = makeAnimCacheKey(site, tmdbId || title.slice(0, 20), type, season, epNum);
+    const hit  = await getFromSourceCache(cKey);
+
+    if (hit) {
+      // ✅ تقديم من الكاش فوراً (< 5ms)
+      for (const s of hit.sources) {
+        sendSource(s.url, s.label, s.directUrl, s.proxyUrl, s.subtitleUrl ? { subtitleUrl: s.subtitleUrl } : undefined);
+      }
+      // تجديد خلفي إذا اقترب الانتهاء (بدون إرسال للعميل — الاستجابة قد تنتهي)
+      if (shouldRefreshCache(hit.expiresAt)) {
+        setImmediate(async () => {
+          try {
+            const oldCapture = _captureKey;
+            _captureKey = cKey + ":bg";
+            _capturedSources.set(_captureKey, []);
+            // تشغيل الكاشط بصمت (sendSource لا يُرسل لأن الاستجابة قد أُغلقت)
+            await scrape();
+            const bg = _capturedSources.get(_captureKey + "") ?? [];
+            _capturedSources.delete(_captureKey + "");
+            _captureKey = oldCapture;
+            if (bg.length) await setSourceCache(cKey, site, bg);
+          } catch { /* silent */ }
+        });
+      }
+      return;
+    }
+
+    // ❌ لا يوجد كاش → اكشط مع التسجيل
+    _captureKey = cKey;
+    _capturedSources.set(cKey, []);
+    await scrape();
+    _captureKey = null;
+    const captured = _capturedSources.get(cKey) ?? [];
+    _capturedSources.delete(cKey);
+    if (captured.length) await setSourceCache(cKey, site, captured);
+  }
 
   // Try embed URL → extract stream → probe → sendSource
   // Returns true if a direct stream was found and sent, false otherwise
@@ -1513,7 +1571,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       Promise.resolve(),
 
       // ── 15. StarCima (vidzee HLS direct + arabic-sources embeds, TMDB ID native) ─
-      (async () => {
+      scrapeAnimCached("starcima", async () => {
         if (!tmdbId) return;
         const SC_BASE    = "https://starcima.com";
         const SC_VIDZEE  = `${SC_BASE}/api/vidzee`;
@@ -1649,7 +1707,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           ]);
 
         } catch { /* silent */ }
-      })(),
+      }),
 
       // ── AnimeWitcher Dubbed (Firebase Firestore — مدبلج عربي/إنجليزي) ────────────
       // يُعيد أنمي مدبلج لا علاقة له بالأنيميشن الغربي → مُعطَّل
@@ -1963,7 +2021,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // Correct endpoint: /api/movie?id={tmdbId} or /api/tv?id={tmdbId}&season=&episode=
       // Returns SSE: {"type":"source","source":{"url":"https://vyla.hf.space/api?url=<encoded_m3u8>"}}
       // The Vyla proxy URL encodes the real CDN m3u8; extract inner URL, wrap in our hls-proxy.
-      (async () => {
+      scrapeAnimCached("vyla", async () => {
         if (!tmdbId) return;
         const VYLA_BASE = "https://missourimonster-vyla.hf.space";
         try {
@@ -2033,10 +2091,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }
           reader.cancel().catch(() => {});
         } catch { /* silent — HF Space may be sleeping */ }
-      })(),
+      }),
 
       // ── anime-day.com — أنمي داي (كرتون غربي/أنمي صيني) ────────────────────
-      (async () => {
+      scrapeAnimCached("animeday_anim", async () => {
         if (!title) return;
         try {
           send("status", { msg: "AniméDay: جاري البحث…" });
@@ -2159,10 +2217,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             await sendExtracted(full, `AniméDay · ${prov}`);
           }
         } catch { /* silent */ }
-      })(),
+      }),
 
       // ── aflaam.com — مباشر MP4 عربي متعدد الجودات ───────────────────────────
-      (async () => {
+      scrapeAnimCached("aflaam", async () => {
         if (!title) return;
         try {
           send("status", { msg: "aflaam: جاري البحث…" });
@@ -2181,10 +2239,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             sendSource(proxied, `aflaam · ${qLabel}`, proxied, proxied);
           }
         } catch { /* silent */ }
-      })(),
+      }),
 
       // ── SeePanal — أنيميشن وكرتون مدبلج عربي ─────────────────────────────────
-      (async () => {
+      scrapeAnimCached("seepanel", async () => {
         if (!title) return;
         try {
           send("status", { msg: "SeePanal: جاري البحث…" });
@@ -2253,10 +2311,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             if (sourceCount > 0) break;
           }
         } catch { /* silent */ }
-      })(),
+      }),
 
       // ── ArabSeed (m.asd.ink) — Arabic dubbed/subbed content ──────────────────
-      (async () => {
+      scrapeAnimCached("arabseed", async () => {
         if (!title) return;
         try {
           send("status", { msg: "عرب سيد: جاري البحث…" });
@@ -2316,10 +2374,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             } catch { /* skip */ }
           })()));
         } catch { /* silent */ }
-      })(),
+      }),
 
       // ── EzVidAPI (api.ezvidapi.com) — free HLS multi-quality TMDB-native ────────
-      (async () => {
+      scrapeAnimCached("2embed", async () => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "EzVidAPI: جاري الاستخراج…" });
@@ -2360,10 +2418,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             } catch { /* silent per provider */ }
           }));
         } catch { /* silent */ }
-      })(),
+      }),
 
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
-      (async () => {
+      scrapeAnimCached("animephoenix", async () => {
         const q = enTitlePrefetched || title;
         if (!q) return;
         try {
@@ -2385,7 +2443,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             sendSource(proxied, `AnimePhoenix · ${src.quality || "1080p"} · مدبلج`, proxied, proxied);
           }
         } catch { /* silent */ }
-      })(),
+      }),
 
     ]);
 
