@@ -1,5 +1,4 @@
 import nodemailer from "nodemailer";
-import { supabaseAdmin } from "./supabaseAdmin.js";
 
 const EMAIL_USER = process.env.EMAIL_USER || "";
 const EMAIL_PASS = process.env.EMAIL_PASS || "";
@@ -50,32 +49,7 @@ export async function sendVerificationEmail(to: string, code: string): Promise<b
     console.error("[email] Gmail فشل:", err);
   }
 
-  /* 2. Supabase invite email (sends a real email via Supabase infrastructure) */
-  try {
-    if (supabaseAdmin) {
-      const appUrl = process.env.REPLIT_DEV_DOMAIN
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : (process.env.APP_URL || "https://nova-anime.repl.co");
-
-      const { error } = await supabaseAdmin.auth.admin.generateLink({
-        type: "invite",
-        email: to,
-        options: {
-          redirectTo: `${appUrl}/auth`,
-          data: { nova_verification_code: code },
-        },
-      });
-      if (!error) {
-        console.log(`[email] ✅ Supabase invite → ${to}`);
-        return true;
-      }
-      console.warn("[email] Supabase invite خطأ:", error.message);
-    }
-  } catch (err) {
-    console.error("[email] Supabase فشل:", err);
-  }
-
-  /* 3. Fallback: log to console (development) */
+  /* 2. Fallback: log to console (development) */
   console.warn(`[email] ⚠️  SMTP غير مُعدَّل — رمز التحقق لـ ${to}: ${code}`);
   return false;
 }

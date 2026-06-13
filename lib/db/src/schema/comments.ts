@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 
 export const comments = pgTable("comments", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -21,7 +21,9 @@ export const commentLikes = pgTable("comment_likes", {
   commentId: uuid("comment_id").notNull().references(() => comments.id, { onDelete: "cascade" }),
   userId: varchar("user_id", { length: 128 }).notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [
+  uniqueIndex("comment_likes_uniq").on(t.commentId, t.userId),
+]);
 
 export type Comment = typeof comments.$inferSelect;
 export type CommentLike = typeof commentLikes.$inferSelect;
