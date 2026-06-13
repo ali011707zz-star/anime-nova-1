@@ -296,7 +296,7 @@ export default function Settings() {
 
   const displayName = user
     ? (user.displayName ||
-       [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+       
        user.email?.split("@")[0] || "مستخدم Nova")
     : null;
   const username = user

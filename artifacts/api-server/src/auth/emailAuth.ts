@@ -1,9 +1,8 @@
 import type { Express, Request, Response } from "express";
 import { db, users } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { sendVerificationEmail } from "../lib/emailSender";
 
 const scryptAsync = promisify(scrypt);
 
@@ -24,331 +23,287 @@ async function verifyPassword(password: string, hash: string): Promise<boolean> 
   }
 }
 
-function generateCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+function sanitizeUsername(raw: string): string {
+  return raw
+    .replace(/^@/, "")
+    .replace(/[^a-zA-Z0-9_.]/g, "")
+    .slice(0, 20)
+    .toLowerCase();
+}
+
+async function generateUniqueUsername(base: string): Promise<string> {
+  const clean = sanitizeUsername(base) || "user";
+  const [existing] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.username, clean))
+    .limit(1);
+  if (!existing) return clean;
+  const suffix = Math.floor(100 + Math.random() * 900);
+  const candidate = `${clean.slice(0, 17)}${suffix}`;
+  const [e2] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.username, candidate))
+    .limit(1);
+  if (!e2) return candidate;
+  return `${clean.slice(0, 14)}${Date.now() % 10000}`;
+}
+
+function userPayload(user: any) {
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    username: user.username,
+    avatarColor: user.avatarColor ?? 0,
+    profileImageUrl: user.profileImageCustom || user.profileImageUrl,
+    authType: "email" as const,
+    createdAt: user.createdAt,
+  };
 }
 
 export function registerEmailAuthRoutes(app: Express): void {
 
-  // ── Sign Up ──────────────────────────────────────────────────────────────
-  app.post("/api/auth/email-signup", async (req: Request, res: Response) => {
+  /* ── Sign Up (direct, no email verification) ───────────────────── */
+  app.post("/api/auth/signup", async (req: Request, res: Response) => {
     try {
-      const { email, password, name } = req.body || {};
-      if (!email || !password) {
+      const { email, password, displayName: rawName } = req.body || {};
+      if (!email || !password)
         return res.status(400).json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
-      }
-      if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email)))
         return res.status(400).json({ error: "بريد إلكتروني غير صالح" });
-      }
-      if (typeof password !== "string" || password.length < 6) {
+      if (String(password).length < 6)
         return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
-      }
 
-      const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
-      if (existing.length > 0) {
+      const existing = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, String(email)))
+        .limit(1);
+      if (existing.length > 0)
         return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
-      }
 
-      const passwordHash = await hashPassword(password);
-      const displayName = typeof name === "string" && name.trim() ? name.trim() : email.split("@")[0];
-      const nameParts = displayName.split(" ");
-      const code = generateCode();
-      const expiresAt = new Date(Date.now() + 15 * 60_000);
+      const passwordHash = await hashPassword(String(password));
+      const displayName = typeof rawName === "string" && rawName.trim()
+        ? rawName.trim().slice(0, 50)
+        : String(email).split("@")[0];
 
-      const [user] = await db.insert(users).values({
-        email,
-        passwordHash,
-        displayName,
-        firstName: nameParts[0] || null,
-        lastName: nameParts.slice(1).join(" ") || null,
-        emailVerified: false,
-        verificationCode: code,
-        verificationExpires: expiresAt,
-      } as any).returning();
+      const baseUsername = String(email).split("@")[0];
+      const username = await generateUniqueUsername(baseUsername);
 
-      // احفظ في session للتحقق لاحقاً
-      (req.session as any).pendingVerifyId = user.id;
+      const [user] = await db
+        .insert(users)
+        .values({
+          email: String(email),
+          passwordHash,
+          displayName,
+          username,
+          emailVerified: true,
+          firstName: displayName.split(" ")[0] || null,
+          lastName: displayName.split(" ").slice(1).join(" ") || null,
+        } as any)
+        .returning();
 
-      // أرسل رمز التحقق
-      const sent = await sendVerificationEmail(email, code);
-      console.log(`[signup] رمز التحقق لـ ${email}: ${code} (تم الإرسال: ${sent})`);
-
-      return res.status(202).json({
-        requiresVerification: true,
-        emailSent: sent,
-        message: "تم إنشاء الحساب، يرجى التحقق من بريدك الإلكتروني",
-      });
-    } catch (err: any) {
-      console.error("email-signup error:", err);
-      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
-    }
-  });
-
-  // ── Sign Up (old path kept for compat — returns user directly if verified) ─
-  app.post("/api/auth/email-signup-direct", async (req: Request, res: Response) => {
-    try {
-      const { email, password, name } = req.body || {};
-      if (!email || !password) return res.status(400).json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
-      if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-        return res.status(400).json({ error: "بريد إلكتروني غير صالح" });
-      if (typeof password !== "string" || password.length < 6)
-        return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
-
-      const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
-      if (existing.length > 0) return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
-
-      const passwordHash = await hashPassword(password);
-      const displayName = typeof name === "string" && name.trim() ? name.trim() : email.split("@")[0];
-      const nameParts = displayName.split(" ");
-
-      const [user] = await db.insert(users).values({
-        email, passwordHash, displayName,
-        firstName: nameParts[0] || null,
-        lastName: nameParts.slice(1).join(" ") || null,
-        emailVerified: true, verificationCode: null,
-      }).returning();
-
-      (req.session as any).emailUserId = user.id;
-      req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
-      return res.json({
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        username: user.username,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        profileImageUrl: user.profileImageCustom || user.profileImageUrl,
-      });
-    } catch (err: any) {
-      console.error("email-signup error:", err);
-      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
-    }
-  });
-
-  // ── Verify Email ─────────────────────────────────────────────────────────
-  app.post("/api/auth/verify-email", async (req: Request, res: Response) => {
-    try {
-      const userId = (req.session as any).pendingVerifyId;
-      if (!userId) return res.status(400).json({ error: "جلسة التحقق منتهية" });
-
-      const { code } = req.body || {};
-      if (!code) return res.status(400).json({ error: "رمز التحقق مطلوب" });
-
-      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-      if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
-
-      if (String(user.verificationCode) !== String(code).trim()) {
-        return res.status(400).json({ error: "رمز التحقق غير صحيح" });
-      }
-
-      await db.update(users).set({ emailVerified: true, verificationCode: null, updatedAt: new Date() }).where(eq(users.id, userId));
-
-      delete (req.session as any).pendingVerifyId;
-      (req.session as any).emailUserId = userId;
+      (req.session as any).userId = user.id;
       req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
 
-      return res.json({
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        username: user.username,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        profileImageUrl: user.profileImageCustom || user.profileImageUrl,
-      });
-    } catch (err) {
-      console.error("verify-email error:", err);
+      return res.status(201).json(userPayload(user));
+    } catch (err: any) {
+      console.error("[signup]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
 
-  // ── Resend Code ───────────────────────────────────────────────────────────
-  app.post("/api/auth/resend-code", async (req: Request, res: Response) => {
-    try {
-      const userId = (req.session as any).pendingVerifyId;
-      if (!userId) return res.status(400).json({ error: "جلسة التحقق منتهية" });
-
-      const code = generateCode();
-      await db.update(users).set({ verificationCode: code, updatedAt: new Date() }).where(eq(users.id, userId));
-
-      const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
-      const sent = user?.email ? await sendVerificationEmail(user.email, code) : false;
-
-      return res.json({ ok: true, emailSent: sent });
-    } catch (err) {
-      console.error("resend-code error:", err);
-      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
-    }
-  });
-
-  // ── Sign In ──────────────────────────────────────────────────────────────
-  app.post("/api/auth/email-signin", async (req: Request, res: Response) => {
+  /* ── Sign In ──────────────────────────────────────────────────── */
+  app.post("/api/auth/signin", async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body || {};
-      if (!email || !password) {
+      if (!email || !password)
         return res.status(400).json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
-      }
 
-      const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
-      if (!user || !user.passwordHash) {
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, String(email)))
+        .limit(1);
+
+      if (!user || !user.passwordHash)
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
-      }
 
       const valid = await verifyPassword(String(password), user.passwordHash);
-      if (!valid) {
+      if (!valid)
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
-      }
 
-      // إذا لم يُتحقَّق من البريد بعد → أرسل رمزاً جديداً وأعد التحقق
-      if (!user.emailVerified) {
-        const code = generateCode();
-        const expiresAt = new Date(Date.now() + 15 * 60_000);
-        await db.update(users).set({ verificationCode: code, verificationExpires: expiresAt, updatedAt: new Date() }).where(eq(users.id, user.id));
-        (req.session as any).pendingVerifyId = user.id;
-        const sent = await sendVerificationEmail(user.email!, code);
-        console.log(`[signin] إعادة إرسال رمز التحقق لـ ${email}: ${code}`);
-        return res.status(403).json({
-          requiresVerification: true,
-          emailSent: sent,
-          message: "يرجى التحقق من بريدك الإلكتروني أولاً",
-        });
-      }
-
-      (req.session as any).emailUserId = user.id;
+      (req.session as any).userId = user.id;
       req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
 
-      return res.json({
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        username: user.username,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        profileImageUrl: user.profileImageCustom || user.profileImageUrl,
-      });
+      return res.json(userPayload(user));
     } catch (err) {
-      console.error("email-signin error:", err);
+      console.error("[signin]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
 
-  // ── Profile Update ────────────────────────────────────────────────────────
-  app.patch("/api/auth/profile", async (req: Request, res: Response) => {
-    try {
-      const userId = (req.session as any).emailUserId || (req.user as any)?.claims?.sub;
-      if (!userId) return res.status(401).json({ error: "غير مصرّح" });
+  /* ── Sign Out ────────────────────────────────────────────────── */
+  app.post("/api/auth/signout", (req: Request, res: Response) => {
+    req.session.destroy(() => res.json({ ok: true }));
+  });
 
-      const { displayName, username, profileImageCustom } = req.body || {};
+  /* ── Get current user ────────────────────────────────────────── */
+  app.get("/api/auth/me", async (req: Request, res: Response) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ error: "غير مصرّح" });
+    try {
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      if (!user) {
+        req.session.destroy(() => {});
+        return res.status(401).json({ error: "غير مصرّح" });
+      }
+      return res.json(userPayload(user));
+    } catch {
+      return res.status(500).json({ error: "خطأ في الخادم" });
+    }
+  });
+
+  /* ── Update Profile ──────────────────────────────────────────── */
+  app.patch("/api/auth/profile", async (req: Request, res: Response) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ error: "غير مصرّح" });
+    try {
+      const { displayName, username, profileImageCustom, avatarColor } = req.body || {};
       const updates: Record<string, any> = { updatedAt: new Date() };
 
       if (typeof displayName === "string" && displayName.trim()) {
         updates.displayName = displayName.trim().slice(0, 50);
-        const parts = updates.displayName.split(" ");
-        updates.firstName = parts[0];
-        if (parts.length > 1) updates.lastName = parts.slice(1).join(" ");
+        updates.firstName = updates.displayName.split(" ")[0];
+        updates.lastName = updates.displayName.split(" ").slice(1).join(" ") || null;
       }
       if (typeof username === "string") {
-        const cleaned = username.replace(/^@/, "").replace(/[^a-zA-Z0-9_.]/g, "").slice(0, 20);
-        if (!cleaned) {
-          return res.status(400).json({ error: "اسم المستخدم يجب أن يحتوي على أحرف إنجليزية أو أرقام فقط" });
-        }
-        const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, cleaned)).limit(1);
-        if (existing.length > 0 && existing[0].id !== userId) {
-          return res.status(409).json({ error: "اسم المستخدم مستخدم مسبقاً، جرّب اسماً آخر" });
-        }
+        const cleaned = sanitizeUsername(username);
+        if (!cleaned)
+          return res.status(400).json({ error: "اسم المستخدم يجب أن يحتوي على أحرف إنجليزية أو أرقام" });
+        if (cleaned.length < 3)
+          return res.status(400).json({ error: "اسم المستخدم يجب أن يكون 3 أحرف على الأقل" });
+        const [existing] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.username, cleaned))
+          .limit(1);
+        if (existing && existing.id !== userId)
+          return res.status(409).json({ error: "اسم المستخدم مستخدم مسبقاً" });
         updates.username = cleaned;
       }
       if (typeof profileImageCustom === "string") {
         updates.profileImageCustom = profileImageCustom.slice(0, 500_000);
-      }
-      if (profileImageCustom === null) {
+      } else if (profileImageCustom === null) {
         updates.profileImageCustom = null;
       }
+      if (typeof avatarColor === "number" && avatarColor >= 0 && avatarColor <= 7) {
+        updates.avatarColor = avatarColor;
+      }
 
-      const [updated] = await db.update(users).set(updates).where(eq(users.id, userId)).returning();
+      const [updated] = await db
+        .update(users)
+        .set(updates)
+        .where(eq(users.id, userId))
+        .returning();
+
       if (!updated) return res.status(404).json({ error: "المستخدم غير موجود" });
-
-      return res.json({
-        id: updated.id,
-        email: updated.email,
-        displayName: updated.displayName,
-        username: updated.username,
-        firstName: updated.firstName,
-        lastName: updated.lastName,
-        profileImageUrl: updated.profileImageCustom || updated.profileImageUrl,
-      });
+      return res.json(userPayload(updated));
     } catch (err) {
-      console.error("profile update error:", err);
+      console.error("[profile]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
 
-  // ── Change Password ───────────────────────────────────────────────────────
+  /* ── Change Password ─────────────────────────────────────────── */
   app.post("/api/auth/change-password", async (req: Request, res: Response) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
-      const userId = (req.session as any).emailUserId;
-      if (!userId) return res.status(401).json({ error: "غير مصرّح" });
-
       const { currentPassword, newPassword } = req.body || {};
-      if (!currentPassword || !newPassword) return res.status(400).json({ error: "جميع الحقول مطلوبة" });
-      if (typeof newPassword !== "string" || newPassword.length < 6)
+      if (!currentPassword || !newPassword)
+        return res.status(400).json({ error: "جميع الحقول مطلوبة" });
+      if (String(newPassword).length < 6)
         return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
 
-      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-      if (!user || !user.passwordHash) return res.status(401).json({ error: "المستخدم غير موجود" });
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      if (!user?.passwordHash)
+        return res.status(401).json({ error: "المستخدم غير موجود" });
 
       const valid = await verifyPassword(String(currentPassword), user.passwordHash);
-      if (!valid) return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
+      if (!valid)
+        return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
 
-      const newHash = await hashPassword(newPassword);
+      const newHash = await hashPassword(String(newPassword));
       await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, userId));
-
       return res.json({ ok: true });
     } catch (err) {
-      console.error("change-password error:", err);
+      console.error("[change-password]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
 
-  // ── Delete Account ────────────────────────────────────────────────────────
+  /* ── Delete Account ──────────────────────────────────────────── */
   app.delete("/api/auth/account", async (req: Request, res: Response) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
-      const userId = (req.session as any).emailUserId || (req.user as any)?.claims?.sub;
-      if (!userId) return res.status(401).json({ error: "غير مصرّح" });
-
       await db.delete(users).where(eq(users.id, userId));
-
       req.session.destroy(() => {});
       return res.json({ ok: true });
     } catch (err) {
-      console.error("delete-account error:", err);
+      console.error("[delete-account]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
 
-  // ── Email Sign Out ────────────────────────────────────────────────────────
-  app.post("/api/auth/email-signout", (req: Request, res: Response) => {
-    delete (req.session as any).emailUserId;
-    req.session.destroy(() => res.json({ ok: true }));
+  /* ── Check username availability ─────────────────────────────── */
+  app.get("/api/auth/check-username/:username", async (req: Request, res: Response) => {
+    const userId = (req.session as any)?.userId;
+    const cleaned = sanitizeUsername(req.params.username);
+    if (!cleaned || cleaned.length < 3)
+      return res.json({ available: false, reason: "قصير جداً" });
+    try {
+      const [existing] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.username, cleaned))
+        .limit(1);
+      const available = !existing || existing.id === userId;
+      return res.json({ available, username: cleaned });
+    } catch {
+      return res.json({ available: false });
+    }
   });
 }
 
-// ── Get email-authed user from session ────────────────────────────────────
+/* ── Get authed user from session ────────────────────────────── */
 export async function getEmailUser(req: Request): Promise<any | null> {
-  const emailUserId = (req.session as any)?.emailUserId;
-  if (!emailUserId) return null;
+  const userId = (req.session as any)?.userId
+    || (req.session as any)?.emailUserId;
+  if (!userId) return null;
   try {
-    const [user] = await db.select().from(users).where(eq(users.id, emailUserId)).limit(1);
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     if (!user) return null;
     return {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
       username: user.username,
-      firstName: user.firstName,
-      lastName: user.lastName,
+      avatarColor: (user as any).avatarColor ?? 0,
       profileImageUrl: user.profileImageCustom || user.profileImageUrl,
-      authType: "email",
+      authType: "email" as const,
+      createdAt: user.createdAt,
     };
   } catch {
     return null;

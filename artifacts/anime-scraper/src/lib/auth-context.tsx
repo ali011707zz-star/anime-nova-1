@@ -5,43 +5,44 @@ export interface AuthUser {
   email?: string | null;
   displayName?: string | null;
   username?: string | null;
-  firstName?: string | null;
-  lastName?: string | null;
+  avatarColor?: number;
   profileImageUrl?: string | null;
-  authType?: "supabase" | "replit" | "email";
+  authType?: "email";
+  createdAt?: string | null;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
-  session: null;
   loading: boolean;
-  signIn: () => void;
+  signIn: (email: string, password: string) => Promise<{ error?: string }>;
+  signUp: (email: string, password: string, displayName?: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
-  emailSignIn: (email: string, password: string) => Promise<{ error?: string; requiresVerification?: boolean; email?: string; emailSent?: boolean; verificationCode?: string }>;
-  emailSignUp: (email: string, password: string, name: string) => Promise<{ error?: string; requiresVerification?: boolean; email?: string; emailSent?: boolean; verificationCode?: string }>;
-  updateProfile: (data: { displayName?: string; username?: string; profileImageCustom?: string | null }) => Promise<{ error?: string }>;
+  updateProfile: (data: {
+    displayName?: string;
+    username?: string;
+    avatarColor?: number;
+    profileImageCustom?: string | null;
+  }) => Promise<{ error?: string }>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ error?: string }>;
   deleteAccount: () => Promise<{ error?: string }>;
   refreshUser: () => Promise<void>;
-  changePassword: (currentPassword: string, newPassword: string) => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  session: null,
   loading: true,
-  signIn: () => { window.location.href = "/api/login"; },
+  signIn: async () => ({}),
+  signUp: async () => ({}),
   signOut: async () => {},
-  emailSignIn: async () => ({}),
-  emailSignUp: async () => ({}),
   updateProfile: async () => ({}),
+  changePassword: async () => ({}),
   deleteAccount: async () => ({}),
   refreshUser: async () => {},
-  changePassword: async () => ({}),
 });
 
 async function fetchCurrentUser(): Promise<AuthUser | null> {
   try {
-    const res = await fetch("/api/auth/user", { credentials: "include" });
+    const res = await fetch("/api/auth/me", { credentials: "include" });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -59,40 +60,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    fetchCurrentUser().then((u) => {
+    fetchCurrentUser().then(u => {
       setUser(u);
       setLoading(false);
     });
   }, []);
 
-  const signIn = () => { window.location.href = "/api/login"; };
-
-  const signOut = async () => {
-    if (user?.authType === "email") {
-      try {
-        await fetch("/api/auth/email-signout", { method: "POST", credentials: "include" });
-      } catch {}
-      setUser(null);
-      window.location.href = "/";
-    } else {
-      window.location.href = "/api/logout";
-    }
-  };
-
-  const emailSignIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string) => {
     try {
-      const res = await fetch("/api/auth/email-signin", {
+      const res = await fetch("/api/auth/signin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        if (data.requiresVerification) return { requiresVerification: true, email };
-        return { error: data.error || "حدث خطأ، حاول مرة أخرى" };
-      }
-      if (data.requiresVerification) return { requiresVerification: true, email };
+      if (!res.ok) return { error: data.error || "حدث خطأ، حاول مرة أخرى" };
       setUser(data);
       return {};
     } catch {
@@ -100,17 +83,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const emailSignUp = async (email: string, password: string, name: string) => {
+  const signUp = async (email: string, password: string, displayName?: string) => {
     try {
-      const res = await fetch("/api/auth/email-signup", {
+      const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, password, name }),
+        body: JSON.stringify({ email, password, displayName }),
       });
       const data = await res.json();
       if (!res.ok) return { error: data.error || "حدث خطأ، حاول مرة أخرى" };
-      if (data.requiresVerification) return { requiresVerification: true, email: data.email };
       setUser(data);
       return {};
     } catch {
@@ -118,7 +100,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateProfile = async (data: { displayName?: string; username?: string; profileImageCustom?: string | null }) => {
+  const signOut = async () => {
+    try {
+      await fetch("/api/auth/signout", { method: "POST", credentials: "include" });
+    } catch {}
+    setUser(null);
+  };
+
+  const updateProfile = async (data: {
+    displayName?: string;
+    username?: string;
+    avatarColor?: number;
+    profileImageCustom?: string | null;
+  }) => {
     try {
       const res = await fetch("/api/auth/profile", {
         method: "PATCH",
@@ -160,7 +154,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (!res.ok) return { error: data.error || "فشل حذف الحساب" };
       setUser(null);
-      window.location.href = "/";
       return {};
     } catch {
       return { error: "خطأ في الاتصال" };
@@ -169,17 +162,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user,
-      session: null,
-      loading,
-      signIn,
-      signOut,
-      emailSignIn,
-      emailSignUp,
-      updateProfile,
-      deleteAccount,
-      refreshUser,
-      changePassword,
+      user, loading, signIn, signUp, signOut,
+      updateProfile, changePassword, deleteAccount, refreshUser,
     }}>
       {children}
     </AuthContext.Provider>

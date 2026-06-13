@@ -7,8 +7,8 @@ const router = Router();
 /* ── Auth helper ── */
 function getUserId(req: Request): string | null {
   return (
+    (req.session as any)?.userId ||
     (req.session as any)?.emailUserId ||
-    (req.user as any)?.claims?.sub ||
     null
   );
 }
@@ -325,4 +325,41 @@ router.get("/user/continue-watching", async (req: Request, res: Response) => {
   }
 });
 
+/* ═══════════════════════════════════════════
+   USER STATS
+═══════════════════════════════════════════ */
+
+/* GET /api/user/stats */
+router.get("/user/stats", async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  if (!userId) return res.json({ watchedCount: 0, favoritesCount: 0, progressCount: 0 });
+
+  try {
+    const [histCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(watchHistory)
+      .where(eq(watchHistory.userId, userId));
+
+    const [favCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(favorites)
+      .where(eq(favorites.userId, userId));
+
+    const [progCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(watchProgress)
+      .where(eq(watchProgress.userId, userId));
+
+    return res.json({
+      watchedCount: histCount?.count ?? 0,
+      favoritesCount: favCount?.count ?? 0,
+      progressCount: progCount?.count ?? 0,
+    });
+  } catch (err) {
+    console.error("[userdata] stats:", err);
+    return res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
 export default router;
+
