@@ -1,14 +1,10 @@
 import type { Express, Request, Response } from "express";
-import { db, users } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
 import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { sendVerifyEmail, sendPasswordResetEmail } from "./emailService.js";
+import { sbGet, sbInsert, sbUpdate, sbDelete } from "../lib/sb.js";
 
-/* ══ مخزن كودات التحقق (في الذاكرة) ══════════════════════════════
-   المفتاح = البريد الإلكتروني (صغير)
-   يُحذف تلقائياً بعد 10 دقائق أو عند الاستخدام
-══════════════════════════════════════════════════════════════════ */
+/* ══ مخزن كودات التحقق (في الذاكرة) ══════════════════════════════ */
 interface PendingCode {
   code: string;
   expiresAt: number;
@@ -16,10 +12,10 @@ interface PendingCode {
   type: "signup" | "reset";
 }
 const pendingCodes = new Map<string, PendingCode>();
-const CODE_TTL_MS = 10 * 60 * 1000; // 10 دقائق
-const MAX_ATTEMPTS = 5;
-const RESEND_COOLDOWN_MS = 60 * 1000; // دقيقة واحدة بين الإرسالات
-const lastSentAt = new Map<string, number>();
+const CODE_TTL_MS       = 10 * 60 * 1000;
+const MAX_ATTEMPTS      = 5;
+const RESEND_COOLDOWN_MS = 60 * 1000;
+const lastSentAt        = new Map<string, number>();
 
 function generateCode(): string {
   return String(Math.floor(100_000 + Math.random() * 900_000));
@@ -36,19 +32,17 @@ const scryptAsync = promisify(scrypt);
 
 async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
-  const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+  const buf  = (await scryptAsync(password, salt, 64)) as Buffer;
   return `${buf.toString("hex")}.${salt}`;
 }
 
 async function verifyPassword(password: string, hash: string): Promise<boolean> {
   try {
     const [hashHex, salt] = hash.split(".");
-    const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+    const buf     = (await scryptAsync(password, salt, 64)) as Buffer;
     const hashBuf = Buffer.from(hashHex, "hex");
     return timingSafeEqual(buf, hashBuf);
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 function sanitizeUsername(raw: string): string {
@@ -61,39 +55,31 @@ function sanitizeUsername(raw: string): string {
 
 async function generateUniqueUsername(base: string): Promise<string> {
   const clean = sanitizeUsername(base) || "user";
-  const [existing] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.username, clean))
-    .limit(1);
-  if (!existing) return clean;
-  const suffix = Math.floor(100 + Math.random() * 900);
+  const rows = await sbGet("users", { username: `eq.${clean}`, select: "id", limit: "1" });
+  if (!rows.length) return clean;
+  const suffix    = Math.floor(100 + Math.random() * 900);
   const candidate = `${clean.slice(0, 17)}${suffix}`;
-  const [e2] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.username, candidate))
-    .limit(1);
-  if (!e2) return candidate;
+  const rows2 = await sbGet("users", { username: `eq.${candidate}`, select: "id", limit: "1" });
+  if (!rows2.length) return candidate;
   return `${clean.slice(0, 14)}${Date.now() % 10000}`;
 }
 
-function userPayload(user: any) {
+function userPayload(u: any) {
   return {
-    id: user.id,
-    email: user.email,
-    displayName: user.displayName,
-    username: user.username,
-    avatarColor: user.avatarColor ?? 0,
-    profileImageUrl: user.profileImageCustom || user.profileImageUrl,
-    authType: "email" as const,
-    createdAt: user.createdAt,
+    id:              u.id,
+    email:           u.email,
+    displayName:     u.display_name,
+    username:        u.username,
+    avatarColor:     u.avatar_color ?? 0,
+    profileImageUrl: u.profile_image_custom || u.profile_image_url,
+    authType:        "email" as const,
+    createdAt:       u.created_at,
   };
 }
 
 export function registerEmailAuthRoutes(app: Express): void {
 
-  /* ── Send verification code (signup / reset) ──────────────────── */
+  /* ── Send verification code ─────────────────────────────────── */
   app.post("/api/auth/send-verify-code", async (req: Request, res: Response) => {
     try {
       cleanupExpiredCodes();
@@ -102,35 +88,18 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(400).json({ error: "بريد إلكتروني غير صالح" });
 
       const emailKey = String(email).toLowerCase().trim();
-
-      /* cooldown: منع إعادة الإرسال المتكرر */
       const last = lastSentAt.get(emailKey) || 0;
       if (Date.now() - last < RESEND_COOLDOWN_MS) {
         const wait = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - last)) / 1000);
         return res.status(429).json({ error: `انتظر ${wait} ثانية قبل إعادة الإرسال` });
       }
 
-      if (type === "signup") {
-        /* تحقق أن البريد غير مسجّل */
-        const [existing] = await db
-          .select({ id: users.id })
-          .from(users)
-          .where(eq(users.email, emailKey))
-          .limit(1);
-        if (existing)
-          return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
-      }
+      const existing = await sbGet("users", { email: `eq.${emailKey}`, select: "id", limit: "1" });
 
-      if (type === "reset") {
-        /* تحقق أن البريد موجود */
-        const [existing] = await db
-          .select({ id: users.id })
-          .from(users)
-          .where(eq(users.email, emailKey))
-          .limit(1);
-        if (!existing)
-          return res.status(404).json({ error: "لا يوجد حساب بهذا البريد الإلكتروني" });
-      }
+      if (type === "signup" && existing.length > 0)
+        return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
+      if (type === "reset" && existing.length === 0)
+        return res.status(404).json({ error: "لا يوجد حساب بهذا البريد الإلكتروني" });
 
       const code = generateCode();
       pendingCodes.set(emailKey, { code, expiresAt: Date.now() + CODE_TTL_MS, attempts: 0, type: type as "signup" | "reset" });
@@ -144,9 +113,7 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(500).json({ error: "فشل إرسال البريد، حاول مرة أخرى" });
 
       const resp: Record<string, any> = { sent: true };
-      /* في وضع الاختبار (Ethereal) أرجع رابط المعاينة ليتمكن المطوّر من رؤية الكود */
       if (result.previewUrl) resp.previewUrl = result.previewUrl;
-
       return res.json(resp);
     } catch (err) {
       console.error("[send-verify-code]", err);
@@ -154,7 +121,7 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Sign Up (requires verification code) ─────────────────────── */
+  /* ── Sign Up ─────────────────────────────────────────────────── */
   app.post("/api/auth/signup", async (req: Request, res: Response) => {
     try {
       const { email, password, displayName: rawName, verifyCode } = req.body || {};
@@ -167,7 +134,6 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       const emailKey = String(email).toLowerCase().trim();
 
-      /* ── التحقق من الكود ── */
       if (!verifyCode)
         return res.status(400).json({ error: "كود التحقق مطلوب" });
 
@@ -186,40 +152,30 @@ export function registerEmailAuthRoutes(app: Express): void {
       if (String(verifyCode).trim() !== pending.code)
         return res.status(400).json({ error: `الكود غير صحيح (${MAX_ATTEMPTS - pending.attempts + 1} محاولات متبقية)` });
 
-      /* الكود صحيح → احذفه */
       pendingCodes.delete(emailKey);
 
-      const existing = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.email, emailKey))
-        .limit(1);
-      if (existing.length > 0)
+      const already = await sbGet("users", { email: `eq.${emailKey}`, select: "id", limit: "1" });
+      if (already.length > 0)
         return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
 
-      const passwordHash = await hashPassword(String(password));
-      const displayName = typeof rawName === "string" && rawName.trim()
+      const passwordHash  = await hashPassword(String(password));
+      const displayName   = typeof rawName === "string" && rawName.trim()
         ? rawName.trim().slice(0, 50)
         : emailKey.split("@")[0];
+      const username = await generateUniqueUsername(emailKey.split("@")[0]);
 
-      const baseUsername = emailKey.split("@")[0];
-      const username = await generateUniqueUsername(baseUsername);
-
-      const [user] = await db
-        .insert(users)
-        .values({
-          email: emailKey,
-          passwordHash,
-          displayName,
-          username,
-          emailVerified: true,
-          firstName: displayName.split(" ")[0] || null,
-          lastName: displayName.split(" ").slice(1).join(" ") || null,
-        } as any)
-        .returning();
+      const [user] = await sbInsert("users", {
+        email:          emailKey,
+        password_hash:  passwordHash,
+        display_name:   displayName,
+        username,
+        email_verified: true,
+        first_name:     displayName.split(" ")[0] || null,
+        last_name:      displayName.split(" ").slice(1).join(" ") || null,
+      });
 
       (req.session as any).userId = user.id;
-      req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
+      req.session.cookie.maxAge   = 30 * 24 * 60 * 60 * 1000;
 
       return res.status(201).json(userPayload(user));
     } catch (err: any) {
@@ -228,7 +184,7 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Reset Password (verify code + set new password) ─────────── */
+  /* ── Reset Password ──────────────────────────────────────────── */
   app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
     try {
       const { email, verifyCode, newPassword } = req.body || {};
@@ -238,7 +194,7 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
 
       const emailKey = String(email).toLowerCase().trim();
-      const pending = pendingCodes.get(emailKey);
+      const pending  = pendingCodes.get(emailKey);
 
       if (!pending || pending.type !== "reset")
         return res.status(400).json({ error: "لم يُرسَل كود إعادة تعيين لهذا البريد" });
@@ -256,11 +212,14 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       pendingCodes.delete(emailKey);
 
-      const [user] = await db.select().from(users).where(eq(users.email, emailKey)).limit(1);
+      const [user] = await sbGet("users", { email: `eq.${emailKey}`, limit: "1" });
       if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
 
       const newHash = await hashPassword(String(newPassword));
-      await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, user.id));
+      await sbUpdate("users", { id: `eq.${user.id}` }, {
+        password_hash: newHash,
+        updated_at:    new Date().toISOString(),
+      });
 
       return res.json({ ok: true });
     } catch (err) {
@@ -269,28 +228,25 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Sign In ──────────────────────────────────────────────────── */
+  /* ── Sign In ─────────────────────────────────────────────────── */
   app.post("/api/auth/signin", async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body || {};
       if (!email || !password)
         return res.status(400).json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
 
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, String(email)))
-        .limit(1);
+      const rows = await sbGet("users", { email: `eq.${String(email).toLowerCase().trim()}`, limit: "1" });
+      const user = rows[0];
 
-      if (!user || !user.passwordHash)
+      if (!user || !user.password_hash)
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
 
-      const valid = await verifyPassword(String(password), user.passwordHash);
+      const valid = await verifyPassword(String(password), user.password_hash);
       if (!valid)
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
 
       (req.session as any).userId = user.id;
-      req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
+      req.session.cookie.maxAge   = 30 * 24 * 60 * 60 * 1000;
 
       return res.json(userPayload(user));
     } catch (err) {
@@ -309,16 +265,12 @@ export function registerEmailAuthRoutes(app: Express): void {
     const userId = (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      if (!user) {
+      const rows = await sbGet("users", { id: `eq.${userId}`, limit: "1" });
+      if (!rows.length) {
         req.session.destroy(() => {});
         return res.status(401).json({ error: "غير مصرّح" });
       }
-      return res.json(userPayload(user));
+      return res.json(userPayload(rows[0]));
     } catch {
       return res.status(500).json({ error: "خطأ في الخادم" });
     }
@@ -330,12 +282,13 @@ export function registerEmailAuthRoutes(app: Express): void {
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       const { displayName, username, profileImageCustom, avatarColor } = req.body || {};
-      const updates: Record<string, any> = { updatedAt: new Date() };
+      const updates: Record<string, any> = { updated_at: new Date().toISOString() };
 
       if (typeof displayName === "string" && displayName.trim()) {
-        updates.displayName = displayName.trim().slice(0, 50);
-        updates.firstName = updates.displayName.split(" ")[0];
-        updates.lastName = updates.displayName.split(" ").slice(1).join(" ") || null;
+        const dn = displayName.trim().slice(0, 50);
+        updates.display_name = dn;
+        updates.first_name   = dn.split(" ")[0];
+        updates.last_name    = dn.split(" ").slice(1).join(" ") || null;
       }
       if (typeof username === "string") {
         const cleaned = sanitizeUsername(username);
@@ -343,32 +296,23 @@ export function registerEmailAuthRoutes(app: Express): void {
           return res.status(400).json({ error: "اسم المستخدم يجب أن يحتوي على أحرف إنجليزية أو أرقام" });
         if (cleaned.length < 3)
           return res.status(400).json({ error: "اسم المستخدم يجب أن يكون 3 أحرف على الأقل" });
-        const [existing] = await db
-          .select({ id: users.id })
-          .from(users)
-          .where(eq(users.username, cleaned))
-          .limit(1);
-        if (existing && existing.id !== userId)
+        const existing = await sbGet("users", { username: `eq.${cleaned}`, select: "id", limit: "1" });
+        if (existing.length && existing[0].id !== userId)
           return res.status(409).json({ error: "اسم المستخدم مستخدم مسبقاً" });
         updates.username = cleaned;
       }
       if (typeof profileImageCustom === "string") {
-        updates.profileImageCustom = profileImageCustom.slice(0, 500_000);
+        updates.profile_image_custom = profileImageCustom.slice(0, 500_000);
       } else if (profileImageCustom === null) {
-        updates.profileImageCustom = null;
+        updates.profile_image_custom = null;
       }
       if (typeof avatarColor === "number" && avatarColor >= 0 && avatarColor <= 7) {
-        updates.avatarColor = avatarColor;
+        updates.avatar_color = avatarColor;
       }
 
-      const [updated] = await db
-        .update(users)
-        .set(updates)
-        .where(eq(users.id, userId))
-        .returning();
-
-      if (!updated) return res.status(404).json({ error: "المستخدم غير موجود" });
-      return res.json(userPayload(updated));
+      const rows = await sbUpdate("users", { id: `eq.${userId}` }, updates);
+      if (!rows.length) return res.status(404).json({ error: "المستخدم غير موجود" });
+      return res.json(userPayload(rows[0]));
     } catch (err) {
       console.error("[profile]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
@@ -386,20 +330,20 @@ export function registerEmailAuthRoutes(app: Express): void {
       if (String(newPassword).length < 6)
         return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
 
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      if (!user?.passwordHash)
+      const rows = await sbGet("users", { id: `eq.${userId}`, limit: "1" });
+      const user = rows[0];
+      if (!user?.password_hash)
         return res.status(401).json({ error: "المستخدم غير موجود" });
 
-      const valid = await verifyPassword(String(currentPassword), user.passwordHash);
+      const valid = await verifyPassword(String(currentPassword), user.password_hash);
       if (!valid)
         return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
 
       const newHash = await hashPassword(String(newPassword));
-      await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, userId));
+      await sbUpdate("users", { id: `eq.${userId}` }, {
+        password_hash: newHash,
+        updated_at:    new Date().toISOString(),
+      });
       return res.json({ ok: true });
     } catch (err) {
       console.error("[change-password]", err);
@@ -412,7 +356,7 @@ export function registerEmailAuthRoutes(app: Express): void {
     const userId = (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
-      await db.delete(users).where(eq(users.id, userId));
+      await sbDelete("users", { id: `eq.${userId}` });
       req.session.destroy(() => {});
       return res.json({ ok: true });
     } catch (err) {
@@ -423,17 +367,13 @@ export function registerEmailAuthRoutes(app: Express): void {
 
   /* ── Check username availability ─────────────────────────────── */
   app.get("/api/auth/check-username/:username", async (req: Request, res: Response) => {
-    const userId = (req.session as any)?.userId;
+    const userId  = (req.session as any)?.userId;
     const cleaned = sanitizeUsername(req.params.username);
     if (!cleaned || cleaned.length < 3)
       return res.json({ available: false, reason: "قصير جداً" });
     try {
-      const [existing] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.username, cleaned))
-        .limit(1);
-      const available = !existing || existing.id === userId;
+      const existing = await sbGet("users", { username: `eq.${cleaned}`, select: "id", limit: "1" });
+      const available = !existing.length || existing[0].id === userId;
       return res.json({ available, username: cleaned });
     } catch {
       return res.json({ available: false });
@@ -443,23 +383,21 @@ export function registerEmailAuthRoutes(app: Express): void {
 
 /* ── Get authed user from session ────────────────────────────── */
 export async function getEmailUser(req: Request): Promise<any | null> {
-  const userId = (req.session as any)?.userId
-    || (req.session as any)?.emailUserId;
+  const userId = (req.session as any)?.userId || (req.session as any)?.emailUserId;
   if (!userId) return null;
   try {
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    if (!user) return null;
+    const rows = await sbGet("users", { id: `eq.${userId}`, limit: "1" });
+    if (!rows.length) return null;
+    const u = rows[0];
     return {
-      id: user.id,
-      email: user.email,
-      displayName: user.displayName,
-      username: user.username,
-      avatarColor: (user as any).avatarColor ?? 0,
-      profileImageUrl: user.profileImageCustom || user.profileImageUrl,
-      authType: "email" as const,
-      createdAt: user.createdAt,
+      id:              u.id,
+      email:           u.email,
+      displayName:     u.display_name,
+      username:        u.username,
+      avatarColor:     u.avatar_color ?? 0,
+      profileImageUrl: u.profile_image_custom || u.profile_image_url,
+      authType:        "email" as const,
+      createdAt:       u.created_at,
     };
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
