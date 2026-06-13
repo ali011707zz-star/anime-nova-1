@@ -328,7 +328,7 @@ export default function Settings() {
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl"
           style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[9px] text-white/30 font-bold">NOVA ANIME · v2.4</span>
+          <span className="text-[9px] text-white/30 font-bold">ANIME NOVA · v2.4</span>
         </div>
       </div>
 
@@ -546,7 +546,7 @@ export default function Settings() {
           </div>
           <div className="flex-1 min-w-0 text-right">
             <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">إصدار التطبيق</p>
-            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">NOVA ANIME · تطبيق بث الأنمي العربي</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">ANIME NOVA · تطبيق بث الأنمي العربي</p>
           </div>
           <span className="text-[12px] font-black text-primary shrink-0">v2.4.0</span>
         </div>

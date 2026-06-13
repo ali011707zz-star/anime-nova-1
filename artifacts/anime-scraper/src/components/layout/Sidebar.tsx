@@ -248,7 +248,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             {/* ── FOOTER ── */}
             <div className="shrink-0 px-3 pt-2 pb-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
               <div className="flex items-center justify-between px-1">
-                <p className="text-[7.5px] text-white/12 font-bold">Anime Nova © 2025</p>
+                <p className="text-[7.5px] text-white/12 font-bold">Anime NOVA © 2025</p>
                 <div className="flex items-center gap-1">
                   <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
                   <span className="text-[7.5px] text-emerald-400/50 font-bold">متصل</span>
