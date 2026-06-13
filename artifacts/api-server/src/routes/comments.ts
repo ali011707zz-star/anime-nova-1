@@ -7,6 +7,25 @@ function getUserId(req: Request): string | null {
   return (req.session as any)?.userId || (req.session as any)?.emailUserId || null;
 }
 
+function mapRow(r: any, liked: boolean) {
+  return {
+    id:              r.id,
+    userId:          r.user_id,
+    username:        r.username,
+    avatarUrl:       r.avatar_url  || null,
+    animeId:         r.anime_id    ?? null,
+    tmdbId:          r.tmdb_id     ?? null,
+    animeType:       r.anime_type  || "anime",
+    episodeNumber:   r.episode_number ?? null,
+    text:            r.text,
+    likes:           r.likes || 0,
+    createdAt:       r.created_at,
+    parentId:        r.parent_id   || null,
+    replyToUsername: r.reply_to_username || null,
+    liked,
+  };
+}
+
 /* ─────────────────────────────────────────
    GET /api/comments?animeId=&ep=&limit=&offset=
    GET /api/comments?tmdbId=&ep=&limit=&offset=
@@ -16,19 +35,19 @@ router.get("/comments", async (req: Request, res: Response) => {
     const animeId = req.query.animeId ? Number(req.query.animeId) : null;
     const tmdbId  = req.query.tmdbId  ? String(req.query.tmdbId) : null;
     const ep      = req.query.ep !== undefined ? Number(req.query.ep) : null;
-    const limit   = Math.min(Number(req.query.limit) || 50, 100);
+    const limit   = Math.min(Number(req.query.limit) || 100, 200);
     const offset  = Number(req.query.offset) || 0;
     const userId  = getUserId(req);
 
     if (!animeId && !tmdbId) return res.status(400).json({ error: "animeId أو tmdbId مطلوب" });
 
     const params: Record<string, string> = {
-      order: "created_at.desc",
+      order: "created_at.asc",
       limit: String(limit),
       offset: String(offset),
     };
     if (animeId !== null) params["anime_id"] = `eq.${animeId}`;
-    if (tmdbId !== null)  params["tmdb_id"]  = `eq.${tmdbId}`;
+    if (tmdbId  !== null) params["tmdb_id"]  = `eq.${tmdbId}`;
     if (ep !== null)      params["episode_number"] = `eq.${ep}`;
     else                  params["episode_number"] = "is.null";
 
@@ -38,14 +57,14 @@ router.get("/comments", async (req: Request, res: Response) => {
     if (userId && rows.length > 0) {
       const ids = rows.map((r: any) => r.id);
       const likeRows = await sbGet("comment_likes", {
-        "user_id": `eq.${userId}`,
+        "user_id":    `eq.${userId}`,
         "comment_id": `in.(${ids.join(",")})`,
-        "select": "comment_id",
+        "select":     "comment_id",
       });
       likedIds = new Set(likeRows.map((l: any) => l.comment_id));
     }
 
-    const result = rows.map((r: any) => ({ ...r, liked: likedIds.has(r.id) }));
+    const result = rows.map((r: any) => mapRow(r, likedIds.has(r.id)));
     return res.json({ comments: result, total: result.length });
   } catch (err) {
     console.error("[comments] GET:", err);
@@ -61,13 +80,18 @@ router.post("/comments", async (req: Request, res: Response) => {
   if (!userId) return res.status(401).json({ error: "يجب تسجيل الدخول للتعليق" });
 
   try {
-    const { animeId, tmdbId, episodeNumber, text: txt, username, avatarUrl, animeType } = req.body;
+    const {
+      animeId, tmdbId, episodeNumber, text: txt,
+      username, avatarUrl, animeType,
+      parentId, replyToUsername,
+    } = req.body;
+
     if ((!animeId && !tmdbId) || !txt?.trim())
       return res.status(400).json({ error: "animeId أو tmdbId + النص مطلوبان" });
     if (txt.trim().length > 1000)
       return res.status(400).json({ error: "التعليق طويل جداً (الحد 1000 حرف)" });
 
-    const [row] = await sbInsert("comments", {
+    const insertData: Record<string, any> = {
       user_id:        userId,
       username:       username || "مستخدم",
       avatar_url:     avatarUrl || null,
@@ -77,9 +101,15 @@ router.post("/comments", async (req: Request, res: Response) => {
       anime_type:     animeType || "anime",
       text:           txt.trim(),
       likes:          0,
-    });
+    };
 
-    return res.status(201).json({ comment: { ...row, liked: false } });
+    if (parentId) {
+      insertData.parent_id = parentId;
+      insertData.reply_to_username = replyToUsername || null;
+    }
+
+    const [row] = await sbInsert("comments", insertData);
+    return res.status(201).json({ comment: mapRow(row, false) });
   } catch (err) {
     console.error("[comments] POST:", err);
     return res.status(500).json({ error: "خطأ في الخادم" });
@@ -121,19 +151,16 @@ router.post("/comments/:id/like", async (req: Request, res: Response) => {
     let liked: boolean;
 
     if (existing.length > 0) {
-      // unlike
       await sbDelete("comment_likes", {
         comment_id: `eq.${commentId}`,
         user_id:    `eq.${userId}`,
       });
-      // count remaining likes
       const remaining = await sbGet("comment_likes", { comment_id: `eq.${commentId}` });
       newLikes = Math.max(0, remaining.length);
       const [updated] = await sbUpdate("comments", { id: `eq.${commentId}` }, { likes: newLikes });
       liked = false;
       newLikes = updated?.likes ?? newLikes;
     } else {
-      // like
       await sbInsertIgnore("comment_likes", { comment_id: commentId, user_id: userId });
       const all = await sbGet("comment_likes", { comment_id: `eq.${commentId}` });
       newLikes = all.length;
