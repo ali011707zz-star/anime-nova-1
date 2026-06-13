@@ -397,6 +397,7 @@ export default function RiftPlayer({
         abrEwmaDefaultEstimate: 3_000_000,
         testBandwidth: false,
         capLevelToPlayerSize: false,
+        enableCEA708Captions: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
           xhr.timeout = 25000;
         },

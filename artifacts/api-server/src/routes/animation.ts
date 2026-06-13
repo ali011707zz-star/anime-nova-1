@@ -1998,12 +1998,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const d = JSON.parse(line.slice(5).trim()) as any;
 
                 if (d.type === "source") {
-                  // d.source.url is either a Vyla proxy URL (/api?url=<encoded>)
-                  // or a toustream proxy URL, or a direct m3u8
+                  // d.source.url is the Vyla proxy URL (missourimonster-vyla.hf.space/api?url=...)
+                  // Vyla proxy rewrites ALL segment URLs within the m3u8 to also go through itself
+                  // with correct Referer/Origin headers; sets CORS * on all responses.
+                  // → Send the Vyla proxy URL directly to the browser (no hls-proxy needed).
                   const proxyUrl: string = d.source?.url || "";
                   if (!proxyUrl) continue;
 
-                  // Extract inner CDN URL from proxy wrapper
+                  // Deduplicate by inner CDN URL (the ?url= param)
                   let innerUrl = proxyUrl;
                   try {
                     const pu = new URL(proxyUrl);
@@ -2012,14 +2014,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   } catch { /* keep proxyUrl */ }
 
                   if (!innerUrl || seenUrls.has(innerUrl)) continue;
+                  seenUrls.add(innerUrl);
 
                   const provLabel = d.source?.provider
                     ? `Vyla · ${d.source.provider}`
                     : `Vyla · ${++provIdx}`;
 
-                  // Wrap inner CDN m3u8 in our hls-proxy for segment rewriting + CORS
-                  const proxied = wrapHls(innerUrl, VYLA_BASE + "/");
-                  sendSource(proxied, provLabel, proxied, proxied);
+                  // Send Vyla proxy URL directly — browser plays it without our hls-proxy
+                  // (Vyla already handles CORS + segment proxying internally)
+                  sendSource(proxyUrl, provLabel, proxyUrl, proxyUrl);
 
                 } else if (d.type === "done" || d.type === "end") {
                   break outer;
@@ -2319,8 +2322,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "EzVidAPI: جاري الاستخراج…" });
-          // TV: vidnest, vidlink, vidrock; Movie: vidnest, vidlink, vidrock (vidnest works for many movies too)
-          const providers = ["vidnest", "vidlink", "vidrock"];
+          // vidnest: TV-only (times out for movies); vidlink+vidrock work for both
+          const providers = type === "tv"
+            ? ["vidnest", "vidlink", "vidrock"]
+            : ["vidlink", "vidrock"];
           await Promise.allSettled(providers.map(async (prov) => {
             try {
               const apiUrl = type === "tv"
