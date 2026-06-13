@@ -193,15 +193,6 @@ function EpCommentSheet({ epNum, animeId, onClose, animeTitle }: {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                onClose();
-                navigate(`/comments?animeId=${animeId}&ep=${epNum}&title=${encodeURIComponent(animeTitle || "")}`);
-              }}
-              className="text-[9px] text-primary/70 font-black font-['Cairo'] px-2.5 py-1 bg-primary/10 border border-primary/20 rounded-xl"
-            >
-              صفحة كاملة
-            </button>
             <button onClick={onClose} className="w-8 h-8 bg-white/6 rounded-full flex items-center justify-center active:scale-90">
               <X className="w-4 h-4 text-white/50" />
             </button>

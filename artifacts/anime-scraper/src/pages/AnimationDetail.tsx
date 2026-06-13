@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
-import CommentsSheet from "@/components/CommentsSheet";
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
 const IMG_O = "https://image.tmdb.org/t/p/original";
@@ -45,7 +44,6 @@ export default function AnimationDetail() {
   const [favorited,  setFavorited]  = useState(false);
   const [myRating, setMyRating] = useState(0);
   const [showRatingPicker, setShowRatingPicker] = useState(false);
-  const [showComments, setShowComments] = useState(false);
   const [commentsCount, setCommentsCount] = useState(0);
   const [descAr, setDescAr] = useState<string | null>(null);
 
@@ -301,7 +299,7 @@ export default function AnimationDetail() {
           ))}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <motion.button whileTap={{ scale: 0.94 }} onClick={() => setShowComments(true)}
+          <motion.button whileTap={{ scale: 0.94 }} onClick={() => navigate(`/comments?tmdbId=${id}&type=${type}&title=${encodeURIComponent(detail?.title || detail?.name || "")}`) }
             className="flex flex-col items-center gap-1 py-3 rounded-2xl border font-['Cairo'] transition-all"
             style={commentsCount > 0
               ? { background: "rgba(139,92,246,0.10)", borderColor: "rgba(139,92,246,0.25)", color: "#A78BFA" }
@@ -382,9 +380,9 @@ export default function AnimationDetail() {
             <div className="w-1 h-5 bg-primary rounded-full" />
             <h2 className="text-[15px] font-black font-['Cairo']">التعليقات{commentsCount > 0 ? ` (${commentsCount})` : ""}</h2>
           </div>
-          <button onClick={() => setShowComments(true)} className="text-[10px] text-primary font-black font-['Cairo']">عرض الكل</button>
+          <button onClick={() => navigate(`/comments?tmdbId=${id}&type=${type}&title=${encodeURIComponent(detail?.title || detail?.name || "")}`)} className="text-[10px] text-primary font-black font-['Cairo']">عرض الكل</button>
         </div>
-        <motion.button whileTap={{ scale: 0.97 }} onClick={() => setShowComments(true)}
+        <motion.button whileTap={{ scale: 0.97 }} onClick={() => navigate(`/comments?tmdbId=${id}&type=${type}&title=${encodeURIComponent(detail?.title || detail?.name || "")}`)}
           className="w-full py-4 rounded-2xl border border-white/8 flex items-center justify-center gap-2.5 transition-colors"
           style={{ background: commentsCount > 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.025)", borderStyle: commentsCount === 0 ? "dashed" : "solid", borderColor: commentsCount > 0 ? "rgba(139,92,246,0.20)" : "rgba(255,255,255,0.10)" }}>
           <MessageSquare className="w-4 h-4" style={{ color: commentsCount > 0 ? "#A78BFA" : "rgba(255,255,255,0.25)" }} />
@@ -459,12 +457,6 @@ export default function AnimationDetail() {
         </div>
       )}
 
-      <CommentsSheet
-        commKey={storageKey}
-        open={showComments}
-        onClose={() => { setShowComments(false); setCommentsCount(loadCommentsCount(storageKey)); }}
-        title={detail?.title || detail?.name || ""}
-      />
     </main>
   );
 }

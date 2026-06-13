@@ -453,12 +453,6 @@ function CodeInfo({ email, previewUrl }: { email: string; previewUrl: string }) 
         أُرسل كود مكوّن من <span className="text-violet-300 font-black">6 أرقام</span> إلى<br />
         <span className="text-violet-200 font-black">{email}</span>
       </p>
-      {previewUrl && (
-        <a href={previewUrl} target="_blank" rel="noopener noreferrer"
-          className="inline-block mt-2 text-[10.5px] text-amber-400/80 underline font-['Cairo']">
-          🔗 وضع الاختبار — اضغط لمعاينة البريد
-        </a>
-      )}
     </div>
   );
 }
