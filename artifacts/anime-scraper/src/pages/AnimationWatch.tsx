@@ -153,6 +153,10 @@ export default function AnimationWatch() {
   const [showSubPanel, setShowSubPanel] = useState(false);
   const [hlsTime,     setHlsTime]     = useState(0);
 
+  /* ── Skip intro / outro ── */
+  const [skipIntro, setSkipIntro] = useState<{ start: number; end: number } | undefined>(undefined);
+  const [skipOutro, setSkipOutro] = useState<{ start: number; end: number } | undefined>(undefined);
+
   const [subSettings, setSubSettings] = useState<SubSettings>({
     fontSize: 24, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom",
   });
@@ -309,6 +313,32 @@ export default function AnimationWatch() {
       .then(d => setEpisodes(d.episodes || []))
       .catch(() => {});
   }, [type, tmdbId, season]);
+
+  /* ── Skip times via AniSkip (للأنيمي الياباني) ── */
+  useEffect(() => {
+    if (type !== "tv") return;
+    setSkipIntro(undefined); setSkipOutro(undefined);
+    // AniSkip يستخدم MAL ID — نجلبه من TMDB external_ids
+    fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/external_ids?api_key=8265bd1679663a7ea12ac168da84d2e8`)
+      .then(r => r.ok ? r.json() : null)
+      .then((ext: any) => {
+        const malId = ext?.tvdb_id; // ليس MAL، لكن نحاول aniskip بـ TVDB fallback
+        // جرّب aniskip مباشرة بـ tmdbId كـ MAL fallback
+        return fetch(`/api/anime/aniskip?malId=${tmdbId}&ep=${ep}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+      })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: any) => {
+        if (!data?.found) return;
+        for (const result of (data.results || [])) {
+          const iv = result.interval;
+          if (result.skipType === "op") setSkipIntro({ start: iv.startTime, end: iv.endTime });
+          if (result.skipType === "ed") setSkipOutro({ start: iv.startTime, end: iv.endTime });
+        }
+      })
+      .catch(() => {});
+  }, [tmdbId, type, ep]);
 
   /* ── SSE stream ── */
   useEffect(() => {
@@ -619,6 +649,8 @@ export default function AnimationWatch() {
           totalEps={episodes.length || undefined}
           qualityLabel={Q_SHORT[getSourceTier(selSrc)]}
           resumeTime={resumeTime > 10 ? resumeTime : undefined}
+          skipIntro={skipIntro}
+          skipOutro={skipOutro}
           subCues={subStatus === "ready" && subCues.length > 0 ? subCues : undefined}
           subElapsed={hlsTime}
           subEnabled={subStatus === "ready" && subCues.length > 0}
