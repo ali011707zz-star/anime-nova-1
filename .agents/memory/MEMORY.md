@@ -108,3 +108,4 @@
 - [Email verification system](email-verify-system.md) — send-verify-code+signup 2-step; Ethereal auto-test fallback; SMTP_USER/SMTP_PASS for real Gmail; cooldown+attempts enforced
 - [Supabase REST-only (no direct DB)](supabase-rest-only.md) — Replit can NOT connect to db.*.supabase.co or *.pooler.supabase.com (DNS blocked); ONLY fetch() to SUPABASE_URL/rest/v1 works; no Drizzle ORM; use SUPABASE_SERVICE_ROLE_KEY as Bearer
 - [source_cache L1+L2 architecture](source-cache-arch.md) — L1=in-process Map (instant); L2=Supabase source_cache table via REST; anime.ts uses scrapeCached(); animation.ts uses scrapeAnimCached() which captures sendSource() calls; TTLs in SITE_TTL map in sourceCache.ts; run supabase/migrations/001_all_tables.sql once in Supabase SQL Editor
+- [Anime Rift APK analysis](anime-rift-apk.md) — NOT integrable: Firebase App Check (Play Integrity) requires real Android device; servers also intentionally down Jun 13→16 2026
