@@ -125,9 +125,12 @@ export default function CommentsPage() {
   const search = useSearch();
   const params = new URLSearchParams(search);
   const animeId = params.get("animeId") ? Number(params.get("animeId")) : null;
+  const tmdbId  = params.get("tmdbId")  || null;
+  const mediaType = params.get("type") || "movie";
   const ep = params.get("ep") !== null ? Number(params.get("ep")) : null;
   const animeTitle = params.get("title") || "";
   const isEpMode = ep !== null && !isNaN(ep);
+  const isAnimation = !!tmdbId && !animeId;
 
   const { user } = useAuth();
   const userId = (user as any)?.id || (user as any)?.userId || null;
@@ -144,13 +147,20 @@ export default function CommentsPage() {
   const avatarUrl = (user as any)?.avatarUrl || null;
 
   const loadComments = useCallback(async () => {
-    if (!animeId) return;
+    if (!animeId && !tmdbId) return;
     setLoading(true);
     setError(null);
     try {
-      const url = isEpMode
-        ? `/api/comments?animeId=${animeId}&ep=${ep}`
-        : `/api/comments?animeId=${animeId}`;
+      let url: string;
+      if (tmdbId) {
+        url = isEpMode
+          ? `/api/comments?tmdbId=${tmdbId}&ep=${ep}`
+          : `/api/comments?tmdbId=${tmdbId}`;
+      } else {
+        url = isEpMode
+          ? `/api/comments?animeId=${animeId}&ep=${ep}`
+          : `/api/comments?animeId=${animeId}`;
+      }
       const res = await fetch(url, { credentials: "include" });
       const data = await res.json();
       if (data.comments) setComments(data.comments);
@@ -160,13 +170,13 @@ export default function CommentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [animeId, ep, isEpMode]);
+  }, [animeId, tmdbId, ep, isEpMode]);
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
   const sendComment = async () => {
     const txt = text.trim();
-    if (!txt || !animeId) return;
+    if (!txt || (!animeId && !tmdbId)) return;
     if (!user) { setError("يجب تسجيل الدخول للتعليق"); return; }
     setSending(true);
     setError(null);
@@ -176,7 +186,8 @@ export default function CommentsPage() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          animeId,
+          ...(animeId  ? { animeId }  : {}),
+          ...(tmdbId   ? { tmdbId, animeType: mediaType } : {}),
           episodeNumber: isEpMode ? ep : undefined,
           text: txt,
           username,
@@ -232,7 +243,11 @@ export default function CommentsPage() {
             <div className="flex items-center gap-2">
               <MessageCircle className="w-4 h-4 text-primary shrink-0" />
               <h1 className="text-[15px] font-black font-['Cairo'] truncate">
-                {isEpMode ? `تعليقات الحلقة ${ep}` : "تعليقات الأنمي"}
+                {isEpMode
+                  ? `تعليقات الحلقة ${ep}`
+                  : isAnimation
+                    ? (mediaType === "tv" ? "تعليقات المسلسل" : "تعليقات الفيلم")
+                    : "تعليقات الأنمي"}
               </h1>
             </div>
             {animeTitle && (
@@ -257,10 +272,15 @@ export default function CommentsPage() {
         </div>
 
         {/* tab if no ep — show tabs for anime/ep */}
-        {!isEpMode && animeId && (
+        {!isEpMode && (animeId || tmdbId) && (
           <div className="px-4 pb-3 flex gap-2">
             <div className="flex items-center gap-1.5 text-[10px] bg-primary/10 text-primary px-3 py-1.5 rounded-xl border border-primary/20">
-              <Film className="w-3 h-3" /> تعليقات على الأنمي كله
+              {isAnimation
+                ? (mediaType === "tv" ? <Tv className="w-3 h-3" /> : <Film className="w-3 h-3" />)
+                : <Film className="w-3 h-3" />}
+              {isAnimation
+                ? (mediaType === "tv" ? "تعليقات على المسلسل كله" : "تعليقات على الفيلم")
+                : "تعليقات على الأنمي كله"}
             </div>
           </div>
         )}

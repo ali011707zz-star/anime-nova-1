@@ -36,11 +36,11 @@ export async function sendVerificationEmail(to: string, code: string): Promise<b
     const transport = createGmailTransport();
     if (transport) {
       await transport.sendMail({
-        from: `"Nova Anime" <${EMAIL_USER}>`,
+        from: `"Anime NOVA" <${EMAIL_USER}>`,
         to,
-        subject: "رمز التحقق من حسابك — Nova Anime",
+        subject: "رمز التحقق من حسابك — Anime NOVA",
         html: EMAIL_HTML(code),
-        text: `رمز التحقق الخاص بك في Nova Anime: ${code}\nصالح لمدة 15 دقيقة.`,
+        text: `رمز التحقق الخاص بك في Anime NOVA: ${code}\nصالح لمدة 15 دقيقة.`,
       });
       console.log(`[email] ✅ Gmail → ${to}`);
       return true;

@@ -512,7 +512,7 @@ export default function AnimeDetail() {
         {/* 3-button action row */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           {[
-            { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => setShowComments(true), sub: comments.length > 0 ? `${comments.length}` : null },
+            { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => navigate(`/comments?animeId=${params.id}&title=${encodeURIComponent(anime?.title?.romaji || anime?.title?.english || "")}`), sub: comments.length > 0 ? `${comments.length}` : null },
             { icon: Plus,          label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: saved ? "مضاف" : null },
             { icon: Star,          label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
           ].map(({ icon: Icon, label, active, activeColor, action, sub }) => (
@@ -799,110 +799,6 @@ export default function AnimeDetail() {
         )}
       </AnimatePresence>
 
-      {/* ══ COMMENTS SHEET ══════════════════════════════════════ */}
-      <AnimatePresence>
-        {showComments && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowComments(false)}
-              className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100]" />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 h-[78vh] bg-[#0d0d10] rounded-t-[28px] z-[101] flex flex-col border-t border-white/8"
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-white/6 shrink-0" dir="rtl">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-primary" />
-                  <h2 className="text-sm font-black font-['Cairo']">التعليقات</h2>
-                  {comments.length > 0 && (
-                    <span className="text-[9px] bg-primary/15 text-primary px-2 py-0.5 rounded-full font-black">{comments.length}</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => { setShowComments(false); navigate(`/comments?animeId=${params.id}&title=${encodeURIComponent(anime?.title?.romaji || anime?.title?.english || "")}`); }}
-                    className="text-[9px] text-primary/70 font-black font-['Cairo'] px-2.5 py-1 bg-primary/10 border border-primary/20 rounded-xl"
-                  >صفحة كاملة</button>
-                  <button onClick={() => setShowComments(false)} className="w-8 h-8 bg-white/6 rounded-full flex items-center justify-center active:scale-90">
-                    <X className="w-4 h-4 text-white/50" />
-                  </button>
-                </div>
-              </div>
-              {/* Comments list */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3" dir="rtl">
-                {comments.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-3 opacity-30">
-                    <MessageSquare className="w-10 h-10" />
-                    <p className="text-sm font-bold font-['Cairo']">لا تعليقات بعد. كن أول من يعلّق!</p>
-                  </div>
-                ) : comments.map(c => {
-                  const isMe = !!(user as any)?.id && c.userId === (user as any)?.id;
-                  return (
-                    <motion.div key={c.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                      className="bg-white/4 rounded-2xl p-3 border border-white/5">
-                      <div className="flex items-start gap-2.5">
-                        {c.avatarUrl
-                          ? <img src={c.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
-                          : <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black text-white shrink-0"
-                              style={{ background: avatarColor(c.username) }}>{(c.username||"م").charAt(0).toUpperCase()}</div>
-                        }
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <span className="text-[11px] font-black font-['Cairo']">{c.username}</span>
-                            {isMe && <span className="text-[8px] bg-primary/15 text-primary px-1 py-0.5 rounded-full">أنت</span>}
-                            <span className="text-[9px] text-white/20">{timeAgo(String(c.createdAt))}</span>
-                          </div>
-                          <p className="text-[12px] text-white/70 font-['Cairo'] leading-relaxed">{c.text}</p>
-                          <div className="flex items-center gap-4 mt-2">
-                            <button onClick={() => toggleLike(c.id)}
-                              className="flex items-center gap-1 text-[10px] transition-colors"
-                              style={{ color: c.liked ? "#EC4899" : "rgba(255,255,255,0.3)" }}>
-                              <Heart className={`w-3 h-3 ${c.liked ? "fill-current" : ""}`} /> {c.likes||0}
-                            </button>
-                            {isMe && (
-                              <button onClick={() => deleteComment(c.id)}
-                                className="text-[10px] text-red-400/50 hover:text-red-400 transition-colors font-['Cairo']">
-                                حذف
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-              {/* Input */}
-              <div className="px-4 py-3 border-t border-white/6 shrink-0" dir="rtl">
-                {!user ? (
-                  <button onClick={() => { setShowComments(false); navigate("/auth"); }}
-                    className="w-full py-3 rounded-2xl font-black font-['Cairo'] text-sm text-white"
-                    style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>
-                    سجّل الدخول للتعليق
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-2 bg-[#111116] rounded-2xl px-4 py-2.5 border border-white/8">
-                    <input
-                      ref={inputRef}
-                      value={newComment}
-                      onChange={e => setNewComment(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && addComment()}
-                      placeholder="اكتب تعليقك..."
-                      className="flex-1 bg-transparent text-white text-sm outline-none font-['Cairo'] placeholder:text-white/25"
-                    />
-                    <motion.button whileTap={{ scale: 0.9 }} onClick={addComment} disabled={!newComment.trim() || sendingComment}
-                      className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shrink-0 disabled:opacity-40">
-                      <Send className="w-3.5 h-3.5 text-white" />
-                    </motion.button>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
 
       {/* ══ RATING PICKER ════════════════════════════════════════ */}
       <AnimatePresence>

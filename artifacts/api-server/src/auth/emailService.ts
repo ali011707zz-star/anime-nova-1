@@ -73,15 +73,15 @@ export async function sendVerifyEmail(
   try {
     const t = await getTransporter();
     const from = process.env.SMTP_FROM
-      ? `"Nova Anime" <${process.env.SMTP_FROM}>`
+      ? `"Anime NOVA" <${process.env.SMTP_FROM}>`
       : isEthereal
-      ? `"Nova Anime" <${testAccount?.user}>`
-      : `"Nova Anime" <${process.env.SMTP_USER}>`;
+      ? `"Anime NOVA" <${testAccount?.user}>`
+      : `"Anime NOVA" <${process.env.SMTP_USER}>`;
 
     const info = await t.sendMail({
       from,
       to,
-      subject: `كود التحقق: ${code} — Nova Anime`,
+      subject: `كود التحقق: ${code} — Anime NOVA`,
       text: `كود التحقق الخاص بك: ${code}\nصالح لمدة 10 دقائق.`,
       html: `
 <!DOCTYPE html>
@@ -94,12 +94,12 @@ export async function sendVerifyEmail(
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:28px;">
         <div style="width:42px;height:42px;background:linear-gradient(135deg,#7C3AED,#4F46E5);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:20px;">✨</div>
         <div>
-          <p style="margin:0;font-size:18px;font-weight:900;color:#fff;">Nova Anime</p>
+          <p style="margin:0;font-size:18px;font-weight:900;color:#fff;">Anime NOVA</p>
           <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.35);">التحقق من البريد الإلكتروني</p>
         </div>
       </div>
       <p style="font-size:14px;color:rgba(255,255,255,0.7);margin-bottom:28px;line-height:1.7;">
-        مرحباً! استخدم الكود أدناه لتفعيل حسابك في Nova Anime. الكود صالح لمدة <strong style="color:#A78BFA;">10 دقائق</strong> فقط.
+        مرحباً! استخدم الكود أدناه لتفعيل حسابك في Anime NOVA. الكود صالح لمدة <strong style="color:#A78BFA;">10 دقائق</strong> فقط.
       </p>
       <div style="background:rgba(139,92,246,0.12);border:1.5px solid rgba(139,92,246,0.30);border-radius:18px;padding:28px;text-align:center;margin-bottom:24px;">
         <p style="margin:0 0 8px 0;font-size:11px;color:rgba(255,255,255,0.35);letter-spacing:2px;">كود التحقق</p>
@@ -139,15 +139,15 @@ export async function sendPasswordResetEmail(
   try {
     const t = await getTransporter();
     const from = process.env.SMTP_FROM
-      ? `"Nova Anime" <${process.env.SMTP_FROM}>`
+      ? `"Anime NOVA" <${process.env.SMTP_FROM}>`
       : isEthereal
-      ? `"Nova Anime" <${testAccount?.user}>`
-      : `"Nova Anime" <${process.env.SMTP_USER}>`;
+      ? `"Anime NOVA" <${testAccount?.user}>`
+      : `"Anime NOVA" <${process.env.SMTP_USER}>`;
 
     const info = await t.sendMail({
       from,
       to,
-      subject: `إعادة تعيين كلمة المرور: ${code} — Nova Anime`,
+      subject: `إعادة تعيين كلمة المرور: ${code} — Anime NOVA`,
       html: `
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
