@@ -67,7 +67,7 @@ waitForPort = 8000
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
-integrations = ["javascript_log_in_with_replit:2.0.0"]
+integrations = ["javascript_log_in_with_replit:2.0.0", "javascript_database:1.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
