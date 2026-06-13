@@ -5401,15 +5401,8 @@ async function getArabSeedSources(
           return;
         }
 
-        // vidmoly → embed-only (allowed by iframe policy)
-        if (VIDMOLY_HOSTS.some(h => embedUrl.includes(h))) {
-          sources.push({
-            name: `${srvLabel} · VidMoly · مترجم عربي`,
-            url: embedUrl, quality: "1080p", qualityRank: 10,
-            site: "arabseed", directUrl: embedUrl, directType: "mp4", isEmbed: true,
-          });
-          return;
-        }
+        // vidmoly → إعلانات فقط، لا قيمة للمستخدم — تخطّ
+        if (VIDMOLY_HOSTS.some(h => embedUrl.includes(h))) return;
 
         // vidaraa / bysezejataos / other → push for extractAndCollect
         sources.push({
