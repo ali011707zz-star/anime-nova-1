@@ -2338,6 +2338,50 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
+      // ── EzVidAPI (api.ezvidapi.com) — free HLS multi-quality TMDB-native ────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "EzVidAPI: جاري الاستخراج…" });
+          // TV: vidnest, vidlink, vidrock all work; Movie: vidlink, vidrock only
+          const providers = type === "tv"
+            ? ["vidnest", "vidlink", "vidrock"]
+            : ["vidlink", "vidrock"];
+          await Promise.allSettled(providers.map(async (prov) => {
+            try {
+              const apiUrl = type === "tv"
+                ? `https://api.ezvidapi.com/tv/${prov}/${tmdbId}?season=${season}&episode=${epNum}`
+                : `https://api.ezvidapi.com/movie/${prov}/${tmdbId}`;
+              const r = await fetch(apiUrl, {
+                headers: { "User-Agent": UA },
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (!r.ok) return;
+              const data = await r.json() as { stream_url?: string };
+              if (!data.stream_url) return;
+              const streamUrl = data.stream_url;
+              if (seenUrls.has(streamUrl)) return;
+              // For vidrock: Arabic subtitle at cache.vdrk.site/v2
+              let subtitleUrl: string | undefined;
+              if (prov === "vidrock") {
+                subtitleUrl = type === "tv"
+                  ? `https://cache.vdrk.site/v2/tv/${tmdbId}/${season}/${epNum}/Arabic.vtt`
+                  : `https://cache.vdrk.site/v2/movie/${tmdbId}/Arabic.vtt`;
+              }
+              seenUrls.add(streamUrl);
+              sourceCount++;
+              send("source", {
+                url: streamUrl,
+                label: `EzVidAPI · ${prov}`,
+                directUrl: streamUrl,
+                proxyUrl: streamUrl,
+                ...(subtitleUrl ? { subtitleUrl } : {}),
+              });
+            } catch { /* silent per provider */ }
+          }));
+        } catch { /* silent */ }
+      })(),
+
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
       (async () => {
         const q = enTitlePrefetched || title;
