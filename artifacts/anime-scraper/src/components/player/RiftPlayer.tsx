@@ -940,6 +940,43 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
+        {/* ── Skip intro/outro — always visible when in range (outside showCtrl) ── */}
+        <AnimatePresence>
+          {!error && !isLocked && (showSkipIntro || showSkipOutro) && (
+            <motion.div
+              key="skip-btns"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.18 }}
+              className="absolute pointer-events-auto z-30 flex justify-end px-5"
+              style={{ bottom: 72, left: 0, right: 0 }}
+              dir="rtl"
+            >
+              {showSkipIntro && (() => {
+                const rem = skipIntro ? Math.max(0, Math.ceil(skipIntro.end - currentTime)) : 0;
+                return (
+                  <button
+                    onPointerDown={e => { e.stopPropagation(); const skipTo = skipIntro ? skipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                    style={{ background: "rgba(6,182,212,0.88)", border: "1px solid rgba(34,211,238,0.55)", color: "white", boxShadow: "0 4px 20px rgba(6,182,212,0.45)", touchAction: "manipulation" }}>
+                    <span>⏭ تخطي المقدمة</span>
+                    {rem > 0 && <span className="font-mono text-[10px] opacity-80 bg-white/15 px-1.5 py-0.5 rounded-lg">{rem}ث</span>}
+                  </button>
+                );
+              })()}
+              {showSkipOutro && !showSkipIntro && (
+                <button
+                  onPointerDown={e => { e.stopPropagation(); onNextEp?.(); }}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                  style={{ background: "rgba(249,115,22,0.88)", border: "1px solid rgba(251,146,60,0.55)", color: "white", boxShadow: "0 4px 16px rgba(249,115,22,0.40)", touchAction: "manipulation" }}>
+                  ⏭ الحلقة التالية
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* ── long press 2× ── */}
         <AnimatePresence>
           {longPress && (
@@ -1228,41 +1265,7 @@ export default function RiftPlayer({
                 onTouchStart={e => e.stopPropagation()}
                 onTouchEnd={e => e.stopPropagation()}
               >
-                {/* ── Skip intro / outro — always visible when in range ── */}
-                {(showSkipIntro || showSkipOutro) && (
-                  <div className="flex justify-end px-5 pb-2 pointer-events-auto" dir="rtl">
-                    {showSkipIntro && (() => {
-                      const rem = skipIntro ? Math.max(0, Math.ceil(skipIntro.end - currentTime)) : 0;
-                      return (
-                        <motion.button
-                          key="skip-intro"
-                          initial={{ opacity: 0, y: 6, scale: 0.94 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 4, scale: 0.96 }}
-                          transition={{ duration: 0.18 }}
-                          onPointerDown={e => { e.stopPropagation(); const skipTo = skipIntro ? skipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
-                          className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                          style={{ background: "rgba(6,182,212,0.88)", border: "1px solid rgba(34,211,238,0.55)", color: "white", boxShadow: "0 4px 20px rgba(6,182,212,0.45)", touchAction: "manipulation" }}>
-                          <span>⏭ تخطي المقدمة</span>
-                          {rem > 0 && <span className="font-mono text-[10px] opacity-80 bg-white/15 px-1.5 py-0.5 rounded-lg">{rem}ث</span>}
-                        </motion.button>
-                      );
-                    })()}
-                    {showSkipOutro && !showSkipIntro && (
-                      <motion.button
-                        key="skip-outro"
-                        initial={{ opacity: 0, y: 6, scale: 0.94 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 4, scale: 0.96 }}
-                        transition={{ duration: 0.18 }}
-                        onPointerDown={e => { e.stopPropagation(); onNextEp?.(); }}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                        style={{ background: "rgba(249,115,22,0.88)", border: "1px solid rgba(251,146,60,0.55)", color: "white", boxShadow: "0 4px 16px rgba(249,115,22,0.40)", touchAction: "manipulation" }}>
-                        ⏭ الحلقة التالية
-                      </motion.button>
-                    )}
-                  </div>
-                )}
+                {/* Skip spacer placeholder (skip buttons are rendered outside showCtrl) */}
 
                 {/* ── Progress bar ── */}
                 <div className="px-5 pt-1 pb-1">

@@ -9,14 +9,16 @@ import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
 import CommentsSheet from "@/components/CommentsSheet";
 
+const ADULT_WARN = "قد يحتوي هذا الأنمي على مشاهد جنسية أو عنف أو مشاهد للبالغين فقط وغير مناسبة للأطفال أو المشاهدة العائلية.\n\nينصح بمراعاة المشاهدين";
+
 // ── Age rating helper ─────────────────────────────────────────────
 function getAgeRating(genres: string[], isAdult: boolean) {
-  if (isAdult) return { label: "+18", color: "#ef4444", bg: "rgba(239,68,68,0.14)", warn: null };
+  if (isAdult) return { label: "+18", color: "#ef4444", bg: "rgba(239,68,68,0.14)", warn: ADULT_WARN };
   const g = (genres || []).map(x => x.toLowerCase());
   if (g.some(x => ["ecchi"].includes(x)))
-    return { label: "+17", color: "#f97316", bg: "rgba(249,115,22,0.14)", warn: "يحتوي على محتوى للكبار (+17)" };
+    return { label: "+17", color: "#ef4444", bg: "rgba(239,68,68,0.10)", warn: ADULT_WARN };
   if (g.some(x => ["horror", "psychological", "thriller"].includes(x)))
-    return { label: "+17", color: "#f97316", bg: "rgba(249,115,22,0.14)", warn: "يحتوي على مشاهد عنف أو رعب (+17)" };
+    return { label: "+17", color: "#ef4444", bg: "rgba(239,68,68,0.10)", warn: ADULT_WARN };
   if (g.some(x => ["kids"].includes(x)))
     return { label: "+7", color: "#22c55e", bg: "rgba(34,197,94,0.13)", warn: null };
   return { label: "+13", color: "#a78bfa", bg: "rgba(167,139,250,0.11)", warn: null };
@@ -179,6 +181,9 @@ export default function AnimeDetail() {
   const [newComment, setNewComment] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
   const [favChars, setFavChars]     = useState<any[]>(() => getFavChars());
+  const [warnDismissed, setWarnDismissed] = useState(() =>
+    !!localStorage.getItem(`adult-warn-${params.id}`)
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const countdown = useCountdown(anime?.nextAiringEpisode?.airingAt);
 
@@ -493,18 +498,31 @@ export default function AnimeDetail() {
         </motion.button>
       </div>
 
-      {/* ══ +17 WARNING ══════════════════════════════════════════ */}
+      {/* ══ +17/+18 WARNING ═══════════════════════════════════════ */}
       {(() => {
         const r = getAgeRating(anime.genres || [], anime.isAdult);
-        return r.warn ? (
-          <div className="mx-4 mt-2.5 flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl"
-            style={{ background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.22)" }}>
-            <span className="text-[16px] shrink-0">⚠️</span>
-            <p className="text-[11px] font-black font-['Cairo']" style={{ color: "rgba(253,186,116,0.90)" }}>
-              {r.warn}
-            </p>
+        if (!r.warn || warnDismissed) return null;
+        return (
+          <div className="mx-4 mt-2.5 rounded-2xl overflow-hidden"
+            style={{ background: "rgba(239,68,68,0.10)", border: "1.5px solid rgba(239,68,68,0.38)" }}>
+            <div className="flex items-start gap-2.5 px-3.5 pt-3 pb-2.5">
+              <span className="text-[18px] shrink-0 mt-0.5">🔞</span>
+              <p className="text-[11.5px] font-bold font-['Cairo'] leading-relaxed flex-1 whitespace-pre-line"
+                style={{ color: "#fca5a5" }}>
+                {r.warn}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                localStorage.setItem(`adult-warn-${params.id}`, "1");
+                setWarnDismissed(true);
+              }}
+              className="w-full py-2 text-[11px] font-black font-['Cairo'] border-t active:opacity-70 transition-opacity"
+              style={{ color: "rgba(252,165,165,0.70)", borderColor: "rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.07)" }}>
+              فهمتُ، لا تُظهر هذا مجدداً
+            </button>
           </div>
-        ) : null;
+        );
       })()}
 
       {/* ══ SCORE + ACTIONS GRID ═════════════════════════════════ */}
