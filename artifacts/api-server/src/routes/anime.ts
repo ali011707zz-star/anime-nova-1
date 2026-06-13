@@ -110,6 +110,41 @@ const CF_BROWSER_HDRS: Record<string, string> = {
   "accept-language": "ar,en-US;q=0.9,en;q=0.8",
 };
 
+async function cfProxyPost(
+  url: string,
+  body: string,
+  contentType = "application/x-www-form-urlencoded",
+  referer?: string,
+  timeoutMs = 12000,
+): Promise<string | null> {
+  const now = Date.now();
+  if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
+    try {
+      const h = await fetch(`${CF_PROXY_BASE}/health`, { signal: AbortSignal.timeout(2000) });
+      _cfProxyAlive = h.ok;
+    } catch { _cfProxyAlive = false; }
+    _cfProxyCheckedAt = now;
+  }
+  if (!_cfProxyAlive) return null;
+  try {
+    const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
+    proxyUrl.searchParams.set("url", url);
+    proxyUrl.searchParams.set("method", "POST");
+    if (referer) proxyUrl.searchParams.set("ref", referer);
+    proxyUrl.searchParams.set("timeout", String(Math.floor(timeoutMs / 1000)));
+    const r = await fetch(proxyUrl.toString(), {
+      method: "POST",
+      headers: { "Content-Type": contentType, "X-Requested-With": "XMLHttpRequest" },
+      body,
+      signal: AbortSignal.timeout(timeoutMs + 2000),
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    if (text.length < 10) return null;
+    return text;
+  } catch { _cfProxyAlive = false; return null; }
+}
+
 async function cfGet(url: string, extraHdrs: Record<string, string> = {}): Promise<string | null> {
   try {
     const r = await fetch(url, {
@@ -1241,56 +1276,34 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
     if (stripped !== s) slugVariants.push(stripped);
   }
 
-  // Direct slug check (faster than search)
+  // Direct slug check (faster than search) — use cfProxyGet to bypass CF/IP blocks
   for (const slug of [...new Set(slugVariants)]) {
-    try {
-      const r = await fetch(`${ALK_BASE}/anime/${slug}/`, {
-        headers: ALK_HDRS, signal: AbortSignal.timeout(6000), redirect: "follow",
-      });
-      if (r.ok) {
-        const html = await r.text();
-        if (!isCloudflareBlock(html) && html.includes("/episode/")) {
-          alkSlugCache.set(ck, { slug, ts: Date.now() });
-          return slug;
-        }
-      }
-    } catch {}
+    const html = await cfProxyGet(`${ALK_BASE}/anime/${slug}/`, `${ALK_BASE}/`);
+    if (html && html.includes("/episode/")) {
+      alkSlugCache.set(ck, { slug, ts: Date.now() });
+      return slug;
+    }
   }
 
   // Search fallback — use ?s= (standard WP search, ?search_term_string= is broken)
   for (const q of [english, title].filter(Boolean) as string[]) {
-    try {
-      const r = await fetch(`${ALK_BASE}/search/?s=${encodeURIComponent(q as string)}`, {
-        headers: ALK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
-      });
-      if (!r.ok) continue;
-      const html = await r.text();
-      if (isCloudflareBlock(html)) continue;
-      // Search page may return 404 page with no anime results
-      if (!html.includes("/anime/")) continue;
-      let best: string | null = null, bestScore = 0;
-      for (const m of html.matchAll(/href="https?:\/\/animelek\.top\/anime\/([^/"]+)\/?"/gi)) {
-        const s = m[1];
-        const label = s.replace(/-/g, " ");
-        const score = Math.max(similarity(label, title), english ? similarity(label, english as string) : 0);
-        if (score > bestScore && score > 0.2) { bestScore = score; best = s; }
+    const html = await cfProxyGet(`${ALK_BASE}/search/?s=${encodeURIComponent(q as string)}`, `${ALK_BASE}/`);
+    if (!html || !html.includes("/anime/")) continue;
+    let best: string | null = null, bestScore = 0;
+    for (const m of html.matchAll(/href="https?:\/\/animelek\.top\/anime\/([^/"]+)\/?"/gi)) {
+      const s = m[1];
+      const label = s.replace(/-/g, " ");
+      const score = Math.max(similarity(label, title), english ? similarity(label, english as string) : 0);
+      if (score > bestScore && score > 0.2) { bestScore = score; best = s; }
+    }
+    if (best && bestScore > 0.25) {
+      // Verify the found slug actually has episodes
+      const vhtml = await cfProxyGet(`${ALK_BASE}/anime/${best}/`, `${ALK_BASE}/`);
+      if (vhtml && vhtml.includes("/episode/")) {
+        alkSlugCache.set(ck, { slug: best, ts: Date.now() });
+        return best;
       }
-      if (best && bestScore > 0.25) {
-        // Verify the found slug actually has episodes
-        try {
-          const vr = await fetch(`${ALK_BASE}/anime/${best}/`, {
-            headers: ALK_HDRS, signal: AbortSignal.timeout(5000), redirect: "follow",
-          });
-          if (vr.ok) {
-            const vhtml = await vr.text();
-            if (!isCloudflareBlock(vhtml) && vhtml.includes("/episode/")) {
-              alkSlugCache.set(ck, { slug: best, ts: Date.now() });
-              return best;
-            }
-          }
-        } catch {}
-      }
-    } catch {}
+    }
   }
 
   alkSlugCache.set(ck, { slug: null, ts: Date.now() });
@@ -1309,11 +1322,8 @@ async function getAnimelekSources(
     if (!slug) return [];
 
     const seriesUrl = `${ALK_BASE}/anime/${slug}/`;
-    const sr = await fetch(seriesUrl, {
-      headers: ALK_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow",
-    });
-    if (!sr.ok) return [];
-    const sHtml = await sr.text();
+    const sHtml = await cfProxyGet(seriesUrl, `${ALK_BASE}/`);
+    if (!sHtml) return [];
 
     let epUrl: string | null = null;
     for (const m of sHtml.matchAll(/href="(https?:\/\/animelek\.top\/episode\/[^"]+)"/gi)) {
@@ -1336,10 +1346,14 @@ async function getAnimelekSources(
         `${ALK_BASE}/episode/${slug}-%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9-${epPad}/`,
       ];
       for (const u of candidates) {
+        const ph = await cfProxyGet(u, seriesUrl);
+        if (ph && ph.includes("data-embed=")) { epUrl = u; break; }
+        // fallback: plain HEAD check
         try {
           const pr = await fetch(u, {
+            method: "HEAD",
             headers: { ...ALK_HDRS, Referer: seriesUrl },
-            signal: AbortSignal.timeout(6000), redirect: "follow",
+            signal: AbortSignal.timeout(4000), redirect: "follow",
           });
           if (pr.ok) { epUrl = u; break; }
         } catch {}
@@ -1347,13 +1361,8 @@ async function getAnimelekSources(
     }
     if (!epUrl) return [];
 
-    const er = await fetch(epUrl, {
-      headers: { ...ALK_HDRS, Referer: seriesUrl },
-      signal: AbortSignal.timeout(8000), redirect: "follow",
-    });
-    if (!er.ok) return [];
-    const eHtml = await er.text();
-    if (isCloudflareBlock(eHtml)) return [];
+    const eHtml = await cfProxyGet(epUrl, seriesUrl);
+    if (!eHtml) return [];
 
     const sources: UnifiedSource[] = [];
     const seenHosts = new Set<string>();
@@ -1366,7 +1375,25 @@ async function getAnimelekSources(
       try { rawUrl = decodeURIComponent(rawUrl); } catch {}
       rawUrl = rawUrl.replace(/&amp;/g, "&");
       if (!rawUrl.startsWith("http")) continue;
+
+      // mega.nz/embed is allowed as sandboxed iframe — handle BEFORE DEAD_FILE_HOSTS
+      const isMegaEmbed = rawUrl.includes("mega.nz/embed") || rawUrl.includes("mega.co.nz/embed");
+      if (isMegaEmbed) {
+        const host = (rawUrl.split("/")[2] || "").replace(/^www\./, "");
+        if (seenHosts.has(host)) continue; seenHosts.add(host);
+        const nameM = innerHtml.match(/<span[^>]*class="[^"]*server[^"]*"[^>]*>([^<]+)<\/span>/i);
+        const label = (nameM?.[1] || "").trim().replace(/\s*\|.*$/, "").trim();
+        idx++;
+        sources.push({
+          name: `AnimeLek · ${label || `Mega ${idx}`}`,
+          url: rawUrl, quality: "HD", qualityRank: 2, site: "animelek",
+          directUrl: rawUrl, isEmbed: true,
+        });
+        continue;
+      }
+
       if (DEAD_FILE_HOSTS.some(h => rawUrl.includes(h))) continue;
+      if (EMBED_ONLY_HOSTS.some(h => rawUrl.includes(h))) continue;
       const host = (rawUrl.split("/")[2] || "").replace(/^www\./, "");
       if (seenHosts.has(host)) continue; seenHosts.add(host);
       const nameM = innerHtml.match(/<span[^>]*class="[^"]*server[^"]*"[^>]*>([^<]+)<\/span>/i);
@@ -2354,23 +2381,15 @@ async function searchOkAnime(title: string, english: string | null): Promise<str
     return OK_BASE;
   }
 
-  // Method 1: Direct slug check via /anime/{slug} page (try all domains)
+  // Method 1: Direct slug check via /anime/{slug} page (try all domains via cfProxy)
   for (const slug of [...new Set(slugVariants)]) {
     for (const domain of OK_DOMAINS) {
-      try {
-        const r = await fetch(`${domain}/anime/${slug}`, {
-          headers: { ...BASE_HDRS, Referer: `${domain}/` },
-          signal: AbortSignal.timeout(6000), redirect: "follow",
-        });
-        if (r.ok) {
-          const html = await r.text();
-          if (!isCloudflareBlock(html) && html.includes("/episode/")) {
-            OK_BASE = domain;
-            okSlugCache.set(ck, { slug, ts: Date.now() });
-            return slug;
-          }
-        }
-      } catch {}
+      const html = await cfProxyGet(`${domain}/anime/${slug}`, `${domain}/`);
+      if (html && html.includes("/episode/")) {
+        OK_BASE = domain;
+        okSlugCache.set(ck, { slug, ts: Date.now() });
+        return slug;
+      }
     }
   }
 
@@ -2640,6 +2659,7 @@ async function getAnimeTimeSources(
 const RISTO_BASE = "https://ristoanime.co";
 const RISTO_AJAX = `${RISTO_BASE}/wp-content/themes/TopAnime/Ajaxt`;
 const RISTO_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ristoanime.co/" };
+const RISTOANIME_DISABLED = true; // AJAX endpoint is behind CF JS challenge — cannot bypass from datacenter IPs
 
 const ristoSeriesCache = new Map<string, { url: string | null; ts: number }>();
 const ristoSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
@@ -2695,6 +2715,7 @@ async function searchRistoAnime(title: string, english: string | null): Promise<
 async function getRistoAnimeSources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
+  if (RISTOANIME_DISABLED) return [];
   const ck = `risto:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = ristoSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
@@ -2722,21 +2743,26 @@ async function getRistoAnimeSources(
     let epUrl: string | null = null;
 
     for (const season of seasons.slice(0, 4)) {
-      // AJAX works without session cookies
-      const eR = await fetch(`${RISTO_AJAX}/Single/Episodes.php`, {
-        method: "POST",
-        body: `season=${encodeURIComponent(season)}&post_id=${postId}`,
-        headers: {
-          ...RISTO_HDRS,
-          "Content-Type": "application/x-www-form-urlencoded",
-          "X-Requested-With": "XMLHttpRequest",
-          Referer: seriesUrl,
-        },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!eR.ok) continue;
-      const epsHtml = await eR.text();
-      if (isCloudflareBlock(epsHtml) || epsHtml.length < 50) continue;
+      const postBody = `season=${encodeURIComponent(season)}&post_id=${postId}`;
+      // Try cfProxy first (bypasses IP block on AJAX endpoint), fallback to plain fetch
+      let epsHtml = await cfProxyPost(`${RISTO_AJAX}/Single/Episodes.php`, postBody, "application/x-www-form-urlencoded", seriesUrl);
+      if (!epsHtml) {
+        try {
+          const eR = await fetch(`${RISTO_AJAX}/Single/Episodes.php`, {
+            method: "POST",
+            body: postBody,
+            headers: {
+              ...RISTO_HDRS,
+              "Content-Type": "application/x-www-form-urlencoded",
+              "X-Requested-With": "XMLHttpRequest",
+              Referer: seriesUrl,
+            },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (eR.ok) epsHtml = await eR.text();
+        } catch {}
+      }
+      if (!epsHtml || isCloudflareBlock(epsHtml) || epsHtml.length < 50) continue;
 
       // Episode links are at root domain (e.g. https://ristoanime.co/انمي-dandadan-الحلقة-1-...)
       const epLinks: string[] = [];
@@ -3787,9 +3813,12 @@ async function extractAninekoHls(embedUrl: string, seriesSlug: string): Promise<
   return null;
 }
 
+const ANINEKO_DISABLED = true; // anineko.to returns HTTP 403 on all pages from datacenter IPs
+
 async function getAninekoSources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
+  if (ANINEKO_DISABLED) return [];
   try {
     const slug = await findAninekoSlug(title, english);
     if (!slug) return [];
