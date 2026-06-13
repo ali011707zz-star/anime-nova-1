@@ -1958,50 +1958,77 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── 27. anyembed.xyz — مُعطَّل (iframe مُزال من الواجهة) ─────────────────
       Promise.resolve(),
 
-      // ── 16. Vyla downloads (missourimonster-vyla.hf.space) ──
-      // SSE /movie/ لا تُرجع sources بعد الآن — نستخدم downloads API
-      // تندرج.com/tgstream MKV: HTTP 200 مؤكد من سيرفر Replit
+      // ── 16. Vyla SSE stream (missourimonster-vyla.hf.space) ──────────────────
+      // Correct endpoint: /api/movie?id={tmdbId} or /api/tv?id={tmdbId}&season=&episode=
+      // Returns SSE: {"type":"source","source":{"url":"https://vyla.hf.space/api?url=<encoded_m3u8>"}}
+      // The Vyla proxy URL encodes the real CDN m3u8; extract inner URL, wrap in our hls-proxy.
       (async () => {
         if (!tmdbId) return;
         const VYLA_BASE = "https://missourimonster-vyla.hf.space";
         try {
-          // فحص سريع: HF Spaces تنام بعد الخمول
-          try {
-            const hc = await fetch(`${VYLA_BASE}/api/health`, {
-              signal: AbortSignal.timeout(5_000),
-              headers: { "User-Agent": UA },
-            });
-            // HF Spaces returns 207 when healthy (not 200), treat any 2xx as OK
-            if (hc.status >= 400) return;
-          } catch { return; }
+          send("status", { msg: "Vyla: جاري الاستخراج…" });
 
-          // TV episodes قد لا تتوفر — نحاول فقط الأفلام
-          // (downloads/tv يرجع [] لمعظم المسلسلات)
-          const dlUrl = type === "tv"
-            ? `${VYLA_BASE}/api/downloads/tv/${tmdbId}/${season}/${epNum}`
-            : `${VYLA_BASE}/api/downloads/movie/${tmdbId}`;
+          const sseUrl = type === "tv"
+            ? `${VYLA_BASE}/api/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
+            : `${VYLA_BASE}/api/movie?id=${tmdbId}`;
 
-          send("status", { msg: "Vyla: جاري جلب الروابط…" });
-
-          const r = await fetch(dlUrl, {
-            signal: AbortSignal.timeout(12_000),
-            headers: { "User-Agent": UA },
+          const r = await fetch(sseUrl, {
+            headers: { "User-Agent": UA, "Accept": "text/event-stream" },
+            signal: AbortSignal.timeout(22_000),
           });
-          if (!r.ok) return;
+          if (!r.ok || !r.body) return;
 
-          const data: any = await r.json();
-          const downloads: any[] = (data.downloads || [])
-            .filter((d: any) => d.active !== false && !!d.url?.startsWith("http"));
+          const reader = r.body.getReader();
+          const dec    = new TextDecoder();
+          let buf      = "";
+          let provIdx  = 0;
 
-          if (!downloads.length) return;
+          outer: while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
 
-          for (const dl of downloads) {
-            const proxied = wrapMp4(dl.url, `${VYLA_BASE}/`);
-            const qLabel  = dl.quality || "HD";
-            const typeTag = dl.type === "mkv" ? " · MKV" : "";
-            sendSource(proxied, `Vyla · ${qLabel}${typeTag}`, proxied, proxied);
+            const lines = buf.split("\n");
+            buf = lines.pop() ?? "";
+
+            for (const rawLine of lines) {
+              const line = rawLine.trim();
+              if (!line.startsWith("data:")) continue;
+              try {
+                const d = JSON.parse(line.slice(5).trim()) as any;
+
+                if (d.type === "source") {
+                  // d.source.url is either a Vyla proxy URL (/api?url=<encoded>)
+                  // or a toustream proxy URL, or a direct m3u8
+                  const proxyUrl: string = d.source?.url || "";
+                  if (!proxyUrl) continue;
+
+                  // Extract inner CDN URL from proxy wrapper
+                  let innerUrl = proxyUrl;
+                  try {
+                    const pu = new URL(proxyUrl);
+                    const encoded = pu.searchParams.get("url");
+                    if (encoded) innerUrl = encoded;
+                  } catch { /* keep proxyUrl */ }
+
+                  if (!innerUrl || seenUrls.has(innerUrl)) continue;
+
+                  const provLabel = d.source?.provider
+                    ? `Vyla · ${d.source.provider}`
+                    : `Vyla · ${++provIdx}`;
+
+                  // Wrap inner CDN m3u8 in our hls-proxy for segment rewriting + CORS
+                  const proxied = wrapHls(innerUrl, VYLA_BASE + "/");
+                  sendSource(proxied, provLabel, proxied, proxied);
+
+                } else if (d.type === "done" || d.type === "end") {
+                  break outer;
+                }
+              } catch { /* ignore malformed event */ }
+            }
           }
-        } catch { /* silent */ }
+          reader.cancel().catch(() => {});
+        } catch { /* silent — HF Space may be sleeping */ }
       })(),
 
       // ── anime-day.com — أنمي داي (كرتون غربي/أنمي صيني) ────────────────────
@@ -2292,10 +2319,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "EzVidAPI: جاري الاستخراج…" });
-          // TV: vidnest, vidlink, vidrock all work; Movie: vidlink, vidrock only
-          const providers = type === "tv"
-            ? ["vidnest", "vidlink", "vidrock"]
-            : ["vidlink", "vidrock"];
+          // TV: vidnest, vidlink, vidrock; Movie: vidnest, vidlink, vidrock (vidnest works for many movies too)
+          const providers = ["vidnest", "vidlink", "vidrock"];
           await Promise.allSettled(providers.map(async (prov) => {
             try {
               const apiUrl = type === "tv"
