@@ -2,10 +2,12 @@
  * sourceCache.ts — نظام cache ذكي متعدد الطبقات للمصادر
  *
  * L1: Map في الذاكرة (instant, يُفقد عند restart)
- * L2: Supabase PostgreSQL via REST API (دائم، ينجو من restart)
+ * L2: Replit PostgreSQL via Drizzle ORM (دائم، ينجو من restart)
  */
 
-import { sbGet, sbUpsert, sbDelete } from "./sb.js";
+import { db } from "./db.js";
+import { sourceCache as sourceCacheTable } from "@workspace/db";
+import { eq, lt } from "drizzle-orm";
 
 // ── TTL بالميلي ثانية لكل موقع ──────────────────────────────────
 export const SITE_TTL: Record<string, number> = {
@@ -70,7 +72,6 @@ export function computeExpiry(site: string, sources: any[]): number {
       let url = rawField;
       if (url.startsWith("/api/")) {
         try {
-          // URLSearchParams already decodes — no extra decodeURIComponent needed
           const u   = new URLSearchParams(url.split("?")[1] ?? "");
           const inner = u.get("url");
           if (!inner) continue;
@@ -95,40 +96,42 @@ setInterval(() => {
   for (const [k, v] of l1) { if (now > v.expiresAt) l1.delete(k); }
 }, 10 * 60_000);
 
-// ── L2: Supabase REST helpers ──
+// ── L2: PostgreSQL via Drizzle ──
 async function pgGet(cacheKey: string): Promise<{ sources: any[]; expiresAt: number } | null> {
   try {
-    const rows = await sbGet("source_cache", {
-      cache_key: `eq.${cacheKey}`,
-      select:    "sources,expires_at",
-      limit:     "1",
-    });
+    const rows = await db.select({
+      sources: sourceCacheTable.sources,
+      expiresAt: sourceCacheTable.expiresAt,
+    }).from(sourceCacheTable).where(eq(sourceCacheTable.cacheKey, cacheKey)).limit(1);
     if (!rows[0]) return null;
-    return { sources: rows[0].sources as any[], expiresAt: Number(rows[0].expires_at) };
+    return { sources: rows[0].sources as any[], expiresAt: Number(rows[0].expiresAt) };
   } catch { return null; }
 }
 
 async function pgUpsert(cacheKey: string, site: string, sources: any[], expiresAt: number): Promise<void> {
   try {
-    await sbUpsert("source_cache", {
-      cache_key:  cacheKey,
+    await db.insert(sourceCacheTable).values({
+      cacheKey,
       site,
       sources,
-      fetched_at: Date.now(),
-      expires_at: expiresAt,
+      fetchedAt: Date.now(),
+      expiresAt,
+    }).onConflictDoUpdate({
+      target: sourceCacheTable.cacheKey,
+      set: { sources, fetchedAt: Date.now(), expiresAt },
     });
   } catch { /* silent */ }
 }
 
 async function pgDeleteExpired(): Promise<void> {
   try {
-    await sbDelete("source_cache", { expires_at: `lt.${Date.now()}` });
+    await db.delete(sourceCacheTable).where(lt(sourceCacheTable.expiresAt, Date.now()));
   } catch { /* silent */ }
 }
 
 setInterval(pgDeleteExpired, 3_600_000);
 
-console.log("[sourceCache] Supabase L2 cache مفعّل ✓");
+console.log("[sourceCache] Replit PostgreSQL L2 cache مفعّل ✓");
 
 // ── صنع مفتاح cache ──
 export function makeSourceCacheKey(site: string, title: string, ep: number): string {
@@ -160,7 +163,7 @@ export async function getFromSourceCache(
   if (!row) return null;
 
   if (Date.now() > row.expiresAt) {
-    sbDelete("source_cache", { cache_key: `eq.${key}` }).catch(() => {});
+    db.delete(sourceCacheTable).where(eq(sourceCacheTable.cacheKey, key)).catch(() => {});
     return null;
   }
 

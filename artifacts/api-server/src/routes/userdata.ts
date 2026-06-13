@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from "express";
-import { sbGet, sbInsert, sbUpsert, sbDelete } from "../lib/sb.js";
+import { db } from "../lib/db.js";
+import { watchHistory, favorites, watchProgress } from "@workspace/db";
+import { eq, desc, and } from "drizzle-orm";
 
 const router = Router();
 
@@ -23,12 +25,11 @@ router.get("/user/history", async (req: Request, res: Response) => {
     const limit  = Math.min(Number(req.query.limit) || 60, 100);
     const offset = Number(req.query.offset) || 0;
 
-    const rows = await sbGet("watch_history", {
-      user_id: `eq.${userId}`,
-      order:   "watched_at.desc",
-      limit:   String(limit),
-      offset:  String(offset),
-    });
+    const rows = await db.select().from(watchHistory)
+      .where(eq(watchHistory.userId, userId))
+      .orderBy(desc(watchHistory.watchedAt))
+      .limit(limit)
+      .offset(offset);
 
     return res.json({ history: rows });
   } catch (err) {
@@ -48,24 +49,26 @@ router.post("/user/history", async (req: Request, res: Response) => {
     const season = Number(seasonNumber) || 1;
 
     // Delete existing entry for same combo
-    await sbDelete("watch_history", {
-      user_id:        `eq.${userId}`,
-      anime_id:       `eq.${Number(animeId)}`,
-      episode_number: `eq.${Number(episodeNumber)}`,
-      season_number:  `eq.${season}`,
-    });
+    await db.delete(watchHistory).where(
+      and(
+        eq(watchHistory.userId, userId),
+        eq(watchHistory.animeId, Number(animeId)),
+        eq(watchHistory.episodeNumber, Number(episodeNumber)),
+        eq(watchHistory.seasonNumber, season),
+      )
+    );
 
-    const [row] = await sbInsert("watch_history", {
-      user_id:        userId,
-      anime_id:       Number(animeId),
-      anime_title:    animeTitle || null,
-      anime_cover:    animeCover || null,
-      anime_type:     animeType || "anime",
-      episode_number: Number(episodeNumber),
-      season_number:  season,
-      tmdb_id:        tmdbId ? String(tmdbId) : null,
-      media_type:     mediaType || null,
-    });
+    const [row] = await db.insert(watchHistory).values({
+      userId,
+      animeId:       Number(animeId),
+      animeTitle:    animeTitle || null,
+      animeCover:    animeCover || null,
+      animeType:     animeType || "anime",
+      episodeNumber: Number(episodeNumber),
+      seasonNumber:  season,
+      tmdbId:        tmdbId ? String(tmdbId) : null,
+      mediaType:     mediaType || null,
+    }).returning();
 
     return res.status(201).json({ entry: row });
   } catch (err) {
@@ -79,7 +82,9 @@ router.delete("/user/history/:id", async (req: Request, res: Response) => {
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    await sbDelete("watch_history", { id: `eq.${req.params.id}`, user_id: `eq.${userId}` });
+    await db.delete(watchHistory).where(
+      and(eq(watchHistory.id, req.params.id), eq(watchHistory.userId, userId))
+    );
     return res.json({ ok: true });
   } catch (err) {
     console.error("[userdata] history DELETE:", err);
@@ -92,7 +97,7 @@ router.delete("/user/history", async (req: Request, res: Response) => {
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    await sbDelete("watch_history", { user_id: `eq.${userId}` });
+    await db.delete(watchHistory).where(eq(watchHistory.userId, userId));
     return res.json({ ok: true });
   } catch (err) {
     console.error("[userdata] history DELETE all:", err);
@@ -109,10 +114,9 @@ router.get("/user/favorites", async (req: Request, res: Response) => {
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    const rows = await sbGet("favorites", {
-      user_id: `eq.${userId}`,
-      order:   "added_at.desc",
-    });
+    const rows = await db.select().from(favorites)
+      .where(eq(favorites.userId, userId))
+      .orderBy(desc(favorites.addedAt));
     return res.json({ favorites: rows });
   } catch (err) {
     console.error("[userdata] favorites GET:", err);
@@ -125,8 +129,9 @@ router.get("/user/favorites/ids", async (req: Request, res: Response) => {
   if (!userId) return res.json({ ids: [] });
 
   try {
-    const rows = await sbGet("favorites", { user_id: `eq.${userId}`, select: "anime_id" });
-    return res.json({ ids: rows.map((r: any) => r.anime_id) });
+    const rows = await db.select({ animeId: favorites.animeId }).from(favorites)
+      .where(eq(favorites.userId, userId));
+    return res.json({ ids: rows.map((r) => r.animeId) });
   } catch (err) {
     console.error("[userdata] favorites/ids GET:", err);
     return res.status(500).json({ error: "خطأ في الخادم" });
@@ -141,25 +146,23 @@ router.post("/user/favorites", async (req: Request, res: Response) => {
     const { animeId, animeTitle, animeCover, animeType, tmdbId, mediaType } = req.body;
     if (!animeId) return res.status(400).json({ error: "animeId مطلوب" });
 
-    // sbInsertIgnore handles onConflictDoNothing
-    const rows = await sbGet("favorites", {
-      user_id:  `eq.${userId}`,
-      anime_id: `eq.${Number(animeId)}`,
-    });
+    const existing = await db.select().from(favorites).where(
+      and(eq(favorites.userId, userId), eq(favorites.animeId, Number(animeId)))
+    );
 
-    if (rows.length > 0) {
-      return res.status(201).json({ entry: rows[0], already: true });
+    if (existing.length > 0) {
+      return res.status(201).json({ entry: existing[0], already: true });
     }
 
-    const [row] = await sbInsert("favorites", {
-      user_id:     userId,
-      anime_id:    Number(animeId),
-      anime_title: animeTitle || null,
-      anime_cover: animeCover || null,
-      anime_type:  animeType || "anime",
-      tmdb_id:     tmdbId ? String(tmdbId) : null,
-      media_type:  mediaType || null,
-    });
+    const [row] = await db.insert(favorites).values({
+      userId,
+      animeId:    Number(animeId),
+      animeTitle: animeTitle || null,
+      animeCover: animeCover || null,
+      animeType:  animeType || "anime",
+      tmdbId:     tmdbId ? String(tmdbId) : null,
+      mediaType:  mediaType || null,
+    }).returning();
 
     return res.status(201).json({ entry: row || null, already: false });
   } catch (err) {
@@ -173,10 +176,9 @@ router.delete("/user/favorites/:animeId", async (req: Request, res: Response) =>
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    await sbDelete("favorites", {
-      user_id:  `eq.${userId}`,
-      anime_id: `eq.${Number(req.params.animeId)}`,
-    });
+    await db.delete(favorites).where(
+      and(eq(favorites.userId, userId), eq(favorites.animeId, Number(req.params.animeId)))
+    );
     return res.json({ ok: true });
   } catch (err) {
     console.error("[userdata] favorites DELETE:", err);
@@ -193,10 +195,9 @@ router.get("/user/progress/all", async (req: Request, res: Response) => {
   if (!userId) return res.json({ progress: [] });
 
   try {
-    const rows = await sbGet("watch_progress", {
-      user_id: `eq.${userId}`,
-      order:   "updated_at.desc",
-    });
+    const rows = await db.select().from(watchProgress)
+      .where(eq(watchProgress.userId, userId))
+      .orderBy(desc(watchProgress.updatedAt));
     return res.json({ progress: rows });
   } catch (err) {
     console.error("[userdata] progress/all GET:", err);
@@ -213,13 +214,14 @@ router.get("/user/progress/:animeId/:ep", async (req: Request, res: Response) =>
     const ep      = Number(req.params.ep);
     const season  = Number(req.query.season) || 1;
 
-    const rows = await sbGet("watch_progress", {
-      user_id:        `eq.${userId}`,
-      anime_id:       `eq.${animeId}`,
-      episode_number: `eq.${ep}`,
-      season_number:  `eq.${season}`,
-      limit:          "1",
-    });
+    const rows = await db.select().from(watchProgress).where(
+      and(
+        eq(watchProgress.userId, userId),
+        eq(watchProgress.animeId, animeId),
+        eq(watchProgress.episodeNumber, ep),
+        eq(watchProgress.seasonNumber, season),
+      )
+    ).limit(1);
 
     return res.json({ progress: rows[0] || null });
   } catch (err) {
@@ -236,39 +238,27 @@ router.post("/user/progress", async (req: Request, res: Response) => {
     const { animeId, animeType, episodeNumber, seasonNumber, tmdbId, progressSeconds, durationSeconds } = req.body;
     if (!animeId || progressSeconds == null) return res.status(400).json({ error: "animeId و progressSeconds مطلوبان" });
 
-    let row: any;
-    try {
-      [row] = await sbUpsert("watch_progress", {
-        user_id:          userId,
-        anime_id:         Number(animeId),
-        anime_type:       animeType || "anime",
-        episode_number:   Number(episodeNumber) || 1,
-        season_number:    Number(seasonNumber) || 1,
-        tmdb_id:          tmdbId ? String(tmdbId) : null,
-        progress_seconds: Number(progressSeconds),
-        duration_seconds: Number(durationSeconds) || 0,
-        updated_at:       new Date().toISOString(),
-      });
-    } catch (upsertErr: any) {
-      if (upsertErr?.message?.includes("23505") || upsertErr?.message?.includes("duplicate key")) {
-        const updated = await sbUpdate("watch_progress",
-          {
-            user_id:        `eq.${userId}`,
-            anime_id:       `eq.${Number(animeId)}`,
-            episode_number: `eq.${Number(episodeNumber) || 1}`,
-            season_number:  `eq.${Number(seasonNumber) || 1}`,
-          },
-          {
-            progress_seconds: Number(progressSeconds),
-            duration_seconds: Number(durationSeconds) || 0,
-            updated_at:       new Date().toISOString(),
-          }
-        );
-        row = updated[0];
-      } else {
-        throw upsertErr;
+    const ep = Number(episodeNumber) || 1;
+    const season = Number(seasonNumber) || 1;
+
+    const [row] = await db.insert(watchProgress).values({
+      userId,
+      animeId:         Number(animeId),
+      animeType:       animeType || "anime",
+      episodeNumber:   ep,
+      seasonNumber:    season,
+      tmdbId:          tmdbId ? String(tmdbId) : null,
+      progressSeconds: Number(progressSeconds),
+      durationSeconds: Number(durationSeconds) || 0,
+      updatedAt:       new Date(),
+    }).onConflictDoUpdate({
+      target: [watchProgress.userId, watchProgress.animeId, watchProgress.episodeNumber, watchProgress.seasonNumber],
+      set: {
+        progressSeconds: Number(progressSeconds),
+        durationSeconds: Number(durationSeconds) || 0,
+        updatedAt:       new Date(),
       }
-    }
+    }).returning();
 
     return res.status(201).json({ entry: row });
   } catch (err) {
@@ -282,15 +272,14 @@ router.get("/user/continue-watching", async (req: Request, res: Response) => {
   if (!userId) return res.json([]);
 
   try {
-    const rows = await sbGet("watch_progress", {
-      user_id: `eq.${userId}`,
-      order:   "updated_at.desc",
-      limit:   "20",
-    });
+    const rows = await db.select().from(watchProgress)
+      .where(eq(watchProgress.userId, userId))
+      .orderBy(desc(watchProgress.updatedAt))
+      .limit(20);
 
-    const active = rows.filter((r: any) =>
-      r.progress_seconds > 30 &&
-      (r.duration_seconds === 0 || r.progress_seconds < (r.duration_seconds ?? 0) * 0.95)
+    const active = rows.filter((r) =>
+      (r.progressSeconds || 0) > 30 &&
+      (r.durationSeconds === 0 || (r.progressSeconds || 0) < ((r.durationSeconds ?? 0) * 0.95))
     );
 
     return res.json(active);
@@ -309,11 +298,10 @@ router.get("/user/stats", async (req: Request, res: Response) => {
   if (!userId) return res.json({ watchedCount: 0, favoritesCount: 0, progressCount: 0 });
 
   try {
-    // Use Supabase count header
     const [histRows, favRows, progRows] = await Promise.all([
-      sbGet("watch_history",  { user_id: `eq.${userId}`, select: "id" }),
-      sbGet("favorites",      { user_id: `eq.${userId}`, select: "id" }),
-      sbGet("watch_progress", { user_id: `eq.${userId}`, select: "id" }),
+      db.select({ id: watchHistory.id }).from(watchHistory).where(eq(watchHistory.userId, userId)),
+      db.select({ id: favorites.id }).from(favorites).where(eq(favorites.userId, userId)),
+      db.select({ id: watchProgress.id }).from(watchProgress).where(eq(watchProgress.userId, userId)),
     ]);
 
     return res.json({

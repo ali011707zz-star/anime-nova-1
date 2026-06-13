@@ -12,6 +12,8 @@ export const comments = pgTable("comments", {
   tmdbId: varchar("tmdb_id", { length: 32 }),
   text: text("text").notNull(),
   likes: integer("likes").notNull().default(0),
+  parentId: uuid("parent_id"),
+  replyToUsername: varchar("reply_to_username", { length: 64 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
