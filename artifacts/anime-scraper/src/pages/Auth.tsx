@@ -7,30 +7,24 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { useLocation } from "wouter";
 
-declare const __SUPABASE_URL__: string;
-declare const __SUPABASE_ANON_KEY__: string;
+declare const __GOOGLE_CLIENT_ID__: string;
 
-/** فتح Google OAuth عبر Supabase مباشرةً بدون SDK */
+/** فتح Google OAuth مباشرةً بدون Supabase */
 async function signInWithGoogle() {
-  const supabaseUrl = __SUPABASE_URL__;
-  const anonKey     = __SUPABASE_ANON_KEY__;
-  const redirectUri = `${window.location.origin}/auth/callback`;
-
-  const res = await fetch(`${supabaseUrl}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUri)}`, {
-    method: "GET",
-    headers: { "apikey": anonKey },
-    redirect: "manual",
-  }).catch(() => null);
-
-  /* Supabase يُعيد 302 إلى Google — نقرأ الـ Location ونُوجّه المستخدم */
-  const location = res?.headers.get("location");
-  if (location) {
-    window.location.href = location;
+  const clientId = __GOOGLE_CLIENT_ID__;
+  if (!clientId) {
+    alert("تسجيل الدخول بـ Google غير مفعّل حالياً. يرجى استخدام البريد الإلكتروني.");
     return;
   }
-
-  /* إذا لم يعمل الـ fetch المباشر، نبني الـ URL يدوياً */
-  window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUri)}`;
+  const redirectUri = `${window.location.origin}/auth/callback`;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "token",
+    scope: "openid email profile",
+    prompt: "select_account",
+  });
+  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 
 /* ═══════════════════════════════════════════════
