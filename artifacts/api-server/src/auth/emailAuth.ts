@@ -3,6 +3,34 @@ import { db, users } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { sendVerifyEmail, sendPasswordResetEmail } from "./emailService.js";
+
+/* ══ مخزن كودات التحقق (في الذاكرة) ══════════════════════════════
+   المفتاح = البريد الإلكتروني (صغير)
+   يُحذف تلقائياً بعد 10 دقائق أو عند الاستخدام
+══════════════════════════════════════════════════════════════════ */
+interface PendingCode {
+  code: string;
+  expiresAt: number;
+  attempts: number;
+  type: "signup" | "reset";
+}
+const pendingCodes = new Map<string, PendingCode>();
+const CODE_TTL_MS = 10 * 60 * 1000; // 10 دقائق
+const MAX_ATTEMPTS = 5;
+const RESEND_COOLDOWN_MS = 60 * 1000; // دقيقة واحدة بين الإرسالات
+const lastSentAt = new Map<string, number>();
+
+function generateCode(): string {
+  return String(Math.floor(100_000 + Math.random() * 900_000));
+}
+
+function cleanupExpiredCodes() {
+  const now = Date.now();
+  for (const [key, v] of pendingCodes) {
+    if (v.expiresAt <= now) pendingCodes.delete(key);
+  }
+}
 
 const scryptAsync = promisify(scrypt);
 
@@ -65,10 +93,71 @@ function userPayload(user: any) {
 
 export function registerEmailAuthRoutes(app: Express): void {
 
-  /* ── Sign Up (direct, no email verification) ───────────────────── */
+  /* ── Send verification code (signup / reset) ──────────────────── */
+  app.post("/api/auth/send-verify-code", async (req: Request, res: Response) => {
+    try {
+      cleanupExpiredCodes();
+      const { email, type = "signup" } = req.body || {};
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email)))
+        return res.status(400).json({ error: "بريد إلكتروني غير صالح" });
+
+      const emailKey = String(email).toLowerCase().trim();
+
+      /* cooldown: منع إعادة الإرسال المتكرر */
+      const last = lastSentAt.get(emailKey) || 0;
+      if (Date.now() - last < RESEND_COOLDOWN_MS) {
+        const wait = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - last)) / 1000);
+        return res.status(429).json({ error: `انتظر ${wait} ثانية قبل إعادة الإرسال` });
+      }
+
+      if (type === "signup") {
+        /* تحقق أن البريد غير مسجّل */
+        const [existing] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.email, emailKey))
+          .limit(1);
+        if (existing)
+          return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
+      }
+
+      if (type === "reset") {
+        /* تحقق أن البريد موجود */
+        const [existing] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.email, emailKey))
+          .limit(1);
+        if (!existing)
+          return res.status(404).json({ error: "لا يوجد حساب بهذا البريد الإلكتروني" });
+      }
+
+      const code = generateCode();
+      pendingCodes.set(emailKey, { code, expiresAt: Date.now() + CODE_TTL_MS, attempts: 0, type: type as "signup" | "reset" });
+      lastSentAt.set(emailKey, Date.now());
+
+      const result = type === "reset"
+        ? await sendPasswordResetEmail(emailKey, code)
+        : await sendVerifyEmail(emailKey, code);
+
+      if (!result.ok)
+        return res.status(500).json({ error: "فشل إرسال البريد، حاول مرة أخرى" });
+
+      const resp: Record<string, any> = { sent: true };
+      /* في وضع الاختبار (Ethereal) أرجع رابط المعاينة ليتمكن المطوّر من رؤية الكود */
+      if (result.previewUrl) resp.previewUrl = result.previewUrl;
+
+      return res.json(resp);
+    } catch (err) {
+      console.error("[send-verify-code]", err);
+      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
+    }
+  });
+
+  /* ── Sign Up (requires verification code) ─────────────────────── */
   app.post("/api/auth/signup", async (req: Request, res: Response) => {
     try {
-      const { email, password, displayName: rawName } = req.body || {};
+      const { email, password, displayName: rawName, verifyCode } = req.body || {};
       if (!email || !password)
         return res.status(400).json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email)))
@@ -76,10 +165,34 @@ export function registerEmailAuthRoutes(app: Express): void {
       if (String(password).length < 6)
         return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
 
+      const emailKey = String(email).toLowerCase().trim();
+
+      /* ── التحقق من الكود ── */
+      if (!verifyCode)
+        return res.status(400).json({ error: "كود التحقق مطلوب" });
+
+      const pending = pendingCodes.get(emailKey);
+      if (!pending || pending.type !== "signup")
+        return res.status(400).json({ error: "لم يُرسَل كود تحقق لهذا البريد، أرسل الكود أولاً" });
+      if (Date.now() > pending.expiresAt) {
+        pendingCodes.delete(emailKey);
+        return res.status(400).json({ error: "انتهت صلاحية الكود، أرسل كوداً جديداً" });
+      }
+      pending.attempts++;
+      if (pending.attempts > MAX_ATTEMPTS) {
+        pendingCodes.delete(emailKey);
+        return res.status(429).json({ error: "تجاوزت عدد المحاولات، أرسل كوداً جديداً" });
+      }
+      if (String(verifyCode).trim() !== pending.code)
+        return res.status(400).json({ error: `الكود غير صحيح (${MAX_ATTEMPTS - pending.attempts + 1} محاولات متبقية)` });
+
+      /* الكود صحيح → احذفه */
+      pendingCodes.delete(emailKey);
+
       const existing = await db
         .select({ id: users.id })
         .from(users)
-        .where(eq(users.email, String(email)))
+        .where(eq(users.email, emailKey))
         .limit(1);
       if (existing.length > 0)
         return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
@@ -87,15 +200,15 @@ export function registerEmailAuthRoutes(app: Express): void {
       const passwordHash = await hashPassword(String(password));
       const displayName = typeof rawName === "string" && rawName.trim()
         ? rawName.trim().slice(0, 50)
-        : String(email).split("@")[0];
+        : emailKey.split("@")[0];
 
-      const baseUsername = String(email).split("@")[0];
+      const baseUsername = emailKey.split("@")[0];
       const username = await generateUniqueUsername(baseUsername);
 
       const [user] = await db
         .insert(users)
         .values({
-          email: String(email),
+          email: emailKey,
           passwordHash,
           displayName,
           username,
@@ -111,6 +224,47 @@ export function registerEmailAuthRoutes(app: Express): void {
       return res.status(201).json(userPayload(user));
     } catch (err: any) {
       console.error("[signup]", err);
+      return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
+    }
+  });
+
+  /* ── Reset Password (verify code + set new password) ─────────── */
+  app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
+    try {
+      const { email, verifyCode, newPassword } = req.body || {};
+      if (!email || !verifyCode || !newPassword)
+        return res.status(400).json({ error: "جميع الحقول مطلوبة" });
+      if (String(newPassword).length < 6)
+        return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
+
+      const emailKey = String(email).toLowerCase().trim();
+      const pending = pendingCodes.get(emailKey);
+
+      if (!pending || pending.type !== "reset")
+        return res.status(400).json({ error: "لم يُرسَل كود إعادة تعيين لهذا البريد" });
+      if (Date.now() > pending.expiresAt) {
+        pendingCodes.delete(emailKey);
+        return res.status(400).json({ error: "انتهت صلاحية الكود، أرسل كوداً جديداً" });
+      }
+      pending.attempts++;
+      if (pending.attempts > MAX_ATTEMPTS) {
+        pendingCodes.delete(emailKey);
+        return res.status(429).json({ error: "تجاوزت عدد المحاولات، أرسل كوداً جديداً" });
+      }
+      if (String(verifyCode).trim() !== pending.code)
+        return res.status(400).json({ error: `الكود غير صحيح (${MAX_ATTEMPTS - pending.attempts + 1} محاولات متبقية)` });
+
+      pendingCodes.delete(emailKey);
+
+      const [user] = await db.select().from(users).where(eq(users.email, emailKey)).limit(1);
+      if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
+
+      const newHash = await hashPassword(String(newPassword));
+      await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, user.id));
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error("[reset-password]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
