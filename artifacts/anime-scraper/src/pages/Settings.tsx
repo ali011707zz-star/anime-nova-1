@@ -141,7 +141,7 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", cancelLa
 /* ──────────────── Toggle switch ──────────────── */
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
-    <motion.button onClick={() => onChange(!on)}
+    <motion.button onClick={(e) => { e.stopPropagation(); onChange(!on); }}
       className="relative shrink-0 rounded-full transition-colors duration-250"
       style={{
         width: 48, height: 28,
@@ -498,8 +498,7 @@ export default function Settings() {
           iconColor={notifs ? "text-amber-400" : "text-white/30"}
           iconBg={notifs ? "bg-amber-500/10" : "bg-white/5"}
           label="إشعارات الحلقات الجديدة"
-          sub="تنبيه عند نزول حلقة جديدة لأنمي متابَع"
-          badge="قريباً"
+          sub={notifs ? "مفعّلة · ستصلك تنبيهات عند نزول حلقات جديدة" : "موقفة · لن تصلك أي تنبيهات"}
           on={notifs} onChange={setN}
         />
       </Card>
