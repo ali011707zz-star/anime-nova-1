@@ -950,15 +950,16 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     if (r.ok) { const d = await r.json() as any; imdbId = String(d.imdb_id || ""); }
   } catch { /* ignore */ }
 
-  // ── 2. CDN candidates (vdrk.site v1 — only v1 is live; v2/v3 return 404) ──
+  // ── 2. CDN candidates (vdrk.site — v2 and v3 are live; v1 returns 404) ──
   const cdnPath = type === "tv" ? `tv/${tmdbId}/${season}/${ep}` : `movie/${tmdbId}`;
   const cdnBase = "https://cache.vdrk.site";
   const cdnCandidates: Track[] = [
-    { id: "ar-cdn-v1",   lang: "ar", label: "عربي · CDN",      url: `${cdnBase}/v1/${cdnPath}/Arabic.vtt`   },
-    { id: "ar-cdn-v1-2", lang: "ar", label: "عربي · CDN 2",    url: `${cdnBase}/v1/${cdnPath}/Arabic2.vtt`  },
-    { id: "ar-cdn-v1-3", lang: "ar", label: "عربي · CDN 3",    url: `${cdnBase}/v1/${cdnPath}/Arabic3.vtt`  },
-    { id: "ar-cdn-v1-4", lang: "ar", label: "عربي · CDN 4",    url: `${cdnBase}/v1/${cdnPath}/Arabic4.vtt`  },
-    { id: "en-cdn-v1",   lang: "en", label: "إنجليزي · CDN",   url: `${cdnBase}/v1/${cdnPath}/English.vtt`  },
+    { id: "ar-cdn-v2",   lang: "ar", label: "عربي · CDN",      url: `${cdnBase}/v2/${cdnPath}/Arabic.vtt`   },
+    { id: "ar-cdn-v3",   lang: "ar", label: "عربي · CDN 2",    url: `${cdnBase}/v3/${cdnPath}/Arabic.vtt`   },
+    { id: "ar-cdn-v2-2", lang: "ar", label: "عربي · CDN 3",    url: `${cdnBase}/v2/${cdnPath}/Arabic2.vtt`  },
+    { id: "ar-cdn-v2-3", lang: "ar", label: "عربي · CDN 4",    url: `${cdnBase}/v2/${cdnPath}/Arabic3.vtt`  },
+    { id: "en-cdn-v2",   lang: "en", label: "إنجليزي · CDN",   url: `${cdnBase}/v2/${cdnPath}/English.vtt`  },
+    { id: "en-cdn-v3",   lang: "en", label: "إنجليزي · CDN 2", url: `${cdnBase}/v3/${cdnPath}/English.vtt`  },
   ];
   const cdnFound: Track[] = [];
   await Promise.allSettled(cdnCandidates.map(async c => {
@@ -1017,14 +1018,8 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
           if (trackUrl.startsWith("/")) trackUrl = `https://starcima.com${trackUrl}`;
           else continue; // skip unparseable URLs
         }
-        // Skip dead vdrk.site v2/v3 CDN paths — only v1 is live
-        // Also skip sub-retime wrappers that internally use v2/v3 URLs
-        if (
-          trackUrl.includes("cache.vdrk.site/v2/") ||
-          trackUrl.includes("cache.vdrk.site/v3/") ||
-          (trackUrl.includes("sub-retime") && trackUrl.includes("vdrk.site/v2")) ||
-          (trackUrl.includes("sub-retime") && trackUrl.includes("vdrk.site/v3"))
-        ) continue;
+        // Skip dead vdrk.site v1 CDN path — v2 and v3 are live
+        if (trackUrl.includes("cache.vdrk.site/v1/")) continue;
         const lCode = (s.languageCode || s.language || "").toLowerCase();
         // Only include Arabic or English tracks — skip Bengali, Malay, Russian, etc.
         const isAr = lCode.startsWith("ar");
@@ -1468,25 +1463,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
 
-      // ── 11. vidsrc.me (IMDB ID) + vidsrc.xyz (TMDB ID) ─────────────────────
-      (async () => {
-        try {
-          send("status", { msg: "VidSrc: جاري الاستخراج…" });
-          // Try vidsrc.xyz with TMDB ID (no IMDB required)
-          const xyzUrl = type === "tv"
-            ? `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
-            : `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}`;
-          await sendExtracted(xyzUrl, "VidSrc");
-        } catch { /* silent */ }
-        if (imdbId) {
-          try {
-            const meUrl = type === "tv"
-              ? `https://vidsrc.me/embed/tv?imdb=${imdbId}&season=${season}&episode=${epNum}`
-              : `https://vidsrc.me/embed/movie?imdb=${imdbId}`;
-            await sendExtracted(meUrl, "VidSrc2");
-          } catch { /* silent */ }
-        }
-      })(),
+      // ── 11. vidsrc.xyz + vidsrc.me → DISABLED (DNS failure from Replit datacenter) ─
+      Promise.resolve(),
 
       // ── 12. vidsrc.pro → DISABLED (redirects to embed.su, already handled below) ─
       Promise.resolve(),
@@ -1494,30 +1472,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── 9. vidsrc.icu → DISABLED (timeout from datacenter IPs) ──────────────
       Promise.resolve(),
 
-      // ── 10. autoembed.cc (TMDB-native, direct HLS) ───────────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const url = type === "tv"
-            ? `https://autoembed.cc/tv/tmdb/${tmdbId}-${season}-${epNum}`
-            : `https://autoembed.cc/movie/tmdb/${tmdbId}`;
-          await sendExtracted(url, "AutoEmbed");
-        } catch { /* silent */ }
-      })(),
+      // ── 10. autoembed.cc → DISABLED (DNS failure from Replit datacenter) ────
+      Promise.resolve(),
 
       // ── 13. ToonStream — DISABLED ──
       Promise.resolve(),
 
-      // ── 19. multiembed.mov (TMDB-native, returns streamwish/filemoon) ─────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const url = type === "tv"
-            ? `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=tv&s=${season}&e=${epNum}`
-            : `https://multiembed.mov/embed/?tmdb=${tmdbId}&type=movie`;
-          await sendExtracted(url, "multiembed · HLS");
-        } catch { /* silent */ }
-      })(),
+      // ── 19. multiembed.mov → DISABLED (403 from Replit datacenter) ──────────
+      Promise.resolve(),
 
       // ── 20. vidsrc.vip → DISABLED (timeout from datacenter IPs) ─────────────
       Promise.resolve(),
@@ -1541,25 +1503,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       })(),
 
-      // ── 17. vidsrc.xyz (TMDB-based, known to have streamsb/filemoon sources) ──
-      (async () => {
-        try {
-          const url = type === "tv"
-            ? `https://vidsrc.xyz/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
-            : `https://vidsrc.xyz/embed/movie?tmdb=${tmdbId}`;
-          await sendExtracted(url, "VidSrc XYZ");
-        } catch { /* silent */ }
-      })(),
+      // ── 17. vidsrc.xyz → DISABLED (duplicate + DNS failure) ─────────────────
+      Promise.resolve(),
 
-      // ── 18. embed.su (TMDB-based, often filemoon/streamwish inside) ───────────
-      (async () => {
-        try {
-          const url = type === "tv"
-            ? `https://embed.su/embed/tv/${tmdbId}/${season}/${epNum}`
-            : `https://embed.su/embed/movie/${tmdbId}`;
-          await sendExtracted(url, "Embed.su");
-        } catch { /* silent */ }
-      })(),
+      // ── 18. embed.su → DISABLED (DNS failure from Replit datacenter) ─────────
+      Promise.resolve(),
 
       // ── 14. moviesapi.club → DISABLED (domain dead — redirects to alliance4creativity.com) ─
       Promise.resolve(),
@@ -2023,7 +1971,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               signal: AbortSignal.timeout(5_000),
               headers: { "User-Agent": UA },
             });
-            if (!hc.ok) return;
+            // HF Spaces returns 207 when healthy (not 200), treat any 2xx as OK
+            if (hc.status >= 400) return;
           } catch { return; }
 
           // TV episodes قد لا تتوفر — نحاول فقط الأفلام
