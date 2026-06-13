@@ -327,12 +327,14 @@ export default function Profile() {
   const [g1] = AVATAR_COLORS[colorIdx];
   const avatarImg = photoPreview || user.profileImageUrl || null;
 
-  /* local fallbacks for stats */
-  const localHistory   = (() => { try { return JSON.parse(localStorage.getItem("watch-history") || "[]").length; } catch { return 0; } })();
+  /* local fallbacks for stats — combine anime + animation histories */
+  const localAnimeHist = (() => { try { return JSON.parse(localStorage.getItem("watch-history") || "[]").length; } catch { return 0; } })();
+  const localAnimHist  = (() => { try { return JSON.parse(localStorage.getItem("anim-watch-history") || "[]").length; } catch { return 0; } })();
+  const localHistory   = localAnimeHist + localAnimHist;
   const localFavorites = (() => { try { return JSON.parse(localStorage.getItem("savedAnime") || "[]").length; } catch { return 0; } })();
 
-  const watchedCount  = stats?.watchedCount  ?? localHistory;
-  const favCount      = stats?.favoritesCount ?? localFavorites;
+  const watchedCount  = Math.max(stats?.watchedCount  ?? 0, localHistory);
+  const favCount      = Math.max(stats?.favoritesCount ?? 0, localFavorites);
   const progressCount = stats?.progressCount  ?? 0;
 
   const joinDate = user.createdAt ? new Date(user.createdAt).toLocaleDateString("ar-SA", { year: "numeric", month: "long" }) : null;
@@ -391,6 +393,11 @@ export default function Profile() {
               className="absolute inset-0 rounded-[1.5rem] flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 active:opacity-100"
               style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
               <Camera className="w-6 h-6 text-white" />
+            </button>
+            <button onClick={() => fileRef.current?.click()}
+              className="absolute -bottom-1.5 -left-1.5 w-7 h-7 rounded-xl flex items-center justify-center active:scale-90 transition-transform shadow-lg"
+              style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)", border: "2px solid #09090B", boxShadow: "0 2px 12px rgba(124,58,237,0.55)" }}>
+              <Camera className="w-3.5 h-3.5 text-white" />
             </button>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
           </div>

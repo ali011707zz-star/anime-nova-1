@@ -317,22 +317,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
         </div>
       )}
 
-      {/* ══════════════════════════════════════════
-          OAUTH BUTTONS (login + signup only)
-      ══════════════════════════════════════════ */}
-      {(flow === "login" || flow === "signup") && (
-        <div className="mb-3">
-          <div className="flex gap-2">
-            <div className="flex-1"><GoogleBtn /></div>
-            <div className="flex-1"><GithubBtn /></div>
-          </div>
-          <div className="flex items-center gap-3 my-4">
-            <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
-            <span className="text-[11px] text-white/25 font-['Cairo']">أو</span>
-            <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
-          </div>
-        </div>
-      )}
+      {/* OAuth buttons hidden temporarily — will be added later */}
 
       {/* ══════════════════════════════════════════
           LOGIN
