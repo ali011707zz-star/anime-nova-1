@@ -5657,8 +5657,9 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
-      case "anineko":     (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "mitanime":    (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, [])); break;
       default: break;
     }
     res.json({ sources });
