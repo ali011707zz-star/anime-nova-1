@@ -391,14 +391,14 @@ export default function RiftPlayer({
         highBufferWatchdogPeriod: 2,
         nudgeOffset: 0.4,
         nudgeMaxRetry: 8,
-        maxStarvationDelay: 2,
-        maxLoadingDelay: 2,
+        maxStarvationDelay: 12,
+        maxLoadingDelay: 12,
         startLevel: -1,
         abrEwmaDefaultEstimate: 3_000_000,
         testBandwidth: false,
         capLevelToPlayerSize: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
-          xhr.timeout = 10000;
+          xhr.timeout = 25000;
         },
       });
       hlsRef.current = hls;
