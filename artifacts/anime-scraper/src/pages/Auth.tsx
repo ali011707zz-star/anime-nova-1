@@ -465,7 +465,7 @@ function CodeInfo({ email, previewUrl }: { email: string; previewUrl: string }) 
 
 function CodeInput({ code, refs, onChange, onKeyDown, onPaste }: {
   code: string[];
-  refs: React.RefObject<HTMLInputElement>[];
+  refs: React.RefObject<HTMLInputElement | null>[];
   onChange: (i: number, v: string) => void;
   onKeyDown: (i: number, e: React.KeyboardEvent) => void;
   onPaste: (e: React.ClipboardEvent) => void;

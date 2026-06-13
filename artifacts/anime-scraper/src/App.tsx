@@ -68,6 +68,7 @@ const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
+const CommentsPage       = lazy(() => import("@/pages/Comments"));
 
 function PageLoader() {
   return (
@@ -154,6 +155,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/animation/watch"                    component={AnimationWatchWrapper} />
                 <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
                 <Route path="/animation/:type/:id"             component={AnimationDetail} />
+                <Route path="/comments"                component={CommentsPage} />
                 <Route                                 component={NotFound} />
               </Switch>
             </motion.div>
