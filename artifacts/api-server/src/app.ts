@@ -4,9 +4,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import userdataRouter from "./routes/userdata.js";
 import { logger } from "./lib/logger";
-import { setupAuth } from "./auth/replitAuth";
-import { registerAuthRoutes } from "./auth/routes";
-import { registerEmailAuthRoutes } from "./auth/emailAuth";
+import { setupSession, registerEmailAuthRoutes } from "./auth/index.js";
 
 export async function createApp(): Promise<Express> {
   const app: Express = express();
@@ -16,16 +14,10 @@ export async function createApp(): Promise<Express> {
       logger,
       serializers: {
         req(req) {
-          return {
-            id: req.id,
-            method: req.method,
-            url: req.url?.split("?")[0],
-          };
+          return { id: req.id, method: req.method, url: req.url?.split("?")[0] };
         },
         res(res) {
-          return {
-            statusCode: res.statusCode,
-          };
+          return { statusCode: res.statusCode };
         },
       },
     }),
@@ -34,9 +26,7 @@ export async function createApp(): Promise<Express> {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
 
-  await setupAuth(app);
-
-  registerAuthRoutes(app);
+  setupSession(app);
   registerEmailAuthRoutes(app);
 
   app.use("/api", router);
