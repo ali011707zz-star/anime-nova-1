@@ -3,44 +3,70 @@
  * ─────────────────────────────────────────────────────
  * إرسال بريد إلكتروني عبر nodemailer
  *
- * الأولوية:
- *  1. SMTP_USER + SMTP_PASS موجودة  → SMTP حقيقي (Gmail أو غيره)
- *  2. لا يوجد → Ethereal test account (يُنشأ تلقائياً، URL يظهر في الكونسول)
- *
- * متغيرات البيئة:
- *   SMTP_HOST   (اختياري، افتراضي smtp.gmail.com)
- *   SMTP_PORT   (اختياري، افتراضي 587)
- *   SMTP_USER   (البريد المُرسِل)
- *   SMTP_PASS   (كلمة المرور / App Password لـ Gmail)
- *   SMTP_FROM   (اسم المُرسِل، اختياري)
+ * أولوية قراءة إعدادات SMTP:
+ *  1. متغيرات Replit Secrets (SMTP_USER + SMTP_PASS)  ← أسرع
+ *  2. جدول app_config في Supabase                    ← دائم عند تغيير حساب Replit
+ *  3. Ethereal test account                           ← للتطوير فقط، لا يُسلَّم للـ inbox
  */
 import nodemailer, { type Transporter } from "nodemailer";
+import { sbGet } from "../lib/sb";
 
 let transporter: Transporter | null = null;
 let testAccount: { user: string; pass: string } | null = null;
 let isEthereal = false;
 
+/** يقرأ قيمة مفتاح من جدول app_config في Supabase */
+async function getConfig(key: string): Promise<string | null> {
+  try {
+    const rows = await sbGet<{ value: string }>("app_config", {
+      select: "value",
+      key: `eq.${key}`,
+    });
+    return rows[0]?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function getTransporter(): Promise<Transporter> {
   if (transporter) return transporter;
 
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  /* ── 1. جرّب Replit env vars أولاً (أسرع) ── */
+  let user = process.env.SMTP_USER;
+  let pass = process.env.SMTP_PASS;
+  let host = process.env.SMTP_HOST;
+  let port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined;
+
+  /* ── 2. إذا ناقص → اقرأ من Supabase app_config ── */
+  if (!user || !pass) {
+    console.log("[email] env vars غير مكتملة — يُجرّب Supabase app_config...");
+    const [sbUser, sbPass, sbHost, sbPort] = await Promise.all([
+      getConfig("smtp_user"),
+      getConfig("smtp_pass"),
+      getConfig("smtp_host"),
+      getConfig("smtp_port"),
+    ]);
+    user  = user  || sbUser  || undefined;
+    pass  = pass  || sbPass  || undefined;
+    host  = host  || sbHost  || undefined;
+    port  = port  || (sbPort ? Number(sbPort) : undefined);
+  }
 
   if (user && pass) {
     /* ── SMTP حقيقي ── */
-    const host = process.env.SMTP_HOST || "smtp.gmail.com";
-    const port = Number(process.env.SMTP_PORT) || 587;
+    const smtpHost = host || "smtp.gmail.com";
+    const smtpPort = port || 587;
     transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
       auth: { user, pass },
       tls: { rejectUnauthorized: false },
     });
     isEthereal = false;
-    console.log(`[email] ✅ SMTP جاهز → ${host}:${port} (${user})`);
+    console.log(`[email] ✅ SMTP جاهز → ${smtpHost}:${smtpPort} (${user})`);
   } else {
-    /* ── Ethereal (اختبار فقط — لا يُسلَّم للـ inbox الحقيقي) ── */
+    /* ── 3. Ethereal — آخر خيار (لا يُسلَّم للـ inbox الحقيقي) ── */
     testAccount = await nodemailer.createTestAccount();
     transporter = nodemailer.createTransport({
       host: "smtp.ethereal.email",
@@ -48,7 +74,8 @@ async function getTransporter(): Promise<Transporter> {
       auth: { user: testAccount.user, pass: testAccount.pass },
     });
     isEthereal = true;
-    console.error("[email] ❌ SMTP_USER أو SMTP_PASS غير موجود — كودات التحقق لن تصل للمستخدمين!");
+    console.error("[email] ❌ لا يوجد SMTP_USER/SMTP_PASS في Replit ولا في Supabase app_config!");
+    console.error("[email] أضف smtp_user و smtp_pass في جدول app_config بـ Supabase Dashboard");
     console.warn(`[email] Ethereal fallback: ${testAccount.user}`);
   }
 
@@ -56,21 +83,19 @@ async function getTransporter(): Promise<Transporter> {
 }
 
 /**
- * يُستدعى عند بدء الخادم لفحص إعدادات SMTP فوراً
+ * يُستدعى عند بدء الخادم — يتحقق من اتصال SMTP ويُسجّل النتيجة
  */
 export async function initEmailService(): Promise<void> {
   try {
     const t = await getTransporter();
     if (!isEthereal) {
-      // اختبار الاتصال الفعلي بـ SMTP
       await t.verify();
       console.log("[email] ✅ اتصال SMTP تم التحقق منه بنجاح");
     }
   } catch (err: any) {
-    // إعادة التهيئة عند فشل الاتصال (مثلاً App Password خاطئ)
     transporter = null;
     console.error("[email] ❌ فشل التحقق من SMTP:", err.message);
-    console.error("[email] تأكد من أن SMTP_USER و SMTP_PASS صحيحان وأن App Password مفعّل في Gmail");
+    console.error("[email] تأكد من صحة smtp_user و smtp_pass في Replit Secrets أو Supabase app_config");
   }
 }
 
@@ -81,12 +106,14 @@ export interface SendResult {
   error?: string;
 }
 
+/** يُرسل كود التحقق عبر البريد */
 export async function sendVerifyEmail(
   to: string,
   code: string
 ): Promise<SendResult> {
   try {
     const t = await getTransporter();
+
     const from = process.env.SMTP_FROM
       ? `"Anime NOVA" <${process.env.SMTP_FROM}>`
       : isEthereal
@@ -97,36 +124,8 @@ export async function sendVerifyEmail(
       from,
       to,
       subject: `كود التحقق: ${code} — Anime NOVA`,
-      text: `كود التحقق الخاص بك: ${code}\nصالح لمدة 10 دقائق.`,
-      html: `
-<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
-<body style="margin:0;padding:0;background:#09090B;font-family:'Cairo',Arial,sans-serif;color:#fff;">
-  <div style="max-width:480px;margin:40px auto;background:linear-gradient(135deg,#0F0D1B,#09090B);border:1px solid rgba(139,92,246,0.22);border-radius:24px;overflow:hidden;">
-    <div style="height:3px;background:linear-gradient(90deg,#7C3AED,#A78BFA,#EC4899);"></div>
-    <div style="padding:40px 32px;">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:28px;">
-        <div style="width:42px;height:42px;background:linear-gradient(135deg,#7C3AED,#4F46E5);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:20px;">✨</div>
-        <div>
-          <p style="margin:0;font-size:18px;font-weight:900;color:#fff;">Anime NOVA</p>
-          <p style="margin:0;font-size:11px;color:rgba(255,255,255,0.35);">التحقق من البريد الإلكتروني</p>
-        </div>
-      </div>
-      <p style="font-size:14px;color:rgba(255,255,255,0.7);margin-bottom:28px;line-height:1.7;">
-        مرحباً! استخدم الكود أدناه لتفعيل حسابك في Anime NOVA. الكود صالح لمدة <strong style="color:#A78BFA;">10 دقائق</strong> فقط.
-      </p>
-      <div style="background:rgba(139,92,246,0.12);border:1.5px solid rgba(139,92,246,0.30);border-radius:18px;padding:28px;text-align:center;margin-bottom:24px;">
-        <p style="margin:0 0 8px 0;font-size:11px;color:rgba(255,255,255,0.35);letter-spacing:2px;">كود التحقق</p>
-        <p style="margin:0;font-size:44px;font-weight:900;letter-spacing:10px;color:#A78BFA;font-family:monospace;">${code}</p>
-      </div>
-      <p style="font-size:11px;color:rgba(255,255,255,0.25);text-align:center;margin:0;">
-        إذا لم تطلب هذا الكود، يمكنك تجاهل هذا البريد.
-      </p>
-    </div>
-  </div>
-</body>
-</html>`,
+      html: verifyHtml(code),
+      text: `كود تفعيل حسابك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
     });
 
     const previewUrl = isEthereal
@@ -134,25 +133,24 @@ export async function sendVerifyEmail(
       : undefined;
 
     if (previewUrl) {
-      console.log(`[email] ✅ كود [${code}] → ${to}`);
-      console.log(`[email] 🔗 معاينة البريد: ${previewUrl}`);
-    } else {
-      console.log(`[email] ✅ كود [${code}] أُرسل إلى ${to} (${info.messageId})`);
+      console.log("[email] Ethereal preview:", previewUrl);
     }
 
-    return { ok: true, previewUrl: previewUrl as string | undefined, messageId: info.messageId };
+    return { ok: true, messageId: info.messageId, previewUrl };
   } catch (err: any) {
-    console.error("[email] ❌ فشل الإرسال:", err.message);
+    console.error("[email] فشل إرسال كود التحقق:", err.message);
     return { ok: false, error: err.message };
   }
 }
 
+/** يُرسل كود إعادة تعيين كلمة المرور */
 export async function sendPasswordResetEmail(
   to: string,
   code: string
 ): Promise<SendResult> {
   try {
     const t = await getTransporter();
+
     const from = process.env.SMTP_FROM
       ? `"Anime NOVA" <${process.env.SMTP_FROM}>`
       : isEthereal
@@ -163,34 +161,67 @@ export async function sendPasswordResetEmail(
       from,
       to,
       subject: `إعادة تعيين كلمة المرور: ${code} — Anime NOVA`,
-      html: `
-<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head><meta charset="UTF-8"/></head>
-<body style="margin:0;padding:0;background:#09090B;font-family:'Cairo',Arial,sans-serif;color:#fff;">
-  <div style="max-width:480px;margin:40px auto;background:linear-gradient(135deg,#0F0D1B,#09090B);border:1px solid rgba(236,72,153,0.22);border-radius:24px;overflow:hidden;">
-    <div style="height:3px;background:linear-gradient(90deg,#EC4899,#F97316,#EAB308);"></div>
-    <div style="padding:40px 32px;">
-      <p style="font-size:14px;color:rgba(255,255,255,0.7);margin-bottom:28px;line-height:1.7;">
-        طلبت إعادة تعيين كلمة المرور. استخدم الكود أدناه (صالح <strong style="color:#F9A8D4;">10 دقائق</strong>).
-      </p>
-      <div style="background:rgba(236,72,153,0.10);border:1.5px solid rgba(236,72,153,0.28);border-radius:18px;padding:28px;text-align:center;">
-        <p style="margin:0 0 8px 0;font-size:11px;color:rgba(255,255,255,0.35);letter-spacing:2px;">كود إعادة التعيين</p>
-        <p style="margin:0;font-size:44px;font-weight:900;letter-spacing:10px;color:#F9A8D4;font-family:monospace;">${code}</p>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`,
+      html: resetHtml(code),
+      text: `كود إعادة تعيين كلمة مرورك في Anime NOVA هو: ${code}\nصالح لمدة 10 دقائق فقط.`,
     });
 
-    const previewUrl = isEthereal ? nodemailer.getTestMessageUrl(info) || undefined : undefined;
-    if (previewUrl) console.log(`[email] 🔗 معاينة إعادة التعيين: ${previewUrl}`);
-    else console.log(`[email] ✅ كود إعادة التعيين [${code}] → ${to}`);
+    const previewUrl = isEthereal
+      ? nodemailer.getTestMessageUrl(info) || undefined
+      : undefined;
 
-    return { ok: true, previewUrl: previewUrl as string | undefined, messageId: info.messageId };
+    if (previewUrl) {
+      console.log("[email] Ethereal preview:", previewUrl);
+    }
+
+    return { ok: true, messageId: info.messageId, previewUrl };
   } catch (err: any) {
-    console.error("[email] ❌ فشل الإرسال:", err.message);
+    console.error("[email] فشل إرسال كود إعادة التعيين:", err.message);
     return { ok: false, error: err.message };
   }
+}
+
+/* ── قوالب HTML ─────────────────────────────────────────────────── */
+
+function verifyHtml(code: string): string {
+  return `
+<div dir="rtl" style="font-family:'Segoe UI',Arial,sans-serif;max-width:480px;margin:0 auto;background:#0d0d18;color:#e2e8f0;border-radius:16px;overflow:hidden;">
+  <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);padding:32px;text-align:center;">
+    <p style="margin:0;font-size:26px;font-weight:900;color:#fff;letter-spacing:-0.5px;">Anime NOVA</p>
+    <p style="margin:8px 0 0;color:rgba(255,255,255,0.7);font-size:13px;">تحقق من بريدك الإلكتروني</p>
+  </div>
+  <div style="padding:32px;text-align:center;">
+    <p style="color:#94a3b8;margin:0 0 24px;font-size:15px;">
+      مرحباً! استخدم الكود أدناه لتفعيل حسابك في Anime NOVA. الكود صالح لمدة <strong style="color:#A78BFA;">10 دقائق</strong> فقط.
+    </p>
+    <div style="display:inline-block;background:#1e1b4b;border:2px solid #7c3aed;border-radius:12px;padding:16px 36px;margin-bottom:24px;">
+      <span style="font-size:36px;font-weight:900;letter-spacing:10px;color:#a78bfa;font-family:monospace;">${code}</span>
+    </div>
+    <p style="color:#64748b;font-size:12px;margin:0;">إذا لم تطلب هذا الكود، تجاهل هذا البريد.</p>
+  </div>
+  <div style="padding:16px;text-align:center;border-top:1px solid #1e1b4b;">
+    <p style="color:#475569;font-size:11px;margin:0;">Anime NOVA · جميع الحقوق محفوظة 2025</p>
+  </div>
+</div>`;
+}
+
+function resetHtml(code: string): string {
+  return `
+<div dir="rtl" style="font-family:'Segoe UI',Arial,sans-serif;max-width:480px;margin:0 auto;background:#0d0d18;color:#e2e8f0;border-radius:16px;overflow:hidden;">
+  <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);padding:32px;text-align:center;">
+    <p style="margin:0;font-size:26px;font-weight:900;color:#fff;letter-spacing:-0.5px;">Anime NOVA</p>
+    <p style="margin:8px 0 0;color:rgba(255,255,255,0.7);font-size:13px;">إعادة تعيين كلمة المرور</p>
+  </div>
+  <div style="padding:32px;text-align:center;">
+    <p style="color:#94a3b8;margin:0 0 24px;font-size:15px;">
+      استخدم الكود أدناه لإعادة تعيين كلمة مرورك. الكود صالح لمدة <strong style="color:#A78BFA;">10 دقائق</strong> فقط.
+    </p>
+    <div style="display:inline-block;background:#1e1b4b;border:2px solid #7c3aed;border-radius:12px;padding:16px 36px;margin-bottom:24px;">
+      <span style="font-size:36px;font-weight:900;letter-spacing:10px;color:#a78bfa;font-family:monospace;">${code}</span>
+    </div>
+    <p style="color:#64748b;font-size:12px;margin:0;">إذا لم تطلب إعادة التعيين، تجاهل هذا البريد.</p>
+  </div>
+  <div style="padding:16px;text-align:center;border-top:1px solid #1e1b4b;">
+    <p style="color:#475569;font-size:11px;margin:0;">Anime NOVA · جميع الحقوق محفوظة 2025</p>
+  </div>
+</div>`;
 }
