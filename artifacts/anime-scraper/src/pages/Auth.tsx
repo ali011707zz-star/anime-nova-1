@@ -112,6 +112,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
   const [success,   setSuccess]   = useState("");
   const [cooldown,  setCooldown]  = useState(0);
   const [previewUrl, setPreviewUrl] = useState("");
+  const [devCode,    setDevCode]    = useState("");
   const codeRefs = [
     useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null),
@@ -146,6 +147,12 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       if (!res.ok) { setError(data.error || "حدث خطأ"); setLoading(false); return false; }
       startCooldown(60);
       if (data.previewUrl) setPreviewUrl(data.previewUrl);
+      if (data.devCode) {
+        setDevCode(data.devCode);
+        // ملء الكود تلقائياً في خانات الإدخال
+        const digits = String(data.devCode).split("");
+        setCode(digits.length === 6 ? digits : [...digits, ...Array(6)].slice(0, 6).map(d => d || ""));
+      }
       setLoading(false);
       return true;
     } catch {
@@ -396,7 +403,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       ══════════════════════════════════════════ */}
       {flow === "verify" && (
         <form onSubmit={submitSignupVerify} className="flex flex-col gap-4">
-          <CodeInfo email={email} previewUrl={previewUrl} />
+          <CodeInfo email={email} previewUrl={previewUrl} devCode={devCode} />
           <CodeInput code={code} refs={codeRefs} onChange={handleCodeInput} onKeyDown={handleCodeKey} onPaste={handleCodePaste} />
           <ErrorBox error={error} />
           <SubmitBtn loading={loading} label="تحقّق وأنشئ الحساب" />
@@ -427,7 +434,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       ══════════════════════════════════════════ */}
       {flow === "reset" && (
         <form onSubmit={submitReset} className="flex flex-col gap-4">
-          <CodeInfo email={email} previewUrl={previewUrl} />
+          <CodeInfo email={email} previewUrl={previewUrl} devCode={devCode} />
           <CodeInput code={code} refs={codeRefs} onChange={handleCodeInput} onKeyDown={handleCodeKey} onPaste={handleCodePaste} />
           <div className="relative">
             <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/25 pointer-events-none" />
@@ -500,7 +507,24 @@ function ResendBtn({ cooldown, loading, onResend }: { cooldown: number; loading:
   );
 }
 
-function CodeInfo({ email, previewUrl }: { email: string; previewUrl: string }) {
+function CodeInfo({ email, previewUrl, devCode }: { email: string; previewUrl: string; devCode?: string }) {
+  if (devCode) {
+    return (
+      <div className="rounded-2xl px-4 py-3 text-center"
+        style={{ background: "rgba(139,92,246,0.13)", border: "1px solid rgba(139,92,246,0.35)" }}>
+        <p className="text-[11px] text-white/50 font-['Cairo'] mb-1.5">وضع التطوير — الكود مُولَّد تلقائياً</p>
+        <div className="flex justify-center gap-1.5 mb-1">
+          {devCode.split("").map((d, i) => (
+            <span key={i} className="w-8 h-9 flex items-center justify-center rounded-lg text-[18px] font-black font-mono"
+              style={{ background: "rgba(124,58,237,0.25)", border: "1.5px solid rgba(124,58,237,0.45)", color: "#A78BFA" }}>
+              {d}
+            </span>
+          ))}
+        </div>
+        <p className="text-[11px] text-white/35 font-['Cairo']">تم ملء الخانات تلقائياً · اضغط «إنشاء حساب» للمتابعة</p>
+      </div>
+    );
+  }
   return (
     <div className="rounded-2xl px-4 py-3 text-center"
       style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.18)" }}>

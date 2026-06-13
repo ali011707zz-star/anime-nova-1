@@ -2,32 +2,62 @@ import type { Express, Request, Response } from "express";
 import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { sendVerifyEmail, sendPasswordResetEmail } from "./emailService.js";
-import { db } from "../lib/db.js";
+import { db, pool } from "../lib/db.js";
 import { users } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-/* ══ مخزن كودات التحقق (في الذاكرة) ══════════════════════════════ */
-interface PendingCode {
-  code: string;
-  expiresAt: number;
-  attempts: number;
-  type: "signup" | "reset";
-}
-const pendingCodes = new Map<string, PendingCode>();
-const CODE_TTL_MS       = 10 * 60 * 1000;
-const MAX_ATTEMPTS      = 5;
+/* ══ كودات التحقق — مخزّنة في PostgreSQL (تبقى عبر إعادة تشغيل السيرفر) ══ */
+const CODE_TTL_MS        = 10 * 60 * 1000;
+const MAX_ATTEMPTS       = 5;
 const RESEND_COOLDOWN_MS = 60 * 1000;
-const lastSentAt        = new Map<string, number>();
 
 function generateCode(): string {
   return String(Math.floor(100_000 + Math.random() * 900_000));
 }
 
-function cleanupExpiredCodes() {
-  const now = Date.now();
-  for (const [key, v] of pendingCodes) {
-    if (v.expiresAt <= now) pendingCodes.delete(key);
-  }
+async function setPendingCode(email: string, code: string, type: "signup" | "reset"): Promise<void> {
+  const expiresAt = new Date(Date.now() + CODE_TTL_MS).toISOString();
+  await pool.query(
+    `INSERT INTO pending_verifications(email, code, type, expires_at, attempts, sent_at)
+     VALUES($1,$2,$3,$4,0,NOW())
+     ON CONFLICT(email) DO UPDATE
+       SET code=$2, type=$3, expires_at=$4, attempts=0, sent_at=NOW()`,
+    [email, code, type, expiresAt]
+  );
+}
+
+async function getPendingCode(email: string): Promise<{ code: string; type: string; expiresAt: Date; attempts: number } | null> {
+  const r = await pool.query(
+    `SELECT code, type, expires_at, attempts FROM pending_verifications WHERE email=$1`,
+    [email]
+  );
+  if (!r.rows.length) return null;
+  const row = r.rows[0];
+  return { code: row.code, type: row.type, expiresAt: new Date(row.expires_at), attempts: row.attempts };
+}
+
+async function incrementAttempts(email: string): Promise<number> {
+  const r = await pool.query(
+    `UPDATE pending_verifications SET attempts=attempts+1 WHERE email=$1 RETURNING attempts`,
+    [email]
+  );
+  return r.rows[0]?.attempts ?? MAX_ATTEMPTS + 1;
+}
+
+async function deletePendingCode(email: string): Promise<void> {
+  await pool.query(`DELETE FROM pending_verifications WHERE email=$1`, [email]);
+}
+
+async function getSentAt(email: string): Promise<Date | null> {
+  const r = await pool.query(
+    `SELECT sent_at FROM pending_verifications WHERE email=$1`,
+    [email]
+  );
+  return r.rows[0]?.sent_at ? new Date(r.rows[0].sent_at) : null;
+}
+
+async function cleanupExpiredCodes(): Promise<void> {
+  await pool.query(`DELETE FROM pending_verifications WHERE expires_at < NOW()`).catch(() => {});
 }
 
 const scryptAsync = promisify(scrypt);
@@ -84,15 +114,17 @@ export function registerEmailAuthRoutes(app: Express): void {
   /* ── Send verification code ─────────────────────────────────── */
   app.post("/api/auth/send-verify-code", async (req: Request, res: Response) => {
     try {
-      cleanupExpiredCodes();
+      await cleanupExpiredCodes();
       const { email, type = "signup" } = req.body || {};
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email)))
         return res.status(400).json({ error: "بريد إلكتروني غير صالح" });
 
       const emailKey = String(email).toLowerCase().trim();
-      const last = lastSentAt.get(emailKey) || 0;
-      if (Date.now() - last < RESEND_COOLDOWN_MS) {
-        const wait = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - last)) / 1000);
+
+      // Cooldown: check last sent time from DB
+      const sentAt = await getSentAt(emailKey);
+      if (sentAt && Date.now() - sentAt.getTime() < RESEND_COOLDOWN_MS) {
+        const wait = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - sentAt.getTime())) / 1000);
         return res.status(429).json({ error: `انتظر ${wait} ثانية قبل إعادة الإرسال` });
       }
 
@@ -104,8 +136,7 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(404).json({ error: "لا يوجد حساب بهذا البريد الإلكتروني" });
 
       const code = generateCode();
-      pendingCodes.set(emailKey, { code, expiresAt: Date.now() + CODE_TTL_MS, attempts: 0, type: type as "signup" | "reset" });
-      lastSentAt.set(emailKey, Date.now());
+      await setPendingCode(emailKey, code, type as "signup" | "reset");
 
       const result = type === "reset"
         ? await sendPasswordResetEmail(emailKey, code)
@@ -116,6 +147,8 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       const resp: Record<string, any> = { sent: true };
       if (result.previewUrl) resp.previewUrl = result.previewUrl;
+      // وضع التطوير: لا يوجد SMTP حقيقي → أرسل الكود مباشرة ليُعرض في الواجهة
+      if (!process.env.SMTP_USER) resp.devCode = code;
       return res.json(resp);
     } catch (err) {
       console.error("[send-verify-code]", err);
@@ -139,22 +172,22 @@ export function registerEmailAuthRoutes(app: Express): void {
       if (!verifyCode)
         return res.status(400).json({ error: "كود التحقق مطلوب" });
 
-      const pending = pendingCodes.get(emailKey);
+      const pending = await getPendingCode(emailKey);
       if (!pending || pending.type !== "signup")
         return res.status(400).json({ error: "لم يُرسَل كود تحقق لهذا البريد، أرسل الكود أولاً" });
-      if (Date.now() > pending.expiresAt) {
-        pendingCodes.delete(emailKey);
+      if (Date.now() > pending.expiresAt.getTime()) {
+        await deletePendingCode(emailKey);
         return res.status(400).json({ error: "انتهت صلاحية الكود، أرسل كوداً جديداً" });
       }
-      pending.attempts++;
-      if (pending.attempts > MAX_ATTEMPTS) {
-        pendingCodes.delete(emailKey);
+      const attempts = await incrementAttempts(emailKey);
+      if (attempts > MAX_ATTEMPTS) {
+        await deletePendingCode(emailKey);
         return res.status(429).json({ error: "تجاوزت عدد المحاولات، أرسل كوداً جديداً" });
       }
       if (String(verifyCode).trim() !== pending.code)
-        return res.status(400).json({ error: `الكود غير صحيح (${MAX_ATTEMPTS - pending.attempts + 1} محاولات متبقية)` });
+        return res.status(400).json({ error: `الكود غير صحيح (${MAX_ATTEMPTS - attempts + 1} محاولات متبقية)` });
 
-      pendingCodes.delete(emailKey);
+      await deletePendingCode(emailKey);
 
       const already = await db.select({ id: users.id }).from(users).where(eq(users.email, emailKey)).limit(1);
       if (already.length > 0)
@@ -196,23 +229,23 @@ export function registerEmailAuthRoutes(app: Express): void {
         return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
 
       const emailKey = String(email).toLowerCase().trim();
-      const pending  = pendingCodes.get(emailKey);
+      const pending  = await getPendingCode(emailKey);
 
       if (!pending || pending.type !== "reset")
         return res.status(400).json({ error: "لم يُرسَل كود إعادة تعيين لهذا البريد" });
-      if (Date.now() > pending.expiresAt) {
-        pendingCodes.delete(emailKey);
+      if (Date.now() > pending.expiresAt.getTime()) {
+        await deletePendingCode(emailKey);
         return res.status(400).json({ error: "انتهت صلاحية الكود، أرسل كوداً جديداً" });
       }
-      pending.attempts++;
-      if (pending.attempts > MAX_ATTEMPTS) {
-        pendingCodes.delete(emailKey);
+      const attempts = await incrementAttempts(emailKey);
+      if (attempts > MAX_ATTEMPTS) {
+        await deletePendingCode(emailKey);
         return res.status(429).json({ error: "تجاوزت عدد المحاولات، أرسل كوداً جديداً" });
       }
       if (String(verifyCode).trim() !== pending.code)
-        return res.status(400).json({ error: `الكود غير صحيح (${MAX_ATTEMPTS - pending.attempts + 1} محاولات متبقية)` });
+        return res.status(400).json({ error: `الكود غير صحيح (${MAX_ATTEMPTS - attempts + 1} محاولات متبقية)` });
 
-      pendingCodes.delete(emailKey);
+      await deletePendingCode(emailKey);
 
       const userRows = await db.select().from(users).where(eq(users.email, emailKey)).limit(1);
       if (!userRows.length) return res.status(404).json({ error: "المستخدم غير موجود" });
