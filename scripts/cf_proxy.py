@@ -6,6 +6,7 @@ CF Proxy — خادم Flask يستخدم curl_cffi لتجاوز Cloudflare
 import json
 import os
 import sys
+import urllib.parse
 from flask import Flask, request, Response
 from curl_cffi import requests as cf
 
@@ -25,7 +26,7 @@ DEFAULT_HEADERS = {
 def health():
     return {"ok": True, "service": "cf-proxy", "impersonate": IMPERSONATE}
 
-@app.route("/fetch")
+@app.route("/fetch", methods=["GET", "POST"])
 def fetch_url():
     url = request.args.get("url", "").strip()
     if not url:
@@ -38,7 +39,8 @@ def fetch_url():
     # Build headers — merge defaults with caller overrides
     hdrs = dict(DEFAULT_HEADERS)
     if referer:
-        hdrs["Referer"] = referer
+        # Encode non-ASCII chars (e.g. Arabic in URL path) for HTTP header compatibility
+        hdrs["Referer"] = urllib.parse.quote(referer, safe="/:@?#&=+,;!$'()*~%._-")
 
     # Optional: caller can pass extra headers as JSON in ?headers=
     extra_hdrs_raw = request.args.get("headers", "")
@@ -51,13 +53,13 @@ def fetch_url():
 
     try:
         if method == "POST":
-            body = request.get_data(as_text=True) or ""
+            body = request.get_data(as_text=False) or b""
             content_type = request.content_type or "application/x-www-form-urlencoded"
             hdrs["Content-Type"] = content_type
             resp = cf.post(
                 url,
                 headers=hdrs,
-                content=body.encode(),
+                data=body,
                 impersonate=IMPERSONATE,
                 timeout=timeout,
                 allow_redirects=True,
@@ -78,8 +80,9 @@ def fetch_url():
             or ("just a moment" in body_text.lower() and "cf_chl_" in body_text.lower())
         )
 
+        body_bytes = body_text.encode("utf-8", errors="replace")
         return Response(
-            body_text,
+            body_bytes,
             status=resp.status_code,
             headers={
                 "X-CF-Blocked":    "1" if cf_blocked else "0",
