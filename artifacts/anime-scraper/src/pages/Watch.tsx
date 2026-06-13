@@ -210,6 +210,7 @@ function isIframeUrl(url: string): boolean {
   if (url.includes("workers.dev")) return false;        // Anime-Phoenix CDN (direct video)
   if (url.includes("streamtape.com")) return false;     // direct MP4
   if (url.includes("sendvid.com")) return false;        // direct MP4
+  if (url.includes("video.kawaii-anime.com")) return false; // kawaii CDN (CORS * — direct HLS)
   if (url.match(/\.(m3u8|mp4|mkv|webm|ts)([?#]|$)/i)) return false; // video file
   return url.startsWith("https://");                    // external embed page
 }
@@ -901,8 +902,9 @@ function ScraperPicker({
     </>
   );
 
-  /* ── While scrapers are still running: show AnimationWatch-style centered loading screen ── */
-  if (!allDone) {
+  /* ── While scrapers are still running AND no sources yet: show loading screen ── */
+  /* If sources already arrived (from a previous run or fast scraper), skip loading screen */
+  if (!allDone && !hasSources && !hasBackupSources) {
     return (
       <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl">
         {/* Blurred poster background */}
