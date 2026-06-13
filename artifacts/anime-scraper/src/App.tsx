@@ -68,6 +68,7 @@ const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
+const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
 const CommentsPage       = lazy(() => import("@/pages/Comments"));
 
 function PageLoader() {
@@ -150,6 +151,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/updates"                 component={Updates} />
                 <Route path="/settings"               component={Settings} />
                 <Route path="/profile"                component={Profile} />
+                <Route path="/auth/callback"           component={AuthCallback} />
                 <Route path="/auth"                    component={AuthPage} />
                 <Route path="/animations"              component={AnimationLibrary} />
                 <Route path="/animation/watch"                    component={AnimationWatchWrapper} />

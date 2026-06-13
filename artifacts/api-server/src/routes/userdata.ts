@@ -236,17 +236,39 @@ router.post("/user/progress", async (req: Request, res: Response) => {
     const { animeId, animeType, episodeNumber, seasonNumber, tmdbId, progressSeconds, durationSeconds } = req.body;
     if (!animeId || progressSeconds == null) return res.status(400).json({ error: "animeId و progressSeconds مطلوبان" });
 
-    const [row] = await sbUpsert("watch_progress", {
-      user_id:          userId,
-      anime_id:         Number(animeId),
-      anime_type:       animeType || "anime",
-      episode_number:   Number(episodeNumber) || 1,
-      season_number:    Number(seasonNumber) || 1,
-      tmdb_id:          tmdbId ? String(tmdbId) : null,
-      progress_seconds: Number(progressSeconds),
-      duration_seconds: Number(durationSeconds) || 0,
-      updated_at:       new Date().toISOString(),
-    });
+    let row: any;
+    try {
+      [row] = await sbUpsert("watch_progress", {
+        user_id:          userId,
+        anime_id:         Number(animeId),
+        anime_type:       animeType || "anime",
+        episode_number:   Number(episodeNumber) || 1,
+        season_number:    Number(seasonNumber) || 1,
+        tmdb_id:          tmdbId ? String(tmdbId) : null,
+        progress_seconds: Number(progressSeconds),
+        duration_seconds: Number(durationSeconds) || 0,
+        updated_at:       new Date().toISOString(),
+      });
+    } catch (upsertErr: any) {
+      if (upsertErr?.message?.includes("23505") || upsertErr?.message?.includes("duplicate key")) {
+        const updated = await sbUpdate("watch_progress",
+          {
+            user_id:        `eq.${userId}`,
+            anime_id:       `eq.${Number(animeId)}`,
+            episode_number: `eq.${Number(episodeNumber) || 1}`,
+            season_number:  `eq.${Number(seasonNumber) || 1}`,
+          },
+          {
+            progress_seconds: Number(progressSeconds),
+            duration_seconds: Number(durationSeconds) || 0,
+            updated_at:       new Date().toISOString(),
+          }
+        );
+        row = updated[0];
+      } else {
+        throw upsertErr;
+      }
+    }
 
     return res.status(201).json({ entry: row });
   } catch (err) {
