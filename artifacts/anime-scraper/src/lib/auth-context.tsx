@@ -15,7 +15,7 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
-  signUp: (email: string, password: string, displayName?: string) => Promise<{ error?: string }>;
+  signUp: (email: string, password: string, displayName?: string, verifyCode?: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   updateProfile: (data: {
     displayName?: string;
@@ -32,7 +32,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   signIn: async () => ({}),
-  signUp: async () => ({}),
+  signUp: async () => ({ }),
   signOut: async () => {},
   updateProfile: async () => ({}),
   changePassword: async () => ({}),
@@ -83,13 +83,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUp = async (email: string, password: string, displayName?: string) => {
+  const signUp = async (email: string, password: string, displayName?: string, verifyCode?: string) => {
     try {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, password, displayName }),
+        body: JSON.stringify({ email, password, displayName, verifyCode }),
       });
       const data = await res.json();
       if (!res.ok) return { error: data.error || "حدث خطأ، حاول مرة أخرى" };
