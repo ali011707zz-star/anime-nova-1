@@ -31,3 +31,12 @@ export const users = pgTable("users", {
 
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
+
+export const pendingVerifications = pgTable("pending_verifications", {
+  email: text("email").primaryKey(),
+  code: text("code").notNull(),
+  type: text("type").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+});
