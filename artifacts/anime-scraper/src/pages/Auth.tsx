@@ -24,7 +24,7 @@ export default function AuthPage() {
 ═══════════════════════════════════════════════ */
 export function AuthModal({ onClose }: { onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" dir="rtl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" dir="rtl">
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0"
@@ -32,25 +32,21 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
         onClick={onClose}
       />
       <motion.div
-        initial={{ opacity: 0, y: 100 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 100 }}
+        initial={{ opacity: 0, scale: 0.95, y: 24 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 24 }}
         transition={{ type: "spring", stiffness: 340, damping: 30 }}
-        className="relative w-full max-w-md flex flex-col overflow-hidden"
+        className="relative w-full max-w-sm flex flex-col overflow-hidden"
         style={{
           maxHeight: "92dvh",
           background: "linear-gradient(180deg, #0E0C1A 0%, #09090B 100%)",
-          borderRadius: "2.2rem 2.2rem 0 0",
+          borderRadius: "2.2rem",
           border: "1.5px solid rgba(139,92,246,0.22)",
-          borderBottom: "none",
-          boxShadow: "0 -32px 80px rgba(0,0,0,0.95), 0 0 80px rgba(124,58,237,0.08)",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.95), 0 0 80px rgba(124,58,237,0.10)",
         }}
         onClick={e => e.stopPropagation()}
       >
         <div className="h-[2px] shrink-0" style={{ background: "linear-gradient(90deg,transparent,#7C3AED,#A78BFA,#EC4899,transparent)" }} />
-        <div className="flex justify-center pt-3.5 pb-0.5 shrink-0">
-          <div className="w-10 h-[3.5px] rounded-full bg-white/10" />
-        </div>
         <div className="overflow-y-auto flex-1">
           <AuthContent onClose={onClose} isModal />
         </div>
