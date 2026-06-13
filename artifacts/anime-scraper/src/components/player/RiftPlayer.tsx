@@ -375,31 +375,36 @@ export default function RiftPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: 90,
-        maxMaxBufferLength: 200,
-        backBufferLength: 30,
-        maxBufferSize: 200 * 1000 * 1000,
+        /* ── تسريع بدء التشغيل: buffer أقل = يبدأ الفيديو أسرع ── */
+        maxBufferLength: 20,
+        maxMaxBufferLength: 40,
+        backBufferLength: 10,
+        maxBufferSize: 50 * 1024 * 1024,
         startFragPrefetch: true,
         progressive: true,
-        fragLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 200,
-        fragLoadingMaxRetryTimeout: 8000,
-        manifestLoadingMaxRetry: 2,
-        manifestLoadingRetryDelay: 300,
-        levelLoadingMaxRetry: 2,
-        levelLoadingRetryDelay: 300,
-        highBufferWatchdogPeriod: 2,
-        nudgeOffset: 0.4,
-        nudgeMaxRetry: 8,
-        maxStarvationDelay: 12,
-        maxLoadingDelay: 12,
-        startLevel: -1,
-        abrEwmaDefaultEstimate: 3_000_000,
+        /* ── بدء من أدنى جودة فوراً ثم ترقية تلقائية ── */
+        startLevel: 0,
+        abrEwmaDefaultEstimate: 8_000_000,
+        abrEwmaFastEstimate: 8_000_000,
         testBandwidth: false,
         capLevelToPlayerSize: false,
+        /* ── إعادة المحاولة بسرعة ── */
+        fragLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 100,
+        fragLoadingMaxRetryTimeout: 5000,
+        manifestLoadingMaxRetry: 2,
+        manifestLoadingRetryDelay: 200,
+        levelLoadingMaxRetry: 2,
+        levelLoadingRetryDelay: 200,
+        /* ── استجابة أسرع عند التوقف ── */
+        highBufferWatchdogPeriod: 1,
+        nudgeOffset: 0.3,
+        nudgeMaxRetry: 8,
+        maxStarvationDelay: 4,
+        maxLoadingDelay: 4,
         enableCEA708Captions: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
-          xhr.timeout = 25000;
+          xhr.timeout = 12000;
         },
       });
       hlsRef.current = hls;
