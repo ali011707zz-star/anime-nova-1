@@ -1107,14 +1107,28 @@ export default function RiftPlayer({
                       style={{ fontSize: 15, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
                       {title || "Nova Player"}
                     </h1>
-                    {/* Row 3: episode + episode title */}
-                    <div className="flex items-center gap-1.5 mt-[4px] overflow-hidden">
-                      <span className="text-white/55 text-[12px] font-black font-['Cairo'] shrink-0">الحلقة {ep}</span>
+                    {/* Row 3: episode badge + episode title */}
+                    <div className="flex items-center gap-2 mt-[5px] overflow-hidden">
+                      {/* episode number pill */}
+                      <span
+                        className="shrink-0 px-2 py-[2px] rounded-md text-[11px] font-black font-['Cairo'] tracking-wide"
+                        style={{
+                          background: "linear-gradient(135deg,rgba(139,92,246,0.32),rgba(109,40,217,0.22))",
+                          border: "1px solid rgba(167,139,250,0.3)",
+                          color: "rgba(221,214,254,0.95)",
+                          textShadow: "0 1px 6px rgba(109,40,217,0.5)",
+                        }}
+                      >
+                        الحلقة {ep}
+                      </span>
+                      {/* episode title */}
                       {epTitle && (
-                        <>
-                          <span className="text-white/25 text-[10px] shrink-0">·</span>
-                          <span className="text-violet-200/85 text-[12px] font-['Cairo'] truncate">{epTitle}</span>
-                        </>
+                        <span
+                          className="text-[12px] font-['Cairo'] truncate leading-tight"
+                          style={{ color: "rgba(233,221,255,0.82)", fontWeight: 500, letterSpacing: "0.01em" }}
+                        >
+                          {epTitle}
+                        </span>
                       )}
                     </div>
                   </div>
