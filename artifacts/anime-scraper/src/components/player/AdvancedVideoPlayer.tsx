@@ -239,7 +239,22 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
 
     const video = videoRef.current;
     if (currentSource.type === 'hls' && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
+      const hls = new Hls({
+        enableWorker: true,
+        maxBufferLength: 20,
+        maxMaxBufferLength: 40,
+        backBufferLength: 10,
+        maxBufferSize: 50 * 1024 * 1024,
+        startFragPrefetch: true,
+        progressive: true,
+        startLevel: 0,
+        abrEwmaDefaultEstimate: 8_000_000,
+        testBandwidth: false,
+        fragLoadingRetryDelay: 100,
+        maxStarvationDelay: 4,
+        maxLoadingDelay: 4,
+        enableCEA708Captions: false,
+      });
       hlsRef.current = hls;
       hls.loadSource(currentSource.url);
       hls.attachMedia(video);

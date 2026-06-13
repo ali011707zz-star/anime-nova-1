@@ -6264,6 +6264,7 @@ const HLS_PROXY_HDRS = (ref: string, origin?: string) => ({
   ...(origin && !ref.includes("kwik.cx") ? { Origin: origin } : {}),
   Accept: "*/*",
   "Accept-Language": "ar,en;q=0.9",
+  "Connection": "keep-alive",
 });
 
 function rewriteM3u8(manifest: string, baseUrl: string, _selfBase: string, ref: string): string {
@@ -6426,7 +6427,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
   }
 
   try {
-    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(30000), redirect: "follow" });
+    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(10000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
     const ct = r.headers.get("content-type") || "video/mp2t";
     const len = r.headers.get("content-length");
