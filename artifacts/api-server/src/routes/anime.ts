@@ -3616,10 +3616,11 @@ async function getKawaiiAnimeSources(
 
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
-      // MP4: رابط CDN بلا امتداد ملف → يجب توجيهه عبر video-proxy حتى يبدأ بـ "/"
-      // وإلا تعتبره isIframeUrl صفحة embed وتُحمّله iframe ← شاشة سوداء
+      // video.kawaii-anime.com CDN: CORS * + no auth → تشغيل مباشر في المتصفح دون hls-proxy
+      // (hls-proxy يجعل كل segment يمر عبر السيرفر = بطء شديد)
+      // MP4: لا امتداد في الرابط → نمرره عبر video-proxy حتى لا يُحمَّل iframe
       const directUrl = isHls
-        ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`
+        ? src.url   // raw CDN URL — hls.js يشغّله مباشرة
         : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
       return {
         name: `كواي أنمي · ${src.quality || "1080p"} · ${subLangLabel}`,
