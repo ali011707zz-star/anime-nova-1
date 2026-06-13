@@ -38,9 +38,9 @@ async function getTransporter(): Promise<Transporter> {
       tls: { rejectUnauthorized: false },
     });
     isEthereal = false;
-    console.log(`[email] SMTP جاهز → ${host}:${port} (${user})`);
+    console.log(`[email] ✅ SMTP جاهز → ${host}:${port} (${user})`);
   } else {
-    /* ── Ethereal (اختبار) ── */
+    /* ── Ethereal (اختبار فقط — لا يُسلَّم للـ inbox الحقيقي) ── */
     testAccount = await nodemailer.createTestAccount();
     transporter = nodemailer.createTransport({
       host: "smtp.ethereal.email",
@@ -48,15 +48,30 @@ async function getTransporter(): Promise<Transporter> {
       auth: { user: testAccount.user, pass: testAccount.pass },
     });
     isEthereal = true;
-    console.warn(
-      "[email] ⚠️  لم تُعيَّن SMTP_USER/SMTP_PASS — يُستخدم Ethereal للاختبار"
-    );
-    console.warn(
-      `[email] Ethereal: ${testAccount.user} / ${testAccount.pass}`
-    );
+    console.error("[email] ❌ SMTP_USER أو SMTP_PASS غير موجود — كودات التحقق لن تصل للمستخدمين!");
+    console.warn(`[email] Ethereal fallback: ${testAccount.user}`);
   }
 
   return transporter;
+}
+
+/**
+ * يُستدعى عند بدء الخادم لفحص إعدادات SMTP فوراً
+ */
+export async function initEmailService(): Promise<void> {
+  try {
+    const t = await getTransporter();
+    if (!isEthereal) {
+      // اختبار الاتصال الفعلي بـ SMTP
+      await t.verify();
+      console.log("[email] ✅ اتصال SMTP تم التحقق منه بنجاح");
+    }
+  } catch (err: any) {
+    // إعادة التهيئة عند فشل الاتصال (مثلاً App Password خاطئ)
+    transporter = null;
+    console.error("[email] ❌ فشل التحقق من SMTP:", err.message);
+    console.error("[email] تأكد من أن SMTP_USER و SMTP_PASS صحيحان وأن App Password مفعّل في Gmail");
+  }
 }
 
 export interface SendResult {

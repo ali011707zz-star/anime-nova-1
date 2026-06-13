@@ -1,5 +1,6 @@
 import { createApp } from "./app";
 import { logger } from "./lib/logger";
+import { initEmailService } from "./auth/emailService";
 
 const rawPort = process.env["PORT"];
 
@@ -24,4 +25,7 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // فحص SMTP فور بدء الخادم
+  initEmailService().catch(() => {});
 });
