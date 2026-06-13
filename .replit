@@ -61,7 +61,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pip install flask curl_cffi -q && CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py"
+args = "CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py"
 waitForPort = 8000
 
 [agent]
@@ -96,6 +96,10 @@ externalPort = 3001
 [[ports]]
 localPort = 24968
 externalPort = 3000
+
+[[ports]]
+localPort = 8000
+externalPort = 8000
 
 [nix]
 channel = "stable-25_05"
