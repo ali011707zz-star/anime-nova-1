@@ -282,6 +282,22 @@ export default function AnimationWatch() {
     if (step !== "playing" || !selSrc || !tmdbId || histSavedRef.current) return;
     histSavedRef.current = true;
     saveAnimHistory(tmdbId, type, displayTitle, posterUrl, ep, season);
+    /* حفظ على الخادم (للمستخدمين المسجّلين) */
+    fetch("/api/user/history", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        animeId:       tmdbId,
+        animeTitle:    displayTitle,
+        animeCover:    posterUrl,
+        animeType:     "animation",
+        episodeNumber: ep,
+        seasonNumber:  season,
+        tmdbId,
+        mediaType:     type,
+      }),
+    }).catch(() => {});
   }, [step, selSrc, tmdbId, type, displayTitle, posterUrl, ep, season]);
   useEffect(() => { histSavedRef.current = false; }, [tmdbId, type, ep, season]);
 

@@ -499,8 +499,8 @@ router.get("/animation/detail", async (req: Request, res: Response) => {
     const id   = String(req.query.id   || "");
     if (!id) { res.status(400).json({ error: "id required" }); return; }
     const app = type === "tv"
-      ? "aggregate_credits,recommendations,content_ratings"
-      : "credits,recommendations";
+      ? "aggregate_credits,recommendations,content_ratings,videos"
+      : "credits,recommendations,videos";
     const data: any = await tmdb(`/${type}/${id}?append_to_response=${app}`);
     // Filter recommendations to animation-only (genre 16 = رسوم متحركة)
     if (data.recommendations?.results) {
