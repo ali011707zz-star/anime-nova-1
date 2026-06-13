@@ -97,8 +97,8 @@ const REL_TYPE: Record<string, string> = {
 };
 const REL_SHOW = new Set(["SEQUEL","PREQUEL","SIDE_STORY","SPIN_OFF","PARENT","ALTERNATIVE"]);
 
-function timeAgo(ts: number): string {
-  const m = Math.floor((Date.now() - ts) / 60000);
+function timeAgo(ts: number | string): string {
+  const m = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
   if (m < 1)  return "الآن";
   if (m < 60) return `منذ ${m} دقيقة`;
   const h = Math.floor(m / 60);
@@ -119,14 +119,15 @@ function fmtRuntime(mins: number) {
 }
 
 // ── Types ─────────────────────────────────────────────────────────
-interface Reply   { id: number; text: string; user: string; ts: number; likes: number; liked: boolean }
-interface Comment { id: number; text: string; user: string; ts: number; likes: number; liked: boolean; replies: Reply[] }
-
-function loadComments(animeId: string): Comment[] {
-  try { return JSON.parse(localStorage.getItem(`nova-comments-${animeId}`) || "[]"); } catch { return []; }
-}
-function saveComments(animeId: string, c: Comment[]) {
-  localStorage.setItem(`nova-comments-${animeId}`, JSON.stringify(c));
+interface Comment {
+  id: string;
+  userId: string;
+  username: string;
+  avatarUrl?: string | null;
+  text: string;
+  likes: number;
+  liked: boolean;
+  createdAt: string;
 }
 function getFavChars(): any[] {
   try { return JSON.parse(localStorage.getItem("fav-characters") || "[]"); } catch { return []; }
@@ -172,16 +173,13 @@ export default function AnimeDetail() {
   const [hoverRating, setHoverRating] = useState(0);
   const [tab, setTab]               = useState<"chars"|"related"|"similar">("chars");
   const [showComments, setShowComments]   = useState(false);
-  const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set());
-  const [replyingTo, setReplyingTo]       = useState<number | null>(null);
   const [showRatingPicker, setShowRatingPicker] = useState(false);
   const [showTrailer, setShowTrailer]     = useState(false);
   const [comments, setComments]     = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
-  const [newReply, setNewReply]     = useState("");
+  const [sendingComment, setSendingComment] = useState(false);
   const [favChars, setFavChars]     = useState<any[]>(() => getFavChars());
   const inputRef = useRef<HTMLInputElement>(null);
-  const replyRef = useRef<HTMLInputElement>(null);
   const countdown = useCountdown(anime?.nextAiringEpisode?.airingAt);
 
   // ── Load anime data ──
@@ -198,7 +196,10 @@ export default function AnimeDetail() {
     const savedList: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     setSaved(savedList.includes(parseInt(params.id)));
     setMyRating(parseInt(localStorage.getItem(`nova-rating-${params.id}`) || "0"));
-    setComments(loadComments(params.id));
+    setComments([]);
+    fetch(`/api/comments?animeId=${params.id}`, { credentials: "include" })
+      .then(r => r.json()).then(d => { if (!cancelled && d.comments) setComments(d.comments); })
+      .catch(() => {});
 
     const doFetch = (useProxy: boolean) => {
       const p: Promise<any> = useProxy
@@ -269,31 +270,35 @@ export default function AnimeDetail() {
     setShowRatingPicker(false);
   };
 
-  const addComment = () => {
+  const addComment = async () => {
     const txt = newComment.trim();
-    if (!txt) return;
-    const c: Comment = { id: Date.now(), text: txt, user: getMyName(), ts: Date.now(), likes: 0, liked: false, replies: [] };
-    const upd = [c, ...comments];
-    setComments(upd); saveComments(params.id!, upd); setNewComment("");
+    if (!txt || !user || sendingComment) return;
+    const myUsername = getMyName();
+    const myAvatar = (user as any)?.avatarUrl || null;
+    setSendingComment(true);
+    try {
+      const res = await fetch("/api/comments", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ animeId: Number(params.id), text: txt, username: myUsername, avatarUrl: myAvatar }),
+      });
+      const data = await res.json();
+      if (data.comment) { setComments(prev => [data.comment, ...prev]); setNewComment(""); }
+    } catch {} finally { setSendingComment(false); }
   };
 
-  const toggleLike = (id: number) => {
-    const upd = comments.map(c => c.id === id
-      ? { ...c, likes: c.liked ? c.likes - 1 : c.likes + 1, liked: !c.liked }
-      : c);
-    setComments(upd); saveComments(params.id!, upd);
+  const toggleLike = async (id: string) => {
+    if (!user) return;
+    setComments(prev => prev.map(c =>
+      c.id === id ? { ...c, liked: !c.liked, likes: c.liked ? c.likes - 1 : c.likes + 1 } : c
+    ));
+    await fetch(`/api/comments/${id}/like`, { method: "POST", credentials: "include" }).catch(() => {});
   };
 
-  const addReply = (commentId: number) => {
-    const txt = newReply.trim();
-    if (!txt) return;
-    const reply: Reply = { id: Date.now(), text: txt, user: getMyName(), ts: Date.now(), likes: 0, liked: false };
-    const upd = comments.map(c => c.id === commentId
-      ? { ...c, replies: [...c.replies, reply] }
-      : c);
-    setComments(upd); saveComments(params.id!, upd); setNewReply("");
-    setExpandedReplies(prev => new Set([...prev, commentId]));
-    setReplyingTo(null);
+  const deleteComment = async (id: string) => {
+    setComments(prev => prev.filter(c => c.id !== id));
+    await fetch(`/api/comments/${id}`, { method: "DELETE", credentials: "include" }).catch(() => {});
   };
 
   const toggleCharFav = (charNode: any) => {
@@ -308,14 +313,6 @@ export default function AnimeDetail() {
     setFavChars(upd);
   };
 
-  const toggleReplyLike = (commentId: number, replyId: number) => {
-    const upd = comments.map(c => c.id === commentId
-      ? { ...c, replies: c.replies.map(r => r.id === replyId
-          ? { ...r, likes: r.liked ? r.likes - 1 : r.likes + 1, liked: !r.liked }
-          : r) }
-      : c);
-    setComments(upd); saveComments(params.id!, upd);
-  };
 
   // ── Loading / Error ──
   // Get cover from watch history for a better loading screen
@@ -802,12 +799,110 @@ export default function AnimeDetail() {
         )}
       </AnimatePresence>
 
-      <CommentsSheet
-        commKey={`nova-comments-${params.id}`}
-        open={showComments}
-        onClose={() => setShowComments(false)}
-        title={anime?.title?.english || anime?.title?.romaji || ""}
-      />
+      {/* ══ COMMENTS SHEET ══════════════════════════════════════ */}
+      <AnimatePresence>
+        {showComments && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowComments(false)}
+              className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100]" />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 h-[78vh] bg-[#0d0d10] rounded-t-[28px] z-[101] flex flex-col border-t border-white/8"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/6 shrink-0" dir="rtl">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-primary" />
+                  <h2 className="text-sm font-black font-['Cairo']">التعليقات</h2>
+                  {comments.length > 0 && (
+                    <span className="text-[9px] bg-primary/15 text-primary px-2 py-0.5 rounded-full font-black">{comments.length}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setShowComments(false); navigate(`/comments?animeId=${params.id}&title=${encodeURIComponent(anime?.title?.romaji || anime?.title?.english || "")}`); }}
+                    className="text-[9px] text-primary/70 font-black font-['Cairo'] px-2.5 py-1 bg-primary/10 border border-primary/20 rounded-xl"
+                  >صفحة كاملة</button>
+                  <button onClick={() => setShowComments(false)} className="w-8 h-8 bg-white/6 rounded-full flex items-center justify-center active:scale-90">
+                    <X className="w-4 h-4 text-white/50" />
+                  </button>
+                </div>
+              </div>
+              {/* Comments list */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3" dir="rtl">
+                {comments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-3 opacity-30">
+                    <MessageSquare className="w-10 h-10" />
+                    <p className="text-sm font-bold font-['Cairo']">لا تعليقات بعد. كن أول من يعلّق!</p>
+                  </div>
+                ) : comments.map(c => {
+                  const isMe = !!(user as any)?.id && c.userId === (user as any)?.id;
+                  return (
+                    <motion.div key={c.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                      className="bg-white/4 rounded-2xl p-3 border border-white/5">
+                      <div className="flex items-start gap-2.5">
+                        {c.avatarUrl
+                          ? <img src={c.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                          : <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black text-white shrink-0"
+                              style={{ background: avatarColor(c.username) }}>{(c.username||"م").charAt(0).toUpperCase()}</div>
+                        }
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-[11px] font-black font-['Cairo']">{c.username}</span>
+                            {isMe && <span className="text-[8px] bg-primary/15 text-primary px-1 py-0.5 rounded-full">أنت</span>}
+                            <span className="text-[9px] text-white/20">{timeAgo(String(c.createdAt))}</span>
+                          </div>
+                          <p className="text-[12px] text-white/70 font-['Cairo'] leading-relaxed">{c.text}</p>
+                          <div className="flex items-center gap-4 mt-2">
+                            <button onClick={() => toggleLike(c.id)}
+                              className="flex items-center gap-1 text-[10px] transition-colors"
+                              style={{ color: c.liked ? "#EC4899" : "rgba(255,255,255,0.3)" }}>
+                              <Heart className={`w-3 h-3 ${c.liked ? "fill-current" : ""}`} /> {c.likes||0}
+                            </button>
+                            {isMe && (
+                              <button onClick={() => deleteComment(c.id)}
+                                className="text-[10px] text-red-400/50 hover:text-red-400 transition-colors font-['Cairo']">
+                                حذف
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+              {/* Input */}
+              <div className="px-4 py-3 border-t border-white/6 shrink-0" dir="rtl">
+                {!user ? (
+                  <button onClick={() => { setShowComments(false); navigate("/auth"); }}
+                    className="w-full py-3 rounded-2xl font-black font-['Cairo'] text-sm text-white"
+                    style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>
+                    سجّل الدخول للتعليق
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 bg-[#111116] rounded-2xl px-4 py-2.5 border border-white/8">
+                    <input
+                      ref={inputRef}
+                      value={newComment}
+                      onChange={e => setNewComment(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && addComment()}
+                      placeholder="اكتب تعليقك..."
+                      className="flex-1 bg-transparent text-white text-sm outline-none font-['Cairo'] placeholder:text-white/25"
+                    />
+                    <motion.button whileTap={{ scale: 0.9 }} onClick={addComment} disabled={!newComment.trim() || sendingComment}
+                      className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shrink-0 disabled:opacity-40">
+                      <Send className="w-3.5 h-3.5 text-white" />
+                    </motion.button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* ══ RATING PICKER ════════════════════════════════════════ */}
       <AnimatePresence>
@@ -912,59 +1007,7 @@ function CharCard({ e, main, isFav, onToggleFav }: { e: any; main?: boolean; isF
   );
 }
 
-function CommentRow({ c, onLike, onReply, full, repliesCount, isExpanded, onToggleReplies, myImage, isMe }: {
-  c: any; onLike: () => void; onReply: () => void; full?: boolean;
-  repliesCount?: number; isExpanded?: boolean; onToggleReplies?: () => void;
-  myImage?: string; isMe?: boolean;
-}) {
-  return (
-    <div className="px-4 py-3.5 flex gap-3">
-      {isMe && myImage ? (
-        <img src={myImage} alt="" className="w-9 h-9 rounded-full object-cover shrink-0 border border-white/10" />
-      ) : (
-        <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black text-white shrink-0"
-          style={{ background: avatarColor(c.user) }}>
-          {c.user.charAt(0).toUpperCase()}
-        </div>
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between mb-1">
-          <div>
-            <span className="text-[12px] font-black font-['Cairo']">{c.user}</span>
-            <span className="mr-2 text-[9px] text-white/25 font-['Cairo']">{timeAgo(c.ts)}</span>
-          </div>
-          <Flag className="w-3.5 h-3.5 text-white/15 shrink-0" />
-        </div>
-        <p className={`text-[13px] text-white/80 font-['Cairo'] leading-relaxed ${!full ? "line-clamp-2" : ""}`}>
-          {c.text}
-        </p>
-        <div className="flex items-center gap-5 mt-2">
-          <button onClick={onLike}
-            className="flex items-center gap-1.5 text-[11px] transition-colors"
-            style={{ color: c.liked ? "#EC4899" : "rgba(255,255,255,0.3)" }}>
-            <Heart className={`w-3.5 h-3.5 ${c.liked ? "fill-current" : ""}`} />
-            <span>{c.likes || 0}</span>
-          </button>
-          <button onClick={onReply}
-            className="flex items-center gap-1.5 text-[11px] text-white/30">
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>رد</span>
-          </button>
-          {(repliesCount ?? c.replies?.length) > 0 && onToggleReplies && (
-            <button onClick={onToggleReplies}
-              className="flex items-center gap-1 text-[10px] font-black font-['Cairo'] transition-colors"
-              style={{ color: isExpanded ? "#c4b5fd" : "rgba(255,255,255,0.25)" }}>
-              <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-              {repliesCount ?? c.replies?.length} ردود
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function avatarColor(name: string) {
   const colors = ["#EF4444","#F97316","#EAB308","#22C55E","#14B8A6","#3B82F6","#8B5CF6","#EC4899"];
-  return colors[name.charCodeAt(0) % colors.length];
+  return colors[(name || " ").charCodeAt(0) % colors.length];
 }

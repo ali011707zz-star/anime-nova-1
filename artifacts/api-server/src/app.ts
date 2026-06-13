@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import userdataRouter from "./routes/userdata.js";
+import commentsRouter from "./routes/comments.js";
 import { logger } from "./lib/logger";
 import { setupSession, registerEmailAuthRoutes } from "./auth/index.js";
 
@@ -31,6 +32,7 @@ export async function createApp(): Promise<Express> {
 
   app.use("/api", router);
   app.use("/api", userdataRouter);
+  app.use("/api", commentsRouter);
 
   return app;
 }
