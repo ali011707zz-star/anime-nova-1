@@ -378,8 +378,10 @@ export default function RiftPlayer({
         /* ── تسريع بدء التشغيل: buffer أقل = يبدأ الفيديو أسرع ── */
         maxBufferLength: 20,
         maxMaxBufferLength: 40,
-        backBufferLength: 10,
+        backBufferLength: 8,
         maxBufferSize: 50 * 1024 * 1024,
+        maxBufferHole: 0.5,
+        maxFragLookUpTolerance: 0.4,
         startFragPrefetch: true,
         progressive: true,
         /* ── بدء من أدنى جودة فوراً ثم ترقية تلقائية ── */
@@ -398,13 +400,13 @@ export default function RiftPlayer({
         levelLoadingRetryDelay: 200,
         /* ── استجابة أسرع عند التوقف ── */
         highBufferWatchdogPeriod: 1,
-        nudgeOffset: 0.3,
+        nudgeOffset: 0.5,
         nudgeMaxRetry: 8,
-        maxStarvationDelay: 4,
-        maxLoadingDelay: 4,
+        maxStarvationDelay: 3,
+        maxLoadingDelay: 3,
         enableCEA708Captions: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
-          xhr.timeout = 12000;
+          xhr.timeout = 10000;
         },
       });
       hlsRef.current = hls;
@@ -1214,7 +1216,7 @@ export default function RiftPlayer({
               >
                 {/* ── Skip intro / outro — always visible when in range ── */}
                 {(showSkipIntro || showSkipOutro) && (
-                  <div className="flex justify-start px-5 pb-2 pointer-events-auto" dir="rtl">
+                  <div className="flex justify-end px-5 pb-2 pointer-events-auto" dir="rtl">
                     {showSkipIntro && (() => {
                       const rem = skipIntro ? Math.max(0, Math.ceil(skipIntro.end - currentTime)) : 0;
                       return (
