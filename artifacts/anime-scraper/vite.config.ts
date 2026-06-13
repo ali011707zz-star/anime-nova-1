@@ -16,6 +16,7 @@ export default defineConfig(async ({ mode }) => {
     base: basePath,
     define: {
       "__GOOGLE_CLIENT_ID__": JSON.stringify(process.env.GOOGLE_CLIENT_ID || ""),
+      "__GITHUB_CLIENT_ID__": JSON.stringify(process.env.GITHUB_CLIENT_ID || ""),
     },
     plugins: [
       react(),
