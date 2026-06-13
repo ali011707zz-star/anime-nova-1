@@ -2019,8 +2019,11 @@ export default function WatchPage() {
         if (d) {
           setAnime(d);
           saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0, userId);
-          /* ── Fetch AniSkip timestamps via server proxy (avoids CORS) ── */
+          /* ── Fetch skip timestamps: aniskip + baha-anime-skip بالتوازي ── */
           setSkipTimes({});
+          const mergeSkip = (st: SkipTimes) => setSkipTimes(prev => ({ ...prev, ...st }));
+
+          // aniskip (MAL ID)
           if (d.idMal) {
             fetch(`/api/anime/aniskip?malId=${d.idMal}&ep=${ep}`, {
               signal: AbortSignal.timeout(10000),
@@ -2034,7 +2037,25 @@ export default function WatchPage() {
                   if (result.skipType === "op") st.op = { start: iv.startTime, end: iv.endTime };
                   if (result.skipType === "ed") st.ed = { start: iv.startTime, end: iv.endTime };
                 }
-                setSkipTimes(st);
+                mergeSkip(st);
+              })
+              .catch(() => {});
+          }
+
+          // baha-anime-skip (Bahamut DB — يُكمل ما فاته aniskip)
+          {
+            const titleEnc   = encodeURIComponent(d.title?.english || d.title?.romaji || "");
+            const nativeEnc  = encodeURIComponent(d.title?.native || "");
+            fetch(`/api/anime/baha-skip?title=${titleEnc}&native=${nativeEnc}&ep=${ep}`, {
+              signal: AbortSignal.timeout(12000),
+            })
+              .then(r => r.ok ? r.json() : null)
+              .then((data: any) => {
+                if (!data?.found || !data?.skip) return;
+                const st: SkipTimes = {};
+                if (data.skip.op) st.op = data.skip.op;
+                if (data.skip.ed) st.ed = data.skip.ed;
+                mergeSkip(st);
               })
               .catch(() => {});
           }

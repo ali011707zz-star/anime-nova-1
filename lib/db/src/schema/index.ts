@@ -3,3 +3,4 @@ export * from "./auth";
 export * from "./userdata";
 export * from "./comments";
 export * from "./source-cache";
+export * from "./subtitle-cache";

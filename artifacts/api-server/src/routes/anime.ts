@@ -5,6 +5,9 @@ import {
   setSourceCache,
   shouldRefreshCache,
 } from "../lib/sourceCache.js";
+import { db } from "../lib/db.js";
+import { subtitleCache as subtitleCacheTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const router = Router();
 
@@ -5881,6 +5884,109 @@ router.get("/anime/aniskip", async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+//  baha-skip  GET /api/anime/baha-skip?title=&native=&ep=
+//  يجلب توقيتات تخطي المقدمة/الخاتمة من قاعدة baha-anime-skip (GitHub)
+//  عبر البحث في Bahamut Anime API للحصول على SN الحلقة
+// ════════════════════════════════════════════════════════════════════
+
+const BAHA_DB_URL = "https://raw.githubusercontent.com/JacobLinCool/baha-anime-skip/main/packages/baha-anime-skip-db/data.json";
+let bahaDbCache: Record<string, Record<string, [number, number]>> | null = null;
+let bahaDbFetchedAt = 0;
+const BAHA_DB_TTL = 3_600_000; // 1 hour
+
+async function getBahaDb(): Promise<Record<string, Record<string, [number, number]>> | null> {
+  if (bahaDbCache && Date.now() - bahaDbFetchedAt < BAHA_DB_TTL) return bahaDbCache;
+  try {
+    const r = await fetch(BAHA_DB_URL, {
+      headers: { "User-Agent": BROWSER_UA },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!r.ok) return bahaDbCache;
+    bahaDbCache = await r.json() as Record<string, Record<string, [number, number]>>;
+    bahaDbFetchedAt = Date.now();
+    return bahaDbCache;
+  } catch { return bahaDbCache; }
+}
+
+// ذاكرة مؤقتة للبحث عن Bahamut SN بالعنوان
+const bahaSearchCache = new Map<string, { sn: string | null; ts: number }>();
+
+async function getBahaAnimeSN(title: string, nativeTitle: string): Promise<string | null> {
+  const cacheKey = `${title}::${nativeTitle}`.toLowerCase();
+  const cached = bahaSearchCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < BAHA_DB_TTL) return cached.sn;
+
+  const keywords = [nativeTitle, title].filter(Boolean);
+  for (const kw of keywords) {
+    if (!kw) continue;
+    try {
+      const url = `https://api.gamer.com.tw/anime/v1/search.php?keyword=${encodeURIComponent(kw)}`;
+      const r = await cfProxyGet(url, {});
+      if (!r) continue;
+      const data = JSON.parse(r) as any;
+      if (data?.error || !data?.data?.length) continue;
+      const sn = String(data.data[0]?.animeSN || data.data[0]?.sn || "");
+      if (sn) {
+        bahaSearchCache.set(cacheKey, { sn, ts: Date.now() });
+        return sn;
+      }
+    } catch { continue; }
+  }
+  bahaSearchCache.set(cacheKey, { sn: null, ts: Date.now() });
+  return null;
+}
+
+async function getBahaEpSN(animeSN: string, epNum: number): Promise<string | null> {
+  try {
+    const url = `https://api.gamer.com.tw/anime/v1/episode.php?animeSN=${animeSN}&page=0`;
+    const r = await cfProxyGet(url, {});
+    if (!r) return null;
+    const data = JSON.parse(r) as any;
+    const episodes: any[] = data?.data?.episodes || data?.episodes || [];
+    const ep = episodes.find((e: any) => {
+      const n = parseInt(String(e.episode || e.epNumber || e.num || ""), 10);
+      return n === epNum;
+    });
+    if (ep) return String(ep.videoSN || ep.sn || ep.animeSN || "");
+    return null;
+  } catch { return null; }
+}
+
+router.get("/anime/baha-skip", async (req, res) => {
+  const title   = String(req.query.title   || "").trim();
+  const native  = String(req.query.native  || "").trim();
+  const epNum   = parseInt(String(req.query.ep || "1"), 10);
+
+  if (!title && !native) { res.json({ found: false }); return; }
+
+  try {
+    const [db2, animeSN] = await Promise.all([
+      getBahaDb(),
+      getBahaAnimeSN(title, native),
+    ]);
+
+    if (!db2) { res.json({ found: false }); return; }
+
+    if (!animeSN) { res.json({ found: false }); return; }
+
+    const epSN = await getBahaEpSN(animeSN, epNum);
+    if (!epSN) { res.json({ found: false }); return; }
+
+    const skipData = db2[epSN];
+    if (!skipData) { res.json({ found: false }); return; }
+
+    const result: Record<string, { start: number; end: number }> = {};
+    for (const [type, [start, duration]] of Object.entries(skipData)) {
+      result[type.toLowerCase()] = { start, end: start + duration };
+    }
+
+    res.json({ found: true, animeSN, epSN, skip: result });
+  } catch (e: any) {
+    res.json({ found: false, error: e?.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
 //  proxy-text  GET /api/anime/proxy-text?url=
 //  Fetches a text file (VTT/SRT/plain) server-side and returns body
 //  Used for fetching subtitle files that block browser CORS requests
@@ -5989,6 +6095,29 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
 }
 
 const translateVttCache = new Map<string, { cues: Array<{ timing: string; text: string }>; ts: number }>();
+const SUB_CACHE_TTL = 30 * 24 * 3_600_000; // 30 days
+
+async function getSubFromDb(cacheKey: string): Promise<Array<{ timing: string; text: string }> | null> {
+  try {
+    const rows = await db.select().from(subtitleCacheTable).where(eq(subtitleCacheTable.cacheKey, cacheKey)).limit(1);
+    if (rows.length && rows[0].expiresAt > Date.now()) {
+      return rows[0].cues as Array<{ timing: string; text: string }>;
+    }
+  } catch { /* DB unavailable — continue */ }
+  return null;
+}
+
+async function saveSubToDb(cacheKey: string, cues: Array<{ timing: string; text: string }>): Promise<void> {
+  try {
+    const now = Date.now();
+    await db.insert(subtitleCacheTable)
+      .values({ cacheKey, cues: cues as any, fetchedAt: now, expiresAt: now + SUB_CACHE_TTL })
+      .onConflictDoUpdate({
+        target: subtitleCacheTable.cacheKey,
+        set: { cues: cues as any, fetchedAt: now, expiresAt: now + SUB_CACHE_TTL },
+      });
+  } catch { /* DB unavailable — skip */ }
+}
 
 router.get("/anime/translate-vtt", async (req, res) => {
   const rawUrl = ((req.query.url  as string) || "").trim();
@@ -6001,9 +6130,18 @@ router.get("/anime/translate-vtt", async (req, res) => {
   const url = rawUrl.startsWith("/") ? `http://localhost:${PORT}${rawUrl}` : rawUrl;
 
   const cacheKey = `${from}→${to}:${rawUrl}`;
-  const cached = translateVttCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < 3_600_000) {
-    res.json({ cues: cached.cues }); return;
+
+  // L1: ذاكرة داخلية
+  const memCached = translateVttCache.get(cacheKey);
+  if (memCached && Date.now() - memCached.ts < 3_600_000) {
+    res.json({ cues: memCached.cues, cached: true }); return;
+  }
+
+  // L2: قاعدة البيانات (مُخزَّن للأبد حتى 30 يوم)
+  const dbCached = await getSubFromDb(cacheKey);
+  if (dbCached) {
+    translateVttCache.set(cacheKey, { cues: dbCached, ts: Date.now() });
+    res.json({ cues: dbCached, cached: true }); return;
   }
 
   try {
@@ -6021,18 +6159,17 @@ router.get("/anime/translate-vtt", async (req, res) => {
     const cues = parseVttCues(vttText);
     if (!cues.length) { res.json({ cues: [] }); return; }
 
-    // Translate in batches of 40 cues for efficiency
-    const BATCH = 40;
-    // translateBatchFree (MyMemory) handles its own internal chunking + parallelism
     const translatedTexts = await translateBatchFree(cues.map(c => c.rawText), from, to);
-    void BATCH; // BATCH no longer used — kept for reference
 
     const result = cues.map((c, i) => ({
       timing: c.timing,
       text: translatedTexts[i] ?? c.rawText,
     }));
 
+    // حفظ في L1 و L2
     translateVttCache.set(cacheKey, { cues: result, ts: Date.now() });
+    void saveSubToDb(cacheKey, result); // fire & forget
+
     res.json({ cues: result });
   } catch (e: any) {
     res.status(500).json({ error: e?.message || "Translation failed" });
