@@ -502,6 +502,17 @@ router.get("/animation/detail", async (req: Request, res: Response) => {
       ? "aggregate_credits,recommendations,content_ratings,videos"
       : "credits,recommendations,videos";
     const data: any = await tmdb(`/${type}/${id}?append_to_response=${app}`);
+    // Fallback: if no Arabic overview, fetch English overview so the synopsis section is never empty
+    if (!data.overview) {
+      try {
+        const enUrl = `${TMDB_BASE}/${type}/${id}?api_key=${TMDB_KEY}&language=en-US`;
+        const enR = await fetch(enUrl, { signal: AbortSignal.timeout(8_000) });
+        if (enR.ok) {
+          const enD: any = await enR.json();
+          if (enD.overview) data.overview = enD.overview;
+        }
+      } catch { /* ignore */ }
+    }
     // Filter recommendations to animation-only (genre 16 = رسوم متحركة)
     if (data.recommendations?.results) {
       data.recommendations.results = data.recommendations.results.filter(
