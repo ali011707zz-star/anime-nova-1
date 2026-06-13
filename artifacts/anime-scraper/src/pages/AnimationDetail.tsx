@@ -3,7 +3,7 @@ import { useParams, useLocation, Link } from "wouter";
 import {
   ChevronRight, Play, Star, Calendar, Clock,
   Tv, Film, ChevronDown, Sparkles, Users,
-  Bookmark, MessageSquare, Heart, Plus,
+  Bookmark, MessageSquare, Heart, Plus, X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
@@ -46,6 +46,7 @@ export default function AnimationDetail() {
   const [showRatingPicker, setShowRatingPicker] = useState(false);
   const [commentsCount, setCommentsCount] = useState(0);
   const [descAr, setDescAr] = useState<string | null>(null);
+  const [showTrailer, setShowTrailer] = useState(false);
 
   const storageKey = `anim-comments-v2-${type}-${id}`;
 
@@ -147,6 +148,9 @@ export default function AnimationDetail() {
   const cast     = (detail.credits?.cast || detail.aggregate_credits?.cast || []).slice(0, 14);
   const recs: any[] = (detail.recommendations?.results || []).slice(0, 10);
   const studios  = (detail.production_companies || []).slice(0, 2).map((c: any) => c.name).join(" · ");
+  const trailerYT = (detail.videos?.results || []).find(
+    (v: any) => v.site === "YouTube" && (v.type === "Trailer" || v.type === "Teaser")
+  )?.key || null;
 
   return (
     <main className="min-h-screen bg-[#09090B] pb-32 text-white" dir="rtl">
@@ -350,6 +354,41 @@ export default function AnimationDetail() {
         )}
       </AnimatePresence>
 
+      {/* ── Trailer ── */}
+      {trailerYT && (
+        <div className="mt-5 px-4">
+          <div className="flex items-center mb-3">
+            <div className="w-1 h-5 bg-primary rounded-full ml-2" />
+            <h2 className="text-[15px] font-black font-['Cairo']">الإعلان الدعائي</h2>
+          </div>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => setShowTrailer(true)}
+            className="w-full rounded-2xl overflow-hidden border border-white/8 relative block"
+            style={{ aspectRatio: "16/9", background: "#0d0d10" }}>
+            <img
+              src={`https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg`}
+              alt="trailer"
+              className="w-full h-full object-cover"
+              onError={e => {
+                const el = e.target as HTMLImageElement;
+                if (!el.dataset.fb) { el.dataset.fb = "1"; el.src = `https://img.youtube.com/vi/${trailerYT}/sddefault.jpg`; }
+              }} />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/10" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center shadow-2xl"
+                style={{ boxShadow: "0 0 0 8px rgba(220,38,38,0.2), 0 8px 32px rgba(220,38,38,0.5)" }}>
+                <Play className="w-7 h-7 text-white fill-white mr-[-2px]" />
+              </div>
+            </div>
+            <div className="absolute bottom-0 right-0 left-0 px-4 pb-3">
+              <p className="text-white font-black text-[13px] font-['Cairo']">العرض الدعائي</p>
+              <p className="text-white/45 text-[10px] font-['Cairo']">انقر للمشاهدة بملء الشاشة</p>
+            </div>
+          </motion.button>
+        </div>
+      )}
+
       {/* ── Synopsis ── */}
       {overview && (
         <div className="mt-7 px-4">
@@ -456,6 +495,32 @@ export default function AnimationDetail() {
           </div>
         </div>
       )}
+
+      {/* ── Trailer Modal (fullscreen) ── */}
+      <AnimatePresence>
+        {showTrailer && trailerYT && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-black flex flex-col">
+            <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 pt-safe pt-4 pb-3"
+              style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)" }}>
+              <button onClick={() => setShowTrailer(false)}
+                className="w-9 h-9 bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 active:scale-90">
+                <X className="w-4 h-4 text-white" />
+              </button>
+              <p className="text-white text-[13px] font-black font-['Cairo'] opacity-80">الإعلان الدعائي</p>
+              <div className="w-9" />
+            </div>
+            <iframe
+              src={`https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=0`}
+              className="w-full flex-1"
+              allow="autoplay; fullscreen; picture-in-picture"
+              allowFullScreen
+              style={{ border: "none" }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </main>
   );
