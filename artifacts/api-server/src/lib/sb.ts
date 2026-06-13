@@ -16,13 +16,16 @@ function baseHeaders(extra?: Record<string, string>) {
   };
 }
 
-/** GET — returns array of rows */
+/** GET — returns array of rows.
+ *  Pass `select` inside params to choose columns, e.g. { select: "id,email" }.
+ *  Defaults to select=* when omitted.
+ */
 export async function sbGet<T = any>(
   table: string,
-  params: Record<string, string> = {},
-  select = "*"
+  params: Record<string, string> = {}
 ): Promise<T[]> {
-  const q = new URLSearchParams({ select, ...params });
+  const { select = "*", ...rest } = params;
+  const q = new URLSearchParams({ select, ...rest });
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${q}`, {
     headers: baseHeaders(),
   });
