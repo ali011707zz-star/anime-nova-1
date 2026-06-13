@@ -210,8 +210,8 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
 
   /* ── عنوان كل مرحلة ── */
   const titles: Record<Flow, { title: string; sub: string }> = {
-    login:  { title: "Nova Anime", sub: "مرحباً بعودتك" },
-    signup: { title: "Nova Anime", sub: "أنشئ حسابك مجاناً" },
+    login:  { title: "Anime NOVA", sub: "مرحباً بعودتك" },
+    signup: { title: "Anime NOVA", sub: "أنشئ حسابك مجاناً" },
     verify: { title: "تأكيد البريد", sub: `أُرسل كود إلى ${email}` },
     forgot: { title: "نسيت كلمة المرور", sub: "سنرسل لك كود إعادة تعيين" },
     reset:  { title: "إعادة تعيين", sub: `أُرسل كود إلى ${email}` },

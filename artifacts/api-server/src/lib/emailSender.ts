@@ -14,7 +14,7 @@ function createGmailTransport() {
 const EMAIL_HTML = (code: string) => `
   <div dir="rtl" style="font-family:'Segoe UI',Arial,sans-serif;max-width:480px;margin:0 auto;background:#0d0d18;color:#e2e8f0;border-radius:16px;overflow:hidden;">
     <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);padding:32px;text-align:center;">
-      <h1 style="margin:0;font-size:26px;font-weight:900;color:#fff;letter-spacing:-0.5px;">NOVA ANIME</h1>
+      <h1 style="margin:0;font-size:26px;font-weight:900;color:#fff;letter-spacing:-0.5px;">ANIME NOVA</h1>
       <p style="margin:8px 0 0;color:rgba(255,255,255,0.7);font-size:13px;">تحقق من بريدك الإلكتروني</p>
     </div>
     <div style="padding:32px;text-align:center;">

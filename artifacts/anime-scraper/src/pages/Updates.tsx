@@ -130,7 +130,7 @@ export default function Updates() {
             })}
 
             <div className="text-center pt-6 pb-4">
-              <p className="text-[10px] text-white/15">Nova Anime · جميع الحقوق محفوظة 2025</p>
+              <p className="text-[10px] text-white/15">Anime NOVA · جميع الحقوق محفوظة 2025</p>
             </div>
           </div>
         )}

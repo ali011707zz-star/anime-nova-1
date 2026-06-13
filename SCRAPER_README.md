@@ -1,4 +1,4 @@
-# Arabic Anime Scraper للتطبيق Anime Nova
+# Arabic Anime Scraper للتطبيق Anime NOVA
 
 ## 📋 الوصف
 
