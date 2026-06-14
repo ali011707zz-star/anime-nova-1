@@ -118,7 +118,7 @@ interface FetchedSrc {
 }
 
 /* ── All known scrapers — shown immediately in picker ── */
-const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] = [
+const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en" }[] = [
   // ── عربي مدبلج / مترجم ────────────────────────────────────────────
   { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH" },
   { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "AL" },
@@ -142,8 +142,13 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS" },
   // ── 1080p مباشر (Anime-Phoenix) ───────────────────────────────────
   { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH" },
-  // ── TMDB-native (أنمي + ترجمة) ────────────────────────────────────────────
+  // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────
   { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS · صوت ياباني",  tag: "SC" },
+  // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
+  { site: "videasy_anim",  name: "Videasy",       desc: "TMDB · HLS · ترجمة عربية", tag: "VE", audioLang: "en" },
+  { site: "vidlink_anim",  name: "VidLink",       desc: "TMDB · HLS · ترجمة عربية", tag: "VL", audioLang: "en" },
+  { site: "lordflix_anim", name: "LordFlix",      desc: "TMDB · HLS · ترجمة عربية", tag: "LF", audioLang: "en" },
+  { site: "vyla_anim",     name: "Vyla",          desc: "TMDB · HLS · ترجمة عربية", tag: "VY", audioLang: "en" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
@@ -774,11 +779,23 @@ function ScraperPicker({
   /* Direct sources only in main section; embed sources always in backup section */
   const displaySources = allFlat;
 
-  /* Group direct sources by quality tier */
+  /* Split: English-audio sites vs everything else */
+  const ENGLISH_SITES = new Set(["videasy_anim", "vidlink_anim", "lordflix_anim", "vyla_anim"]);
+  const mainSources = displaySources.filter(s => !ENGLISH_SITES.has(s.site ?? ""));
+  const engSources  = displaySources.filter(s =>  ENGLISH_SITES.has(s.site ?? ""));
+
+  /* Group main (Arabic/Japanese) sources by quality tier */
   const grouped: Record<Quality, FetchedSrc[]> = {
-    "1080p FHD": displaySources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
-    "720p HD":   displaySources.filter(s => getSrcQualityTier(s) === "720p HD"),
-    "360p SD":   displaySources.filter(s => getSrcQualityTier(s) === "360p SD"),
+    "1080p FHD": mainSources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
+    "720p HD":   mainSources.filter(s => getSrcQualityTier(s) === "720p HD"),
+    "360p SD":   mainSources.filter(s => getSrcQualityTier(s) === "360p SD"),
+  };
+
+  /* Group English sources by quality tier */
+  const engGrouped: Record<Quality, FetchedSrc[]> = {
+    "1080p FHD": engSources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
+    "720p HD":   engSources.filter(s => getSrcQualityTier(s) === "720p HD"),
+    "360p SD":   engSources.filter(s => getSrcQualityTier(s) === "360p SD"),
   };
 
   const hasSources = displaySources.length > 0;
@@ -1043,6 +1060,7 @@ function ScraperPicker({
 
         {(hasSources || hasBackupSources) ? (
           <>
+            {/* ── Main sources: Arabic / Japanese ── */}
             {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
               const srcs = grouped[q];
               if (!srcs.length) return null;
@@ -1071,6 +1089,50 @@ function ScraperPicker({
                 </div>
               );
             })}
+
+            {/* ── 🇬🇧 English sources separator + section ── */}
+            {engSources.length > 0 && (
+              <>
+                <div className="mx-4 mt-6 mb-1 flex items-center gap-3">
+                  <div className="flex-1 h-px" style={{ background: "linear-gradient(to left, rgba(255,255,255,0.08), transparent)" }} />
+                  <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl shrink-0"
+                    style={{ background: "rgba(29,78,216,0.14)", border: "1px solid rgba(59,130,246,0.30)" }}>
+                    <span className="text-base leading-none select-none">🇬🇧</span>
+                    <span className="text-[11px] font-black font-['Cairo']"
+                      style={{ color: "rgba(147,197,253,0.92)" }}>الصوت إنجليزي · ترجمة عربية</span>
+                  </div>
+                  <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(255,255,255,0.08), transparent)" }} />
+                </div>
+                {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
+                  const srcs = engGrouped[q];
+                  if (!srcs.length) return null;
+                  const qs = QUALITY_STYLE[q];
+                  let rowIdx = mainSources.length;
+                  for (const prevQ of ["1080p FHD", "720p HD", "360p SD"] as Quality[]) {
+                    if (prevQ === q) break;
+                    rowIdx += engGrouped[prevQ].length;
+                  }
+                  return (
+                    <div key={`en-${q}`}>
+                      <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+                        <div className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{ background: qs.dot, boxShadow: `0 0 6px ${qs.dot}88` }} />
+                        <span className="text-[10px] font-bold font-['Cairo'] tracking-wider" style={{ color: qs.text }}>
+                          {Q_LABEL[q]}
+                        </span>
+                        <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
+                          style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
+                          {srcs.length}
+                        </span>
+                      </div>
+                      {srcs.map((src, i) => (
+                        <SourceRow key={`en-${src.site}-${rowIdx + i}`} src={src} idx={rowIdx + i} onPlaySrc={onPlaySrc} />
+                      ))}
+                    </div>
+                  );
+                })}
+              </>
+            )}
 
             {/* ── Backup / embed sources section (mega / vidmoly) ── */}
             {hasBackupSources && (
