@@ -5457,6 +5457,251 @@ async function getArabSeedSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  TMDB-native sources for anime (Videasy / VidLink / LordFlix / Vyla / StarCima)
+//  Each uses TMDB TV ID resolved from the English title via TMDB search.
+//  These same sources were confirmed working with anime in animation tests.
+// ════════════════════════════════════════════════════════════════════
+
+// Simple in-memory cache for TMDB ID lookups (6h TTL)
+const animeTmdbCache = new Map<string, { id: number | null; ts: number }>();
+const ANIME_TMDB_TTL = 6 * 60 * 60 * 1000;
+const TMDB_KEY_ANIME = "8265bd1679663a7ea12ac168da84d2e8";
+
+async function fetchAnimeTmdbId(english: string | null, romaji: string): Promise<number | null> {
+  const query = (english || romaji || "").trim();
+  if (!query) return null;
+  const cKey = query.toLowerCase();
+  const hit = animeTmdbCache.get(cKey);
+  if (hit && Date.now() - hit.ts < ANIME_TMDB_TTL) return hit.id;
+
+  // Try English title first, then romaji
+  const attempts = [english, romaji].filter((v): v is string => !!v && v.trim().length > 0);
+  for (const q of attempts) {
+    try {
+      const r = await fetch(
+        `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY_ANIME}&query=${encodeURIComponent(q)}&language=en`,
+        { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(8_000) },
+      );
+      if (!r.ok) continue;
+      const data = await r.json() as { results?: Array<{ id: number; name: string }> };
+      const id = data.results?.[0]?.id ?? null;
+      if (id) {
+        animeTmdbCache.set(cKey, { id, ts: Date.now() });
+        return id;
+      }
+    } catch { continue; }
+  }
+  animeTmdbCache.set(cKey, { id: null, ts: Date.now() });
+  return null;
+}
+
+// ── Videasy anime sources (api.videasy.to, TMDB-native multi-quality HLS) ──
+async function getVideasyAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title);
+  if (!tmdbId) return [];
+  const sources: UnifiedSource[] = [];
+  const encTitle = encodeURIComponent(encodeURIComponent(english || title));
+  const VEA_HDRS = {
+    "User-Agent": BROWSER_UA,
+    "Accept": "application/json, */*; q=0.01",
+    "Referer": "https://player.videasy.to/",
+    "Origin": "https://player.videasy.to",
+  };
+  await Promise.allSettled(["mb-flix", "cdn", "downloader2"].map(async (server) => {
+    try {
+      const params = `title=${encTitle}&mediaType=tv&year=&tmdbId=${tmdbId}&imdbId=&episodeId=${ep}&seasonId=1`;
+      const r = await fetch(`https://api.videasy.to/${server}/sources-with-title?${params}`,
+        { headers: VEA_HDRS, signal: AbortSignal.timeout(12_000) });
+      if (!r.ok) return;
+      const blob = await r.text();
+      if (!blob || blob.length < 20) return;
+      const decR = await fetch("https://enc-dec.app/api/dec-videasy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: blob, id: String(tmdbId) }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!decR.ok) return;
+      const dec = await decR.json() as { status: number; result?: { sources?: any[]; subtitles?: any[] } };
+      if (dec.status !== 200 || !dec.result?.sources) return;
+      const araSub = (dec.result.subtitles ?? []).find((s: any) => s.lang === "ara" || s.lang === "ar");
+      for (const src of (dec.result.sources ?? [])) {
+        if (!src?.url) continue;
+        const q = src.quality || "HD";
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
+        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 10, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(araSub?.url ? { subtitleUrl: araSub.url } : {}) });
+      }
+    } catch { /* silent per server */ }
+  }));
+  return sources;
+}
+
+// ── VidLink via enc-dec.app (TMDB-native, auth-token IP-tied → hls-proxy) ──
+async function getVidLinkAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title);
+  if (!tmdbId) return [];
+  try {
+    const encR = await fetch(`https://enc-dec.app/api/enc-vidlink?text=${tmdbId}`,
+      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(8_000) });
+    if (!encR.ok) return [];
+    const encData = await encR.json() as { status: number; result?: string };
+    if (encData.status !== 200 || !encData.result) return [];
+    const vlUrl = `https://vidlink.pro/api/b/tv/${encData.result}/1/${ep}`;
+    const vlR = await fetch(vlUrl, {
+      headers: { "User-Agent": BROWSER_UA, "Origin": "https://vidlink.pro", "Referer": "https://vidlink.pro/" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!vlR.ok) return [];
+    const vlData = await vlR.json() as { stream?: { playlist?: string; captions?: any[] } };
+    const hlsUrl = vlData.stream?.playlist;
+    if (!hlsUrl) return [];
+    const araCap = (vlData.stream?.captions ?? []).find((c: any) => c.language === "ara" || c.language === "ar");
+    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
+    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 9, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(araCap?.url ? { subtitleUrl: araCap.url } : {}) }];
+  } catch { return []; }
+}
+
+// ── LordFlix (snowhouse.lordflix.club, enc-dec.app, CDN Referer: lordflix.org) ──
+async function getLordFlixAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title);
+  if (!tmdbId) return [];
+  const engTitle = (english || title).trim();
+  try {
+    const lfUrl = `https://snowhouse.lordflix.club/?title=${encodeURIComponent(engTitle)}&type=series&year=&imdb=&tmdb=${tmdbId}&server=Orion&season=1&episode=${ep}`;
+    const encLfR = await fetch(`https://enc-dec.app/api/enc-lordflix?url=${encodeURIComponent(lfUrl)}`,
+      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10_000) }).then(r => r.json()) as { status: number; result?: { url: string; sign: string } };
+    if (encLfR.status !== 200 || !encLfR.result?.url) return [];
+    const { url: encUrl, sign } = encLfR.result;
+    const encResp = await fetch(encUrl, {
+      headers: { "User-Agent": BROWSER_UA, "Origin": "https://lordflix.org", "Referer": "https://lordflix.org/", "Accept": "*/*" },
+      signal: AbortSignal.timeout(15_000),
+    }).then(r => r.text());
+    if (!encResp || encResp.length < 20) return [];
+    const decR = await fetch("https://enc-dec.app/api/dec-lordflix", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: encResp, sign }),
+      signal: AbortSignal.timeout(10_000),
+    }).then(r => r.json()) as { status: number; result?: { stream?: any[]; captions?: any[] } };
+    if (decR.status !== 200 || !decR.result?.stream?.length) return [];
+    const araCap = (decR.result.captions ?? []).find((c: any) => String(c.id || "").includes("ar") || String(c.language || "").match(/^ar/i));
+    const sources: UnifiedSource[] = [];
+    for (const st of decR.result.stream) {
+      const hlsUrl = st?.playlist || "";
+      if (!hlsUrl || st?.type !== "hls") continue;
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://lordflix.org/")}`;
+      sources.push({ name: `LordFlix · ${st.id || "primary"}`, url: proxied, quality: "HD", qualityRank: 9, site: "lordflix_anim", directUrl: proxied, directType: "hls", ...(araCap?.url ? { subtitleUrl: araCap.url } : {}) });
+    }
+    return sources;
+  } catch { return []; }
+}
+
+// ── Vyla SSE (missourimonster-vyla.hf.space, TMDB TV with season=1) ──
+async function getVylaAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title);
+  if (!tmdbId) return [];
+  const VYLA_BASE = "https://missourimonster-vyla.hf.space";
+  const sources: UnifiedSource[] = [];
+  try {
+    const sseUrl = `${VYLA_BASE}/api/tv?id=${tmdbId}&season=1&episode=${ep}`;
+    const r = await fetch(sseUrl, {
+      headers: { "User-Agent": BROWSER_UA, "Accept": "text/event-stream" },
+      signal: AbortSignal.timeout(22_000),
+    });
+    if (!r.ok || !r.body) return [];
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let provIdx = 0;
+    const seen = new Set<string>();
+    outer: while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line.startsWith("data:")) continue;
+        try {
+          const d = JSON.parse(line.slice(5).trim()) as any;
+          if (d.type === "source") {
+            const proxyUrl: string = d.source?.url || "";
+            if (!proxyUrl) continue;
+            // deduplicate by inner URL
+            let innerUrl = proxyUrl;
+            try { const pu = new URL(proxyUrl); const enc = pu.searchParams.get("url"); if (enc) innerUrl = enc; } catch {}
+            if (!innerUrl || seen.has(innerUrl)) continue;
+            seen.add(innerUrl);
+            // Quick probe
+            const ok = await fetch(proxyUrl, { method: "HEAD", headers: { "User-Agent": BROWSER_UA, "Origin": "https://www.netflix.com" }, signal: AbortSignal.timeout(5_000) }).then(r => r.ok).catch(() => false);
+            if (!ok) continue;
+            const provLabel = d.source?.provider ? `Vyla · ${d.source.provider}` : `Vyla · ${++provIdx}`;
+            sources.push({ name: provLabel, url: proxyUrl, quality: "HD", qualityRank: 9, site: "vyla_anim", directUrl: proxyUrl });
+          } else if (d.type === "done" || d.type === "end") { break outer; }
+        } catch {}
+      }
+    }
+    reader.cancel().catch(() => {});
+  } catch {}
+  return sources;
+}
+
+// ── StarCima vidzee (TMDB-native, direct HLS CDN) ──
+async function getStarCimaAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title);
+  if (!tmdbId) return [];
+  const SC_BASE = "https://starcima.com";
+  const SC_VIDZEE = `${SC_BASE}/api/vidzee`;
+  const SC_REF_HLS = "https://player.vidzee.wtf/";
+  const watchRef = `${SC_BASE}/watch/${tmdbId}?type=tv`;
+  const scHeaders = {
+    "User-Agent": BROWSER_UA,
+    "Referer": watchRef,
+    "Origin": SC_BASE,
+    "Accept": "application/json",
+    "Accept-Language": "ar,en;q=0.9",
+  };
+  try {
+    const r = await fetch(
+      `${SC_VIDZEE}?tmdbId=${tmdbId}&type=tv&title=${encodeURIComponent(title)}&season=1&episode=${ep}`,
+      { headers: scHeaders, signal: AbortSignal.timeout(18_000) },
+    );
+    if (!r.ok) return [];
+    const data: any = await r.json();
+    const servers: any[] = data.servers || [];
+    if (!servers.length) return [];
+    const PROBE_PORT = parseInt(String(process.env.PORT || 8080), 10);
+    const prepared = servers
+      .filter((srv: any) => !!srv.url)
+      .map((srv: any) => {
+        let rawUrl = String(srv.url);
+        let referer = SC_REF_HLS;
+        if (rawUrl.includes(`${SC_BASE}/cdn/?`)) {
+          try { const pu = new URL(rawUrl); rawUrl = pu.searchParams.get("url") || rawUrl; referer = pu.searchParams.get("referer") || SC_REF_HLS; } catch {}
+        }
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
+        return { proxied, rawUrl, label: `StarCima · ${srv.name || "HD"}` };
+      });
+    const probeResults = await Promise.allSettled(
+      prepared.map(async ({ proxied, rawUrl, label }) => {
+        try {
+          const pr = await fetch(`http://127.0.0.1:${PROBE_PORT}${proxied}`, { signal: AbortSignal.timeout(6_000) });
+          return { proxied, rawUrl, label, ok: pr.ok || pr.status === 206 };
+        } catch { return { proxied, rawUrl, label, ok: false }; }
+      }),
+    );
+    return probeResults
+      .filter((r): r is PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; ok: boolean }> => r.status === "fulfilled")
+      .map(r => {
+        const { proxied, rawUrl, label, ok } = r.value;
+        const finalUrl = ok ? proxied : rawUrl;
+        return { name: label, url: finalUrl, quality: "HD", qualityRank: 9, site: "starcima_anim", directUrl: ok ? rawUrl : rawUrl, directType: "hls" as const };
+      });
+  } catch { return []; }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -5612,6 +5857,12 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
+      // ── مصادر TMDB-native (تعمل مع الأنمي بشكل مؤكّد) ────────────
+      scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep),  false),
+      scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep),  false),
+      scrapeCached("lordflix_anim", () => getLordFlixAnimeSources(title, english, ep), false),
+      scrapeCached("vyla_anim",     () => getVylaAnimeSources(title, english, ep),     false),
+      scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
