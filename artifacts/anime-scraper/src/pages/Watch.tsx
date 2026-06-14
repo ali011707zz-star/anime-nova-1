@@ -73,7 +73,7 @@ interface SubSettings {
   bold: boolean;
   position: "top" | "center" | "bottom";  // subtitle placement
 }
-const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 24, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 28, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
 
 /* ── Last-source helpers: cache the URL that actually played so resume is instant ── */
 function saveLastSrc(animeId: number, ep: number, url: string, qualityRank: number) {

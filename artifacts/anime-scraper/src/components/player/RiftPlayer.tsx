@@ -1929,16 +1929,18 @@ export default function RiftPlayer({
       ════════════════════════════════════════ */}
       {subCues && subSettings && subActive && (
         <div
-          className="absolute left-0 right-0 flex justify-center px-5 pointer-events-none"
+          className="absolute left-0 right-0 flex justify-center pointer-events-none"
           style={{
             zIndex: 70,
+            padding: "0 16px",
             transition: "top 0.3s ease, bottom 0.3s ease",
             ...subPositionStyle(subSettings.position ?? "bottom", showCtrl),
           }}
         >
           <div
-            className="max-w-[92%] text-center px-4 py-2 rounded-2xl"
+            className="text-center px-4 py-2 rounded-2xl"
             style={{
+              maxWidth: "min(88%, 780px)",
               background: subSettings.bgOpacity > 0
                 ? `rgba(0,0,0,${subSettings.bgOpacity})`
                 : "transparent",
@@ -1953,8 +1955,29 @@ export default function RiftPlayer({
                 fontSize: subSettings.fontSize,
                 fontWeight: subSettings.bold ? 700 : 500,
                 fontFamily: "'Cairo', sans-serif",
-                lineHeight: 1.6,
-                textShadow: "0 1px 10px rgba(0,0,0,1), 0 0 3px rgba(0,0,0,1)",
+                lineHeight: 1.55,
+                margin: 0,
+                wordBreak: "break-word",
+                overflowWrap: "break-word",
+                textShadow: [
+                  "-2px -2px 0 #000",
+                  "-1px -2px 0 #000",
+                  "0   -2px 0 #000",
+                  "1px -2px 0 #000",
+                  "2px -2px 0 #000",
+                  "2px -1px 0 #000",
+                  "2px  0   0 #000",
+                  "2px  1px 0 #000",
+                  "2px  2px 0 #000",
+                  "1px  2px 0 #000",
+                  "0    2px 0 #000",
+                  "-1px 2px 0 #000",
+                  "-2px 2px 0 #000",
+                  "-2px 1px 0 #000",
+                  "-2px 0   0 #000",
+                  "-2px -1px 0 #000",
+                  "0 4px 12px rgba(0,0,0,0.75)",
+                ].join(", "),
               }}
             >
               {subActive.text}
