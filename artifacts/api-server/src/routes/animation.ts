@@ -1609,7 +1609,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               try {
                 const r = await fetch(
                   `${SC_VIDZEE}?tmdbId=${tmdbId}&type=${type}&title=${encodeURIComponent(title)}${tvExtra}`,
-                  { headers: scHeaders, signal: AbortSignal.timeout(28_000) }
+                  { headers: scHeaders, signal: AbortSignal.timeout(18_000) }
                 );
                 if (!r.ok) {
                   console.error(`[StarCima/vidzee] HTTP ${r.status} for tmdbId=${tmdbId}`);
@@ -2410,6 +2410,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               if (!data.stream_url) return;
               const streamUrl = data.stream_url;
               if (seenUrls.has(streamUrl)) return;
+              // Wrap with hls-proxy for CORS bypass — CDN may block cross-origin segment requests
+              const ezRef = `https://www.${prov}.pro/`;
+              const proxiedStream = streamUrl.includes(".m3u8")
+                ? wrapHls(streamUrl, ezRef)
+                : streamUrl;
               // For vidrock: Arabic subtitle at cache.vdrk.site/v2
               let subtitleUrl: string | undefined;
               if (prov === "vidrock") {
@@ -2420,10 +2425,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               seenUrls.add(streamUrl);
               sourceCount++;
               send("source", {
-                url: streamUrl,
+                url: proxiedStream,
                 label: `EzVidAPI · ${prov}`,
                 directUrl: streamUrl,
-                proxyUrl: streamUrl,
+                proxyUrl: proxiedStream,
                 ...(subtitleUrl ? { subtitleUrl } : {}),
               });
             } catch { /* silent per provider */ }
