@@ -1961,6 +1961,8 @@ export default function WatchPage() {
   const [quality,      setQuality]      = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]   = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
+  // showPicker: false on first load (shows loading screen), true when user returns from player
+  const [showPicker,   setShowPicker]   = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
@@ -2104,10 +2106,11 @@ export default function WatchPage() {
       try { v.pause(); v.src = ""; } catch {}
     });
     if (phase === "player") {
-      /* From player → go back to source picker */
+      /* From player → go back to source picker (show full picker so user can choose) */
+      setShowPicker(true);
       setPhase("picker");
     } else {
-      /* From picker → go back (avoids creating new history entry that causes infinite loop) */
+      /* From picker → go back to episodes page */
       navigate(animeId ? `/episodes/${animeId}` : "/");
     }
   }
@@ -2201,11 +2204,8 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── 2.5s min-wait before auto-play (gives AnimeDay + other fast scrapers time to finish) ── */
-  useEffect(() => {
-    const t = setTimeout(() => setAutoPlayReady(true), 2500);
-    return () => clearTimeout(t);
-  }, []);
+  /* ── auto-play ready immediately — no artificial delay ── */
+  useEffect(() => { setAutoPlayReady(true); }, []);
 
   /* ── Auto-play: fire on first available source of any quality ── */
   useEffect(() => {
@@ -2356,8 +2356,9 @@ export default function WatchPage() {
   const servers = playerServers[quality] || [];
 
   if (phase === "picker") {
-    return (
-      <>
+    /* Show full picker only when user navigated back from player */
+    if (showPicker) {
+      return (
         <AnimatePresence mode="wait">
           <motion.div key="picker"
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
@@ -2375,8 +2376,34 @@ export default function WatchPage() {
             />
           </motion.div>
         </AnimatePresence>
+      );
+    }
 
-      </>
+    /* Initial load: show a centered loading screen while scrapers run */
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-6 select-none">
+        {cover && (
+          <img
+            src={cover} alt={title}
+            className="w-28 h-40 object-cover rounded-xl shadow-2xl opacity-80"
+          />
+        )}
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-white text-base font-medium opacity-90">
+            {title}
+          </p>
+          <p className="text-white/50 text-sm">
+            الحلقة {ep} · جاري التحميل…
+          </p>
+        </div>
+        <button
+          onClick={() => navigate(animeId ? `/episodes/${animeId}` : "/")}
+          className="absolute top-4 right-4 text-white/40 hover:text-white/80 transition-colors p-2"
+        >
+          ✕
+        </button>
+      </div>
     );
   }
 
@@ -2402,7 +2429,7 @@ export default function WatchPage() {
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
           onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
           userId={userId}
-          onTierExhausted={() => setPhase("picker")}
+          onTierExhausted={() => { setShowPicker(true); setPhase("picker"); }}
         />
       </motion.div>
     </AnimatePresence>
