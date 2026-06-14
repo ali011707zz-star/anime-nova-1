@@ -196,7 +196,15 @@ function titleSim(a: string, b: string): number {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff ]/g, "").replace(/\s+/g, " ").trim();
   const na = norm(a); const nb = norm(b);
   if (na === nb) return 1;
-  if (na.includes(nb) || nb.includes(na)) return Math.min(0.95, 0.7 + 0.25 * (Math.min(na.length, nb.length) / Math.max(na.length, nb.length)));
+  if (na.includes(nb) || nb.includes(na)) {
+    const wa_len = na.split(" ").length;
+    const wb_len = nb.split(" ").length;
+    const wordRatio = Math.min(wa_len, wb_len) / Math.max(wa_len, wb_len || 1);
+    const lenRatio  = Math.min(na.length, nb.length) / Math.max(na.length, nb.length || 1);
+    // Penalise by BOTH word count AND char length; prevents "Kung Fu Panda" from
+    // strongly matching "Kung Fu Panda 4" or "Kung Fu Panda: Dragon Knight"
+    return Math.min(0.95, 0.85 * (0.4 + Math.min(wordRatio, lenRatio) * 0.6));
+  }
   const wa = na.split(" "); const wb = nb.split(" ");
   const common = wa.filter(w => wb.some(x => x === w || (w.length > 3 && (x.includes(w) || w.includes(x))))).length;
   return common / Math.max(wa.length, wb.length);

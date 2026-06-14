@@ -210,13 +210,16 @@ function normalize(s: string) {
 function similarity(a: string, b: string) {
   a = normalize(a); b = normalize(b);
   if (a === b) return 1;
-  // If b includes a (b is longer/superset) → good match, full 0.85
-  if (b.includes(a)) return 0.85;
+  const aWords = a.split(" ").length;
+  const bWords = b.split(" ").length;
+  // If b includes a: a is a prefix/subset of b (a is shorter query, b is longer site title)
+  // Penalise by word-count ratio so "dragon ball super" doesn't score 0.85 for "dragon ball super broly"
+  if (b.includes(a)) {
+    const ratio = aWords / bWords; // 0..1, lower = a covers less of b
+    return 0.85 * (0.4 + ratio * 0.6); // range: 0.34 (very short a) → 0.85 (a≈b)
+  }
   // If a includes b (a is longer, b is a subset) → penalise by word-count ratio
-  // e.g. searching "dragon ball super broly" vs site title "dragon ball super" → penalised
   if (a.includes(b)) {
-    const aWords = a.split(" ").length;
-    const bWords = b.split(" ").length;
     const ratio = bWords / aWords; // 0..1, lower = b covers less of a
     return 0.85 * (0.4 + ratio * 0.6); // range: 0.34 (very short b) → 0.85 (b≈a)
   }
@@ -242,6 +245,23 @@ function similarity(a: string, b: string) {
 function asciiSimilarity(a: string, b: string): number {
   const toAscii = (s: string) => s.replace(/[^\x00-\x7F]/g, " ").replace(/-/g, " ");
   return similarity(toAscii(a), b);
+}
+/**
+ * Stricter similarity for movie/OVA matching:
+ * Combines normal similarity with a character-length ratio penalty.
+ * Prevents "Dragon Ball Super" (18 chars) from matching "Dragon Ball Super: Broly" (24 chars) too closely.
+ */
+function strictMovieSimilarity(siteTitle: string, queryTitle: string): number {
+  const base = Math.max(
+    similarity(siteTitle, queryTitle),
+    asciiSimilarity(siteTitle, queryTitle),
+  );
+  const aN = normalize(siteTitle), bN = normalize(queryTitle);
+  if (!aN || !bN) return base;
+  const lenRatio = Math.min(aN.length, bN.length) / Math.max(aN.length, bN.length);
+  // If char lengths differ by more than 35%, apply additional length penalty
+  if (lenRatio < 0.65) return base * lenRatio;
+  return base;
 }
 function toSlug(s: string): string {
   return s.toLowerCase()
@@ -745,20 +765,20 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
   return best;
 }
 
-async function resolveAllShahiidUrls(romaji: string, english?: string | null): Promise<string[]> {
+async function resolveAllShahiidUrls(romaji: string, english?: string | null, isMovie = false): Promise<string[]> {
   const seen = new Set<string>();
   const all: Array<{ url: string; score: number }> = [];
+  const MIN_SCORE = isMovie ? 0.58 : 0.15;
 
   for (const q of [english, romaji].filter(Boolean) as string[]) {
     const results = await searchShahiid(q);
     for (const r of results) {
       if (seen.has(r.url)) continue;
       seen.add(r.url);
-      const s = Math.max(
-        similarity(r.label, romaji),
-        english ? similarity(r.label, english) : 0,
-      );
-      if (s > 0.15) all.push({ url: r.url, score: s });
+      const s = isMovie
+        ? Math.max(strictMovieSimilarity(r.label, romaji), english ? strictMovieSimilarity(r.label, english) : 0)
+        : Math.max(similarity(r.label, romaji), english ? similarity(r.label, english) : 0);
+      if (s > MIN_SCORE) all.push({ url: r.url, score: s });
     }
   }
 
@@ -1035,14 +1055,14 @@ async function findShahiidEpisodeUrl(seasonsUrl: string, epNum: number): Promise
 }
 
 async function getShahiidSources(
-  romaji: string, english?: string | null, ep: number = 1
+  romaji: string, english?: string | null, ep: number = 1, isMovie = false,
 ): Promise<UnifiedSource[]> {
   const ck = `shahiid:${romaji.toLowerCase()}:${ep}`;
   const cached = shahiidSrcCache.get(ck);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
 
   try {
-    let candidateUrls = await resolveAllShahiidUrls(romaji, english);
+    let candidateUrls = await resolveAllShahiidUrls(romaji, english, isMovie);
 
     // Supplement with direct slug construction (covers Season 1 not returned by search)
     const slugsToTry: string[] = [];
@@ -1056,7 +1076,11 @@ async function getShahiidSources(
     }
     const extraUrls: string[] = [];
     for (const slug of [...new Set(slugsToTry)]) {
-      for (const prefix of ["seasons", "series", "serieses", "seasonses"]) {
+      // For movies: try /anime/ prefix FIRST (Shahiid uses /anime/ for OVA/movies)
+      const prefixes = isMovie
+        ? ["anime", "seasons", "series", "serieses", "seasonses"]
+        : ["seasons", "series", "serieses", "seasonses"];
+      for (const prefix of prefixes) {
         const u = `${SHAHIID_BASE}/${prefix}/${slug}/`;
         if (!candidateUrls.includes(u)) extraUrls.push(u);
       }
@@ -1065,6 +1089,14 @@ async function getShahiidSources(
     // Rationale: slug-constructed URLs often 404 for non-ASCII anime titles (Arabic slugs),
     // wasting serial time before the correct search result URL is even attempted.
     candidateUrls = [...candidateUrls, ...extraUrls];
+    // For movies: prioritize /anime/ URLs (OVA/movie pages) and sort them first
+    if (isMovie) {
+      candidateUrls.sort((a, b) => {
+        const aIsAnime = a.includes("/anime/") ? 0 : 1;
+        const bIsAnime = b.includes("/anime/") ? 0 : 1;
+        return aIsAnime - bIsAnime;
+      });
+    }
     if (!candidateUrls.length) return [];
 
     let episodePage: string | null = null;
@@ -1266,7 +1298,7 @@ const ALK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime
 const alkSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const alkSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchAnimelek(title: string, english: string | null): Promise<string | null> {
+async function searchAnimelek(title: string, english: string | null, isMovie = false): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = alkSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
@@ -1295,6 +1327,7 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
   }
 
   // Search fallback — use ?s= (standard WP search, ?search_term_string= is broken)
+  const alkMinScore = isMovie ? 0.58 : 0.2;
   for (const q of [english, title].filter(Boolean) as string[]) {
     const html = await cfProxyGet(`${ALK_BASE}/search/?s=${encodeURIComponent(q as string)}`, `${ALK_BASE}/`);
     if (!html || !html.includes("/anime/")) continue;
@@ -1302,10 +1335,12 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
     for (const m of html.matchAll(/href="https?:\/\/animelek\.top\/anime\/([^/"]+)\/?"/gi)) {
       const s = m[1];
       const label = s.replace(/-/g, " ");
-      const score = Math.max(similarity(label, title), english ? similarity(label, english as string) : 0);
-      if (score > bestScore && score > 0.2) { bestScore = score; best = s; }
+      const score = isMovie
+        ? Math.max(strictMovieSimilarity(label, title), english ? strictMovieSimilarity(label, english as string) : 0)
+        : Math.max(similarity(label, title), english ? similarity(label, english as string) : 0);
+      if (score > bestScore && score > alkMinScore) { bestScore = score; best = s; }
     }
-    if (best && bestScore > 0.25) {
+    if (best && bestScore > alkMinScore) {
       // Verify the found slug actually has episodes
       const vhtml = await cfProxyGet(`${ALK_BASE}/anime/${best}/`, `${ALK_BASE}/`);
       if (vhtml && vhtml.includes("/episode/")) {
@@ -1320,14 +1355,14 @@ async function searchAnimelek(title: string, english: string | null): Promise<st
 }
 
 async function getAnimelekSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, isMovie = false,
 ): Promise<UnifiedSource[]> {
   const ck = `alk:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = alkSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    const slug = await searchAnimelek(title, english);
+    const slug = await searchAnimelek(title, english, isMovie);
     if (!slug) return [];
 
     const seriesUrl = `${ALK_BASE}/anime/${slug}/`;
@@ -1496,7 +1531,7 @@ function parseAnimadarServers(
   return episodes;
 }
 
-async function searchAnimedar(title: string, english: string | null): Promise<string | null> {
+async function searchAnimedar(title: string, english: string | null, isMovie = false): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = adarSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
@@ -1531,13 +1566,21 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
         const label = rawLabel.replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim()
           || slugAscii
           || slugDecoded.replace(/-/g, " ");
-        const score = Math.max(
-          similarity(label, title),
-          english ? similarity(label, english) : 0,
-          slugAscii ? similarity(slugAscii, title) : 0,
-          slugAscii && english ? similarity(slugAscii, english) : 0,
-        );
-        if (score > bestScore && score > 0.2) { bestScore = score; best = url.replace(/\/?$/, "/"); }
+        const adarMin = isMovie ? 0.58 : 0.2;
+        const score = isMovie
+          ? Math.max(
+              strictMovieSimilarity(label, title),
+              english ? strictMovieSimilarity(label, english) : 0,
+              slugAscii ? strictMovieSimilarity(slugAscii, title) : 0,
+              slugAscii && english ? strictMovieSimilarity(slugAscii, english) : 0,
+            )
+          : Math.max(
+              similarity(label, title),
+              english ? similarity(label, english) : 0,
+              slugAscii ? similarity(slugAscii, title) : 0,
+              slugAscii && english ? similarity(slugAscii, english) : 0,
+            );
+        if (score > bestScore && score > adarMin) { bestScore = score; best = url.replace(/\/?$/, "/"); }
       }
 
       if (best && bestScore > 0.28) {
@@ -1587,14 +1630,14 @@ async function searchAnimedar(title: string, english: string | null): Promise<st
 }
 
 async function getAnimadarSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, isMovie = false,
 ): Promise<UnifiedSource[]> {
   const ck = `adar:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = adarSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    const seriesUrl = await searchAnimedar(title, english);
+    const seriesUrl = await searchAnimedar(title, english, isMovie);
     if (!seriesUrl) return [];
 
     const r = await fetch(seriesUrl, {
@@ -1661,7 +1704,7 @@ const APH_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime
 const aphSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const aphSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchAnimePhoenix(title: string, english: string | null): Promise<string | null> {
+async function searchAnimePhoenix(title: string, english: string | null, isMovie = false): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = aphSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
@@ -1707,14 +1750,14 @@ async function searchAnimePhoenix(title: string, english: string | null): Promis
         let best: string | null = null;
         let bestScore = 0;
 
+        const aphMin = isMovie ? 0.58 : 0.25;
         for (const m of html.matchAll(/href="(https?:\/\/anime-phoenix\.com\/animes\/([^/"]+)\/?)"/gi)) {
           const slug  = m[2];
           const label = slug.replace(/-/g, " ");
-          const score = Math.max(
-            similarity(label, title),
-            english ? similarity(label, english) : 0,
-          );
-          if (score > bestScore && score > 0.25) { bestScore = score; best = slug; }
+          const score = isMovie
+            ? Math.max(strictMovieSimilarity(label, title), english ? strictMovieSimilarity(label, english) : 0)
+            : Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+          if (score > bestScore && score > aphMin) { bestScore = score; best = slug; }
         }
 
         if (best) {
@@ -1787,13 +1830,13 @@ function parseAnimePhoenixVideo(html: string): Array<{ url: string; label: strin
 }
 
 async function getAnimePhoenixSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, isMovie = false,
 ): Promise<UnifiedSource[]> {
   const cKey = `phoenix:${title}|${english ?? ""}|${ep}`;
   const cached = aphSrcCache.get(cKey);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
 
-  const slug = await searchAnimePhoenix(title, english);
+  const slug = await searchAnimePhoenix(title, english, isMovie);
   if (!slug) { aphSrcCache.set(cKey, { sources: [], ts: Date.now() }); return []; }
 
   const epUrl = `${APH_BASE}/episodes/${slug}-episode-${ep}/`;
@@ -2368,7 +2411,7 @@ const OK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: `${OK_BASE}/` }
 const okSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const okSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchOkAnime(title: string, english: string | null): Promise<string | null> {
+async function searchOkAnime(title: string, english: string | null, isMovie = false): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = okSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
@@ -2425,18 +2468,26 @@ async function searchOkAnime(title: string, english: string | null): Promise<str
       const data = await r.json() as Array<{ name?: string; slug?: string }>;
       if (!Array.isArray(data) || !data.length) continue;
 
+      const okMin = isMovie ? 0.58 : 0.28;
       let best: string | null = null, bestScore = 0;
       for (const item of data) {
         if (!item.slug) continue;
         const nameLabel = (item.name || "").toLowerCase();
         const slugLabel = item.slug.replace(/-/g, " ");
-        const score = Math.max(
-          similarity(nameLabel, title),
-          english ? similarity(nameLabel, english) : 0,
-          similarity(slugLabel, title),
-          english ? similarity(slugLabel, english) : 0,
-        );
-        if (score > bestScore && score > 0.28) { bestScore = score; best = item.slug; }
+        const score = isMovie
+          ? Math.max(
+              strictMovieSimilarity(nameLabel, title),
+              english ? strictMovieSimilarity(nameLabel, english) : 0,
+              strictMovieSimilarity(slugLabel, title),
+              english ? strictMovieSimilarity(slugLabel, english) : 0,
+            )
+          : Math.max(
+              similarity(nameLabel, title),
+              english ? similarity(nameLabel, english) : 0,
+              similarity(slugLabel, title),
+              english ? similarity(slugLabel, english) : 0,
+            );
+        if (score > bestScore && score > okMin) { bestScore = score; best = item.slug; }
       }
       if (best) { okSlugCache.set(ck, { slug: best, ts: Date.now() }); return best; }
     } catch {}
@@ -2447,14 +2498,14 @@ async function searchOkAnime(title: string, english: string | null): Promise<str
 }
 
 async function getOkAnimeSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, isMovie = false,
 ): Promise<UnifiedSource[]> {
   const ck = `ok:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = okSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    const slug = await searchOkAnime(title, english);
+    const slug = await searchOkAnime(title, english, isMovie);
     if (!slug) return [];
 
     // Try padded and non-padded episode number variants, across active domain
@@ -5227,13 +5278,14 @@ async function seepanelGetEpSources(
 }
 
 async function getSeepanelSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, isMovie = false,
 ): Promise<UnifiedSource[]> {
   try {
     const queries = [title, english].filter(Boolean) as string[];
     const seen = new Set<number>();
     // Map: posterId → score
     const candidates: Array<{ poster: SeepanelPoster; score: number }> = [];
+    const spMin = isMovie ? 0.55 : 0.35;
 
     for (const q of queries) {
       const posters = await seepanelSearch(q);
@@ -5244,32 +5296,46 @@ async function getSeepanelSources(
         const spLow = spTitle.toLowerCase();
         const tLow  = title.toLowerCase();
         const eLow  = english?.toLowerCase() ?? "";
-        const score = Math.max(
-          similarity(tLow, spLow),
-          eLow ? similarity(eLow, spLow) : 0,
-          asciiSimilarity(spTitle, title),
-          eLow ? asciiSimilarity(spTitle, english!) : 0,
-          // Substring bonus: if the search title appears inside the SeePanal title
-          // (e.g. "one piece" inside "Anime One Piece Egghead Saga Arc") → 0.55
-          (spLow.includes(tLow) || (eLow && spLow.includes(eLow))) ? 0.55 : 0,
-        );
-        if (score >= 0.35) candidates.push({ poster: p, score });
+        const score = isMovie
+          ? Math.max(
+              strictMovieSimilarity(tLow, spLow),
+              eLow ? strictMovieSimilarity(eLow, spLow) : 0,
+              strictMovieSimilarity(spTitle, title),
+              eLow ? strictMovieSimilarity(spTitle, english!) : 0,
+            )
+          : Math.max(
+              similarity(tLow, spLow),
+              eLow ? similarity(eLow, spLow) : 0,
+              asciiSimilarity(spTitle, title),
+              eLow ? asciiSimilarity(spTitle, english!) : 0,
+              // Substring bonus: if the search title appears inside the SeePanal title
+              // (e.g. "one piece" inside "Anime One Piece Egghead Saga Arc") → 0.55
+              (spLow.includes(tLow) || (eLow && spLow.includes(eLow))) ? 0.55 : 0,
+            );
+        if (score >= spMin) candidates.push({ poster: p, score });
       }
     }
 
     if (!candidates.length) return [];
 
-    // Sort: highest similarity first; ties → prefer serie over movie (more likely to have ep)
+    // Sort: highest similarity first; ties → for movies prefer movie type, for series prefer serie
     candidates.sort((a, b) =>
       b.score !== a.score ? b.score - a.score :
-      (a.poster.type === "serie" ? -1 : 1),
+      isMovie
+        ? (a.poster.type === "movie" ? -1 : 1)
+        : (a.poster.type === "serie" ? -1 : 1),
     );
 
     // Try each candidate — return the first that has the requested episode
     // For ep > 1, skip movie-type posters (they only have 1 episode)
-    const filtered = ep > 1
-      ? candidates.filter(c => c.poster.type !== "movie")
-      : candidates;
+    // For movies (isMovie=true), prefer movie-type posters
+    const filtered = isMovie
+      ? candidates.filter(c => c.poster.type === "movie").length > 0
+        ? candidates.filter(c => c.poster.type === "movie")
+        : candidates
+      : ep > 1
+        ? candidates.filter(c => c.poster.type !== "movie")
+        : candidates;
 
     for (const { poster } of filtered.slice(0, 6)) {
       const srcs = await seepanelGetEpSources(
@@ -5738,6 +5804,8 @@ router.get("/anime/sources-stream", async (req, res) => {
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
   const anilistId = parseInt((req.query.anime as string) || "0") || undefined;
+  const format    = ((req.query.format  as string) || "").trim().toUpperCase();
+  const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -5866,14 +5934,14 @@ router.get("/anime/sources-stream", async (req, res) => {
     // جميع الكاشطات تعمل بالتوازي
     await Promise.allSettled([
       // ── مصادر عربية مدبلجة / مترجمة ──────────────────────────────
-      scrapeCached("shahiid",      () => getShahiidSources(title, english, ep)),
-      scrapeCached("animelek",     () => getAnimelekSources(title, english, ep)),
-      scrapeCached("animedar",     () => getAnimadarSources(title, english, ep)),
-      scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep)),
+      scrapeCached("shahiid",      () => getShahiidSources(title, english, ep, isMovie)),
+      scrapeCached("animelek",     () => getAnimelekSources(title, english, ep, isMovie)),
+      scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie)),
+      scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
-      scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep)),
+      scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep, isMovie)),
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
@@ -5924,6 +5992,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
   const anilistId = parseInt((req.query.anime as string) || "0") || undefined;
+  const format    = ((req.query.format  as string) || "").trim().toUpperCase();
+  const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
@@ -5975,21 +6045,21 @@ router.get("/anime/fetch-source", async (req, res) => {
 
   try {
     switch (site) {
-      case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep),    SCRAPER_MS, [])); break;
-      case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep),    SCRAPER_MS, [])); break;
+      case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
+      case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
+      case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
+      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
       case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, [])); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, [])); break;
+      case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       // ── TMDB-native (StarCima ياباني + مصادر إنجليزية) ─────────────────────
       case "starcima_anim": (await race(getStarCimaAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
