@@ -64,6 +64,8 @@ interface StreamData {
   animeId?: number;
 }
 interface SubCue { start: number; end: number; text: string }
+interface SubTrack { id: string; lang: string; label: string; url: string; }
+type SubChoice = "off" | "ar" | "ar-auto" | "en";
 interface SubSettings {
   fontSize: number;                        // 13 | 16 | 20 | 24
   color: string;                           // css color
@@ -1370,6 +1372,13 @@ function EpisodePlayer({
   const [subOffset,    setSubOffset]   = useState(0);
   const [showSubPanel, setShowSubPanel] = useState(false);
   const [subSettings,  setSubSettings] = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
+  /* ── Multi-track subtitle system ── */
+  const [subTracks,    setSubTracks]   = useState<SubTrack[]>([]);
+  const [subChoice,    setSubChoice]   = useState<SubChoice>("off");
+  const [subStatus,    setSubStatus]   = useState<"off"|"discovering"|"loading"|"translating"|"ready"|"failed">("off");
+  const [ttsDub,       setTtsDub]      = useState(false);
+  const subAbortRef = useRef<AbortController | null>(null);
+  const ttsLastCueRef = useRef("");
 
   const currentUrl  = servers[currentServer] || "";
 
@@ -1379,6 +1388,16 @@ function EpisodePlayer({
     prevUrlRef.current = currentUrl;
     if (subCues.length > 0) setSubCues([]);
     if (subState === "ready") setSubState("idle");
+  }
+
+  /* ── Reset tracks when episode changes ── */
+  const prevEpRef = useRef(ep);
+  if (prevEpRef.current !== ep) {
+    prevEpRef.current = ep;
+    subAbortRef.current?.abort();
+    if (subTracks.length > 0) setSubTracks([]);
+    if (subChoice !== "off") setSubChoice("off");
+    if (subStatus !== "off") setSubStatus("off");
   }
   const currentInfo = getServerInfo(currentUrl, currentServer);
 
@@ -1404,86 +1423,178 @@ function EpisodePlayer({
     setRealQuality(null);
   }, [quality]);
 
-  /* ── Fetch subtitles (called on button click) ── */
-  async function fetchSubtitles() {
-    /* If already showing or loading — just toggle the panel visibility */
-    if (subState === "loading" || subState === "ready") { setShowSubPanel(p => !p); return; }
-    /* Reset so we can retry (covers "none" state as well) */
-    setSubState("loading");
-    setShowSubPanel(true);
+  /* ── Helper: parse timestamp string to seconds ── */
+  function toSec(ts: string): number {
+    const m = ts.trim().match(/^(\d+):(\d{2}):(\d{2})[,.](\d{1,3})/);
+    if (m) return +m[1]*3600 + +m[2]*60 + +m[3] + parseInt(m[4].padEnd(3,"0"))/1000;
+    const m2 = ts.trim().match(/^(\d+):(\d{2})[,.](\d{1,3})/);
+    if (m2) return +m2[1]*60 + +m2[2] + parseInt(m2[3].padEnd(3,"0"))/1000;
+    return 0;
+  }
+
+  /* ── loadTrack: fetch one subtitle track and fill subCues ── */
+  const loadTrack = useCallback(async (
+    track: SubTrack,
+    mode: "direct" | "translate",
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
     setSubCues([]);
-    try {
-      /* If source has a subtitle URL already, translate it to Arabic first */
-      if (subtitleUrl) {
-        const toSec = (ts: string): number => {
-          const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
-          if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
-          const m2 = ts.match(/(\d{1,2}):(\d{2})[,.](\d{3})/);
-          if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
-          return 0;
-        };
-        /* subtitleUrl may already be a translate-vtt URL from the scraper → fetch directly */
+    const isTranslateUrl = track.url.startsWith("/api/anime/translate-vtt");
+    if (mode === "translate" || isTranslateUrl) {
+      setSubStatus("translating");
+      const vttUrl = isTranslateUrl
+        ? track.url
+        : `/api/anime/translate-vtt?url=${encodeURIComponent(track.url)}&from=en&to=ar`;
+      try {
+        const r = await fetch(vttUrl, { signal: signal ?? AbortSignal.timeout(120_000) });
+        if (!r.ok) { setSubStatus("failed"); return false; }
+        const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+        if (!d.cues?.length) { setSubStatus("failed"); return false; }
+        const cues = d.cues.map(c => {
+          const [s, e] = c.timing.split("-->").map(x => x.trim());
+          return { start: toSec(s||""), end: toSec(e||""), text: c.text };
+        }).filter(c => c.start < c.end && c.text.trim());
+        if (!cues.length || (signal && signal.aborted)) { setSubStatus("failed"); return false; }
+        setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+        return true;
+      } catch { setSubStatus("failed"); return false; }
+    } else {
+      setSubStatus("loading");
+      try {
+        const r = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(track.url)}`, {
+          signal: signal ?? AbortSignal.timeout(12_000),
+        });
+        if (!r.ok) { setSubStatus("failed"); return false; }
+        const cues = parseSrt(await r.text());
+        if (!cues.length || (signal && signal.aborted)) { setSubStatus("failed"); return false; }
+        setSubCues(cues);
+        setSubLang(track.lang === "ar" ? "ara" : "eng");
+        setSubState("ready"); setSubStatus("ready");
+        return true;
+      } catch { setSubStatus("failed"); return false; }
+    }
+  }, []);
+
+  /* ── changeSubChoice: user picks a language track ── */
+  const changeSubChoice = useCallback(async (choice: SubChoice) => {
+    setSubChoice(choice);
+    if (choice === "off") {
+      subAbortRef.current?.abort();
+      setSubCues([]); setSubLang(null); setSubState("idle"); setSubStatus("off");
+      return;
+    }
+    const arTrack   = subTracks.find(t => t.lang === "ar");
+    const arAutoTrk = subTracks.find(t => t.lang === "ar-auto");
+    const enTrack   = subTracks.find(t => t.lang === "en");
+    subAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    subAbortRef.current = ctrl;
+    if (choice === "ar" && arTrack) {
+      await loadTrack(arTrack, "direct", ctrl.signal);
+    } else if (choice === "ar-auto") {
+      const trk = arAutoTrk ?? enTrack;
+      if (trk) await loadTrack(trk, arAutoTrk ? "direct" : "translate", ctrl.signal);
+      else setSubStatus("failed");
+    } else if (choice === "en" && enTrack) {
+      await loadTrack(enTrack, "direct", ctrl.signal);
+    } else {
+      setSubStatus("failed");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subTracks, loadTrack]);
+
+  /* ── fetchSubtitles: called when user clicks the CC button ── */
+  async function fetchSubtitles() {
+    setShowSubPanel(p => !p);
+
+    /* If already have tracks — just open the panel */
+    if (subTracks.length > 0 || subStatus === "discovering") return;
+
+    subAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    subAbortRef.current = ctrl;
+
+    /* If the source already provides a subtitleUrl (kawaii/anikoto/anineko) — use it directly */
+    if (subtitleUrl && subState !== "ready") {
+      setSubStatus("loading");
+      setSubState("loading");
+      setSubCues([]);
+      try {
         if (subtitleUrl.startsWith("/api/anime/translate-vtt")) {
-          try {
-            const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(30000) });
-            if (r.ok) {
-              const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-              if (d.cues?.length) {
-                const arCues = d.cues.map(c => {
-                  const pts = c.timing.split("-->").map(s => s.trim());
-                  return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
-                }).filter(c => c.start < c.end && c.text.trim());
-                if (arCues.length) { setSubCues(arCues); setSubLang("ara"); setSubState("ready"); return; }
+          const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(45_000) });
+          if (r.ok) {
+            const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+            if (d.cues?.length) {
+              const cues = d.cues.map(c => {
+                const [s, e] = c.timing.split("-->").map(x => x.trim());
+                return { start: toSec(s||""), end: toSec(e||""), text: c.text };
+              }).filter(c => c.start < c.end && c.text.trim());
+              if (cues.length) {
+                setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
               }
             }
-          } catch { /* fall through */ }
+          }
         } else {
-          /* Plain VTT/SRT URL — wrap with translate-vtt */
-          try {
-            const r = await fetch(
-              `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
-              { signal: AbortSignal.timeout(30000) },
-            );
-            if (r.ok) {
-              const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-              if (d.cues?.length) {
-                const arCues = d.cues.map(c => {
-                  const pts = c.timing.split("-->").map(s => s.trim());
-                  return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
-                }).filter(c => c.start < c.end && c.text.trim());
-                if (arCues.length) { setSubCues(arCues); setSubLang("ara"); setSubState("ready"); return; }
+          const r = await fetch(
+            `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
+            { signal: AbortSignal.timeout(45_000) },
+          );
+          if (r.ok) {
+            const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
+            if (d.cues?.length) {
+              const cues = d.cues.map(c => {
+                const [s, e] = c.timing.split("-->").map(x => x.trim());
+                return { start: toSec(s||""), end: toSec(e||""), text: c.text };
+              }).filter(c => c.start < c.end && c.text.trim());
+              if (cues.length) {
+                setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
               }
             }
-          } catch { /* fall through */ }
-          /* English fallback */
-          try {
-            const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10000) });
-            if (r2.ok) {
-              const text = await r2.text();
-              const cues = parseSrt(text);
-              if (cues.length) { setSubCues(cues); setSubLang("eng"); setSubState("ready"); return; }
-            }
-          } catch { /* fall through */ }
+          }
+          const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10_000) });
+          if (r2.ok) {
+            const cues = parseSrt(await r2.text());
+            if (cues.length) { setSubCues(cues); setSubLang("eng"); setSubState("ready"); setSubStatus("ready"); return; }
+          }
         }
+      } catch { /* fall through to API discovery */ }
+    }
+
+    /* Discover tracks via /api/anime/subtitle-tracks */
+    setSubStatus("discovering");
+    try {
+      const params = new URLSearchParams({
+        anilistId: String(animeId),
+        ep: String(ep),
+        title: animeTitle,
+        english: animeTitle,
+      });
+      const r = await fetch(`/api/anime/subtitle-tracks?${params}`, { signal: AbortSignal.timeout(20_000) });
+      if (!r.ok || ctrl.signal.aborted) { setSubStatus("failed"); return; }
+      const d = await r.json() as { tracks?: SubTrack[] };
+      const tracks = d.tracks || [];
+      setSubTracks(tracks);
+      if (!tracks.length) { setSubStatus("failed"); return; }
+
+      const arTrk   = tracks.find(t => t.lang === "ar");
+      const arAuto  = tracks.find(t => t.lang === "ar-auto");
+      const enTrk   = tracks.find(t => t.lang === "en");
+
+      if (arTrk) {
+        setSubChoice("ar");
+        await loadTrack(arTrk, "direct", ctrl.signal);
+      } else if (arAuto || enTrk) {
+        setSubChoice("ar-auto");
+        const trk = arAuto ?? enTrk!;
+        await loadTrack(trk, arAuto ? "direct" : "translate", ctrl.signal);
+      } else if (enTrk) {
+        setSubChoice("en");
+        await loadTrack(enTrk, "direct", ctrl.signal);
+      } else {
+        setSubStatus("failed");
       }
-      /* SUBDL Arabic lookup — only for sources that support subtitles */
-      const SUB_ALLOWED_SITES = ["kawaii", "anikoto", "anineko"];
-      if (!SUB_ALLOWED_SITES.includes(subtitleSite || "")) {
-        setSubState("none"); setShowSubPanel(true); return;
-      }
-      const params = new URLSearchParams({ title: animeTitle, ep: String(ep) });
-      const r = await fetch(`/api/anime/subtitles?${params}`, { signal: AbortSignal.timeout(15000) });
-      if (!r.ok) { setSubState("none"); setShowSubPanel(true); return; }
-      const d = await r.json() as { lang: string | null; content: string | null };
-      if (!d.content) { setSubState("none"); setShowSubPanel(true); return; }
-      const cues = parseSrt(d.content);
-      if (!cues.length) { setSubState("none"); setShowSubPanel(true); return; }
-      setSubCues(cues);
-      setSubLang(d.lang);
-      setSubState("ready");
     } catch {
-      setSubState("none");
-      setShowSubPanel(true);
+      if (!ctrl.signal.aborted) setSubStatus("failed");
     }
   }
 
@@ -1560,6 +1671,27 @@ function EpisodePlayer({
     return () => { cancelled = true; clearTimeout(t); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtitleUrl]);
+
+  /* ── Arabic TTS dubbing effect — reads current subtitle cue aloud in Arabic ── */
+  useEffect(() => {
+    if (!ttsDub || !subCues.length || subStatus !== "ready") return;
+    const currentCue = subCues.find(c => c.start <= hlsTime && c.end >= hlsTime);
+    if (!currentCue || ttsLastCueRef.current === currentCue.text) return;
+    ttsLastCueRef.current = currentCue.text;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(currentCue.text);
+    utter.lang = "ar-SA";
+    const voices = window.speechSynthesis.getVoices();
+    const arVoice = voices.find(v => v.lang.startsWith("ar"));
+    if (arVoice) utter.voice = arVoice;
+    utter.rate = 1.05;
+    window.speechSynthesis.speak(utter);
+  }, [ttsDub, hlsTime, subCues, subStatus]);
+
+  /* Stop TTS when disabled */
+  useEffect(() => {
+    if (!ttsDub) { window.speechSynthesis.cancel(); ttsLastCueRef.current = ""; }
+  }, [ttsDub]);
 
   const lastSwitchRef = useRef(0);
   const tryNextServer = useCallback(() => {
@@ -1787,7 +1919,7 @@ function EpisodePlayer({
               skipIntro={skipTimes?.op}
               skipOutro={skipTimes?.ed}
               autoPlay={localStorage.getItem("pref-autoplay") !== "false"}
-              onSubtitleClick={["shahiid","animelek","animedar","okanime","ristoanime","animeday","akwam","anime4up"].includes(subtitleSite||"") ? undefined : fetchSubtitles}
+              onSubtitleClick={fetchSubtitles}
               onSubSettingsChange={s => setSubSettings(s)}
               onBack={onBack}
               onPrevEp={onPrevEp}
@@ -1833,81 +1965,158 @@ function EpisodePlayer({
       <AnimatePresence>
         {showSubPanel && (
           <motion.div key="subpanel"
-            initial={{ opacity: 0, scale: 0.95, y: -8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -8 }}
-            transition={{ duration: 0.15 }}
-            className="absolute top-[72px] left-0 right-0 z-40 flex justify-center px-4">
-            <div className="rounded-2xl px-5 py-4 shadow-2xl w-full max-w-sm" dir="rtl"
-              style={{ background: "rgba(8,8,20,0.97)", backdropFilter: "blur(28px)", border: "1px solid rgba(255,255,255,0.10)" }}>
+            initial={{ opacity: 0, y: 32 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 32 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            className="fixed inset-x-0 bottom-0 z-[400]"
+            style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
+          >
+            <div className="fixed inset-0 z-[-1]" onClick={() => setShowSubPanel(false)} />
+            <div className="mx-3 rounded-2xl overflow-hidden"
+              style={{
+                background: "rgba(9,7,22,0.97)",
+                border: "1px solid rgba(139,92,246,0.22)",
+                backdropFilter: "blur(40px)",
+                boxShadow: "0 -24px 60px rgba(0,0,0,0.85)",
+                maxHeight: "82dvh",
+                overflowY: "auto",
+              }}>
 
-              {subState === "idle" && (
-                <div className="flex items-center gap-3">
-                  <span className="text-white/25 text-[14px]">CC</span>
-                  <p className="text-white/35 text-[12px] font-['Cairo']">الترجمة متوقفة</p>
-                  <button onClick={() => { setShowSubPanel(false); fetchSubtitles(); }} className="mr-auto px-3 py-1 rounded-lg text-[11px] font-bold font-['Cairo'] active:scale-90"
-                    style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.30)", color: "rgba(196,181,253,0.85)" }}>
-                    تفعيل
-                  </button>
-                  <button onClick={() => setShowSubPanel(false)} className="text-white/25 active:scale-90">
-                    <X className="w-4 h-4" />
-                  </button>
+              {/* ── Header ── */}
+              <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/[0.06]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px]"
+                    style={{ background: "rgba(139,92,246,0.20)", border: "1px solid rgba(139,92,246,0.30)" }}>
+                    <span className="text-violet-300 font-black">ت</span>
+                  </div>
+                  <h3 className="text-[14px] font-black font-['Cairo'] text-white">الترجمة</h3>
+                  {subTracks.length > 0 && (
+                    <span className="text-[9px] font-['Cairo'] text-violet-300/50 font-bold">
+                      {subTracks.length} مصدر
+                    </span>
+                  )}
                 </div>
-              )}
+                <button onClick={() => setShowSubPanel(false)}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-white/40 active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span className="text-[13px]">✕</span>
+                </button>
+              </div>
 
-              {subState === "loading" && (
-                <div className="flex items-center gap-3">
-                  <Loader2 className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
-                  <p className="text-white/45 text-[12px] font-['Cairo']">
-                    {subtitleUrl ? "جاري ترجمة الترجمة إلى العربية…" : "جاري البحث عن ترجمة عربية…"}
-                  </p>
-                </div>
-              )}
+              {/* ── 4 Language Option Buttons ── */}
+              {(() => {
+                const hasAr   = subTracks.some(t => t.lang === "ar");
+                const hasAuto = subTracks.some(t => t.lang === "ar-auto") || subTracks.some(t => t.lang === "en");
+                const hasEn   = subTracks.some(t => t.lang === "en");
+                const hasSub  = subtitleUrl != null;
+                const opts = [
+                  { id: "off"    as SubChoice, label: "إيقاف",   icon: "✕", available: true,           desc: "" },
+                  { id: "ar"     as SubChoice, label: "عربي",    icon: "ع", available: hasAr,           desc: "مباشر" },
+                  { id: "ar-auto"as SubChoice, label: "مترجم",   icon: "↻", available: hasAuto||hasSub, desc: "تلقائي" },
+                  { id: "en"     as SubChoice, label: "إنجليزي", icon: "E", available: hasEn,           desc: "أصلي" },
+                ];
+                return (
+                  <div className="grid grid-cols-4 gap-2 p-4">
+                    {opts.map(opt => {
+                      const active = subChoice === opt.id && subStatus !== "off";
+                      return (
+                        <button key={opt.id}
+                          onClick={() => opt.available && changeSubChoice(opt.id)}
+                          disabled={!opt.available}
+                          className="flex flex-col items-center gap-1.5 py-3.5 rounded-xl transition-all active:scale-95 disabled:opacity-25"
+                          style={{
+                            background: active ? "rgba(139,92,246,0.20)" : "rgba(255,255,255,0.04)",
+                            border: active ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.07)",
+                            boxShadow: active ? "0 0 18px rgba(139,92,246,0.16) inset" : "none",
+                          }}>
+                          <span className="text-[18px]" style={{ color: active ? "rgba(196,181,253,0.95)" : "rgba(255,255,255,0.40)" }}>
+                            {opt.icon}
+                          </span>
+                          <span className="text-[10px] font-black font-['Cairo'] leading-none"
+                            style={{ color: active ? "rgba(196,181,253,0.90)" : "rgba(255,255,255,0.50)" }}>
+                            {opt.label}
+                          </span>
+                          {opt.desc && (
+                            <span className="text-[8px] font-['Cairo']"
+                              style={{ color: active ? "rgba(196,181,253,0.50)" : "rgba(255,255,255,0.20)" }}>
+                              {opt.desc}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
-              {subState === "none" && (
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-3">
-                    <AlertTriangle className="w-4 h-4 text-white/18 shrink-0" />
-                    <p className="text-white/30 text-[12px] font-['Cairo']">لا توجد ترجمة لهذه الحلقة</p>
-                    <button onClick={() => setShowSubPanel(false)} className="mr-auto text-white/25 active:scale-90">
-                      <X className="w-4 h-4" />
+              {/* ── Status row ── */}
+              <div className="px-5 pb-3 flex items-center gap-2.5 min-h-[28px]">
+                {(subStatus === "loading" || subStatus === "translating" || subStatus === "discovering") && (
+                  <>
+                    <motion.div
+                      className="w-3.5 h-3.5 rounded-full border-2 border-violet-400/20 border-t-violet-400/70"
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 0.85, repeat: Infinity, ease: "linear" }}
+                    />
+                    <span className="text-[11px] font-['Cairo'] text-white/38">
+                      {subStatus === "translating" ? "جاري الترجمة للعربية… (قد يأخذ دقيقة)" :
+                       subStatus === "loading"      ? "جاري تحميل الترجمة…" :
+                       "يبحث عن مصادر الترجمة…"}
+                    </span>
+                  </>
+                )}
+                {subStatus === "ready" && (
+                  <span className="text-[11px] font-['Cairo']" style={{ color: "rgba(110,231,183,0.80)" }}>
+                    ✓ جاهز · {subCues.length} سطر ترجمة
+                  </span>
+                )}
+                {subStatus === "failed" && (
+                  <div className="flex items-center justify-between w-full">
+                    <span className="text-[11px] font-['Cairo'] text-white/28">لم يُعثر على ترجمة لهذا المحتوى</span>
+                    <button onClick={() => { setSubTracks([]); fetchSubtitles(); }}
+                      className="text-[10px] font-bold font-['Cairo'] px-2.5 py-1 rounded-lg active:scale-90"
+                      style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.30)", color: "rgba(196,181,253,0.80)" }}>
+                      إعادة
                     </button>
                   </div>
-                  <button
-                    onClick={() => { setShowSubPanel(false); setSubState("idle"); fetchSubtitles(); }}
-                    className="w-full py-2 rounded-xl text-[12px] font-bold font-['Cairo'] transition-all active:scale-95"
-                    style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", color: "rgba(196,181,253,0.75)" }}>
-                    🔄 إعادة المحاولة بمصدر آخر
-                  </button>
+                )}
+                {subStatus === "off" && (
+                  <span className="text-[11px] font-['Cairo'] text-white/18">الترجمة موقوفة</span>
+                )}
+              </div>
+
+              {/* ── Arabic TTS Dubbing toggle ── */}
+              {subStatus === "ready" && (
+                <div className="px-5 pb-3 border-t border-white/[0.05] pt-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[11px] font-black font-['Cairo'] text-white/60">دبلجة صوتية عربية</p>
+                      <p className="text-[9px] font-['Cairo'] text-white/24">تجريبي · يقرأ الترجمة بصوت عربي</p>
+                    </div>
+                    <button
+                      onClick={() => setTtsDub(d => !d)}
+                      className="relative w-11 h-6 rounded-full transition-all active:scale-90"
+                      style={{
+                        background: ttsDub ? "rgba(139,92,246,0.70)" : "rgba(255,255,255,0.10)",
+                        border: ttsDub ? "1px solid rgba(139,92,246,0.80)" : "1px solid rgba(255,255,255,0.15)",
+                      }}>
+                      <motion.div
+                        className="absolute top-0.5 w-5 h-5 rounded-full"
+                        style={{ background: ttsDub ? "#c4b5fd" : "rgba(255,255,255,0.45)" }}
+                        animate={{ left: ttsDub ? "auto" : "2px", right: ttsDub ? "2px" : "auto" }}
+                        transition={{ duration: 0.2 }}
+                      />
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {subState === "ready" && (
-                <div className="flex flex-col gap-4">
+              {/* ── Settings (when subtitle ready) ── */}
+              {subStatus === "ready" && (
+                <div className="px-5 pb-4 pt-3 border-t border-white/[0.05] flex flex-col gap-3">
 
-                  {/* ── Header ── */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-                      <p className="text-white/60 text-[12px] font-['Cairo']">
-                        {subLang === "ara" ? "ترجمة عربية" : "مترجمة تلقائياً"}
-                        <span className="text-white/24 mr-1">· {subCues.length} سطر</span>
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => { setSubCues([]); setSubState("idle"); setShowSubPanel(false); }}
-                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold font-['Cairo'] active:scale-90 transition-transform"
-                        style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.28)", color: "rgba(239,100,100,0.80)" }}>
-                        إيقاف
-                      </button>
-                      <button onClick={() => setShowSubPanel(false)} className="text-white/26 active:scale-90">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* ── Font size ── */}
+                  {/* Font size */}
                   <div>
                     <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">حجم الخط</p>
                     <div className="flex gap-2">
@@ -1926,7 +2135,7 @@ function EpisodePlayer({
                     </div>
                   </div>
 
-                  {/* ── Color ── */}
+                  {/* Color */}
                   <div>
                     <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">لون النص</p>
                     <div className="flex gap-2">
@@ -1950,16 +2159,12 @@ function EpisodePlayer({
                     </div>
                   </div>
 
-                  {/* ── Background + Bold ── */}
+                  {/* Background + Bold */}
                   <div className="flex gap-2">
                     <div className="flex-1">
                       <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">خلفية</p>
                       <div className="flex gap-1.5">
-                        {([
-                          { v: 0.82, label: "مظلل" },
-                          { v: 0.45, label: "خفيف" },
-                          { v: 0,    label: "بلا" },
-                        ] as { v: number; label: string }[]).map(({ v, label }) => (
+                        {([{ v: 0.82, label: "مظلل" }, { v: 0.45, label: "خفيف" }, { v: 0, label: "بلا" }] as { v: number; label: string }[]).map(({ v, label }) => (
                           <button key={v} onClick={() => setSubSettings(s => ({ ...s, bgOpacity: v }))}
                             className="flex-1 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] transition-all active:scale-90"
                             style={{
@@ -1987,14 +2192,14 @@ function EpisodePlayer({
                     </div>
                   </div>
 
-                  {/* ── Position ── */}
+                  {/* Position */}
                   <div>
                     <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">موضع الترجمة</p>
                     <div className="flex gap-2">
                       {([
-                        { v: "top",    label: "أعلى",  icon: "⬆" },
-                        { v: "center", label: "وسط",   icon: "⬛" },
-                        { v: "bottom", label: "أسفل",  icon: "⬇" },
+                        { v: "top", label: "أعلى", icon: "⬆" },
+                        { v: "center", label: "وسط", icon: "⬛" },
+                        { v: "bottom", label: "أسفل", icon: "⬇" },
                       ] as { v: "top"|"center"|"bottom"; label: string; icon: string }[]).map(({ v, label, icon }) => (
                         <button key={v} onClick={() => setSubSettings(s => ({ ...s, position: v }))}
                           className="flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all active:scale-90"
@@ -2010,7 +2215,7 @@ function EpisodePlayer({
                     </div>
                   </div>
 
-                  {/* ── Offset ── */}
+                  {/* Timing offset */}
                   <div>
                     <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">إزاحة التوقيت</p>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -2035,17 +2240,28 @@ function EpisodePlayer({
                       </p>
                     )}
                   </div>
+                </div>
+              )}
 
-                  {/* ── Turn off subtitles ── */}
-                  <div className="pt-2 mt-1 border-t border-white/[0.06]">
-                    <button
-                      onClick={() => { setSubCues([]); setSubState("idle"); setShowSubPanel(false); }}
-                      className="w-full py-2 rounded-xl text-[12px] font-bold font-['Cairo'] transition-all active:scale-95"
-                      style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(239,100,100,0.85)" }}>
-                      إيقاف الترجمة
-                    </button>
+              {/* ── Available track chips ── */}
+              {subTracks.length > 0 && (
+                <div className="px-5 pb-4 pt-2.5 border-t border-white/[0.05]">
+                  <p className="text-[9px] font-['Cairo'] font-bold tracking-[0.10em] mb-2" style={{ color: "rgba(255,255,255,0.16)" }}>
+                    المصادر المتاحة
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {subTracks.map(t => (
+                      <span key={t.id}
+                        className="text-[9px] px-2.5 py-1 rounded-lg font-['Cairo'] font-bold"
+                        style={{
+                          background: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.10)" : "rgba(147,197,253,0.10)",
+                          border: t.lang === "ar" || t.lang === "ar-auto" ? "1px solid rgba(110,231,183,0.25)" : "1px solid rgba(147,197,253,0.25)",
+                          color: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.70)" : "rgba(147,197,253,0.70)",
+                        }}>
+                        {t.label}
+                      </span>
+                    ))}
                   </div>
-
                 </div>
               )}
             </div>

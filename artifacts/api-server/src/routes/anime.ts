@@ -6145,6 +6145,169 @@ router.get("/anime/subtitles", async (req, res) => {
 });
 
 
+// ════════════════════════════════════════════════════════════════════
+//  anime/subtitle-tracks  GET /api/anime/subtitle-tracks
+//  Returns an array of subtitle tracks for an anime episode.
+//  Sources: wyzie.ru (IMDB ID via AniList→Jikan) + SubDL (title search)
+//  Auto-adds "عربي مُترجم" track when English found but no Arabic.
+// ════════════════════════════════════════════════════════════════════
+const animeTracksCache = new Map<string, { tracks: any[]; ts: number }>();
+const ANIME_TRACKS_TTL = 28 * 60 * 1000; // 28 min
+
+router.get("/anime/subtitle-tracks", async (req, res) => {
+  const anilistId = String(req.query.anilistId || "").trim();
+  const ep        = Math.max(1, parseInt(String(req.query.ep     || "1"), 10) || 1);
+  const season    = Math.max(1, parseInt(String(req.query.season || "1"), 10) || 1);
+  const title     = String(req.query.title   || "").trim();
+  const english   = String(req.query.english || title).trim();
+  const malIdQ    = String(req.query.malId   || "").trim();
+
+  if (!anilistId && !title) { res.json({ tracks: [] }); return; }
+
+  const ck = `anitrack:${anilistId}:${season}:${ep}`;
+  const hit = animeTracksCache.get(ck);
+  if (hit && Date.now() - hit.ts < ANIME_TRACKS_TTL) { res.json({ tracks: hit.tracks }); return; }
+
+  type Track = { id: string; lang: string; label: string; url: string };
+
+  // ── Step 1: Resolve IMDB ID via AniList + Jikan ──────────────────
+  let imdbId = "";
+  let malId  = malIdQ;
+
+  if (anilistId && !malId) {
+    try {
+      const alR = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          query: `query($id:Int){Media(id:$id,type:ANIME){idMal externalLinks{site url}}}`,
+          variables: { id: parseInt(anilistId) },
+        }),
+        signal: AbortSignal.timeout(7_000),
+      });
+      if (alR.ok) {
+        const alData = await alR.json() as any;
+        const media  = alData?.data?.Media;
+        malId = String(media?.idMal || "");
+        const imdbLink = (media?.externalLinks || []).find(
+          (l: any) => l.site === "Internet Movie Database" || (l.url || "").includes("imdb.com"),
+        );
+        if (imdbLink?.url) {
+          const m = imdbLink.url.match(/tt(\d+)/);
+          if (m) imdbId = `tt${m[1]}`;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (!imdbId && malId) {
+    try {
+      const jikanR = await fetch(
+        `https://api.jikan.moe/v4/anime/${malId}/external`,
+        { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(7_000) },
+      );
+      if (jikanR.ok) {
+        const jData = await jikanR.json() as any;
+        const imdbEntry = (jData.data || []).find(
+          (e: any) => e.name === "Internet Movie Database" || (e.url || "").includes("imdb.com"),
+        );
+        if (imdbEntry?.url) {
+          const m = imdbEntry.url.match(/tt(\d+)/);
+          if (m) imdbId = `tt${m[1]}`;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // ── Step 2: wyzie.ru (Arabic + English) by IMDB ID ───────────────
+  const wyzieItems: Track[] = [];
+  if (imdbId) {
+    await Promise.allSettled(["ar", "en"].map(async lang => {
+      try {
+        const q = `https://sub.wyzie.ru/search?id=${imdbId}&language=${lang}&season=${season}&episode=${ep}`;
+        const r = await fetch(q, {
+          headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (!r.ok) return;
+        const data  = await r.json() as any;
+        const items: any[] = Array.isArray(data) ? data : (data?.data ?? []);
+        items.slice(0, 3).forEach((item: any, i: number) => {
+          if (!item.url) return;
+          const sfx = i > 0 ? ` ${i + 1}` : "";
+          wyzieItems.push({
+            id: `${lang}-wyzie-${i}`,
+            lang,
+            label: lang === "ar" ? `عربي · Wyzie${sfx}` : `إنجليزي · Wyzie${sfx}`,
+            url: item.url,
+          });
+        });
+      } catch { /* ignore */ }
+    }));
+  }
+
+  // ── Step 3: SubDL (Arabic + English) by title ────────────────────
+  const subdlItems: Track[] = [];
+  const sdKey        = (process.env.SUBDL_API_KEY || "").trim();
+  const searchTitle  = english || title;
+  if (sdKey && searchTitle) {
+    await Promise.allSettled(["AR", "EN"].map(async lang => {
+      try {
+        const sdUrl = `https://api.subdl.com/api/v1/subtitles?api_key=${sdKey}&film_name=${encodeURIComponent(searchTitle)}&season_number=${season}&episode_number=${ep}&languages=${lang}&subs_per_page=3`;
+        const sdR = await fetch(sdUrl, {
+          headers: { "User-Agent": BROWSER_UA },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!sdR.ok) return;
+        const sdData = await sdR.json() as any;
+        const subs: any[] = (sdData.subtitles || []).filter((s: any) => s.url);
+        subs.slice(0, 2).forEach((sub: any, i: number) => {
+          const dlPath = sub.url as string;
+          const dlUrl  = dlPath.startsWith("http") ? dlPath : `https://dl.subdl.com${dlPath}`;
+          const lc     = lang === "AR" ? "ar" : "en";
+          const sfx    = i > 0 ? ` ${i + 1}` : "";
+          subdlItems.push({
+            id: `${lc}-subdl-${i}`,
+            lang: lc,
+            label: lc === "ar" ? `عربي · SubDL${sfx}` : `إنجليزي · SubDL${sfx}`,
+            url: dlUrl,
+          });
+        });
+      } catch { /* ignore */ }
+    }));
+  }
+
+  // ── Step 4: Merge + auto-translate fallback ──────────────────────
+  const all: Track[] = [...wyzieItems, ...subdlItems];
+  const hasAr  = all.some(t => t.lang === "ar");
+  const firstEn = all.find(t => t.lang === "en");
+
+  // Add auto-translate track when no Arabic but English is available
+  if (!hasAr && firstEn) {
+    all.unshift({
+      id: "ar-auto",
+      lang: "ar-auto",
+      label: "عربي مُترجم",
+      url: `/api/anime/translate-vtt?url=${encodeURIComponent(firstEn.url)}&from=en&to=ar`,
+    });
+  }
+
+  // Sort Arabic first, then auto-translate, then English
+  all.sort((a, b) => {
+    const rank = (t: Track) => t.lang === "ar" ? 0 : t.lang === "ar-auto" ? 1 : 2;
+    return rank(a) - rank(b);
+  });
+
+  // Deduplicate by URL
+  const seen   = new Set<string>();
+  const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
+
+  animeTracksCache.set(ck, { tracks, ts: Date.now() });
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ tracks });
+});
+
+
 router.get("/anime/translate", async (req, res) => {
   const text = ((req.query.text as string) || "").trim();
   const from = ((req.query.from as string) || "en").trim();

@@ -1122,6 +1122,18 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
   const seen = new Set<string>();
   const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
 
+  // ── Auto-translate fallback: add عربي مُترجم when no Arabic but English available ──
+  const hasArTrack  = tracks.some(t => t.lang === "ar");
+  const firstEnTrack = tracks.find(t => t.lang === "en");
+  if (!hasArTrack && firstEnTrack) {
+    tracks.unshift({
+      id: "ar-auto-translate",
+      lang: "ar-auto",
+      label: "عربي مُترجم",
+      url: `/api/anime/translate-vtt?url=${encodeURIComponent(firstEnTrack.url)}&from=en&to=ar`,
+    });
+  }
+
   animTracksCache.set(ck, { tracks, ts: Date.now() });
   res.setHeader("Cache-Control", "no-store");
   res.json({ tracks });
