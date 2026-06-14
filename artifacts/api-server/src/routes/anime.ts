@@ -5518,7 +5518,7 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
     "Referer": "https://player.videasy.to/",
     "Origin": "https://player.videasy.to",
   };
-  await Promise.allSettled(["mb-flix", "cdn", "downloader2"].map(async (server) => {
+  await Promise.allSettled(["mb-flix", "cdn"].map(async (server) => {
     try {
       const params = `title=${encTitle}&mediaType=tv&year=&tmdbId=${tmdbId}&imdbId=&episodeId=${ep}&seasonId=1`;
       const r = await fetch(`https://api.videasy.to/${server}/sources-with-title?${params}`,
@@ -5983,6 +5983,12 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, [])); break;
+      // ── TMDB-native (Videasy / VidLink / LordFlix / Vyla / StarCima) ─────────
+      case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "vidlink_anim":  (await race(getVidLinkAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "lordflix_anim": (await race(getLordFlixAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "vyla_anim":     (await race(getVylaAnimeSources(title, english, ep),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "starcima_anim": (await race(getStarCimaAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
 
