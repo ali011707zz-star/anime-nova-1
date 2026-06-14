@@ -169,7 +169,7 @@ export default function AnimationWatch() {
   const [skipOutro, setSkipOutro] = useState<{ start: number; end: number } | undefined>(undefined);
 
   const [subSettings, setSubSettings] = useState<SubSettings>({
-    fontSize: 24, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom",
+    fontSize: 28, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom",
   });
   const subAbortRef = useRef<AbortController | null>(null);
 
