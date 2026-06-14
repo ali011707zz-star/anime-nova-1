@@ -32,11 +32,16 @@ export const SITE_TTL: Record<string, number> = {
   aflaam:       24 * 3_600_000,
   stardima:     12 * 3_600_000,
   vyla:          4 * 3_600_000,
-  videasy:       2 * 3_600_000,  // tokens expire ~2h
-  vidlink_encdec: 2 * 3_600_000, // tokens expire ~2h
-  topcinemaa:    4 * 3_600_000,
-  animeday_anim: 4 * 3_600_000,
-  "2embed":      4 * 3_600_000,
+  videasy:        2 * 3_600_000,  // tokens expire ~2h
+  videasy3:       2 * 3_600_000,  // animation section (same token expiry)
+  videasy_anim:   2 * 3_600_000,  // anime section English
+  vidlink_encdec: 2 * 3_600_000,  // tokens expire ~2h
+  vidlink_anim:   2 * 3_600_000,  // anime section English
+  lordflix_anim:  2 * 3_600_000,  // enc-dec tokens
+  vyla_anim:      4 * 3_600_000,  // Vyla SSE (stable URLs)
+  topcinemaa:     4 * 3_600_000,
+  animeday_anim:  4 * 3_600_000,
+  "2embed":       4 * 3_600_000,
 };
 const DEFAULT_TTL = 4 * 3_600_000;
 

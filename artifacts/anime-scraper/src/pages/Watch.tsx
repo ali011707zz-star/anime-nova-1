@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { saveProgress as saveProgressServer } from "@/lib/db";
@@ -660,7 +660,7 @@ const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", 
 /* ══════════════════════════════════ SCRAPER PICKER ══════════ */
 const QUALITY_TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
 
-function SourceRow({ src, idx, onPlaySrc }: { src: FetchedSrc; idx: number; onPlaySrc: (s: FetchedSrc) => void }) {
+const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: FetchedSrc; idx: number; onPlaySrc: (s: FetchedSrc) => void }) {
   const url     = src.directUrl || src.url;
   const cdn     = getCdnDisplayName(url);
   const site    = SITE_SHORT[src.site || ""] || src.site || "";
@@ -670,29 +670,29 @@ function SourceRow({ src, idx, onPlaySrc }: { src: FetchedSrc; idx: number; onPl
   const qs      = QUALITY_STYLE[q];
   return (
     <motion.div
-      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(idx * 0.04, 0.28), duration: 0.18 }}>
+      initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(idx * 0.025, 0.14), duration: 0.14 }}>
       <div
-        className="flex items-center px-3.5 py-3 gap-3 active:bg-white/[0.03] transition-colors cursor-pointer"
+        className="flex items-center px-3 py-2 gap-2.5 active:bg-white/[0.03] transition-colors cursor-pointer"
         style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
         onClick={() => onPlaySrc(src)}>
-        <div className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0"
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
           style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
           {isEmbed
-            ? <Tv2 className="w-4 h-4" style={{ color: qs.icon }} />
-            : <MonitorPlay className="w-4 h-4" style={{ color: qs.icon }} />}
+            ? <Tv2 className="w-3.5 h-3.5" style={{ color: qs.icon }} />
+            : <MonitorPlay className="w-3.5 h-3.5" style={{ color: qs.icon }} />}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-white/90 text-[13px] font-black font-['Cairo'] leading-tight">{cdn}</p>
-          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            {site && <span className="text-white/36 text-[10px] font-['Cairo']">{site}</span>}
-            {site && <span className="text-white/14 text-[9px]">·</span>}
-            <span className="font-mono text-[7.5px] font-bold px-1 py-0.5 rounded"
+          <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">{cdn}</p>
+          <div className="flex items-center gap-1 flex-wrap">
+            {site && <span className="text-white/36 text-[9.5px] font-['Cairo']">{site}</span>}
+            {site && <span className="text-white/14 text-[8px]">·</span>}
+            <span className="font-mono text-[7px] font-bold px-1 py-0.5 rounded"
               style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
               {tag}
             </span>
             {isEmbed && (
-              <span className="font-mono text-[7.5px] font-bold px-1 py-0.5 rounded"
+              <span className="font-mono text-[7px] font-bold px-1 py-0.5 rounded"
                 style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.70)", border: "1px solid rgba(52,211,153,0.18)" }}>
                 مدمج
               </span>
@@ -700,28 +700,28 @@ function SourceRow({ src, idx, onPlaySrc }: { src: FetchedSrc; idx: number; onPl
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="font-mono text-[7.5px] font-bold px-1.5 py-0.5 rounded"
+          <span className="font-mono text-[7px] font-bold px-1.5 py-0.5 rounded"
             style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
             {Q_SHORT[q]}
           </span>
           {getDownloadUrl(src) && (
             <a href={getDownloadUrl(src)!} download target="_blank" rel="noreferrer"
               onClick={e => e.stopPropagation()}
-              className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+              className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-transform shrink-0"
               style={{ background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.28)" }}>
-              <Download className="w-3.5 h-3.5 text-emerald-400/85" />
+              <Download className="w-3 h-3 text-emerald-400/85" />
             </a>
           )}
-          <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl active:scale-95 transition-transform"
-            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 14px rgba(109,40,217,0.30)" }}>
-            <Play className="w-3 h-3 text-white fill-white" />
-            <span className="text-white text-[11px] font-black font-['Cairo']">تشغيل</span>
+          <div className="flex items-center gap-0.5 px-2.5 py-1.5 rounded-xl active:scale-95 transition-transform"
+            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.90), rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 10px rgba(109,40,217,0.25)" }}>
+            <Play className="w-2.5 h-2.5 text-white fill-white" />
+            <span className="text-white text-[10.5px] font-black font-['Cairo']">تشغيل</span>
           </div>
         </div>
       </div>
     </motion.div>
   );
-}
+});
 
 function ScraperPicker({
   cover, title, ep, totalEps, animeId, anime,
@@ -742,75 +742,73 @@ function ScraperPicker({
     slotStatus[d.site] === "ready" || slotStatus[d.site] === "failed"
   );
 
-  /* Flatten + filter + deduplicate all fetched sources */
-  const allFlat: FetchedSrc[] = [];
-  const seenKeys = new Set<string>();
-  for (const srcs of Object.values(slotSources)) {
-    for (const s of srcs) {
-      if (!shouldShowSrc(s)) continue;
-      const key = s.directUrl || s.url;
-      if (!key || seenKeys.has(key)) continue;
-      seenKeys.add(key);
-      allFlat.push(s);
+  const ENGLISH_SITES = useMemo(() => new Set(["videasy_anim", "vidlink_anim", "lordflix_anim", "vyla_anim"]), []);
+
+  /* Flatten + filter + deduplicate all fetched sources — memoised to avoid re-work on every SSE tick */
+  const { displaySources, embedFallbacks } = useMemo(() => {
+    const flat: FetchedSrc[] = [];
+    const seen = new Set<string>();
+    for (const srcs of Object.values(slotSources)) {
+      for (const s of srcs) {
+        if (!shouldShowSrc(s)) continue;
+        const key = s.directUrl || s.url;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        flat.push(s);
+      }
     }
-  }
-
-  /* Sort: quality tier first (FHD > HD > SD), then by rank within tier */
-  allFlat.sort((a, b) => {
-    const tA = QUALITY_TIER_RANK[getSrcQualityTier(a)];
-    const tB = QUALITY_TIER_RANK[getSrcQualityTier(b)];
-    if (tA !== tB) return tB - tA;
-    return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
-  });
-
-  /* Embed fallbacks (mega/vidmoly) — collected separately, shown only when no direct sources */
-  const embedFallbacks: FetchedSrc[] = [];
-  const seenEmbedKeys = new Set<string>();
-  for (const srcs of Object.values(slotSources)) {
-    for (const s of srcs) {
-      if (!isEmbedFallback(s)) continue;
-      const key = s.directUrl || s.url;
-      if (!key || seenEmbedKeys.has(key)) continue;
-      seenEmbedKeys.add(key);
-      embedFallbacks.push(s);
+    flat.sort((a, b) => {
+      const tA = QUALITY_TIER_RANK[getSrcQualityTier(a)];
+      const tB = QUALITY_TIER_RANK[getSrcQualityTier(b)];
+      if (tA !== tB) return tB - tA;
+      return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
+    });
+    const embeds: FetchedSrc[] = [];
+    const seenE = new Set<string>();
+    for (const srcs of Object.values(slotSources)) {
+      for (const s of srcs) {
+        if (!isEmbedFallback(s)) continue;
+        const key = s.directUrl || s.url;
+        if (!key || seenE.has(key)) continue;
+        seenE.add(key);
+        embeds.push(s);
+      }
     }
-  }
+    return { displaySources: flat, embedFallbacks: embeds };
+  }, [slotSources]);
 
-  /* Direct sources only in main section; embed sources always in backup section */
-  const displaySources = allFlat;
+  /* Split: English-audio sites vs everything else — memoised */
+  const { mainSources, engSources } = useMemo(() => ({
+    mainSources: displaySources.filter(s => !ENGLISH_SITES.has(s.site ?? "")),
+    engSources:  displaySources.filter(s =>  ENGLISH_SITES.has(s.site ?? "")),
+  }), [displaySources, ENGLISH_SITES]);
 
-  /* Split: English-audio sites vs everything else */
-  const ENGLISH_SITES = new Set(["videasy_anim", "vidlink_anim", "lordflix_anim", "vyla_anim"]);
-  const mainSources = displaySources.filter(s => !ENGLISH_SITES.has(s.site ?? ""));
-  const engSources  = displaySources.filter(s =>  ENGLISH_SITES.has(s.site ?? ""));
-
-  /* Group main (Arabic/Japanese) sources by quality tier */
-  const grouped: Record<Quality, FetchedSrc[]> = {
+  /* Group by quality tier — memoised */
+  const grouped: Record<Quality, FetchedSrc[]> = useMemo(() => ({
     "1080p FHD": mainSources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
     "720p HD":   mainSources.filter(s => getSrcQualityTier(s) === "720p HD"),
     "360p SD":   mainSources.filter(s => getSrcQualityTier(s) === "360p SD"),
-  };
+  }), [mainSources]);
 
-  /* Group English sources by quality tier */
-  const engGrouped: Record<Quality, FetchedSrc[]> = {
+  const engGrouped: Record<Quality, FetchedSrc[]> = useMemo(() => ({
     "1080p FHD": engSources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
     "720p HD":   engSources.filter(s => getSrcQualityTier(s) === "720p HD"),
     "360p SD":   engSources.filter(s => getSrcQualityTier(s) === "360p SD"),
-  };
+  }), [engSources]);
 
   const hasSources = displaySources.length > 0;
   const hasBackupSources = embedFallbacks.length > 0;
 
-  /* ── Shared: extract anime metadata ── */
+  /* ── Shared: extract anime metadata — memoised ── */
   const animeScore   = anime?.averageScore ? (anime.averageScore / 10) : 0;
   const animeGenres: string[] = anime?.genres?.slice(0, 6) || [];
-  const animeDesc    = (() => {
+  const animeDesc = useMemo(() => {
     const raw = anime?.description || "";
     return raw.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
       .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
       .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
       .replace(/\s+/g," ").trim().substring(0, 400);
-  })();
+  }, [anime?.description]);
   const animeStatus  = anime?.status ? (STATUS_MAP[anime.status]?.label || "") : "";
   const animeStudio  = anime?.studios?.nodes?.[0]?.name || "";
   const animeSeason  = anime?.seasonYear ? `${SEASON_MAP[anime.season] || ""} ${anime.seasonYear}`.trim() : "";

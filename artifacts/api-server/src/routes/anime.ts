@@ -5550,7 +5550,8 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
         if (!src?.url) continue;
         const q = src.quality || "HD";
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
-        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 10, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(araSub?.url ? { subtitleUrl: araSub.url } : {}) });
+        const subUrl = araSub?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araSub.url)}&from=ar&to=ar` : undefined;
+        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 10, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
       }
     } catch { /* silent per server */ }
   }));
@@ -5578,7 +5579,8 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
     if (!hlsUrl) return [];
     const araCap = (vlData.stream?.captions ?? []).find((c: any) => c.language === "ara" || c.language === "ar");
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
-    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 9, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(araCap?.url ? { subtitleUrl: araCap.url } : {}) }];
+    const subUrl = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
+    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 9, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) }];
   } catch { return []; }
 }
 
@@ -5611,7 +5613,8 @@ async function getLordFlixAnimeSources(title: string, english: string | null, ep
       const hlsUrl = st?.playlist || "";
       if (!hlsUrl || st?.type !== "hls") continue;
       const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://lordflix.org/")}`;
-      sources.push({ name: `LordFlix · ${st.id || "primary"}`, url: proxied, quality: "HD", qualityRank: 9, site: "lordflix_anim", directUrl: proxied, directType: "hls", ...(araCap?.url ? { subtitleUrl: araCap.url } : {}) });
+      const subUrl = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
+      sources.push({ name: `LordFlix · ${st.id || "primary"}`, url: proxied, quality: "HD", qualityRank: 9, site: "lordflix_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
     }
     return sources;
   } catch { return []; }
@@ -6504,6 +6507,14 @@ router.get("/anime/translate-vtt", async (req, res) => {
     const vttText = await r.text();
     const cues = parseVttCues(vttText);
     if (!cues.length) { res.json({ cues: [] }); return; }
+
+    // إذا كانت اللغة المصدر = الهدف → لا داعي للترجمة (مثلاً from=ar&to=ar للترجمات العربية الجاهزة)
+    if (from === to) {
+      const result = cues.map(c => ({ timing: c.timing, text: c.rawText }));
+      translateVttCache.set(cacheKey, { cues: result, ts: Date.now() });
+      void saveSubToDb(cacheKey, result);
+      res.json({ cues: result }); return;
+    }
 
     const translatedTexts = await translateBatchFree(cues.map(c => c.rawText), from, to);
 
