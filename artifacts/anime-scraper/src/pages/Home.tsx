@@ -86,7 +86,7 @@ function buildPopularQuery(genre: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA], isAdult: false${gf}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA], isAdult: false, genre_not_in: ["Ecchi", "Hentai"]${gf}) {
       id title { romaji english } coverImage { large extraLarge }
       bannerImage averageScore episodes genres status format
     }
@@ -96,7 +96,7 @@ function buildPopularQuery(genre: string) {
 
 const SPRING_2026_QUERY = `query {
   Page(perPage: 20) {
-    media(type: ANIME, season: SPRING, seasonYear: 2026, sort: POPULARITY_DESC, format_in: [TV, ONA]) {
+    media(type: ANIME, season: SPRING, seasonYear: 2026, sort: POPULARITY_DESC, format_in: [TV, ONA], isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
       id title { romaji english } coverImage { large } averageScore episodes nextAiringEpisode { episode } status
     }
   }
@@ -104,7 +104,7 @@ const SPRING_2026_QUERY = `query {
 
 const MOVIES_QUERY = `query {
   Page(perPage: 12) {
-    media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP", isAdult: false) {
+    media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
       id title { romaji } coverImage { large } averageScore
     }
   }
@@ -231,8 +231,13 @@ export default function Home() {
     })
       .then(r => r.json())
       .then(async d => {
+        const ECCHI_BLOCKED = new Set(["Ecchi", "Hentai"]);
         const arr = (d.data?.Page?.airingSchedules || [])
-          .filter((s: any) => !s.media?.isAdult && s.media?.id);
+          .filter((s: any) => {
+            if (!s.media?.id || s.media?.isAdult) return false;
+            const genres: string[] = s.media?.genres || [];
+            return !genres.some((g: string) => ECCHI_BLOCKED.has(g));
+          });
         if (!arr.length) { setTodayEps([]); setTodayChecking(false); return; }
         // التحقق من توفر المصادر العربية
         const titles = arr.map((s: any) => s.media?.title?.romaji || s.media?.title?.english || "").filter(Boolean);

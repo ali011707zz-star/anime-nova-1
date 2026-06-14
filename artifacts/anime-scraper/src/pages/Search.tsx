@@ -103,7 +103,7 @@ function buildQuery(sort: string, format: string, status: string, genre: string,
   return `
 query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: ${sortArr}${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false) {
+    media(search: $search, type: ANIME, sort: ${sortArr}${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
       id title { romaji english native } coverImage { large }
       averageScore episodes format status startDate { year } genres
     }
@@ -119,7 +119,7 @@ function buildBrowseQuery(sort: string, format: string, status: string, genre: s
   return `
 query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}]${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false) {
+    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}]${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
       id title { romaji english native } coverImage { large }
       averageScore episodes format status startDate { year } genres
     }

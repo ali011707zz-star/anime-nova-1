@@ -195,7 +195,12 @@ export default function Schedule() {
     })
       .then(r => r.json())
       .then(d => {
-        const items: any[] = d.data?.Page?.airingSchedules || [];
+        const ECCHI_BLOCKED = new Set(["Ecchi", "Hentai"]);
+        const items: any[] = (d.data?.Page?.airingSchedules || []).filter((s: any) => {
+          if (s.media?.isAdult) return false;
+          const genres: string[] = s.media?.genres || [];
+          return !genres.some((g: string) => ECCHI_BLOCKED.has(g));
+        });
         const grouped: Record<string, any[]> = {};
 
         items.forEach((item: any) => {
