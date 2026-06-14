@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "python-3.11", "web", "postgresql-16"]
+modules = ["nodejs-20", "python-3.11", "web"]
 
 [deployment]
 router = "application"
@@ -62,7 +62,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "CF_PROXY_PORT=8000 python3.11 scripts/cf_proxy.py"
+args = "pip install flask curl_cffi -q && CF_PROXY_PORT=8000 python3.11 scripts/cf_proxy.py"
 waitForPort = 8000
 
 [agent]
@@ -85,10 +85,6 @@ externalPort = 80
 [[ports]]
 localPort = 8000
 externalPort = 8000
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
 
 [[ports]]
 localPort = 8081
