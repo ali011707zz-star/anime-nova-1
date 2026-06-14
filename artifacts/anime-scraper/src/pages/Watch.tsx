@@ -2036,16 +2036,22 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  /* Fetch AniList metadata */
+  /* Fetch AniList metadata — tries proxy first, falls back to direct AniList */
   useEffect(() => {
     if (!animeId) return;
-    fetch("/api/anime/anilist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } }),
-      signal: AbortSignal.timeout(12000),
-    })
-      .then(r => r.json())
+    const body = JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } });
+    const headers = { "Content-Type": "application/json" };
+    const fetchAniList = () =>
+      fetch("/api/anime/anilist", { method: "POST", headers, body, signal: AbortSignal.timeout(10000) })
+        .then(r => {
+          if (!r.ok) throw new Error(`proxy ${r.status}`);
+          return r.json();
+        })
+        .catch(() =>
+          fetch("https://graphql.anilist.co", { method: "POST", headers, body, signal: AbortSignal.timeout(10000) })
+            .then(r => r.json())
+        );
+    fetchAniList()
       .then(j => {
         const d = j.data?.Media;
         if (d) {

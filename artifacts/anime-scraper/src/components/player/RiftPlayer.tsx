@@ -1294,24 +1294,6 @@ export default function RiftPlayer({
                     <div className="absolute left-0 right-0 rounded-full overflow-hidden pointer-events-none"
                       style={{ height: prgHover ? 8 : 5, transition: "height 0.18s cubic-bezier(.22,1,.36,1)" }}>
                       <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.14)" }} />
-                      {/* Intro marker — yellow */}
-                      {skipIntro && duration > 0 && (
-                        <div className="absolute top-0 h-full" style={{
-                          left: `${(skipIntro.start / duration) * 100}%`,
-                          width: `${Math.max(0.5, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
-                          background: "rgba(250,204,21,0.95)", zIndex: 2,
-                          boxShadow: "0 0 8px rgba(250,204,21,0.80)",
-                        }} />
-                      )}
-                      {/* Outro marker — amber */}
-                      {skipOutro && duration > 0 && (
-                        <div className="absolute top-0 h-full" style={{
-                          left: `${(skipOutro.start / duration) * 100}%`,
-                          width: `${Math.max(0.5, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
-                          background: "rgba(251,146,60,0.95)", zIndex: 2,
-                          boxShadow: "0 0 8px rgba(251,146,60,0.80)",
-                        }} />
-                      )}
                       {/* Buffered */}
                       <div className="absolute top-0 left-0 h-full"
                         style={{ width: `${bufPct}%`, background: "rgba(139,92,246,0.28)", transition: "width 0.5s" }} />
@@ -1324,6 +1306,63 @@ export default function RiftPlayer({
                           transition: (seekDrag.current || touchScrubbing.current) ? "none" : "width 0.12s, box-shadow 0.18s",
                         }} />
                     </div>
+                    {/* ── Skip markers — outside overflow-hidden so they're always visible ── */}
+                    {skipIntro && duration > 0 && (
+                      <>
+                        {/* Intro start tick */}
+                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
+                          left: `${(skipIntro.start / duration) * 100}%`,
+                          width: 3, height: prgHover ? 18 : 13,
+                          background: "#facc15",
+                          boxShadow: "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
+                          zIndex: 10,
+                        }} />
+                        {/* Intro colored segment (rendered on top of track via separate layer) */}
+                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
+                          left: `${(skipIntro.start / duration) * 100}%`,
+                          width: `${Math.max(0.5, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
+                          height: prgHover ? 8 : 5,
+                          background: "rgba(250,204,21,0.70)",
+                          zIndex: 9,
+                        }} />
+                        {/* Intro end tick */}
+                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
+                          left: `${(skipIntro.end / duration) * 100}%`,
+                          width: 3, height: prgHover ? 18 : 13,
+                          background: "#facc15",
+                          boxShadow: "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
+                          zIndex: 10,
+                        }} />
+                      </>
+                    )}
+                    {skipOutro && duration > 0 && (
+                      <>
+                        {/* Outro start tick */}
+                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
+                          left: `${(skipOutro.start / duration) * 100}%`,
+                          width: 3, height: prgHover ? 18 : 13,
+                          background: "#fb923c",
+                          boxShadow: "0 0 6px rgba(251,146,60,0.9), 0 0 12px rgba(251,146,60,0.5)",
+                          zIndex: 10,
+                        }} />
+                        {/* Outro colored segment */}
+                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
+                          left: `${(skipOutro.start / duration) * 100}%`,
+                          width: `${Math.max(0.5, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
+                          height: prgHover ? 8 : 5,
+                          background: "rgba(251,146,60,0.70)",
+                          zIndex: 9,
+                        }} />
+                        {/* Outro end tick */}
+                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
+                          left: `${(skipOutro.end / duration) * 100}%`,
+                          width: 3, height: prgHover ? 18 : 13,
+                          background: "#fb923c",
+                          boxShadow: "0 0 6px rgba(251,146,60,0.9), 0 0 12px rgba(251,146,60,0.5)",
+                          zIndex: 10,
+                        }} />
+                      </>
+                    )}
                     {/* Thumb */}
                     <div className="absolute top-1/2 -translate-y-1/2 rounded-full pointer-events-none"
                       style={{
