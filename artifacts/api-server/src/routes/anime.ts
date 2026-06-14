@@ -7183,7 +7183,9 @@ router.get("/anime/seg-proxy", async (req, res) => {
   if (!rawUrl) { res.status(400).send("url required"); return; }
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
-  let origin = ""; try { origin = new URL(url).origin; } catch {}
+  // Derive Origin from ref (Referer) so it matches what a real browser would send
+  let origin = ""; try { origin = new URL(ref || url).origin; } catch {}
+  if (!origin) try { origin = new URL(url).origin; } catch {}
 
   const cacheKey = `seg:${url}`;
   const hit = cdnCache.get(cacheKey);

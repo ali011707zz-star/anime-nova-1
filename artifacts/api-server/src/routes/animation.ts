@@ -2725,8 +2725,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             String(c.id || "").includes("ar") || String(c.language || "").match(/^ar/i)
           );
           for (const st of decR.result.stream) {
-            const hlsUrl = st?.playlist || "";
-            if (!hlsUrl || st?.type !== "hls") continue;
+            const hlsUrl = st?.playlist || st?.url || "";
+            if (!hlsUrl || (st?.type && st.type !== "hls")) continue;
             const label = `LordFlix · ${st.id || "primary"}`;
             // CDN (ok.horseapples.cc) requires Referer: lordflix.org — no CORS header
             // Route through hls-proxy: server fetches with correct Referer → segments via seg-proxy
