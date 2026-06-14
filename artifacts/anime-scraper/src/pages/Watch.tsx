@@ -2424,7 +2424,7 @@ export default function WatchPage() {
           subtitleUrl={playerSubUrl}
           subtitleSite={playerSrcSite}
           skipTimes={skipTimes}
-          onBack={() => setPhase("picker")}
+          onBack={handleBack}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
           onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
