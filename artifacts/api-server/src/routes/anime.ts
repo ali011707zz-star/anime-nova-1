@@ -5521,10 +5521,7 @@ async function getArabSeedSources(
           return;
         }
 
-        // vidmoly من عرب سيد → يُحذف كلياً (بناءً على طلب المستخدم)
-        if (VIDMOLY_HOSTS.some(h => embedUrl.includes(h))) return;
-
-        // vidaraa / bysezejataos / other → push for extractAndCollect
+        // vidaraa / bysezejataos / vidmoly / other → push for extractAndCollect
         sources.push({
           name: `${srvLabel} · مترجم عربي`,
           url: embedUrl, quality: "1080p", qualityRank: 10,

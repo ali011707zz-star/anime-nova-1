@@ -1510,8 +1510,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       for (const s of hit.sources) {
         sendSource(s.url, s.label, s.directUrl, s.proxyUrl, s.subtitleUrl ? { subtitleUrl: s.subtitleUrl } : undefined);
       }
-      // تجديد خلفي إذا اقترب الانتهاء (بدون إرسال للعميل — الاستجابة قد تنتهي)
-      if (shouldRefreshCache(hit.expiresAt)) {
+      // تجديد خلفي إذا انتهى الكاش (stale) أو اقترب انتهاؤه
+      if (hit.stale || shouldRefreshCache(hit.expiresAt)) {
         setImmediate(async () => {
           try {
             const oldCapture = _captureKey;
