@@ -250,17 +250,18 @@ export default function AnimationWatch() {
     const prefProxy = (arr: Source[], prefix: string) =>
       arr.find(s => s.label?.startsWith(prefix) && (s.proxyUrl?.startsWith("/api/") || s.directUrl?.startsWith("/api/"))) ??
       arr.find(s => s.label?.startsWith(prefix));
+    const starcima     = prefProxy(okSources, "StarCima");
+    const videasy      = prefProxy(okSources, "Videasy");
     const vyla         = okSources.find(s => s.label?.startsWith("Vyla"));
     const vidlink      = prefProxy(okSources, "VidLink");
     const ezv          = prefProxy(okSources, "EzVidAPI");
     const aflaam       = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
-    const starcima     = prefProxy(okSources, "StarCima");
     const seepanel     = okSources.find(s => s.label?.startsWith("SeePanal"));
     const animephoenix = okSources.find(s => s.label?.startsWith("AnimePhoenix"));
     const witcher      = okSources.find(s => s.label?.includes("AnimeWitcher"));
     // Tier-1 (trusted direct/proxied HLS): auto-play immediately
-    // Priority: Vyla (self-proxy) > VidLink (hls-proxy) > EzVidAPI > aflaam > StarCima > …
-    const tier1 = vyla ?? vidlink ?? ezv ?? aflaam ?? starcima ?? seepanel ?? animephoenix ?? witcher;
+    // Priority: StarCima (الثريا) > Videasy > Vyla > VidLink > EzVidAPI > aflaam > …
+    const tier1 = starcima ?? videasy ?? vyla ?? vidlink ?? ezv ?? aflaam ?? seepanel ?? animephoenix ?? witcher;
     if (tier1) {
       if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
       autoPlayAttemptsRef.current += 1;

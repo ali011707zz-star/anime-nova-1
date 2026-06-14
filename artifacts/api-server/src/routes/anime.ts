@@ -3728,7 +3728,7 @@ async function getKawaiiAnimeSources(
         name: `كواي أنمي · ${src.quality || "1080p"} · ${subLangLabel}`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 15,
+        qualityRank: 20,
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
@@ -3809,7 +3809,7 @@ async function getAniKotoSources(
       name: `AniKoto · 1080p · ياباني${subLang ? " · " + subLang : ""}`,
       url: m3u8Url,
       quality: "1080p",
-      qualityRank: 10,
+      qualityRank: 19,
       site: "anikoto",
       directUrl: proxied,
       directType: "hls",
@@ -4019,7 +4019,7 @@ async function getAnimePaheSources(
     if (!data.success || !data.results?.streams?.length) return [];
 
     const sources: UnifiedSource[] = [];
-    const qualityRankMap: Record<string, number> = { "1080p": 11, "720p": 10, "480p": 9, "360p": 8 };
+    const qualityRankMap: Record<string, number> = { "1080p": 18, "720p": 17, "480p": 16, "360p": 15 };
 
     for (const stream of data.results.streams) {
       if (stream.type !== "hls") continue;
@@ -5622,7 +5622,7 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
         const q = src.quality || "HD";
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
         const subUrl = araSub?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araSub.url)}&from=ar&to=ar` : undefined;
-        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 10, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
+        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 14, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
       }
     } catch { /* silent per server */ }
   }));
@@ -5653,7 +5653,7 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
     const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
     const subUrl = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
-    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 9, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) }];
+    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 13, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) }];
   } catch (err) { console.error("[vidlink_anim] error:", err); return []; }
 }
 
