@@ -32,6 +32,8 @@ export const SITE_TTL: Record<string, number> = {
   aflaam:       24 * 3_600_000,
   stardima:     12 * 3_600_000,
   vyla:          4 * 3_600_000,
+  videasy:       2 * 3_600_000,  // tokens expire ~2h
+  vidlink_encdec: 2 * 3_600_000, // tokens expire ~2h
   topcinemaa:    4 * 3_600_000,
   animeday_anim: 4 * 3_600_000,
   "2embed":      4 * 3_600_000,

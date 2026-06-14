@@ -74,10 +74,11 @@ function getSourceTier(src: Source): QualityTier {
   if (src.tier) return src.tier;
   const url = src.proxyUrl || src.directUrl || src.url;
   const lbl = src.label || "";
+  // Vyla is always high-quality multi-stream HLS (self-proxied, CORS-safe)
+  if (lbl.startsWith("Vyla")) return "1080p FHD";
   if (url.includes("hls-proxy")) {
-    // All Vyla sources are high-quality HLS
-    if (lbl.startsWith("Vyla")) return "1080p FHD";
     if (
+      lbl.startsWith("VidLink") ||
       lbl.includes("الثريا") || lbl.startsWith("StarCima") ||
       lbl.includes("Smashy") || lbl.includes("multiembed") ||
       lbl.includes("Najm") || lbl.startsWith("VidSrc VIP") ||
@@ -168,6 +169,7 @@ export default function AnimationWatch() {
   const lastProgressSave = useRef(0);
   const histSavedRef     = useRef(false);
   const autoPlayedRef      = useRef(false);
+  const autoPlayAttemptsRef = useRef(0); // max cascade retries
   // upgradedToFhdRef removed — auto-upgrade disabled for animation section
   const sourceCountRef     = useRef(0);
 
@@ -215,6 +217,10 @@ export default function AnimationWatch() {
 
       // All attempts exhausted → mark failed, return to picker
       setSources(prev => prev.map(s => s.url === sel.url ? { ...s, status: "fail" as const } : s));
+      // Allow auto-play to try next source (up to 4 cascade attempts)
+      if (autoPlayAttemptsRef.current < 4) {
+        autoPlayedRef.current = false;
+      }
       setStep("sources");
       return sel;
     });
@@ -230,17 +236,24 @@ export default function AnimationWatch() {
     if (!prefAutoplay.current) return;
     const okSources = sources.filter(s => s.status === "ok");
     if (!okSources.length) return;
+    // Prefer sources that go through our own proxy (/api/) — avoids IP-bound raw tokens
+    const prefProxy = (arr: Source[], prefix: string) =>
+      arr.find(s => s.label?.startsWith(prefix) && (s.proxyUrl?.startsWith("/api/") || s.directUrl?.startsWith("/api/"))) ??
+      arr.find(s => s.label?.startsWith(prefix));
     const vyla         = okSources.find(s => s.label?.startsWith("Vyla"));
-    const ezv          = okSources.find(s => s.label?.startsWith("EzVidAPI"));
+    const vidlink      = prefProxy(okSources, "VidLink");
+    const ezv          = prefProxy(okSources, "EzVidAPI");
     const aflaam       = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
-    const starcima     = okSources.find(s => s.label?.startsWith("StarCima"));
+    const starcima     = prefProxy(okSources, "StarCima");
     const seepanel     = okSources.find(s => s.label?.startsWith("SeePanal"));
     const animephoenix = okSources.find(s => s.label?.startsWith("AnimePhoenix"));
     const witcher      = okSources.find(s => s.label?.includes("AnimeWitcher"));
-    // Tier-1 (trusted direct HLS/MP4): auto-play immediately
-    const tier1 = vyla ?? ezv ?? aflaam ?? starcima ?? seepanel ?? animephoenix ?? witcher;
+    // Tier-1 (trusted direct/proxied HLS): auto-play immediately
+    // Priority: Vyla (self-proxy) > VidLink (hls-proxy) > EzVidAPI > aflaam > StarCima > …
+    const tier1 = vyla ?? vidlink ?? ezv ?? aflaam ?? starcima ?? seepanel ?? animephoenix ?? witcher;
     if (tier1) {
       if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      autoPlayAttemptsRef.current += 1;
       autoPlayedRef.current = true;
       playSource(tier1);
       return;
@@ -248,6 +261,7 @@ export default function AnimationWatch() {
     // Tier-2: if SSE done OR 10s elapsed with any source → play best available
     if (sseDone) {
       if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      autoPlayAttemptsRef.current += 1;
       autoPlayedRef.current = true;
       playSource(okSources[0]);
       return;

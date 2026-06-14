@@ -2100,6 +2100,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     ? `Vyla · ${d.source.provider}`
                     : `Vyla · ${++provIdx}`;
 
+                  // Quick probe: if Vyla proxy URL itself is down (502/503), skip source
+                  const probeOk = await fetch(proxyUrl, {
+                    method: "HEAD",
+                    headers: { "User-Agent": UA, "Origin": "https://www.netflix.com" },
+                    signal: AbortSignal.timeout(5_000),
+                  }).then(r => r.ok).catch(() => false);
+                  if (!probeOk) continue;
+
                   // Send Vyla proxy URL directly — browser plays it without our hls-proxy
                   // (Vyla already handles CORS + segment proxying internally)
                   sendSource(proxyUrl, provLabel, proxyUrl, proxyUrl);
@@ -2494,10 +2502,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (!src?.url) continue;
                 const quality = src.quality || "HD";
                 const label = `Videasy · ${server} · ${quality}`;
-                // CDN (joe.goldweather.net / server.digitalsun.app) blocks datacenter IPs →
-                // send raw URL for browser direct playback (CORS headers present for browsers)
+                // CDN (joe.goldweather.net / server.digitalsun.app) requires
+                // Referer: https://player.videasy.net/ — without it returns 403.
+                // hls-proxy adds the correct Referer server-side; browser never touches CDN directly.
+                const VIDY_REF = "https://player.videasy.net/";
+                const proxied  = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(VIDY_REF)}`;
                 sendSource(
-                  src.url, label, src.url, src.url,
+                  proxied, label, src.url, proxied,
                   araSub?.url ? { subtitleUrl: araSub.url } : undefined,
                 );
               }
@@ -2540,10 +2551,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (!hlsUrl) return;
           const captions = vlData.stream?.captions ?? [];
           const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
-          // VidLink streams are proxied by storm.vodvidl.site (cors-allowed) →
-          // send raw HLS to browser; hls.js fetches segments from user IP (not datacenter)
+          // storm.vodvidl.site auth token is bound to the server IP that requested it.
+          // Browser (different IP) gets 403. Use hls-proxy so server fetches segments
+          // with the same IP that generated the auth token.
+          const VL_REF  = "https://vidlink.pro/";
+          const vlProxy = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`;
           sendSource(
-            hlsUrl, "VidLink · HLS", hlsUrl, hlsUrl,
+            vlProxy, "VidLink · HLS", hlsUrl, vlProxy,
             araCap?.url ? { subtitleUrl: araCap.url } : undefined,
           );
         } catch { /* silent */ }
