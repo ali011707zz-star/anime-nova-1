@@ -30,8 +30,11 @@ const adarSlugCache  = new Map<string, { url: string | null; ts: number }>();
 
 // CDN response cache
 const cdnCache = new Map<string, { body: Buffer; ct: string; ts: number }>();
-const CDN_CACHE_TTL = 8 * 60_000;
-const CDN_CACHE_HOSTS = ["vault-13.owocdn.top", "owocdn.top", "kwik.cx"];
+const CDN_CACHE_TTL = 15 * 60_000; // 15 دقيقة — كافية لمشاهدة فيلم كامل من cache
+const CDN_CACHE_HOSTS = [
+  "vault-13.owocdn.top", "owocdn.top", "kwik.cx",
+  "ok.horseapples.cc",  // LordFlix CDN — signed URLs expire ~4 min; serve from cache
+];
 function isCdnCacheable(url: string): boolean {
   try { return CDN_CACHE_HOSTS.some(h => new URL(url).hostname.endsWith(h)); } catch { return false; }
 }

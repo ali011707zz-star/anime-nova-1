@@ -366,27 +366,70 @@ export default function AnimationWatch() {
   useEffect(() => {
     if (type !== "tv") return;
     setSkipIntro(undefined); setSkipOutro(undefined);
-    // AniSkip يستخدم MAL ID — نجلبه من TMDB external_ids
-    fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/external_ids?api_key=8265bd1679663a7ea12ac168da84d2e8`)
-      .then(r => r.ok ? r.json() : null)
-      .then((ext: any) => {
-        const malId = ext?.tvdb_id; // ليس MAL، لكن نحاول aniskip بـ TVDB fallback
-        // جرّب aniskip مباشرة بـ tmdbId كـ MAL fallback
-        return fetch(`/api/anime/aniskip?malId=${tmdbId}&ep=${ep}`, {
-          signal: AbortSignal.timeout(8000),
-        });
-      })
-      .then(r => r.ok ? r.json() : null)
-      .then((data: any) => {
-        if (!data?.found) return;
-        for (const result of (data.results || [])) {
-          const iv = result.interval;
-          if (result.skipType === "op") setSkipIntro({ start: iv.startTime, end: iv.endTime });
-          if (result.skipType === "ed") setSkipOutro({ start: iv.startTime, end: iv.endTime });
+
+    const skipCacheKey = `skip-anim-${tmdbId}-${ep}`;
+    const malCacheKey  = `malid-anim-${tmdbId}`;
+
+    // ── 1. تحميل فوري من localStorage إن وُجد ──
+    try {
+      const raw = localStorage.getItem(skipCacheKey);
+      if (raw) {
+        const { op, ed, exp } = JSON.parse(raw);
+        if (Date.now() < exp) {
+          if (op) setSkipIntro(op);
+          if (ed) setSkipOutro(ed);
+          return; // نتيجة مخزنة لمدة 7 أيام — لا داعي للطلب
         }
+      }
+    } catch {}
+
+    const applySkip = (data: any) => {
+      if (!data?.found) return;
+      const op: { start: number; end: number } | undefined =
+        data.results?.find((r: any) => (r.skip_type || r.skipType) === "op")?.interval &&
+        { start: data.results.find((r: any) => (r.skip_type || r.skipType) === "op").interval.startTime,
+          end:   data.results.find((r: any) => (r.skip_type || r.skipType) === "op").interval.endTime };
+      const ed: { start: number; end: number } | undefined =
+        data.results?.find((r: any) => (r.skip_type || r.skipType) === "ed")?.interval &&
+        { start: data.results.find((r: any) => (r.skip_type || r.skipType) === "ed").interval.startTime,
+          end:   data.results.find((r: any) => (r.skip_type || r.skipType) === "ed").interval.endTime };
+      if (op) setSkipIntro(op);
+      if (ed) setSkipOutro(ed);
+      if (op || ed) {
+        try { localStorage.setItem(skipCacheKey, JSON.stringify({ op, ed, exp: Date.now() + 7 * 86400_000 })); } catch {}
+      }
+    };
+
+    const fetchSkip = (malId: number) =>
+      fetch(`/api/anime/aniskip?malId=${malId}&ep=${ep}`, { signal: AbortSignal.timeout(10_000) })
+        .then(r => r.ok ? r.json() : null)
+        .then(applySkip)
+        .catch(() => {});
+
+    // ── 2. استخدم MAL ID المخزن مسبقاً إن وُجد ──
+    const cachedMal = localStorage.getItem(malCacheKey);
+    if (cachedMal && Number(cachedMal) > 0) {
+      fetchSkip(Number(cachedMal));
+      return;
+    }
+
+    // ── 3. ابحث عبر AniList بالعنوان للحصول على MAL ID ──
+    const ANILIST_Q = `query ($s: String) { Media(search: $s, type: ANIME) { idMal } }`;
+    fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: ANILIST_Q, variables: { s: displayTitle } }),
+      signal: AbortSignal.timeout(10_000),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then((al: any) => {
+        const malId: number | null = al?.data?.Media?.idMal ?? null;
+        if (!malId || malId <= 0) return;
+        try { localStorage.setItem(malCacheKey, String(malId)); } catch {}
+        return fetchSkip(malId);
       })
       .catch(() => {});
-  }, [tmdbId, type, ep]);
+  }, [tmdbId, type, ep, displayTitle]);
 
   /* ── SSE stream ── */
   useEffect(() => {
