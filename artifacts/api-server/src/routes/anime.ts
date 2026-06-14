@@ -5878,9 +5878,11 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
+      // ── StarCima — TMDB-native ياباني (CDN: phim1280.tv/dzink418hun → صوت ياباني ✅) ──
+      scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
+      // ── معطّلة: Videasy/VidLink/LordFlix/Vyla — CDN غربي → إنجليزي فقط ❌ ──────────
+      // videasy_anim / vidlink_anim / lordflix_anim / vyla_anim محذوفة من قسم الأنمي
       // ── معطّلة / محذوفة ────────────────────────────────────────────
-      // videasy_anim / vidlink_anim / lordflix_anim / vyla_anim / starcima_anim:
-      //   مصادر TMDB-native غربية — تعيد دبلجة إنجليزية فقط، لا صوت ياباني → محذوفة من قسم الأنمي
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
       // anime3rb:     CF IP block حقيقي، curl_cffi لا تنفع
@@ -5979,12 +5981,9 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, [])); break;
-      // ── TMDB-native (Videasy / VidLink / LordFlix / Vyla / StarCima) ─────────
-      case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "vidlink_anim":  (await race(getVidLinkAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "lordflix_anim": (await race(getLordFlixAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "vyla_anim":     (await race(getVylaAnimeSources(title, english, ep),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      // ── StarCima — TMDB-native (CDN ياباني ✅) ───────────────────────────────
       case "starcima_anim": (await race(getStarCimaAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
+      // videasy_anim / vidlink_anim / lordflix_anim / vyla_anim: CDN غربي → إنجليزي → محذوفة
       default: break;
     }
 
