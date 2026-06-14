@@ -1,7 +1,6 @@
 import { createApp } from "./app";
 import { logger } from "./lib/logger";
 import { initEmailService } from "./auth/emailService";
-import { runSupabaseMigration } from "./lib/supabaseMigrate.js";
 
 const rawPort = process.env["PORT"];
 
@@ -29,7 +28,4 @@ app.listen(port, (err) => {
 
   // فحص SMTP فور بدء الخادم
   initEmailService().catch(() => {});
-
-  // مزامنة بيانات Supabase تلقائياً عند كل إطلاق
-  runSupabaseMigration().catch(() => {});
 });
