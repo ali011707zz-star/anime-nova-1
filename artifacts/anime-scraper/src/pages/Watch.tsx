@@ -1207,7 +1207,17 @@ function MegaEmbedPlayer({
   useEffect(() => {
     const fn = () => setIsFs(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", fn);
-    return () => document.removeEventListener("fullscreenchange", fn);
+    // Auto-fullscreen on mount — user just clicked source card (gesture is fresh)
+    const timer = setTimeout(() => {
+      const el = containerRef.current;
+      if (el && !document.fullscreenElement) {
+        el.requestFullscreen?.().catch(() => {});
+      }
+    }, 150);
+    return () => {
+      document.removeEventListener("fullscreenchange", fn);
+      clearTimeout(timer);
+    };
   }, []);
 
   function toggleFs() {
@@ -1823,7 +1833,7 @@ function EpisodePlayer({
       </AnimatePresence>
 
       <AnimatePresence>
-        {showSubPanel && subState !== "idle" && (
+        {showSubPanel && (
           <motion.div key="subpanel"
             initial={{ opacity: 0, scale: 0.95, y: -8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1832,6 +1842,20 @@ function EpisodePlayer({
             className="absolute top-[72px] left-0 right-0 z-40 flex justify-center px-4">
             <div className="rounded-2xl px-5 py-4 shadow-2xl w-full max-w-sm" dir="rtl"
               style={{ background: "rgba(8,8,20,0.97)", backdropFilter: "blur(28px)", border: "1px solid rgba(255,255,255,0.10)" }}>
+
+              {subState === "idle" && (
+                <div className="flex items-center gap-3">
+                  <span className="text-white/25 text-[14px]">CC</span>
+                  <p className="text-white/35 text-[12px] font-['Cairo']">الترجمة متوقفة</p>
+                  <button onClick={() => { setShowSubPanel(false); fetchSubtitles(); }} className="mr-auto px-3 py-1 rounded-lg text-[11px] font-bold font-['Cairo'] active:scale-90"
+                    style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.30)", color: "rgba(196,181,253,0.85)" }}>
+                    تفعيل
+                  </button>
+                  <button onClick={() => setShowSubPanel(false)} className="text-white/25 active:scale-90">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
 
               {subState === "loading" && (
                 <div className="flex items-center gap-3">
@@ -1843,11 +1867,19 @@ function EpisodePlayer({
               )}
 
               {subState === "none" && (
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="w-4 h-4 text-white/18 shrink-0" />
-                  <p className="text-white/30 text-[12px] font-['Cairo']">لا توجد ترجمة لهذه الحلقة</p>
-                  <button onClick={() => setShowSubPanel(false)} className="mr-auto text-white/25 active:scale-90">
-                    <X className="w-4 h-4" />
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-4 h-4 text-white/18 shrink-0" />
+                    <p className="text-white/30 text-[12px] font-['Cairo']">لا توجد ترجمة لهذه الحلقة</p>
+                    <button onClick={() => setShowSubPanel(false)} className="mr-auto text-white/25 active:scale-90">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => { setShowSubPanel(false); setSubState("idle"); fetchSubtitles(); }}
+                    className="w-full py-2 rounded-xl text-[12px] font-bold font-['Cairo'] transition-all active:scale-95"
+                    style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", color: "rgba(196,181,253,0.75)" }}>
+                    🔄 إعادة المحاولة بمصدر آخر
                   </button>
                 </div>
               )}
@@ -1864,9 +1896,17 @@ function EpisodePlayer({
                         <span className="text-white/24 mr-1">· {subCues.length} سطر</span>
                       </p>
                     </div>
-                    <button onClick={() => setShowSubPanel(false)} className="text-white/26 active:scale-90">
-                      <X className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setSubCues([]); setSubState("idle"); setShowSubPanel(false); }}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold font-['Cairo'] active:scale-90 transition-transform"
+                        style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.28)", color: "rgba(239,100,100,0.80)" }}>
+                        إيقاف
+                      </button>
+                      <button onClick={() => setShowSubPanel(false)} className="text-white/26 active:scale-90">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* ── Font size ── */}

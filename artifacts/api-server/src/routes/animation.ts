@@ -2517,12 +2517,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               if (!data.stream_url) return;
               const streamUrl = data.stream_url;
               if (seenUrls.has(streamUrl)) return;
-              // Wrap with hls-proxy for CORS bypass — CDN may block cross-origin segment requests
               const ezRef = `https://www.${prov}.pro/`;
-              const proxiedStream = streamUrl.includes(".m3u8")
-                ? wrapHls(streamUrl, ezRef)
-                : wrapMp4(streamUrl, ezRef);  // non-m3u8: route through video-proxy (CDN CORS blocks browser)
-              // Probe before sending — skip dead streams
+              // vidrock: EzVidAPI proxy URL already handles CORS/auth internally — send raw to browser
+              // Others: wrap with hls-proxy so server rewrites segments via seg-proxy
+              const proxiedStream = (prov === "vidrock")
+                ? streamUrl
+                : (streamUrl.includes(".m3u8") ? wrapHls(streamUrl, ezRef) : wrapMp4(streamUrl, ezRef));
+              // Probe — probeHlsProxy returns true immediately for external (non-/api/) URLs
               const ezProbeOk = await probeHlsProxy(proxiedStream);
               if (!ezProbeOk) return;
               // For vidrock: Arabic subtitle at cache.vdrk.site/v2
