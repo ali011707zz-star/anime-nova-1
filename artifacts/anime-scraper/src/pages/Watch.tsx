@@ -143,11 +143,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string }[] 
   // ── 1080p مباشر (Anime-Phoenix) ───────────────────────────────────
   { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH" },
   // ── TMDB-native (أنمي + ترجمة) ────────────────────────────────────────────
-  { site: "videasy_anim",  name: "Videasy",       desc: "TMDB · HLS متعدد الجودات", tag: "VE" },
-  { site: "vidlink_anim",  name: "VidLink",       desc: "TMDB · HLS مباشر",         tag: "VL" },
-  { site: "lordflix_anim", name: "LordFlix",      desc: "TMDB · HLS · Orion",       tag: "LF" },
-  { site: "vyla_anim",     name: "Vyla",          desc: "TMDB · HLS · Multi CDN",   tag: "VY" },
-  { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS مباشر",         tag: "SC" },
+  { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS · صوت ياباني",  tag: "SC" },
 ];
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
