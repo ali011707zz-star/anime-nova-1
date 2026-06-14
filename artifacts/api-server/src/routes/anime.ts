@@ -5880,8 +5880,11 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
       // ── StarCima — TMDB-native ياباني (CDN: phim1280.tv/dzink418hun → صوت ياباني ✅) ──
       scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
-      // ── معطّلة: Videasy/VidLink/LordFlix/Vyla — CDN غربي → إنجليزي فقط ❌ ──────────
-      // videasy_anim / vidlink_anim / lordflix_anim / vyla_anim محذوفة من قسم الأنمي
+      // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
+      scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep),  false),
+      scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep),  false),
+      scrapeCached("lordflix_anim", () => getLordFlixAnimeSources(title, english, ep), false),
+      scrapeCached("vyla_anim",     () => getVylaAnimeSources(title, english, ep),     false),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
@@ -5981,9 +5984,12 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep), SCRAPER_MS, [])); break;
-      // ── StarCima — TMDB-native (CDN ياباني ✅) ───────────────────────────────
+      // ── TMDB-native (StarCima ياباني + مصادر إنجليزية) ─────────────────────
       case "starcima_anim": (await race(getStarCimaAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
-      // videasy_anim / vidlink_anim / lordflix_anim / vyla_anim: CDN غربي → إنجليزي → محذوفة
+      case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "vidlink_anim":  (await race(getVidLinkAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "lordflix_anim": (await race(getLordFlixAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "vyla_anim":     (await race(getVylaAnimeSources(title, english, ep),     SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
 
