@@ -138,20 +138,25 @@ function saveFavChars(chars: any[]) {
   localStorage.setItem("fav-characters", JSON.stringify(chars));
 }
 
-// ── Countdown hook ────────────────────────────────────────────────
-function useCountdown(targetTs?: number) {
-  const [secs, setSecs] = useState(targetTs ? Math.max(0, targetTs - Math.floor(Date.now() / 1000)) : 0);
+// ── Countdown hook (updates every minute, no seconds) ─────────────
+function useCountdown(targetTs?: number, animeId?: string | number) {
+  const cacheKey = animeId ? `airing-ts-${animeId}` : null;
+  const [secs, setSecs] = useState(() => {
+    const ts = targetTs ?? (cacheKey ? Number(localStorage.getItem(cacheKey) || 0) : 0);
+    return ts ? Math.max(0, ts - Math.floor(Date.now() / 1000)) : 0;
+  });
   useEffect(() => {
     if (!targetTs) return;
-    const id = setInterval(() => setSecs(Math.max(0, targetTs - Math.floor(Date.now() / 1000))), 1000);
+    if (cacheKey) localStorage.setItem(cacheKey, String(targetTs));
+    setSecs(Math.max(0, targetTs - Math.floor(Date.now() / 1000)));
+    const id = setInterval(() => setSecs(Math.max(0, targetTs - Math.floor(Date.now() / 1000))), 60_000);
     return () => clearInterval(id);
-  }, [targetTs]);
-  if (!targetTs || secs <= 0) return null;
+  }, [targetTs, cacheKey]);
+  if (secs <= 0) return null;
   const d = Math.floor(secs / 86400);
   const h = Math.floor((secs % 86400) / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return { d, h, m, s };
+  return { d, h, m };
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -185,7 +190,7 @@ export default function AnimeDetail() {
     !!localStorage.getItem(`adult-warn-${params.id}`)
   );
   const inputRef = useRef<HTMLInputElement>(null);
-  const countdown = useCountdown(anime?.nextAiringEpisode?.airingAt);
+  const countdown = useCountdown(anime?.nextAiringEpisode?.airingAt, params.id);
 
   // ── Load anime data ──
   useEffect(() => {
@@ -279,7 +284,7 @@ export default function AnimeDetail() {
     const txt = newComment.trim();
     if (!txt || !user || sendingComment) return;
     const myUsername = getMyName();
-    const myAvatar = (user as any)?.avatarUrl || null;
+    const myAvatar = user?.profileImageUrl || (user as any)?.avatarUrl || null;
     setSendingComment(true);
     try {
       const res = await fetch("/api/comments", {
@@ -472,7 +477,7 @@ export default function AnimeDetail() {
           className="mx-4 mt-5 rounded-2xl px-4 py-3"
           style={{ background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.22)" }}>
           <p className="text-amber-400 text-[11px] font-black font-['Cairo'] mb-2">
-            ◉ حلقة جديدة بعد: {countdown.d} يوم {countdown.h} ساعة {countdown.m} دقيقة {countdown.s} ثانية
+            ◉ حلقة جديدة بعد: {countdown.d > 0 ? `${countdown.d} يوم ` : ""}{countdown.h} ساعة {countdown.m} دقيقة
           </p>
           <p className="text-amber-300/50 text-[10px] font-['Cairo']">
             الحلقة {anime.nextAiringEpisode.episode} (وقت تقريبي)

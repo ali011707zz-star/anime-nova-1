@@ -1294,22 +1294,22 @@ export default function RiftPlayer({
                     <div className="absolute left-0 right-0 rounded-full overflow-hidden pointer-events-none"
                       style={{ height: prgHover ? 8 : 5, transition: "height 0.18s cubic-bezier(.22,1,.36,1)" }}>
                       <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.14)" }} />
-                      {/* Intro marker */}
+                      {/* Intro marker — yellow */}
                       {skipIntro && duration > 0 && (
                         <div className="absolute top-0 h-full" style={{
                           left: `${(skipIntro.start / duration) * 100}%`,
-                          width: `${Math.max(0, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
-                          background: "rgba(6,182,212,0.90)", zIndex: 2,
-                          boxShadow: "0 0 6px rgba(6,182,212,0.70)",
+                          width: `${Math.max(0.5, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
+                          background: "rgba(250,204,21,0.95)", zIndex: 2,
+                          boxShadow: "0 0 8px rgba(250,204,21,0.80)",
                         }} />
                       )}
-                      {/* Outro marker */}
+                      {/* Outro marker — amber */}
                       {skipOutro && duration > 0 && (
                         <div className="absolute top-0 h-full" style={{
                           left: `${(skipOutro.start / duration) * 100}%`,
-                          width: `${Math.max(0, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
-                          background: "rgba(249,115,22,0.85)", zIndex: 2,
-                          boxShadow: "0 0 6px rgba(249,115,22,0.65)",
+                          width: `${Math.max(0.5, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
+                          background: "rgba(251,146,60,0.95)", zIndex: 2,
+                          boxShadow: "0 0 8px rgba(251,146,60,0.80)",
                         }} />
                       )}
                       {/* Buffered */}

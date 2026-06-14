@@ -336,7 +336,7 @@ export function registerEmailAuthRoutes(app: Express): void {
         updates.username = cleaned;
       }
       if (typeof profileImageCustom === "string") {
-        updates.profileImageCustom = profileImageCustom.slice(0, 500_000);
+        updates.profileImageCustom = profileImageCustom.slice(0, 2_000_000);
       } else if (profileImageCustom === null) {
         updates.profileImageCustom = null;
       }

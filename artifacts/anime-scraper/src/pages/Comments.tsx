@@ -179,7 +179,7 @@ export default function CommentsPage() {
   const { user } = useAuth();
   const userId  = (user as any)?.id || (user as any)?.userId || null;
   const username = user?.displayName || user?.username || "مستخدم";
-  const avatarUrl = (user as any)?.avatarUrl || null;
+  const avatarUrl = user?.profileImageUrl || (user as any)?.avatarUrl || null;
 
   const [comments,  setComments]  = useState<Comment[]>([]);
   const [loading,   setLoading]   = useState(true);
