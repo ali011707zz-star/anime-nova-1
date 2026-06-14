@@ -1432,8 +1432,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     const extracted = await callExtractApi(embedUrl);
     if (extracted?.directUrl) {
       const d = extracted.directUrl;
-      // Probe the extracted URL before sending — prevents black screens
-      // from CDN blocks or expired tokens
+      // Probe only for definitive failures (404/5xx) — 403/405/timeout → still send
       if (d.startsWith("http")) {
         try {
           const probe = await fetch(d, {
@@ -1442,18 +1441,16 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             signal : AbortSignal.timeout(5_000),
             redirect: "follow",
           });
-          // 403/405 may still work via hls-proxy (CDN checks full request);
-          // skip 404, 4xx (except 403/405), 5xx — these are definitively broken
-          const ok = probe.ok || probe.status === 403 || probe.status === 405;
-          if (!ok) return false;
+          // Only skip truly dead URLs (404, 4xx excluding 403/405, 5xx excluding 503)
+          const definitivelyDead = !probe.ok
+            && probe.status !== 403
+            && probe.status !== 405
+            && probe.status !== 503
+            && probe.status !== 0;
+          if (definitivelyDead) return false;
         } catch {
-          // HEAD failed from Replit server — CDN may still work via hls-proxy/video-proxy from client
-          const isHls2 = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
-          const needPrxy2 = !isHls2 && MP4_PROXY_HOSTS.some(h => d.includes(h));
-          const proxy2 = isHls2 ? (d.startsWith("/") ? d : wrapHls(d, embedUrl)) : needPrxy2 ? wrapMp4(d, embedUrl) : d;
-          seenUrls.add(embedUrl);
-          sendSource(embedUrl, label, d, proxy2);
-          return true;
+          // HEAD timeout/network error — CDN may still work from client browser
+          // Fall through and send the source anyway
         }
       }
       const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
@@ -1468,7 +1465,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     const streams = await scrapeEmbedForStreams(embedUrl);
     let sentAny = false;
     for (const s of streams.slice(0, 2)) {
-      // Probe each found stream too
+      // Probe each found stream — skip only definitive failures
       if (s.url.startsWith("http")) {
         try {
           const probe = await fetch(s.url, {
@@ -1477,8 +1474,12 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             signal : AbortSignal.timeout(4_000),
             redirect: "follow",
           });
-          if (!probe.ok && probe.status !== 403 && probe.status !== 405) continue;
-        } catch { continue; }
+          const definitivelyDead = !probe.ok
+            && probe.status !== 403
+            && probe.status !== 405
+            && probe.status !== 503;
+          if (definitivelyDead) continue;
+        } catch { /* timeout/network → still try */ }
       }
       seenUrls.add(embedUrl);
       sendSource(s.url, label, s.url, s.proxyUrl);
@@ -1657,13 +1658,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                       const pr = await fetch(`http://localhost:${PROBE_PORT}${proxied}`, {
                         signal: AbortSignal.timeout(8_000),
                       });
-                      const ok = isAtlas
-                        ? (pr.ok || pr.status === 206 || pr.status === 403 || pr.status === 405)
-                        : pr.ok;
+                      // Accept 200/206/403/405 for all servers — CDN may return 403 from server-side
+                      // but still play fine from the browser (different IP / user-agent context)
+                      const ok = pr.ok || pr.status === 206 || pr.status === 403 || pr.status === 405;
                       return { proxied, rawUrl: pRaw, label, isAtlas, ok };
                     } catch {
-                      // Network error probing — Atlas gets benefit of the doubt
-                      return { proxied, rawUrl: pRaw, label, isAtlas, ok: isAtlas };
+                      // Network error probing — send it anyway (client may have different routing)
+                      return { proxied, rawUrl: pRaw, label, isAtlas, ok: true };
                     }
                   })
                 );
