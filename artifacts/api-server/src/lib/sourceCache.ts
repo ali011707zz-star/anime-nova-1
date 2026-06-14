@@ -127,7 +127,9 @@ async function pgUpsert(cacheKey: string, site: string, sources: any[], expiresA
       target: sourceCacheTable.cacheKey,
       set: { sources, fetchedAt: Date.now(), expiresAt },
     });
-  } catch { /* silent */ }
+  } catch (err) {
+    console.error(`[sourceCache] pgUpsert failed for ${site}:${cacheKey}`, err instanceof Error ? err.message : err);
+  }
 }
 
 async function pgDeleteExpired(): Promise<void> {

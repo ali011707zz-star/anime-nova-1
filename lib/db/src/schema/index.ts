@@ -5,3 +5,4 @@ export * from "./comments";
 export * from "./source-cache";
 export * from "./subtitle-cache";
 export * from "./cdn-cache";
+export * from "./reports";
