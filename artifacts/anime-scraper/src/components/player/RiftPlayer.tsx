@@ -514,11 +514,12 @@ export default function RiftPlayer({
     const t = setTimeout(() => {
       const v = videoRef.current;
       if (!v) return;
-      if (v.currentTime > 2 && v.videoWidth === 0 && v.videoHeight === 0 && !v.paused) {
+      // Wait until currentTime > 5s to avoid false positives on slow CDNs
+      if (v.currentTime > 5 && v.videoWidth === 0 && v.videoHeight === 0 && !v.paused) {
         setError("كودك الفيديو غير مدعوم في هذا المتصفح — جرّب مصدراً آخر");
         try { v.pause(); } catch {}
       }
-    }, 4000);
+    }, 8000);
     return () => clearTimeout(t);
   }, [playing]);
 
@@ -567,8 +568,11 @@ export default function RiftPlayer({
   }
   function skip(delta: number) {
     const v = videoRef.current; if (!v || !duration) return;
+    const wasPlaying = !v.paused;
     v.currentTime = Math.max(0, Math.min(duration, v.currentTime + delta));
     setCurrentTime(v.currentTime);
+    // Ensure playback resumes after seek (browser may pause during buffering)
+    if (wasPlaying) v.play().catch(() => {});
   }
   function changeSpeed(s: number) {
     setSpeed(s); if (videoRef.current) videoRef.current.playbackRate = s;
