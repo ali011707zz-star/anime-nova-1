@@ -5582,10 +5582,12 @@ router.get("/anime/sources-stream", async (req, res) => {
         if (!closed) buf.forEach(s => sendSrc(s));
         if (buf.length) await setSourceCache(cKey, site, buf);
       } else {
-        // Probe بالتوازي قبل الإرسال — يحذف المصادر الميتة فوراً
-        const alive = await probeAndFilter(srcs);
-        if (!closed) alive.forEach(s => sendSrc(s));
-        if (alive.length) await setSourceCache(cKey, site, alive);
+        // إرسال فوري بدون انتظار الـ probe — يظهر في الواجهة فوراً
+        if (!closed) srcs.forEach(s => sendSrc(s));
+        // Probe في الخلفية لبناء cache دقيق فقط
+        probeAndFilter(srcs).then(async alive => {
+          if (alive.length) await setSourceCache(cKey, site, alive);
+        }).catch(() => {});
       }
     }
 
