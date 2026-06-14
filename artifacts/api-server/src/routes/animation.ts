@@ -1341,6 +1341,78 @@ async function scrapeAflaamSeries(
   return [];
 }
 
+// ── Videasy fresh URL redirect ─────────────────────────────────────────────────
+// Returns a 302 redirect to a freshly-fetched Videasy CDN URL.
+// Called from the browser so the browser follows the redirect with its own
+// residential IP (CDN blocks datacenter IPs but allows browser IPs).
+const videasyCache = new Map<string, { url: string; ts: number }>();
+const VIDEASY_TTL  = 30 * 60 * 1000; // 30 min
+
+router.get("/animation/videasy-fresh", async (req: Request, res: Response) => {
+  const server    = String(req.query.server    || "mb-flix");
+  const tmdbId    = String(req.query.tmdbId    || "");
+  const mediaType = String(req.query.mediaType || "movie");
+  const epNum     = String(req.query.ep        || "1");
+  const season    = String(req.query.season    || "1");
+  const quality   = String(req.query.quality   || "");
+  if (!tmdbId) { res.status(400).json({ error: "tmdbId required" }); return; }
+
+  const cacheKey = `${server}|${tmdbId}|${mediaType}|${epNum}|${season}`;
+  const cached = videasyCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < VIDEASY_TTL) {
+    res.redirect(302, cached.url); return;
+  }
+
+  try {
+    const UA2 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+    const VEA_HDRS = {
+      "User-Agent": UA2,
+      "Accept": "application/json, */*; q=0.01",
+      "Referer": "https://player.videasy.net/",
+      "Origin": "https://player.videasy.net",
+    };
+    const encTitle = encodeURIComponent(encodeURIComponent(""));
+    const baseParams = mediaType === "tv"
+      ? `title=${encTitle}&mediaType=tv&year=&tmdbId=${tmdbId}&imdbId=&episodeId=${epNum}&seasonId=${season}`
+      : `title=${encTitle}&mediaType=movie&year=&tmdbId=${tmdbId}&imdbId=&episodeId=1&seasonId=1`;
+
+    const apiUrl = `https://api.videasy.to/${server}/sources-with-title?${baseParams}`;
+    const r = await fetch(apiUrl, { headers: VEA_HDRS, signal: AbortSignal.timeout(12_000) });
+    if (!r.ok) { res.status(502).json({ error: `Videasy API ${r.status}` }); return; }
+    const blob = await r.text();
+    if (!blob || blob.length < 20) { res.status(502).json({ error: "empty response" }); return; }
+
+    const decR = await fetch("https://enc-dec.app/api/dec-videasy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: blob, id: tmdbId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!decR.ok) { res.status(502).json({ error: "decrypt failed" }); return; }
+    const decData = await decR.json() as {
+      status: number;
+      result?: { sources?: Array<{ url: string; quality?: string }> };
+    };
+    if (decData.status !== 200 || !decData.result?.sources?.length) {
+      res.status(404).json({ error: "no sources" }); return;
+    }
+
+    // Pick best quality match or highest available
+    const sources = decData.result.sources;
+    let picked = sources.find(s => s.quality === quality) || sources[0];
+    if (!picked?.url) { res.status(404).json({ error: "no url" }); return; }
+
+    videasyCache.set(cacheKey, { url: picked.url, ts: Date.now() });
+
+    // Add CORS headers so browser hls.js can read m3u8 via redirect
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET");
+    res.redirect(302, picked.url);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 // ── SSE animation sources stream ──────────────────────────────────────────────
 
 router.get("/animation/sources-stream", async (req: Request, res: Response) => {
@@ -2455,7 +2527,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       }),
 
       // ── Videasy (api.videasy.to) — TMDB-native HLS multi-quality + Arabic subtitle ─
-      scrapeAnimCached("videasy", async () => {
+      scrapeAnimCached("videasy3", async () => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
@@ -2502,11 +2574,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (!src?.url) continue;
                 const quality = src.quality || "HD";
                 const label = `Videasy · ${server} · ${quality}`;
-                // CDN (joe.goldweather.net / server.digitalsun.app) blocks Replit datacenter IPs.
-                // hls-proxy fetches from the same datacenter IP → always 403.
-                // Solution: send the raw URL directly; browser IP is residential → CDN allows it.
+                // CDN blocks datacenter IPs. Use /api/animation/videasy-fresh which returns
+                // a 302 redirect. Browser follows redirect with its own residential IP → CDN allows.
+                // Detect HLS vs MP4 from URL to set type param for RiftPlayer.
+                const isHlsSrc = src.url.includes(".m3u8");
+                const freshUrl = `/api/animation/videasy-fresh?server=${encodeURIComponent(server)}&tmdbId=${tmdbId}&mediaType=${mediaType}&ep=${epNum}&season=${season}&quality=${encodeURIComponent(quality)}&vtype=${isHlsSrc ? "hls" : "mp4"}`;
                 sendSource(
-                  src.url, label, src.url, src.url,
+                  freshUrl, label, freshUrl, freshUrl,
                   araSub?.url ? { subtitleUrl: araSub.url } : undefined,
                 );
               }
