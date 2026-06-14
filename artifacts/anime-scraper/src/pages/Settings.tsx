@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Bell, BellOff, Check, Shield, LogOut, User,
   Trash2, ChevronLeft, Settings as SettingsIcon,
   Palette, Zap, ChevronRight, Sparkles, X, CheckCircle2,
   UserCircle, Crown, Smartphone, ExternalLink, MessageCircle,
-  AlertCircle,
+  AlertCircle, Send, Bug, Lightbulb, Film,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useLocation } from "wouter";
@@ -138,6 +138,213 @@ function ConfirmSheet({ open, title, desc, confirmLabel = "تأكيد", cancelLa
   );
 }
 
+/* ──────────────── ReportSheet ──────────────── */
+const REPORT_TYPES = [
+  { id: "bug",        label: "خلل تقني",       icon: Bug,        color: "text-red-400",    bg: "bg-red-500/10",    border: "border-red-500/20"    },
+  { id: "suggestion", label: "اقتراح",          icon: Lightbulb,  color: "text-amber-400",  bg: "bg-amber-500/10",  border: "border-amber-500/20"  },
+  { id: "content",    label: "محتوى مفقود",     icon: Film,       color: "text-violet-400", bg: "bg-violet-500/10", border: "border-violet-500/20" },
+  { id: "other",      label: "أخرى",            icon: MessageCircle, color: "text-sky-400", bg: "bg-sky-500/10",    border: "border-sky-500/20"    },
+];
+
+function ReportSheet({ open, onClose, userDisplayName }: { open: boolean; onClose: () => void; userDisplayName?: string }) {
+  const [type,    setType]    = useState("bug");
+  const [msg,     setMsg]     = useState("");
+  const [status,  setStatus]  = useState<"idle" | "sending" | "ok" | "err">("idle");
+  const [errMsg,  setErrMsg]  = useState("");
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (open) { setType("bug"); setMsg(""); setStatus("idle"); setErrMsg(""); }
+  }, [open]);
+
+  if (!open) return null;
+
+  const send = async () => {
+    if (!msg.trim()) { taRef.current?.focus(); return; }
+    setStatus("sending");
+    try {
+      const r = await fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type,
+          message: msg.trim(),
+          page: location.pathname,
+          userDisplayName: userDisplayName || undefined,
+        }),
+      });
+      const d = await r.json() as { ok: boolean; error?: string };
+      if (d.ok) { setStatus("ok"); }
+      else { setErrMsg(d.error || "فشل الإرسال"); setStatus("err"); }
+    } catch {
+      setErrMsg("تعذّر الاتصال بالخادم"); setStatus("err");
+    }
+  };
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[9999] flex flex-col justify-end" style={{ direction: "rtl" }}>
+      <motion.div className="absolute inset-0"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        style={{ background: "rgba(0,0,0,0.80)", backdropFilter: "blur(8px)" }}
+        onPointerDown={onClose} />
+      <motion.div
+        initial={{ y: "100%", opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+        exit={{ y: "100%", opacity: 0 }}
+        transition={{ type: "spring", stiffness: 400, damping: 36 }}
+        onPointerDown={e => e.stopPropagation()}
+        style={{
+          position: "relative", zIndex: 1,
+          background: "linear-gradient(180deg,#0E0C1A 0%,#09090B 100%)",
+          borderRadius: "2rem 2rem 0 0",
+          border: "1.5px solid rgba(255,255,255,0.08)", borderBottom: "none",
+          boxShadow: "0 -32px 80px rgba(0,0,0,0.90)",
+          paddingBottom: "max(28px,env(safe-area-inset-bottom))",
+          maxHeight: "92dvh", display: "flex", flexDirection: "column",
+        }}>
+
+        {/* top gradient bar */}
+        <div className="h-[2px] shrink-0" style={{ background: "linear-gradient(90deg,transparent,#7C3AED,#A78BFA,#7C3AED,transparent)", borderRadius: "2rem 2rem 0 0" }} />
+        <div className="flex justify-center pt-3 pb-1 shrink-0"><div className="w-10 h-[3.5px] rounded-full bg-white/12" /></div>
+
+        {/* header */}
+        <div className="flex items-center justify-between px-5 py-3 shrink-0">
+          <button onPointerDown={onClose}
+            className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-transform"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)" }}>
+            <X className="w-4 h-4 text-white/50" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+              style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.30)" }}>
+              <AlertCircle className="w-4 h-4 text-violet-300" />
+            </div>
+            <span className="text-[16px] font-black font-['Cairo']">التواصل معنا</span>
+          </div>
+          <div className="w-9" />
+        </div>
+
+        {/* scrollable body */}
+        <div className="flex-1 overflow-y-auto px-5 pb-4">
+          <AnimatePresence mode="wait">
+            {status === "ok" ? (
+              /* ── success state ── */
+              <motion.div key="ok"
+                initial={{ opacity: 0, scale: 0.88 }} animate={{ opacity: 1, scale: 1 }}
+                className="flex flex-col items-center justify-center gap-4 py-10 text-center">
+                <div className="w-20 h-20 rounded-full flex items-center justify-center"
+                  style={{ background: "rgba(16,185,129,0.14)", border: "2px solid rgba(16,185,129,0.35)" }}>
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+                </div>
+                <div>
+                  <p className="text-[18px] font-black font-['Cairo'] text-white/90 mb-1">تم الإرسال! 🎉</p>
+                  <p className="text-[12px] text-white/40 font-['Cairo'] leading-relaxed">
+                    وصلت رسالتك بنجاح · سنرد عليك في أقرب وقت عبر تيليجرام
+                  </p>
+                </div>
+                <button onPointerDown={onClose}
+                  className="mt-2 px-8 py-3 rounded-2xl text-[13px] font-black font-['Cairo'] text-white active:scale-95 transition-transform"
+                  style={{ background: "linear-gradient(135deg,#7C3AED,#6D28D9)", boxShadow: "0 6px 20px rgba(124,58,237,0.35)" }}>
+                  حسناً
+                </button>
+              </motion.div>
+            ) : (
+              /* ── form state ── */
+              <motion.div key="form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-5 pt-1">
+
+                {/* type selector */}
+                <div>
+                  <p className="text-[11px] font-black text-white/35 font-['Cairo'] mb-2.5 tracking-wide">نوع الرسالة</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {REPORT_TYPES.map(t => {
+                      const Icon = t.icon;
+                      const sel  = type === t.id;
+                      return (
+                        <button key={t.id} onPointerDown={() => setType(t.id)}
+                          className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all active:scale-95 ${t.bg} ${t.border} border`}
+                          style={sel ? { boxShadow: "0 0 0 1.5px rgba(139,92,246,0.55)", background: "rgba(139,92,246,0.14)" } : {}}>
+                          <Icon className={`w-3.5 h-3.5 shrink-0 ${sel ? "text-violet-300" : t.color}`} />
+                          <span className={`text-[12px] font-bold font-['Cairo'] ${sel ? "text-violet-200" : "text-white/70"}`}>{t.label}</span>
+                          {sel && <div className="mr-auto w-1.5 h-1.5 rounded-full bg-violet-400" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* message textarea */}
+                <div>
+                  <p className="text-[11px] font-black text-white/35 font-['Cairo'] mb-2 tracking-wide">رسالتك</p>
+                  <textarea
+                    ref={taRef}
+                    value={msg} onChange={e => setMsg(e.target.value)}
+                    placeholder={
+                      type === "bug"        ? "صف المشكلة التي واجهتها بالتفصيل…" :
+                      type === "suggestion" ? "شاركنا اقتراحك أو فكرتك…" :
+                      type === "content"    ? "اذكر اسم الأنمي أو الحلقة المفقودة…" :
+                                             "اكتب رسالتك هنا…"
+                    }
+                    rows={5}
+                    className="w-full rounded-2xl px-4 py-3.5 text-[13px] font-['Cairo'] text-white/85 placeholder-white/20 resize-none outline-none transition-all"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: msg.trim() ? "1.5px solid rgba(139,92,246,0.40)" : "1.5px solid rgba(255,255,255,0.08)",
+                      lineHeight: "1.8",
+                    }}
+                  />
+                  <div className="flex justify-between mt-1.5">
+                    <span className={`text-[10px] font-['Cairo'] ${msg.length > 900 ? "text-red-400/60" : "text-white/20"}`}>{msg.length}/1000</span>
+                    {msg.trim().length === 0 && (
+                      <span className="text-[10px] text-white/20 font-['Cairo']">مطلوب</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* error msg */}
+                {status === "err" && (
+                  <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl"
+                    style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.25)" }}>
+                    <X className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                    <span className="text-[12px] text-red-300/80 font-['Cairo']">{errMsg}</span>
+                  </div>
+                )}
+
+                {/* send button */}
+                <button
+                  onPointerDown={send}
+                  disabled={status === "sending" || !msg.trim()}
+                  className="w-full py-4 rounded-2xl text-[14px] font-black font-['Cairo'] text-white flex items-center justify-center gap-2.5 transition-all active:scale-[0.98]"
+                  style={{
+                    background: msg.trim() ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(255,255,255,0.05)",
+                    color: msg.trim() ? "white" : "rgba(255,255,255,0.25)",
+                    boxShadow: msg.trim() ? "0 6px 24px rgba(124,58,237,0.40)" : "none",
+                    border: msg.trim() ? "1px solid rgba(139,92,246,0.35)" : "1px solid rgba(255,255,255,0.06)",
+                  }}>
+                  {status === "sending" ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>جاري الإرسال…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>إرسال الرسالة</span>
+                    </>
+                  )}
+                </button>
+
+                <p className="text-center text-[10px] text-white/18 font-['Cairo'] pb-1">
+                  سيتم إرسال رسالتك مباشرة عبر تيليجرام · @L_X_00
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
+    </div>,
+    document.body
+  );
+}
+
 /* ──────────────── Toggle switch ──────────────── */
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -253,7 +460,8 @@ function NavRow({ icon: Icon, iconColor, iconBg, label, sub, href, badge }: {
 export default function Settings() {
   const { user, signOut } = useAuth();
   const [, navigate] = useLocation();
-  const [showAuth, setShowAuth] = useState(false);
+  const [showAuth,   setShowAuth]   = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     open: boolean; title: string; desc?: string;
     confirmLabel?: string; danger?: boolean; onConfirm: () => void;
@@ -574,29 +782,29 @@ export default function Settings() {
         </div>
 
         <button
-          onClick={() => window.open("https://t.me/Anime_NOVA_0", "_blank")}
+          onClick={() => setShowReport(true)}
           className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-sky-500/10 border-white/8">
             <AlertCircle className="w-4 h-4 text-sky-400" />
           </div>
           <div className="flex-1 text-right">
             <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">الإبلاغ عن مشكلة</p>
-            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">أخبرنا إذا واجهت أي خلل عبر تيليجرام</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">أخبرنا إذا واجهت أي خلل · يصلنا مباشرة</p>
           </div>
-          <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
+          <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
         </button>
 
         <button
-          onClick={() => window.open("https://t.me/Anime_NOVA_0", "_blank")}
+          onClick={() => setShowReport(true)}
           className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-pink-500/10 border-white/8">
             <MessageCircle className="w-4 h-4 text-pink-400" />
           </div>
           <div className="flex-1 text-right">
             <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">تواصل معنا</p>
-            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">اقتراحات · شراكات · مساعدة</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">اقتراحات · شراكات · مساعدة · يصلنا فوراً</p>
           </div>
-          <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
+          <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
         </button>
 
         <button
@@ -692,6 +900,16 @@ export default function Settings() {
 
       <AnimatePresence>
         {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showReport && (
+          <ReportSheet
+            open={showReport}
+            onClose={() => setShowReport(false)}
+            userDisplayName={displayName || undefined}
+          />
+        )}
       </AnimatePresence>
     </main>
   );
