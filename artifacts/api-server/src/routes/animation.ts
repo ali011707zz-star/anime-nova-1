@@ -2444,6 +2444,109 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
+      // ── Videasy (api.videasy.to) — TMDB-native HLS multi-quality + Arabic subtitle ─
+      scrapeAnimCached("videasy", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "Videasy: جاري الاستخراج…" });
+          const rawTitle = enTitlePrefetched || title || "";
+          if (!rawTitle) return;
+          // Videasy requires double URL-encoding for the title parameter
+          const encTitle = encodeURIComponent(encodeURIComponent(rawTitle));
+          const mediaType = type === "movie" ? "movie" : "tv";
+          const baseParams = mediaType === "tv"
+            ? `title=${encTitle}&mediaType=tv&year=&tmdbId=${tmdbId}&imdbId=&episodeId=${epNum}&seasonId=${season}`
+            : `title=${encTitle}&mediaType=movie&year=&tmdbId=${tmdbId}&imdbId=&episodeId=1&seasonId=1`;
+          const VEA_HDRS = {
+            "User-Agent": UA,
+            "Accept": "application/json, */*; q=0.01",
+            "Referer": "https://player.videasy.net/",
+            "Origin": "https://player.videasy.net",
+          };
+          // mb-flix = primary English; cdn = high-quality (4K); downloader2 = fallback
+          const servers = ["mb-flix", "cdn", "downloader2"];
+          await Promise.allSettled(servers.map(async (server) => {
+            try {
+              const url = `https://api.videasy.to/${server}/sources-with-title?${baseParams}`;
+              const r = await fetch(url, { headers: VEA_HDRS, signal: AbortSignal.timeout(12_000) });
+              if (!r.ok) return;
+              const blob = await r.text();
+              if (!blob || blob.length < 20) return;
+              // Decrypt via enc-dec.app (free, no auth required)
+              const decR = await fetch("https://enc-dec.app/api/dec-videasy", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: blob, id: String(tmdbId) }),
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (!decR.ok) return;
+              const decData = await decR.json() as {
+                status: number;
+                result?: { sources?: any[]; subtitles?: any[] };
+              };
+              if (decData.status !== 200 || !decData.result?.sources) return;
+              // Arabic subtitle from cc.boopigcdn.com (publicly accessible, WEBVTT)
+              const subs = decData.result.subtitles ?? [];
+              const araSub = subs.find((s: any) => s.lang === "ara" || s.lang === "ar");
+              for (const src of (decData.result.sources ?? [])) {
+                if (!src?.url) continue;
+                const quality = src.quality || "HD";
+                const label = `Videasy · ${server} · ${quality}`;
+                // CDN (joe.goldweather.net / server.digitalsun.app) blocks datacenter IPs →
+                // send raw URL for browser direct playback (CORS headers present for browsers)
+                sendSource(
+                  src.url, label, src.url, src.url,
+                  araSub?.url ? { subtitleUrl: araSub.url } : undefined,
+                );
+              }
+            } catch { /* silent per server */ }
+          }));
+        } catch { /* silent */ }
+      }),
+
+      // ── VidLink via enc-dec.app — TMDB-native HLS + Arabic captions ─────────────
+      scrapeAnimCached("vidlink_encdec", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "VidLink: جاري التشفير…" });
+          // Step 1: Encrypt TMDB ID via enc-dec.app
+          const encR = await fetch(`https://enc-dec.app/api/enc-vidlink?text=${tmdbId}`, {
+            headers: { "User-Agent": UA },
+            signal: AbortSignal.timeout(8_000),
+          });
+          if (!encR.ok) return;
+          const encData = await encR.json() as { status: number; result?: string };
+          if (encData.status !== 200 || !encData.result) return;
+          const encrypted = encData.result;
+          // Step 2: Fetch VidLink API with encrypted ID
+          const vlUrl = type === "movie"
+            ? `https://vidlink.pro/api/b/movie/${encrypted}`
+            : `https://vidlink.pro/api/b/tv/${encrypted}/${season}/${epNum}`;
+          const vlR = await fetch(vlUrl, {
+            headers: {
+              "User-Agent": UA,
+              "Origin": "https://vidlink.pro",
+              "Referer": "https://vidlink.pro/",
+            },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!vlR.ok) return;
+          const vlData = await vlR.json() as {
+            stream?: { playlist?: string; flags?: string[]; captions?: any[] };
+          };
+          const hlsUrl = vlData.stream?.playlist;
+          if (!hlsUrl) return;
+          const captions = vlData.stream?.captions ?? [];
+          const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
+          // VidLink streams are proxied by storm.vodvidl.site (cors-allowed) →
+          // send raw HLS to browser; hls.js fetches segments from user IP (not datacenter)
+          sendSource(
+            hlsUrl, "VidLink · HLS", hlsUrl, hlsUrl,
+            araCap?.url ? { subtitleUrl: araCap.url } : undefined,
+          );
+        } catch { /* silent */ }
+      }),
+
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
       scrapeAnimCached("animephoenix", async () => {
         // AnimePhoenix هو موقع مسلسلات أنمي مدبلج فقط — لا يحتوي أفلام

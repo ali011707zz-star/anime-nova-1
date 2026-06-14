@@ -4,6 +4,8 @@
 
 المصادر الفعّالة: **shahiid-anime.net (عربي)** · **animelek.top (عربي)** · **animedar.net (عربي)** · **seepanel.top/SeeDrama APK (عربي مدبلج)** · **kawaii-anime.com (ياباني مترجم)** · **AniKoto/megaplay.buzz (ياباني مترجم + ترجمة VTT)** · **AniNeko/anineko.to (ياباني مترجم HLS متعدد الجودات)** · **anime-phoenix.com (1080p MKV مباشر عبر curl_cffi)**
 
+مصادر الأنيميشن: **Videasy (api.videasy.to) — TMDB-native HLS + ترجمة عربية** · **VidLink via enc-dec.app — TMDB-native HLS + ترجمة عربية** · **Vyla · StarCima · aflaam · EzVidAPI · SeePanal · ArabSeed · StarlDima**
+
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
