@@ -155,7 +155,7 @@ export default function AnimationWatch() {
 
   /* ── Subtitle state ── */
   const [subTracks,   setSubTracks]   = useState<SubTrack[]>([]);
-  const [subChoice,   setSubChoice]   = useState<SubChoice>("off");
+  const [subChoice,   setSubChoice]   = useState<SubChoice>("ar-translated");
   const [subStatus,   setSubStatus]   = useState<SubStatus>("off");
   const [subCues,     setSubCues]     = useState<SubCue[]>([]);
   const [subTrigger,  setSubTrigger]  = useState(0);
@@ -391,7 +391,7 @@ export default function AnimationWatch() {
   /* ── SSE stream ── */
   useEffect(() => {
     setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
-    setSubCues([]); setSubStatus("off"); setSubChoice("off"); setHlsTime(0); setShowSubPanel(false);
+    setSubCues([]); setSubStatus("off"); setSubChoice("ar-translated"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
 
     const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodeURIComponent(title))}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}`;
@@ -557,7 +557,7 @@ export default function AnimationWatch() {
     subAbortRef.current?.abort();
     const forced = forceSubRef.current;
     forceSubRef.current = false;
-    setSubTracks([]); setSubCues([]); setSubChoice("off"); setSubStatus("discovering");
+    setSubTracks([]); setSubCues([]); setSubChoice("ar-translated"); setSubStatus("discovering");
     if (!tmdbId) { setSubStatus("off"); return; }
 
     // Main ctrl: cancelled only on unmount / episode change (no hard timeout)
