@@ -1532,18 +1532,18 @@ export default function RiftPlayer({
                     </div>
 
                     {/* ── Persistent skip intro button (shows whenever skip data available) ── */}
-                    {skipIntro && duration > 0 && (
+                    {effectiveSkipIntro && duration > 0 && (
                       <button
-                        onPointerDown={e => { e.stopPropagation(); seekFrac(skipIntro.end / duration); showControls(); }}
+                        onPointerDown={e => { e.stopPropagation(); seekFrac(effectiveSkipIntro!.end / duration); showControls(); }}
                         className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] active:scale-90 transition-all"
                         style={{ background: "rgba(6,182,212,0.16)", border: "1px solid rgba(6,182,212,0.40)", color: "rgba(103,232,249,0.92)", touchAction: "manipulation" }}>
                         ⏭ مقدمة
                       </button>
                     )}
                     {/* ── Persistent skip outro button ── */}
-                    {skipOutro && duration > 0 && (
+                    {effectiveSkipOutro && duration > 0 && (
                       <button
-                        onPointerDown={e => { e.stopPropagation(); onNextEp ? onNextEp() : seekFrac(skipOutro.end / duration); showControls(); }}
+                        onPointerDown={e => { e.stopPropagation(); onNextEp ? onNextEp() : seekFrac(effectiveSkipOutro!.end / duration); showControls(); }}
                         className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] active:scale-90 transition-all"
                         style={{ background: "rgba(249,115,22,0.16)", border: "1px solid rgba(249,115,22,0.40)", color: "rgba(253,186,116,0.92)", touchAction: "manipulation" }}>
                         ⏭ نهاية

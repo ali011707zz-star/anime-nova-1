@@ -1803,20 +1803,31 @@ async function getAnimePhoenixSources(
   const videos = parseAnimePhoenixVideo(html);
   if (!videos.length) { aphSrcCache.set(cKey, { sources: [], ts: Date.now() }); return []; }
 
-  const sources: UnifiedSource[] = videos.slice(0, 5).map((v, i) => {
-    // Wrap with video-proxy for Range support (MKV seeking requires it)
-    const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(APH_BASE + "/")}`;
-    return {
-      name: v.label || `Phoenix ${i + 1}`,
+  const sources: UnifiedSource[] = [];
+  let idx = 0;
+  for (const v of videos.slice(0, 6)) {
+    const lower = v.url.toLowerCase();
+    // MKV files on anime-phoenix.com are x265/HEVC — browsers cannot decode them
+    // (only Safari on Apple Silicon partially supports HEVC; Chrome/Firefox never do).
+    // Skip MKV to prevent guaranteed black-screen playback.
+    if (lower.endsWith(".mkv") || lower.includes(".mkv?")) continue;
+    const isHls = lower.includes(".m3u8");
+    const proxied = isHls
+      ? `/api/anime/hls-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(APH_BASE + "/")}`
+      : `/api/anime/video-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(APH_BASE + "/")}`;
+    sources.push({
+      name: v.label || `Phoenix ${idx + 1}`,
       url: proxied,
       directUrl: proxied,
-      directType: "mp4" as const,
+      directType: isHls ? ("hls" as const) : ("mp4" as const),
       quality: "1080p",
       qualityRank: 13,
       site: "animephoenix",
       isEmbed: false,
-    };
-  });
+    });
+    idx++;
+    if (idx >= 5) break;
+  }
 
   aphSrcCache.set(cKey, { sources, ts: Date.now() });
   return sources;
@@ -5515,15 +5526,25 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
       if (!r.ok) return;
       const blob = await r.text();
       if (!blob || blob.length < 20) return;
-      const decR = await fetch("https://enc-dec.app/api/dec-videasy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: blob, id: String(tmdbId) }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!decR.ok) return;
-      const dec = await decR.json() as { status: number; result?: { sources?: any[]; subtitles?: any[] } };
-      if (dec.status !== 200 || !dec.result?.sources) return;
+
+      // Try decryption — downloader2 may use a different key derivation:
+      // attempt 1: with tmdbId, attempt 2: with empty id (fallback for downloader2)
+      const tryDecrypt = async (id: string) =>
+        fetch("https://enc-dec.app/api/dec-videasy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: blob, id, server }),
+          signal: AbortSignal.timeout(10_000),
+        }).then(r2 => r2.ok ? r2.json() : null).catch(() => null) as
+        Promise<{ status: number; result?: { sources?: any[]; subtitles?: any[] } } | null>;
+
+      let dec = await tryDecrypt(String(tmdbId));
+      if (!dec || dec.status !== 200 || !dec.result?.sources?.length) {
+        // Fallback for downloader2: try without id
+        dec = await tryDecrypt("");
+      }
+      if (!dec || dec.status !== 200 || !dec.result?.sources) return;
+
       const araSub = (dec.result.subtitles ?? []).find((s: any) => s.lang === "ara" || s.lang === "ar");
       for (const src of (dec.result.sources ?? [])) {
         if (!src?.url) continue;
@@ -6159,6 +6180,32 @@ router.post("/anime/anilist", async (req, res) => {
 // ════════════════════════════════════════════════════════════════════
 //  Proxies AniSkip API to avoid CORS/network issues from browser
 // ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  ep-title  GET /api/anime/ep-title?malId=&ep=
+//  يجلب عنوان الحلقة من Jikan (MyAnimeList) عندما يكون AniList فارغاً
+// ════════════════════════════════════════════════════════════════════
+const epTitleCache = new Map<string, { title: string; ts: number }>();
+router.get("/anime/ep-title", async (req, res) => {
+  const malId = String(req.query.malId || "").trim();
+  const ep    = parseInt(String(req.query.ep || "1"), 10);
+  if (!malId || isNaN(ep)) { res.json({ title: "" }); return; }
+  const cKey = `${malId}-${ep}`;
+  const hit = epTitleCache.get(cKey);
+  if (hit && Date.now() - hit.ts < 86400_000) { res.json({ title: hit.title }); return; }
+  try {
+    // Jikan v4: GET https://api.jikan.moe/v4/anime/:id/episodes/:ep
+    const r = await fetch(
+      `https://api.jikan.moe/v4/anime/${malId}/episodes/${ep}`,
+      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(8_000) }
+    );
+    if (!r.ok) { res.json({ title: "" }); return; }
+    const data = await r.json() as { data?: { title?: string; title_romanji?: string } };
+    const title = data?.data?.title || data?.data?.title_romanji || "";
+    epTitleCache.set(cKey, { title, ts: Date.now() });
+    res.json({ title });
+  } catch { res.json({ title: "" }); }
+});
+
 router.get("/anime/aniskip", async (req, res) => {
   const malId = String(req.query.malId || "");
   const ep    = String(req.query.ep    || "");

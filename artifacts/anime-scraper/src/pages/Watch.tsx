@@ -2037,21 +2037,42 @@ export default function WatchPage() {
     return raw.replace(/^Episode\s+\d+\s*[-:–]\s*/i, "").trim();
   })();
 
-  /* Arabic episode title — translated via server proxy */
+  /* Arabic episode title — Jikan fallback then translated via server proxy */
   const [arEpTitle, setArEpTitle] = useState<string>("");
   useEffect(() => {
     setArEpTitle("");
-    if (!epTitle) return;
     const ctrl = new AbortController();
-    fetch(`/api/anime/translate?text=${encodeURIComponent(epTitle)}&from=en&to=ar`, { signal: ctrl.signal })
-      .then(r => r.ok ? r.json() : null)
-      .then((d: any) => {
-        const t = d?.translated?.trim();
-        if (t && t !== epTitle) setArEpTitle(t);
-      })
-      .catch(() => {});
+
+    const translateAndSet = (raw: string) => {
+      if (!raw) return;
+      fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar`, { signal: ctrl.signal })
+        .then(r => r.ok ? r.json() : null)
+        .then((d: any) => {
+          const t = d?.translated?.trim();
+          if (t && t !== raw) setArEpTitle(t);
+          else setArEpTitle(raw);
+        })
+        .catch(() => {});
+    };
+
+    if (epTitle) {
+      translateAndSet(epTitle);
+    } else {
+      // AniList streamingEpisodes is empty — try Jikan (MAL) for episode title
+      const malId = anime?.idMal || localStorage.getItem(`malid-${animeId}`);
+      if (malId && Number(malId) > 0) {
+        fetch(`/api/anime/ep-title?malId=${malId}&ep=${ep}`, { signal: ctrl.signal })
+          .then(r => r.ok ? r.json() : null)
+          .then((d: any) => {
+            const t = (d?.title || "").trim();
+            if (t) translateAndSet(t);
+          })
+          .catch(() => {});
+      }
+    }
+
     return () => ctrl.abort();
-  }, [epTitle]);
+  }, [epTitle, anime?.idMal, animeId, ep]);
 
   /* ── Early history save using URL params — before AniList data loads ── */
   useEffect(() => {

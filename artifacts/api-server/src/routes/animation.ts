@@ -2554,19 +2554,21 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               if (!r.ok) return;
               const blob = await r.text();
               if (!blob || blob.length < 20) return;
-              // Decrypt via enc-dec.app (free, no auth required)
-              const decR = await fetch("https://enc-dec.app/api/dec-videasy", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: blob, id: String(tmdbId) }),
-                signal: AbortSignal.timeout(10_000),
-              });
-              if (!decR.ok) return;
-              const decData = await decR.json() as {
-                status: number;
-                result?: { sources?: any[]; subtitles?: any[] };
-              };
-              if (decData.status !== 200 || !decData.result?.sources) return;
+              // Decrypt via enc-dec.app — downloader2 may need empty id as fallback
+              const tryDecrypt = async (id: string) =>
+                fetch("https://enc-dec.app/api/dec-videasy", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text: blob, id, server }),
+                  signal: AbortSignal.timeout(10_000),
+                }).then(r2 => r2.ok ? r2.json() : null).catch(() => null) as
+                Promise<{ status: number; result?: { sources?: any[]; subtitles?: any[] } } | null>;
+
+              let decData = await tryDecrypt(String(tmdbId));
+              if (!decData || decData.status !== 200 || !decData.result?.sources?.length) {
+                decData = await tryDecrypt("");
+              }
+              if (!decData || decData.status !== 200 || !decData.result?.sources) return;
               // Arabic subtitle from cc.boopigcdn.com (publicly accessible, WEBVTT)
               const subs = decData.result.subtitles ?? [];
               const araSub = subs.find((s: any) => s.lang === "ara" || s.lang === "ar");
