@@ -150,7 +150,7 @@ export default function RiftPlayer({
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, lastX: 0, startValue: 0 });
   const volumeRef     = useRef(1);
-  const brightnessRef = useRef(1.0);
+  const brightnessRef = useRef(0.85);
   const lastTap      = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const longTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSpeed    = useRef(1);
@@ -178,7 +178,7 @@ export default function RiftPlayer({
   const [buffered,        setBuffered]        = useState(0);
   const [muted,           setMuted]           = useState(false);
   const [volume,          setVolume]          = useState(1);
-  const [brightness,      setBrightness]      = useState(1.0);
+  const [brightness,      setBrightness]      = useState(0.85);
   const [speed,           setSpeed]           = useState(() => parseFloat(localStorage.getItem("pref-speed") || "1"));
   const [showCtrl,        setShowCtrl]        = useState(true);
   const [isFs,            setIsFs]            = useState(false);
@@ -779,8 +779,8 @@ export default function RiftPlayer({
   const bufPct = duration > 0 ? (buffered   / duration) * 100 : 0;
 
   /* ── Skip intro/outro visibility (AniSkip API only — no heuristics) ── */
-  // تظهر الأزرار 5 ثوانٍ قبل بداية المقدمة/النهاية حتى يتمكن المستخدم من التحضير
-  const SKIP_LEAD = 5;
+  // تظهر الأزرار 10 ثوانٍ قبل بداية المقدمة/النهاية حتى يتمكن المستخدم من التحضير
+  const SKIP_LEAD = 10;
   const showSkipIntro = !!skipIntro && currentTime >= Math.max(0, skipIntro.start - SKIP_LEAD) && currentTime <= skipIntro.end;
   const showSkipOutro = !!skipOutro && currentTime >= Math.max(0, skipOutro.start - SKIP_LEAD) && currentTime <= skipOutro.end;
 
@@ -862,7 +862,7 @@ export default function RiftPlayer({
                     style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.22)", color: "white" }}>
                     ↺ إعادة
                   </button>
-                  {onNextEp && ep < totalEps && (
+                  {onNextEp && (totalEps >= 900 || ep < totalEps) && (
                     <button
                       onPointerDown={e => { e.stopPropagation(); setAutoPlayCountdown(0); onNextEp?.(); }}
                       className="relative flex items-center gap-2 px-5 py-3 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform overflow-hidden"
@@ -1145,7 +1145,10 @@ export default function RiftPlayer({
                   paddingTop: "max(16px, env(safe-area-inset-top))",
                   paddingBottom: 22,
                   paddingLeft: 14,
-                  paddingRight: 14,
+                  /* In portrait-rotated mode the player's right edge sits on the device's
+                     physical bottom where the nav bar lives — add inset-bottom to keep
+                     the close / screenshot buttons from being cut off.              */
+                  paddingRight: isPortrait ? "max(18px, env(safe-area-inset-bottom))" : 14,
                 }}
                 onClick={e => e.stopPropagation()}
                 onTouchStart={e => { e.stopPropagation(); showControls(); }}
@@ -1415,10 +1418,16 @@ export default function RiftPlayer({
                 {/* ── Controls row ── */}
                 <div
                   className="flex items-center px-3 pt-2"
-                  style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
+                  style={{
+                    /* portrait-rotated: physical bottom → player's left → no safe area needed there;
+                       physical top (notch) → player's left edge in landscape, handled by paddingLeft.
+                       Keep safe-area-inset-bottom for non-rotated (fullscreen) mode.             */
+                    paddingBottom: isPortrait ? 14 : "max(16px, env(safe-area-inset-bottom))",
+                    paddingLeft: isPortrait ? "max(12px, env(safe-area-inset-top))" : 12,
+                  }}
                 >
-                  {/* Left: speed */}
-                  <div className="flex items-center gap-1.5 flex-1">
+                  {/* Left: speed + skip buttons */}
+                  <div className="flex items-center gap-1.5 flex-1 flex-wrap">
 
                     {/* Speed */}
                     <div className="relative">
@@ -1459,6 +1468,25 @@ export default function RiftPlayer({
                         )}
                       </AnimatePresence>
                     </div>
+
+                    {/* ── Persistent skip intro button (shows whenever skip data available) ── */}
+                    {skipIntro && duration > 0 && (
+                      <button
+                        onPointerDown={e => { e.stopPropagation(); seekFrac(skipIntro.end / duration); showControls(); }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] active:scale-90 transition-all"
+                        style={{ background: "rgba(6,182,212,0.16)", border: "1px solid rgba(6,182,212,0.40)", color: "rgba(103,232,249,0.92)", touchAction: "manipulation" }}>
+                        ⏭ مقدمة
+                      </button>
+                    )}
+                    {/* ── Persistent skip outro button ── */}
+                    {skipOutro && duration > 0 && (
+                      <button
+                        onPointerDown={e => { e.stopPropagation(); onNextEp ? onNextEp() : seekFrac(skipOutro.end / duration); showControls(); }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] active:scale-90 transition-all"
+                        style={{ background: "rgba(249,115,22,0.16)", border: "1px solid rgba(249,115,22,0.40)", color: "rgba(253,186,116,0.92)", touchAction: "manipulation" }}>
+                        ⏭ نهاية
+                      </button>
+                    )}
                   </div>
 
                   {/* Center: +10ث · play/pause · -10ث  (RTL: تقدم على اليسار، رجوع على اليمين) */}
