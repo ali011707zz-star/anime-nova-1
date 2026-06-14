@@ -257,12 +257,23 @@ export default function RiftPlayer({
     return () => { try { (screen.orientation as any).unlock(); } catch {} };
   }, []);
 
-  /* ── portrait detection ── */
+  /* ── portrait detection — only fires on PHYSICAL device rotation, not manual CSS toggle ── */
+  const manualRotateRef = useRef(false);
   useEffect(() => {
-    const check = () => setIsPortrait(window.innerHeight > window.innerWidth);
+    const check = () => {
+      if (manualRotateRef.current) return;
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+    const onOrient = () => {
+      manualRotateRef.current = false;
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
     window.addEventListener("resize", check);
-    window.addEventListener("orientationchange", check);
-    return () => { window.removeEventListener("resize", check); window.removeEventListener("orientationchange", check); };
+    window.addEventListener("orientationchange", onOrient);
+    return () => {
+      window.removeEventListener("resize", check);
+      window.removeEventListener("orientationchange", onOrient);
+    };
   }, []);
 
   /* ── fullscreen ── */
@@ -338,12 +349,8 @@ export default function RiftPlayer({
   }
 
   function toggleRotation() {
+    manualRotateRef.current = true;
     setIsPortrait(p => !p);
-    try {
-      const next = !isPortrait;
-      if (next) { (screen.orientation as any).lock?.("portrait-primary").catch?.(() => {}); }
-      else       { (screen.orientation as any).lock?.("landscape-primary").catch?.(() => {}); }
-    } catch {}
   }
 
   /* ── Portrait rotation resets zoom to contain ── */
