@@ -1357,7 +1357,7 @@ router.get("/animation/videasy-fresh", async (req: Request, res: Response) => {
   const quality   = String(req.query.quality   || "");
   if (!tmdbId) { res.status(400).json({ error: "tmdbId required" }); return; }
 
-  const cacheKey = `${server}|${tmdbId}|${mediaType}|${epNum}|${season}`;
+  const cacheKey = `${server}|${tmdbId}|${mediaType}|${epNum}|${season}|${quality}`;
   const cached = videasyCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < VIDEASY_TTL) {
     res.redirect(302, cached.url); return;
@@ -2574,11 +2574,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (!src?.url) continue;
                 const quality = src.quality || "HD";
                 const label = `Videasy · ${server} · ${quality}`;
-                // CDN blocks datacenter IPs. Use /api/animation/videasy-fresh which returns
-                // a 302 redirect. Browser follows redirect with its own residential IP → CDN allows.
-                // Detect HLS vs MP4 from URL to set type param for RiftPlayer.
-                const isHlsSrc = src.url.includes(".m3u8");
-                const freshUrl = `/api/animation/videasy-fresh?server=${encodeURIComponent(server)}&tmdbId=${tmdbId}&mediaType=${mediaType}&ep=${epNum}&season=${season}&quality=${encodeURIComponent(quality)}&vtype=${isHlsSrc ? "hls" : "mp4"}`;
+                // Videasy CDN URLs (joe.goldweather.net/server.digitalsun.app) never have
+                // .m3u8 extension but ALWAYS serve HLS streams. Force vtype=hls so hls.js
+                // is used instead of native <video> (Chrome can't play HLS natively → black screen).
+                // Pre-populate videasyCache so the browser-side fetch is instant (no 22s re-call).
+                const ckPre = `${server}|${tmdbId}|${mediaType}|${epNum}|${season}|${quality}`;
+                videasyCache.set(ckPre, { url: src.url, ts: Date.now() });
+                const freshUrl = `/api/animation/videasy-fresh?server=${encodeURIComponent(server)}&tmdbId=${tmdbId}&mediaType=${mediaType}&ep=${epNum}&season=${season}&quality=${encodeURIComponent(quality)}&vtype=hls`;
                 sendSource(
                   freshUrl, label, freshUrl, freshUrl,
                   araSub?.url ? { subtitleUrl: araSub.url } : undefined,
