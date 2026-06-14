@@ -1,8 +1,9 @@
-modules = ["nodejs-20", "python-3.12", "web", "postgresql-16"]
+modules = ["nodejs-20", "web", "python-3.11"]
 
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
+run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -61,11 +62,11 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py"
+args = "CF_PROXY_PORT=8000 python3.11 scripts/cf_proxy.py"
 waitForPort = 8000
 
 [agent]
-stack = "BEST_EFFORT_FALLBACK"
+stack = "FLASK_VANILLA_JS"
 expertMode = true
 integrations = ["javascript_log_in_with_replit:2.0.0", "javascript_database:1.0.0"]
 
@@ -86,10 +87,6 @@ localPort = 8000
 externalPort = 8000
 
 [[ports]]
-localPort = 8080
-externalPort = 8080
-
-[[ports]]
 localPort = 8081
 externalPort = 8081
 
@@ -103,6 +100,7 @@ externalPort = 3000
 
 [nix]
 channel = "stable-25_05"
+packages = ["openssl", "postgresql"]
 
 [userenv]
 
