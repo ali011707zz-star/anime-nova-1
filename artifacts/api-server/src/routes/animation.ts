@@ -2502,13 +2502,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (!src?.url) continue;
                 const quality = src.quality || "HD";
                 const label = `Videasy · ${server} · ${quality}`;
-                // CDN (joe.goldweather.net / server.digitalsun.app) requires
-                // Referer: https://player.videasy.net/ — without it returns 403.
-                // hls-proxy adds the correct Referer server-side; browser never touches CDN directly.
-                const VIDY_REF = "https://player.videasy.net/";
-                const proxied  = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(VIDY_REF)}`;
+                // CDN (joe.goldweather.net / server.digitalsun.app) blocks Replit datacenter IPs.
+                // hls-proxy fetches from the same datacenter IP → always 403.
+                // Solution: send the raw URL directly; browser IP is residential → CDN allows it.
                 sendSource(
-                  proxied, label, src.url, proxied,
+                  src.url, label, src.url, src.url,
                   araSub?.url ? { subtitleUrl: araSub.url } : undefined,
                 );
               }
