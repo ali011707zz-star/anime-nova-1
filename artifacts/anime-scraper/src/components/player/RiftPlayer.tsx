@@ -1028,9 +1028,9 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── Skip intro/outro — always visible when in range (outside showCtrl) ── */}
+        {/* ── Skip intro/outro — visible when in range OR when controls showing with skip data ── */}
         <AnimatePresence>
-          {!error && !isLocked && (showSkipIntro || showSkipOutro) && (
+          {!error && !isLocked && (showSkipIntro || showSkipOutro || (showCtrl && (effectiveSkipIntro || effectiveSkipOutro))) && (
             <motion.div
               key="skip-btns"
               initial={{ opacity: 0, y: 8 }}
@@ -1038,7 +1038,7 @@ export default function RiftPlayer({
               exit={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.18 }}
               className="absolute pointer-events-auto z-[55] flex justify-end px-5"
-              style={{ bottom: 92, left: 0, right: 0 }}
+              style={{ bottom: 105, left: 0, right: 0 }}
               dir="rtl"
             >
               {showSkipIntro && (() => {
@@ -1069,6 +1069,27 @@ export default function RiftPlayer({
                   style={{ background: "rgba(249,115,22,0.88)", border: "1px solid rgba(251,146,60,0.55)", color: "white", boxShadow: "0 4px 16px rgba(249,115,22,0.40)", touchAction: "manipulation" }}>
                   ⏭ الحلقة التالية
                 </button>
+              )}
+              {/* Ghost buttons when controls visible but not in range */}
+              {!showSkipIntro && !showSkipOutro && (
+                <div className="flex items-center gap-2">
+                  {effectiveSkipIntro && duration > 0 && (
+                    <button
+                      onPointerDown={e => { e.stopPropagation(); seekFrac(effectiveSkipIntro!.end / duration); showControls(); }}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                      style={{ background: "rgba(6,182,212,0.12)", border: "1px solid rgba(34,211,238,0.28)", color: "rgba(103,232,249,0.80)", touchAction: "manipulation" }}>
+                      ⏭ تخطي المقدمة
+                    </button>
+                  )}
+                  {effectiveSkipOutro && duration > 0 && (
+                    <button
+                      onPointerDown={e => { e.stopPropagation(); onNextEp ? onNextEp() : seekFrac(effectiveSkipOutro!.end / duration); showControls(); }}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                      style={{ background: "rgba(249,115,22,0.12)", border: "1px solid rgba(251,146,60,0.28)", color: "rgba(253,186,116,0.80)", touchAction: "manipulation" }}>
+                      ⏭ تخطي النهاية
+                    </button>
+                  )}
+                </div>
               )}
             </motion.div>
           )}
@@ -1244,9 +1265,8 @@ export default function RiftPlayer({
                       style={{ fontSize: 15, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
                       {title || "Nova Player"}
                     </h1>
-                    {/* Row 3: episode badge + episode title */}
+                    {/* Row 3: episode badge */}
                     <div className="flex items-center gap-2 mt-[5px] overflow-hidden">
-                      {/* episode number pill */}
                       <span
                         className="shrink-0 px-2 py-[2px] rounded-md text-[11px] font-black font-['Cairo'] tracking-wide"
                         style={{
@@ -1258,16 +1278,20 @@ export default function RiftPlayer({
                       >
                         الحلقة {ep}
                       </span>
-                      {/* episode title */}
-                      {epTitle && (
-                        <span
-                          className="text-[12px] font-['Cairo'] truncate leading-tight"
-                          style={{ color: "rgba(233,221,255,0.82)", fontWeight: 500, letterSpacing: "0.01em" }}
-                        >
+                    </div>
+                    {/* Row 4: Arabic episode title */}
+                    {epTitle && (
+                      <div className="flex items-center gap-1 mt-[3px] overflow-hidden">
+                        <span className="shrink-0 font-['Cairo'] font-bold"
+                          style={{ fontSize: 10, color: "rgba(167,139,250,0.55)" }}>
+                          عنوان •
+                        </span>
+                        <span className="text-[11px] font-['Cairo'] truncate leading-tight"
+                          style={{ color: "rgba(233,221,255,0.80)", fontWeight: 500 }}>
                           {epTitle}
                         </span>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* RIGHT: action buttons */}
@@ -1415,58 +1439,104 @@ export default function RiftPlayer({
                     {/* ── Skip markers — outside overflow-hidden so they're always visible ── */}
                     {effectiveSkipIntro && duration > 0 && (
                       <>
+                        {/* Intro colored segment (full bar height — very visible) */}
+                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{
+                          left: `${(effectiveSkipIntro.start / duration) * 100}%`,
+                          width: `${Math.max(0.8, (effectiveSkipIntro.end - effectiveSkipIntro.start) / duration * 100)}%`,
+                          height: prgHover ? 10 : 6,
+                          background: localSkipIntro
+                            ? "rgba(167,139,250,0.75)"
+                            : "rgba(250,204,21,0.80)",
+                          borderRadius: 3,
+                          zIndex: 9,
+                        }} />
                         {/* Intro start tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipIntro.start / duration) * 100}%`,
-                          width: 3, height: prgHover ? 18 : 13,
+                          width: 3, height: prgHover ? 22 : 16,
                           background: localSkipIntro ? "#a78bfa" : "#facc15",
-                          boxShadow: localSkipIntro ? "0 0 6px rgba(167,139,250,0.9), 0 0 12px rgba(167,139,250,0.5)" : "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
-                          zIndex: 10,
-                        }} />
-                        {/* Intro colored segment */}
-                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(effectiveSkipIntro.start / duration) * 100}%`,
-                          width: `${Math.max(0.5, (effectiveSkipIntro.end - effectiveSkipIntro.start) / duration * 100)}%`,
-                          height: prgHover ? 8 : 5,
-                          background: localSkipIntro ? "rgba(167,139,250,0.70)" : "rgba(250,204,21,0.70)",
-                          zIndex: 9,
+                          boxShadow: localSkipIntro
+                            ? "0 0 6px rgba(167,139,250,1), 0 0 14px rgba(167,139,250,0.6)"
+                            : "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
+                          zIndex: 11,
                         }} />
                         {/* Intro end tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipIntro.end / duration) * 100}%`,
-                          width: 3, height: prgHover ? 18 : 13,
+                          width: 3, height: prgHover ? 22 : 16,
                           background: localSkipIntro ? "#a78bfa" : "#facc15",
-                          boxShadow: localSkipIntro ? "0 0 6px rgba(167,139,250,0.9), 0 0 12px rgba(167,139,250,0.5)" : "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
-                          zIndex: 10,
+                          boxShadow: localSkipIntro
+                            ? "0 0 6px rgba(167,139,250,1), 0 0 14px rgba(167,139,250,0.6)"
+                            : "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
+                          zIndex: 11,
                         }} />
+                        {/* Intro label above segment */}
+                        {prgHover && (
+                          <div className="absolute pointer-events-none" style={{
+                            left: `${(effectiveSkipIntro.start / duration) * 100}%`,
+                            bottom: 18,
+                            background: localSkipIntro ? "rgba(109,40,217,0.90)" : "rgba(161,130,0,0.90)",
+                            color: "#fff",
+                            fontSize: 9,
+                            fontWeight: 900,
+                            fontFamily: "Cairo, sans-serif",
+                            padding: "2px 5px",
+                            borderRadius: 5,
+                            whiteSpace: "nowrap",
+                            zIndex: 20,
+                          }}>OP</div>
+                        )}
                       </>
                     )}
                     {effectiveSkipOutro && duration > 0 && (
                       <>
+                        {/* Outro colored segment (full bar height — very visible) */}
+                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{
+                          left: `${(effectiveSkipOutro.start / duration) * 100}%`,
+                          width: `${Math.max(0.8, (effectiveSkipOutro.end - effectiveSkipOutro.start) / duration * 100)}%`,
+                          height: prgHover ? 10 : 6,
+                          background: localSkipOutro
+                            ? "rgba(167,139,250,0.75)"
+                            : "rgba(251,146,60,0.80)",
+                          borderRadius: 3,
+                          zIndex: 9,
+                        }} />
                         {/* Outro start tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipOutro.start / duration) * 100}%`,
-                          width: 3, height: prgHover ? 18 : 13,
-                          background: localSkipOutro ? "#a78bfa" : "#facc15",
-                          boxShadow: localSkipOutro ? "0 0 6px rgba(167,139,250,0.9), 0 0 12px rgba(167,139,250,0.5)" : "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
-                          zIndex: 10,
-                        }} />
-                        {/* Outro colored segment */}
-                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(effectiveSkipOutro.start / duration) * 100}%`,
-                          width: `${Math.max(0.5, (effectiveSkipOutro.end - effectiveSkipOutro.start) / duration * 100)}%`,
-                          height: prgHover ? 8 : 5,
-                          background: localSkipOutro ? "rgba(167,139,250,0.70)" : "rgba(250,204,21,0.70)",
-                          zIndex: 9,
+                          width: 3, height: prgHover ? 22 : 16,
+                          background: localSkipOutro ? "#a78bfa" : "#fb923c",
+                          boxShadow: localSkipOutro
+                            ? "0 0 6px rgba(167,139,250,1), 0 0 14px rgba(167,139,250,0.6)"
+                            : "0 0 6px rgba(251,146,60,1), 0 0 14px rgba(251,146,60,0.6)",
+                          zIndex: 11,
                         }} />
                         {/* Outro end tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipOutro.end / duration) * 100}%`,
-                          width: 3, height: prgHover ? 18 : 13,
-                          background: localSkipOutro ? "#a78bfa" : "#facc15",
-                          boxShadow: localSkipOutro ? "0 0 6px rgba(167,139,250,0.9), 0 0 12px rgba(167,139,250,0.5)" : "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
-                          zIndex: 10,
+                          width: 3, height: prgHover ? 22 : 16,
+                          background: localSkipOutro ? "#a78bfa" : "#fb923c",
+                          boxShadow: localSkipOutro
+                            ? "0 0 6px rgba(167,139,250,1), 0 0 14px rgba(167,139,250,0.6)"
+                            : "0 0 6px rgba(251,146,60,1), 0 0 14px rgba(251,146,60,0.6)",
+                          zIndex: 11,
                         }} />
+                        {/* Outro label above segment */}
+                        {prgHover && (
+                          <div className="absolute pointer-events-none" style={{
+                            left: `${(effectiveSkipOutro.start / duration) * 100}%`,
+                            bottom: 18,
+                            background: localSkipOutro ? "rgba(109,40,217,0.90)" : "rgba(154,52,18,0.90)",
+                            color: "#fff",
+                            fontSize: 9,
+                            fontWeight: 900,
+                            fontFamily: "Cairo, sans-serif",
+                            padding: "2px 5px",
+                            borderRadius: 5,
+                            whiteSpace: "nowrap",
+                            zIndex: 20,
+                          }}>ED</div>
+                        )}
                       </>
                     )}
                     {/* Thumb */}
