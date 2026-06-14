@@ -1654,38 +1654,40 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     return { proxied, rawUrl, label, isAtlas: false };
                   });
 
-                // Probe all CDN URLs in parallel.
-                // Atlas CDNs may return 403 for server-side HEAD but still work from the client
-                // — treat 200/206/403/405 as ok for Atlas, only 200 for others.
-                // Fallback: if ALL non-Atlas fail, send them anyway (better than nothing).
+                // Probe all CDN URLs in parallel to check server-side accessibility.
+                // If CDN returns 200/206 from server: send via hls-proxy (CORS + segment rewriting).
+                // If CDN returns 403 from server (IP-blocked): send raw URL for browser direct access
+                // (browser fetches m3u8 + segments from user's home IP, bypassing our datacenter IP).
                 const PROBE_PORT = process.env.PORT || 8080;
                 const probeResults = await Promise.allSettled(
-                  prepared.map(async ({ proxied, rawUrl: pRaw, label, isAtlas }) => {
+                  prepared.map(async ({ proxied, rawUrl: pRaw, label }) => {
                     try {
                       const pr = await fetch(`http://localhost:${PROBE_PORT}${proxied}`, {
-                        signal: AbortSignal.timeout(8_000),
+                        signal: AbortSignal.timeout(6_000),
                       });
-                      // Accept 200/206/403/405 for all servers — CDN may return 403 from server-side
-                      // but still play fine from the browser (different IP / user-agent context)
-                      const ok = pr.ok || pr.status === 206 || pr.status === 403 || pr.status === 405;
-                      return { proxied, rawUrl: pRaw, label, isAtlas, ok };
+                      // 200/206 = CDN accessible from server → use hls-proxy
+                      // 403/502/other = CDN blocks server IPs → send raw for browser
+                      const serverAccessible = pr.ok || pr.status === 206;
+                      return { proxied, rawUrl: pRaw, label, serverAccessible };
                     } catch {
-                      // Network error probing — send it anyway (client may have different routing)
-                      return { proxied, rawUrl: pRaw, label, isAtlas, ok: true };
+                      // Network error = assume blocked from server → send raw for browser
+                      return { proxied, rawUrl: pRaw, label, serverAccessible: false };
                     }
                   })
                 );
 
                 const probed = probeResults
                   .filter(r => r.status === "fulfilled")
-                  .map(r => (r as PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; isAtlas: boolean; ok: boolean }>).value);
+                  .map(r => (r as PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; serverAccessible: boolean }>).value);
 
-                const working = probed.filter(s => s.ok);
-                // Fallback: if ALL fail, send all anyway (better than nothing)
-                const toSend = working.length > 0 ? working : probed;
-                for (const { proxied, rawUrl: sRaw, label } of toSend) {
-                  // directUrl = raw CDN URL so browser can retry directly if hls-proxy 403s
-                  sendSource(proxied, label, sRaw, proxied);
+                for (const { proxied, rawUrl: sRaw, label, serverAccessible } of probed) {
+                  if (serverAccessible) {
+                    // CDN accessible from server → use hls-proxy (handles CORS + seg rewriting)
+                    sendSource(proxied, label, sRaw, proxied);
+                  } else {
+                    // CDN blocks server IPs (403) → send raw URL for browser direct access
+                    sendSource(sRaw, label, sRaw, sRaw);
+                  }
                 }
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
             })(),

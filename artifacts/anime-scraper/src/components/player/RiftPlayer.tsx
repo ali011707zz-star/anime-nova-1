@@ -785,7 +785,9 @@ export default function RiftPlayer({
   /* ── Skip intro/outro visibility (AniSkip API only — no heuristics) ── */
   // تظهر الأزرار 10 ثوانٍ قبل بداية المقدمة/النهاية حتى يتمكن المستخدم من التحضير
   const SKIP_LEAD = 10;
-  const showSkipIntro = !!skipIntro && currentTime >= Math.max(0, skipIntro.start - SKIP_LEAD) && currentTime <= skipIntro.end;
+  // Show skip intro from very start of episode until intro ends (not just during window)
+  // This ensures users always see the button and don't miss it
+  const showSkipIntro = !!skipIntro && currentTime < skipIntro.end;
   const showSkipOutro = !!skipOutro && currentTime >= Math.max(0, skipOutro.start - SKIP_LEAD) && currentTime <= skipOutro.end;
 
   /* ── portrait style ── */
@@ -986,14 +988,23 @@ export default function RiftPlayer({
               dir="rtl"
             >
               {showSkipIntro && (() => {
-                const rem = skipIntro ? Math.max(0, Math.ceil(skipIntro.end - currentTime)) : 0;
+                const beforeIntro = skipIntro ? currentTime < skipIntro.start : false;
+                const rem = skipIntro
+                  ? (beforeIntro
+                    ? Math.ceil(skipIntro.start - currentTime)
+                    : Math.max(0, Math.ceil(skipIntro.end - currentTime)))
+                  : 0;
                 return (
                   <button
                     onPointerDown={e => { e.stopPropagation(); const skipTo = skipIntro ? skipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                    style={{ background: "rgba(6,182,212,0.88)", border: "1px solid rgba(34,211,238,0.55)", color: "white", boxShadow: "0 4px 20px rgba(6,182,212,0.45)", touchAction: "manipulation" }}>
+                    style={{ background: beforeIntro ? "rgba(6,182,212,0.65)" : "rgba(6,182,212,0.88)", border: "1px solid rgba(34,211,238,0.55)", color: "white", boxShadow: "0 4px 20px rgba(6,182,212,0.45)", touchAction: "manipulation" }}>
                     <span>⏭ تخطي المقدمة</span>
-                    {rem > 0 && <span className="font-mono text-[10px] opacity-80 bg-white/15 px-1.5 py-0.5 rounded-lg">{rem}ث</span>}
+                    {rem > 0 && (
+                      <span className="font-mono text-[10px] opacity-80 bg-white/15 px-1.5 py-0.5 rounded-lg">
+                        {beforeIntro ? `بعد ${rem}ث` : `${rem}ث`}
+                      </span>
+                    )}
                   </button>
                 );
               })()}
