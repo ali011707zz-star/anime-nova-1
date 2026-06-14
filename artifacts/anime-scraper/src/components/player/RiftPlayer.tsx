@@ -307,7 +307,7 @@ export default function RiftPlayer({
   /* ── control hide ── */
   const schedHide = useCallback(() => {
     if (hideRef.current) clearTimeout(hideRef.current);
-    hideRef.current = setTimeout(() => setShowCtrl(false), 4000);
+    hideRef.current = setTimeout(() => setShowCtrl(false), 6500);
   }, []);
   const showControls = useCallback(() => { setShowCtrl(true); schedHide(); }, [schedHide]);
 
@@ -387,7 +387,6 @@ export default function RiftPlayer({
         /* ── بدء من أدنى جودة فوراً ثم ترقية تلقائية ── */
         startLevel: 0,
         abrEwmaDefaultEstimate: 4_000_000,
-        abrEwmaFastEstimate: 4_000_000,
         testBandwidth: false,
         capLevelToPlayerSize: false,
         /* ── إعادة المحاولة: تأخير كافٍ لإتاحة فرصة للـ CDN ── */

@@ -210,7 +210,16 @@ function normalize(s: string) {
 function similarity(a: string, b: string) {
   a = normalize(a); b = normalize(b);
   if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.85;
+  // If b includes a (b is longer/superset) → good match, full 0.85
+  if (b.includes(a)) return 0.85;
+  // If a includes b (a is longer, b is a subset) → penalise by word-count ratio
+  // e.g. searching "dragon ball super broly" vs site title "dragon ball super" → penalised
+  if (a.includes(b)) {
+    const aWords = a.split(" ").length;
+    const bWords = b.split(" ").length;
+    const ratio = bWords / aWords; // 0..1, lower = b covers less of a
+    return 0.85 * (0.4 + ratio * 0.6); // range: 0.34 (very short b) → 0.85 (b≈a)
+  }
   const aw = a.split(" ");
   const bw = b.split(" ");
   // Fuzzy word match: also match if one word is a prefix of the other (≥4 chars)
