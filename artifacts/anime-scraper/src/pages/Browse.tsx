@@ -54,7 +54,7 @@ function buildQuery(genre: string, format: string, year: number | "", page: numb
   return `query {
   Page(page: ${page}, perPage: 24) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP"${gf}${ff}${yf}${sf}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Ecchi", "Hentai"]${gf}${ff}${yf}${sf}) {
       id title { romaji } coverImage { large } averageScore episodes format status
     }
   }
