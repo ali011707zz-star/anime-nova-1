@@ -2087,8 +2087,9 @@ export default function WatchPage() {
                 const st: SkipTimes = {};
                 for (const result of (data.results || [])) {
                   const iv = result.interval;
-                  if (result.skipType === "op") st.op = { start: iv.startTime, end: iv.endTime };
-                  if (result.skipType === "ed") st.ed = { start: iv.startTime, end: iv.endTime };
+                  const sType = result.skip_type || result.skipType || "";
+                  if (sType === "op") st.op = { start: iv.startTime, end: iv.endTime };
+                  if (sType === "ed") st.ed = { start: iv.startTime, end: iv.endTime };
                 }
                 mergeSkip(st);
               })

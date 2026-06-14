@@ -150,7 +150,7 @@ export default function RiftPlayer({
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, lastX: 0, startValue: 0 });
   const volumeRef     = useRef(1);
-  const brightnessRef = useRef(0.88);
+  const brightnessRef = useRef(1.0);
   const lastTap      = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const longTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevSpeed    = useRef(1);
@@ -176,7 +176,7 @@ export default function RiftPlayer({
   const [buffered,        setBuffered]        = useState(0);
   const [muted,           setMuted]           = useState(false);
   const [volume,          setVolume]          = useState(1);
-  const [brightness,      setBrightness]      = useState(0.88);
+  const [brightness,      setBrightness]      = useState(1.0);
   const [speed,           setSpeed]           = useState(() => parseFloat(localStorage.getItem("pref-speed") || "1"));
   const [showCtrl,        setShowCtrl]        = useState(true);
   const [isFs,            setIsFs]            = useState(false);
@@ -280,6 +280,7 @@ export default function RiftPlayer({
 
   async function toggleFs() {
     if (!document.fullscreenElement) {
+      setIsPortrait(false);
       await containerRef.current?.requestFullscreen?.().catch(() => {});
       try { await (screen.orientation as any).lock("landscape"); } catch {}
     } else {
@@ -592,7 +593,7 @@ export default function RiftPlayer({
   function calcSeekFrac(clientX: number, clientY: number, r: DOMRect): number {
     /* When player is CSS-rotated 90°CW (portrait lock), the progress bar is
        physically vertical on screen: top = 0%, bottom = 100% */
-    if (isPortrait) return Math.max(0, Math.min(1, (clientY - r.top) / r.height));
+    if (isPortrait && !isFs) return Math.max(0, Math.min(1, (clientY - r.top) / r.height));
     return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
   }
   function handlePrgClick(e: React.MouseEvent) {
@@ -602,7 +603,7 @@ export default function RiftPlayer({
   }
   function handlePrgDown(e: React.MouseEvent) {
     e.stopPropagation(); seekDrag.current = true;
-    const portrait = isPortrait;
+    const portrait = isPortrait && !isFs;
     let lastF = duration > 0 ? currentTime / duration : 0;
     const onMv = (ev: MouseEvent) => {
       const bar = progressRef.current; if (!bar) return;
@@ -644,7 +645,7 @@ export default function RiftPlayer({
     if (longPress) return;
     if (g.active === "none" && dist > G_THRESH) {
       moved.current = true;
-      if (isPortrait) {
+      if (isPortrait && !isFs) {
         // Player rotated 90deg CW: horizontal on player = vertical on screen; left/right zone = top/bottom screen
         if (Math.abs(dy) > Math.abs(dx) * 1.4) {
           g.active = "seek"; g.startValue = videoRef.current?.currentTime ?? 0;
@@ -668,7 +669,7 @@ export default function RiftPlayer({
     if (g.active === "seek") {
       const maxD = Math.min(duration * 0.25, 60);
       let delta: number;
-      if (isPortrait) {
+      if (isPortrait && !isFs) {
         // Vertical screen movement = horizontal player movement (down = forward)
         delta = (dy / window.innerHeight) * maxD;
       } else {
@@ -685,8 +686,8 @@ export default function RiftPlayer({
     } else if (g.active === "volume") {
       // Portrait (CSS-rotated 90° CW): player-up = screen-right = clientX increases → positive dV
       // Landscape: player-up = screen-up = clientY decreases → g.lastY - t.clientY is positive
-      const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
-      if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
+      const dV = (isPortrait && !isFs) ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
+      if (isPortrait && !isFs) g.lastX = t.clientX; else g.lastY = t.clientY;
       // Use videoRef.current.volume for freshest value (avoids stale React state)
       const curVol = volumeRef.current;
       const nV = Math.max(0, Math.min(2.0, curVol + dV / 150));
@@ -704,9 +705,9 @@ export default function RiftPlayer({
       setFeedback({ type: "volume", value: nV });
     } else if (g.active === "brightness") {
       // Same directional fix as volume
-      const dV = isPortrait ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
-      if (isPortrait) g.lastX = t.clientX; else g.lastY = t.clientY;
-      const nB = Math.max(0.3, Math.min(2.0, brightnessRef.current + dV / 180));
+      const dV = (isPortrait && !isFs) ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
+      if (isPortrait && !isFs) g.lastX = t.clientX; else g.lastY = t.clientY;
+      const nB = Math.max(0.3, Math.min(1.5, brightnessRef.current + dV / 150));
       brightnessRef.current = nB;
       setBrightness(nB); setFeedback({ type: "brightness", value: nB });
     }
@@ -733,7 +734,7 @@ export default function RiftPlayer({
 
     const touch = e.changedTouches[0];
     /* In portrait (CSS-rotated 90° CW): video's left/right = screen's top/bottom (Y axis) */
-    const side: "L" | "R" = isPortrait
+    const side: "L" | "R" = (isPortrait && !isFs)
       ? (touch.clientY < window.innerHeight / 2 ? "L" : "R")
       : (touch.clientX < window.innerWidth / 2 ? "L" : "R");
     const now = Date.now();
@@ -1007,12 +1008,12 @@ export default function RiftPlayer({
               className="absolute left-5 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 pointer-events-none">
               <div className="relative rounded-full overflow-hidden" style={{ width: 4, height: 110, background: "rgba(255,255,255,0.15)" }}>
                 <div className="absolute bottom-0 left-0 right-0 rounded-full"
-                  style={{ background: "rgba(253,224,71,0.90)", height: `${Math.min(Math.max((feedback.value - 0.3) / 1.7 * 100, 0), 100)}%`, transition: "height 0.06s" }} />
+                  style={{ background: "rgba(253,224,71,0.90)", height: `${Math.min(Math.max((feedback.value - 0.3) / 1.2 * 100, 0), 100)}%`, transition: "height 0.06s" }} />
               </div>
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
                 style={{ background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.12)" }}>
                 <Sun className="w-3 h-3 text-yellow-300/75" />
-                <span className="text-white/85 text-[11px] font-bold font-mono">{Math.round(feedback.value * 100)}%</span>
+                <span className="text-white/85 text-[11px] font-bold font-mono">{Math.round((feedback.value - 0.3) / 1.2 * 100)}%</span>
               </div>
             </motion.div>
           )}
