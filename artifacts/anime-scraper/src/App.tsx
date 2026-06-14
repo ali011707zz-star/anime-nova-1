@@ -118,6 +118,18 @@ function StartPageRedirect() {
   return null;
 }
 
+function HistoryTracker() {
+  const [location] = useLocation();
+  useEffect(() => {
+    const prev = sessionStorage.getItem("nova-current-path");
+    if (prev && prev !== location) {
+      sessionStorage.setItem("nova-prev-path", prev);
+    }
+    sessionStorage.setItem("nova-current-path", location);
+  }, [location]);
+  return null;
+}
+
 function Router({ onMenuClick }: { onMenuClick: () => void }) {
   const [location] = useLocation();
   const hideHeader = NO_GLOBAL_HEADER.some(r => location.startsWith(r));
@@ -125,6 +137,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
   return (
     <>
       <StartPageRedirect />
+      <HistoryTracker />
       {!hideHeader && <Header onMenuClick={onMenuClick} />}
       <ErrorBoundary resetKey={location}>
         <Suspense fallback={<PageLoader />}>

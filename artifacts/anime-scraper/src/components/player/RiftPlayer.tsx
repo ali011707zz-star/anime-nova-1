@@ -385,9 +385,11 @@ export default function RiftPlayer({
         maxFragLookUpTolerance: 0.4,
         startFragPrefetch: true,
         progressive: true,
-        /* ── بدء من أدنى جودة فوراً ثم ترقية تلقائية ── */
-        startLevel: 0,
+        /* ── اختيار جودة تلقائية حسب سرعة الشبكة ── */
+        startLevel: -1,
         abrEwmaDefaultEstimate: 4_000_000,
+        abrBandwidthUpFactor: 0.75,
+        abrBandwidthDownFactor: 0.92,
         testBandwidth: false,
         capLevelToPlayerSize: false,
         /* ── إعادة المحاولة: تأخير كافٍ لإتاحة فرصة للـ CDN ── */
