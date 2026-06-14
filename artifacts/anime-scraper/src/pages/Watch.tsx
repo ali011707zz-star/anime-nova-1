@@ -73,6 +73,21 @@ interface SubSettings {
 }
 const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 24, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
 
+/* ── Last-source helpers: cache the URL that actually played so resume is instant ── */
+function saveLastSrc(animeId: number, ep: number, url: string, qualityRank: number) {
+  try { localStorage.setItem(`last-src-${animeId}-${ep}`, JSON.stringify({ url, qualityRank, ts: Date.now() })); } catch {}
+}
+function loadLastSrc(animeId: number, ep: number): { url: string; qualityRank: number } | null {
+  try {
+    const raw = localStorage.getItem(`last-src-${animeId}-${ep}`);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    // Expire after 6 hours — sources (especially HLS) expire on CDN
+    if (!d?.url || Date.now() - (d.ts || 0) > 6 * 60 * 60_000) return null;
+    return d;
+  } catch { return null; }
+}
+
 /* ══════════════════════════════════ HELPERS ══════════════════ */
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0, userId?: string | null) {
   if (localStorage.getItem("pref-automark") === "false") return;
@@ -2164,6 +2179,25 @@ export default function WatchPage() {
     const ctrl = new AbortController();
     const tids: ReturnType<typeof setTimeout>[] = [];
 
+    /* ── Quick-resume: inject last played source immediately (if recent) ── */
+    if (animeId) {
+      const savedProgress = parseFloat(localStorage.getItem(`wp-${animeId}-${ep}`) || "0");
+      if (savedProgress > 30) {
+        const lastSrc = loadLastSrc(animeId, ep);
+        if (lastSrc) {
+          const resumeSrc: FetchedSrc = {
+            url: lastSrc.url,
+            directUrl: lastSrc.url,
+            qualityRank: lastSrc.qualityRank,
+            site: "_resume",
+            name: "آخر مصدر",
+          };
+          setSlotSources(prev => ({ ...prev, _resume: [resumeSrc] }));
+          setSlotStatus(prev => ({ ...prev, _resume: "ready" }));
+        }
+      }
+    }
+
     SCRAPER_DEFS.forEach((def, i) => {
       const tid = setTimeout(() => {
         if (!alive) return;
@@ -2249,6 +2283,8 @@ export default function WatchPage() {
       setPlayerServers(srvMap);
       setQuality(clickedTier);
       setInitialSrv(0);
+      /* Save for quick-resume (skip _resume itself to avoid stale loop) */
+      if (animeId && firstSrc.site !== "_resume") saveLastSrc(animeId, ep, clickedUrl, firstSrc.qualityRank ?? 0);
       setPhase("player");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2355,6 +2391,9 @@ export default function WatchPage() {
     setPlayerServers(servers);
     setQuality(clickedTier);
     setInitialSrv(0);
+
+    /* Save for quick-resume next time */
+    if (animeId && src.site !== "_resume") saveLastSrc(animeId, ep, clickedUrl, src.qualityRank ?? 0);
 
     setPhase("player");
   }

@@ -343,7 +343,7 @@ export default function AnimeDetail() {
           <div className="absolute inset-0 bg-gradient-to-b from-[#09090B]/90 via-[#09090B]/60 to-[#09090B]" />
         </div>
       )}
-      <button onClick={() => window.history.back()}
+      <button onClick={() => { if (window.history.length > 1) { window.history.back(); } else { navigate("/"); } }}
         className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
         style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
         <ChevronRight className="w-5 h-5 text-white/60" />
