@@ -10,6 +10,8 @@ interface HomeCache {
   hero: any; hasMore: boolean;
 }
 let _homeCache: HomeCache | null = null;
+// Separate cache for today's airing episodes (independent fetch, persists between navigations)
+let _cachedTodayEps: any[] | null = null;
 
 /* ── Continue Watching helpers ── */
 interface MergedContinueItem {
@@ -191,7 +193,7 @@ export default function Home() {
   const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
-  const [todayEps, setTodayEps] = useState<any[]>([]);
+  const [todayEps, setTodayEps] = useState<any[]>(_cachedTodayEps || []);
   const [todayChecking, setTodayChecking] = useState(false);
 
   /* Load continue-watching from localStorage (fast, synchronous) */
@@ -221,6 +223,7 @@ export default function Home() {
 
   /* Load today's airing episodes (last 36h → next 4h) + verify Arabic availability */
   useEffect(() => {
+    if (_cachedTodayEps) return; // already cached — no re-fetch needed
     const now = Math.floor(Date.now() / 1000);
     const gt  = now - 36 * 3600;
     const lt  = now + 4  * 3600;
@@ -252,10 +255,12 @@ export default function Home() {
             const english = (s.media?.title?.english || "").toLowerCase().trim();
             return availSet.has(romaji) || availSet.has(english);
           });
+          _cachedTodayEps = filtered;
           setTodayEps(filtered);
         } catch {
           // عند فشل التحقق: أظهر الأنمي الأكثر شهرة فقط (تصفية بديلة)
           const filtered = arr.filter((s: any) => (s.media?.popularity ?? 0) >= 2000);
+          _cachedTodayEps = filtered;
           setTodayEps(filtered);
         }
         setTodayChecking(false);
