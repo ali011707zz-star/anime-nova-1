@@ -2545,8 +2545,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             "Referer": "https://player.videasy.to/",
             "Origin": "https://player.videasy.to",
           };
-          // mb-flix = primary English; cdn = high-quality (4K); downloader2 = fallback
-          const servers = ["mb-flix", "cdn", "downloader2"];
+          // mb-flix = primary English; cdn = high-quality (4K)
+          const servers = ["mb-flix", "cdn"];
           await Promise.allSettled(servers.map(async (server) => {
             try {
               const url = `https://api.videasy.to/${server}/sources-with-title?${baseParams}`;

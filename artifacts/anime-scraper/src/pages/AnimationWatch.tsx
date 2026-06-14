@@ -74,16 +74,24 @@ function getSourceTier(src: Source): QualityTier {
   if (src.tier) return src.tier;
   const url = src.proxyUrl || src.directUrl || src.url;
   const lbl = src.label || "";
+  // Check label for explicit quality keywords first (most reliable)
+  const lblUp = lbl.toUpperCase();
+  if (lblUp.includes("1080") || lblUp.includes("FHD") || lblUp.includes("4K") || lblUp.includes("2160")) return "1080p FHD";
+  if (lblUp.includes("480") || lblUp.includes("360") || lblUp.includes("240") || lblUp.includes(" SD")) return "360p SD";
   // Vyla is always high-quality multi-stream HLS (self-proxied, CORS-safe)
   if (lbl.startsWith("Vyla")) return "1080p FHD";
   if (url.includes("hls-proxy")) {
     if (
       lbl.startsWith("VidLink") ||
+      lbl.startsWith("Videasy") ||
+      lbl.startsWith("EzVidAPI") ||
       lbl.includes("الثريا") || lbl.startsWith("StarCima") ||
       lbl.includes("Smashy") || lbl.includes("multiembed") ||
       lbl.includes("Najm") || lbl.startsWith("VidSrc VIP") ||
       lbl.startsWith("Wecima") || lbl.startsWith("TopCinema") ||
-      lbl.startsWith("Moviz") || lbl.startsWith("StarDima")
+      lbl.startsWith("Moviz") || lbl.startsWith("StarDima") ||
+      lbl.startsWith("aflaam") || lbl.startsWith("LordFlix") ||
+      lbl.startsWith("ArabSeed") || lbl.startsWith("SeePanal")
     ) return "1080p FHD";
     return "720p HD";
   }
