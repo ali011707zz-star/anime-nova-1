@@ -351,7 +351,7 @@ export default function RiftPlayer({
       const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onM); v.removeEventListener("error", onE); };
       const onM = () => { if (done) return; cleanup(); setLoading(false); v.play().catch(() => {}); showControls(); };
       const onE = () => { if (done) return; cleanup(); fireOnFail(); };
-      const t = setTimeout(() => { if (done) return; v.src = ""; onE(); }, 10000);
+      const t = setTimeout(() => { if (done) return; v.src = ""; onE(); }, 20000);
       v.addEventListener("loadedmetadata", onM, { once: true });
       v.addEventListener("error", onE, { once: true });
       return;
@@ -375,38 +375,38 @@ export default function RiftPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        /* ── تسريع بدء التشغيل: buffer أقل = يبدأ الفيديو أسرع ── */
-        maxBufferLength: 20,
-        maxMaxBufferLength: 40,
-        backBufferLength: 8,
-        maxBufferSize: 50 * 1024 * 1024,
+        /* ── Buffer كبير = تشغيل سلس حتى مع CDN بطيء ── */
+        maxBufferLength: 60,
+        maxMaxBufferLength: 90,
+        backBufferLength: 30,
+        maxBufferSize: 120 * 1024 * 1024,
         maxBufferHole: 0.5,
         maxFragLookUpTolerance: 0.4,
         startFragPrefetch: true,
         progressive: true,
         /* ── بدء من أدنى جودة فوراً ثم ترقية تلقائية ── */
         startLevel: 0,
-        abrEwmaDefaultEstimate: 8_000_000,
-        abrEwmaFastEstimate: 8_000_000,
+        abrEwmaDefaultEstimate: 4_000_000,
+        abrEwmaFastEstimate: 4_000_000,
         testBandwidth: false,
         capLevelToPlayerSize: false,
-        /* ── إعادة المحاولة بسرعة ── */
-        fragLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 100,
-        fragLoadingMaxRetryTimeout: 5000,
-        manifestLoadingMaxRetry: 2,
-        manifestLoadingRetryDelay: 200,
-        levelLoadingMaxRetry: 2,
-        levelLoadingRetryDelay: 200,
-        /* ── استجابة أسرع عند التوقف ── */
-        highBufferWatchdogPeriod: 1,
-        nudgeOffset: 0.5,
-        nudgeMaxRetry: 8,
-        maxStarvationDelay: 3,
-        maxLoadingDelay: 3,
+        /* ── إعادة المحاولة: تأخير كافٍ لإتاحة فرصة للـ CDN ── */
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 1500,
+        fragLoadingMaxRetryTimeout: 30000,
+        manifestLoadingMaxRetry: 3,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingMaxRetry: 3,
+        levelLoadingRetryDelay: 1000,
+        /* ── مراقبة أقل عدوانية للـ buffer stall ── */
+        highBufferWatchdogPeriod: 3,
+        nudgeOffset: 0.3,
+        nudgeMaxRetry: 10,
+        maxStarvationDelay: 4,
+        maxLoadingDelay: 4,
         enableCEA708Captions: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
-          xhr.timeout = 10000;
+          xhr.timeout = 25000;
         },
       });
       hlsRef.current = hls;
@@ -428,24 +428,18 @@ export default function RiftPlayer({
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (hlsRef.current !== hls) return;
         if (!d.fatal) {
-          // Non-fatal buffer stall — seek forward a tiny bit to unstick
-          if (d.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
-              d.details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
-            const v2 = videoRef.current;
-            if (v2 && v2.readyState >= 1) {
-              const ahead = v2.currentTime + 0.4;
-              if (ahead < (v2.duration || Infinity)) v2.currentTime = ahead;
-            }
-          }
+          // Non-fatal errors: let HLS.js handle via internal nudge mechanism
+          // Do NOT manually seek on BUFFER_STALLED — it conflicts with nudge
           return;
         }
         if (d.type === Hls.ErrorTypes.MEDIA_ERROR) {
           hls.recoverMediaError();
         } else if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          // Retry network errors up to 3 times before failing
+          // Retry network errors with exponential backoff before failing
           const attempts = (hls as any)._netRetry = ((hls as any)._netRetry || 0) + 1;
-          if (attempts <= 3) { setTimeout(() => hls.startLoad(), 800 * attempts); }
-          else { fireOnFail(); }
+          if (attempts <= 5) {
+            setTimeout(() => { if (hlsRef.current === hls) hls.startLoad(); }, 1000 * attempts);
+          } else { fireOnFail(); }
         } else {
           fireOnFail();
         }

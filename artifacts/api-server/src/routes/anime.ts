@@ -6531,7 +6531,8 @@ router.get("/anime/video-proxy", async (req, res) => {
   try {
     const r = await fetch(url, {
       headers: reqHeaders,
-      signal: AbortSignal.timeout(30000),
+      // 5-minute timeout — large MKV/MP4 files (e.g. anime-phoenix 400MB+) need time to stream
+      signal: AbortSignal.timeout(300000),
       redirect: "follow",
     });
 
@@ -6587,7 +6588,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
   }
 
   try {
-    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(10000), redirect: "follow" });
+    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(25000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
     const ct = r.headers.get("content-type") || "video/mp2t";
     const len = r.headers.get("content-length");
