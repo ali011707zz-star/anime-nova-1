@@ -152,9 +152,10 @@ export function makeAnimCacheKey(site: string, tmdbId: string, type: string, sea
 }
 
 // ── قراءة من Cache (L1 → L2) ──
+// stale=true يعني أن الـ cache انتهى لكن البيانات لا تزال مفيدة (stale-while-revalidate)
 export async function getFromSourceCache(
   key: string
-): Promise<{ sources: any[]; expiresAt: number } | null> {
+): Promise<{ sources: any[]; expiresAt: number; stale?: boolean } | null> {
   const m = l1.get(key);
   if (m && Date.now() < m.expiresAt) return m;
   l1.delete(key);
@@ -163,8 +164,8 @@ export async function getFromSourceCache(
   if (!row) return null;
 
   if (Date.now() > row.expiresAt) {
-    db.delete(sourceCacheTable).where(eq(sourceCacheTable.cacheKey, key)).catch(() => {});
-    return null;
+    // stale-while-revalidate: أرجع البيانات القديمة فوراً وشغّل التجديد خلفياً
+    return { sources: row.sources, expiresAt: row.expiresAt, stale: true };
   }
 
   l1.set(key, { sources: row.sources, expiresAt: row.expiresAt });
@@ -184,7 +185,7 @@ export async function setSourceCache(
 }
 
 export function shouldRefreshCache(expiresAt: number): boolean {
-  return expiresAt - Date.now() < 20 * 60_000;
+  return expiresAt - Date.now() < 45 * 60_000;
 }
 
 export function getCacheStats(): { l1Size: number; pgEnabled: boolean } {

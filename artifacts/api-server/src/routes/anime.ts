@@ -5545,8 +5545,8 @@ router.get("/anime/sources-stream", async (req, res) => {
         // ✅ تقديم من الـ Cache فوراً (< 5ms)
         hit.sources.forEach(s => sendSrc(s));
 
-        // تجديد خلفي إذا اقترب الانتهاء
-        if (shouldRefreshCache(hit.expiresAt)) {
+        // تجديد خلفي إذا اقترب الانتهاء أو انتهى فعلاً (stale-while-revalidate)
+        if (hit.stale || shouldRefreshCache(hit.expiresAt)) {
           setImmediate(async () => {
             try {
               const srcs = await race(scrape(), SCRAPER_MS, []);
@@ -5554,15 +5554,22 @@ router.get("/anime/sources-stream", async (req, res) => {
               if (useExtract) {
                 const buf: UnifiedSource[] = [];
                 await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-                if (buf.length) await setSourceCache(cKey, site, buf);
+                if (buf.length) {
+                  await setSourceCache(cKey, site, buf);
+                  // أرسل المصادر الجديدة للاتصال المفتوح إن وُجد
+                  if (!closed) buf.forEach(s => sendSrc(s));
+                }
               } else {
                 const alive = await probeAndFilter(srcs);
-                if (alive.length) await setSourceCache(cKey, site, alive);
+                if (alive.length) {
+                  await setSourceCache(cKey, site, alive);
+                  if (!closed) alive.forEach(s => sendSrc(s));
+                }
               }
             } catch {}
           });
         }
-        return; // لا حاجة للكشط
+        return; // لا حاجة للانتظار
       }
 
       // ❌ لا يوجد cache → اكشط
