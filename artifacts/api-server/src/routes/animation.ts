@@ -660,6 +660,23 @@ function wrapMp4(url: string, ref: string): string {
   return `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
 }
 
+// Probe a proxied HLS/MP4 URL through our own server before sending to client.
+// Returns true = accessible (200/206), false = dead (skip source).
+// Timeout 5s — fast enough to not block the 30s deadline significantly.
+async function probeHlsProxy(proxied: string): Promise<boolean> {
+  if (!proxied.startsWith("/api/anime/")) return true; // external URL — assume OK
+  try {
+    const port = process.env.PORT || "8080";
+    const pr = await fetch(`http://localhost:${port}${proxied}`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    // 200/206 = accessible; 403 might still play in browser (auth bypass) so allow it
+    return pr.ok || pr.status === 206 || pr.status === 403;
+  } catch {
+    return false; // timeout or network error = dead
+  }
+}
+
 // Hosts that must go through video-proxy (IP-tied or CORS-blocked)
 const MP4_PROXY_HOSTS = [
   "streamtape", "sendvid", "sendcdn", "uptostream", "uqload",
@@ -2505,6 +2522,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const proxiedStream = streamUrl.includes(".m3u8")
                 ? wrapHls(streamUrl, ezRef)
                 : wrapMp4(streamUrl, ezRef);  // non-m3u8: route through video-proxy (CDN CORS blocks browser)
+              // Probe before sending — skip dead streams
+              const ezProbeOk = await probeHlsProxy(proxiedStream);
+              if (!ezProbeOk) return;
               // For vidrock: Arabic subtitle at cache.vdrk.site/v2
               let subtitleUrl: string | undefined;
               if (prov === "vidrock") {
@@ -2582,6 +2602,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 //   browser → hls-proxy (server, correct Referer) → CDN → returns m3u8 ✓
                 //   segment URLs rewritten to seg-proxy (same Referer) → CDN → segments ✓
                 const hlsProxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
+                // Probe before sending — skip dead/expired CDN streams (fixes CDN 4K issue)
+                const veaProbeOk = await probeHlsProxy(hlsProxied);
+                if (!veaProbeOk) continue;
                 sendSource(
                   hlsProxied, label, hlsProxied, hlsProxied,
                   araSub?.url ? { subtitleUrl: araSub.url } : undefined,
@@ -2631,6 +2654,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           // with the same IP that generated the auth token.
           const VL_REF  = "https://vidlink.pro/";
           const vlProxy = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`;
+          // Probe before sending — VidLink auth tokens expire quickly
+          const vlProbeOk = await probeHlsProxy(vlProxy);
+          if (!vlProbeOk) return;
           sendSource(
             vlProxy, "VidLink · HLS", hlsUrl, vlProxy,
             araCap?.url ? { subtitleUrl: araCap.url } : undefined,
@@ -2690,6 +2716,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             // Route through hls-proxy: server fetches with correct Referer → segments via seg-proxy
             const LF_REF = "https://lordflix.org/";
             const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(LF_REF)}`;
+            // Probe before sending — LordFlix CDN tokens expire after ~30min
+            const lfProbeOk = await probeHlsProxy(proxied);
+            if (!lfProbeOk) continue;
             sendSource(
               proxied, label, proxied, proxied,
               araCap?.url ? { subtitleUrl: araCap.url } : undefined,
