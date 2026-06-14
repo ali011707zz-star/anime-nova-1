@@ -1037,8 +1037,8 @@ export default function RiftPlayer({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.18 }}
-              className="absolute pointer-events-auto z-30 flex justify-end px-5"
-              style={{ bottom: 72, left: 0, right: 0 }}
+              className="absolute pointer-events-auto z-[55] flex justify-end px-5"
+              style={{ bottom: 92, left: 0, right: 0 }}
               dir="rtl"
             >
               {showSkipIntro && (() => {
