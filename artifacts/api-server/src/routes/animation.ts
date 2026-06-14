@@ -2638,10 +2638,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             headers: { "User-Agent": UA },
             signal: AbortSignal.timeout(8_000),
           });
-          if (!encR.ok) return;
-          const encData = await encR.json() as { status: number; result?: string };
-          if (encData.status !== 200 || !encData.result) return;
-          const encrypted = encData.result;
+          if (!encR.ok) { console.error(`[vidlink_anim] enc-dec ${encR.status}`); return; }
+          const encData = await encR.json() as { status?: number; result?: string; data?: string };
+          const encrypted = encData.result || encData.data || "";
+          if (!encrypted) { console.error("[vidlink_anim] enc-dec no encrypted value", encData); return; }
           // Step 2: Fetch VidLink API with encrypted ID
           const vlUrl = type === "movie"
             ? `https://vidlink.pro/api/b/movie/${encrypted}`
@@ -2654,22 +2654,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             },
             signal: AbortSignal.timeout(12_000),
           });
-          if (!vlR.ok) return;
-          const vlData = await vlR.json() as {
-            stream?: { playlist?: string; flags?: string[]; captions?: any[] };
-          };
-          const hlsUrl = vlData.stream?.playlist;
-          if (!hlsUrl) return;
-          const captions = vlData.stream?.captions ?? [];
+          if (!vlR.ok) { console.error(`[vidlink_anim] API ${vlR.status}`); return; }
+          const vlData = await vlR.json() as any;
+          const hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
+          if (!hlsUrl) { console.error("[vidlink_anim] no playlist in response", JSON.stringify(vlData).slice(0, 150)); return; }
+          const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
           const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
           // storm.vodvidl.site auth token is bound to the server IP that requested it.
           // Browser (different IP) gets 403. Use hls-proxy so server fetches segments
           // with the same IP that generated the auth token.
           const VL_REF  = "https://vidlink.pro/";
           const vlProxy = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`;
-          // Probe before sending — VidLink auth tokens expire quickly
-          const vlProbeOk = await probeHlsProxy(vlProxy);
-          if (!vlProbeOk) return;
           sendSource(
             vlProxy, "VidLink · HLS", hlsUrl, vlProxy,
             araCap?.url ? { subtitleUrl: araCap.url } : undefined,
@@ -2729,9 +2724,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             // Route through hls-proxy: server fetches with correct Referer → segments via seg-proxy
             const LF_REF = "https://lordflix.org/";
             const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(LF_REF)}`;
-            // Probe before sending — LordFlix CDN tokens expire after ~30min
-            const lfProbeOk = await probeHlsProxy(proxied);
-            if (!lfProbeOk) continue;
             sendSource(
               proxied, label, proxied, proxied,
               araCap?.url ? { subtitleUrl: araCap.url } : undefined,

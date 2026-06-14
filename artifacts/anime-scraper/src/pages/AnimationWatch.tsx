@@ -1019,6 +1019,16 @@ function SubPanel({
   onTtsDub: (v: boolean) => void;
   onClose: () => void;
 }) {
+  const [isLandscape, setIsLandscape] = useState(() => typeof window !== "undefined" && window.innerWidth > window.innerHeight);
+  useEffect(() => {
+    const onResize = () => setIsLandscape(window.innerWidth > window.innerHeight);
+    window.addEventListener("resize", onResize);
+    const mq = window.matchMedia("(orientation: landscape)");
+    const onOrient = (e: MediaQueryListEvent) => setIsLandscape(e.matches);
+    mq.addEventListener("change", onOrient);
+    return () => { window.removeEventListener("resize", onResize); mq.removeEventListener("change", onOrient); };
+  }, []);
+
   const hasAr   = tracks.some(t => t.lang === "ar");
   const hasAuto = tracks.some(t => t.lang === "ar-auto") || tracks.some(t => t.lang === "en");
   const hasEn   = tracks.some(t => t.lang === "en");
@@ -1032,22 +1042,25 @@ function SubPanel({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 32 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 32 }}
+      initial={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: 32 }}
+      animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
+      exit={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: 32 }}
       transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-      className="fixed inset-x-0 bottom-0 z-[400]"
-      style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
+      className={isLandscape ? "fixed inset-y-0 right-0 z-[400] flex items-stretch" : "fixed inset-x-0 bottom-0 z-[400]"}
+      style={isLandscape ? {} : { paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
     >
       {/* Backdrop tap to close */}
       <div className="fixed inset-0 z-[-1]" onClick={onClose} />
 
-      <div className="mx-3 rounded-2xl overflow-hidden"
+      <div className={isLandscape ? "w-[280px] overflow-y-auto" : "mx-3 rounded-2xl overflow-hidden"}
         style={{
           background: "rgba(9,7,22,0.97)",
           border: "1px solid rgba(139,92,246,0.22)",
           backdropFilter: "blur(40px)",
-          boxShadow: "0 -24px 60px rgba(0,0,0,0.85)",
+          boxShadow: isLandscape
+            ? "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)"
+            : "0 -24px 60px rgba(0,0,0,0.85)",
+          borderRadius: isLandscape ? "20px 0 0 20px" : undefined,
         }}>
 
         {/* ── Header ── */}
@@ -1067,7 +1080,7 @@ function SubPanel({
         </div>
 
         {/* ── 4 option buttons ── */}
-        <div className="grid grid-cols-4 gap-2 p-4">
+        <div className={`grid gap-2 p-4 ${isLandscape ? "grid-cols-2" : "grid-cols-4"}`}>
           {opts.map(opt => {
             const active = choice === opt.id;
             return (
@@ -1254,15 +1267,15 @@ function AnimSourceRow({
           ? "linear-gradient(90deg, transparent, rgba(239,68,68,0.5), transparent)"
           : `linear-gradient(90deg, transparent, ${qs.icon}55, transparent)` }} />
 
-      <div className="flex items-center gap-3.5 px-4 py-3.5">
+      <div className="flex items-center gap-3 px-3.5 py-2.5">
 
         {/* Icon */}
-        <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 relative"
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 relative"
           style={{
             background: isFailed ? "rgba(239,68,68,0.10)" : qs.badge,
             border: isFailed ? "1px solid rgba(239,68,68,0.30)" : `1px solid ${qs.border}`,
           }}>
-          <MonitorPlay className="w-[19px] h-[19px]"
+          <MonitorPlay className="w-[16px] h-[16px]"
             style={{ color: isFailed ? "rgba(239,68,68,0.70)" : qs.icon }} />
           <span className="absolute -bottom-1.5 -left-1 font-mono text-[7px] font-black px-1 py-[1px] rounded-md leading-none"
             style={{ background: isHls ? "rgba(99,102,241,0.88)" : "rgba(52,211,153,0.85)", color: "white" }}>
@@ -1272,7 +1285,7 @@ function AnimSourceRow({
 
         {/* Label + quality */}
         <div className="flex-1 min-w-0">
-          <p className="text-[14px] font-black font-['Cairo'] leading-tight truncate"
+          <p className="text-[12.5px] font-black font-['Cairo'] leading-tight truncate"
             style={{ color: isFailed ? "rgba(252,165,165,0.75)" : "rgba(255,255,255,0.92)" }}>
             {src.label}
           </p>

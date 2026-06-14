@@ -5564,24 +5564,26 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
   if (!tmdbId) return [];
   try {
     const encR = await fetch(`https://enc-dec.app/api/enc-vidlink?text=${tmdbId}`,
-      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(8_000) });
-    if (!encR.ok) return [];
-    const encData = await encR.json() as { status: number; result?: string };
-    if (encData.status !== 200 || !encData.result) return [];
-    const vlUrl = `https://vidlink.pro/api/b/tv/${encData.result}/1/${ep}`;
+      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10_000) });
+    if (!encR.ok) { console.error(`[vidlink_anim] enc-dec returned ${encR.status}`); return []; }
+    const encData = await encR.json() as { status?: number; result?: string; data?: string };
+    const encrypted = encData.result || encData.data || "";
+    if (!encrypted) { console.error("[vidlink_anim] enc-dec no result", encData); return []; }
+    const vlUrl = `https://vidlink.pro/api/b/tv/${encrypted}/1/${ep}`;
     const vlR = await fetch(vlUrl, {
       headers: { "User-Agent": BROWSER_UA, "Origin": "https://vidlink.pro", "Referer": "https://vidlink.pro/" },
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(15_000),
     });
-    if (!vlR.ok) return [];
-    const vlData = await vlR.json() as { stream?: { playlist?: string; captions?: any[] } };
-    const hlsUrl = vlData.stream?.playlist;
-    if (!hlsUrl) return [];
-    const araCap = (vlData.stream?.captions ?? []).find((c: any) => c.language === "ara" || c.language === "ar");
+    if (!vlR.ok) { console.error(`[vidlink_anim] vidlink API ${vlR.status} for ${vlUrl}`); return []; }
+    const vlData = await vlR.json() as any;
+    const hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
+    if (!hlsUrl) { console.error("[vidlink_anim] no playlist in response", JSON.stringify(vlData).slice(0, 200)); return []; }
+    const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
+    const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
     const subUrl = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
     return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 9, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) }];
-  } catch { return []; }
+  } catch (err) { console.error("[vidlink_anim] error:", err); return []; }
 }
 
 // ── LordFlix (snowhouse.lordflix.club, enc-dec.app, CDN Referer: lordflix.org) ──
@@ -5593,31 +5595,33 @@ async function getLordFlixAnimeSources(title: string, english: string | null, ep
     const lfUrl = `https://snowhouse.lordflix.club/?title=${encodeURIComponent(engTitle)}&type=series&year=&imdb=&tmdb=${tmdbId}&server=Orion&season=1&episode=${ep}`;
     const encLfR = await fetch(`https://enc-dec.app/api/enc-lordflix?url=${encodeURIComponent(lfUrl)}`,
       { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10_000) }).then(r => r.json()) as { status: number; result?: { url: string; sign: string } };
-    if (encLfR.status !== 200 || !encLfR.result?.url) return [];
+    if (encLfR.status !== 200 || !encLfR.result?.url) { console.error("[lordflix_anim] enc-dec enc status:", encLfR.status); return []; }
     const { url: encUrl, sign } = encLfR.result;
     const encResp = await fetch(encUrl, {
       headers: { "User-Agent": BROWSER_UA, "Origin": "https://lordflix.org", "Referer": "https://lordflix.org/", "Accept": "*/*" },
       signal: AbortSignal.timeout(15_000),
     }).then(r => r.text());
-    if (!encResp || encResp.length < 20) return [];
+    if (!encResp || encResp.length < 20) { console.error("[lordflix_anim] empty encResp from snowhouse"); return []; }
     const decR = await fetch("https://enc-dec.app/api/dec-lordflix", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: encResp, sign }),
       signal: AbortSignal.timeout(10_000),
-    }).then(r => r.json()) as { status: number; result?: { stream?: any[]; captions?: any[] } };
-    if (decR.status !== 200 || !decR.result?.stream?.length) return [];
-    const araCap = (decR.result.captions ?? []).find((c: any) => String(c.id || "").includes("ar") || String(c.language || "").match(/^ar/i));
+    }).then(r => r.json()) as any;
+    const streams: any[] = decR?.result?.stream || decR?.stream || [];
+    if (!streams.length) { console.error("[lordflix_anim] dec status:", decR?.status, "streams:", streams.length); return []; }
+    const caps: any[] = decR?.result?.captions || decR?.captions || [];
+    const araCap = caps.find((c: any) => String(c.id || "").includes("ar") || String(c.language || "").match(/^ar/i));
     const sources: UnifiedSource[] = [];
-    for (const st of decR.result.stream) {
-      const hlsUrl = st?.playlist || "";
-      if (!hlsUrl || st?.type !== "hls") continue;
+    for (const st of streams) {
+      const hlsUrl = st?.playlist || st?.url || "";
+      if (!hlsUrl || (st?.type && st.type !== "hls")) continue;
       const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://lordflix.org/")}`;
       const subUrl = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
       sources.push({ name: `LordFlix · ${st.id || "primary"}`, url: proxied, quality: "HD", qualityRank: 9, site: "lordflix_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
     }
     return sources;
-  } catch { return []; }
+  } catch (err) { console.error("[lordflix_anim] error:", err); return []; }
 }
 
 // ── Vyla SSE (missourimonster-vyla.hf.space, TMDB TV with season=1) ──
@@ -5718,9 +5722,8 @@ async function getStarCimaAnimeSources(title: string, english: string | null, ep
     return probeResults
       .filter((r): r is PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; ok: boolean }> => r.status === "fulfilled")
       .map(r => {
-        const { proxied, rawUrl, label, ok } = r.value;
-        const finalUrl = ok ? proxied : rawUrl;
-        return { name: label, url: finalUrl, quality: "HD", qualityRank: 9, site: "starcima_anim", directUrl: ok ? rawUrl : rawUrl, directType: "hls" as const };
+        const { proxied, rawUrl, label } = r.value;
+        return { name: label, url: proxied, quality: "HD", qualityRank: 9, site: "starcima_anim", directUrl: rawUrl, directType: "hls" as const };
       });
   } catch { return []; }
 }
@@ -6277,8 +6280,48 @@ router.get("/anime/subtitle-tracks", async (req, res) => {
     }));
   }
 
+  // ── Step 3.5: AniKoto (megaplay.buzz) — English VTT via AniList ID ──────────
+  const anikotoItems: Track[] = [];
+  if (anilistId) {
+    try {
+      const megaBase = "https://megaplay.buzz";
+      const megaRef = "https://hianimes.re/";
+      const embedUrl = `${megaBase}/stream/ani/${anilistId}/${ep}/sub`;
+      const html = await fetch(embedUrl, {
+        headers: { "User-Agent": BROWSER_UA, "Referer": megaRef, "Accept-Language": "en-US,en;q=0.9" },
+        signal: AbortSignal.timeout(10_000),
+      }).then(r => r.ok ? r.text() : "").catch(() => "");
+      const fileId = html.match(/data-id="([^"]+)"/)?.[1];
+      if (fileId) {
+        const origin = new URL(embedUrl).origin;
+        const sourcesData = await fetch(`${origin}/stream/getSources?id=${fileId}&id=${fileId}`, {
+          headers: { "User-Agent": BROWSER_UA, "Referer": `${origin}/`, "X-Requested-With": "XMLHttpRequest", "Accept": "application/json" },
+          signal: AbortSignal.timeout(8_000),
+        }).then(r => r.ok ? r.json() : null).catch(() => null) as {
+          tracks?: Array<{ file: string; label?: string; kind?: string }>;
+        } | null;
+        if (sourcesData?.tracks) {
+          for (const t of sourcesData.tracks) {
+            if (!t.file || t.kind === "thumbnails") continue;
+            const isAr = /(arabic|arab|\bar\b)/i.test(t.label || "");
+            const isEn = /(english|eng)/i.test(t.label || "");
+            const lang = isAr ? "ar" : isEn ? "en" : null;
+            if (!lang) continue;
+            const proxyUrl = `/api/anime/proxy-text?url=${encodeURIComponent(t.file)}&ref=${encodeURIComponent(origin + "/")}`;
+            anikotoItems.push({
+              id: `${lang}-anikoto`,
+              lang,
+              label: isAr ? "عربي · AniKoto" : "إنجليزي · AniKoto",
+              url: proxyUrl,
+            });
+          }
+        }
+      }
+    } catch { /* silent */ }
+  }
+
   // ── Step 4: Merge + auto-translate fallback ──────────────────────
-  const all: Track[] = [...wyzieItems, ...subdlItems];
+  const all: Track[] = [...wyzieItems, ...subdlItems, ...anikotoItems];
   const hasAr  = all.some(t => t.lang === "ar");
   const firstEn = all.find(t => t.lang === "en");
 

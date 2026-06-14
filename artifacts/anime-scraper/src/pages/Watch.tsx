@@ -697,7 +697,7 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
             {isEngAudio && (
               <span className="text-[7.5px] font-bold px-1.5 py-0.5 rounded-md font-['Cairo'] shrink-0"
                 style={{ background: "rgba(59,130,246,0.14)", border: "1px solid rgba(59,130,246,0.30)", color: "rgba(147,197,253,0.90)" }}>
-                🎌 إنجليزي/ياباني
+                🎌 الصوت إنجليزي/ياباني
               </span>
             )}
           </div>
@@ -1314,6 +1314,19 @@ function EpisodePlayer({
     };
   }, []);
 
+  /* ── Orientation tracking for subtitle panel ── */
+  useEffect(() => {
+    const onResize = () => setIsLandscape(window.innerWidth > window.innerHeight);
+    window.addEventListener("resize", onResize);
+    const mq = window.matchMedia("(orientation: landscape)");
+    const onOrient = (e: MediaQueryListEvent) => setIsLandscape(e.matches);
+    mq.addEventListener("change", onOrient);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      mq.removeEventListener("change", onOrient);
+    };
+  }, []);
+
   /* Detect if all quality tiers have the same server list (flat mode → hide quality picker) */
   const q1 = allServers["1080p FHD"] || [];
   const q2 = allServers["720p HD"]   || [];
@@ -1330,6 +1343,7 @@ function EpisodePlayer({
   const [subOffset,    setSubOffset]   = useState(0);
   const [showSubPanel, setShowSubPanel] = useState(false);
   const [subSettings,  setSubSettings] = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
+  const [isLandscape,  setIsLandscape] = useState(() => typeof window !== "undefined" && window.innerWidth > window.innerHeight);
   /* ── Multi-track subtitle system ── */
   const [subTracks,    setSubTracks]   = useState<SubTrack[]>([]);
   const [subChoice,    setSubChoice]   = useState<SubChoice>("off");
@@ -1922,7 +1936,6 @@ function EpisodePlayer({
 
       <AnimatePresence>
         {showSubPanel && (() => {
-          const isLandscape = typeof window !== "undefined" && window.innerWidth > window.innerHeight;
           const hasAr   = subTracks.some(t => t.lang === "ar");
           const hasAuto = subTracks.some(t => t.lang === "ar-auto") || subTracks.some(t => t.lang === "en");
           const hasEn   = subTracks.some(t => t.lang === "en");
