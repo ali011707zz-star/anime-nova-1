@@ -335,7 +335,9 @@ export default function RiftPlayer({
 
     let m3u8 = src;
 
-    if (src.includes("animegg.org/play/") || src.includes("vidcache.net")) {
+    if (src.includes("animegg.org/play/") || src.includes("vidcache.net")
+        || (src.includes("/api/animation/videasy-fresh") && src.includes("vtype=mp4"))
+        || src.includes("go.itsdeskmate.com")) {
       v.src = src; v.load();
       v.addEventListener("loadedmetadata", () => { setLoading(false); v.play().catch(() => {}); showControls(); }, { once: true });
       v.addEventListener("error", () => fireOnFail(), { once: true });
