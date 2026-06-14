@@ -10,7 +10,7 @@ import {
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
   RotateCcw, RotateCw, Sun, Lock, Unlock,
   Scan, ScanLine, Camera, X, Zap,
-  ChevronDown,
+  ChevronDown, Timer,
 } from "lucide-react";
 
 /* ─────────────────────────────────────── helpers ─── */
@@ -80,6 +80,7 @@ interface Props {
   onSubSettingsChange?: (s: SubSettings) => void;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
+  animeId?: number;
   autoPlay?: boolean;
   onBack?: () => void;
   onPrevEp?: () => void;
@@ -131,7 +132,7 @@ export default function RiftPlayer({
   downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
   subNote,
   onSubtitleClick, onSubSettingsChange,
-  skipIntro, skipOutro, autoPlay,
+  skipIntro, skipOutro, animeId, autoPlay,
   onBack, onPrevEp, onNextEp, onRealQuality, onTimeUpdate, onDuration, onFail,
 }: Props) {
 
@@ -198,6 +199,51 @@ export default function RiftPlayer({
   const [autoPlayCountdown, setAutoPlayCountdown] = useState(0);
   const [showUnlockBtn,   setShowUnlockBtn]   = useState(false);
   const unlockBtnHideRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showSkipMenu,    setShowSkipMenu]    = useState(false);
+  const [localSkipIntro,  setLocalSkipIntro]  = useState<{start:number;end:number}|undefined>(undefined);
+  const [localSkipOutro,  setLocalSkipOutro]  = useState<{start:number;end:number}|undefined>(undefined);
+
+  /* ── custom skip times: load from localStorage per anime ── */
+  const customSkipKey = animeId ? `skip-custom-${animeId}` : null;
+  useEffect(() => {
+    setLocalSkipIntro(undefined); setLocalSkipOutro(undefined);
+    if (!customSkipKey) return;
+    try {
+      const raw = localStorage.getItem(customSkipKey);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d.op) setLocalSkipIntro(d.op);
+        if (d.ed) setLocalSkipOutro(d.ed);
+      }
+    } catch {}
+  }, [customSkipKey]);
+
+  const saveCustomSkip = useCallback((type: "op"|"ed", time: number) => {
+    if (!customSkipKey) return;
+    const cur = (() => { try { return JSON.parse(localStorage.getItem(customSkipKey)||"{}"); } catch { return {}; } })();
+    if (type === "op") {
+      const s = { start: 0, end: Math.max(1, Math.floor(time)) };
+      setLocalSkipIntro(s);
+      localStorage.setItem(customSkipKey, JSON.stringify({ ...cur, op: s }));
+    } else {
+      const s = { start: Math.floor(time), end: Math.ceil(duration) || Math.floor(time) + 90 };
+      setLocalSkipOutro(s);
+      localStorage.setItem(customSkipKey, JSON.stringify({ ...cur, ed: s }));
+    }
+    setShowSkipMenu(false);
+  }, [customSkipKey, duration]);
+
+  const clearCustomSkip = useCallback(() => {
+    if (!customSkipKey) return;
+    setLocalSkipIntro(undefined); setLocalSkipOutro(undefined);
+    localStorage.removeItem(customSkipKey);
+    setShowSkipMenu(false);
+  }, [customSkipKey]);
+
+  /* ── auto-close skip menu when controls hide ── */
+  useEffect(() => {
+    if (!showCtrl) { setShowSkipMenu(false); setShowSubMenu(false); }
+  }, [showCtrl]);
 
   /* ── auto-close sub menu when controls hide ── */
   useEffect(() => {
@@ -784,13 +830,12 @@ export default function RiftPlayer({
   const pct    = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufPct = duration > 0 ? (buffered   / duration) * 100 : 0;
 
-  /* ── Skip intro/outro visibility (AniSkip API only — no heuristics) ── */
-  // تظهر الأزرار 10 ثوانٍ قبل بداية المقدمة/النهاية حتى يتمكن المستخدم من التحضير
+  /* ── Skip intro/outro visibility — custom times override AniSkip ── */
   const SKIP_LEAD = 10;
-  // Show skip intro from very start of episode until intro ends (not just during window)
-  // This ensures users always see the button and don't miss it
-  const showSkipIntro = !!skipIntro && currentTime < skipIntro.end;
-  const showSkipOutro = !!skipOutro && currentTime >= Math.max(0, skipOutro.start - SKIP_LEAD) && currentTime <= skipOutro.end;
+  const effectiveSkipIntro = localSkipIntro || skipIntro;
+  const effectiveSkipOutro = localSkipOutro || skipOutro;
+  const showSkipIntro = !!effectiveSkipIntro && currentTime < effectiveSkipIntro.end;
+  const showSkipOutro = !!effectiveSkipOutro && currentTime >= Math.max(0, effectiveSkipOutro.start - SKIP_LEAD) && currentTime <= effectiveSkipOutro.end;
 
   /* ── portrait style ── */
   const portraitStyle: React.CSSProperties = isPortrait ? {
@@ -990,15 +1035,15 @@ export default function RiftPlayer({
               dir="rtl"
             >
               {showSkipIntro && (() => {
-                const beforeIntro = skipIntro ? currentTime < skipIntro.start : false;
-                const rem = skipIntro
+                const beforeIntro = effectiveSkipIntro ? currentTime < effectiveSkipIntro.start : false;
+                const rem = effectiveSkipIntro
                   ? (beforeIntro
-                    ? Math.ceil(skipIntro.start - currentTime)
-                    : Math.max(0, Math.ceil(skipIntro.end - currentTime)))
+                    ? Math.ceil(effectiveSkipIntro.start - currentTime)
+                    : Math.max(0, Math.ceil(effectiveSkipIntro.end - currentTime)))
                   : 0;
                 return (
                   <button
-                    onPointerDown={e => { e.stopPropagation(); const skipTo = skipIntro ? skipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
+                    onPointerDown={e => { e.stopPropagation(); const skipTo = effectiveSkipIntro ? effectiveSkipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
                     style={{ background: beforeIntro ? "rgba(6,182,212,0.65)" : "rgba(6,182,212,0.88)", border: "1px solid rgba(34,211,238,0.55)", color: "white", boxShadow: "0 4px 20px rgba(6,182,212,0.45)", touchAction: "manipulation" }}>
                     <span>⏭ تخطي المقدمة</span>
@@ -1361,58 +1406,58 @@ export default function RiftPlayer({
                         }} />
                     </div>
                     {/* ── Skip markers — outside overflow-hidden so they're always visible ── */}
-                    {skipIntro && duration > 0 && (
+                    {effectiveSkipIntro && duration > 0 && (
                       <>
                         {/* Intro start tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(skipIntro.start / duration) * 100}%`,
+                          left: `${(effectiveSkipIntro.start / duration) * 100}%`,
                           width: 3, height: prgHover ? 18 : 13,
-                          background: "#facc15",
-                          boxShadow: "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
+                          background: localSkipIntro ? "#a78bfa" : "#facc15",
+                          boxShadow: localSkipIntro ? "0 0 6px rgba(167,139,250,0.9), 0 0 12px rgba(167,139,250,0.5)" : "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
                           zIndex: 10,
                         }} />
-                        {/* Intro colored segment (rendered on top of track via separate layer) */}
+                        {/* Intro colored segment */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(skipIntro.start / duration) * 100}%`,
-                          width: `${Math.max(0.5, (skipIntro.end - skipIntro.start) / duration * 100)}%`,
+                          left: `${(effectiveSkipIntro.start / duration) * 100}%`,
+                          width: `${Math.max(0.5, (effectiveSkipIntro.end - effectiveSkipIntro.start) / duration * 100)}%`,
                           height: prgHover ? 8 : 5,
-                          background: "rgba(250,204,21,0.70)",
+                          background: localSkipIntro ? "rgba(167,139,250,0.70)" : "rgba(250,204,21,0.70)",
                           zIndex: 9,
                         }} />
                         {/* Intro end tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(skipIntro.end / duration) * 100}%`,
+                          left: `${(effectiveSkipIntro.end / duration) * 100}%`,
                           width: 3, height: prgHover ? 18 : 13,
-                          background: "#facc15",
-                          boxShadow: "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
+                          background: localSkipIntro ? "#a78bfa" : "#facc15",
+                          boxShadow: localSkipIntro ? "0 0 6px rgba(167,139,250,0.9), 0 0 12px rgba(167,139,250,0.5)" : "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
                           zIndex: 10,
                         }} />
                       </>
                     )}
-                    {skipOutro && duration > 0 && (
+                    {effectiveSkipOutro && duration > 0 && (
                       <>
                         {/* Outro start tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(skipOutro.start / duration) * 100}%`,
+                          left: `${(effectiveSkipOutro.start / duration) * 100}%`,
                           width: 3, height: prgHover ? 18 : 13,
-                          background: "#facc15",
-                          boxShadow: "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
+                          background: localSkipOutro ? "#a78bfa" : "#facc15",
+                          boxShadow: localSkipOutro ? "0 0 6px rgba(167,139,250,0.9), 0 0 12px rgba(167,139,250,0.5)" : "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
                           zIndex: 10,
                         }} />
                         {/* Outro colored segment */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(skipOutro.start / duration) * 100}%`,
-                          width: `${Math.max(0.5, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
+                          left: `${(effectiveSkipOutro.start / duration) * 100}%`,
+                          width: `${Math.max(0.5, (effectiveSkipOutro.end - effectiveSkipOutro.start) / duration * 100)}%`,
                           height: prgHover ? 8 : 5,
-                          background: "rgba(250,204,21,0.70)",
+                          background: localSkipOutro ? "rgba(167,139,250,0.70)" : "rgba(250,204,21,0.70)",
                           zIndex: 9,
                         }} />
                         {/* Outro end tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(skipOutro.end / duration) * 100}%`,
+                          left: `${(effectiveSkipOutro.end / duration) * 100}%`,
                           width: 3, height: prgHover ? 18 : 13,
-                          background: "#facc15",
-                          boxShadow: "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
+                          background: localSkipOutro ? "#a78bfa" : "#facc15",
+                          boxShadow: localSkipOutro ? "0 0 6px rgba(167,139,250,0.9), 0 0 12px rgba(167,139,250,0.5)" : "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
                           zIndex: 10,
                         }} />
                       </>
