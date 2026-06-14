@@ -2519,10 +2519,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "EzVidAPI: جاري الاستخراج…" });
-          // vidnest: TV-only (times out for movies); vidlink+vidrock work for both
+          // vidnest: TV-only (times out for movies); vidlink works for both; vidrock removed (broken)
           const providers = type === "tv"
-            ? ["vidnest", "vidlink", "vidrock"]
-            : ["vidlink", "vidrock"];
+            ? ["vidnest", "vidlink"]
+            : ["vidlink"];
           await Promise.allSettled(providers.map(async (prov) => {
             try {
               const apiUrl = type === "tv"
@@ -2540,19 +2540,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const ezRef = `https://www.${prov}.pro/`;
               // vidrock: EzVidAPI proxy URL already handles CORS/auth internally — send raw to browser
               // Others: wrap with hls-proxy so server rewrites segments via seg-proxy
-              const proxiedStream = (prov === "vidrock")
-                ? streamUrl
-                : (streamUrl.includes(".m3u8") ? wrapHls(streamUrl, ezRef) : wrapMp4(streamUrl, ezRef));
+              const proxiedStream = streamUrl.includes(".m3u8") ? wrapHls(streamUrl, ezRef) : wrapMp4(streamUrl, ezRef);
               // Probe — probeHlsProxy returns true immediately for external (non-/api/) URLs
               const ezProbeOk = await probeHlsProxy(proxiedStream);
               if (!ezProbeOk) return;
-              // For vidrock: Arabic subtitle at cache.vdrk.site/v2
-              let subtitleUrl: string | undefined;
-              if (prov === "vidrock") {
-                subtitleUrl = type === "tv"
-                  ? `https://cache.vdrk.site/v2/tv/${tmdbId}/${season}/${epNum}/Arabic.vtt`
-                  : `https://cache.vdrk.site/v2/movie/${tmdbId}/Arabic.vtt`;
-              }
+              const subtitleUrl: string | undefined = undefined;
               seenUrls.add(streamUrl);
               sourceCount++;
               send("source", {

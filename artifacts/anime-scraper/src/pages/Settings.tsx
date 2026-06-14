@@ -819,6 +819,19 @@ export default function Settings() {
           </div>
           <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
         </button>
+
+        <button
+          onClick={() => window.open("https://t.me/L_X_00", "_blank")}
+          className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-violet-500/10 border-white/8">
+            <MessageCircle className="w-4 h-4 text-violet-400" />
+          </div>
+          <div className="flex-1 text-right">
+            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">تواصل مع المطوّر</p>
+            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">مشكلات · اقتراحات · @L_X_00</p>
+          </div>
+          <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
+        </button>
       </Card>
 
       {/* ══════ البيانات والكاش ══════ */}
