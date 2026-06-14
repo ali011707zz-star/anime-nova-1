@@ -170,6 +170,8 @@ export default function RiftPlayer({
   const [loading,         setLoading]         = useState(true);
   const [buffering,       setBuffering]       = useState(false);
   const [error,           setError]           = useState<string | null>(null);
+  const [skipNotif,       setSkipNotif]       = useState(false);
+  const skipNotifFired   = useRef(false);
   const [playing,         setPlaying]         = useState(false);
   const [currentTime,     setCurrentTime]     = useState(0);
   const [duration,        setDuration]        = useState(0);
@@ -533,6 +535,16 @@ export default function RiftPlayer({
     return () => clearInterval(tick);
   }, [isEnded, autoPlay]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ── إشعار لمرة واحدة عند تحميل توقيتات التخطي ── */
+  useEffect(() => {
+    if ((skipIntro || skipOutro) && !skipNotifFired.current) {
+      skipNotifFired.current = true;
+      setSkipNotif(true);
+      const t = setTimeout(() => setSkipNotif(false), 3500);
+      return () => clearTimeout(t);
+    }
+  }, [skipIntro, skipOutro]);
+
   /* ── controls ── */
   function togglePlay() {
     const v = videoRef.current; if (!v) return;
@@ -766,8 +778,10 @@ export default function RiftPlayer({
   const bufPct = duration > 0 ? (buffered   / duration) * 100 : 0;
 
   /* ── Skip intro/outro visibility (AniSkip API only — no heuristics) ── */
-  const showSkipIntro = !!skipIntro && currentTime >= skipIntro.start && currentTime <= skipIntro.end;
-  const showSkipOutro = !!skipOutro && currentTime >= skipOutro.start && currentTime <= skipOutro.end;
+  // تظهر الأزرار 5 ثوانٍ قبل بداية المقدمة/النهاية حتى يتمكن المستخدم من التحضير
+  const SKIP_LEAD = 5;
+  const showSkipIntro = !!skipIntro && currentTime >= Math.max(0, skipIntro.start - SKIP_LEAD) && currentTime <= skipIntro.end;
+  const showSkipOutro = !!skipOutro && currentTime >= Math.max(0, skipOutro.start - SKIP_LEAD) && currentTime <= skipOutro.end;
 
   /* ── portrait style ── */
   const portraitStyle: React.CSSProperties = isPortrait ? {
@@ -932,6 +946,23 @@ export default function RiftPlayer({
                   {dblTap.side === "L" ? "-" : "+"}{dblTap.secs}ث
                 </span>
               </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Skip ready notification (appears briefly when skip data loads) ── */}
+        <AnimatePresence>
+          {skipNotif && (
+            <motion.div
+              key="skip-notif"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+              className="absolute top-14 right-4 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-xl pointer-events-none font-['Cairo'] text-[11px] font-bold"
+              style={{ background: "rgba(0,0,0,0.72)", border: "1px solid rgba(250,204,21,0.4)", color: "#fde047", backdropFilter: "blur(8px)" }}>
+              <span>⏭</span>
+              <span>توقيتات التخطي متاحة</span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1343,8 +1374,8 @@ export default function RiftPlayer({
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(skipOutro.start / duration) * 100}%`,
                           width: 3, height: prgHover ? 18 : 13,
-                          background: "#fb923c",
-                          boxShadow: "0 0 6px rgba(251,146,60,0.9), 0 0 12px rgba(251,146,60,0.5)",
+                          background: "#facc15",
+                          boxShadow: "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
                           zIndex: 10,
                         }} />
                         {/* Outro colored segment */}
@@ -1352,15 +1383,15 @@ export default function RiftPlayer({
                           left: `${(skipOutro.start / duration) * 100}%`,
                           width: `${Math.max(0.5, (skipOutro.end - skipOutro.start) / duration * 100)}%`,
                           height: prgHover ? 8 : 5,
-                          background: "rgba(251,146,60,0.70)",
+                          background: "rgba(250,204,21,0.70)",
                           zIndex: 9,
                         }} />
                         {/* Outro end tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(skipOutro.end / duration) * 100}%`,
                           width: 3, height: prgHover ? 18 : 13,
-                          background: "#fb923c",
-                          boxShadow: "0 0 6px rgba(251,146,60,0.9), 0 0 12px rgba(251,146,60,0.5)",
+                          background: "#facc15",
+                          boxShadow: "0 0 6px rgba(250,204,21,0.9), 0 0 12px rgba(250,204,21,0.5)",
                           zIndex: 10,
                         }} />
                       </>
