@@ -34,3 +34,16 @@ LordFlix uses enc-dec.app encryption (enc-lordflix / dec-lordflix). CDN requires
 - kisskh, abyss: need slug/content-ID lookup, not TMDB-native
 
 **Why:** LordFlix is the only EncDecEndpoints source confirmed to deliver complete working HLS for both movies and TV via TMDB ID.
+
+## Anime sources confirmed working (TMDB-native → anime.ts)
+- Videasy: Attack on Titan TMDB ID 1429 → 9+ sources (360p/480p/720p/1080p)
+- VidLink enc-dec: storm.vodvidl.site HLS → 1 source
+- LordFlix: ok.horseapples.cc → 1 source per show
+- Vyla: missourimonster-vyla.hf.space TV SSE → multiple CDN sources
+- StarCima vidzee: workers.dev + cdn.1shows.app + hlcxm.com → 4-5 sources
+
+## fetchAnimeTmdbId
+- TMDB_KEY: public demo `8265bd1679663a7ea12ac168da84d2e8`
+- Searches `/3/search/tv?query=` with English title first, romaji fallback
+- Cache TTL: 6h in-memory Map (animeTmdbCache)
+- Always uses season=1, ep=N for anime (each AniList entry = one season)
