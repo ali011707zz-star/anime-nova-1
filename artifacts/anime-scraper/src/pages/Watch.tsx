@@ -2777,30 +2777,83 @@ export default function WatchPage() {
       );
     }
 
-    /* Initial load: show a centered loading screen while scrapers run */
+    /* Initial load: show a beautiful loading screen while scrapers run */
     return (
-      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-6 select-none">
+      <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl">
+        {/* Blurred bg */}
         {cover && (
-          <img
-            src={cover} alt={title}
-            className="w-28 h-40 object-cover rounded-xl shadow-2xl opacity-80"
-          />
+          <div className="absolute inset-0">
+            <img src={cover} alt="" className="w-full h-full object-cover scale-125 blur-3xl opacity-[0.15] saturate-150" />
+            <div className="absolute inset-0 bg-gradient-to-b from-[#07070d]/85 via-[#07070d]/50 to-[#07070d]/92" />
+          </div>
         )}
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-white text-base font-medium opacity-90">
-            {title}
-          </p>
-          <p className="text-white/50 text-sm">
-            الحلقة {ep} · جاري التحميل…
-          </p>
-        </div>
+        {/* Back button */}
         <button
           onClick={() => navigate(animeId ? `/episodes/${animeId}` : "/")}
-          className="absolute top-4 right-4 text-white/40 hover:text-white/80 transition-colors p-2"
+          className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+          style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}
         >
-          ✕
+          <X className="w-5 h-5 text-white/60" />
         </button>
+
+        <div className="relative h-full flex flex-col items-center justify-center gap-6 px-6">
+          {/* Prayer — ABOVE poster */}
+          <motion.p
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05, duration: 0.4 }}
+            className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide text-center">
+            اللهم صلِّ وسلِّم على نبينا محمد ﷺ
+          </motion.p>
+
+          {/* Poster */}
+          {cover ? (
+            <motion.div
+              className="relative shrink-0"
+              initial={{ opacity: 0, y: 20, scale: 0.92 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ delay: 0.08, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <div className="absolute -inset-4 rounded-[28px] pointer-events-none"
+                style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.25) 0%, transparent 68%)" }} />
+              <img src={cover} alt={title || "أنمي"}
+                className="w-44 h-[248px] rounded-2xl object-cover"
+                style={{ boxShadow: "0 28px 72px rgba(0,0,0,0.90), 0 0 0 1px rgba(255,255,255,0.09)" }} />
+            </motion.div>
+          ) : (
+            <div className="w-44 h-[248px] rounded-2xl bg-white/[0.03] flex items-center justify-center"
+              style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
+              <div className="w-16 h-16 rounded-full bg-violet-500/15 flex items-center justify-center">
+                <div className="w-7 h-7 rounded-full bg-violet-500/35" />
+              </div>
+            </div>
+          )}
+
+          {/* Title + episode — BELOW poster */}
+          <motion.div
+            className="text-center"
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.18, duration: 0.38 }}
+          >
+            {title && (
+              <h2 className="text-white text-[18px] font-black font-['Cairo'] leading-tight mb-1.5"
+                style={{ textShadow: "0 2px 14px rgba(0,0,0,0.75)" }}>{title}</h2>
+            )}
+            <p className="text-white/35 text-[13px] font-['Cairo'] tracking-wide">الحلقة {ep}{(arEpTitle || epTitle) ? ` · ${arEpTitle || epTitle}` : ""}</p>
+          </motion.div>
+
+          {/* Spinner + message */}
+          <motion.div
+            className="flex flex-col items-center gap-3"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.30 }}
+          >
+            <div className="relative w-9 h-9">
+              <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
+              <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+                animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
+            </div>
+            <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
+          </motion.div>
+        </div>
       </div>
     );
   }
