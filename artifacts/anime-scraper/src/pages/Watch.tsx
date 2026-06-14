@@ -235,6 +235,7 @@ function isIframeUrl(url: string): boolean {
   if (url.includes("streamtape.com")) return false;     // direct MP4
   if (url.includes("sendvid.com")) return false;        // direct MP4
   if (url.includes("video.kawaii-anime.com")) return false; // kawaii CDN (CORS * — direct HLS)
+  if (url.includes("missourimonster-vyla.hf.space")) return false; // Vyla proxy (direct HLS)
   if (url.match(/\.(m3u8|mp4|mkv|webm|ts)([?#]|$)/i)) return false; // video file
   return url.startsWith("https://");                    // external embed page
 }
@@ -307,6 +308,10 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   // Mega.nz embed (animeify — no ads, stays in app)
   if (url.includes("mega.nz/embed")) {
     return { label: "ميغا", sublabel: "عربي · مباشر", isHls: false, isDirect: false };
+  }
+  // Vyla proxy (TMDB-native, direct HLS served from Vyla proxy)
+  if (url.includes("missourimonster-vyla.hf.space")) {
+    return { label: "Vyla", sublabel: "ياباني · HLS مترجم", isHls: true };
   }
   // Fallback — all sources are native
   return { label: `مصدر ${idx + 1}`, sublabel: "عربي · تشغيل مباشر", isHls: true, isDirect: true };
@@ -663,19 +668,21 @@ const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", 
 const QUALITY_TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
 
 const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: FetchedSrc; idx: number; onPlaySrc: (s: FetchedSrc) => void }) {
-  const url     = src.directUrl || src.url;
-  const cdn     = getCdnDisplayName(url);
-  const site    = SITE_SHORT[src.site || ""] || src.site || "";
-  const isEmbed = !!src.isEmbed;
-  const tag     = SCRAPER_DEFS.find(d => d.site === src.site)?.tag || "??";
-  const q       = getSrcQualityTier(src);
-  const qs      = QUALITY_STYLE[q];
+  const url       = src.directUrl || src.url;
+  const cdn       = getCdnDisplayName(url);
+  const site      = SITE_SHORT[src.site || ""] || src.site || "";
+  const isEmbed   = !!src.isEmbed;
+  const def       = SCRAPER_DEFS.find(d => d.site === src.site);
+  const tag       = def?.tag || "??";
+  const isEngAudio = def?.audioLang === "en";
+  const q         = getSrcQualityTier(src);
+  const qs        = QUALITY_STYLE[q];
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
       transition={{ delay: Math.min(idx * 0.025, 0.14), duration: 0.14 }}>
       <div
-        className="flex items-center px-3 py-2 gap-2.5 active:bg-white/[0.03] transition-colors cursor-pointer"
+        className="flex items-center px-3 py-2.5 gap-2.5 active:bg-white/[0.03] transition-colors cursor-pointer"
         style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
         onClick={() => onPlaySrc(src)}>
         <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
@@ -685,7 +692,15 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
             : <MonitorPlay className="w-3.5 h-3.5" style={{ color: qs.icon }} />}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">{cdn}</p>
+          <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">{cdn}</p>
+            {isEngAudio && (
+              <span className="text-[7.5px] font-bold px-1.5 py-0.5 rounded-md font-['Cairo'] shrink-0"
+                style={{ background: "rgba(59,130,246,0.14)", border: "1px solid rgba(59,130,246,0.30)", color: "rgba(147,197,253,0.90)" }}>
+                🎌 إنجليزي/ياباني
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1 flex-wrap">
             {site && <span className="text-white/36 text-[9.5px] font-['Cairo']">{site}</span>}
             {site && <span className="text-white/14 text-[8px]">·</span>}
@@ -744,8 +759,6 @@ function ScraperPicker({
     slotStatus[d.site] === "ready" || slotStatus[d.site] === "failed"
   );
 
-  const ENGLISH_SITES = useMemo(() => new Set(["videasy_anim", "vidlink_anim", "lordflix_anim", "vyla_anim"]), []);
-
   /* Flatten + filter + deduplicate all fetched sources — memoised to avoid re-work on every SSE tick */
   const { displaySources, embedFallbacks } = useMemo(() => {
     const flat: FetchedSrc[] = [];
@@ -779,24 +792,12 @@ function ScraperPicker({
     return { displaySources: flat, embedFallbacks: embeds };
   }, [slotSources]);
 
-  /* Split: English-audio sites vs everything else — memoised */
-  const { mainSources, engSources } = useMemo(() => ({
-    mainSources: displaySources.filter(s => !ENGLISH_SITES.has(s.site ?? "")),
-    engSources:  displaySources.filter(s =>  ENGLISH_SITES.has(s.site ?? "")),
-  }), [displaySources, ENGLISH_SITES]);
-
-  /* Group by quality tier — memoised */
+  /* Group ALL sources by quality tier — English-audio sites merged in (badge shown on card) */
   const grouped: Record<Quality, FetchedSrc[]> = useMemo(() => ({
-    "1080p FHD": mainSources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
-    "720p HD":   mainSources.filter(s => getSrcQualityTier(s) === "720p HD"),
-    "360p SD":   mainSources.filter(s => getSrcQualityTier(s) === "360p SD"),
-  }), [mainSources]);
-
-  const engGrouped: Record<Quality, FetchedSrc[]> = useMemo(() => ({
-    "1080p FHD": engSources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
-    "720p HD":   engSources.filter(s => getSrcQualityTier(s) === "720p HD"),
-    "360p SD":   engSources.filter(s => getSrcQualityTier(s) === "360p SD"),
-  }), [engSources]);
+    "1080p FHD": displaySources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
+    "720p HD":   displaySources.filter(s => getSrcQualityTier(s) === "720p HD"),
+    "360p SD":   displaySources.filter(s => getSrcQualityTier(s) === "360p SD"),
+  }), [displaySources]);
 
   const hasSources = displaySources.length > 0;
   const hasBackupSources = embedFallbacks.length > 0;
@@ -1090,49 +1091,6 @@ function ScraperPicker({
               );
             })}
 
-            {/* ── 🇬🇧 English sources separator + section ── */}
-            {engSources.length > 0 && (
-              <>
-                <div className="mx-4 mt-6 mb-1 flex items-center gap-3">
-                  <div className="flex-1 h-px" style={{ background: "linear-gradient(to left, rgba(255,255,255,0.08), transparent)" }} />
-                  <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl shrink-0"
-                    style={{ background: "rgba(29,78,216,0.14)", border: "1px solid rgba(59,130,246,0.30)" }}>
-                    <span className="text-base leading-none select-none">🇬🇧</span>
-                    <span className="text-[11px] font-black font-['Cairo']"
-                      style={{ color: "rgba(147,197,253,0.92)" }}>الصوت إنجليزي · ترجمة عربية</span>
-                  </div>
-                  <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(255,255,255,0.08), transparent)" }} />
-                </div>
-                {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
-                  const srcs = engGrouped[q];
-                  if (!srcs.length) return null;
-                  const qs = QUALITY_STYLE[q];
-                  let rowIdx = mainSources.length;
-                  for (const prevQ of ["1080p FHD", "720p HD", "360p SD"] as Quality[]) {
-                    if (prevQ === q) break;
-                    rowIdx += engGrouped[prevQ].length;
-                  }
-                  return (
-                    <div key={`en-${q}`}>
-                      <div className="flex items-center gap-2 px-4 pt-3 pb-2">
-                        <div className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ background: qs.dot, boxShadow: `0 0 6px ${qs.dot}88` }} />
-                        <span className="text-[10px] font-bold font-['Cairo'] tracking-wider" style={{ color: qs.text }}>
-                          {Q_LABEL[q]}
-                        </span>
-                        <span className="mr-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded"
-                          style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
-                          {srcs.length}
-                        </span>
-                      </div>
-                      {srcs.map((src, i) => (
-                        <SourceRow key={`en-${src.site}-${rowIdx + i}`} src={src} idx={rowIdx + i} onPlaySrc={onPlaySrc} />
-                      ))}
-                    </div>
-                  );
-                })}
-              </>
-            )}
 
             {/* ── Backup / embed sources section (mega / vidmoly) ── */}
             {hasBackupSources && (
@@ -1963,253 +1921,238 @@ function EpisodePlayer({
       </AnimatePresence>
 
       <AnimatePresence>
-        {showSubPanel && (
-          <motion.div key="subpanel"
-            initial={{ opacity: 0, y: 32 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 32 }}
-            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed inset-x-0 bottom-0 z-[400]"
-            style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
-          >
-            <div className="fixed inset-0 z-[-1]" onClick={() => setShowSubPanel(false)} />
-            <div className="mx-3 rounded-2xl overflow-hidden"
-              style={{
-                background: "rgba(9,7,22,0.97)",
-                border: "1px solid rgba(139,92,246,0.22)",
-                backdropFilter: "blur(40px)",
-                boxShadow: "0 -24px 60px rgba(0,0,0,0.85)",
-                maxHeight: "82dvh",
-                overflowY: "auto",
-              }}>
+        {showSubPanel && (() => {
+          const isLandscape = typeof window !== "undefined" && window.innerWidth > window.innerHeight;
+          const hasAr   = subTracks.some(t => t.lang === "ar");
+          const hasAuto = subTracks.some(t => t.lang === "ar-auto") || subTracks.some(t => t.lang === "en");
+          const hasEn   = subTracks.some(t => t.lang === "en");
+          const hasSub  = subtitleUrl != null;
+          const subOpts = [
+            { id: "off"     as SubChoice, label: "إيقاف",    icon: "⊘",  available: true,           color: "rgba(255,255,255,0.30)" },
+            { id: "ar"      as SubChoice, label: "عربي",     icon: "ع",  available: hasAr,           color: "rgba(110,231,183,0.85)" },
+            { id: "ar-auto" as SubChoice, label: "مترجم",    icon: "↻",  available: hasAuto||hasSub, color: "rgba(251,191,36,0.85)"  },
+            { id: "en"      as SubChoice, label: "إنجليزي",  icon: "En", available: hasEn,           color: "rgba(147,197,253,0.85)" },
+          ];
+
+          const panelContent = (
+            <div style={{
+              background: "rgba(7,5,20,0.98)",
+              backdropFilter: "blur(40px)",
+              WebkitBackdropFilter: "blur(40px)",
+              border: "1px solid rgba(139,92,246,0.20)",
+              boxShadow: isLandscape
+                ? "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)"
+                : "inset 0 0 0 0.5px rgba(255,255,255,0.06), 0 -20px 60px rgba(0,0,0,0.80)",
+              borderRadius: isLandscape ? "20px 0 0 20px" : "20px 20px 0 0",
+              overflowY: "auto",
+              maxHeight: isLandscape ? "100dvh" : "88dvh",
+              width: isLandscape ? "280px" : "auto",
+            }}>
+              {/* Drag handle (portrait only) */}
+              {!isLandscape && (
+                <div className="flex justify-center pt-3 pb-1">
+                  <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.14)" }} />
+                </div>
+              )}
 
               {/* ── Header ── */}
-              <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/[0.06]">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px]"
-                    style={{ background: "rgba(139,92,246,0.20)", border: "1px solid rgba(139,92,246,0.30)" }}>
-                    <span className="text-violet-300 font-black">ت</span>
+              <div className={`flex items-center justify-between border-b border-white/[0.06] ${isLandscape ? "px-4 pt-5 pb-3" : "px-4 pt-2 pb-3"}`}>
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl flex items-center justify-center"
+                    style={{ background: "linear-gradient(135deg,rgba(139,92,246,0.35),rgba(109,40,217,0.25))", border: "1px solid rgba(139,92,246,0.35)" }}>
+                    <span className="text-violet-300 text-[13px] font-black" style={{ fontFamily: "Cairo, sans-serif" }}>ت</span>
                   </div>
-                  <h3 className="text-[14px] font-black font-['Cairo'] text-white">الترجمة</h3>
+                  <h3 className="text-[14px] font-black text-white" style={{ fontFamily: "Cairo, sans-serif" }}>الترجمة</h3>
                   {subTracks.length > 0 && (
-                    <span className="text-[9px] font-['Cairo'] text-violet-300/50 font-bold">
-                      {subTracks.length} مصدر
+                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-md" style={{ fontFamily: "Cairo, sans-serif", background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)", color: "rgba(196,181,253,0.60)" }}>
+                      {subTracks.length} مصادر
                     </span>
                   )}
                 </div>
                 <button onClick={() => setShowSubPanel(false)}
-                  className="w-8 h-8 rounded-xl flex items-center justify-center text-white/40 active:scale-90 transition-transform"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <span className="text-[13px]">✕</span>
+                  className="w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.10)" }}>
+                  <X className="w-3.5 h-3.5 text-white/45" />
                 </button>
               </div>
 
               {/* ── 4 Language Option Buttons ── */}
-              {(() => {
-                const hasAr   = subTracks.some(t => t.lang === "ar");
-                const hasAuto = subTracks.some(t => t.lang === "ar-auto") || subTracks.some(t => t.lang === "en");
-                const hasEn   = subTracks.some(t => t.lang === "en");
-                const hasSub  = subtitleUrl != null;
-                const opts = [
-                  { id: "off"    as SubChoice, label: "إيقاف",   icon: "✕", available: true,           desc: "" },
-                  { id: "ar"     as SubChoice, label: "عربي",    icon: "ع", available: hasAr,           desc: "مباشر" },
-                  { id: "ar-auto"as SubChoice, label: "مترجم",   icon: "↻", available: hasAuto||hasSub, desc: "تلقائي" },
-                  { id: "en"     as SubChoice, label: "إنجليزي", icon: "E", available: hasEn,           desc: "أصلي" },
-                ];
-                return (
-                  <div className="grid grid-cols-4 gap-2 p-4">
-                    {opts.map(opt => {
-                      const active = subChoice === opt.id && subStatus !== "off";
-                      return (
-                        <button key={opt.id}
-                          onClick={() => opt.available && changeSubChoice(opt.id)}
-                          disabled={!opt.available}
-                          className="flex flex-col items-center gap-1.5 py-3.5 rounded-xl transition-all active:scale-95 disabled:opacity-25"
-                          style={{
-                            background: active ? "rgba(139,92,246,0.20)" : "rgba(255,255,255,0.04)",
-                            border: active ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.07)",
-                            boxShadow: active ? "0 0 18px rgba(139,92,246,0.16) inset" : "none",
-                          }}>
-                          <span className="text-[18px]" style={{ color: active ? "rgba(196,181,253,0.95)" : "rgba(255,255,255,0.40)" }}>
-                            {opt.icon}
-                          </span>
-                          <span className="text-[10px] font-black font-['Cairo'] leading-none"
-                            style={{ color: active ? "rgba(196,181,253,0.90)" : "rgba(255,255,255,0.50)" }}>
-                            {opt.label}
-                          </span>
-                          {opt.desc && (
-                            <span className="text-[8px] font-['Cairo']"
-                              style={{ color: active ? "rgba(196,181,253,0.50)" : "rgba(255,255,255,0.20)" }}>
-                              {opt.desc}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
+              <div className={`grid gap-2 p-4 ${isLandscape ? "grid-cols-2" : "grid-cols-4"}`}>
+                {subOpts.map(opt => {
+                  const active = subChoice === opt.id && (opt.id === "off" ? subStatus === "off" : subStatus !== "off");
+                  const isOff  = opt.id === "off";
+                  return (
+                    <button key={opt.id}
+                      onClick={() => opt.available && changeSubChoice(opt.id)}
+                      disabled={!opt.available}
+                      className="flex flex-col items-center gap-1.5 rounded-2xl transition-all active:scale-95 disabled:opacity-20"
+                      style={{
+                        padding: isLandscape ? "12px 8px" : "14px 6px",
+                        background: active
+                          ? isOff ? "rgba(239,68,68,0.15)" : "rgba(139,92,246,0.18)"
+                          : "rgba(255,255,255,0.04)",
+                        border: active
+                          ? isOff ? "1px solid rgba(239,68,68,0.40)" : "1px solid rgba(139,92,246,0.42)"
+                          : "1px solid rgba(255,255,255,0.07)",
+                        boxShadow: active ? `0 0 20px ${isOff ? "rgba(239,68,68,0.10)" : "rgba(139,92,246,0.14)"} inset` : "none",
+                      }}>
+                      <span className="text-[15px] leading-none font-black select-none"
+                        style={{ color: active ? (isOff ? "rgba(252,165,165,0.90)" : opt.color) : "rgba(255,255,255,0.28)", fontFamily: "Cairo, sans-serif" }}>
+                        {opt.icon}
+                      </span>
+                      <span className="text-[9.5px] font-black leading-none" style={{ fontFamily: "Cairo, sans-serif", color: active ? (isOff ? "rgba(252,165,165,0.85)" : "rgba(196,181,253,0.90)") : "rgba(255,255,255,0.40)" }}>
+                        {opt.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
 
-              {/* ── Status row ── */}
-              <div className="px-5 pb-3 flex items-center gap-2.5 min-h-[28px]">
+              {/* ── Status pill ── */}
+              <div className="px-4 pb-3">
                 {(subStatus === "loading" || subStatus === "translating" || subStatus === "discovering") && (
-                  <>
-                    <motion.div
-                      className="w-3.5 h-3.5 rounded-full border-2 border-violet-400/20 border-t-violet-400/70"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 0.85, repeat: Infinity, ease: "linear" }}
-                    />
-                    <span className="text-[11px] font-['Cairo'] text-white/38">
-                      {subStatus === "translating" ? "جاري الترجمة للعربية… (قد يأخذ دقيقة)" :
-                       subStatus === "loading"      ? "جاري تحميل الترجمة…" :
-                       "يبحث عن مصادر الترجمة…"}
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "rgba(139,92,246,0.10)", border: "1px solid rgba(139,92,246,0.18)" }}>
+                    <motion.div className="w-3 h-3 rounded-full border-2 border-violet-400/25 border-t-violet-400/75 shrink-0"
+                      animate={{ rotate: 360 }} transition={{ duration: 0.85, repeat: Infinity, ease: "linear" }} />
+                    <span className="text-[10px] font-['Cairo'] text-white/50">
+                      {subStatus === "translating" ? "جاري الترجمة…" : subStatus === "loading" ? "جاري التحميل…" : "يبحث عن الترجمة…"}
                     </span>
-                  </>
+                  </div>
                 )}
                 {subStatus === "ready" && (
-                  <span className="text-[11px] font-['Cairo']" style={{ color: "rgba(110,231,183,0.80)" }}>
-                    ✓ جاهز · {subCues.length} سطر ترجمة
-                  </span>
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: "rgba(52,211,153,0.09)", border: "1px solid rgba(52,211,153,0.20)" }}>
+                    <span className="text-[10px] font-['Cairo']" style={{ color: "rgba(110,231,183,0.80)" }}>✓ جاهز · {subCues.length} سطر</span>
+                    <span className="text-[9px] font-['Cairo'] text-white/20">{subLang === "ara" || subLang === "ar" ? "عربي" : "إنجليزي"}</span>
+                  </div>
                 )}
                 {subStatus === "failed" && (
-                  <div className="flex items-center justify-between w-full">
-                    <span className="text-[11px] font-['Cairo'] text-white/28">لم يُعثر على ترجمة لهذا المحتوى</span>
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)" }}>
+                    <span className="text-[10px] font-['Cairo'] text-white/35">لا توجد ترجمة لهذا المحتوى</span>
                     <button onClick={() => { setSubTracks([]); fetchSubtitles(); }}
-                      className="text-[10px] font-bold font-['Cairo'] px-2.5 py-1 rounded-lg active:scale-90"
-                      style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.30)", color: "rgba(196,181,253,0.80)" }}>
+                      className="text-[9px] font-bold font-['Cairo'] px-2 py-1 rounded-lg active:scale-90 transition-transform"
+                      style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.32)", color: "rgba(196,181,253,0.80)" }}>
                       إعادة
                     </button>
                   </div>
                 )}
                 {subStatus === "off" && (
-                  <span className="text-[11px] font-['Cairo'] text-white/18">الترجمة موقوفة</span>
+                  <div className="px-3 py-2 rounded-xl text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span className="text-[10px] font-['Cairo'] text-white/18">اختر لغة الترجمة من الأعلى</span>
+                  </div>
                 )}
               </div>
 
-              {/* ── Arabic TTS Dubbing toggle ── */}
+              {/* ── TTS Dub toggle ── */}
               {subStatus === "ready" && (
-                <div className="px-5 pb-3 border-t border-white/[0.05] pt-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-[11px] font-black font-['Cairo'] text-white/60">دبلجة صوتية عربية</p>
-                      <p className="text-[9px] font-['Cairo'] text-white/24">تجريبي · يقرأ الترجمة بصوت عربي</p>
+                <div className="px-4 pb-3 pt-1 border-t border-white/[0.05]">
+                  <div className="flex items-center justify-between py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[14px]">🔊</span>
+                      <div>
+                        <p className="text-[11px] font-black font-['Cairo'] text-white/55">دبلجة صوتية</p>
+                        <p className="text-[8.5px] font-['Cairo'] text-white/22">تجريبي · يقرأ الترجمة عربياً</p>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => setTtsDub(d => !d)}
-                      className="relative w-11 h-6 rounded-full transition-all active:scale-90"
-                      style={{
-                        background: ttsDub ? "rgba(139,92,246,0.70)" : "rgba(255,255,255,0.10)",
-                        border: ttsDub ? "1px solid rgba(139,92,246,0.80)" : "1px solid rgba(255,255,255,0.15)",
-                      }}>
-                      <motion.div
-                        className="absolute top-0.5 w-5 h-5 rounded-full"
-                        style={{ background: ttsDub ? "#c4b5fd" : "rgba(255,255,255,0.45)" }}
+                    <button onClick={() => setTtsDub(d => !d)}
+                      className="relative w-10 h-[22px] rounded-full transition-all active:scale-90"
+                      style={{ background: ttsDub ? "rgba(139,92,246,0.70)" : "rgba(255,255,255,0.09)", border: ttsDub ? "1px solid rgba(139,92,246,0.70)" : "1px solid rgba(255,255,255,0.12)" }}>
+                      <motion.div className="absolute top-0.5 w-[18px] h-[18px] rounded-full"
+                        style={{ background: ttsDub ? "#c4b5fd" : "rgba(255,255,255,0.42)" }}
                         animate={{ left: ttsDub ? "auto" : "2px", right: ttsDub ? "2px" : "auto" }}
-                        transition={{ duration: 0.2 }}
-                      />
+                        transition={{ duration: 0.18 }} />
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* ── Settings (when subtitle ready) ── */}
+              {/* ── Settings ── */}
               {subStatus === "ready" && (
-                <div className="px-5 pb-4 pt-3 border-t border-white/[0.05] flex flex-col gap-3">
+                <div className="px-4 pb-4 pt-2 border-t border-white/[0.05] flex flex-col gap-3">
 
                   {/* Font size */}
                   <div>
-                    <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">حجم الخط</p>
-                    <div className="flex gap-2">
+                    <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>حجم الخط</p>
+                    <div className="flex gap-1.5">
                       {([13, 16, 20, 24] as number[]).map(sz => (
                         <button key={sz} onClick={() => setSubSettings(s => ({ ...s, fontSize: sz }))}
                           className="flex-1 py-2 rounded-xl font-bold font-['Cairo'] transition-all active:scale-90"
                           style={{
-                            fontSize: sz > 18 ? sz * 0.65 : sz * 0.75,
-                            background: subSettings.fontSize === sz ? "rgba(139,92,246,0.25)" : "rgba(255,255,255,0.05)",
-                            border: subSettings.fontSize === sz ? "1px solid rgba(139,92,246,0.50)" : "1px solid rgba(255,255,255,0.08)",
-                            color: subSettings.fontSize === sz ? "#c4b5fd" : "rgba(255,255,255,0.40)",
+                            fontSize: sz > 18 ? sz * 0.62 : sz * 0.72,
+                            background: subSettings.fontSize === sz ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
+                            border: subSettings.fontSize === sz ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
+                            color: subSettings.fontSize === sz ? "#c4b5fd" : "rgba(255,255,255,0.35)",
                           }}>
-                          {sz === 13 ? "ص" : sz === 16 ? "م" : sz === 20 ? "ك" : "ع"}
+                          {sz === 13 ? "أ" : sz === 16 ? "أ" : sz === 20 ? "أ" : "أ"}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Color */}
+                  {/* Color swatches */}
                   <div>
-                    <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">لون النص</p>
+                    <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>لون النص</p>
                     <div className="flex gap-2">
                       {([
-                        { v: "#ffffff", label: "أبيض" },
-                        { v: "#fde047", label: "ذهبي" },
-                        { v: "#67e8f9", label: "سماوي" },
-                        { v: "#86efac", label: "أخضر" },
-                        { v: "#fca5a5", label: "وردي" },
-                      ] as { v: string; label: string }[]).map(({ v, label }) => (
+                        { v: "#ffffff" }, { v: "#fde047" }, { v: "#67e8f9" }, { v: "#86efac" }, { v: "#fca5a5" },
+                      ] as { v: string }[]).map(({ v }) => (
                         <button key={v} onClick={() => setSubSettings(s => ({ ...s, color: v }))}
-                          className="flex-1 flex flex-col items-center gap-1 py-1.5 rounded-xl transition-all active:scale-90"
-                          style={{
-                            background: subSettings.color === v ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.03)",
-                            border: subSettings.color === v ? "1.5px solid rgba(255,255,255,0.35)" : "1px solid rgba(255,255,255,0.08)",
-                          }}>
-                          <div className="w-4 h-4 rounded-full" style={{ background: v, boxShadow: "0 1px 6px rgba(0,0,0,0.60)" }} />
-                          <span className="text-[9px] font-['Cairo']" style={{ color: subSettings.color === v ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.25)" }}>{label}</span>
+                          className="flex-1 h-8 rounded-xl transition-all active:scale-90 relative"
+                          style={{ background: v, opacity: subSettings.color === v ? 1 : 0.35, boxShadow: subSettings.color === v ? `0 0 10px ${v}80` : "none", border: subSettings.color === v ? "2px solid rgba(255,255,255,0.60)" : "1.5px solid rgba(255,255,255,0.10)" }}>
+                          {subSettings.color === v && (
+                            <span className="absolute inset-0 flex items-center justify-center text-[10px]" style={{ color: "#000", opacity: 0.6 }}>✓</span>
+                          )}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Background + Bold */}
+                  {/* Background opacity + bold */}
                   <div className="flex gap-2">
                     <div className="flex-1">
-                      <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">خلفية</p>
+                      <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>خلفية</p>
                       <div className="flex gap-1.5">
-                        {([{ v: 0.82, label: "مظلل" }, { v: 0.45, label: "خفيف" }, { v: 0, label: "بلا" }] as { v: number; label: string }[]).map(({ v, label }) => (
+                        {([{ v: 0.82, label: "●" }, { v: 0.45, label: "◐" }, { v: 0, label: "○" }] as { v: number; label: string }[]).map(({ v, label }) => (
                           <button key={v} onClick={() => setSubSettings(s => ({ ...s, bgOpacity: v }))}
-                            className="flex-1 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] transition-all active:scale-90"
+                            className="flex-1 py-2 rounded-xl text-[14px] transition-all active:scale-90"
                             style={{
                               background: subSettings.bgOpacity === v ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
                               border: subSettings.bgOpacity === v ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
-                              color: subSettings.bgOpacity === v ? "#c4b5fd" : "rgba(255,255,255,0.35)",
+                              color: subSettings.bgOpacity === v ? "#c4b5fd" : "rgba(255,255,255,0.28)",
                             }}>
                             {label}
                           </button>
                         ))}
                       </div>
                     </div>
-                    <div>
-                      <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">سمك</p>
+                    <div className="shrink-0">
+                      <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>وزن</p>
                       <button onClick={() => setSubSettings(s => ({ ...s, bold: !s.bold }))}
-                        className="w-full px-3 py-1.5 rounded-xl text-[12px] transition-all active:scale-90"
+                        className="h-[38px] px-3 rounded-xl text-[11px] transition-all active:scale-90"
                         style={{
-                          fontWeight: subSettings.bold ? 700 : 400,
+                          fontWeight: subSettings.bold ? 800 : 400,
                           background: subSettings.bold ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
                           border: subSettings.bold ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
-                          color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.35)",
+                          color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.30)",
+                          fontFamily: "Cairo, sans-serif",
                         }}>
-                        {subSettings.bold ? "عريض" : "عادي"}
+                        {subSettings.bold ? "ع" : "ع"}
                       </button>
                     </div>
                   </div>
 
                   {/* Position */}
                   <div>
-                    <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">موضع الترجمة</p>
-                    <div className="flex gap-2">
-                      {([
-                        { v: "top", label: "أعلى", icon: "⬆" },
-                        { v: "center", label: "وسط", icon: "⬛" },
-                        { v: "bottom", label: "أسفل", icon: "⬇" },
-                      ] as { v: "top"|"center"|"bottom"; label: string; icon: string }[]).map(({ v, label, icon }) => (
+                    <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>موضع</p>
+                    <div className="flex gap-1.5">
+                      {([{ v: "top", label: "↑ أعلى" }, { v: "center", label: "⬛ وسط" }, { v: "bottom", label: "↓ أسفل" }] as { v: "top"|"center"|"bottom"; label: string }[]).map(({ v, label }) => (
                         <button key={v} onClick={() => setSubSettings(s => ({ ...s, position: v }))}
-                          className="flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all active:scale-90"
+                          className="flex-1 py-2 rounded-xl text-[10px] font-bold font-['Cairo'] transition-all active:scale-90"
                           style={{
-                            background: subSettings.position === v ? "rgba(139,92,246,0.25)" : "rgba(255,255,255,0.05)",
-                            border: subSettings.position === v ? "1px solid rgba(139,92,246,0.50)" : "1px solid rgba(255,255,255,0.08)",
-                            color: subSettings.position === v ? "#c4b5fd" : "rgba(255,255,255,0.40)",
+                            background: subSettings.position === v ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
+                            border: subSettings.position === v ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
+                            color: subSettings.position === v ? "#c4b5fd" : "rgba(255,255,255,0.35)",
                           }}>
-                          <span style={{ fontSize: 10 }}>{icon}</span>
-                          <span className="text-[10px] font-bold font-['Cairo']">{label}</span>
+                          {label}
                         </button>
                       ))}
                     </div>
@@ -2217,46 +2160,40 @@ function EpisodePlayer({
 
                   {/* Timing offset */}
                   <div>
-                    <p className="text-white/30 text-[10px] font-['Cairo'] mb-1.5">إزاحة التوقيت</p>
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>
+                      إزاحة التوقيت{subOffset !== 0 && <span className="mr-1.5 text-violet-300/60 normal-case">{subOffset > 0 ? "+" : ""}{subOffset.toFixed(1)}s</span>}
+                    </p>
+                    <div className="flex gap-1.5">
                       {([-2, -0.5, 0.5, 2] as number[]).map(d => (
                         <button key={d} onClick={() => adjustOffset(d)}
-                          className="flex-1 py-1.5 rounded-xl text-white/40 text-[11px] font-bold active:scale-90 transition-transform"
-                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                          className="flex-1 py-2 rounded-xl text-white/40 text-[10px] font-bold active:scale-90 transition-transform"
+                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", fontFamily: "monospace" }}>
                           {d > 0 ? "+" : ""}{d}s
                         </button>
                       ))}
                       {subOffset !== 0 && (
                         <button onClick={() => setSubOffset(0)}
-                          className="px-2 py-1.5 rounded-xl text-white/25 text-[10px] active:scale-90 transition-transform"
-                          style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)" }}>
-                          صفر
+                          className="px-2.5 py-2 rounded-xl text-[10px] active:scale-90 transition-transform"
+                          style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(252,165,165,0.70)", fontFamily: "Cairo, sans-serif" }}>
+                          ✕
                         </button>
                       )}
                     </div>
-                    {subOffset !== 0 && (
-                      <p className="text-center text-violet-300/50 text-[10px] font-mono mt-1">
-                        {subOffset > 0 ? "+" : ""}{subOffset.toFixed(1)}s
-                      </p>
-                    )}
                   </div>
                 </div>
               )}
 
               {/* ── Available track chips ── */}
               {subTracks.length > 0 && (
-                <div className="px-5 pb-4 pt-2.5 border-t border-white/[0.05]">
-                  <p className="text-[9px] font-['Cairo'] font-bold tracking-[0.10em] mb-2" style={{ color: "rgba(255,255,255,0.16)" }}>
-                    المصادر المتاحة
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
+                <div className="px-4 pb-4 pt-2 border-t border-white/[0.05]">
+                  <p className="text-[8px] font-bold font-['Cairo'] uppercase tracking-[0.10em] mb-2" style={{ color: "rgba(255,255,255,0.14)" }}>المصادر المكتشفة</p>
+                  <div className="flex flex-wrap gap-1">
                     {subTracks.map(t => (
-                      <span key={t.id}
-                        className="text-[9px] px-2.5 py-1 rounded-lg font-['Cairo'] font-bold"
+                      <span key={t.id} className="text-[8.5px] px-2 py-0.5 rounded-lg font-['Cairo'] font-bold"
                         style={{
-                          background: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.10)" : "rgba(147,197,253,0.10)",
-                          border: t.lang === "ar" || t.lang === "ar-auto" ? "1px solid rgba(110,231,183,0.25)" : "1px solid rgba(147,197,253,0.25)",
-                          color: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.70)" : "rgba(147,197,253,0.70)",
+                          background: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.09)" : "rgba(147,197,253,0.09)",
+                          border: t.lang === "ar" || t.lang === "ar-auto" ? "1px solid rgba(110,231,183,0.22)" : "1px solid rgba(147,197,253,0.22)",
+                          color: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.65)" : "rgba(147,197,253,0.65)",
                         }}>
                         {t.label}
                       </span>
@@ -2265,8 +2202,25 @@ function EpisodePlayer({
                 </div>
               )}
             </div>
-          </motion.div>
-        )}
+          );
+
+          return (
+            <motion.div key="subpanel"
+              initial={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: 40 }}
+              animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
+              exit={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: 40 }}
+              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+              className="fixed z-[400]"
+              style={isLandscape
+                ? { top: 0, bottom: 0, right: 0, width: "280px", paddingTop: "max(12px, env(safe-area-inset-top))", paddingBottom: "max(12px, env(safe-area-inset-bottom))" }
+                : { insetInline: 0, bottom: 0, paddingBottom: "max(10px, env(safe-area-inset-bottom))", paddingInline: "8px" }
+              }
+            >
+              <div className="fixed inset-0 z-[-1]" onClick={() => setShowSubPanel(false)} />
+              {panelContent}
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
     </motion.div>
   );
