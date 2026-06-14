@@ -813,7 +813,7 @@ function ScraperPicker({
             style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(10px)", color: "rgba(255,255,255,0.65)" }}>
             <ChevronRight className="w-3.5 h-3.5" />السابقة
           </button>
-          <button onClick={onNextEp} disabled={ep >= totalEps}
+          <button onClick={onNextEp} disabled={totalEps < 900 && ep >= totalEps}
             className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
             style={{ background: "rgba(109,40,217,0.55)", border: "1px solid rgba(139,92,246,0.38)", backdropFilter: "blur(10px)", color: "rgba(196,181,253,0.92)" }}>
             التالية<ChevronLeft className="w-3.5 h-3.5" />
@@ -1205,10 +1205,12 @@ function MegaEmbedPlayer({
           style={{ color: ep <= 1 ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)" }}>
           <ChevronRight className="w-4 h-4" /> السابقة
         </button>
-        <span className="text-white/25 text-[11px] font-['Cairo']">{ep} / {totalEps}</span>
-        <button onClick={onNextEp} disabled={ep >= totalEps}
+        <span className="text-white/25 text-[11px] font-['Cairo']">
+          {totalEps >= 900 ? `حلقة ${ep}` : `${ep} / ${totalEps}`}
+        </span>
+        <button onClick={onNextEp} disabled={totalEps < 900 && ep >= totalEps}
           className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all flex-row-reverse"
-          style={{ color: ep >= totalEps ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)" }}>
+          style={{ color: (totalEps < 900 && ep >= totalEps) ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)" }}>
           <ChevronLeft className="w-4 h-4" /> التالية
         </button>
       </div>
@@ -1672,9 +1674,9 @@ function EpisodePlayer({
       {/* Next ep */}
       <button
         onClick={onNextEp}
-        disabled={ep >= totalEps}
+        disabled={totalEps < 900 && ep >= totalEps}
         className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0 flex-row-reverse"
-        style={{ color: "rgba(255,255,255,0.42)", opacity: ep >= totalEps ? 0.18 : 1 }}>
+        style={{ color: "rgba(255,255,255,0.42)", opacity: (totalEps < 900 && ep >= totalEps) ? 0.18 : 1 }}>
         <ChevronLeft className="w-4 h-4" />التالية
       </button>
     </div>
@@ -2226,7 +2228,8 @@ export default function WatchPage() {
       const savedProgress = parseFloat(localStorage.getItem(`wp-${animeId}-${ep}`) || "0");
       if (savedProgress > 30) {
         const lastSrc = loadLastSrc(animeId, ep);
-        if (lastSrc) {
+        /* Skip embed URLs (mega/vidmoly) — they cause iframe flicker then native-player takeover */
+        if (lastSrc && !isIframeUrl(lastSrc.url)) {
           const resumeSrc: FetchedSrc = {
             url: lastSrc.url,
             directUrl: lastSrc.url,
@@ -2325,8 +2328,8 @@ export default function WatchPage() {
       setPlayerServers(srvMap);
       setQuality(clickedTier);
       setInitialSrv(0);
-      /* Save for quick-resume (skip _resume itself to avoid stale loop) */
-      if (animeId && firstSrc.site !== "_resume") saveLastSrc(animeId, ep, clickedUrl, firstSrc.qualityRank ?? 0);
+      /* Save for quick-resume (skip _resume + skip embed URLs to avoid iframe flicker on next visit) */
+      if (animeId && firstSrc.site !== "_resume" && !isIframeUrl(clickedUrl)) saveLastSrc(animeId, ep, clickedUrl, firstSrc.qualityRank ?? 0);
       setPhase("player");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2434,8 +2437,8 @@ export default function WatchPage() {
     setQuality(clickedTier);
     setInitialSrv(0);
 
-    /* Save for quick-resume next time */
-    if (animeId && src.site !== "_resume") saveLastSrc(animeId, ep, clickedUrl, src.qualityRank ?? 0);
+    /* Save for quick-resume next time (skip embed URLs — they cause iframe flicker) */
+    if (animeId && src.site !== "_resume" && !isIframeUrl(clickedUrl)) saveLastSrc(animeId, ep, clickedUrl, src.qualityRank ?? 0);
 
     setPhase("player");
   }
