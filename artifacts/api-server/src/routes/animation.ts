@@ -1241,7 +1241,14 @@ async function aflaamWatchSources(
   watchUrl: string,
   ref: string
 ): Promise<{ url: string; size: string }[]> {
-  const html = await cfGet(watchUrl, ref);
+  // Try CF proxy first (bypasses CF-protection and JS-rendered pages)
+  // Fall back to regular cfGet if CF proxy fails
+  let html: string;
+  try {
+    html = await cfProxyGet(watchUrl);
+  } catch {
+    html = await cfGet(watchUrl, ref);
+  }
   return parseAflaamMp4s(html);
 }
 
@@ -2415,7 +2422,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const ezRef = `https://www.${prov}.pro/`;
               const proxiedStream = streamUrl.includes(".m3u8")
                 ? wrapHls(streamUrl, ezRef)
-                : streamUrl;
+                : wrapMp4(streamUrl, ezRef);  // non-m3u8: route through video-proxy (CDN CORS blocks browser)
               // For vidrock: Arabic subtitle at cache.vdrk.site/v2
               let subtitleUrl: string | undefined;
               if (prov === "vidrock") {
@@ -2439,6 +2446,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
       scrapeAnimCached("animephoenix", async () => {
+        // AnimePhoenix هو موقع مسلسلات أنمي مدبلج فقط — لا يحتوي أفلام
+        if (type === "movie") return;
         const q = enTitlePrefetched || title;
         if (!q) return;
         try {
