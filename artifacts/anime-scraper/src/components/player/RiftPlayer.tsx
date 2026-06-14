@@ -378,22 +378,22 @@ export default function RiftPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        /* ── Buffer كبير = تشغيل سلس حتى مع CDN بطيء ── */
-        maxBufferLength: 60,
-        maxMaxBufferLength: 90,
-        backBufferLength: 30,
-        maxBufferSize: 120 * 1024 * 1024,
-        maxBufferHole: 0.5,
-        maxFragLookUpTolerance: 0.4,
+        /* ── Buffer: بداية سريعة ثم تخزين مسبق كافٍ للاستقرار ── */
+        maxBufferLength: 30,          // يبدأ بسرعة (30ث) ويزداد تلقائياً
+        maxMaxBufferLength: 120,      // يسمح بـ 2 دقيقة مخزناً للاستقرار
+        backBufferLength: 20,
+        maxBufferSize: 80 * 1024 * 1024,
+        maxBufferHole: 1.0,           // يتحمل فجوة 1ث قبل التوقف
+        maxFragLookUpTolerance: 0.6,
         startFragPrefetch: true,
         progressive: true,
-        /* ── اختيار جودة تلقائية حسب سرعة الشبكة ── */
-        startLevel: -1,
-        abrEwmaDefaultEstimate: 4_000_000,
+        /* ── يبدأ بأقل جودة (0) للتشغيل الفوري ثم يرفع تلقائياً ── */
+        startLevel: 0,
+        abrEwmaDefaultEstimate: 1_500_000, // 1.5Mbps تقدير محافظ
         abrBandWidthFactor: 0.85,
         abrBandWidthUpFactor: 0.75,
         testBandwidth: false,
-        capLevelToPlayerSize: false,
+        capLevelToPlayerSize: true,   // لا ترفع الجودة أعلى من دقة الشاشة
         /* ── إعادة المحاولة: تأخير كافٍ لإتاحة فرصة للـ CDN ── */
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1500,

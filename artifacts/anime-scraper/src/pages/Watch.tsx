@@ -2051,9 +2051,46 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  /* Fetch AniList metadata — tries proxy first, falls back to direct AniList */
+  /* Fetch AniList metadata + skip timestamps (aniskip + baha-skip) */
   useEffect(() => {
     if (!animeId) return;
+
+    // ── 1. Reset for new episode, then load cached skip times instantly ──
+    setSkipTimes({});
+    const _skipKey = `skip-${animeId}-${ep}`;
+    try {
+      const raw = localStorage.getItem(_skipKey);
+      if (raw) {
+        const { data, exp } = JSON.parse(raw);
+        if (Date.now() < exp && data) setSkipTimes(data);
+      }
+    } catch {}
+
+    // ── 2. Immediate aniskip fetch using cached MAL ID (no AniList wait) ──
+    const _cachedMal = localStorage.getItem(`malid-${animeId}`);
+    if (_cachedMal && _cachedMal !== "null" && Number(_cachedMal) > 0) {
+      fetch(`/api/anime/aniskip?malId=${_cachedMal}&ep=${ep}`, {
+        signal: AbortSignal.timeout(10000),
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then((data: any) => {
+          if (!data?.found) return;
+          const st: SkipTimes = {};
+          for (const result of (data.results || [])) {
+            const iv = result.interval;
+            const sType = result.skip_type || result.skipType || "";
+            if (sType === "op") st.op = { start: iv.startTime, end: iv.endTime };
+            if (sType === "ed") st.ed = { start: iv.startTime, end: iv.endTime };
+          }
+          if (st.op || st.ed) {
+            setSkipTimes(prev => ({ ...prev, ...st }));
+            try { localStorage.setItem(_skipKey, JSON.stringify({ data: st, exp: Date.now() + 7 * 86400_000 })); } catch {}
+          }
+        })
+        .catch(() => {});
+    }
+
+    // ── 3. AniList metadata fetch ──
     const body = JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } });
     const headers = { "Content-Type": "application/json" };
     const fetchAniList = () =>
@@ -2072,9 +2109,13 @@ export default function WatchPage() {
         if (d) {
           setAnime(d);
           saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0, userId);
-          /* ── Fetch skip timestamps: aniskip + baha-anime-skip بالتوازي ── */
-          setSkipTimes({});
-          const mergeSkip = (st: SkipTimes) => setSkipTimes(prev => ({ ...prev, ...st }));
+          /* ── cache MAL ID for next visit (instant aniskip) ── */
+          if (d.idMal) { try { localStorage.setItem(`malid-${animeId}`, String(d.idMal)); } catch {} }
+
+          const mergeSkip = (st: SkipTimes) => {
+            setSkipTimes(prev => ({ ...prev, ...st }));
+            try { localStorage.setItem(_skipKey, JSON.stringify({ data: { ...st }, exp: Date.now() + 7 * 86400_000 })); } catch {}
+          };
 
           // aniskip (MAL ID)
           if (d.idMal) {

@@ -223,22 +223,46 @@ export default function AnimationWatch() {
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
   /* ── Auto-play first available "ok" source (respects pref-autoplay setting) ── */
-  /* Priority: Vyla > EzVidAPI > aflaam > AnimeWitcher > أول مصدر متاح */
-  /* لا نبدأ تلقائياً إلا إذا وصل مصدر موثوق (Vyla/EzVidAPI/aflaam) أو انتهى SSE */
+  /* Priority: Vyla > EzVidAPI > aflaam > StarCima > SeePanal > AnimePhoenix > AnimeWitcher > أول مصدر */
+  const autoPlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (autoPlayedRef.current) return;
     if (!prefAutoplay.current) return;
     const okSources = sources.filter(s => s.status === "ok");
     if (!okSources.length) return;
-    const vyla    = okSources.find(s => s.label?.startsWith("Vyla"));
-    const ezv     = okSources.find(s => s.label?.startsWith("EzVidAPI"));
-    const aflaam  = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
-    const witcher = okSources.find(s => s.label?.includes("AnimeWitcher"));
-    // Only auto-play if a reliable source is available, OR SSE is done (all sources arrived)
-    const preferred = vyla ?? ezv ?? aflaam ?? witcher ?? (sseDone ? okSources[0] : null);
-    if (!preferred) return;
-    autoPlayedRef.current = true;
-    playSource(preferred);
+    const vyla         = okSources.find(s => s.label?.startsWith("Vyla"));
+    const ezv          = okSources.find(s => s.label?.startsWith("EzVidAPI"));
+    const aflaam       = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
+    const starcima     = okSources.find(s => s.label?.startsWith("StarCima"));
+    const seepanel     = okSources.find(s => s.label?.startsWith("SeePanal"));
+    const animephoenix = okSources.find(s => s.label?.startsWith("AnimePhoenix"));
+    const witcher      = okSources.find(s => s.label?.includes("AnimeWitcher"));
+    // Tier-1 (trusted direct HLS/MP4): auto-play immediately
+    const tier1 = vyla ?? ezv ?? aflaam ?? starcima ?? seepanel ?? animephoenix ?? witcher;
+    if (tier1) {
+      if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      autoPlayedRef.current = true;
+      playSource(tier1);
+      return;
+    }
+    // Tier-2: if SSE done OR 10s elapsed with any source → play best available
+    if (sseDone) {
+      if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      autoPlayedRef.current = true;
+      playSource(okSources[0]);
+      return;
+    }
+    // Schedule fallback: 10s after first source arrives, play it
+    if (!autoPlayTimerRef.current) {
+      autoPlayTimerRef.current = setTimeout(() => {
+        autoPlayTimerRef.current = null;
+        if (autoPlayedRef.current) return;
+        const stillOk = sources.filter(s => s.status === "ok");
+        if (!stillOk.length) return;
+        autoPlayedRef.current = true;
+        playSource(stillOk[0]);
+      }, 10_000);
+    }
   }, [sources, sseDone, playSource]);
 
   /* Auto-upgrade disabled — sources in animation section are unreliable;
