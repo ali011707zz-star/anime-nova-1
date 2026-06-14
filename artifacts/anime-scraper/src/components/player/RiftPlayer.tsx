@@ -390,8 +390,8 @@ export default function RiftPlayer({
         /* ── اختيار جودة تلقائية حسب سرعة الشبكة ── */
         startLevel: -1,
         abrEwmaDefaultEstimate: 4_000_000,
-        abrBandwidthUpFactor: 0.75,
-        abrBandwidthDownFactor: 0.92,
+        abrBandWidthFactor: 0.85,
+        abrBandWidthUpFactor: 0.75,
         testBandwidth: false,
         capLevelToPlayerSize: false,
         /* ── إعادة المحاولة: تأخير كافٍ لإتاحة فرصة للـ CDN ── */
@@ -543,6 +543,7 @@ export default function RiftPlayer({
       const t = setTimeout(() => setSkipNotif(false), 3500);
       return () => clearTimeout(t);
     }
+    return undefined;
   }, [skipIntro, skipOutro]);
 
   /* ── controls ── */

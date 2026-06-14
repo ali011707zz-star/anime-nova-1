@@ -5439,8 +5439,15 @@ async function getArabSeedSources(
           return;
         }
 
-        // vidmoly → إعلانات فقط، لا قيمة للمستخدم — تخطّ
-        if (VIDMOLY_HOSTS.some(h => embedUrl.includes(h))) return;
+        // vidmoly → Cloudflare Turnstile يمنع الاستخراج → أرسله كـ iframe احتياطي بدل الحذف الكامل
+        if (VIDMOLY_HOSTS.some(h => embedUrl.includes(h))) {
+          sources.push({
+            name: `عرب سيد · VidMoly · مترجم عربي`,
+            url: embedUrl, quality: "720p", qualityRank: 6,
+            site: "arabseed", isEmbed: true, directUrl: embedUrl,
+          });
+          return;
+        }
 
         // vidaraa / bysezejataos / other → push for extractAndCollect
         sources.push({

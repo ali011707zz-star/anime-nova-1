@@ -696,8 +696,8 @@ export default function Home() {
                 <span className="text-white text-[14px] leading-none">📺</span>
               </div>
               <div>
-                <h2 className="text-[13px] font-black text-white font-['Cairo'] leading-none">حلقات اليوم</h2>
-                <p className="text-[9px] text-white/35 font-['Cairo'] mt-0.5">آخر الحلقات المنزلة</p>
+                <h2 className="text-[13px] font-black text-white font-['Cairo'] leading-none">أحدث الحلقات</h2>
+                <p className="text-[9px] text-white/35 font-['Cairo'] mt-0.5">يتجدد يومياً</p>
               </div>
             </div>
             {/* Live dot */}
