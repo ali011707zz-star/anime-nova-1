@@ -1368,8 +1368,8 @@ router.get("/animation/videasy-fresh", async (req: Request, res: Response) => {
     const VEA_HDRS = {
       "User-Agent": UA2,
       "Accept": "application/json, */*; q=0.01",
-      "Referer": "https://player.videasy.net/",
-      "Origin": "https://player.videasy.net",
+      "Referer": "https://player.videasy.to/",
+      "Origin": "https://player.videasy.to",
     };
     const encTitle = encodeURIComponent(encodeURIComponent(""));
     const baseParams = mediaType === "tv"
@@ -2542,8 +2542,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const VEA_HDRS = {
             "User-Agent": UA,
             "Accept": "application/json, */*; q=0.01",
-            "Referer": "https://player.videasy.net/",
-            "Origin": "https://player.videasy.net",
+            "Referer": "https://player.videasy.to/",
+            "Origin": "https://player.videasy.to",
           };
           // mb-flix = primary English; cdn = high-quality (4K); downloader2 = fallback
           const servers = ["mb-flix", "cdn", "downloader2"];
@@ -2574,15 +2574,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (!src?.url) continue;
                 const quality = src.quality || "HD";
                 const label = `Videasy · ${server} · ${quality}`;
-                // Videasy CDN URLs (joe.goldweather.net/server.digitalsun.app) never have
-                // .m3u8 extension but ALWAYS serve HLS streams. Force vtype=hls so hls.js
-                // is used instead of native <video> (Chrome can't play HLS natively → black screen).
-                // Pre-populate videasyCache so the browser-side fetch is instant (no 22s re-call).
-                const ckPre = `${server}|${tmdbId}|${mediaType}|${epNum}|${season}|${quality}`;
-                videasyCache.set(ckPre, { url: src.url, ts: Date.now() });
-                const freshUrl = `/api/animation/videasy-fresh?server=${encodeURIComponent(server)}&tmdbId=${tmdbId}&mediaType=${mediaType}&ep=${epNum}&season=${season}&quality=${encodeURIComponent(quality)}&vtype=hls`;
+                // CDN (joe.goldweather.net) blocks by Referer — REQUIRES Referer: https://player.videasy.to/
+                // Our server CAN access it when the correct Referer is sent (confirmed 200).
+                // Route through hls-proxy with ref=player.videasy.to so:
+                //   browser → hls-proxy (server, correct Referer) → CDN → returns m3u8 ✓
+                //   segment URLs rewritten to seg-proxy (same Referer) → CDN → segments ✓
+                const hlsProxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
                 sendSource(
-                  freshUrl, label, freshUrl, freshUrl,
+                  hlsProxied, label, hlsProxied, hlsProxied,
                   araSub?.url ? { subtitleUrl: araSub.url } : undefined,
                 );
               }
