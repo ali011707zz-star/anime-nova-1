@@ -693,21 +693,19 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-            <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">{cdn}</p>
+            <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">سيرفر {idx + 1}</p>
+            <span className="font-mono text-[7px] font-bold px-1.5 py-0.5 rounded"
+              style={{ color: "rgba(255,255,255,0.55)", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}>
+              {tag}
+            </span>
             {isEngAudio && (
               <span className="text-[7.5px] font-bold px-1.5 py-0.5 rounded-md font-['Cairo'] shrink-0"
                 style={{ background: "rgba(59,130,246,0.14)", border: "1px solid rgba(59,130,246,0.30)", color: "rgba(147,197,253,0.90)" }}>
-                🎌 الصوت إنجليزي/ياباني
+                🎌 إنجليزي/ياباني
               </span>
             )}
           </div>
           <div className="flex items-center gap-1 flex-wrap">
-            {site && <span className="text-white/36 text-[9.5px] font-['Cairo']">{site}</span>}
-            {site && <span className="text-white/14 text-[8px]">·</span>}
-            <span className="font-mono text-[7px] font-bold px-1 py-0.5 rounded"
-              style={{ color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              {tag}
-            </span>
             {isEmbed && (
               <span className="font-mono text-[7px] font-bold px-1 py-0.5 rounded"
                 style={{ background: "rgba(52,211,153,0.10)", color: "rgba(110,231,183,0.70)", border: "1px solid rgba(52,211,153,0.18)" }}>
@@ -2738,7 +2736,10 @@ export default function WatchPage() {
 
     /* Store download URL + subtitle URL for player */
     setPlayerDlUrl(getDownloadUrl(src) || undefined);
-    setPlayerSubUrl(src.subtitleUrl || undefined);
+    // سي بانيل (SeePanal/SeeDrama) ترجمة مدمجة — لا تُشغّل الترجمة الخارجية
+    const isSeePanal = src.site === "seepanel";
+    setPlayerSubUrl(isSeePanal ? undefined : (src.subtitleUrl || undefined));
+    if (isSeePanal && subChoice !== "off") setSubChoice("off");
     setPlayerSrcSite(src.site || "");
     setPlayerServers(servers);
     setQuality(clickedTier);
