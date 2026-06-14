@@ -5878,13 +5878,9 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
-      // ── مصادر TMDB-native (تعمل مع الأنمي بشكل مؤكّد) ────────────
-      scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep),  false),
-      scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep),  false),
-      scrapeCached("lordflix_anim", () => getLordFlixAnimeSources(title, english, ep), false),
-      scrapeCached("vyla_anim",     () => getVylaAnimeSources(title, english, ep),     false),
-      scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
+      // videasy_anim / vidlink_anim / lordflix_anim / vyla_anim / starcima_anim:
+      //   مصادر TMDB-native غربية — تعيد دبلجة إنجليزية فقط، لا صوت ياباني → محذوفة من قسم الأنمي
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
       // anime3rb:     CF IP block حقيقي، curl_cffi لا تنفع
