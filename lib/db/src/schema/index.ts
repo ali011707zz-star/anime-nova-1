@@ -4,3 +4,4 @@ export * from "./userdata";
 export * from "./comments";
 export * from "./source-cache";
 export * from "./subtitle-cache";
+export * from "./cdn-cache";

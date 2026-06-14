@@ -4,6 +4,8 @@ import {
   getFromSourceCache,
   setSourceCache,
   shouldRefreshCache,
+  cdnManifestGet,
+  cdnManifestSet,
 } from "../lib/sourceCache.js";
 import { db } from "../lib/db.js";
 import { subtitleCache as subtitleCacheTable } from "@workspace/db";
@@ -7079,15 +7081,33 @@ router.get("/anime/hls-proxy", async (req, res) => {
   try { origin = new URL(ref || url).origin; } catch {}
   if (!origin) try { origin = new URL(url).origin; } catch {}
   const cacheKey = `hls:${url}`;
+
+  // ── L1: in-memory (binary body — instant) ──
   const hit = cdnCache.get(cacheKey);
   if (hit && isCdnCacheable(url) && Date.now() - hit.ts < CDN_CACHE_TTL) {
     res.setHeader("Content-Type", hit.ct);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Cache", "HIT");
+    res.setHeader("X-Cache", "HIT-L1");
     res.send(hit.body);
     return;
   }
+
+  // ── L2: PostgreSQL — ينجو من restart ──
+  if (isCdnCacheable(url)) {
+    const pgHit = await cdnManifestGet(cacheKey);
+    if (pgHit) {
+      const buf = Buffer.from(pgHit.content);
+      cdnCache.set(cacheKey, { body: buf, ct: pgHit.ct, ts: Date.now() }); // أعِد تعبئة L1
+      res.setHeader("Content-Type", pgHit.ct);
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("X-Cache", "HIT-L2");
+      res.send(buf);
+      return;
+    }
+  }
+
   try {
     const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(18000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
@@ -7099,7 +7119,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
     const rewritten = rewriteM3u8(body, baseForSegments, selfBase, ref || url);
     const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
     if (isCdnCacheable(url)) {
-      cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() });
+      cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
+      cdnManifestSet(cacheKey, rewritten, finalCt);                                           // L2
     }
     res.setHeader("Content-Type", finalCt);
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -7191,15 +7212,33 @@ router.get("/anime/seg-proxy", async (req, res) => {
   if (!origin) try { origin = new URL(url).origin; } catch {}
 
   const cacheKey = `seg:${url}`;
+
+  // ── L1: in-memory (binary body — instant) ──
   const hit = cdnCache.get(cacheKey);
   if (hit && isCdnCacheable(url) && Date.now() - hit.ts < CDN_CACHE_TTL) {
     res.setHeader("Content-Type", hit.ct);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.setHeader("Content-Length", String(hit.body.length));
-    res.setHeader("X-Cache", "HIT");
+    res.setHeader("X-Cache", "HIT-L1");
     res.send(hit.body);
     return;
+  }
+
+  // ── L2: PostgreSQL — للـ m3u8 sub-playlists فقط (ليس binary segments) ──
+  if (isCdnCacheable(url)) {
+    const pgHit = await cdnManifestGet(cacheKey);
+    if (pgHit) {
+      const buf = Buffer.from(pgHit.content);
+      cdnCache.set(cacheKey, { body: buf, ct: pgHit.ct, ts: Date.now() }); // أعِد تعبئة L1
+      res.setHeader("Content-Type", pgHit.ct);
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.setHeader("Content-Length", String(buf.length));
+      res.setHeader("X-Cache", "HIT-L2");
+      res.send(buf);
+      return;
+    }
   }
 
   try {
@@ -7212,15 +7251,19 @@ router.get("/anime/seg-proxy", async (req, res) => {
       const proto = req.headers["x-forwarded-proto"] || "https";
       const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
       const rewritten = rewriteM3u8(body, url, `${proto}://${host}`, ref || url);
-      if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: "application/vnd.apple.mpegurl", ts: Date.now() });
-      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      const mCt = "application/vnd.apple.mpegurl";
+      if (isCdnCacheable(url)) {
+        cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: mCt, ts: Date.now() }); // L1
+        cdnManifestSet(cacheKey, rewritten, mCt);                                           // L2
+      }
+      res.setHeader("Content-Type", mCt);
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "public, max-age=3600");
       res.send(rewritten);
       return;
     }
-    /* Stream binary TS/AAC segments directly — avoids buffering entire chunk before sending,
-       which significantly reduces time-to-first-byte and improves playback smoothness */
+    /* Stream binary TS/AAC segments directly — avoids buffering entire chunk before sending.
+       Binary segments go to L1 only (too large for PostgreSQL) */
     res.setHeader("Content-Type", ct);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=3600");
@@ -7233,7 +7276,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
       readable.pipe(res);
     } else {
       const body = Buffer.from(await r.arrayBuffer());
-      if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body, ct, ts: Date.now() });
+      if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body, ct, ts: Date.now() }); // L1 only
       res.send(body);
     }
   } catch (e: any) { if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`); }

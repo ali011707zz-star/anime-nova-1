@@ -6,7 +6,7 @@
  */
 
 import { db } from "./db.js";
-import { sourceCache as sourceCacheTable } from "@workspace/db";
+import { sourceCache as sourceCacheTable, cdnCache as cdnCacheTable } from "@workspace/db";
 import { eq, lt } from "drizzle-orm";
 
 // ── TTL بالميلي ثانية لكل موقع ──────────────────────────────────
@@ -197,4 +197,65 @@ export function shouldRefreshCache(expiresAt: number): boolean {
 
 export function getCacheStats(): { l1Size: number; pgEnabled: boolean } {
   return { l1Size: l1.size, pgEnabled: true };
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  CDN manifest cache — L1 (memory) + L2 (PostgreSQL)
+//  Only caches TEXT manifests (m3u8) — NOT binary segments
+// ══════════════════════════════════════════════════════════════════
+const CDN_MANIFEST_TTL = 15 * 60_000; // 15 دقيقة
+
+const cdnL1 = new Map<string, { content: string; ct: string; expiresAt: number }>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of cdnL1) { if (now > v.expiresAt) cdnL1.delete(k); }
+}, 5 * 60_000);
+
+async function cdnPgGet(key: string): Promise<{ content: string; ct: string } | null> {
+  try {
+    const rows = await db.select({
+      content:   cdnCacheTable.content,
+      ct:        cdnCacheTable.ct,
+      expiresAt: cdnCacheTable.expiresAt,
+    }).from(cdnCacheTable).where(eq(cdnCacheTable.cacheKey, key)).limit(1);
+    if (!rows[0]) return null;
+    if (Date.now() > Number(rows[0].expiresAt)) return null;
+    return { content: rows[0].content, ct: rows[0].ct };
+  } catch { return null; }
+}
+
+async function cdnPgUpsert(key: string, content: string, ct: string, expiresAt: number): Promise<void> {
+  try {
+    await db.insert(cdnCacheTable).values({
+      cacheKey: key, content, ct,
+      fetchedAt: Date.now(), expiresAt,
+    }).onConflictDoUpdate({
+      target: cdnCacheTable.cacheKey,
+      set: { content, ct, fetchedAt: Date.now(), expiresAt },
+    });
+  } catch { /* silent */ }
+}
+
+setInterval(async () => {
+  try { await db.delete(cdnCacheTable).where(lt(cdnCacheTable.expiresAt, Date.now())); } catch {}
+}, 60 * 60_000);
+
+/** اقرأ manifest من L1 أولاً ثم L2 PostgreSQL */
+export async function cdnManifestGet(key: string): Promise<{ content: string; ct: string } | null> {
+  const m = cdnL1.get(key);
+  if (m && Date.now() < m.expiresAt) return { content: m.content, ct: m.ct };
+  cdnL1.delete(key);
+  const pg = await cdnPgGet(key);
+  if (pg) {
+    cdnL1.set(key, { content: pg.content, ct: pg.ct, expiresAt: Date.now() + CDN_MANIFEST_TTL });
+  }
+  return pg;
+}
+
+/** اكتب manifest في L1 + L2 PostgreSQL */
+export function cdnManifestSet(key: string, content: string, ct: string): void {
+  const expiresAt = Date.now() + CDN_MANIFEST_TTL;
+  cdnL1.set(key, { content, ct, expiresAt });
+  cdnPgUpsert(key, content, ct, expiresAt); // fire-and-forget
 }
