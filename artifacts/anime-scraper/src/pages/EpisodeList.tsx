@@ -131,7 +131,7 @@ function EpCommentSheet({ epNum, animeId, onClose, animeTitle }: {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const username = user?.displayName || user?.username || "مستخدم";
-  const avatarUrl = (user as any)?.avatarUrl || null;
+  const avatarUrl = user?.profileImageUrl || (user as any)?.avatarUrl || null;
   const userId = (user as any)?.id || (user as any)?.userId || null;
 
   useEffect(() => {

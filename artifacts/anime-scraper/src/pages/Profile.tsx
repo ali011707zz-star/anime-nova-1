@@ -288,13 +288,24 @@ export default function Profile() {
   function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const b64 = ev.target?.result as string;
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const MAX = 400;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, w, h);
+      const b64 = canvas.toDataURL("image/jpeg", 0.82);
       setPhotoPreview(b64);
       handleSave({ profileImageCustom: b64 });
     };
-    reader.readAsDataURL(file);
+    img.src = objectUrl;
   }
 
   /* ── Not logged in ── */
