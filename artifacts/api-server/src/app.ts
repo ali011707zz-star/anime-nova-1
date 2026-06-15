@@ -8,6 +8,7 @@ import userdataRouter from "./routes/userdata.js";
 import commentsRouter from "./routes/comments.js";
 import adminRouter from "./routes/admin.js";
 import reportRouter from "./routes/report.js";
+import telegramRouter from "./routes/telegram.js";
 import { logger } from "./lib/logger";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 
@@ -43,6 +44,7 @@ export async function createApp(): Promise<Express> {
   app.use("/api", commentsRouter);
   app.use("/api", adminRouter);
   app.use(reportRouter);
+  app.use(telegramRouter);
 
   // Serve built frontend in production
   const frontendDist = path.resolve(__dirname, "../../anime-scraper/dist/public");

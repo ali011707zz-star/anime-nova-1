@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { logger } from "./lib/logger";
 import { initEmailService } from "./auth/emailService";
+import { registerTelegramWebhook } from "./routes/telegram.js";
 
 const rawPort = process.env["PORT"];
 
@@ -28,4 +29,10 @@ app.listen(port, (err) => {
 
   // فحص SMTP فور بدء الخادم
   initEmailService().catch(() => {});
+
+  // تسجيل Telegram webhook
+  const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(",")[0];
+  if (domain) {
+    registerTelegramWebhook(domain).catch(() => {});
+  }
 });
