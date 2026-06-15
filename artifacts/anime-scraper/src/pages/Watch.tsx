@@ -1633,6 +1633,18 @@ function EpisodePlayer({
     setSubLang(null);
   }, [subtitleUrl]);
 
+  /* ── Re-apply subtitle choice when server URL changes ── */
+  const prevUrlForSubRef = useRef(currentUrl);
+  useEffect(() => {
+    if (prevUrlForSubRef.current === currentUrl) return;
+    prevUrlForSubRef.current = currentUrl;
+    if (subChoice === "off") return;
+    const saved = subChoice;
+    const t = setTimeout(() => changeSubChoice(saved), 900);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUrl]);
+
   /* ── Auto-load subtitles when source has a subtitleUrl ── */
   useEffect(() => {
     if (!subtitleUrl) { setSubState("none"); return; }
@@ -1957,6 +1969,7 @@ function EpisodePlayer({
               autoPlay={localStorage.getItem("pref-autoplay") !== "false"}
               onSubtitleClick={fetchSubtitles}
               onSubSettingsChange={s => setSubSettings(s)}
+              onSubtitleOff={() => changeSubChoice("off")}
               onBack={onBack}
               onPrevEp={onPrevEp}
               onNextEp={onNextEp}
@@ -2805,7 +2818,6 @@ export default function WatchPage() {
     // سي بانيل (SeePanal/SeeDrama) ترجمة مدمجة — لا تُشغّل الترجمة الخارجية
     const isSeePanal = src.site === "seepanel";
     setPlayerSubUrl(isSeePanal ? undefined : (src.subtitleUrl || undefined));
-    if (isSeePanal && subChoice !== "off") setSubChoice("off");
     setPlayerSrcSite(src.site || "");
     setPlayerServers(servers);
     setQuality(clickedTier);
