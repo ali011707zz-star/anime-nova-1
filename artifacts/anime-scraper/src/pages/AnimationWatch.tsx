@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { AnimeMascot } from "@/components/AnimeMascot";
 import { getAppToken } from "@/lib/appToken";
 import { useLocation } from "wouter";
 import {
@@ -757,11 +758,7 @@ export default function AnimationWatch() {
           </div>
 
           <div className="flex flex-col items-center gap-3">
-            <div className="relative w-9 h-9">
-              <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
-              <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
-                animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
-            </div>
+            <AnimeMascot />
             <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
 
             {/* Subtitle preparation indicator — shown while translating during episode load */}

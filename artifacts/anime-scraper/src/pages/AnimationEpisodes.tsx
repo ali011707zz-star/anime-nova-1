@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { AnimeMascot } from "@/components/AnimeMascot";
 import { useParams, useLocation, useSearch, Link } from "wouter";
 import { ChevronRight, Play, Clock } from "lucide-react";
 import { motion } from "framer-motion";
@@ -181,9 +182,9 @@ export default function AnimationEpisodes() {
       {/* ── Episodes ── */}
       <div className="px-4 mt-4 space-y-2">
         {epLoading ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <div className="w-7 h-7 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            <p className="text-white/25 text-[11px] font-['Cairo']">جاري تحميل الحلقات…</p>
+          <div className="flex flex-col items-center justify-center py-12 gap-2">
+            <AnimeMascot />
+            <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل الحلقات…</p>
           </div>
         ) : episodes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
