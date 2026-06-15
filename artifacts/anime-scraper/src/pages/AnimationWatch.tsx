@@ -1354,6 +1354,32 @@ function NoSourcesMessage({
 }
 
 /* ── Source Card Component ─────────────────────────────────────────────── */
+/* ── 2-letter tag from animation source label ── */
+function getAnimTag(label: string): string {
+  const l = label.toLowerCase();
+  if (l.startsWith("vyla"))       return "VY";
+  if (l.startsWith("videasy"))    return "VE";
+  if (l.startsWith("vidlink"))    return "VL";
+  if (l.startsWith("lordflix"))   return "LF";
+  if (l.startsWith("starcima"))   return "SC";
+  if (l.startsWith("stardima"))   return "SD";
+  if (l.startsWith("aflaam"))     return "AF";
+  if (l.startsWith("arabseed"))   return "AS";
+  if (l.startsWith("ezvidapi"))   return "EZ";
+  if (l.startsWith("topcinema"))  return "TC";
+  if (l.startsWith("moviz"))      return "MV";
+  if (l.startsWith("seepan"))     return "SP";
+  if (l.startsWith("animewitcher")) return "AW";
+  if (l.startsWith("toonstream")) return "TS";
+  if (l.startsWith("anikoto"))    return "AK";
+  if (l.startsWith("anineko"))    return "AN";
+  if (l.startsWith("kawaii"))     return "KW";
+  if (l.startsWith("animephoenix") || l.startsWith("phoenix")) return "PH";
+  if (l.startsWith("animehub"))   return "AH";
+  const word = label.replace(/[^a-zA-Zأ-ي]/g, "").slice(0, 2).toUpperCase();
+  return word || "??";
+}
+
 function AnimSourceRow({
   src, idx, qs, qShort, onPlay,
 }: {
@@ -1368,6 +1394,7 @@ function AnimSourceRow({
   const hasDownload = !isHls && (url.includes(".mp4") || url.includes("video-proxy"));
 
   const isFailed = src.status === "fail";
+  const tag = getAnimTag(src.label);
 
   return (
     <div
@@ -1408,13 +1435,14 @@ function AnimSourceRow({
         {/* Label + quality */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-            <p className="text-[13px] font-black font-['Cairo'] leading-tight truncate max-w-[180px]"
+            {/* اسم موحّد: سيرفر N + حرفان مختصران */}
+            <p className="text-[13px] font-black font-['Cairo'] leading-tight"
               style={{ color: isFailed ? "rgba(252,165,165,0.75)" : "rgba(255,255,255,0.94)" }}>
-              {src.label}
+              سيرفر {idx + 1}
             </p>
-            <span className="text-[9px] font-mono px-1.5 py-[2px] rounded shrink-0"
-              style={{ color: "rgba(255,255,255,0.28)", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}>
-              #{idx + 1}
+            <span className="text-[8px] font-mono font-black px-1.5 py-[2px] rounded shrink-0"
+              style={{ color: "rgba(167,139,250,0.85)", background: "rgba(109,40,217,0.18)", border: "1px solid rgba(139,92,246,0.28)" }}>
+              {tag}
             </span>
           </div>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">

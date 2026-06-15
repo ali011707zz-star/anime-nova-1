@@ -2203,32 +2203,6 @@ export default function RiftPlayer({
 
       </div>
 
-      {/* ════════════════════════════════════════
-          PERSISTENT MINI PROGRESS BAR (always visible, shows skip zones)
-      ════════════════════════════════════════ */}
-      {!isEnded && !error && duration > 0 && (
-        <div className="absolute bottom-0 left-0 right-0 pointer-events-none" style={{ zIndex: 9, height: 3 }}>
-          <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.07)" }} />
-          <div className="absolute top-0 left-0 h-full"
-            style={{ width: `${Math.min(pct, 100)}%`, background: "rgba(139,92,246,0.60)", transition: "width 0.4s linear" }} />
-          {effectiveSkipIntro && (
-            <div className="absolute top-0 h-full"
-              style={{
-                left: `${(effectiveSkipIntro.start / duration) * 100}%`,
-                width: `${Math.max(0.5, (effectiveSkipIntro.end - effectiveSkipIntro.start) / duration * 100)}%`,
-                background: "rgba(250,204,21,0.90)",
-              }} />
-          )}
-          {effectiveSkipOutro && (
-            <div className="absolute top-0 h-full"
-              style={{
-                left: `${(effectiveSkipOutro.start / duration) * 100}%`,
-                width: `${Math.max(0.5, (effectiveSkipOutro.end - effectiveSkipOutro.start) / duration * 100)}%`,
-                background: "rgba(250,204,21,0.90)",
-              }} />
-          )}
-        </div>
-      )}
 
       {/* ════════════════════════════════════════
           SUBTITLE OVERLAY
