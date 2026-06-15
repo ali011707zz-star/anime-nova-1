@@ -54,5 +54,10 @@
     "typescript": "~5.9.2",
     "zod": "catalog:",
     "zod-validation-error": "^3.4.0"
+  },
+  "dependencies": {
+    "@expo-google-fonts/cairo": "^0.4.2",
+    "expo-video": "^3.0.16",
+    "react-native-webview": "^13.15.0"
   }
 }

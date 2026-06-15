@@ -1,33 +1,30 @@
 import { BlurView } from "expo-blur";
-import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Tabs } from "expo-router";
-import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
-import { SymbolView } from "expo-symbols";
-import { Feather } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
-
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 
-// IMPORTANT: iOS 26 uses NativeTabs for native tabs with liquid glass support.
-// NativeTabs intentionally does NOT use custom design tokens — liquid glass
-// is a system-level appearance provided by iOS and cannot be overridden.
-// Custom brand colors are applied only on the ClassicTabLayout path (older iOS / Android / web).
-function NativeTabLayout() {
+type TabIconProps = {
+  name: keyof typeof Ionicons.glyphMap;
+  label: string;
+  color: string;
+  focused: boolean;
+};
+
+function TabIcon({ name, label, color, focused }: TabIconProps) {
   return (
-    <NativeTabs>
-      <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "house", selected: "house.fill" }} />
-        <Label>Home</Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
+    <View style={styles.tabItem}>
+      <Ionicons name={name} size={22} color={color} />
+      <Text style={[styles.tabLabel, { color, fontWeight: focused ? "700" : "400" }]}>
+        {label}
+      </Text>
+    </View>
   );
 }
 
-function ClassicTabLayout() {
+export default function TabLayout() {
   const colors = useColors();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
 
@@ -36,51 +33,68 @@ function ClassicTabLayout() {
       screenOptions={{
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedForeground,
-        headerShown: true,
+        headerShown: false,
+        tabBarShowLabel: false,
         tabBarStyle: {
           position: "absolute",
-          backgroundColor: isIOS ? "transparent" : colors.background,
-          borderTopWidth: isWeb ? 1 : 0,
+          backgroundColor: isIOS ? "transparent" : "rgba(9,9,11,0.96)",
+          borderTopWidth: 1,
           borderTopColor: colors.border,
           elevation: 0,
-          ...(isWeb ? { height: 84 } : {}),
+          height: isWeb ? 84 : 60,
+          paddingBottom: isWeb ? 34 : 0,
         },
         tabBarBackground: () =>
           isIOS ? (
-            <BlurView
-              intensity={100}
-              tint={isDark ? "dark" : "light"}
-              style={StyleSheet.absoluteFill}
-            />
-          ) : isWeb ? (
-            <View
-              style={[
-                StyleSheet.absoluteFill,
-                { backgroundColor: colors.background },
-              ]}
-            />
+            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
           ) : null,
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="house" tintColor={color} size={24} />
-            ) : (
-              <Feather name="home" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? "home" : "home-outline"} label="الرئيسية" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? "search" : "search-outline"} label="بحث" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="browse"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? "grid" : "grid-outline"} label="تصفح" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="animations"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? "film" : "film-outline"} label="أنيميشن" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="library"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? "bookmark" : "bookmark-outline"} label="قائمتي" color={color} focused={focused} />
+          ),
         }}
       />
     </Tabs>
   );
 }
 
-export default function TabLayout() {
-  if (isLiquidGlassAvailable()) {
-    return <NativeTabLayout />;
-  }
-  return <ClassicTabLayout />;
-}
+const styles = StyleSheet.create({
+  tabItem: { alignItems: "center", justifyContent: "center", gap: 2, paddingTop: 6 },
+  tabLabel: { fontSize: 9, fontFamily: "Cairo_600SemiBold" },
+});
