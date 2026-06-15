@@ -346,6 +346,23 @@ function parseSrt(srt: string): SubCue[] {
   return cues;
 }
 
+/* ══════════════════════════════════ CLIENT-SIDE SUBTITLE CACHE ══════════
+   كاش الترجمة في جلسة المتصفح — يمنع إعادة الترجمة عند تغيير السيرفر
+   المفتاح: subtitleUrl الأصلي · القيمة: الكيوز المُترجمة + وقت الحفظ
+   TTL: 3 ساعات (يُمسح تلقائياً عند إغلاق التبويب) */
+const _subCueCache = new Map<string, { cues: SubCue[]; ts: number }>();
+const SUB_SESSION_TTL = 3 * 3_600_000; // 3 ساعات
+
+function getCachedCues(key: string): SubCue[] | null {
+  const hit = _subCueCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > SUB_SESSION_TTL) { _subCueCache.delete(key); return null; }
+  return hit.cues;
+}
+function setCachedCues(key: string, cues: SubCue[]) {
+  _subCueCache.set(key, { cues, ts: Date.now() });
+}
+
 /* ══════════════════════════════════ LOADING SCREEN ══════════ */
 function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep: number }) {
   return (
@@ -694,14 +711,14 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
             <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">سيرفر {idx + 1}</p>
-            <span className="font-mono text-[7px] font-bold px-1.5 py-0.5 rounded"
-              style={{ color: "rgba(255,255,255,0.55)", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}>
+            <span className="text-[11px] font-black px-2 py-0.5 rounded-md tracking-wide"
+              style={{ color: "rgba(255,255,255,0.80)", background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.18)", fontFamily: "monospace" }}>
               {tag}
             </span>
             {isEngAudio && (
-              <span className="text-[7.5px] font-bold px-1.5 py-0.5 rounded-md font-['Cairo'] shrink-0"
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md font-['Cairo'] shrink-0"
                 style={{ background: "rgba(59,130,246,0.14)", border: "1px solid rgba(59,130,246,0.30)", color: "rgba(147,197,253,0.90)" }}>
-                🎌 إنجليزي/ياباني
+                🎌 ياباني/إنجليزي
               </span>
             )}
           </div>
@@ -1408,9 +1425,16 @@ function EpisodePlayer({
     mode: "direct" | "translate",
     signal?: AbortSignal,
   ): Promise<boolean> => {
-    setSubCues([]);
     const isTranslateUrl = track.url.startsWith("/api/anime/translate-vtt");
     if (mode === "translate" || isTranslateUrl) {
+      // ✅ فحص كاش الكلايت أولاً — فوري بدون تأخير
+      const cacheKey = track.url;
+      const cached = getCachedCues(cacheKey);
+      if (cached) {
+        setSubCues(cached); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+        return true;
+      }
+      setSubCues([]);
       setSubStatus("translating");
       const vttUrl = isTranslateUrl
         ? track.url
@@ -1425,10 +1449,12 @@ function EpisodePlayer({
           return { start: toSec(s||""), end: toSec(e||""), text: c.text };
         }).filter(c => c.start < c.end && c.text.trim());
         if (!cues.length || (signal && signal.aborted)) { setSubStatus("failed"); return false; }
+        setCachedCues(cacheKey, cues); // 💾 حفظ في الكاش
         setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
         return true;
       } catch { setSubStatus("failed"); return false; }
     } else {
+      setSubCues([]);
       setSubStatus("loading");
       try {
         const r = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(track.url)}`, {
@@ -1486,6 +1512,11 @@ function EpisodePlayer({
 
     /* If the source already provides a subtitleUrl (kawaii/anikoto/anineko) — use it directly */
     if (subtitleUrl && subState !== "ready") {
+      // ✅ كاش الكلايت: تحقق أولاً — إذا موجود يعمل فوراً
+      const cachedHit = getCachedCues(subtitleUrl);
+      if (cachedHit) {
+        setSubCues(cachedHit); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
+      }
       setSubStatus("loading");
       setSubState("loading");
       setSubCues([]);
@@ -1500,6 +1531,7 @@ function EpisodePlayer({
                 return { start: toSec(s||""), end: toSec(e||""), text: c.text };
               }).filter(c => c.start < c.end && c.text.trim());
               if (cues.length) {
+                setCachedCues(subtitleUrl, cues); // 💾
                 setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
               }
             }
@@ -1517,6 +1549,7 @@ function EpisodePlayer({
                 return { start: toSec(s||""), end: toSec(e||""), text: c.text };
               }).filter(c => c.start < c.end && c.text.trim());
               if (cues.length) {
+                setCachedCues(subtitleUrl, cues); // 💾
                 setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
               }
             }
@@ -1574,6 +1607,14 @@ function EpisodePlayer({
 
   /* ── Reset subState to idle when subtitleUrl changes (e.g. switching to kawaii source) ── */
   useEffect(() => {
+    // فحص الكاش أولاً — إذا موجود نُطبّقه فوراً بدون reset
+    if (subtitleUrl) {
+      const cached = getCachedCues(subtitleUrl);
+      if (cached) {
+        setSubCues(cached); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+        return;
+      }
+    }
     setSubState("idle");
     setSubCues([]);
     setSubLang(null);
@@ -1582,6 +1623,14 @@ function EpisodePlayer({
   /* ── Auto-load subtitles when source has a subtitleUrl ── */
   useEffect(() => {
     if (!subtitleUrl) { setSubState("none"); return; }
+
+    // ✅ كاش الكلايت: تحقق أولاً — إذا موجود لا داعي للانتظار
+    const cached = getCachedCues(subtitleUrl);
+    if (cached) {
+      setSubCues(cached); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+      return;
+    }
+
     let cancelled = false;
     const t = setTimeout(async () => {
       if (cancelled) return;
@@ -1606,15 +1655,16 @@ function EpisodePlayer({
                 const pts = c.timing.split("-->").map(s => s.trim());
                 return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
               }).filter(c => c.start < c.end && c.text.trim());
-              if (!cancelled && arCues.length) { setSubCues(arCues); setSubLang("ara"); setSubState("ready"); return; }
+              if (!cancelled && arCues.length) {
+                setCachedCues(subtitleUrl, arCues); // 💾 حفظ
+                setSubCues(arCues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
+              }
             }
           }
         } else {
           /* Raw VTT/SRT URL — translate to Arabic */
-          const r = await fetch(
-            `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
-            { signal: AbortSignal.timeout(30000) },
-          );
+          const translateUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`;
+          const r = await fetch(translateUrl, { signal: AbortSignal.timeout(30000) });
           if (!cancelled && r.ok) {
             const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
             if (d.cues?.length) {
@@ -1622,7 +1672,10 @@ function EpisodePlayer({
                 const pts = c.timing.split("-->").map(s => s.trim());
                 return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
               }).filter(c => c.start < c.end && c.text.trim());
-              if (!cancelled && arCues.length) { setSubCues(arCues); setSubLang("ara"); setSubState("ready"); return; }
+              if (!cancelled && arCues.length) {
+                setCachedCues(subtitleUrl, arCues); // 💾 حفظ
+                setSubCues(arCues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
+              }
             }
           }
           /* English fallback */
@@ -1637,7 +1690,7 @@ function EpisodePlayer({
       } catch { /* fall through */ }
 
       if (!cancelled) setSubState("none");
-    }, 500);
+    }, 400);
     return () => { cancelled = true; clearTimeout(t); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtitleUrl]);
