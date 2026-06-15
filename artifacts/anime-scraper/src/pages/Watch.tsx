@@ -357,20 +357,43 @@ function parseSrt(srt: string): SubCue[] {
 }
 
 /* ══════════════════════════════════ CLIENT-SIDE SUBTITLE CACHE ══════════
-   كاش الترجمة في جلسة المتصفح — يمنع إعادة الترجمة عند تغيير السيرفر
-   المفتاح: subtitleUrl الأصلي · القيمة: الكيوز المُترجمة + وقت الحفظ
-   TTL: 3 ساعات (يُمسح تلقائياً عند إغلاق التبويب) */
+   طبقتا كاش:
+   L1 = Map في الذاكرة (فوري، يُمسح عند إغلاق التبويب) — TTL 3 ساعات
+   L2 = localStorage (دائم، يُمسح بعد 7 أيام) — يمنع إعادة الترجمة بعد إعادة التحميل
+   المفتاح الأساسي: "sub-ar-{animeId}-ep{ep}" ← موحّد لكل سيرفر في نفس الحلقة
+   المفتاح الاحتياطي: URL المُشفَّر (لـ VTT مباشر) */
 const _subCueCache = new Map<string, { cues: SubCue[]; ts: number }>();
-const SUB_SESSION_TTL = 3 * 3_600_000; // 3 ساعات
+const SUB_SESSION_TTL = 3 * 3_600_000;   // L1 TTL — 3 ساعات
+const SUB_LOCAL_TTL  = 7 * 86_400_000;   // L2 TTL — 7 أيام
 
 function getCachedCues(key: string): SubCue[] | null {
+  // L1 memory
   const hit = _subCueCache.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.ts > SUB_SESSION_TTL) { _subCueCache.delete(key); return null; }
-  return hit.cues;
+  if (hit) {
+    if (Date.now() - hit.ts <= SUB_SESSION_TTL) return hit.cues;
+    _subCueCache.delete(key);
+  }
+  // L2 localStorage
+  try {
+    const lsKey = "sc2-" + key.slice(0, 160);
+    const raw = localStorage.getItem(lsKey);
+    if (raw) {
+      const p = JSON.parse(raw) as { cues: SubCue[]; ts: number };
+      if (Date.now() - p.ts <= SUB_LOCAL_TTL) {
+        _subCueCache.set(key, p); // warm-up L1
+        return p.cues;
+      }
+      localStorage.removeItem(lsKey);
+    }
+  } catch { /* quota or parse error — silent */ }
+  return null;
 }
 function setCachedCues(key: string, cues: SubCue[]) {
-  _subCueCache.set(key, { cues, ts: Date.now() });
+  const entry = { cues, ts: Date.now() };
+  _subCueCache.set(key, entry);
+  try {
+    localStorage.setItem("sc2-" + key.slice(0, 160), JSON.stringify(entry));
+  } catch { /* ignore quota exceeded */ }
 }
 
 /* ══════════════════════════════════ LOADING SCREEN ══════════ */
@@ -1467,9 +1490,11 @@ function EpisodePlayer({
   ): Promise<boolean> => {
     const isTranslateUrl = track.url.startsWith("/api/anime/translate-vtt");
     if (mode === "translate" || isTranslateUrl) {
+      // مفتاح موحّد: نفس الحلقة = نفس الكاش حتى لو تغيّر السيرفر
+      const normKey = animeId ? `sub-ar-${animeId}-ep${ep}` : track.url;
+      const urlKey  = track.url;
       // ✅ فحص كاش الكلايت أولاً — فوري بدون تأخير
-      const cacheKey = track.url;
-      const cached = getCachedCues(cacheKey);
+      const cached = getCachedCues(normKey) ?? getCachedCues(urlKey);
       if (cached) {
         setSubCues(cached); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
         return true;
@@ -1489,7 +1514,9 @@ function EpisodePlayer({
           return { start: toSec(s||""), end: toSec(e||""), text: c.text };
         }).filter(c => c.start < c.end && c.text.trim());
         if (!cues.length || (signal && signal.aborted)) { setSubStatus("failed"); return false; }
-        setCachedCues(cacheKey, cues); // 💾 حفظ في الكاش
+        // 💾 حفظ بالمفتاحين: الموحّد (لتسريع تغيير السيرفر) + URL (للرجوع)
+        setCachedCues(normKey, cues);
+        setCachedCues(urlKey,  cues);
         setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
         return true;
       } catch { setSubStatus("failed"); return false; }

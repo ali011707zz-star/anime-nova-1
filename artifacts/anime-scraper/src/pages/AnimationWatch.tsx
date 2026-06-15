@@ -16,6 +16,29 @@ interface SubTrack { id: string; lang: string; label: string; url: string; }
 type SubChoice = "off" | "ar" | "ar-translated" | "ar-auto" | "en";
 type SubStatus = "off" | "discovering" | "loading" | "translating" | "ready" | "failed";
 
+/* ── كاش ترجمة الأنيميشن — L1 ذاكرة + L2 localStorage — TTL 7 أيام ── */
+const _animSubCache = new Map<string, { cues: SubCue[]; ts: number }>();
+const ANIM_SUB_TTL = 7 * 86_400_000;
+function getAnimSubCached(key: string): SubCue[] | null {
+  const hit = _animSubCache.get(key);
+  if (hit && Date.now() - hit.ts <= ANIM_SUB_TTL) return hit.cues;
+  if (hit) _animSubCache.delete(key);
+  try {
+    const raw = localStorage.getItem("sc2-" + key.slice(0, 160));
+    if (raw) {
+      const p = JSON.parse(raw) as { cues: SubCue[]; ts: number };
+      if (Date.now() - p.ts <= ANIM_SUB_TTL) { _animSubCache.set(key, p); return p.cues; }
+      localStorage.removeItem("sc2-" + key.slice(0, 160));
+    }
+  } catch { /* silent */ }
+  return null;
+}
+function setAnimSubCached(key: string, cues: SubCue[]) {
+  const entry = { cues, ts: Date.now() };
+  _animSubCache.set(key, entry);
+  try { localStorage.setItem("sc2-" + key.slice(0, 160), JSON.stringify(entry)); } catch { /* quota */ }
+}
+
 function parseSrt(srt: string): SubCue[] {
   const cues: SubCue[] = [];
   const toSec = (ts: string) => {
@@ -563,6 +586,17 @@ export default function AnimationWatch() {
 
   // Load a single track — direct parse or server-side translation; returns true on success
   const loadSubTrack = useCallback(async (track: SubTrack, mode: "direct" | "translate", signal?: AbortSignal): Promise<boolean> => {
+    // مفتاح موحّد للترجمة: نفس الحلقة = نفس الكاش حتى لو تغيّر السيرفر
+    const normKey = mode === "translate" || track.url.includes("translate-vtt")
+      ? `sub-ar-anim-${tmdbId}-${type}-s${season}-e${ep}`
+      : `sub-${track.lang}-anim-${tmdbId}-${type}-s${season}-e${ep}`;
+
+    // ✅ فحص كاش أولاً (L1 + L2 localStorage)
+    const cachedHit = getAnimSubCached(normKey) ?? getAnimSubCached(track.url);
+    if (cachedHit) {
+      setSubCues(cachedHit); setSubStatus("ready"); return true;
+    }
+
     setSubCues([]);
     // If the URL is already a translate-vtt JSON endpoint, fetch it directly
     if (track.url.startsWith("/api/anime/translate-vtt") || track.url.startsWith("/api/animation/translate-vtt")) {
@@ -585,6 +619,8 @@ export default function AnimationWatch() {
           return { start: parseTiming(s||""), end: parseTiming(e||""), text: c.text };
         }).filter(c => c.start < c.end && c.text.trim());
         if (!cues.length || signal?.aborted) { setSubStatus("failed"); return false; }
+        setAnimSubCached(normKey, cues);
+        setAnimSubCached(track.url, cues);
         setSubCues(cues); setSubStatus("ready"); return true;
       } catch { setSubStatus("failed"); return false; }
     }
@@ -593,10 +629,14 @@ export default function AnimationWatch() {
       ? await translateVttUrl(track.url, signal)
       : await fetchVttParsed(track.url, signal);
     if (signal?.aborted) return false;
-    if (cues.length > 0) { setSubCues(cues); setSubStatus("ready"); return true; }
+    if (cues.length > 0) {
+      setAnimSubCached(normKey, cues);
+      setAnimSubCached(track.url, cues);
+      setSubCues(cues); setSubStatus("ready"); return true;
+    }
     setSubStatus("failed");
     return false;
-  }, [fetchVttParsed, translateVttUrl]);
+  }, [fetchVttParsed, translateVttUrl, tmdbId, type, season, ep]);
 
   // Manual subtitle choice — user picks language option
   const changeSubChoice = useCallback(async (choice: SubChoice) => {
