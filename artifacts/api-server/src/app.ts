@@ -9,8 +9,16 @@ import commentsRouter from "./routes/comments.js";
 import adminRouter from "./routes/admin.js";
 import reportRouter from "./routes/report.js";
 import telegramRouter from "./routes/telegram.js";
+import authTokenRouter from "./routes/authToken.js";
 import { logger } from "./lib/logger";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
+import { validateAnonToken, checkRateLimit } from "./lib/security.js";
+
+// ── المسارات التي تتطلب توكن صالح ──
+const PROTECTED_PATHS = [
+  "/api/anime/fetch-source",
+  "/api/animation/sources-stream",
+];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +46,41 @@ export async function createApp(): Promise<Express> {
   registerEmailAuthRoutes(app);
   registerGoogleAuthRoutes(app);
   registerGithubAuthRoutes(app);
+
+  // ── توكن المصادقة (يجب أن يسبق Middleware الحماية) ──
+  app.use(authTokenRouter);
+
+  // ── Middleware حماية المسارات الحساسة ──
+  app.use((req, res, next) => {
+    const p = req.path; // مثال: /api/anime/fetch-source
+    if (!PROTECTED_PATHS.some(pp => p.startsWith(pp))) return next();
+
+    const ip =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ||
+      req.socket.remoteAddress ||
+      "unknown";
+
+    // Rate limit: 120 طلب/دقيقة لكل IP
+    if (!checkRateLimit(`src:${ip}`, 120, 60_000)) {
+      res.status(429).json({ error: "Too many requests. Please slow down." });
+      return;
+    }
+
+    // التحقق من التوكن (header أو query param)
+    const token =
+      (req.headers["x-app-token"] as string) ||
+      (req.query._tok as string) || "";
+
+    if (!validateAnonToken(token)) {
+      res.status(403).json({
+        error: "Access denied. Use the official Anime NOVA app.",
+        code: "INVALID_TOKEN",
+      });
+      return;
+    }
+
+    next();
+  });
 
   app.use("/api", router);
   app.use("/api", userdataRouter);

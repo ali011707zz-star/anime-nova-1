@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { getAppToken } from "@/lib/appToken";
 import { useLocation } from "wouter";
 import {
   ChevronRight, Play, X,
@@ -438,44 +439,52 @@ export default function AnimationWatch() {
     setSubCues([]); setSubStatus("off"); setSubChoice("ar-translated"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
 
-    const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodeURIComponent(title))}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}`;
-    const es = new EventSource(q);
-    esRef.current = es;
+    let localEs: EventSource | null = null;
+    let alive = true;
 
-    es.addEventListener("source", (e) => {
-      const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
-      // Skip embed-only sources (no iframe player in app)
-      if (src.isEmbed) return;
+    getAppToken().then(tok => {
+      if (!alive) return;
+      const tokParam = tok ? `&_tok=${encodeURIComponent(tok)}` : "";
+      const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodeURIComponent(title))}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}${tokParam}`;
+      const es = new EventSource(q);
+      localEs = es;
+      esRef.current = es;
 
-      const key = src.directUrl || src.url;
-      if (seenUrls.current.has(key)) return;
-      seenUrls.current.add(key);
+      es.addEventListener("source", (e) => {
+        if (!alive) return;
+        const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
+        if (src.isEmbed) return;
 
-      let newSrc: Source;
-      if (src.directUrl || src.proxyUrl) {
-        const resolved = src.proxyUrl || src.directUrl!;
-        const hl       = isHlsUrl(resolved);
-        const proxyUrl = src.proxyUrl || (hl ? wrapHls(src.directUrl!, window.location.origin) : wrapMp4(src.directUrl!, window.location.origin));
-        newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, status: "ok" };
-      } else {
-        newSrc = { url: src.url, label: src.label, status: "loading" };
-        tryExtract(src.url);
-      }
-      sourceCountRef.current += 1;
-      setSources(prev => [newSrc, ...prev]);
+        const key = src.directUrl || src.url;
+        if (seenUrls.current.has(key)) return;
+        seenUrls.current.add(key);
+
+        let newSrc: Source;
+        if (src.directUrl || src.proxyUrl) {
+          const resolved = src.proxyUrl || src.directUrl!;
+          const hl       = isHlsUrl(resolved);
+          const proxyUrl = src.proxyUrl || (hl ? wrapHls(src.directUrl!, window.location.origin) : wrapMp4(src.directUrl!, window.location.origin));
+          newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, status: "ok" };
+        } else {
+          newSrc = { url: src.url, label: src.label, status: "loading" };
+          tryExtract(src.url);
+        }
+        sourceCountRef.current += 1;
+        setSources(prev => [newSrc, ...prev]);
+      });
+
+      es.addEventListener("done", () => {
+        es.close(); setSseDone(true);
+      });
+      es.addEventListener("error", () => { /* ignore — done will fire */ });
+      es.onerror = () => { es.close(); setSseDone(true); };
     });
 
-    es.addEventListener("done", () => {
-      es.close(); setSseDone(true);
-    });
-    es.addEventListener("error", () => {
-      try {
-        // ignore — done will fire eventually
-      } catch { /* noop */ }
-    });
-    es.onerror = () => { es.close(); setSseDone(true); };
-
-    return () => { es.close(); };
+    return () => {
+      alive = false;
+      localEs?.close();
+      esRef.current?.close();
+    };
   }, [title, type, ep, season, tmdbId, tryExtract]);
 
   /* ── Step transitions on SSE done (sourceCountRef avoids stale closure) ── */
