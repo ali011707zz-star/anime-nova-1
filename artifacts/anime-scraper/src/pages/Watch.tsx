@@ -1432,13 +1432,8 @@ function EpisodePlayer({
 
   const currentUrl  = servers[currentServer] || "";
 
-  /* ── Synchronous subtitle reset when source URL changes (prevents old cues flashing on new source) ── */
+  /* ── Track URL changes (don't clear cues immediately — let new load overwrite) ── */
   const prevUrlRef = useRef(currentUrl);
-  if (prevUrlRef.current !== currentUrl) {
-    prevUrlRef.current = currentUrl;
-    if (subCues.length > 0) setSubCues([]);
-    if (subState === "ready") setSubState("idle");
-  }
 
   /* ── Reset tracks when episode changes ── */
   const prevEpRef = useRef(ep);
@@ -1696,7 +1691,16 @@ function EpisodePlayer({
     setSubOffset(0);
     if (subChoice === "off") return;
     const saved = subChoice;
-    // Check cache first — apply immediately if available, else short delay
+    // 1. Check normalized episode cache (persists across server switches)
+    const normKey = animeId ? `sub-ar-${animeId}-ep${ep}` : null;
+    if (normKey) {
+      const normCached = getCachedCues(normKey);
+      if (normCached) {
+        setSubCues(normCached); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+        return;
+      }
+    }
+    // 2. Check subtitleUrl cache
     if (subtitleUrl) {
       const cached = getCachedCues(subtitleUrl);
       if (cached) {
@@ -1704,8 +1708,8 @@ function EpisodePlayer({
         return;
       }
     }
-    const t = setTimeout(() => changeSubChoice(saved), 200);
-    return () => clearTimeout(t);
+    // 3. No cache — re-apply immediately (no artificial delay)
+    changeSubChoice(saved);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUrl]);
 
@@ -1721,17 +1725,18 @@ function EpisodePlayer({
     }
 
     let cancelled = false;
-    const t = setTimeout(async () => {
+
+    const toSecLocal = (ts: string): number => {
+      const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
+      if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
+      const m2 = ts.match(/(\d{1,2}):(\d{2})[,.](\d{3})/);
+      if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
+      return 0;
+    };
+
+    (async () => {
       if (cancelled) return;
       setSubState("loading");
-
-      const toSec = (ts: string): number => {
-        const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
-        if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
-        const m2 = ts.match(/(\d{1,2}):(\d{2})[,.](\d{3})/);
-        if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
-        return 0;
-      };
 
       try {
         /* subtitleUrl from anikoto/anineko is already a /api/anime/translate-vtt URL → fetch directly */
@@ -1742,7 +1747,7 @@ function EpisodePlayer({
             if (d.cues?.length) {
               const arCues = d.cues.map(c => {
                 const pts = c.timing.split("-->").map(s => s.trim());
-                return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
+                return { start: toSecLocal(pts[0] || ""), end: toSecLocal(pts[1] || ""), text: c.text };
               }).filter(c => c.start < c.end && c.text.trim());
               if (!cancelled && arCues.length) {
                 setCachedCues(subtitleUrl, arCues); // 💾 حفظ
@@ -1759,7 +1764,7 @@ function EpisodePlayer({
             if (d.cues?.length) {
               const arCues = d.cues.map(c => {
                 const pts = c.timing.split("-->").map(s => s.trim());
-                return { start: toSec(pts[0] || ""), end: toSec(pts[1] || ""), text: c.text };
+                return { start: toSecLocal(pts[0] || ""), end: toSecLocal(pts[1] || ""), text: c.text };
               }).filter(c => c.start < c.end && c.text.trim());
               if (!cancelled && arCues.length) {
                 setCachedCues(subtitleUrl, arCues); // 💾 حفظ
@@ -1779,8 +1784,8 @@ function EpisodePlayer({
       } catch { /* fall through */ }
 
       if (!cancelled) setSubState("none");
-    }, 400);
-    return () => { cancelled = true; clearTimeout(t); };
+    })();
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtitleUrl]);
 
@@ -2025,7 +2030,7 @@ function EpisodePlayer({
               downloadUrl={downloadUrl}
               resumeTime={resumeTime > 10 ? resumeTime : undefined}
               subCues={subState === "ready" && subCues.length > 0 ? subCues : undefined}
-              subElapsed={hlsTime + subOffset}
+              subOffset={subOffset}
               subSettings={subSettings}
               subEnabled={subState === "ready"}
               skipIntro={skipTimes?.op}

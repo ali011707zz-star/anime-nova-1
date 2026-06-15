@@ -889,7 +889,6 @@ export default function AnimationWatch() {
           skipIntro={skipIntro}
           skipOutro={skipOutro}
           subCues={subStatus === "ready" && subCues.length > 0 ? subCues : undefined}
-          subElapsed={hlsTime}
           subEnabled={subStatus === "ready" && subCues.length > 0}
           subNote={
             subStatus === "failed"     ? "لا تتوفر ترجمة" :

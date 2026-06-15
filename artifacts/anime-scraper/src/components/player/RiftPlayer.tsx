@@ -74,6 +74,7 @@ interface Props {
   resumeTime?: number;
   subCues?: SubCue[];
   subElapsed?: number;
+  subOffset?: number;
   subSettings?: SubSettings;
   subEnabled?: boolean;
   subNote?: string;
@@ -131,7 +132,7 @@ const SUB_POSITIONS = [
 export default function RiftPlayer({
   src, title = "", epTitle = "", ep = 1, totalEps = 999, resumeTime = 0,
   qualityLabel = "", isHls = false, serverCount = 1, serverIndex = 0,
-  downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
+  downloadUrl, subCues, subElapsed, subOffset = 0, subSettings, subEnabled = false,
   subNote,
   onSubtitleClick, onSubSettingsChange, onSubtitleOff,
   skipIntro, skipOutro, animeId, autoPlay,
@@ -832,7 +833,10 @@ export default function RiftPlayer({
   } : { position: "absolute", inset: 0 };
 
   /* ── subtitle active cue ── */
-  const subActive = subCues?.find(c => subElapsed >= c.start && subElapsed <= c.end);
+  // Use local currentTime for subtitle lookup — eliminates parent round-trip latency.
+  // subElapsed kept for backward compat; subOffset allows user timing adjustment.
+  const _subT = currentTime + subOffset;
+  const subActive = subCues?.find(c => _subT >= c.start && _subT <= c.end);
 
   /* ── subtitle position style ── */
   function subPositionStyle(pos: "top" | "center" | "bottom", ctrlVisible: boolean): React.CSSProperties {
