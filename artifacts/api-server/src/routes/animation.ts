@@ -2672,65 +2672,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── LordFlix (snowhouse.lordflix.club) — TMDB-native HLS + multi-server ────
-      scrapeAnimCached("lordflix", async () => {
-        if (!tmdbId) return;
-        try {
-          send("status", { msg: "LordFlix: جاري الاستخراج…" });
-          const engTitle = enTitlePrefetched || title || "";
-          if (!engTitle) return;
-          // lordflix uses "series" for TV, "movie" for movies
-          const mediaType = type === "movie" ? "movie" : "series";
-          const baseParams = mediaType === "series"
-            ? `title=${encodeURIComponent(engTitle)}&type=series&year=&imdb=&tmdb=${tmdbId}&server=Orion&season=${season}&episode=${epNum}`
-            : `title=${encodeURIComponent(engTitle)}&type=movie&year=&imdb=&tmdb=${tmdbId}&server=Orion`;
-          const lfUrl = `https://snowhouse.lordflix.club/?${baseParams}`;
-          // Step 1: Get signed URL from enc-dec.app
-          const encLfR = await fetch(
-            `https://enc-dec.app/api/enc-lordflix?url=${encodeURIComponent(lfUrl)}`,
-            { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10_000) },
-          ).then(r => r.json()) as { status: number; result?: { url: string; sign: string } };
-          if (encLfR.status !== 200 || !encLfR.result?.url) return;
-          const { url: encUrl, sign } = encLfR.result;
-          // Step 2: Fetch encrypted content from snowhouse
-          const encResp = await fetch(encUrl, {
-            headers: {
-              "User-Agent": UA,
-              "Origin": "https://lordflix.org",
-              "Referer": "https://lordflix.org/",
-              "Accept": "*/*",
-            },
-            signal: AbortSignal.timeout(15_000),
-          }).then(r => r.text());
-          if (!encResp || encResp.length < 20) return;
-          // Step 3: Decrypt via enc-dec.app
-          const decR = await fetch("https://enc-dec.app/api/dec-lordflix", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: encResp, sign }),
-            signal: AbortSignal.timeout(10_000),
-          }).then(r => r.json()) as { status: number; result?: { stream?: any[]; captions?: any[] } };
-          if (decR.status !== 200 || !decR.result?.stream?.length) return;
-          // Find Arabic subtitle caption
-          const caps = decR.result.captions ?? [];
-          const araCap = caps.find((c: any) =>
-            String(c.id || "").includes("ar") || String(c.language || "").match(/^ar/i)
-          );
-          for (const st of decR.result.stream) {
-            const hlsUrl = st?.playlist || st?.url || "";
-            if (!hlsUrl || (st?.type && st.type !== "hls")) continue;
-            const label = `LordFlix · ${st.id || "primary"}`;
-            // CDN (ok.horseapples.cc) requires Referer: lordflix.org — no CORS header
-            // Route through hls-proxy: server fetches with correct Referer → segments via seg-proxy
-            const LF_REF = "https://lordflix.org/";
-            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(LF_REF)}`;
-            sendSource(
-              proxied, label, proxied, proxied,
-              araCap?.url ? { subtitleUrl: araCap.url } : undefined,
-            );
-          }
-        } catch { /* silent */ }
-      }),
+      // LordFlix: محذوف — Cloudflare browser-challenge يمنع استخراج البيانات
 
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
       scrapeAnimCached("animephoenix", async () => {

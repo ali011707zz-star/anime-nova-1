@@ -37,7 +37,7 @@ export const SITE_TTL: Record<string, number> = {
   videasy_anim:   2 * 3_600_000,  // anime section English
   vidlink_encdec: 2 * 3_600_000,  // tokens expire ~2h
   vidlink_anim:   2 * 3_600_000,  // anime section English
-  lordflix_anim:  2 * 3_600_000,  // enc-dec tokens
+  // lordflix_anim: محذوف
   vyla_anim:      4 * 3_600_000,  // Vyla SSE (stable URLs)
   topcinemaa:     4 * 3_600_000,
   animeday_anim:  4 * 3_600_000,

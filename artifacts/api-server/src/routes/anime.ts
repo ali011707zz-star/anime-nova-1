@@ -35,7 +35,6 @@ const cdnCache = new Map<string, { body: Buffer; ct: string; ts: number }>();
 const CDN_CACHE_TTL = 15 * 60_000; // 15 دقيقة — كافية لمشاهدة فيلم كامل من cache
 const CDN_CACHE_HOSTS = [
   "vault-13.owocdn.top", "owocdn.top", "kwik.cx",
-  "ok.horseapples.cc",  // LordFlix CDN — signed URLs expire ~4 min; serve from cache
 ];
 function isCdnCacheable(url: string): boolean {
   try { return CDN_CACHE_HOSTS.some(h => new URL(url).hostname.endsWith(h)); } catch { return false; }
@@ -5654,43 +5653,7 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
   } catch (err) { console.error("[vidlink_anim] error:", err); return []; }
 }
 
-// ── LordFlix (snowhouse.lordflix.club, enc-dec.app, CDN Referer: lordflix.org) ──
-async function getLordFlixAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
-  const tmdbId = await fetchAnimeTmdbId(english, title);
-  if (!tmdbId) return [];
-  const engTitle = (english || title).trim();
-  try {
-    const lfUrl = `https://snowhouse.lordflix.club/?title=${encodeURIComponent(engTitle)}&type=series&year=&imdb=&tmdb=${tmdbId}&server=Orion&season=1&episode=${ep}`;
-    const encLfR = await fetch(`https://enc-dec.app/api/enc-lordflix?url=${encodeURIComponent(lfUrl)}`,
-      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(10_000) }).then(r => r.json()) as { status: number; result?: { url: string; sign: string } };
-    if (encLfR.status !== 200 || !encLfR.result?.url) { console.error("[lordflix_anim] enc-dec enc status:", encLfR.status); return []; }
-    const { url: encUrl, sign } = encLfR.result;
-    const encResp = await fetch(encUrl, {
-      headers: { "User-Agent": BROWSER_UA, "Origin": "https://lordflix.org", "Referer": "https://lordflix.org/", "Accept": "*/*" },
-      signal: AbortSignal.timeout(15_000),
-    }).then(r => r.text());
-    if (!encResp || encResp.length < 20) { console.error("[lordflix_anim] empty encResp from snowhouse"); return []; }
-    const decR = await fetch("https://enc-dec.app/api/dec-lordflix", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: encResp, sign }),
-      signal: AbortSignal.timeout(10_000),
-    }).then(r => r.json()) as any;
-    const streams: any[] = decR?.result?.stream || decR?.stream || [];
-    if (!streams.length) { console.error("[lordflix_anim] dec status:", decR?.status, "streams:", streams.length); return []; }
-    const caps: any[] = decR?.result?.captions || decR?.captions || [];
-    const araCap = caps.find((c: any) => String(c.id || "").includes("ar") || String(c.language || "").match(/^ar/i));
-    const sources: UnifiedSource[] = [];
-    for (const st of streams) {
-      const hlsUrl = st?.playlist || st?.url || "";
-      if (!hlsUrl || (st?.type && st.type !== "hls")) continue;
-      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://lordflix.org/")}`;
-      const subUrl = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
-      sources.push({ name: `LordFlix · ${st.id || "primary"}`, url: proxied, quality: "HD", qualityRank: 9, site: "lordflix_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
-    }
-    return sources;
-  } catch (err) { console.error("[lordflix_anim] error:", err); return []; }
-}
+// LordFlix (snowhouse.lordflix.club) — محذوف: يعيد JS browser-challenge (Cloudflare) بدل البيانات
 
 // ── Vyla SSE (missourimonster-vyla.hf.space, TMDB TV with season=1) ──
 async function getVylaAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
@@ -5959,7 +5922,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
       scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep),  false),
       scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep),  false),
-      scrapeCached("lordflix_anim", () => getLordFlixAnimeSources(title, english, ep), false),
+      // lordflix_anim: محذوف (Cloudflare browser-challenge)
       scrapeCached("vyla_anim",     () => getVylaAnimeSources(title, english, ep),     false),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
@@ -6066,7 +6029,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "starcima_anim": (await race(getStarCimaAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       case "vidlink_anim":  (await race(getVidLinkAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "lordflix_anim": (await race(getLordFlixAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
+      // lordflix_anim: محذوف
       case "vyla_anim":     (await race(getVylaAnimeSources(title, english, ep),     SCRAPER_MS, [])).forEach(collectSrc); break;
       default: break;
     }
