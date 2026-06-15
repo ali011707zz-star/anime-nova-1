@@ -5640,9 +5640,12 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
       signal: AbortSignal.timeout(15_000),
     });
     if (!vlR.ok) { console.error(`[vidlink_anim] vidlink API ${vlR.status} for ${vlUrl}`); return []; }
-    const vlData = await vlR.json() as any;
+    const vlText = await vlR.text();
+    if (!vlText || !vlText.trim()) return [];
+    let vlData: any;
+    try { vlData = JSON.parse(vlText); } catch { return []; }
     const hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
-    if (!hlsUrl) { console.error("[vidlink_anim] no playlist in response", JSON.stringify(vlData).slice(0, 200)); return []; }
+    if (!hlsUrl) return [];
     const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
     const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
