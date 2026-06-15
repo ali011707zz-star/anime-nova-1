@@ -1178,18 +1178,31 @@ function MegaEmbedPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const fn = () => setIsFs(!!document.fullscreenElement);
+    const fn = () => {
+      const inFs = !!document.fullscreenElement;
+      setIsFs(inFs);
+      if (!inFs) {
+        try { (screen.orientation as any).unlock?.(); } catch {}
+      }
+    };
     document.addEventListener("fullscreenchange", fn);
-    // Auto-fullscreen on mount — user just clicked source card (gesture is fresh)
+    // Auto-fullscreen + landscape lock on mount — gesture is fresh from user tap
     const timer = setTimeout(() => {
       const el = containerRef.current;
       if (el && !document.fullscreenElement) {
-        el.requestFullscreen?.().catch(() => {});
+        el.requestFullscreen?.()
+          .then(() => {
+            try {
+              (screen.orientation as any).lock?.("landscape").catch(() => {});
+            } catch {}
+          })
+          .catch(() => {});
       }
     }, 150);
     return () => {
       document.removeEventListener("fullscreenchange", fn);
       clearTimeout(timer);
+      try { (screen.orientation as any).unlock?.(); } catch {}
     };
   }, []);
 

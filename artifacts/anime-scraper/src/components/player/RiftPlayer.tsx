@@ -855,7 +855,12 @@ export default function RiftPlayer({
       </AnimatePresence>
 
       {/* ══ TOUCH + UI LAYER ══ */}
-      <div className="absolute inset-0 z-10" onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}>
+      <div className="absolute inset-0 z-10" onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE} onTouchCancel={() => {
+        if (longTimer.current) { clearTimeout(longTimer.current); longTimer.current = null; }
+        if (longPress) { if (videoRef.current) videoRef.current.playbackRate = prevSpeed.current; setLongPress(false); }
+        setFeedback(null);
+        gestRef.current.active = "none";
+      }}>
 
         {/* ── end of episode card ── */}
         <AnimatePresence>
@@ -969,6 +974,34 @@ export default function RiftPlayer({
                 </span>
               </div>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Persistent skip intro/outro button — always visible when in range (no controls needed) ── */}
+        <AnimatePresence>
+          {hasSkipData && activeSkipLabel && !isLocked && !isEnded && !error && (
+            <motion.button
+              key={activeSkipLabel}
+              initial={{ opacity: 0, x: 12 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 12 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              onPointerDown={e => { e.stopPropagation(); if (activeSkipAction) activeSkipAction(); }}
+              className="absolute flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-black font-['Cairo'] active:scale-90 transition-transform pointer-events-auto"
+              style={{
+                zIndex: 35,
+                bottom: 100,
+                left: 16,
+                fontSize: 12,
+                background: "rgba(250,204,21,0.90)",
+                border: "1px solid rgba(253,224,71,0.70)",
+                color: "#1a1200",
+                boxShadow: "0 0 18px rgba(250,204,21,0.50), 0 4px 12px rgba(0,0,0,0.60)",
+                touchAction: "manipulation",
+              }}>
+              <ChevronDown className="w-3.5 h-3.5 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
+              {activeSkipLabel}
+            </motion.button>
           )}
         </AnimatePresence>
 
@@ -1695,10 +1728,10 @@ export default function RiftPlayer({
         </AnimatePresence>
 
         {/* ════════════════════════════════════════
-            SUBTITLE SETTINGS MENU — inline dropdown
+            SUBTITLE SETTINGS MENU — inline dropdown (visible even when controls hidden)
         ════════════════════════════════════════ */}
         <AnimatePresence>
-          {showSubMenu && showCtrl && !error && !isLocked && (
+          {showSubMenu && !error && !isLocked && (
             <motion.div
               key="submenu"
               initial={{ opacity: 0, y: -10, scale: 0.95 }}
