@@ -797,13 +797,28 @@ export default function RiftPlayer({
   const effectiveSkipOutro = skipOutro;
   const inIntroRange  = !!effectiveSkipIntro && currentTime >= Math.max(0, effectiveSkipIntro.start - SKIP_LEAD) && currentTime < effectiveSkipIntro.end;
   const inOutroRange  = !!effectiveSkipOutro && currentTime >= Math.max(0, effectiveSkipOutro.start - SKIP_LEAD) && currentTime <= effectiveSkipOutro.end;
-  const hasSkipData   = !!(effectiveSkipIntro || effectiveSkipOutro) && duration > 0;
+  /* NOTE: duration > 0 intentionally removed — button must show as soon as skip data arrives */
+  const hasSkipData   = !!(effectiveSkipIntro || effectiveSkipOutro);
   const activeSkipLabel = inIntroRange ? "تخطي المقدمة" : inOutroRange ? "تخطي النهاية" : null;
-  const activeSkipAction = inIntroRange
-    ? () => { seekFrac(effectiveSkipIntro!.end / duration); showControls(); }
-    : inOutroRange
-    ? () => { if (onNextEp) onNextEp(); else seekFrac(effectiveSkipOutro!.end / duration); showControls(); }
-    : null;
+  /* Seek directly via videoRef — avoids division-by-zero when duration state is still 0 */
+  const doSkipIntro = () => {
+    const v = videoRef.current;
+    if (v && effectiveSkipIntro) {
+      v.currentTime = effectiveSkipIntro.end;
+      if (v.paused) v.play().catch(() => {});
+    }
+    showControls();
+  };
+  const doSkipOutro = () => {
+    if (onNextEp) { onNextEp(); return; }
+    const v = videoRef.current;
+    if (v && effectiveSkipOutro) {
+      v.currentTime = effectiveSkipOutro.end;
+      if (v.paused) v.play().catch(() => {});
+    }
+    showControls();
+  };
+  const activeSkipAction = inIntroRange ? doSkipIntro : inOutroRange ? doSkipOutro : null;
 
   /* ── portrait style ── */
   const portraitStyle: React.CSSProperties = isPortrait ? {
@@ -977,39 +992,86 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── Persistent skip intro/outro button — visible whenever skip data available ── */}
-        {hasSkipData && !isLocked && !isEnded && !error && (
-          <motion.button
-            key="persistent-skip"
-            initial={{ opacity: 0, x: 12 }}
-            animate={{ opacity: activeSkipLabel ? 1 : 0.55, x: 0 }}
-            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-            onPointerDown={e => {
-              e.stopPropagation();
-              if (activeSkipAction) {
-                activeSkipAction();
-              } else if (effectiveSkipIntro && duration > 0) {
-                seekFrac(effectiveSkipIntro.end / duration); showControls();
-              } else if (effectiveSkipOutro && duration > 0) {
-                seekFrac(effectiveSkipOutro.end / duration); showControls();
-              }
-            }}
-            className="absolute flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-black font-['Cairo'] active:scale-90 transition-all pointer-events-auto"
-            style={{
-              zIndex: 35,
-              bottom: 100,
-              left: 16,
-              fontSize: 12,
-              background: activeSkipLabel ? "rgba(250,204,21,0.90)" : "rgba(250,204,21,0.18)",
-              border: activeSkipLabel ? "1px solid rgba(253,224,71,0.70)" : "1px solid rgba(253,224,71,0.30)",
-              color: activeSkipLabel ? "#1a1200" : "rgba(253,224,71,0.80)",
-              boxShadow: activeSkipLabel ? "0 0 18px rgba(250,204,21,0.50), 0 4px 12px rgba(0,0,0,0.60)" : "none",
-              touchAction: "manipulation",
-            }}>
-            <ChevronDown className="w-3.5 h-3.5 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
-            {activeSkipLabel ?? (effectiveSkipIntro ? "تخطي المقدمة" : "تخطي النهاية")}
-          </motion.button>
-        )}
+        {/* ── Skip Intro / Outro buttons — appear as soon as skip data is available ── */}
+        <AnimatePresence>
+          {!!effectiveSkipIntro && !isLocked && !isEnded && !error && (
+            <motion.button
+              key="skip-intro-btn"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{
+                opacity: inIntroRange ? 1 : 0.90,
+                y: 0,
+                scale: inIntroRange ? 1.04 : 1,
+              }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              onPointerDown={e => { e.stopPropagation(); doSkipIntro(); }}
+              className="absolute flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black font-['Cairo'] pointer-events-auto"
+              style={{
+                zIndex: 35,
+                bottom: showCtrl ? 110 : 24,
+                right: 16,
+                fontSize: 13,
+                background: inIntroRange
+                  ? "rgba(250,204,21,0.95)"
+                  : "rgba(12,10,2,0.82)",
+                border: inIntroRange
+                  ? "1.5px solid rgba(253,224,71,0.85)"
+                  : "1.5px solid rgba(250,204,21,0.55)",
+                color: inIntroRange ? "#110d00" : "rgba(253,224,71,0.95)",
+                boxShadow: inIntroRange
+                  ? "0 0 24px rgba(250,204,21,0.60), 0 4px 16px rgba(0,0,0,0.70)"
+                  : "0 2px 12px rgba(0,0,0,0.65)",
+                backdropFilter: "blur(14px) saturate(160%)",
+                touchAction: "manipulation",
+                transition: "background 0.2s, border 0.2s, color 0.2s, box-shadow 0.2s, bottom 0.25s ease",
+              }}>
+              <ChevronDown className="w-3.5 h-3.5 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
+              تخطي المقدمة
+            </motion.button>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {!!effectiveSkipOutro && !isLocked && !isEnded && !error && (
+            <motion.button
+              key="skip-outro-btn"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{
+                opacity: inOutroRange ? 1 : 0.90,
+                y: 0,
+                scale: inOutroRange ? 1.04 : 1,
+              }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              onPointerDown={e => { e.stopPropagation(); doSkipOutro(); }}
+              className="absolute flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black font-['Cairo'] pointer-events-auto"
+              style={{
+                zIndex: 35,
+                bottom: showCtrl
+                  ? (effectiveSkipIntro ? 158 : 110)
+                  : (effectiveSkipIntro ? 72 : 24),
+                right: 16,
+                fontSize: 13,
+                background: inOutroRange
+                  ? "rgba(167,139,250,0.95)"
+                  : "rgba(8,6,20,0.82)",
+                border: inOutroRange
+                  ? "1.5px solid rgba(196,181,253,0.85)"
+                  : "1.5px solid rgba(167,139,250,0.55)",
+                color: inOutroRange ? "#fff" : "rgba(196,181,253,0.95)",
+                boxShadow: inOutroRange
+                  ? "0 0 24px rgba(139,92,246,0.55), 0 4px 16px rgba(0,0,0,0.70)"
+                  : "0 2px 12px rgba(0,0,0,0.65)",
+                backdropFilter: "blur(14px) saturate(160%)",
+                touchAction: "manipulation",
+                transition: "background 0.2s, border 0.2s, color 0.2s, box-shadow 0.2s, bottom 0.25s ease",
+              }}>
+              <ChevronDown className="w-3.5 h-3.5 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
+              تخطي النهاية
+            </motion.button>
+          )}
+        </AnimatePresence>
 
         {/* ── Skip ready notification (appears briefly when skip data loads) ── */}
         <AnimatePresence>
@@ -1027,8 +1089,6 @@ export default function RiftPlayer({
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* (skip button moved to progress bar row — see below) */}
 
         {/* ── long press 2× ── */}
         <AnimatePresence>
@@ -1340,8 +1400,8 @@ export default function RiftPlayer({
                           onPointerDown={e => {
                             e.stopPropagation();
                             if (activeSkipAction) activeSkipAction();
-                            else if (effectiveSkipIntro && duration > 0) { seekFrac(effectiveSkipIntro.end / duration); showControls(); }
-                            else if (effectiveSkipOutro && duration > 0) { seekFrac(effectiveSkipOutro.end / duration); showControls(); }
+                            else if (effectiveSkipIntro) doSkipIntro();
+                            else if (effectiveSkipOutro) doSkipOutro();
                           }}
                           className="flex items-center gap-1.5 px-3 py-1 rounded-xl font-black font-['Cairo'] active:scale-90 transition-transform"
                           style={activeSkipLabel ? {
@@ -1354,7 +1414,7 @@ export default function RiftPlayer({
                           } : {
                             background: "rgba(250,204,21,0.10)",
                             border: "1px solid rgba(250,204,21,0.22)",
-                            color: "rgba(253,224,71,0.55)",
+                            color: "rgba(253,224,71,0.60)",
                             fontSize: 11,
                             touchAction: "manipulation",
                           }}>
