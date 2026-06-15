@@ -876,16 +876,44 @@ export default function Settings() {
         />
       </Card>
 
-      {/* Footer */}
-      <div className="text-center pt-10 pb-4 px-6">
-        <div className="inline-flex items-center gap-[3px] mb-2" dir="ltr">
-          <span className="text-[15px] font-black text-white/70" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em" }}>ANIME</span>
-          <span className="text-[15px] font-black"
-            style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.04em", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+      {/* ══════ إخلاء المسؤولية ══════ */}
+      <div className="mx-4 mb-4">
+        <div className="rounded-2xl overflow-hidden p-5 text-right"
+          style={{ background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.15)" }}>
+          <div className="flex items-start gap-3 mb-3">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
+              style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)" }}>
+              <Shield className="w-4 h-4 text-violet-400" />
+            </div>
+            <p className="text-[12px] font-black text-violet-300 tracking-wide">إخلاء المسؤولية</p>
+          </div>
+          <p className="text-[11px] leading-6 text-white/50 font-['Cairo']">
+            هذا التطبيق لا يقوم باستضافة أو رفع أي محتوى مرئي.<br />
+            جميع المحتويات المعروضة يتم توفيرها من مصادر خارجية متاحة على الإنترنت.<br />
+            نحن لا نمتلك حقوق أي من المواد المعروضة، وجميع الحقوق محفوظة لأصحابها الأصليين.<br />
+            إذا كنت تملك حقوق أي محتوى وترغب في إزالته، يرجى التواصل معنا ليتم اتخاذ الإجراء المناسب.
+          </p>
+        </div>
+      </div>
+
+      {/* Footer — Logo */}
+      <div className="text-center pt-6 pb-6 px-6 flex flex-col items-center gap-3">
+        <div className="relative">
+          <img
+            src="/logo.jpg"
+            alt="Anime NOVA"
+            className="w-20 h-20 rounded-2xl object-cover"
+            style={{ boxShadow: "0 0 32px rgba(139,92,246,0.45), 0 0 8px rgba(139,92,246,0.2)" }}
+          />
+        </div>
+        <div className="flex items-center gap-[3px]" dir="ltr">
+          <span className="text-[16px] font-black text-white/80" style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.06em" }}>ANIME</span>
+          <span className="text-[16px] font-black"
+            style={{ fontFamily: "'Cairo',sans-serif", letterSpacing: "0.06em", background: "linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
             NOVA
           </span>
         </div>
-        <p className="text-[9px] text-white/18">جميع الحقوق محفوظة · 2025 · مجاني للجميع</p>
+        <p className="text-[9px] text-white/20">v2.4.0 · مجاني للجميع · 2025</p>
       </div>
 
       {/* Confirm dialog */}
