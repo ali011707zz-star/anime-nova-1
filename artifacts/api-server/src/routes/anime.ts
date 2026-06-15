@@ -3256,7 +3256,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             name: "فايل مون · 1080p",
             url: filemoonUrl,
             quality: "FHD",
-            qualityRank: 26,
+            qualityRank: 30,
             site: "animeify",
             directUrl: proxyUrl,
             directType: "hls",
@@ -3267,9 +3267,9 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
     // ── MediaFire MP4 (FRFhdQ=1080p, FRLink=720p, FRLowQ=480p) → مشغّل داخلي مباشر ──
     const mfSlots = [
-      { key: "FRFhdQ", label: "ميديافاير · FHD", quality: "FHD", qualityRank: 25 },
-      { key: "FRLink",  label: "ميديافاير · HD",  quality: "HD",  qualityRank: 24 },
-      { key: "FRLowQ", label: "ميديافاير · SD",  quality: "SD",  qualityRank: 22  },
+      { key: "FRFhdQ", label: "ميديافاير · FHD", quality: "FHD", qualityRank: 29 },
+      { key: "FRLink",  label: "ميديافاير · HD",  quality: "HD",  qualityRank: 28 },
+      { key: "FRLowQ", label: "ميديافاير · SD",  quality: "SD",  qualityRank: 26  },
     ] as const;
 
     await Promise.all(mfSlots.map(async ({ key, label, quality, qualityRank }) => {
@@ -3307,7 +3307,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             name: "سيندفيد · HD",
             url: sendvidUrl,
             quality: "HD",
-            qualityRank: 23,
+            qualityRank: 27,
             site: "animeify",
             directUrl: proxyUrl,
             directType: "mp4",
@@ -3725,7 +3725,7 @@ async function getKawaiiAnimeSources(
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 20,
+        qualityRank: 17,
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
@@ -3806,7 +3806,7 @@ async function getAniKotoSources(
       name: `AniKoto · 1080p · ياباني${subLang ? " · " + subLang : ""}`,
       url: m3u8Url,
       quality: "1080p",
-      qualityRank: 19,
+      qualityRank: 16,
       site: "anikoto",
       directUrl: proxied,
       directType: "hls",
@@ -4098,7 +4098,7 @@ async function getAnimeWitcherSources(
       const visible = f.visible?.booleanValue !== false;
       if (!link || !visible || !srvName) return;
 
-      const qRank = quality === "1080p" ? 15 : quality === "720p" ? 14 : 12;
+      const qRank = quality === "1080p" ? 22 : quality === "720p" ? 21 : 20;
       const qLabel = quality === "1080p" ? "FHD 1080p" : quality === "720p" ? "HD 720p" : quality;
 
       if (srvName === "PD") {
@@ -5650,7 +5650,7 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
     const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
     const subUrl = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
-    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 13, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) }];
+    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 18, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) }];
   } catch (err) { console.error("[vidlink_anim] error:", err); return []; }
 }
 
