@@ -2038,24 +2038,18 @@ function EpisodePlayer({
 
           const panelContent = (
             <div style={{
-              background: "rgba(7,5,20,0.98)",
+              background: "rgba(7,5,20,0.97)",
               backdropFilter: "blur(40px)",
               WebkitBackdropFilter: "blur(40px)",
-              border: "1px solid rgba(139,92,246,0.20)",
+              border: "1px solid rgba(139,92,246,0.22)",
               boxShadow: isLandscape
                 ? "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)"
-                : "inset 0 0 0 0.5px rgba(255,255,255,0.06), 0 -20px 60px rgba(0,0,0,0.80)",
-              borderRadius: isLandscape ? "20px 0 0 20px" : "20px 20px 0 0",
+                : "0 12px 48px rgba(0,0,0,0.80), inset 0 0 0 0.5px rgba(255,255,255,0.07)",
+              borderRadius: isLandscape ? "20px 0 0 20px" : "20px",
               overflowY: "auto",
-              maxHeight: isLandscape ? "100dvh" : "88dvh",
-              width: isLandscape ? "280px" : "auto",
+              maxHeight: isLandscape ? "100dvh" : "48dvh",
+              width: isLandscape ? "280px" : "min(360px, 100%)",
             }}>
-              {/* Drag handle (portrait only) */}
-              {!isLandscape && (
-                <div className="flex justify-center pt-3 pb-1">
-                  <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.14)" }} />
-                </div>
-              )}
 
               {/* ── Header ── */}
               <div className={`flex items-center justify-between border-b border-white/[0.06] ${isLandscape ? "px-4 pt-5 pb-3" : "px-4 pt-2 pb-3"}`}>
@@ -2303,19 +2297,30 @@ function EpisodePlayer({
                   </div>
                 </div>
               )}
+
+              {/* مقبض السحب للأسفل لإغلاق اللوحة (وضع عمودي) */}
+              {!isLandscape && (
+                <div className="flex justify-center pt-1 pb-3">
+                  <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.14)" }} />
+                </div>
+              )}
             </div>
           );
 
           return (
             <motion.div key="subpanel"
-              initial={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: 40 }}
-              animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
-              exit={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: 40 }}
-              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+              initial={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: -20, scale: 0.97 }}
+              animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0, scale: 1 }}
+              exit={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: -20, scale: 0.97 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              drag={!isLandscape ? "y" : false}
+              dragConstraints={{ top: 0, bottom: 400 }}
+              dragElastic={{ top: 0, bottom: 0.22 }}
+              onDragEnd={(_: any, info: any) => { if (!isLandscape && info.offset.y > 65) setShowSubPanel(false); }}
               className="fixed z-[400]"
               style={isLandscape
                 ? { top: 0, bottom: 0, right: 0, width: "280px", paddingTop: "max(12px, env(safe-area-inset-top))", paddingBottom: "max(12px, env(safe-area-inset-bottom))" }
-                : { insetInline: 0, bottom: 0, paddingBottom: "max(10px, env(safe-area-inset-bottom))", paddingInline: "8px" }
+                : { top: 0, insetInlineEnd: 0, insetInlineStart: 0, paddingTop: "max(10px, env(safe-area-inset-top))", paddingInline: "10px", display: "flex", justifyContent: "center" }
               }
             >
               <div className="fixed inset-0 z-[-1]" onClick={() => setShowSubPanel(false)} />
