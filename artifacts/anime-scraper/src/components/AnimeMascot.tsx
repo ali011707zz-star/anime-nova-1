@@ -1,206 +1,261 @@
 import { motion } from "framer-motion";
 
 /**
- * AnimeMascot — شخصية أنمي chibi تقوم بحركة انتظار واقعية
- * خطوتان إلى اليمين ثم العودة لنقطة البداية بشكل متكرر
+ * AnimeMascot — شخصية Sukuna-inspired chibi (Jujutsu Kaisen)
+ * شعر وردي/كريمسون، وشوم مميزة، عيون حمراء بحدقة شقية
+ * حركة: خطوتان يمين ثم رجوع — تكرار مستمر
  */
 export function AnimeMascot({ className }: { className?: string }) {
-  const DUR = 2.6;
-  const TIMES: number[] = [0, 0.24, 0.5, 0.74, 1];
+  const DUR = 2.8;
+  const TIMES: number[] = [0, 0.24, 0.5, 0.76, 1];
 
-  const bodyT = {
-    animate: { x: [0, 22, 44, 22, 0], y: [0, -2, 0, -2, 0] },
-    transition: { duration: DUR, repeat: Infinity, ease: "easeInOut" as const, times: TIMES },
-  };
-
-  const legL = {
-    animate: { rotate: [3, -22, 24, -22, 3] },
-    transition: { duration: DUR, repeat: Infinity, ease: "easeInOut" as const, times: TIMES },
-  };
-  const legR = {
-    animate: { rotate: [-3, 24, -22, 24, -3] },
-    transition: { duration: DUR, repeat: Infinity, ease: "easeInOut" as const, times: TIMES },
-  };
-  const armL = {
-    animate: { rotate: [6, -16, 18, -16, 6] },
-    transition: { duration: DUR, repeat: Infinity, ease: "easeInOut" as const, times: TIMES },
-  };
-  const armR = {
-    animate: { rotate: [-6, 18, -16, 18, -6] },
-    transition: { duration: DUR, repeat: Infinity, ease: "easeInOut" as const, times: TIMES },
-  };
-  const shadow = {
-    animate: { scaleX: [1, 0.87, 0.75, 0.87, 1], opacity: [0.22, 0.16, 0.12, 0.16, 0.22] },
-    transition: { duration: DUR, repeat: Infinity, ease: "easeInOut" as const, times: TIMES },
+  const baseT = {
+    duration: DUR,
+    repeat: Infinity,
+    ease: "easeInOut" as const,
+    times: TIMES,
   };
 
   return (
     <motion.div
       className={className}
-      initial={{ opacity: 0, y: 14, scale: 0.88 }}
+      style={{ overflow: "visible", display: "flex", justifyContent: "center" }}
+      initial={{ opacity: 0, y: 16, scale: 0.85 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.45, delay: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.5, delay: 0.6, ease: [0.22, 1, 0.36, 1] }}
     >
-      <svg viewBox="0 0 96 124" width="84" height="109" aria-hidden="true">
-        {/* ─── ground shadow (stays in place) ─── */}
+      {/* overflow:visible lets the walking motion go outside SVG bounds */}
+      <svg
+        viewBox="0 0 100 128"
+        width="96"
+        height="123"
+        overflow="visible"
+        aria-hidden="true"
+      >
+        <defs>
+          {/* Skin tone */}
+          <radialGradient id="sk" cx="40%" cy="38%" r="65%">
+            <stop offset="0%" stopColor="#FFE0BE" />
+            <stop offset="100%" stopColor="#E8AA72" />
+          </radialGradient>
+          {/* Hot-pink → crimson hair */}
+          <linearGradient id="hr" x1="0" y1="0" x2="0.3" y2="1">
+            <stop offset="0%" stopColor="#FF5FAE" />
+            <stop offset="55%" stopColor="#E0196A" />
+            <stop offset="100%" stopColor="#991240" />
+          </linearGradient>
+          {/* Crimson red eyes */}
+          <radialGradient id="ey" cx="32%" cy="28%" r="72%">
+            <stop offset="0%" stopColor="#FF3030" />
+            <stop offset="55%" stopColor="#AA0018" />
+            <stop offset="100%" stopColor="#440008" />
+          </radialGradient>
+          {/* Dark jacket */}
+          <linearGradient id="jk" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#1a1828" />
+            <stop offset="100%" stopColor="#0e0d18" />
+          </linearGradient>
+        </defs>
+
+        {/* ── Ground shadow (static, outside moving group) ── */}
         <motion.ellipse
-          cx={44} cy={120} rx={20} ry={4}
-          fill="rgba(124,58,237,0.28)"
-          animate={shadow.animate}
-          transition={shadow.transition}
-          style={{ transformOrigin: "44px 120px" }}
+          cx={50} cy={124} rx={20} ry={3.5}
+          fill="rgba(200,0,40,0.22)"
+          animate={{ x: [0, 22, 44, 22, 0], scaleX: [1, 0.88, 0.76, 0.88, 1] }}
+          transition={baseT}
+          style={{ transformOrigin: "50px 124px" }}
         />
 
-        {/* ─── Character body (translates L→R→L) ─── */}
+        {/* ══════════════ CHARACTER — slides L → R → L ══════════════ */}
         <motion.g
-          animate={bodyT.animate}
-          transition={bodyT.transition}
+          animate={{ x: [0, 22, 44, 22, 0], y: [0, -2, 0, -2, 0] }}
+          transition={baseT}
         >
-          {/* ══ LEGS ══ */}
+
+          {/* ── LEGS ── */}
           {/* Left leg — pivot at hip */}
           <motion.g
-            style={{ transformOrigin: "36px 84px" }}
-            animate={legL.animate}
-            transition={legL.transition}
+            style={{ transformOrigin: "37px 90px" }}
+            animate={{ rotate: [4, -24, 26, -24, 4] }}
+            transition={baseT}
           >
-            <rect x={32} y={84} width={9} height={24} rx={4.5} fill="#1E1B4B" />
-            {/* left cuff */}
-            <rect x={31.5} y={100} width={10} height={5} rx={2.5} fill="#2D1B69" />
-            {/* left shoe */}
-            <ellipse cx={36.5} cy={110} rx={8.5} ry={4} fill="#111827" />
-            <ellipse cx={38} cy={108} rx={4} ry={2} fill="#374151" />
+            {/* Pant leg */}
+            <rect x={32} y={90} width={11} height={28} rx={5.5} fill="url(#jk)" />
+            {/* Crimson cuff */}
+            <rect x={31.5} y={109} width={12} height={5} rx={2.5} fill="#B01030" />
+            {/* Sandal platform */}
+            <rect x={29} y={115} width={17} height={6} rx={3} fill="#111" />
+            {/* Sandal strap */}
+            <rect x={31} y={114} width={13} height={2.5} rx={1.2} fill="#C41E3A" />
           </motion.g>
 
           {/* Right leg */}
           <motion.g
-            style={{ transformOrigin: "52px 84px" }}
-            animate={legR.animate}
-            transition={legR.transition}
+            style={{ transformOrigin: "61px 90px" }}
+            animate={{ rotate: [-4, 26, -24, 26, -4] }}
+            transition={baseT}
           >
-            <rect x={48} y={84} width={9} height={24} rx={4.5} fill="#1E1B4B" />
-            {/* right cuff */}
-            <rect x={47.5} y={100} width={10} height={5} rx={2.5} fill="#2D1B69" />
-            {/* right shoe */}
-            <ellipse cx={52.5} cy={110} rx={8.5} ry={4} fill="#111827" />
-            <ellipse cx={54} cy={108} rx={4} ry={2} fill="#374151" />
+            <rect x={56} y={90} width={11} height={28} rx={5.5} fill="url(#jk)" />
+            <rect x={55.5} y={109} width={12} height={5} rx={2.5} fill="#B01030" />
+            <rect x={53} y={115} width={17} height={6} rx={3} fill="#111" />
+            <rect x={55} y={114} width={13} height={2.5} rx={1.2} fill="#C41E3A" />
           </motion.g>
 
-          {/* ══ BODY ══ */}
-          {/* Torso / jacket */}
-          <rect x={26} y={54} width={36} height={33} rx={9} fill="#1E1B4B" />
-          {/* Jacket collar stripe */}
-          <rect x={40} y={54} width={8} height={20} rx={4} fill="#4C1D95" />
-          {/* Star/badge on chest */}
-          <circle cx={32} cy={64} r={3.5} fill="#7C3AED" opacity={0.7} />
-          <circle cx={32} cy={64} r={1.8} fill="#A78BFA" />
-          {/* Waist band */}
-          <rect x={26} y={83} width={36} height={4} rx={2} fill="#2D1B69" />
+          {/* ── BODY / KIMONO ── */}
+          <rect x={25} y={56} width={50} height={37} rx={11} fill="url(#jk)" />
+          {/* Obi / belt */}
+          <rect x={25} y={85} width={50} height={6} rx={3} fill="#B01030" />
+          {/* Collar open V */}
+          <path d="M50,56 L42,72 L50,78 L58,72 Z" fill="#0b0b14" opacity={0.7} />
+          {/* Inner collar lining */}
+          <path d="M50,56 L44,68 L50,73 L56,68 Z" fill="#C41E3A" opacity={0.35} />
+          {/* Chest tattoo lines (Sukuna body markings) */}
+          <path d="M37,64 L34,76" stroke="#C41E3A" strokeWidth={1.8} strokeLinecap="round" opacity={0.75} />
+          <path d="M63,64 L66,76" stroke="#C41E3A" strokeWidth={1.8} strokeLinecap="round" opacity={0.75} />
+          {/* Extra tattoo dots */}
+          <circle cx={38} cy={78} r={2} fill="#C41E3A" opacity={0.6} />
+          <circle cx={62} cy={78} r={2} fill="#C41E3A" opacity={0.6} />
 
-          {/* ══ ARMS ══ */}
-          {/* Left arm — pivot at left shoulder */}
+          {/* ── LEFT ARM ── pivot at shoulder */}
           <motion.g
-            style={{ transformOrigin: "26px 58px" }}
-            animate={armL.animate}
-            transition={armL.transition}
+            style={{ transformOrigin: "25px 62px" }}
+            animate={{ rotate: [6, -18, 20, -18, 6] }}
+            transition={baseT}
           >
-            <rect x={14} y={58} width={13} height={22} rx={6.5} fill="#1E1B4B" />
-            {/* left sleeve cuff */}
-            <rect x={13.5} y={73} width={14} height={5} rx={2.5} fill="#2D1B69" />
-            {/* left hand */}
-            <ellipse cx={21} cy={82} rx={6} ry={5} fill="#FDDBB8" />
-            <ellipse cx={20} cy={80} rx={2} ry={1.5} fill="#E8A87C" opacity={0.5} />
+            <rect x={10} y={62} width={15} height={26} rx={7.5} fill="url(#jk)" />
+            {/* Sleeve cuff */}
+            <rect x={9.5} y={80} width={16} height={5} rx={2.5} fill="#B01030" />
+            {/* Hand — clenched fist suggestion */}
+            <rect x={11} y={85} width={13} height={11} rx={5.5} fill="url(#sk)" />
+            {/* Knuckle lines */}
+            <line x1={13} y1={90} x2={22} y2={90} stroke="#D4956A" strokeWidth={0.8} opacity={0.5} />
+            {/* Hand tattoo (Sukuna's cursed mark) */}
+            <circle cx={17.5} cy={88} r={2.5} fill="#C41E3A" opacity={0.65} />
+            <path d="M17.5,85.5 L17.5,90.5 M15,88 L20,88" stroke="#8B0020" strokeWidth={0.8} opacity={0.8} />
           </motion.g>
 
-          {/* Right arm — pivot at right shoulder */}
+          {/* ── RIGHT ARM ── */}
           <motion.g
-            style={{ transformOrigin: "62px 58px" }}
-            animate={armR.animate}
-            transition={armR.transition}
+            style={{ transformOrigin: "75px 62px" }}
+            animate={{ rotate: [-6, 20, -18, 20, -6] }}
+            transition={baseT}
           >
-            <rect x={62} y={58} width={13} height={22} rx={6.5} fill="#1E1B4B" />
-            {/* right sleeve cuff */}
-            <rect x={61.5} y={73} width={14} height={5} rx={2.5} fill="#2D1B69" />
-            {/* right hand */}
-            <ellipse cx={68} cy={82} rx={6} ry={5} fill="#FDDBB8" />
-            <ellipse cx={67} cy={80} rx={2} ry={1.5} fill="#E8A87C" opacity={0.5} />
+            <rect x={75} y={62} width={15} height={26} rx={7.5} fill="url(#jk)" />
+            <rect x={74.5} y={80} width={16} height={5} rx={2.5} fill="#B01030" />
+            <rect x={76} y={85} width={13} height={11} rx={5.5} fill="url(#sk)" />
+            <line x1={78} y1={90} x2={87} y2={90} stroke="#D4956A" strokeWidth={0.8} opacity={0.5} />
+            <circle cx={82.5} cy={88} r={2.5} fill="#C41E3A" opacity={0.65} />
+            <path d="M82.5,85.5 L82.5,90.5 M80,88 L85,88" stroke="#8B0020" strokeWidth={0.8} opacity={0.8} />
           </motion.g>
 
-          {/* ══ NECK ══ */}
-          <rect x={39} y={48} width={11} height={9} rx={5.5} fill="#FDDBB8" />
+          {/* ── NECK ── */}
+          <rect x={43.5} y={49} width={13} height={10} rx={6.5} fill="url(#sk)" />
+          {/* Neck tattoo line */}
+          <line x1={50} y1={50} x2={50} y2={57} stroke="#C41E3A" strokeWidth={1.2} strokeLinecap="round" opacity={0.5} />
 
-          {/* ══ HAIR — back layer (behind head) ══ */}
-          <circle cx={44} cy={28} r={25} fill="#7C3AED" />
-          {/* Back hair strands */}
-          <ellipse cx={22} cy={38} rx={7} ry={14} fill="#7C3AED" transform="rotate(-12,22,38)" />
-          <ellipse cx={66} cy={38} rx={7} ry={14} fill="#7C3AED" transform="rotate(12,66,38)" />
+          {/* ══ HAIR — back layer ══ */}
+          {/* Large back circle */}
+          <circle cx={50} cy={28} r={27} fill="url(#hr)" />
+          {/* Back side hair hanging down */}
+          <ellipse cx={24} cy={48} rx={8} ry={18} fill="#991240" transform="rotate(-14,24,48)" />
+          <ellipse cx={76} cy={48} rx={8} ry={18} fill="#991240" transform="rotate(14,76,48)" />
 
-          {/* ══ CAT EARS ══ */}
-          {/* Left ear outer */}
-          <polygon points="19,19 25,3 33,19" fill="#6D28D9" />
-          {/* Left ear inner */}
-          <polygon points="21.5,17 25,7 30,17" fill="#C4B5FD" />
-          {/* Right ear outer */}
-          <polygon points="55,19 63,3 69,19" fill="#6D28D9" />
-          {/* Right ear inner */}
-          <polygon points="58,17 63,7 66.5,17" fill="#C4B5FD" />
+          {/* ── HAIR SPIKES (5 prominent spikes — wild Sukuna style) ── */}
+          {/* Spike 1 — far left, angled outward */}
+          <polygon points="22,26 11,4 29,22" fill="#E0196A" />
+          {/* Spike 2 — left */}
+          <polygon points="31,17 27,-2 41,14" fill="#FF3D8A" />
+          {/* Spike 3 — center (tallest) */}
+          <polygon points="44,11 50,-8 56,11" fill="#FF5FAE" />
+          {/* Spike 4 — right */}
+          <polygon points="59,17 73,-2 69,14" fill="#FF3D8A" />
+          {/* Spike 5 — far right */}
+          <polygon points="71,26 89,4 78,22" fill="#E0196A" />
+          {/* Spike highlight overlay (lighter on leading edge) */}
+          <polygon points="44,11 50,-8 50,11" fill="rgba(255,180,210,0.30)" />
 
-          {/* ══ HEAD ══ */}
-          <circle cx={44} cy={28} r={22} fill="#FDDBB8" />
-          {/* Cheek shading */}
-          <ellipse cx={26} cy={35} rx={7} ry={4} fill="rgba(255,150,150,0.32)" />
-          <ellipse cx={62} cy={35} rx={7} ry={4} fill="rgba(255,150,150,0.32)" />
+          {/* ── HEAD ── */}
+          <circle cx={50} cy={30} r={22} fill="url(#sk)" />
 
-          {/* ══ HAIR FRONT (fringe) ══ */}
-          <ellipse cx={29} cy={15} rx={8} ry={11} fill="#7C3AED" transform="rotate(-18,29,15)" />
-          <ellipse cx={38} cy={11} rx={7} ry={11} fill="#7C3AED" transform="rotate(-5,38,11)" />
-          <ellipse cx={47} cy={10} rx={7} ry={11} fill="#7C3AED" transform="rotate(5,47,10)" />
-          <ellipse cx={57} cy={14} rx={7} ry={11} fill="#7C3AED" transform="rotate(18,57,14)" />
-          {/* Hair highlight */}
-          <ellipse cx={52} cy={14} rx={5} ry={3} fill="rgba(196,181,253,0.35)" transform="rotate(30,52,14)" />
+          {/* ── HAIR FRONT FRINGE (wild strands over forehead) ── */}
+          <path d="M33,20 Q28,12 30,6 Q35,10 36,18 Z" fill="#E0196A" />
+          <path d="M39,14 Q37,5 42,3 Q45,9 43,16 Z" fill="#C41E3A" />
+          <path d="M47,12 Q46,3 50,2 Q53,8 52,14 Z" fill="#FF5FAE" />
+          <path d="M54,13 Q57,4 62,5 Q61,11 58,16 Z" fill="#C41E3A" />
+          <path d="M63,20 Q70,12 70,6 Q65,10 63,18 Z" fill="#E0196A" />
+          {/* Fringe highlight */}
+          <path d="M47,12 Q50,5 53,12 Q51,9 50,9 Q49,9 47,12 Z" fill="rgba(255,180,210,0.40)" />
 
-          {/* ══ EYES ══ */}
-          {/* Left eye */}
-          <ellipse cx={34} cy={29} rx={7} ry={7.5} fill="white" />
-          <ellipse cx={34} cy={29.5} rx={6} ry={6.5} fill="#1a0040" />
-          <ellipse cx={34} cy={28.5} rx={4} ry={4.5} fill="#8B5CF6" />
-          {/* iris shimmer */}
-          <ellipse cx={34} cy={27} rx={2.5} ry={1.5} fill="#A78BFA" opacity={0.6} />
-          {/* shine spots */}
-          <circle cx={31.5} cy={26.5} r={1.8} fill="white" />
-          <circle cx={36} cy={31} r={0.9} fill="white" opacity={0.7} />
-          {/* upper eyelid shadow */}
-          <ellipse cx={34} cy={23.5} rx={6.5} ry={2} fill="rgba(30,27,75,0.5)" />
+          {/* ══ FACE ══ */}
+
+          {/* ── SUKUNA TATTOO MARKS — most distinctive feature ── */}
+          {/* Under LEFT eye — two curved lines */}
+          <path d="M31,37 Q27,42 28,47" stroke="#1a0530" strokeWidth={2.2} fill="none" strokeLinecap="round" />
+          <path d="M34,38 Q31,43 32,48" stroke="#1a0530" strokeWidth={1.6} fill="none" strokeLinecap="round" />
+          {/* Under RIGHT eye */}
+          <path d="M69,37 Q73,42 72,47" stroke="#1a0530" strokeWidth={2.2} fill="none" strokeLinecap="round" />
+          <path d="M66,38 Q69,43 68,48" stroke="#1a0530" strokeWidth={1.6} fill="none" strokeLinecap="round" />
+          {/* Cheek side marks */}
+          <path d="M29,33 L25,32" stroke="#1a0530" strokeWidth={1.6} strokeLinecap="round" />
+          <path d="M71,33 L75,32" stroke="#1a0530" strokeWidth={1.6} strokeLinecap="round" />
+          {/* Forehead marks (3 lines) */}
+          <line x1={46} y1={18} x2={44} y2={13} stroke="#1a0530" strokeWidth={1.4} strokeLinecap="round" opacity={0.7} />
+          <line x1={50} y1={17} x2={50} y2={12} stroke="#1a0530" strokeWidth={1.4} strokeLinecap="round" opacity={0.7} />
+          <line x1={54} y1={18} x2={56} y2={13} stroke="#1a0530" strokeWidth={1.4} strokeLinecap="round" opacity={0.7} />
+          {/* Chin mark */}
+          <path d="M48,49 Q50,52 52,49" stroke="#1a0530" strokeWidth={1.3} fill="none" strokeLinecap="round" opacity={0.6} />
+
+          {/* ── EYES ── */}
+          {/* Left eye white */}
+          <ellipse cx={37} cy={29} rx={8} ry={7.5} fill="white" />
+          {/* Upper lid shadow */}
+          <path d="M29,26 Q37,19 45,26" fill="#1a1828" opacity={0.25} />
+          {/* Red iris */}
+          <ellipse cx={37} cy={29} rx={6} ry={6} fill="url(#ey)" />
+          {/* Slit pupil — Sukuna's curse mark */}
+          <rect x={36} y={23.5} width={2.2} height={11} rx={1.1} fill="#0a0008" />
+          {/* Iris ring detail */}
+          <ellipse cx={37} cy={29} rx={5.5} ry={5.5} fill="none" stroke="rgba(255,80,80,0.4)" strokeWidth={0.8} />
+          {/* Eye highlights */}
+          <circle cx={34} cy={26} r={2} fill="rgba(255,255,255,0.88)" />
+          <circle cx={39} cy={32} r={0.9} fill="rgba(255,255,255,0.55)" />
+          {/* Lower eyelid line */}
+          <path d="M30,33 Q37,36 44,33" stroke="#C47060" strokeWidth={0.8} fill="none" opacity={0.5} />
 
           {/* Right eye */}
-          <ellipse cx={54} cy={29} rx={7} ry={7.5} fill="white" />
-          <ellipse cx={54} cy={29.5} rx={6} ry={6.5} fill="#1a0040" />
-          <ellipse cx={54} cy={28.5} rx={4} ry={4.5} fill="#8B5CF6" />
-          <ellipse cx={54} cy={27} rx={2.5} ry={1.5} fill="#A78BFA" opacity={0.6} />
-          <circle cx={51.5} cy={26.5} r={1.8} fill="white" />
-          <circle cx={56} cy={31} r={0.9} fill="white" opacity={0.7} />
-          <ellipse cx={54} cy={23.5} rx={6.5} ry={2} fill="rgba(30,27,75,0.5)" />
+          <ellipse cx={63} cy={29} rx={8} ry={7.5} fill="white" />
+          <path d="M55,26 Q63,19 71,26" fill="#1a1828" opacity={0.25} />
+          <ellipse cx={63} cy={29} rx={6} ry={6} fill="url(#ey)" />
+          <rect x={61.8} y={23.5} width={2.2} height={11} rx={1.1} fill="#0a0008" />
+          <ellipse cx={63} cy={29} rx={5.5} ry={5.5} fill="none" stroke="rgba(255,80,80,0.4)" strokeWidth={0.8} />
+          <circle cx={60} cy={26} r={2} fill="rgba(255,255,255,0.88)" />
+          <circle cx={65} cy={32} r={0.9} fill="rgba(255,255,255,0.55)" />
+          <path d="M56,33 Q63,36 70,33" stroke="#C47060" strokeWidth={0.8} fill="none" opacity={0.5} />
 
-          {/* ══ EYELASHES ══ */}
-          {/* Left eye */}
-          <line x1={27} y1={23.5} x2={25} y2={20.5} stroke="#1a0040" strokeWidth={1.3} strokeLinecap="round" />
-          <line x1={28.5} y1={22.5} x2={27.5} y2={19} stroke="#1a0040" strokeWidth={1.3} strokeLinecap="round" />
-          <line x1={40.5} y1={23} x2={42} y2={20} stroke="#1a0040" strokeWidth={1.3} strokeLinecap="round" />
-          {/* Right eye */}
-          <line x1={47.5} y1={23} x2={46} y2={20} stroke="#1a0040" strokeWidth={1.3} strokeLinecap="round" />
-          <line x1={60.5} y1={23.5} x2={62.5} y2={20.5} stroke="#1a0040" strokeWidth={1.3} strokeLinecap="round" />
-          <line x1={59} y1={22.5} x2={60} y2={19} stroke="#1a0040" strokeWidth={1.3} strokeLinecap="round" />
+          {/* Eyelashes — sharp, angular (Sukuna's look) */}
+          {/* Left eye top lashes */}
+          <path d="M30,24 L27,20" stroke="#1a1828" strokeWidth={1.5} strokeLinecap="round" />
+          <path d="M32,22.5 L30,18.5" stroke="#1a1828" strokeWidth={1.4} strokeLinecap="round" />
+          <path d="M37,21.5 L37,17.5" stroke="#1a1828" strokeWidth={1.3} strokeLinecap="round" />
+          <path d="M42,22.5 L44.5,19" stroke="#1a1828" strokeWidth={1.4} strokeLinecap="round" />
+          <path d="M44,24 L47,20.5" stroke="#1a1828" strokeWidth={1.5} strokeLinecap="round" />
+          {/* Right eye top lashes */}
+          <path d="M56,24 L53,20.5" stroke="#1a1828" strokeWidth={1.5} strokeLinecap="round" />
+          <path d="M58,22.5 L55.5,19" stroke="#1a1828" strokeWidth={1.4} strokeLinecap="round" />
+          <path d="M63,21.5 L63,17.5" stroke="#1a1828" strokeWidth={1.3} strokeLinecap="round" />
+          <path d="M68,22.5 L70,18.5" stroke="#1a1828" strokeWidth={1.4} strokeLinecap="round" />
+          <path d="M70,24 L73,20" stroke="#1a1828" strokeWidth={1.5} strokeLinecap="round" />
 
-          {/* ══ NOSE ══ */}
-          <ellipse cx={44} cy={35} rx={1.8} ry={1.2} fill="#E0946A" />
+          {/* ── NOSE ── */}
+          <ellipse cx={50} cy={37} rx={2} ry={1.4} fill="#D4906A" />
 
-          {/* ══ MOUTH ══ */}
-          <path d="M38.5,40 Q44,45 49.5,40" stroke="#C47B55" strokeWidth={1.8} fill="none" strokeLinecap="round" />
-          {/* small teeth / inside mouth hint */}
-          <path d="M40,41.5 Q44,44 48,41.5" fill="rgba(255,255,255,0.5)" stroke="none" />
-
-          {/* ══ HAIR clip / accessory ══ */}
-          <ellipse cx={57} cy={22} rx={3} ry={2} fill="#F472B6" opacity={0.9} />
-          <ellipse cx={57} cy={22} rx={1.5} ry={1} fill="#FDE68A" opacity={0.9} />
+          {/* ── MOUTH — Sukuna's signature cocky smirk ── */}
+          {/* Main smirk: raised on left, drops on right */}
+          <path d="M39,44 Q44,41 50,43 Q56,45 60,42" stroke="#8B3010" strokeWidth={2} fill="none" strokeLinecap="round" />
+          {/* Subtle upper lip */}
+          <path d="M41,43.5 Q50,40 59,42.5" stroke="#B04020" strokeWidth={0.9} fill="none" strokeLinecap="round" opacity={0.45} />
+          {/* Small fang hint on left corner */}
+          <path d="M40,44 L39,47 L42,46" fill="white" stroke="#ccc" strokeWidth={0.5} />
 
         </motion.g>
       </svg>
