@@ -3704,17 +3704,14 @@ async function getKawaiiAnimeSources(
     };
     if (!data.sources?.length) return [];
 
-    // Prefer Arabic subtitle, fall back to English, then first available
+    // فقط الترجمة العربية — لا نستخدم الإنجليزية لأن مقاطع kawaii تحتوي
+    // على ترجمة إنجليزية مدمجة في الـ HLS stream، تمريرها يُظهر ترجمتين
     const findSub = (tag: string) => data.subtitles?.find(s =>
       (s.lang || s.label || "").toLowerCase().includes(tag)
     );
-    const subEntry = findSub("arabic") || findSub("arab") || findSub("ar")
-                  || findSub("english") || findSub("eng")
-                  || data.subtitles?.[0];
-    const subtitleUrl  = subEntry?.url || undefined;
-    const subLangLabel = subEntry
-      ? (/(arabic|arab|\bar\b)/i.test(subEntry.lang || subEntry.label || "") ? "عربي" : "إنجليزي")
-      : "إنجليزي";
+    const subEntry = findSub("arabic") || findSub("arab") || findSub("ar");
+    const subtitleUrl = subEntry?.url || undefined;
+    const subLangLabel = subEntry ? "عربي" : null;
 
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
@@ -3725,7 +3722,7 @@ async function getKawaiiAnimeSources(
         ? src.url   // raw CDN URL — hls.js يشغّله مباشرة
         : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
       return {
-        name: `كواي أنمي · ${src.quality || "1080p"} · ${subLangLabel}`,
+        name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: src.url,
         quality: src.quality || "1080p",
         qualityRank: 20,
