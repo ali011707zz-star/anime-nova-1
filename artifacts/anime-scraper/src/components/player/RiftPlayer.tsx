@@ -10,7 +10,7 @@ import {
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
   RotateCcw, RotateCw, Sun, Lock, Unlock,
   Scan, ScanLine, Camera, X, Zap,
-  ChevronDown, Timer,
+  ChevronDown,
 } from "lucide-react";
 
 /* ─────────────────────────────────────── helpers ─── */
@@ -199,52 +199,6 @@ export default function RiftPlayer({
   const [autoPlayCountdown, setAutoPlayCountdown] = useState(0);
   const [showUnlockBtn,   setShowUnlockBtn]   = useState(false);
   const unlockBtnHideRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [showSkipMenu,    setShowSkipMenu]    = useState(false);
-  const [localSkipIntro,  setLocalSkipIntro]  = useState<{start:number;end:number}|undefined>(undefined);
-  const [localSkipOutro,  setLocalSkipOutro]  = useState<{start:number;end:number}|undefined>(undefined);
-
-  /* ── custom skip times: load from localStorage per anime ── */
-  const customSkipKey = animeId ? `skip-custom-${animeId}` : null;
-  useEffect(() => {
-    setLocalSkipIntro(undefined); setLocalSkipOutro(undefined);
-    if (!customSkipKey) return;
-    try {
-      const raw = localStorage.getItem(customSkipKey);
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (d.op) setLocalSkipIntro(d.op);
-        if (d.ed) setLocalSkipOutro(d.ed);
-      }
-    } catch {}
-  }, [customSkipKey]);
-
-  const saveCustomSkip = useCallback((type: "op"|"ed", time: number) => {
-    if (!customSkipKey) return;
-    const cur = (() => { try { return JSON.parse(localStorage.getItem(customSkipKey)||"{}"); } catch { return {}; } })();
-    if (type === "op") {
-      const s = { start: 0, end: Math.max(1, Math.floor(time)) };
-      setLocalSkipIntro(s);
-      localStorage.setItem(customSkipKey, JSON.stringify({ ...cur, op: s }));
-    } else {
-      const s = { start: Math.floor(time), end: Math.ceil(duration) || Math.floor(time) + 90 };
-      setLocalSkipOutro(s);
-      localStorage.setItem(customSkipKey, JSON.stringify({ ...cur, ed: s }));
-    }
-    setShowSkipMenu(false);
-  }, [customSkipKey, duration]);
-
-  const clearCustomSkip = useCallback(() => {
-    if (!customSkipKey) return;
-    setLocalSkipIntro(undefined); setLocalSkipOutro(undefined);
-    localStorage.removeItem(customSkipKey);
-    setShowSkipMenu(false);
-  }, [customSkipKey]);
-
-  /* ── auto-close skip menu when controls hide ── */
-  useEffect(() => {
-    if (!showCtrl) { setShowSkipMenu(false); setShowSubMenu(false); }
-  }, [showCtrl]);
-
   /* ── auto-close sub menu when controls hide ── */
   useEffect(() => {
     if (!showCtrl) setShowSubMenu(false);
@@ -837,12 +791,19 @@ export default function RiftPlayer({
   const pct    = duration > 0 ? (currentTime / duration) * 100 : 0;
   const bufPct = duration > 0 ? (buffered   / duration) * 100 : 0;
 
-  /* ── Skip intro/outro visibility — custom times override AniSkip ── */
+  /* ── Skip intro/outro visibility — real AniSkip data only ── */
   const SKIP_LEAD = 10;
-  const effectiveSkipIntro = localSkipIntro || skipIntro;
-  const effectiveSkipOutro = localSkipOutro || skipOutro;
-  const showSkipIntro = !!effectiveSkipIntro && currentTime < effectiveSkipIntro.end;
-  const showSkipOutro = !!effectiveSkipOutro && currentTime >= Math.max(0, effectiveSkipOutro.start - SKIP_LEAD) && currentTime <= effectiveSkipOutro.end;
+  const effectiveSkipIntro = skipIntro;
+  const effectiveSkipOutro = skipOutro;
+  const inIntroRange  = !!effectiveSkipIntro && currentTime >= Math.max(0, effectiveSkipIntro.start - SKIP_LEAD) && currentTime < effectiveSkipIntro.end;
+  const inOutroRange  = !!effectiveSkipOutro && currentTime >= Math.max(0, effectiveSkipOutro.start - SKIP_LEAD) && currentTime <= effectiveSkipOutro.end;
+  const hasSkipData   = !!(effectiveSkipIntro || effectiveSkipOutro) && duration > 0;
+  const activeSkipLabel = inIntroRange ? "تخطي المقدمة" : inOutroRange ? "تخطي النهاية" : null;
+  const activeSkipAction = inIntroRange
+    ? () => { seekFrac(effectiveSkipIntro!.end / duration); showControls(); }
+    : inOutroRange
+    ? () => { if (onNextEp) onNextEp(); else seekFrac(effectiveSkipOutro!.end / duration); showControls(); }
+    : null;
 
   /* ── portrait style ── */
   const portraitStyle: React.CSSProperties = isPortrait ? {
@@ -1028,72 +989,7 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── Skip intro/outro — visible when in range OR when controls showing with skip data ── */}
-        <AnimatePresence>
-          {!error && !isLocked && (showSkipIntro || showSkipOutro || (showCtrl && (effectiveSkipIntro || effectiveSkipOutro))) && (
-            <motion.div
-              key="skip-btns"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              transition={{ duration: 0.18 }}
-              className="absolute pointer-events-auto z-[55] flex justify-end px-5"
-              style={{ bottom: 105, left: 0, right: 0 }}
-              dir="rtl"
-            >
-              {showSkipIntro && (() => {
-                const beforeIntro = effectiveSkipIntro ? currentTime < effectiveSkipIntro.start : false;
-                const rem = effectiveSkipIntro
-                  ? (beforeIntro
-                    ? Math.ceil(effectiveSkipIntro.start - currentTime)
-                    : Math.max(0, Math.ceil(effectiveSkipIntro.end - currentTime)))
-                  : 0;
-                return (
-                  <button
-                    onPointerDown={e => { e.stopPropagation(); const skipTo = effectiveSkipIntro ? effectiveSkipIntro.end : 148; seekFrac(skipTo / duration); showControls(); }}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                    style={{ background: beforeIntro ? "rgba(6,182,212,0.65)" : "rgba(6,182,212,0.88)", border: "1px solid rgba(34,211,238,0.55)", color: "white", boxShadow: "0 4px 20px rgba(6,182,212,0.45)", touchAction: "manipulation" }}>
-                    <span>⏭ تخطي المقدمة</span>
-                    {rem > 0 && (
-                      <span className="font-mono text-[10px] opacity-80 bg-white/15 px-1.5 py-0.5 rounded-lg">
-                        {beforeIntro ? `بعد ${rem}ث` : `${rem}ث`}
-                      </span>
-                    )}
-                  </button>
-                );
-              })()}
-              {showSkipOutro && !showSkipIntro && (
-                <button
-                  onPointerDown={e => { e.stopPropagation(); onNextEp?.(); }}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[12px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                  style={{ background: "rgba(249,115,22,0.88)", border: "1px solid rgba(251,146,60,0.55)", color: "white", boxShadow: "0 4px 16px rgba(249,115,22,0.40)", touchAction: "manipulation" }}>
-                  ⏭ الحلقة التالية
-                </button>
-              )}
-              {/* Ghost buttons when controls visible but not in range */}
-              {!showSkipIntro && !showSkipOutro && (
-                <div className="flex items-center gap-2">
-                  {effectiveSkipIntro && duration > 0 && (
-                    <button
-                      onPointerDown={e => { e.stopPropagation(); seekFrac(effectiveSkipIntro!.end / duration); showControls(); }}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                      style={{ background: "rgba(6,182,212,0.12)", border: "1px solid rgba(34,211,238,0.28)", color: "rgba(103,232,249,0.80)", touchAction: "manipulation" }}>
-                      ⏭ تخطي المقدمة
-                    </button>
-                  )}
-                  {effectiveSkipOutro && duration > 0 && (
-                    <button
-                      onPointerDown={e => { e.stopPropagation(); onNextEp ? onNextEp() : seekFrac(effectiveSkipOutro!.end / duration); showControls(); }}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                      style={{ background: "rgba(249,115,22,0.12)", border: "1px solid rgba(251,146,60,0.28)", color: "rgba(253,186,116,0.80)", touchAction: "manipulation" }}>
-                      ⏭ تخطي النهاية
-                    </button>
-                  )}
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* (skip button moved to progress bar row — see below) */}
 
         {/* ── long press 2× ── */}
         <AnimatePresence>
@@ -1279,15 +1175,15 @@ export default function RiftPlayer({
                         الحلقة {ep}
                       </span>
                     </div>
-                    {/* Row 4: Arabic episode title */}
+                    {/* Row 4: Arabic episode title — big and visible */}
                     {epTitle && (
-                      <div className="flex items-center gap-1 mt-[3px] overflow-hidden">
-                        <span className="shrink-0 font-['Cairo'] font-bold"
-                          style={{ fontSize: 10, color: "rgba(167,139,250,0.55)" }}>
-                          عنوان •
+                      <div className="flex items-center gap-1.5 mt-[5px] overflow-hidden">
+                        <span className="shrink-0 px-1.5 py-[1px] rounded text-[9px] font-black font-['Cairo'] tracking-wide"
+                          style={{ background: "rgba(250,204,21,0.15)", border: "1px solid rgba(250,204,21,0.30)", color: "#fde047" }}>
+                          EP
                         </span>
-                        <span className="text-[11px] font-['Cairo'] truncate leading-tight"
-                          style={{ color: "rgba(233,221,255,0.80)", fontWeight: 500 }}>
+                        <span className="font-['Cairo'] font-bold truncate leading-tight"
+                          style={{ fontSize: 14, color: "rgba(255,255,255,0.95)", textShadow: "0 1px 8px rgba(0,0,0,0.8)" }}>
                           {epTitle}
                         </span>
                       </div>
@@ -1389,13 +1285,45 @@ export default function RiftPlayer({
                 onTouchStart={e => e.stopPropagation()}
                 onTouchEnd={e => e.stopPropagation()}
               >
-                {/* Skip spacer placeholder (skip buttons are rendered outside showCtrl) */}
-
                 {/* ── Progress bar ── */}
                 <div className="px-5 pt-1 pb-1">
+                  {/* Time row + skip button */}
                   <div className="flex items-center justify-between mb-1 px-0.5" dir="ltr">
-                    <span className="text-white/70 text-[12px] font-bold font-mono">{fmtTime(currentTime)}</span>
-                    <span className="text-white/35 text-[12px] font-mono">{fmtTime(duration)}</span>
+                    <span className="text-white/70 text-[12px] font-bold font-mono">{fmtTime(currentTime)} / {fmtTime(duration)}</span>
+                    {/* ── Skip button — right side, above progress bar ── */}
+                    {hasSkipData && (
+                      <AnimatePresence mode="wait">
+                        <motion.button
+                          key={activeSkipLabel ?? "ghost"}
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.9 }}
+                          transition={{ duration: 0.15 }}
+                          onPointerDown={e => {
+                            e.stopPropagation();
+                            if (activeSkipAction) activeSkipAction();
+                            else if (effectiveSkipIntro && duration > 0) { seekFrac(effectiveSkipIntro.end / duration); showControls(); }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-xl font-black font-['Cairo'] active:scale-90 transition-transform"
+                          style={activeSkipLabel ? {
+                            background: "rgba(250,204,21,0.88)",
+                            border: "1px solid rgba(253,224,71,0.70)",
+                            color: "#1a1200",
+                            boxShadow: "0 0 14px rgba(250,204,21,0.55)",
+                            fontSize: 11,
+                            touchAction: "manipulation",
+                          } : {
+                            background: "rgba(250,204,21,0.10)",
+                            border: "1px solid rgba(250,204,21,0.22)",
+                            color: "rgba(253,224,71,0.55)",
+                            fontSize: 11,
+                            touchAction: "manipulation",
+                          }}>
+                          <ChevronDown className="w-3 h-3 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
+                          <span>{activeSkipLabel ?? "تخطي المقدمة"}</span>
+                        </motion.button>
+                      </AnimatePresence>
+                    )}
                   </div>
                   {/* 36px touch target — visual bar centered inside */}
                   <div
@@ -1444,9 +1372,7 @@ export default function RiftPlayer({
                           left: `${(effectiveSkipIntro.start / duration) * 100}%`,
                           width: `${Math.max(0.8, (effectiveSkipIntro.end - effectiveSkipIntro.start) / duration * 100)}%`,
                           height: prgHover ? 10 : 6,
-                          background: localSkipIntro
-                            ? "rgba(167,139,250,0.75)"
-                            : "rgba(250,204,21,0.80)",
+                          background: "rgba(250,204,21,0.85)",
                           borderRadius: 3,
                           zIndex: 9,
                         }} />
@@ -1454,20 +1380,16 @@ export default function RiftPlayer({
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipIntro.start / duration) * 100}%`,
                           width: 3, height: prgHover ? 22 : 16,
-                          background: localSkipIntro ? "#a78bfa" : "#facc15",
-                          boxShadow: localSkipIntro
-                            ? "0 0 6px rgba(167,139,250,1), 0 0 14px rgba(167,139,250,0.6)"
-                            : "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
+                          background: "#facc15",
+                          boxShadow: "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
                           zIndex: 11,
                         }} />
                         {/* Intro end tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipIntro.end / duration) * 100}%`,
                           width: 3, height: prgHover ? 22 : 16,
-                          background: localSkipIntro ? "#a78bfa" : "#facc15",
-                          boxShadow: localSkipIntro
-                            ? "0 0 6px rgba(167,139,250,1), 0 0 14px rgba(167,139,250,0.6)"
-                            : "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
+                          background: "#facc15",
+                          boxShadow: "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
                           zIndex: 11,
                         }} />
                         {/* Intro label above segment */}
@@ -1475,7 +1397,7 @@ export default function RiftPlayer({
                           <div className="absolute pointer-events-none" style={{
                             left: `${(effectiveSkipIntro.start / duration) * 100}%`,
                             bottom: 18,
-                            background: localSkipIntro ? "rgba(109,40,217,0.90)" : "rgba(161,130,0,0.90)",
+                            background: "rgba(161,130,0,0.90)",
                             color: "#fff",
                             fontSize: 9,
                             fontWeight: 900,
@@ -1495,9 +1417,7 @@ export default function RiftPlayer({
                           left: `${(effectiveSkipOutro.start / duration) * 100}%`,
                           width: `${Math.max(0.8, (effectiveSkipOutro.end - effectiveSkipOutro.start) / duration * 100)}%`,
                           height: prgHover ? 10 : 6,
-                          background: localSkipOutro
-                            ? "rgba(167,139,250,0.75)"
-                            : "rgba(251,146,60,0.80)",
+                          background: "rgba(250,204,21,0.85)",
                           borderRadius: 3,
                           zIndex: 9,
                         }} />
@@ -1505,20 +1425,16 @@ export default function RiftPlayer({
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipOutro.start / duration) * 100}%`,
                           width: 3, height: prgHover ? 22 : 16,
-                          background: localSkipOutro ? "#a78bfa" : "#fb923c",
-                          boxShadow: localSkipOutro
-                            ? "0 0 6px rgba(167,139,250,1), 0 0 14px rgba(167,139,250,0.6)"
-                            : "0 0 6px rgba(251,146,60,1), 0 0 14px rgba(251,146,60,0.6)",
+                          background: "#facc15",
+                          boxShadow: "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
                           zIndex: 11,
                         }} />
                         {/* Outro end tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipOutro.end / duration) * 100}%`,
                           width: 3, height: prgHover ? 22 : 16,
-                          background: localSkipOutro ? "#a78bfa" : "#fb923c",
-                          boxShadow: localSkipOutro
-                            ? "0 0 6px rgba(167,139,250,1), 0 0 14px rgba(167,139,250,0.6)"
-                            : "0 0 6px rgba(251,146,60,1), 0 0 14px rgba(251,146,60,0.6)",
+                          background: "#facc15",
+                          boxShadow: "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
                           zIndex: 11,
                         }} />
                         {/* Outro label above segment */}
@@ -1526,7 +1442,7 @@ export default function RiftPlayer({
                           <div className="absolute pointer-events-none" style={{
                             left: `${(effectiveSkipOutro.start / duration) * 100}%`,
                             bottom: 18,
-                            background: localSkipOutro ? "rgba(109,40,217,0.90)" : "rgba(154,52,18,0.90)",
+                            background: "rgba(161,130,0,0.90)",
                             color: "#fff",
                             fontSize: 9,
                             fontWeight: 900,
@@ -1608,24 +1524,6 @@ export default function RiftPlayer({
                       </AnimatePresence>
                     </div>
 
-                    {/* ── Persistent skip intro button (shows whenever skip data available) ── */}
-                    {effectiveSkipIntro && duration > 0 && (
-                      <button
-                        onPointerDown={e => { e.stopPropagation(); seekFrac(effectiveSkipIntro!.end / duration); showControls(); }}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] active:scale-90 transition-all"
-                        style={{ background: "rgba(6,182,212,0.16)", border: "1px solid rgba(6,182,212,0.40)", color: "rgba(103,232,249,0.92)", touchAction: "manipulation" }}>
-                        ⏭ مقدمة
-                      </button>
-                    )}
-                    {/* ── Persistent skip outro button ── */}
-                    {effectiveSkipOutro && duration > 0 && (
-                      <button
-                        onPointerDown={e => { e.stopPropagation(); onNextEp ? onNextEp() : seekFrac(effectiveSkipOutro!.end / duration); showControls(); }}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] active:scale-90 transition-all"
-                        style={{ background: "rgba(249,115,22,0.16)", border: "1px solid rgba(249,115,22,0.40)", color: "rgba(253,186,116,0.92)", touchAction: "manipulation" }}>
-                        ⏭ نهاية
-                      </button>
-                    )}
                   </div>
 
                   {/* Center: +10ث · play/pause · -10ث  (RTL: تقدم على اليسار، رجوع على اليمين) */}
