@@ -113,3 +113,5 @@ packages = ["openssl", "postgresql"]
 PORT = "5000"
 BASE_PATH = "/"
 SMTP_USER = "lya482569@gmail.com"
+NODE_ENV = "production"
+CF_PROXY_PORT = "8000"
