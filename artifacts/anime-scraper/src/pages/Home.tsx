@@ -221,12 +221,12 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  /* Load today's airing episodes (last 36h → next 4h) + verify Arabic availability */
+  /* Load today's airing episodes (last 72h → next 12h) + verify Arabic availability */
   useEffect(() => {
     if (_cachedTodayEps) return; // already cached — no re-fetch needed
     const now = Math.floor(Date.now() / 1000);
-    const gt  = now - 36 * 3600;
-    const lt  = now + 4  * 3600;
+    const gt  = now - 72 * 3600;   // آخر 3 أيام
+    const lt  = now + 12 * 3600;   // 12 ساعة قادمة
     setTodayChecking(true);
     fetch("https://graphql.anilist.co", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -255,13 +255,18 @@ export default function Home() {
             const english = (s.media?.title?.english || "").toLowerCase().trim();
             return availSet.has(romaji) || availSet.has(english);
           });
-          _cachedTodayEps = filtered;
-          setTodayEps(filtered);
+          // إذا لم يُرجع التحقق شيئاً — استخدم الأنمي الأكثر شعبية
+          const finalList = filtered.length >= 3 ? filtered
+            : arr.sort((a: any, b: any) => (b.media?.popularity ?? 0) - (a.media?.popularity ?? 0)).slice(0, 15);
+          _cachedTodayEps = finalList;
+          setTodayEps(finalList);
         } catch {
-          // عند فشل التحقق: أظهر الأنمي الأكثر شهرة فقط (تصفية بديلة)
-          const filtered = arr.filter((s: any) => (s.media?.popularity ?? 0) >= 2000);
-          _cachedTodayEps = filtered;
-          setTodayEps(filtered);
+          // عند فشل التحقق: أظهر الأنمي بحسب الشعبية (حد أدنى 500)
+          const byPop = arr.filter((s: any) => (s.media?.popularity ?? 0) >= 500);
+          const fallback = byPop.length >= 3 ? byPop
+            : arr.sort((a: any, b: any) => (b.media?.popularity ?? 0) - (a.media?.popularity ?? 0)).slice(0, 15);
+          _cachedTodayEps = fallback;
+          setTodayEps(fallback);
         }
         setTodayChecking(false);
       })

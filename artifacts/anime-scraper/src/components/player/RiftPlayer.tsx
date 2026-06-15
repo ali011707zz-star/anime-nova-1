@@ -387,35 +387,35 @@ export default function RiftPlayer({
         enableWorker: true,
         lowLatencyMode: false,
         /* ── Buffer: بداية سريعة ثم تخزين مسبق كافٍ للاستقرار ── */
-        maxBufferLength: 30,          // يبدأ بسرعة (30ث) ويزداد تلقائياً
-        maxMaxBufferLength: 120,      // يسمح بـ 2 دقيقة مخزناً للاستقرار
-        backBufferLength: 20,
-        maxBufferSize: 80 * 1024 * 1024,
-        maxBufferHole: 1.0,           // يتحمل فجوة 1ث قبل التوقف
+        maxBufferLength: 60,          // تخزين 1 دقيقة — يقلل وقت التوقف
+        maxMaxBufferLength: 300,      // 5 دقائق حد أقصى حين السرعة كافية
+        backBufferLength: 60,         // يحتفظ بـ 60ث سابقة للرجوع السلس
+        maxBufferSize: 160 * 1024 * 1024, // 160MB حد للذاكرة
+        maxBufferHole: 1.5,           // يتحمل فجوة 1.5ث قبل التوقف
         maxFragLookUpTolerance: 0.6,
         startFragPrefetch: true,
         progressive: true,
         /* ── يبدأ بأقل جودة (0) للتشغيل الفوري ثم يرفع تلقائياً ── */
         startLevel: 0,
-        abrEwmaDefaultEstimate: 1_500_000, // 1.5Mbps تقدير محافظ
-        abrBandWidthFactor: 0.85,
-        abrBandWidthUpFactor: 0.75,
+        abrEwmaDefaultEstimate: 2_000_000, // 2Mbps تقدير أكثر واقعية
+        abrBandWidthFactor: 0.92,
+        abrBandWidthUpFactor: 0.82,
         testBandwidth: false,
         capLevelToPlayerSize: true,   // لا ترفع الجودة أعلى من دقة الشاشة
-        /* ── إعادة المحاولة: تأخير كافٍ لإتاحة فرصة للـ CDN ── */
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 1500,
-        fragLoadingMaxRetryTimeout: 30000,
-        manifestLoadingMaxRetry: 3,
-        manifestLoadingRetryDelay: 1000,
-        levelLoadingMaxRetry: 3,
-        levelLoadingRetryDelay: 1000,
-        /* ── مراقبة أقل عدوانية للـ buffer stall ── */
-        highBufferWatchdogPeriod: 3,
-        nudgeOffset: 0.3,
-        nudgeMaxRetry: 10,
-        maxStarvationDelay: 4,
-        maxLoadingDelay: 4,
+        /* ── إعادة المحاولة: صبر أطول يمنع الانقطاع بسبب CDN بطيء ── */
+        fragLoadingMaxRetry: 10,
+        fragLoadingRetryDelay: 2000,
+        fragLoadingMaxRetryTimeout: 45000,
+        manifestLoadingMaxRetry: 5,
+        manifestLoadingRetryDelay: 1500,
+        levelLoadingMaxRetry: 5,
+        levelLoadingRetryDelay: 1500,
+        /* ── مراقبة buffer stall: تسمح بوقت استرداد أطول ── */
+        highBufferWatchdogPeriod: 5,
+        nudgeOffset: 0.5,
+        nudgeMaxRetry: 20,
+        maxStarvationDelay: 8,
+        maxLoadingDelay: 8,
         enableCEA708Captions: false,
         renderTextTracksNatively: false,
         xhrSetup: (xhr: XMLHttpRequest) => {

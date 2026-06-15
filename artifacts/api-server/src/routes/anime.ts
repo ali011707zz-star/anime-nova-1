@@ -3254,7 +3254,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             name: "فايل مون · 1080p",
             url: filemoonUrl,
             quality: "FHD",
-            qualityRank: 15,
+            qualityRank: 26,
             site: "animeify",
             directUrl: proxyUrl,
             directType: "hls",
@@ -3265,9 +3265,9 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
     // ── MediaFire MP4 (FRFhdQ=1080p, FRLink=720p, FRLowQ=480p) → مشغّل داخلي مباشر ──
     const mfSlots = [
-      { key: "FRFhdQ", label: "ميديافاير · FHD", quality: "FHD", qualityRank: 14 },
-      { key: "FRLink",  label: "ميديافاير · HD",  quality: "HD",  qualityRank: 13 },
-      { key: "FRLowQ", label: "ميديافاير · SD",  quality: "SD",  qualityRank: 5  },
+      { key: "FRFhdQ", label: "ميديافاير · FHD", quality: "FHD", qualityRank: 25 },
+      { key: "FRLink",  label: "ميديافاير · HD",  quality: "HD",  qualityRank: 24 },
+      { key: "FRLowQ", label: "ميديافاير · SD",  quality: "SD",  qualityRank: 22  },
     ] as const;
 
     await Promise.all(mfSlots.map(async ({ key, label, quality, qualityRank }) => {
@@ -3305,7 +3305,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             name: "سيندفيد · HD",
             url: sendvidUrl,
             quality: "HD",
-            qualityRank: 9,
+            qualityRank: 23,
             site: "animeify",
             directUrl: proxyUrl,
             directType: "mp4",
@@ -5617,7 +5617,7 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
         const q = src.quality || "HD";
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
         const subUrl = araSub?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araSub.url)}&from=ar&to=ar` : undefined;
-        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 14, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
+        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 19, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
       }
     } catch { /* silent per server */ }
   }));

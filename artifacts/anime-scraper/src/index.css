@@ -76,30 +76,30 @@
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
 
-  --background: 240 10% 4%;
-  --foreground: 0 0% 100%;
-  --border: 240 6% 16%;
-  --card: 240 10% 6%;
-  --card-foreground: 0 0% 100%;
-  --card-border: 240 6% 16%;
-  --sidebar: 240 10% 4%;
-  --sidebar-foreground: 0 0% 100%;
-  --sidebar-border: 240 6% 16%;
-  --sidebar-primary: 258 91% 66%;
+  --background: 248 18% 7%;
+  --foreground: 0 0% 91%;
+  --border: 245 8% 18%;
+  --card: 248 18% 9%;
+  --card-foreground: 0 0% 91%;
+  --card-border: 245 8% 18%;
+  --sidebar: 248 18% 7%;
+  --sidebar-foreground: 0 0% 91%;
+  --sidebar-border: 245 8% 18%;
+  --sidebar-primary: 258 65% 60%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 258 91% 66%;
+  --sidebar-accent: 258 65% 60%;
   --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: 258 91% 66%;
-  --popover: 240 10% 4%;
-  --popover-foreground: 0 0% 100%;
-  --popover-border: 240 6% 16%;
-  --primary: 258 91% 66%;
+  --sidebar-ring: 258 65% 60%;
+  --popover: 248 18% 7%;
+  --popover-foreground: 0 0% 91%;
+  --popover-border: 245 8% 18%;
+  --primary: 258 65% 60%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 240 10% 12%;
-  --secondary-foreground: 0 0% 100%;
-  --muted: 240 10% 12%;
-  --muted-foreground: 240 5% 65%;
-  --accent: 258 91% 66%;
+  --secondary: 248 14% 13%;
+  --secondary-foreground: 0 0% 91%;
+  --muted: 248 14% 13%;
+  --muted-foreground: 240 6% 60%;
+  --accent: 258 65% 60%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
@@ -158,38 +158,38 @@
 }
 
 .dark {
-  --button-outline: rgba(255,255,255, .10);
-  --badge-outline: rgba(255,255,255, .05);
+  --button-outline: rgba(255,255,255, .08);
+  --badge-outline: rgba(255,255,255, .04);
 
-  --opaque-button-border-intensity: 9;
+  --opaque-button-border-intensity: 7;
 
-  --elevate-1: rgba(255,255,255, .04);
-  --elevate-2: rgba(255,255,255, .09);
+  --elevate-1: rgba(255,255,255, .03);
+  --elevate-2: rgba(255,255,255, .07);
 
-  --background: 240 10% 4%;
-  --foreground: 0 0% 100%;
-  --border: 240 6% 16%;
-  --card: 240 10% 6%;
-  --card-foreground: 0 0% 100%;
-  --card-border: 240 6% 16%;
-  --sidebar: 240 10% 4%;
-  --sidebar-foreground: 0 0% 100%;
-  --sidebar-border: 240 6% 16%;
-  --sidebar-primary: 258 91% 66%;
+  --background: 248 18% 7%;
+  --foreground: 0 0% 91%;
+  --border: 245 8% 18%;
+  --card: 248 18% 9%;
+  --card-foreground: 0 0% 91%;
+  --card-border: 245 8% 18%;
+  --sidebar: 248 18% 7%;
+  --sidebar-foreground: 0 0% 91%;
+  --sidebar-border: 245 8% 18%;
+  --sidebar-primary: 258 65% 60%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 258 91% 66%;
+  --sidebar-accent: 258 65% 60%;
   --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: 258 91% 66%;
-  --popover: 240 10% 4%;
-  --popover-foreground: 0 0% 100%;
-  --popover-border: 240 6% 16%;
-  --primary: 258 91% 66%;
+  --sidebar-ring: 258 65% 60%;
+  --popover: 248 18% 7%;
+  --popover-foreground: 0 0% 91%;
+  --popover-border: 245 8% 18%;
+  --primary: 258 65% 60%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 240 10% 12%;
-  --secondary-foreground: 0 0% 100%;
-  --muted: 240 10% 12%;
-  --muted-foreground: 240 5% 65%;
-  --accent: 258 91% 66%;
+  --secondary: 248 14% 13%;
+  --secondary-foreground: 0 0% 91%;
+  --muted: 248 14% 13%;
+  --muted-foreground: 240 6% 60%;
+  --accent: 258 65% 60%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
@@ -224,8 +224,8 @@
 
 /* ── Theme system: CSS variable defaults ── */
 :root {
-  --bg-base: #09090B;
-  --bg-card: #111116;
+  --bg-base: #0D0C1A;
+  --bg-card: #131224;
 }
 
 /* Override hardcoded page backgrounds so themes actually apply */
