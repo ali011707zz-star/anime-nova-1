@@ -143,3 +143,46 @@ AJAX response: `<iframe src="https://share4max.com/iframe/D7WXqVhQY0rPt" ...>`
 - Arabic UI throughout (RTL, Cairo font)
 - Play ONLY in internal player — no external iframes ever
 - Filter non-working/dead servers automatically
+
+---
+
+## 🔄 إعادة الإعداد عند نقل المشروع لحساب Replit جديد
+
+إذا نقلت المشروع لحساب Replit آخر (Fork أو Import)، اتبع هذه الخطوات بالترتيب:
+
+### 1. أسرار البيئة (Secrets)
+افتح **Tools → Secrets** وأضف هذه المتغيرات يدوياً:
+
+| المتغير | المصدر | الاستخدام |
+|---|---|---|
+| `SUPABASE_URL` | Supabase → Project Settings → API | قاعدة البيانات الدائمة |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → service_role | مصادقة Supabase |
+| `SMTP_USER` | حساب Gmail | إرسال بريد تحقق |
+| `SMTP_PASS` | Gmail App Password | إرسال بريد تحقق |
+| `GITHUB_CLIENT_ID` | GitHub → Settings → Developer apps | تسجيل دخول بـ GitHub |
+| `GITHUB_CLIENT_SECRET` | GitHub → Settings → Developer apps | تسجيل دخول بـ GitHub |
+
+> ⚠️ `SMTP_PASS` ليست كلمة مرور Gmail العادية — يجب إنشاء **App Password** من:  
+> Gmail → إعدادات الحساب → الأمان → المصادقة الثنائية → App Passwords
+
+### 2. جداول Supabase (مرة واحدة فقط)
+افتح **Supabase → SQL Editor** وشغّل الملفات بالترتيب:
+```
+supabase/migrations/001_all_tables.sql
+supabase/migrations/002_missing_tables.sql
+```
+هذه الجداول مطلوبة: `users`, `watch_history`, `favorites`, `watch_progress`, `comments`, `comment_likes`, `source_cache`, `subtitle_cache`, `cdn_cache`, `reports`, `pending_verifications`, `app_config`
+
+### 3. إعدادات GitHub OAuth (اختياري)
+إذا أردت تسجيل الدخول بـ GitHub:
+1. افتح [github.com/settings/developers](https://github.com/settings/developers)
+2. أنشئ **New OAuth App**
+3. **Homepage URL**: `https://{your-replit-domain}.replit.dev`
+4. **Callback URL**: `https://{your-replit-domain}.replit.dev/auth/callback`
+5. انسخ `Client ID` و`Client Secret` في Secrets
+
+### 4. تشغيل المشروع
+الـ Workflows تعمل تلقائياً، لكن تأكد من تشغيلها بهذا الترتيب:
+1. **CF Proxy** — بروكسي Cloudflare (port 8000)
+2. **Start API Server** — خادم API (port 8080)
+3. **Start application** — الواجهة الأمامية (port 5000)
