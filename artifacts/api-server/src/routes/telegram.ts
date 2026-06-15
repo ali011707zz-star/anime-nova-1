@@ -50,13 +50,14 @@ async function fetchAnimePoster(anilistId: number): Promise<string | null> {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
-        query: `query ($id: Int) { Media(id: $id) { coverImage { large } } }`,
+        query: `query ($id: Int) { Media(id: $id) { coverImage { extraLarge large } } }`,
         variables: { id: anilistId },
       }),
       signal: AbortSignal.timeout(8_000),
     });
     const data = await res.json() as any;
-    return data?.data?.Media?.coverImage?.large ?? null;
+    const img = data?.data?.Media?.coverImage;
+    return img?.extraLarge ?? img?.large ?? null;
   } catch { return null; }
 }
 
