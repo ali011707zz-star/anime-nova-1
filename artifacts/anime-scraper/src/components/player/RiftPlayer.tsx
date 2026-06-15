@@ -1210,7 +1210,7 @@ export default function RiftPlayer({
               className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 pointer-events-none"
               style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 100%)" }}
             >
-              <AnimeMascot />
+              <AnimeMascot mood="loading" />
               <div className="flex items-center gap-2 mt-1">
                 <div className="w-4 h-4 rounded-full border-2 border-white/25 border-t-white/75 animate-spin" />
                 <span className="text-white/55 text-[10px] font-black font-['Cairo']">جاري تحميل الفيديو…</span>

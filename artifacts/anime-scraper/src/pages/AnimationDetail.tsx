@@ -127,7 +127,7 @@ export default function AnimationDetail() {
 
   if (loading) return (
     <div className="bg-[#09090B] min-h-screen flex flex-col items-center justify-center gap-3" dir="rtl">
-      <AnimeMascot />
+      <AnimeMascot mood="loading" />
       <p className="text-white/35 text-xs font-['Cairo']">جاري تحميل التفاصيل…</p>
     </div>
   );
