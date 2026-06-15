@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { getBaseUrl } from "./api";
+import { getBaseUrl } from "./baseUrl";
 
 const TOKEN_KEY = "nova_anon_token";
 const TOKEN_EXP_KEY = "nova_anon_token_exp";

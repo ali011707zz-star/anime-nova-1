@@ -162,7 +162,7 @@ export default function AnimationsScreen() {
   const renderItem = ({ item, index }: { item: TmdbItem; index: number }) => (
     <Pressable
       style={[s.card, { marginRight: index % 3 !== 2 ? 10 : 0 }]}
-      onPress={() => router.push(`/watch?tmdb=${item.id}&type=${type}&title=${encodeURIComponent(displayTitle(item))}`)}
+      onPress={() => router.push(`/animation/${type}/${item.id}`)}
     >
       <View style={s.cardImgWrap}>
         {item.poster_path ? (
@@ -254,7 +254,7 @@ export default function AnimationsScreen() {
                   <Pressable key={item.id}
                     style={s.searchItem}
                     onPress={() => {
-                      router.push(`/watch?tmdb=${item.id}&type=${type}&title=${encodeURIComponent(displayTitle(item))}`);
+                      router.push(`/animation/${type}/${item.id}`);
                       setSearchOpen(false); setSearchQ("");
                     }}>
                     {item.poster_path ? (
