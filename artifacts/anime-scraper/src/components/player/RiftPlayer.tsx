@@ -977,33 +977,39 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── Persistent skip intro/outro button — always visible when in range (no controls needed) ── */}
-        <AnimatePresence>
-          {hasSkipData && activeSkipLabel && !isLocked && !isEnded && !error && (
-            <motion.button
-              key={activeSkipLabel}
-              initial={{ opacity: 0, x: 12 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 12 }}
-              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-              onPointerDown={e => { e.stopPropagation(); if (activeSkipAction) activeSkipAction(); }}
-              className="absolute flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-black font-['Cairo'] active:scale-90 transition-transform pointer-events-auto"
-              style={{
-                zIndex: 35,
-                bottom: 100,
-                left: 16,
-                fontSize: 12,
-                background: "rgba(250,204,21,0.90)",
-                border: "1px solid rgba(253,224,71,0.70)",
-                color: "#1a1200",
-                boxShadow: "0 0 18px rgba(250,204,21,0.50), 0 4px 12px rgba(0,0,0,0.60)",
-                touchAction: "manipulation",
-              }}>
-              <ChevronDown className="w-3.5 h-3.5 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
-              {activeSkipLabel}
-            </motion.button>
-          )}
-        </AnimatePresence>
+        {/* ── Persistent skip intro/outro button — visible whenever skip data available ── */}
+        {hasSkipData && !isLocked && !isEnded && !error && (
+          <motion.button
+            key="persistent-skip"
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: activeSkipLabel ? 1 : 0.55, x: 0 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            onPointerDown={e => {
+              e.stopPropagation();
+              if (activeSkipAction) {
+                activeSkipAction();
+              } else if (effectiveSkipIntro && duration > 0) {
+                seekFrac(effectiveSkipIntro.end / duration); showControls();
+              } else if (effectiveSkipOutro && duration > 0) {
+                seekFrac(effectiveSkipOutro.end / duration); showControls();
+              }
+            }}
+            className="absolute flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-black font-['Cairo'] active:scale-90 transition-all pointer-events-auto"
+            style={{
+              zIndex: 35,
+              bottom: 100,
+              left: 16,
+              fontSize: 12,
+              background: activeSkipLabel ? "rgba(250,204,21,0.90)" : "rgba(250,204,21,0.18)",
+              border: activeSkipLabel ? "1px solid rgba(253,224,71,0.70)" : "1px solid rgba(253,224,71,0.30)",
+              color: activeSkipLabel ? "#1a1200" : "rgba(253,224,71,0.80)",
+              boxShadow: activeSkipLabel ? "0 0 18px rgba(250,204,21,0.50), 0 4px 12px rgba(0,0,0,0.60)" : "none",
+              touchAction: "manipulation",
+            }}>
+            <ChevronDown className="w-3.5 h-3.5 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
+            {activeSkipLabel ?? (effectiveSkipIntro ? "تخطي المقدمة" : "تخطي النهاية")}
+          </motion.button>
+        )}
 
         {/* ── Skip ready notification (appears briefly when skip data loads) ── */}
         <AnimatePresence>
@@ -1320,22 +1326,22 @@ export default function RiftPlayer({
               >
                 {/* ── Progress bar ── */}
                 <div className="px-5 pt-1 pb-1">
-                  {/* Time row + skip button */}
-                  <div className="flex items-center justify-between mb-1 px-0.5" dir="ltr">
-                    <span className="text-white/70 text-[12px] font-bold font-mono">{fmtTime(currentTime)} / {fmtTime(duration)}</span>
-                    {/* ── Skip button — right side, above progress bar ── */}
-                    {hasSkipData && (
-                      <AnimatePresence mode="wait">
+                  {/* Time row: current-time LEFT · skip button CENTER · total-time RIGHT */}
+                  <div className="flex items-center mb-1 px-0.5" dir="ltr">
+                    <span className="text-white/70 text-[12px] font-bold font-mono shrink-0">{fmtTime(currentTime)}</span>
+                    {/* ── Skip button — centred between the two times ── */}
+                    <div className="flex-1 flex justify-center">
+                      {hasSkipData && (
                         <motion.button
-                          key={activeSkipLabel ?? "ghost"}
+                          key={activeSkipLabel ?? "skip-ctrl"}
                           initial={{ opacity: 0, scale: 0.9 }}
                           animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.9 }}
                           transition={{ duration: 0.15 }}
                           onPointerDown={e => {
                             e.stopPropagation();
                             if (activeSkipAction) activeSkipAction();
                             else if (effectiveSkipIntro && duration > 0) { seekFrac(effectiveSkipIntro.end / duration); showControls(); }
+                            else if (effectiveSkipOutro && duration > 0) { seekFrac(effectiveSkipOutro.end / duration); showControls(); }
                           }}
                           className="flex items-center gap-1.5 px-3 py-1 rounded-xl font-black font-['Cairo'] active:scale-90 transition-transform"
                           style={activeSkipLabel ? {
@@ -1353,10 +1359,11 @@ export default function RiftPlayer({
                             touchAction: "manipulation",
                           }}>
                           <ChevronDown className="w-3 h-3 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
-                          <span>{activeSkipLabel ?? "تخطي المقدمة"}</span>
+                          <span>{activeSkipLabel ?? (effectiveSkipIntro ? "تخطي المقدمة" : "تخطي النهاية")}</span>
                         </motion.button>
-                      </AnimatePresence>
-                    )}
+                      )}
+                    </div>
+                    <span className="text-white/45 text-[12px] font-bold font-mono shrink-0">{fmtTime(duration)}</span>
                   </div>
                   {/* 36px touch target — visual bar centered inside */}
                   <div
