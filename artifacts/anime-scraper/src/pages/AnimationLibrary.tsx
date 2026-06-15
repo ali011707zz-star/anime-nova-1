@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { AnimeMascot } from "@/components/AnimeMascot";
 import { Link, useLocation } from "wouter";
 import { Search, Film, Star, ChevronDown, Loader2, SlidersHorizontal, X, Calendar, Flame, Award } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -414,13 +415,9 @@ export default function AnimationLibrary() {
       {/* ── Grid ── */}
       <div className="px-4 pt-4">
         {items.length === 0 && loading ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-3">
-            <div className="relative w-10 h-10">
-              <div className="absolute inset-0 rounded-full border-2 border-violet-500/20" />
-              <motion.div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-400/40"
-                animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
-            </div>
-            <p className="text-white/25 text-xs font-['Cairo']">جارٍ التحميل…</p>
+          <div className="flex flex-col items-center justify-center py-16 gap-2">
+            <AnimeMascot />
+            <p className="text-white/30 text-xs font-['Cairo']">جارٍ تحميل المحتوى…</p>
           </div>
         ) : items.length === 0 && !loading ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3">

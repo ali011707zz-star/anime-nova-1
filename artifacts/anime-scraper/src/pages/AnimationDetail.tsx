@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { AnimeMascot } from "@/components/AnimeMascot";
 import { useParams, useLocation, Link } from "wouter";
 import {
   ChevronRight, Play, Star, Calendar, Clock,
@@ -125,10 +126,9 @@ export default function AnimationDetail() {
 
 
   if (loading) return (
-    <div className="bg-[#09090B] min-h-screen flex items-center justify-center">
-      <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
-        <Sparkles className="w-8 h-8 text-primary" />
-      </motion.div>
+    <div className="bg-[#09090B] min-h-screen flex flex-col items-center justify-center gap-3" dir="rtl">
+      <AnimeMascot />
+      <p className="text-white/35 text-xs font-['Cairo']">جاري تحميل التفاصيل…</p>
     </div>
   );
 
