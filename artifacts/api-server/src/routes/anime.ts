@@ -761,7 +761,7 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
         similarity(r.label, romaji),
         english ? similarity(r.label, english) : 0,
       );
-      if (s > bestScore && s > 0.15) { bestScore = s; best = r.url; }
+      if (s > bestScore && s > 0.40) { bestScore = s; best = r.url; }
     }
     if (best && bestScore > 0.5) break;
   }
@@ -773,7 +773,7 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
 async function resolveAllShahiidUrls(romaji: string, english?: string | null, isMovie = false): Promise<string[]> {
   const seen = new Set<string>();
   const all: Array<{ url: string; score: number }> = [];
-  const MIN_SCORE = isMovie ? 0.58 : 0.15;
+  const MIN_SCORE = isMovie ? 0.58 : 0.40;
 
   for (const q of [english, romaji].filter(Boolean) as string[]) {
     const results = await searchShahiid(q);
@@ -1333,7 +1333,7 @@ async function searchAnimelek(title: string, english: string | null, isMovie = f
   }
 
   // Search fallback — use ?s= (standard WP search, ?search_term_string= is broken)
-  const alkMinScore = isMovie ? 0.58 : 0.2;
+  const alkMinScore = isMovie ? 0.58 : 0.40;
   for (const q of [english, title].filter(Boolean) as string[]) {
     const html = await cfProxyGet(`${ALK_BASE}/search/?s=${encodeURIComponent(q as string)}`, `${ALK_BASE}/`);
     if (!html || !html.includes("/anime/")) continue;
@@ -1572,7 +1572,7 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
         const label = rawLabel.replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim()
           || slugAscii
           || slugDecoded.replace(/-/g, " ");
-        const adarMin = isMovie ? 0.58 : 0.2;
+        const adarMin = isMovie ? 0.58 : 0.40;
         const score = isMovie
           ? Math.max(
               strictMovieSimilarity(label, title),
@@ -1589,7 +1589,7 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
         if (score > bestScore && score > adarMin) { bestScore = score; best = url.replace(/\/?$/, "/"); }
       }
 
-      if (best && bestScore > 0.28) {
+      if (best && bestScore > 0.38) {
         adarSlugCache.set(ck, { url: best, ts: Date.now() });
         return best;
       }
@@ -1968,7 +1968,7 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
           similarity(label, title),
           english ? similarity(label, english) : 0,
         );
-        if (score > bestScore && score > 0.3) { bestScore = score; best = slug; }
+        if (score > bestScore && score > 0.40) { bestScore = score; best = slug; }
       }
       if (best) {
         mitanimeSlugCache.set(ck, { slug: best, ts: Date.now() });
@@ -2451,10 +2451,24 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
   }
 
   // Method 1: Direct slug check via /anime/{slug} page (try all domains via cfProxy)
+  // Must verify page title matches the requested anime (score >= 0.40) to avoid wrong matches
+  const okDirectMin = isMovie ? 0.58 : 0.40;
   for (const slug of [...new Set(slugVariants)]) {
     for (const domain of OK_DOMAINS) {
       const html = await cfProxyGet(`${domain}/anime/${slug}`, `${domain}/`);
-      if (html && html.includes("/episode/")) {
+      if (!html || !html.includes("/episode/")) continue;
+      // Extract page <title> or <h1> and verify it matches the requested anime
+      const pageTitleM = html.match(/<title[^>]*>([^<]{2,120})<\/title>/i)
+        || html.match(/<h1[^>]*>([^<]{2,120})<\/h1>/i);
+      const pageTitle = (pageTitleM?.[1] || "").replace(/\s*[-–|].*$/, "").replace(/\s*–\s*okanime.*/i, "").trim();
+      const slugLabel = slug.replace(/-/g, " ");
+      const verScore = Math.max(
+        pageTitle ? similarity(pageTitle, title) : 0,
+        pageTitle && english ? similarity(pageTitle, english) : 0,
+        similarity(slugLabel, title),
+        english ? similarity(slugLabel, english) : 0,
+      );
+      if (verScore >= okDirectMin) {
         OK_BASE = domain;
         okSlugCache.set(ck, { slug, ts: Date.now() });
         return slug;
@@ -2474,7 +2488,7 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
       const data = await r.json() as Array<{ name?: string; slug?: string }>;
       if (!Array.isArray(data) || !data.length) continue;
 
-      const okMin = isMovie ? 0.58 : 0.28;
+      const okMin = isMovie ? 0.58 : 0.40;
       let best: string | null = null, bestScore = 0;
       for (const item of data) {
         if (!item.slug) continue;
@@ -3854,15 +3868,20 @@ async function findAninekoSlug(title: string, english: string | null): Promise<s
   for (const q of queries) {
     const results = await searchAnineko(q);
     if (!results.length) continue;
-    // مطابقة بالعنوان
-    const target = (english || title).toLowerCase();
-    const best = results.find(r =>
-      r.title.toLowerCase().includes(target.slice(0, 12)) ||
-      target.includes(r.title.toLowerCase().slice(0, 10))
-    ) || results[0];
-    if (best) {
-      aninekoSlugCache.set(ck, { slug: best.slug, ts: Date.now() });
-      return best.slug;
+    // مطابقة بالتشابه — نرفض أي نتيجة أقل من 0.35 لتفادي جلب أنمي خاطئ
+    let bestSlug: string | null = null, bestSc = 0;
+    for (const r of results) {
+      const sc = Math.max(
+        similarity(r.title.toLowerCase(), title.toLowerCase()),
+        english ? similarity(r.title.toLowerCase(), english.toLowerCase()) : 0,
+        asciiSimilarity(r.slug, title),
+        english ? asciiSimilarity(r.slug, english) : 0,
+      );
+      if (sc > bestSc) { bestSc = sc; bestSlug = r.slug; }
+    }
+    if (bestSlug && bestSc >= 0.35) {
+      aninekoSlugCache.set(ck, { slug: bestSlug, ts: Date.now() });
+      return bestSlug;
     }
   }
   aninekoSlugCache.set(ck, { slug: null, ts: Date.now() });
@@ -4234,6 +4253,8 @@ async function getAnimeHubSources(
 
     // Sort by similarity descending — exact/best match first
     allCandidates.sort((a, b) => b.score - a.score);
+    // Reject if best match score is too low — prevents fetching a completely wrong anime
+    if (allCandidates[0].score < 0.35) return [];
     const slugCandidates = allCandidates.map(c => c.slug);
 
     // 3. Try each slug — fetch episode info and extract HLS
@@ -5561,11 +5582,24 @@ async function fetchAnimeTmdbId(english: string | null, romaji: string): Promise
         { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(8_000) },
       );
       if (!r.ok) continue;
-      const data = await r.json() as { results?: Array<{ id: number; name: string }> };
-      const id = data.results?.[0]?.id ?? null;
-      if (id) {
-        animeTmdbCache.set(cKey, { id, ts: Date.now() });
-        return id;
+      const data = await r.json() as { results?: Array<{ id: number; name: string; original_name?: string }> };
+      if (!data.results?.length) continue;
+      // Score each result — don't blindly take results[0] as TMDB order isn't always right
+      const qLow = q.toLowerCase();
+      let bestId: number | null = null, bestSc = 0;
+      for (const res of data.results.slice(0, 8)) {
+        const resName = (res.name || res.original_name || "").toLowerCase();
+        const sc = Math.max(
+          similarity(resName, qLow),
+          english ? similarity(resName, english.toLowerCase()) : 0,
+          similarity(resName, romaji.toLowerCase()),
+        );
+        if (sc > bestSc) { bestSc = sc; bestId = res.id; }
+      }
+      // Require at least 0.35 similarity to avoid mapping wrong show
+      if (bestId && bestSc >= 0.35) {
+        animeTmdbCache.set(cKey, { id: bestId, ts: Date.now() });
+        return bestId;
       }
     } catch { continue; }
   }
