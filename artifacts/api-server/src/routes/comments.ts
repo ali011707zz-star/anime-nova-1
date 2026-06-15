@@ -1,7 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { db } from "../lib/db.js";
-import { comments, commentLikes } from "@workspace/db";
-import { eq, and, inArray, asc, isNull, sql } from "drizzle-orm";
+import { sbSelect, sbInsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
 
 const router = Router();
 
@@ -12,18 +10,18 @@ function getUserId(req: Request): string | null {
 function mapRow(r: any, liked: boolean) {
   return {
     id:              r.id,
-    userId:          r.userId   || r.user_id,
+    userId:          r.user_id,
     username:        r.username,
-    avatarUrl:       r.avatarUrl  || r.avatar_url  || null,
-    animeId:         r.animeId   ?? r.anime_id    ?? null,
-    tmdbId:          r.tmdbId    ?? r.tmdb_id     ?? null,
-    animeType:       r.animeType  || r.anime_type  || "anime",
-    episodeNumber:   r.episodeNumber ?? r.episode_number ?? null,
+    avatarUrl:       r.avatar_url   || null,
+    animeId:         r.anime_id     ?? null,
+    tmdbId:          r.tmdb_id      ?? null,
+    animeType:       r.anime_type   || "anime",
+    episodeNumber:   r.episode_number ?? null,
     text:            r.text,
     likes:           r.likes || 0,
-    createdAt:       r.createdAt || r.created_at,
-    parentId:        r.parentId   || r.parent_id   || null,
-    replyToUsername: r.replyToUsername || r.reply_to_username || null,
+    createdAt:       r.created_at,
+    parentId:        r.parent_id    || null,
+    replyToUsername: r.reply_to_username || null,
     liked,
   };
 }
@@ -35,7 +33,7 @@ function mapRow(r: any, liked: boolean) {
 router.get("/comments", async (req: Request, res: Response) => {
   try {
     const animeId = req.query.animeId ? Number(req.query.animeId) : null;
-    const tmdbId  = req.query.tmdbId  ? String(req.query.tmdbId) : null;
+    const tmdbId  = req.query.tmdbId  ? String(req.query.tmdbId)  : null;
     const ep      = req.query.ep !== undefined ? Number(req.query.ep) : null;
     const limit   = Math.min(Number(req.query.limit) || 100, 200);
     const offset  = Number(req.query.offset) || 0;
@@ -43,28 +41,26 @@ router.get("/comments", async (req: Request, res: Response) => {
 
     if (!animeId && !tmdbId) return res.status(400).json({ error: "animeId أو tmdbId مطلوب" });
 
-    const conditions: any[] = [];
-    if (animeId !== null) conditions.push(eq(comments.animeId, animeId));
-    if (tmdbId  !== null) conditions.push(eq(comments.tmdbId, tmdbId));
-    if (ep !== null)      conditions.push(eq(comments.episodeNumber, ep));
-    else                  conditions.push(isNull(comments.episodeNumber));
+    const filter: Record<string, string> = { order: "created_at.asc" };
+    if (animeId !== null)     filter["anime_id"]       = `eq.${animeId}`;
+    if (tmdbId  !== null)     filter["tmdb_id"]        = `eq.${tmdbId}`;
+    if (ep !== null)          filter["episode_number"] = `eq.${ep}`;
+    else                      filter["episode_number"] = "is.null";
 
-    const rows = await db.select().from(comments)
-      .where(and(...conditions))
-      .orderBy(asc(comments.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const rows = await sbSelect("comments", filter, { limit: limit + offset });
+    const page = rows.slice(offset, offset + limit);
 
     let likedIds = new Set<string>();
-    if (userId && rows.length > 0) {
-      const ids = rows.map((r) => r.id);
-      const likeRows = await db.select({ commentId: commentLikes.commentId })
-        .from(commentLikes)
-        .where(and(eq(commentLikes.userId, userId), inArray(commentLikes.commentId, ids)));
-      likedIds = new Set(likeRows.map((l) => l.commentId));
+    if (userId && page.length > 0) {
+      const ids = page.map((r) => r.id).join(",");
+      const likeRows = await sbSelect("comment_likes", {
+        user_id:    `eq.${userId}`,
+        comment_id: `in.(${ids})`,
+      });
+      likedIds = new Set(likeRows.map((l: any) => l.comment_id));
     }
 
-    const result = rows.map((r) => mapRow(r, likedIds.has(r.id)));
+    const result = page.map((r) => mapRow(r, likedIds.has(r.id)));
     return res.json({ comments: result, total: result.length });
   } catch (err) {
     console.error("[comments] GET:", err);
@@ -91,24 +87,20 @@ router.post("/comments", async (req: Request, res: Response) => {
     if (txt.trim().length > 1000)
       return res.status(400).json({ error: "التعليق طويل جداً (الحد 1000 حرف)" });
 
-    const insertData: any = {
-      userId,
-      username:       username || "مستخدم",
-      avatarUrl:      avatarUrl || null,
-      animeId:        animeId ? Number(animeId) : null,
-      tmdbId:         tmdbId  ? String(tmdbId)  : null,
-      episodeNumber:  episodeNumber !== undefined && episodeNumber !== null ? Number(episodeNumber) : null,
-      animeType:      animeType || "anime",
-      text:           txt.trim(),
-      likes:          0,
-    };
+    const row = await sbInsert("comments", {
+      user_id:         userId,
+      username:        username || "مستخدم",
+      avatar_url:      avatarUrl || null,
+      anime_id:        animeId ? Number(animeId) : null,
+      tmdb_id:         tmdbId  ? String(tmdbId)  : null,
+      episode_number:  episodeNumber !== undefined && episodeNumber !== null ? Number(episodeNumber) : null,
+      anime_type:      animeType || "anime",
+      text:            txt.trim(),
+      likes:           0,
+      parent_id:        parentId || null,
+      reply_to_username: replyToUsername || null,
+    });
 
-    if (parentId) {
-      insertData.parentId = parentId;
-      insertData.replyToUsername = replyToUsername || null;
-    }
-
-    const [row] = await db.insert(comments).values(insertData).returning();
     return res.status(201).json({ comment: mapRow(row, false) });
   } catch (err) {
     console.error("[comments] POST:", err);
@@ -124,9 +116,7 @@ router.delete("/comments/:id", async (req: Request, res: Response) => {
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
 
   try {
-    await db.delete(comments).where(
-      and(eq(comments.id, req.params.id), eq(comments.userId, userId))
-    );
+    await sbDelete("comments", { id: `eq.${req.params.id}`, user_id: `eq.${userId}` });
     return res.json({ ok: true });
   } catch (err) {
     console.error("[comments] DELETE:", err);
@@ -144,30 +134,25 @@ router.post("/comments/:id/like", async (req: Request, res: Response) => {
   try {
     const commentId = req.params.id;
 
-    const existing = await db.select().from(commentLikes).where(
-      and(eq(commentLikes.commentId, commentId), eq(commentLikes.userId, userId))
-    );
+    const existing = await sbSelect("comment_likes", {
+      comment_id: `eq.${commentId}`,
+      user_id:    `eq.${userId}`,
+    }, { limit: 1 });
 
-    let newLikes: number;
     let liked: boolean;
 
     if (existing.length > 0) {
-      await db.delete(commentLikes).where(
-        and(eq(commentLikes.commentId, commentId), eq(commentLikes.userId, userId))
-      );
-      const remaining = await db.select().from(commentLikes).where(eq(commentLikes.commentId, commentId));
-      newLikes = Math.max(0, remaining.length);
-      const [updated] = await db.update(comments).set({ likes: newLikes }).where(eq(comments.id, commentId)).returning();
+      await sbDelete("comment_likes", { comment_id: `eq.${commentId}`, user_id: `eq.${userId}` });
       liked = false;
-      newLikes = updated?.likes ?? newLikes;
     } else {
-      await db.insert(commentLikes).values({ commentId, userId }).onConflictDoNothing();
-      const all = await db.select().from(commentLikes).where(eq(commentLikes.commentId, commentId));
-      newLikes = all.length;
-      const [updated] = await db.update(comments).set({ likes: newLikes }).where(eq(comments.id, commentId)).returning();
+      await sbInsert("comment_likes", { comment_id: commentId, user_id: userId });
       liked = true;
-      newLikes = updated?.likes ?? newLikes;
     }
+
+    // احسب عدد الإعجابات الجديد
+    const allLikes = await sbSelect("comment_likes", { comment_id: `eq.${commentId}` });
+    const newLikes = allLikes.length;
+    await sbPatch("comments", { id: `eq.${commentId}` }, { likes: newLikes });
 
     return res.json({ liked, likes: newLikes });
   } catch (err) {
@@ -182,17 +167,17 @@ router.post("/comments/:id/like", async (req: Request, res: Response) => {
 router.get("/comments/count", async (req: Request, res: Response) => {
   try {
     const animeId = req.query.animeId ? Number(req.query.animeId) : null;
-    const tmdbId  = req.query.tmdbId  ? String(req.query.tmdbId) : null;
+    const tmdbId  = req.query.tmdbId  ? String(req.query.tmdbId)  : null;
     if (!animeId && !tmdbId) return res.status(400).json({ error: "animeId أو tmdbId مطلوب" });
 
-    const condition = animeId !== null
-      ? eq(comments.animeId, animeId)
-      : eq(comments.tmdbId, tmdbId!);
+    const filter: Record<string, string> = {};
+    if (animeId !== null) filter["anime_id"] = `eq.${animeId}`;
+    else                  filter["tmdb_id"]  = `eq.${tmdbId!}`;
 
-    const rows = await db.select({ episodeNumber: comments.episodeNumber }).from(comments).where(condition);
+    const rows = await sbSelect("comments", filter);
     const counts: Record<string, number> = {};
     for (const row of rows) {
-      const key = row.episodeNumber === null ? "anime" : String(row.episodeNumber);
+      const key = row.episode_number === null ? "anime" : String(row.episode_number);
       counts[key] = (counts[key] || 0) + 1;
     }
     return res.json({ counts });

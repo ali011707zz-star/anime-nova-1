@@ -1,24 +1,16 @@
-/**
- * googleAuth.ts
- * ─────────────────────────────────────────────────────
- * تسجيل الدخول بـ Google — يتحقق من access_token عبر Google API مباشرة
- * ─────────────────────────────────────────────────────
- */
 import type { Express, Request, Response } from "express";
-import { db } from "../lib/db.js";
-import { users } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { sbSelect, sbInsert, sbPatch } from "../lib/supabaseClient.js";
 
 async function generateUniqueUsername(base: string): Promise<string> {
   const clean = base
     .replace(/[^a-zA-Z0-9_.]/g, "")
     .slice(0, 20)
     .toLowerCase() || "user";
-  const rows = await db.select({ id: users.id }).from(users).where(eq(users.username, clean)).limit(1);
+  const rows = await sbSelect("users", { username: `eq.${clean}` }, { limit: 1 });
   if (!rows.length) return clean;
   const suffix = Math.floor(100 + Math.random() * 900);
   const candidate = `${clean.slice(0, 17)}${suffix}`;
-  const rows2 = await db.select({ id: users.id }).from(users).where(eq(users.username, candidate)).limit(1);
+  const rows2 = await sbSelect("users", { username: `eq.${candidate}` }, { limit: 1 });
   if (!rows2.length) return candidate;
   return `${clean.slice(0, 14)}${Date.now() % 10000}`;
 }
@@ -29,27 +21,21 @@ function userPayload(u: any) {
     email:           u.email,
     displayName:     u.display_name ?? u.displayName,
     username:        u.username,
-    avatarColor:     u.avatar_color ?? u.avatarColor ?? 0,
-    profileImageUrl: u.profile_image_custom ?? u.profileImageCustom ?? u.profile_image_url ?? u.profileImageUrl,
+    avatarColor:     u.avatar_color ?? 0,
+    profileImageUrl: u.profile_image_custom ?? u.profile_image_url,
     authType:        "google" as const,
-    createdAt:       u.created_at ?? u.createdAt,
+    createdAt:       u.created_at,
   };
 }
 
 export function registerGoogleAuthRoutes(app: Express): void {
 
-  /**
-   * POST /api/auth/google/token
-   * يستقبل { accessToken } من AuthCallback
-   * يتحقق منه عبر Google API مباشرة ويُنشئ session
-   */
   app.post("/api/auth/google/token", async (req: Request, res: Response) => {
     try {
       const { accessToken } = req.body || {};
       if (!accessToken)
         return res.status(400).json({ error: "accessToken مطلوب" });
 
-      /* ── التحقق من الـ token عبر Google API ── */
       const userRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
         headers: { "Authorization": `Bearer ${accessToken}` },
       });
@@ -69,31 +55,29 @@ export function registerGoogleAuthRoutes(app: Express): void {
       const avatarUrl = googleUser.picture || null;
       const fullName  = googleUser.name || email.split("@")[0];
 
-      /* ── البحث عن مستخدم موجود أو إنشاء جديد ── */
-      const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
+      const existing = await sbSelect("users", { email: `eq.${email}` }, { limit: 1 });
       let user: any;
 
       if (existing.length > 0) {
         user = existing[0];
-        if (avatarUrl && user.profileImageUrl !== avatarUrl) {
-          const updated = await db.update(users)
-            .set({ profileImageUrl: avatarUrl, updatedAt: new Date() })
-            .where(eq(users.id, user.id))
-            .returning();
-          if (updated.length > 0) user = updated[0];
+        if (avatarUrl && user.profile_image_url !== avatarUrl) {
+          const updated = await sbPatch("users", { id: `eq.${user.id}` }, {
+            profile_image_url: avatarUrl,
+            updated_at:        new Date().toISOString(),
+          });
+          if (updated) user = updated;
         }
       } else {
         const username = await generateUniqueUsername(fullName.split(" ")[0]);
-        const [created] = await db.insert(users).values({
+        user = await sbInsert("users", {
           email,
-          displayName:     fullName.slice(0, 50),
+          display_name:      fullName.slice(0, 50),
           username,
-          emailVerified:   true,
-          profileImageUrl: avatarUrl,
-          firstName:       fullName.split(" ")[0] || null,
-          lastName:        fullName.split(" ").slice(1).join(" ") || null,
-        }).returning();
-        user = created;
+          email_verified:    true,
+          profile_image_url: avatarUrl,
+          first_name:        fullName.split(" ")[0] || null,
+          last_name:         fullName.split(" ").slice(1).join(" ") || null,
+        });
       }
 
       (req.session as any).userId = user.id;

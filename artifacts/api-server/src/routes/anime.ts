@@ -7,9 +7,7 @@ import {
   cdnManifestGet,
   cdnManifestSet,
 } from "../lib/sourceCache.js";
-import { db } from "../lib/db.js";
-import { subtitleCache as subtitleCacheTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 
 const router = Router();
 
@@ -6689,24 +6687,24 @@ const SUB_CACHE_TTL = 30 * 24 * 3_600_000; // 30 days
 
 async function getSubFromDb(cacheKey: string): Promise<Array<{ timing: string; text: string }> | null> {
   try {
-    const rows = await db.select().from(subtitleCacheTable).where(eq(subtitleCacheTable.cacheKey, cacheKey)).limit(1);
-    if (rows.length && rows[0].expiresAt > Date.now()) {
+    const rows = await sbSelect("subtitle_cache", { cache_key: `eq.${cacheKey}` }, { limit: 1 });
+    if (rows.length && rows[0].expires_at > Date.now()) {
       return rows[0].cues as Array<{ timing: string; text: string }>;
     }
-  } catch { /* DB unavailable — continue */ }
+  } catch { /* Supabase unavailable — continue */ }
   return null;
 }
 
 async function saveSubToDb(cacheKey: string, cues: Array<{ timing: string; text: string }>): Promise<void> {
   try {
     const now = Date.now();
-    await db.insert(subtitleCacheTable)
-      .values({ cacheKey, cues: cues as any, fetchedAt: now, expiresAt: now + SUB_CACHE_TTL })
-      .onConflictDoUpdate({
-        target: subtitleCacheTable.cacheKey,
-        set: { cues: cues as any, fetchedAt: now, expiresAt: now + SUB_CACHE_TTL },
-      });
-  } catch { /* DB unavailable — skip */ }
+    await sbUpsert("subtitle_cache", {
+      cache_key:  cacheKey,
+      cues:       cues,
+      fetched_at: now,
+      expires_at: now + SUB_CACHE_TTL,
+    }, "cache_key");
+  } catch { /* Supabase unavailable — skip */ }
 }
 
 router.get("/anime/translate-vtt", async (req, res) => {
