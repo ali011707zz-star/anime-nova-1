@@ -758,7 +758,7 @@ export default function AnimationWatch() {
           </div>
 
           <div className="flex flex-col items-center gap-3">
-            <AnimeMascot />
+            <AnimeMascot mood="loading" />
             <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
 
             {/* Subtitle preparation indicator — shown while translating during episode load */}

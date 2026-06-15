@@ -416,7 +416,7 @@ export default function AnimationLibrary() {
       <div className="px-4 pt-4">
         {items.length === 0 && loading ? (
           <div className="flex flex-col items-center justify-center py-16 gap-2">
-            <AnimeMascot />
+            <AnimeMascot mood="loading" />
             <p className="text-white/30 text-xs font-['Cairo']">جارٍ تحميل المحتوى…</p>
           </div>
         ) : items.length === 0 && !loading ? (

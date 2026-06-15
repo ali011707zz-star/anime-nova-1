@@ -454,7 +454,7 @@ function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep:
             />
           </div>
           <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
-          <AnimeMascot />
+          <AnimeMascot mood="loading" />
         </motion.div>
       </div>
     </div>
@@ -619,7 +619,7 @@ function WatchLoadingModal({ cover, title, ep, epTitle, onClose }: { cover?: str
             />
           </div>
           <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
-          <AnimeMascot />
+          <AnimeMascot mood="loading" />
         </motion.div>
       </div>
 
@@ -1048,7 +1048,7 @@ function ScraperPicker({
             <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">
               ⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.
             </p>
-            <AnimeMascot />
+            <AnimeMascot mood="loading" />
           </motion.div>
         </div>
       </div>
@@ -2952,7 +2952,7 @@ export default function WatchPage() {
                 animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
             </div>
             <p className="text-white/75 text-[13px] font-bold font-['Cairo'] text-center leading-relaxed px-4">⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</p>
-            <AnimeMascot />
+            <AnimeMascot mood="loading" />
           </motion.div>
         </div>
       </div>

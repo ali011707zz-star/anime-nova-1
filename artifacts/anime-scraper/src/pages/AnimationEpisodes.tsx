@@ -183,7 +183,7 @@ export default function AnimationEpisodes() {
       <div className="px-4 mt-4 space-y-2">
         {epLoading ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2">
-            <AnimeMascot />
+            <AnimeMascot mood="loading" />
             <p className="text-white/30 text-[11px] font-['Cairo']">جاري تحميل الحلقات…</p>
           </div>
         ) : episodes.length === 0 ? (
