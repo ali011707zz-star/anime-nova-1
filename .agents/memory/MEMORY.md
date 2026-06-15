@@ -1,3 +1,4 @@
+- [Nova Mobile animation pages](nova-mobile-animation.md) — 3 new pages: animation/[type]/[id].tsx (detail), animation/episodes.tsx (season tabs), animation/watch.tsx (SSE+VideoView); fix animations.tsx nav to detail page; /api/config route at /config (prefix /api added by app.use)
 - [Security system (token auth + URL encryption)](security-system.md) — AES-256 URL encryption + HMAC 5-min tokens; APP_SECRET env var; token endpoint POST /api/auth/anon-token
 - [Active anime sources 2026-06](active-sources-2026-06.md) — CONFIRMED WORKING: shahiid/animedar/animeify/animephoenix/seepanel/animelek/kawaii/anikoto/mitanime/arabseed; DISABLED: anineko(403)+ristoanime(CF AJAX challenge)
 - [Quick-resume last-src cache](quick-resume-lastsrc.md) — Watch.tsx saves last played URL to localStorage last-src-{animeId}-{ep} (6h TTL); on mount injects _resume FetchedSrc immediately if progress>30s; auto-play fires instantly on resume
