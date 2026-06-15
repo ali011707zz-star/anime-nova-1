@@ -1354,16 +1354,15 @@ function AnimSourceRow({
 
         {/* Label + quality */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-[11px] font-black font-['Cairo'] shrink-0"
-              style={{ color: isFailed ? "rgba(252,165,165,0.55)" : "rgba(255,255,255,0.45)" }}>
-              سيرفر {idx + 1}
-            </span>
-            <span className="text-white/15 text-[8px]">·</span>
-            <p className="text-[12.5px] font-black font-['Cairo'] leading-tight truncate"
+          <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <p className="text-[12.5px] font-black font-['Cairo'] leading-tight"
               style={{ color: isFailed ? "rgba(252,165,165,0.75)" : "rgba(255,255,255,0.92)" }}>
-              {src.label}
+              سيرفر {idx + 1}
             </p>
+            <span className="text-[11px] font-black px-2 py-0.5 rounded-md tracking-wide"
+              style={{ color: "rgba(255,255,255,0.80)", background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.18)", fontFamily: "monospace" }}>
+              {src.label}
+            </span>
           </div>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             {isFailed ? (
