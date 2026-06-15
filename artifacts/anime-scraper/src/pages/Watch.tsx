@@ -73,7 +73,14 @@ interface SubSettings {
   bold: boolean;
   position: "top" | "center" | "bottom";  // subtitle placement
 }
-const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 28, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
+function loadSubSettings(): SubSettings {
+  try {
+    const raw = localStorage.getItem("sub-settings-v1");
+    if (raw) return { ...DEFAULT_SUB_SETTINGS, ...JSON.parse(raw) };
+  } catch {}
+  return DEFAULT_SUB_SETTINGS;
+}
 
 /* ── Last-source helpers: cache the URL that actually played so resume is instant ── */
 function saveLastSrc(animeId: number, ep: number, url: string, qualityRank: number) {
@@ -1370,7 +1377,7 @@ function EpisodePlayer({
   const [subLang,      setSubLang]     = useState<string | null>(null);
   const [subOffset,    setSubOffset]   = useState(0);
   const [showSubPanel, setShowSubPanel] = useState(false);
-  const [subSettings,  setSubSettings] = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
+  const [subSettings,  setSubSettings] = useState<SubSettings>(loadSubSettings);
   const [isLandscape,  setIsLandscape] = useState(() => typeof window !== "undefined" && window.innerWidth > window.innerHeight);
   /* ── Multi-track subtitle system ── */
   const [subTracks,    setSubTracks]   = useState<SubTrack[]>([]);
@@ -1379,6 +1386,11 @@ function EpisodePlayer({
   const [ttsDub,       setTtsDub]      = useState(false);
   const subAbortRef = useRef<AbortController | null>(null);
   const ttsLastCueRef = useRef("");
+
+  /* ── Persist subtitle settings to localStorage whenever they change ── */
+  useEffect(() => {
+    try { localStorage.setItem("sub-settings-v1", JSON.stringify(subSettings)); } catch {}
+  }, [subSettings]);
 
   const currentUrl  = servers[currentServer] || "";
 
