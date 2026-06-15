@@ -5,6 +5,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
+import { AnimeMascot } from "@/components/AnimeMascot";
 import {
   Play, Pause, Volume2, VolumeX,
   Maximize2, Minimize2, AlertTriangle, RefreshCw,
@@ -1199,16 +1200,21 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── Standalone loading spinner — shown only when controls are hidden ── */}
+        {/* ── Mascot loading overlay — shown when video is loading/buffering ── */}
         <AnimatePresence>
           {(loading || buffering) && !error && !playing && !showCtrl && (
             <motion.div
               key="buf-overlay"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none"
+              transition={{ duration: 0.25 }}
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 pointer-events-none"
+              style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 100%)" }}
             >
-              <div className="w-12 h-12 rounded-full border-2 border-white/20 border-t-white/80 animate-spin" />
+              <AnimeMascot />
+              <div className="flex items-center gap-2 mt-1">
+                <div className="w-4 h-4 rounded-full border-2 border-white/25 border-t-white/75 animate-spin" />
+                <span className="text-white/55 text-[10px] font-black font-['Cairo']">جاري تحميل الفيديو…</span>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

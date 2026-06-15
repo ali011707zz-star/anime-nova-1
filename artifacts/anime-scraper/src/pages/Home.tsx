@@ -112,6 +112,30 @@ const MOVIES_QUERY = `query {
   }
 }`;
 
+const TOP_RATED_QUERY = `query {
+  Page(perPage: 14) {
+    media(type: ANIME, sort: SCORE_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE], isAdult: false, genre_not_in: ["Ecchi", "Hentai"], averageScore_greater: 75) {
+      id title { romaji } coverImage { large } averageScore format status
+    }
+  }
+}`;
+
+const FALL_2025_QUERY = `query {
+  Page(perPage: 14) {
+    media(type: ANIME, season: FALL, seasonYear: 2025, sort: POPULARITY_DESC, format_in: [TV, ONA], isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
+      id title { romaji } coverImage { large } averageScore episodes nextAiringEpisode { episode } status
+    }
+  }
+}`;
+
+const ISEKAI_QUERY = `query {
+  Page(perPage: 14) {
+    media(type: ANIME, sort: POPULARITY_DESC, genre_in: ["Isekai"], countryOfOrigin: "JP", format_in: [TV, ONA, MOVIE], isAdult: false) {
+      id title { romaji } coverImage { large } averageScore format status
+    }
+  }
+}`;
+
 const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
   Page(page:1,perPage:25){
     airingSchedules(airingAt_greater:$gt,airingAt_lesser:$lt,sort:[TIME_DESC]){
@@ -158,7 +182,15 @@ export default function Home() {
   const [page, setPage]           = useState(1);
   const [hasMore, setHasMore]     = useState(_homeCache?.hasMore ?? true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hero, setHero]           = useState<any>(_homeCache?.hero || null);
+  const [topRated, setTopRated]   = useState<any[]>([]);
+  const [fall2025, setFall2025]   = useState<any[]>([]);
+  const [isekaiList, setIsekaiList] = useState<any[]>([]);
+  const [hero, setHero]           = useState<any>(() => {
+    if (!_homeCache) return null;
+    const heroes = _homeCache.popular.filter((a: any) => a.bannerImage);
+    if (!heroes.length) return _homeCache.hero;
+    return heroes[Math.floor(Math.random() * heroes.length)];
+  });
   const [heroIdx, setHeroIdx]     = useState(0);
   const [heroDir, setHeroDir]     = useState(1);
   const [selectedGenre, setSelectedGenre] = useState("");
@@ -219,6 +251,17 @@ export default function Home() {
       .then(r => r.json())
       .then(d => setSpring2026(d.data?.Page?.media || []))
       .catch(() => {});
+  }, []);
+
+  /* Load extra sections — Top Rated, Fall 2025, Isekai */
+  useEffect(() => {
+    const post = (q: string) => fetch("https://graphql.anilist.co", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q }),
+    }).then(r => r.json());
+    post(TOP_RATED_QUERY).then(d => setTopRated(d.data?.Page?.media || [])).catch(() => {});
+    post(FALL_2025_QUERY).then(d => setFall2025(d.data?.Page?.media || [])).catch(() => {});
+    post(ISEKAI_QUERY).then(d => setIsekaiList(d.data?.Page?.media || [])).catch(() => {});
   }, []);
 
   /* Load today's airing episodes (last 72h → next 12h) + verify Arabic availability */
@@ -285,7 +328,7 @@ export default function Home() {
         const popMedia = pop?.media || [];
         const hasMorePop = pop?.pageInfo?.hasNextPage ?? false;
         const heroes = popMedia.filter((a: any) => a.bannerImage);
-        const heroItem = heroes[0] || popMedia[0];
+        const heroItem = heroes[Math.floor(Math.random() * Math.max(1, heroes.length))] || popMedia[0];
         setPopular(popMedia);
         setHasMore(hasMorePop);
         setHero(heroItem);
@@ -891,6 +934,58 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── خريف 2025 ── */}
+      {fall2025.length > 0 && !selectedGenre && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)" }}>
+                <span className="text-white text-[14px] leading-none">🍂</span>
+              </div>
+              <div>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">أنمي خريف 2025</h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">{fall2025.length} أنمي</p>
+              </div>
+            </div>
+            <Link href="/browse?year=2025&season=FALL&format=TV">
+              <button className="text-[10px] text-amber-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-amber-500/8 px-2.5 py-1 rounded-xl border border-amber-500/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
+            {fall2025.map(anime => {
+              const ep = anime.nextAiringEpisode?.episode ? anime.nextAiringEpisode.episode - 1 : (anime.episodes || 0);
+              return (
+                <Link key={anime.id} href={`/anime/${anime.id}`}>
+                  <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
+                    <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg" style={{ width: 92, height: 132 }}>
+                      <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
+                      {anime.averageScore > 0 && (
+                        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
+                          <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                        </div>
+                      )}
+                      {ep > 0 && (
+                        <div className="absolute top-1.5 left-1.5 text-[6.5px] font-black px-1.5 py-0.5 rounded-md"
+                          style={{ background: "rgba(245,158,11,0.88)", color: "#fff" }}>
+                          {ep} ح
+                        </div>
+                      )}
+                      <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
+                        <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">{anime.title?.romaji}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── قسم الأنيميشن ── */}
       <div className="mt-5 px-4">
           {/* Banner */}
@@ -1010,9 +1105,100 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── الأكثر تقييماً ── */}
+      {topRated.length > 0 && !selectedGenre && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: "linear-gradient(135deg,#fbbf24,#f59e0b)" }}>
+                <Star className="w-3.5 h-3.5 text-white fill-white" />
+              </div>
+              <div>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">الأكثر تقييماً</h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">أعلى نقاط على AniList</p>
+              </div>
+            </div>
+            <Link href="/browse?sort=SCORE">
+              <button className="text-[10px] text-yellow-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-yellow-500/8 px-2.5 py-1 rounded-xl border border-yellow-500/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
+            {topRated.map(anime => (
+              <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
+                  <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-yellow-500/10 shadow-lg shadow-yellow-900/20" style={{ width: 92, height: 132 }}>
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/10 to-transparent" />
+                    {anime.averageScore > 0 && (
+                      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-yellow-500/90 text-black text-[6.5px] px-1 py-0.5 rounded-md font-black">
+                        ⭐ {(anime.averageScore / 10).toFixed(1)}
+                      </div>
+                    )}
+                    {anime.format === "MOVIE" && (
+                      <div className="absolute top-1.5 left-1.5 text-[6px] font-black px-1 py-0.5 rounded-md"
+                        style={{ background: "rgba(59,130,246,0.88)", color: "#fff" }}>فيلم</div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
+                      <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">{anime.title?.romaji}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── عالم الإيسيكاي ── */}
+      {isekaiList.length > 0 && !selectedGenre && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
+                <span className="text-white text-[14px] leading-none">⚔️</span>
+              </div>
+              <div>
+                <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">عالم الإيسيكاي</h2>
+                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">انتقال إلى عوالم أخرى</p>
+              </div>
+            </div>
+            <Link href="/browse?genre=Isekai">
+              <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-emerald-500/8 px-2.5 py-1 rounded-xl border border-emerald-500/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
+          </div>
+          <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
+            {isekaiList.map(anime => (
+              <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
+                  <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg" style={{ width: 92, height: 132 }}>
+                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/10 to-transparent" />
+                    {anime.averageScore > 0 && (
+                      <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
+                        <Star className="w-1.5 h-1.5 fill-current" /> {(anime.averageScore / 10).toFixed(1)}
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-2">
+                      <p className="text-[8.5px] text-white/90 font-black line-clamp-2 leading-tight font-['Cairo']">{anime.title?.romaji}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Popular grid ── */}
       <div className="mt-6 px-4">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#EF4444,#DC2626)" }}>
             <Flame className="w-3.5 h-3.5 text-white fill-red-200" />
           </div>
@@ -1022,6 +1208,14 @@ export default function Home() {
               : "الأكثر شعبية"}
           </h2>
           {genreLoading && <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />}
+          </div>
+          {!selectedGenre && (
+            <Link href="/browse">
+              <button className="text-[10px] text-red-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-red-500/8 px-2.5 py-1 rounded-xl border border-red-500/15">
+                عرض الكل <ChevronLeft className="w-3 h-3" />
+              </button>
+            </Link>
+          )}
         </div>
         <AnimatePresence mode="wait">
           <motion.div
