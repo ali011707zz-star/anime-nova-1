@@ -10,6 +10,7 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
+import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 
 const router = Router();
 
@@ -5804,7 +5805,11 @@ router.get("/anime/sources-stream", async (req, res) => {
       : checkUrl;
     if (globalSeen.has(key)) return;
     globalSeen.add(key);
-    res.write(`data: ${JSON.stringify(s)}\n\n`);
+    const toSend: UnifiedSource = {
+      ...s,
+      directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
+    };
+    res.write(`data: ${JSON.stringify(toSend)}\n\n`);
   }
 
   try {
@@ -5974,7 +5979,11 @@ router.get("/anime/fetch-source", async (req, res) => {
   const cKey = makeSourceCacheKey(site, title, ep);
   const cached = await getFromSourceCache(cKey);
   if (cached && !shouldRefreshCache(cached.expiresAt)) {
-    res.json({ sources: cached.sources, fromCache: true });
+    const enc = cached.sources.map((s: UnifiedSource) => ({
+      ...s,
+      directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
+    }));
+    res.json({ sources: enc, fromCache: true });
     return;
   }
 
@@ -6044,7 +6053,11 @@ router.get("/anime/fetch-source", async (req, res) => {
       setSourceCache(cKey, site, sources).catch(() => {});
     }
 
-    res.json({ sources });
+    const encSources = sources.map(s => ({
+      ...s,
+      directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
+    }));
+    res.json({ sources: encSources });
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? String(e), sources: [] });
   }
@@ -6979,7 +6992,7 @@ function rewriteM3u8(manifest: string, baseUrl: string, _selfBase: string, ref: 
     let absUrl: string;
     try { absUrl = new URL(raw).href; }
     catch { try { absUrl = new URL(raw, base).href; } catch { return raw; } }
-    return `/api/anime/seg-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}`;
+    return `/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref)}`;
   };
   return manifest.split("\n").map(line => {
     const trimmed = line.trim();
@@ -6994,10 +7007,12 @@ function rewriteM3u8(manifest: string, baseUrl: string, _selfBase: string, ref: 
 
 router.get("/anime/hls-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
-  const ref    = (req.query.ref as string || "").trim();
+  let ref      = (req.query.ref as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
+  if (isEncrypted(url)) url = decryptParam(url);
+  if (ref && isEncrypted(ref)) ref = decryptParam(ref);
 
   let baseForSegments = url;
   if (url.includes("animanga.fun") && url.includes("url=")) {
@@ -7063,10 +7078,12 @@ router.get("/anime/hls-proxy", async (req, res) => {
 
 router.get("/anime/video-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
-  const ref    = (req.query.ref as string || "").trim();
+  let ref      = (req.query.ref as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
+  if (isEncrypted(url)) url = decryptParam(url);
+  if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
   let origin = ""; try { origin = new URL(url).origin; } catch {}
@@ -7134,10 +7151,12 @@ router.get("/anime/video-proxy", async (req, res) => {
 
 router.get("/anime/seg-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
-  const ref    = (req.query.ref as string || "").trim();
+  let ref      = (req.query.ref as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
+  if (isEncrypted(url)) url = decryptParam(url);
+  if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   // Derive Origin from ref (Referer) so it matches what a real browser would send
   let origin = ""; try { origin = new URL(ref || url).origin; } catch {}
   if (!origin) try { origin = new URL(url).origin; } catch {}

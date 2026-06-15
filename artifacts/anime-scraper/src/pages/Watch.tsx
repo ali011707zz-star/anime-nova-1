@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
+import { getAppToken } from "@/lib/appToken";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { saveProgress as saveProgressServer } from "@/lib/db";
@@ -2597,7 +2598,7 @@ export default function WatchPage() {
 
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
-      const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(40000) });
+      const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(40000), headers: { "X-App-Token": await getAppToken() } });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
 
@@ -2660,7 +2661,7 @@ export default function WatchPage() {
               anime:   String(animeId || 0),
               format:  anime?.format || sp.get("format") || "",
             });
-            const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: ctrl.signal });
+            const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: ctrl.signal, headers: { "X-App-Token": await getAppToken() } });
             const data = await r.json() as { sources?: FetchedSrc[] };
             const srcs: FetchedSrc[] = data.sources || [];
             if (!alive) return;
