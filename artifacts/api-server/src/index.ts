@@ -1,5 +1,7 @@
-import app from "./app";
+import { createApp } from "./app";
 import { logger } from "./lib/logger";
+import { initEmailService } from "./auth/emailService";
+import { registerTelegramWebhook } from "./routes/telegram.js";
 
 const rawPort = process.env["PORT"];
 
@@ -15,6 +17,8 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+const app = await createApp();
+
 app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
@@ -22,4 +26,13 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // فحص SMTP فور بدء الخادم
+  initEmailService().catch(() => {});
+
+  // تسجيل Telegram webhook
+  const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(",")[0];
+  if (domain) {
+    registerTelegramWebhook(domain).catch(() => {});
+  }
 });
