@@ -1086,25 +1086,37 @@ function SubPanel({
 
   return (
     <motion.div
-      initial={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: 32 }}
-      animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
-      exit={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: 32 }}
-      transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-      className={isLandscape ? "fixed inset-y-0 right-0 z-[400] flex items-stretch" : "fixed inset-x-0 bottom-0 z-[400]"}
-      style={isLandscape ? {} : { paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
+      initial={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: -20, scale: 0.97 }}
+      animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0, scale: 1 }}
+      exit={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: -20, scale: 0.97 }}
+      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+      drag={!isLandscape ? "y" : false}
+      dragConstraints={{ top: 0, bottom: 400 }}
+      dragElastic={{ top: 0, bottom: 0.22 }}
+      onDragEnd={(_: any, info: any) => { if (!isLandscape && info.offset.y > 65) onClose(); }}
+      className={isLandscape ? "fixed inset-y-0 right-0 z-[400] flex items-stretch" : "fixed inset-x-0 top-0 z-[400]"}
+      style={isLandscape ? {} : {
+        paddingTop: "max(10px, env(safe-area-inset-top))",
+        paddingInline: "10px",
+        display: "flex",
+        justifyContent: "center",
+      }}
     >
       {/* Backdrop tap to close */}
       <div className="fixed inset-0 z-[-1]" onClick={onClose} />
 
-      <div className={isLandscape ? "w-[280px] overflow-y-auto" : "mx-3 rounded-2xl overflow-hidden"}
+      <div className={isLandscape ? "w-[280px] overflow-y-auto" : "rounded-2xl overflow-hidden"}
         style={{
           background: "rgba(9,7,22,0.97)",
           border: "1px solid rgba(139,92,246,0.22)",
           backdropFilter: "blur(40px)",
           boxShadow: isLandscape
             ? "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)"
-            : "0 -24px 60px rgba(0,0,0,0.85)",
-          borderRadius: isLandscape ? "20px 0 0 20px" : undefined,
+            : "0 12px 48px rgba(0,0,0,0.80), inset 0 0 0 0.5px rgba(255,255,255,0.07)",
+          borderRadius: isLandscape ? "20px 0 0 20px" : "20px",
+          maxHeight: isLandscape ? "100dvh" : "50dvh",
+          overflowY: "auto",
+          width: isLandscape ? undefined : "min(360px, 100%)",
         }}>
 
         {/* ── Header ── */}
@@ -1231,6 +1243,13 @@ function SubPanel({
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* مقبض السحب للأسفل لإغلاق اللوحة */}
+        {!isLandscape && (
+          <div className="flex justify-center pt-1 pb-3">
+            <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.14)" }} />
           </div>
         )}
       </div>
