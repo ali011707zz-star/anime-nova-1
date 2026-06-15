@@ -70,6 +70,7 @@ const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
 const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
 const CommentsPage       = lazy(() => import("@/pages/Comments"));
+const Subscription       = lazy(() => import("@/pages/Subscription"));
 
 function PageLoader() {
   return (
@@ -82,7 +83,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/news", "/browse", "/animation/", "/auth"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/news", "/browse", "/animation/", "/auth", "/subscription"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
@@ -171,6 +172,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
                 <Route path="/animation/:type/:id"             component={AnimationDetail} />
                 <Route path="/comments"                component={CommentsPage} />
+                <Route path="/subscription"            component={Subscription} />
                 <Route                                 component={NotFound} />
               </Switch>
             </motion.div>

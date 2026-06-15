@@ -333,7 +333,7 @@ function ReportSheet({ open, onClose, userDisplayName }: { open: boolean; onClos
                 </button>
 
                 <p className="text-center text-[10px] text-white/18 font-['Cairo'] pb-1">
-                  سيتم إرسال رسالتك مباشرة عبر تيليجرام · @L_X_00
+                  سيتم إرسال رسالتك مباشرة عبر تيليجرام
                 </p>
               </motion.div>
             )}
@@ -615,43 +615,47 @@ export default function Settings() {
 
       {/* ══════ Nova Premium ══════ */}
       <div className="mx-4 mt-5">
-        <motion.div whileTap={{ scale: 0.98 }}
-          className="relative rounded-2xl p-4 overflow-hidden cursor-pointer"
-          style={{
-            background: "linear-gradient(135deg, rgba(251,191,36,0.12) 0%, rgba(245,158,11,0.08) 50%, rgba(217,119,6,0.12) 100%)",
-            border: "1px solid rgba(251,191,36,0.25)",
-          }}>
-          {/* Glow */}
-          <div className="absolute inset-0 pointer-events-none"
-            style={{ background: "radial-gradient(ellipse at 80% 50%, rgba(251,191,36,0.08) 0%, transparent 60%)" }} />
+        <Link href="/subscription">
+          <motion.div whileTap={{ scale: 0.97 }}
+            className="relative rounded-2xl p-4 overflow-hidden cursor-pointer"
+            style={{
+              background: "linear-gradient(135deg, rgba(251,191,36,0.14) 0%, rgba(245,158,11,0.09) 50%, rgba(217,119,6,0.14) 100%)",
+              border: "1.5px solid rgba(251,191,36,0.32)",
+              boxShadow: "0 8px 32px rgba(251,191,36,0.08)",
+            }}>
+            {/* Glow */}
+            <div className="absolute inset-0 pointer-events-none"
+              style={{ background: "radial-gradient(ellipse at 80% 40%, rgba(251,191,36,0.10) 0%, transparent 65%)" }} />
 
-          <div className="flex items-center gap-3 relative">
-            <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-              style={{ background: "rgba(251,191,36,0.18)", border: "1px solid rgba(251,191,36,0.35)" }}>
-              <Crown className="w-5 h-5 text-amber-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <p className="text-[14px] font-black text-amber-300">Nova Premium</p>
-                <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
-                  style={{ background: "rgba(251,191,36,0.20)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.30)" }}>
-                  قريباً
-                </span>
+            <div className="flex items-center gap-3 relative">
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
+                style={{ background: "rgba(251,191,36,0.20)", border: "1px solid rgba(251,191,36,0.38)" }}>
+                <Crown className="w-5 h-5 text-amber-400" />
               </div>
-              <p className="text-[10px] text-amber-400/55">إزالة الإعلانات · دعم المطوّر · مميزات حصرية</p>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <p className="text-[14px] font-black text-amber-300">Nova Premium ⭐</p>
+                </div>
+                <p className="text-[10px] text-amber-400/60">اشترك الآن · إزالة الإعلانات · مميزات حصرية</p>
+              </div>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl shrink-0"
+                style={{ background: "rgba(251,191,36,0.18)", border: "1px solid rgba(251,191,36,0.30)" }}>
+                <span className="text-[11px] font-black text-amber-300">اشترك</span>
+                <ChevronLeft className="w-3.5 h-3.5 text-amber-400" />
+              </div>
             </div>
-          </div>
 
-          <div className="flex gap-2 mt-3 relative">
-            {["بدون إعلانات", "دعم المطوّر", "مميزات قادمة"].map(f => (
-              <div key={f} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl"
-                style={{ background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.16)" }}>
-                <Check className="w-2.5 h-2.5 text-amber-400 shrink-0" strokeWidth={3} />
-                <span className="text-[8px] font-black text-amber-300/70">{f}</span>
-              </div>
-            ))}
-          </div>
-        </motion.div>
+            <div className="flex gap-2 mt-3 relative">
+              {["بدون إعلانات", "جودة أعلى", "تخطي المقدمة"].map(f => (
+                <div key={f} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl"
+                  style={{ background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.16)" }}>
+                  <Check className="w-2.5 h-2.5 text-amber-400 shrink-0" strokeWidth={3} />
+                  <span className="text-[8px] font-black text-amber-300/70">{f}</span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </Link>
       </div>
 
       {/* ══════ المظهر ══════ */}
@@ -820,18 +824,6 @@ export default function Settings() {
           <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
         </button>
 
-        <button
-          onClick={() => window.open("https://t.me/L_X_00", "_blank")}
-          className="w-full flex items-center gap-3.5 px-5 py-3.5 hover:bg-white/3 transition-all active:scale-[0.99]">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-violet-500/10 border-white/8">
-            <MessageCircle className="w-4 h-4 text-violet-400" />
-          </div>
-          <div className="flex-1 text-right">
-            <p className="text-[13.5px] font-bold font-['Cairo'] text-white/85">تواصل مع المطوّر</p>
-            <p className="text-[10px] text-white/30 font-['Cairo'] mt-0.5">مشكلات · اقتراحات · @L_X_00</p>
-          </div>
-          <ExternalLink className="w-4 h-4 text-white/20 shrink-0" />
-        </button>
       </Card>
 
       {/* ══════ البيانات والكاش ══════ */}
