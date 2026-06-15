@@ -563,12 +563,11 @@ export default function AnimeDetail() {
       {(score || allTimeRank || anime.idMal) && (
         <div className="mx-4 rounded-2xl overflow-hidden"
           style={{ background: "linear-gradient(135deg,#1e3a5f,#1a2d4a)", border: "1px solid rgba(59,130,246,0.25)" }}>
-          <motion.button whileTap={{ scale: 0.98 }}
-            onClick={() => anime.idMal && window.open(`https://myanimelist.net/anime/${anime.idMal}`, "_blank")}
+          <div
             className="w-full px-4 py-2 border-b border-white/10 flex items-center justify-center gap-2">
             <p className="text-[11px] font-black text-blue-300/80 font-['Cairo']">MyAnimeList</p>
             {anime.idMal && <span className="text-blue-300/40 text-[9px] font-['Cairo']">#{anime.idMal}</span>}
-          </motion.button>
+          </div>
           <div className="flex divide-x divide-x-reverse divide-white/8">
             {score && (
               <div className="flex-1 flex flex-col items-center py-3 px-2">
