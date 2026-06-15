@@ -1269,23 +1269,6 @@ function MegaEmbedPlayer({
         />
       </div>
 
-      {/* ── Bottom nav ── */}
-      <div className="flex items-center justify-between px-5 py-3 shrink-0"
-        style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.82) 0%, transparent 100%)" }}>
-        <button onClick={onPrevEp} disabled={ep <= 1}
-          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all"
-          style={{ color: ep <= 1 ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)" }}>
-          <ChevronRight className="w-4 h-4" /> السابقة
-        </button>
-        <span className="text-white/25 text-[11px] font-['Cairo']">
-          {totalEps >= 900 ? `حلقة ${ep}` : `${ep} / ${totalEps}`}
-        </span>
-        <button onClick={onNextEp} disabled={totalEps < 900 && ep >= totalEps}
-          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all flex-row-reverse"
-          style={{ color: (totalEps < 900 && ep >= totalEps) ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)" }}>
-          <ChevronLeft className="w-4 h-4" /> التالية
-        </button>
-      </div>
     </motion.div>
   );
 }
@@ -1657,7 +1640,15 @@ function EpisodePlayer({
     prevUrlForSubRef.current = currentUrl;
     if (subChoice === "off") return;
     const saved = subChoice;
-    const t = setTimeout(() => changeSubChoice(saved), 900);
+    // Check cache first — apply immediately if available, else short delay
+    if (subtitleUrl) {
+      const cached = getCachedCues(subtitleUrl);
+      if (cached) {
+        setSubCues(cached); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+        return;
+      }
+    }
+    const t = setTimeout(() => changeSubChoice(saved), 200);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUrl]);
