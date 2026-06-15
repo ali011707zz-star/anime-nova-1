@@ -427,6 +427,8 @@ export default function RiftPlayer({
       hls.loadSource(m3u8); hls.attachMedia(v);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (hlsRef.current !== hls) return;
+        // تعطيل مسارات الترجمة المدمجة في HLS (مثل kawaii) — نعتمد على overlay خاص بنا
+        try { hls.subtitleTrack = -1; } catch { /* ignore */ }
         setError(null); setLoading(false); showControls();
         v.play().catch(() => {});
       });
