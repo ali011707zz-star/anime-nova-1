@@ -67,6 +67,7 @@ interface Source {
   label: string;
   directUrl?: string;
   proxyUrl?: string;
+  subtitleUrl?: string;
   status?: "loading" | "ok" | "fail";
   tier?: QualityTier;
   _retriedDirect?: boolean; // true after first retry with raw directUrl
@@ -474,7 +475,7 @@ export default function AnimationWatch() {
 
       es.addEventListener("source", (e) => {
         if (!alive) return;
-        const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; isEmbed?: boolean };
+        const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; subtitleUrl?: string; isEmbed?: boolean };
         if (src.isEmbed) return;
 
         const key = src.directUrl || src.url;
@@ -486,9 +487,9 @@ export default function AnimationWatch() {
           const resolved = src.proxyUrl || src.directUrl!;
           const hl       = isHlsUrl(resolved);
           const proxyUrl = src.proxyUrl || (hl ? wrapHls(src.directUrl!, window.location.origin) : wrapMp4(src.directUrl!, window.location.origin));
-          newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, status: "ok" };
+          newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, subtitleUrl: src.subtitleUrl, status: "ok" };
         } else {
-          newSrc = { url: src.url, label: src.label, status: "loading" };
+          newSrc = { url: src.url, label: src.label, subtitleUrl: src.subtitleUrl, status: "loading" };
           tryExtract(src.url);
         }
         sourceCountRef.current += 1;
@@ -626,6 +627,37 @@ export default function AnimationWatch() {
     forceSubRef.current = true;
     setSubTrigger(t => t + 1);
   }, []);
+
+  /* ── Source subtitle: when the playing source carries its own subtitleUrl, inject it ── */
+  useEffect(() => {
+    const subUrl = selSrc?.subtitleUrl;
+    if (!subUrl) return;
+
+    // Determine if it's a translate-vtt endpoint (English→Arabic) or direct VTT
+    const isTranslate = subUrl.includes("translate-vtt");
+    const synLang = isTranslate ? ("ar-auto" as const) : ("ar" as const);
+    const synTrack: SubTrack = {
+      id: "source-subtitle",
+      lang: synLang,
+      label: isTranslate ? "عربي مُترجم · المصدر" : "عربي · المصدر",
+      url: subUrl,
+    };
+
+    // Inject into tracks if not already present
+    setSubTracks(prev => {
+      if (prev.some(t => t.url === subUrl)) return prev;
+      return [synTrack, ...prev];
+    });
+
+    // Auto-load only if currently no subtitle is ready/loading
+    if (subStatus === "off" || subStatus === "failed") {
+      subAbortRef.current?.abort();
+      const ctrl = new AbortController();
+      subAbortRef.current = ctrl;
+      loadSubTrack(synTrack, "direct", ctrl.signal);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selSrc?.subtitleUrl]);
 
   /* ── Discover + auto-load subtitle tracks whenever episode/trigger changes ── */
   useEffect(() => {

@@ -1124,22 +1124,55 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     url: adGhUrl,
   }] : [];
 
+  // ── 6. OpenSubtitles free REST API (no key, legacy endpoint) ──
+  const osItems: Track[] = [];
+  if (imdbId) {
+    try {
+      const osId = imdbId.replace(/^tt/, "");
+      const osUrl = `https://rest.opensubtitles.org/search/imdbid-${osId}/sublanguageid-ara`;
+      const r = await fetch(osUrl, {
+        headers: { "User-Agent": "TemporaryUserAgent", "X-User-Agent": "TemporaryUserAgent" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (r.ok) {
+        const items = await r.json() as any[];
+        if (Array.isArray(items)) {
+          items.slice(0, 3).forEach((item: any, i: number) => {
+            const dlLink: string = item?.SubDownloadLink || item?.ZipDownloadLink || "";
+            if (!dlLink) return;
+            const sfx = i > 0 ? ` ${i + 1}` : "";
+            osItems.push({
+              id: `ar-opensubs-${i}`,
+              lang: "ar",
+              label: `عربي · OpenSubs${sfx}`,
+              url: dlLink.replace(/\.gz$/, ""),
+            });
+          });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   // ── Merge, sort Arabic-first, deduplicate by URL ──
-  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems];
+  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems];
   all.sort((a, b) => (a.lang === "ar" && b.lang !== "ar" ? -1 : a.lang !== "ar" && b.lang === "ar" ? 1 : 0));
   const seen = new Set<string>();
   const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
 
-  // ── Auto-translate fallback: add عربي مُترجم when no Arabic but English available ──
-  const hasArTrack  = tracks.some(t => t.lang === "ar");
+  // ── Auto-translate: add عربي مُترجم whenever English tracks exist ──
+  // Added ALWAYS (even when Arabic exists) so user can switch between direct Arabic and translated
   const firstEnTrack = tracks.find(t => t.lang === "en");
-  if (!hasArTrack && firstEnTrack) {
-    tracks.unshift({
+  if (firstEnTrack && !tracks.some(t => t.lang === "ar-auto")) {
+    const autoTrack: Track = {
       id: "ar-auto-translate",
       lang: "ar-auto",
       label: "عربي مُترجم",
       url: `/api/anime/translate-vtt?url=${encodeURIComponent(firstEnTrack.url)}&from=en&to=ar`,
-    });
+    };
+    // Insert right after last Arabic track (or at start if none)
+    const lastArIdx = tracks.reduce((acc, t, i) => t.lang === "ar" ? i : acc, -1);
+    if (lastArIdx >= 0) tracks.splice(lastArIdx + 1, 0, autoTrack);
+    else tracks.unshift(autoTrack);
   }
 
   animTracksCache.set(ck, { tracks, ts: Date.now() });
