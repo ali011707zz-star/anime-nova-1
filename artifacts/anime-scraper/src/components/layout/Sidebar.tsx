@@ -5,7 +5,7 @@ import {
   X, Home, Search, Heart, History,
   Library, Film, Settings, CalendarDays,
   ChevronLeft, ChevronDown, User, LogIn,
-  Star, Tv2, Zap, Bell,
+  Newspaper, Tv2, Zap, Bell,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 
@@ -104,9 +104,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <div className="flex items-center justify-between px-4 pt-5 pb-4 shrink-0"
               style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                  style={{ background: 'linear-gradient(135deg,#7C3AED,#4F46E5)' }}>
-                  <Star className="w-4 h-4 text-white" fill="white" />
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 overflow-hidden"
+                  style={{ background: 'linear-gradient(135deg,#7C3AED,#4F46E5)', boxShadow: '0 4px 14px rgba(124,58,237,0.45)' }}>
+                  <svg viewBox="0 0 32 32" fill="none" className="w-5 h-5">
+                    <rect x="4" y="7" width="24" height="16" rx="3" fill="white" fillOpacity="0.15"/>
+                    <rect x="4" y="7" width="24" height="16" rx="3" stroke="white" strokeOpacity="0.4" strokeWidth="1"/>
+                    <path d="M12 11.5L22 16L12 20.5V11.5Z" fill="white"/>
+                    <rect x="11" y="23" width="10" height="1.5" rx="0.75" fill="white" fillOpacity="0.4"/>
+                    <rect x="14" y="24.5" width="4" height="1.5" rx="0.75" fill="white" fillOpacity="0.3"/>
+                  </svg>
                 </div>
                 <div className="flex items-baseline gap-[4px]">
                   <span className="text-[16px] font-black tracking-tight" style={{ fontFamily: "'Cairo',sans-serif", background: 'linear-gradient(135deg,#C4B5FD,#A78BFA,#7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>NOVA</span>
@@ -175,6 +181,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   <NavRow icon={Search}       label="البحث"              href="/search" />
                   <NavRow icon={Tv2}          label="الأنمي"             href="/browse" />
                   <NavRow icon={Film}         label="الأنيميشن والأفلام" href="/animations" />
+                  <NavRow icon={Newspaper}    label="أخبار الأنمي"       href="/news" sub="أحدث الإصدارات والإعلانات" />
                   <NavRow icon={CalendarDays} label="الجدول الأسبوعي"   href="/schedule" />
                 </div>
               </div>
