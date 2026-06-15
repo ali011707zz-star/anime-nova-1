@@ -6,8 +6,9 @@ import {
   shouldRefreshCache,
   cdnManifestGet,
   cdnManifestSet,
+  getSubtitleCache,
+  setSubtitleCache,
 } from "../lib/sourceCache.js";
-import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 
 const router = Router();
 
@@ -6682,31 +6683,6 @@ async function translateBatchFree(texts: string[], from: string, to: string): Pr
   return results;
 }
 
-const translateVttCache = new Map<string, { cues: Array<{ timing: string; text: string }>; ts: number }>();
-const SUB_CACHE_TTL = 30 * 24 * 3_600_000; // 30 days
-
-async function getSubFromDb(cacheKey: string): Promise<Array<{ timing: string; text: string }> | null> {
-  try {
-    const rows = await sbSelect("subtitle_cache", { cache_key: `eq.${cacheKey}` }, { limit: 1 });
-    if (rows.length && rows[0].expires_at > Date.now()) {
-      return rows[0].cues as Array<{ timing: string; text: string }>;
-    }
-  } catch { /* Supabase unavailable — continue */ }
-  return null;
-}
-
-async function saveSubToDb(cacheKey: string, cues: Array<{ timing: string; text: string }>): Promise<void> {
-  try {
-    const now = Date.now();
-    await sbUpsert("subtitle_cache", {
-      cache_key:  cacheKey,
-      cues:       cues,
-      fetched_at: now,
-      expires_at: now + SUB_CACHE_TTL,
-    }, "cache_key");
-  } catch { /* Supabase unavailable — skip */ }
-}
-
 router.get("/anime/translate-vtt", async (req, res) => {
   const rawUrl = ((req.query.url  as string) || "").trim();
   const from   = ((req.query.from as string) || "en").trim();
@@ -6719,17 +6695,10 @@ router.get("/anime/translate-vtt", async (req, res) => {
 
   const cacheKey = `${from}→${to}:${rawUrl}`;
 
-  // L1: ذاكرة داخلية
-  const memCached = translateVttCache.get(cacheKey);
-  if (memCached && Date.now() - memCached.ts < 3_600_000) {
-    res.json({ cues: memCached.cues, cached: true }); return;
-  }
-
-  // L2: قاعدة البيانات (مُخزَّن للأبد حتى 30 يوم)
-  const dbCached = await getSubFromDb(cacheKey);
-  if (dbCached) {
-    translateVttCache.set(cacheKey, { cues: dbCached, ts: Date.now() });
-    res.json({ cues: dbCached, cached: true }); return;
+  // L1 + L2 (Supabase): إذا وُجدت ترجمة مُخزَّنة → أرجعها فوراً
+  const cached = await getSubtitleCache(cacheKey);
+  if (cached) {
+    res.json({ cues: cached, cached: true }); return;
   }
 
   try {
@@ -6747,11 +6716,10 @@ router.get("/anime/translate-vtt", async (req, res) => {
     const cues = parseVttCues(vttText);
     if (!cues.length) { res.json({ cues: [] }); return; }
 
-    // إذا كانت اللغة المصدر = الهدف → لا داعي للترجمة (مثلاً from=ar&to=ar للترجمات العربية الجاهزة)
+    // إذا كانت اللغة المصدر = الهدف → لا داعي للترجمة
     if (from === to) {
       const result = cues.map(c => ({ timing: c.timing, text: c.rawText }));
-      translateVttCache.set(cacheKey, { cues: result, ts: Date.now() });
-      void saveSubToDb(cacheKey, result);
+      void setSubtitleCache(cacheKey, result); // حفظ في L1 + Supabase
       res.json({ cues: result }); return;
     }
 
@@ -6762,9 +6730,8 @@ router.get("/anime/translate-vtt", async (req, res) => {
       text: translatedTexts[i] ?? c.rawText,
     }));
 
-    // حفظ في L1 و L2
-    translateVttCache.set(cacheKey, { cues: result, ts: Date.now() });
-    void saveSubToDb(cacheKey, result); // fire & forget
+    // حفظ في L1 + L2 Supabase (fire-and-forget لا يؤخر الاستجابة)
+    void setSubtitleCache(cacheKey, result);
 
     res.json({ cues: result });
   } catch (e: any) {
