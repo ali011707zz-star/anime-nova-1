@@ -78,6 +78,7 @@ interface Props {
   subNote?: string;
   onSubtitleClick?: () => void;
   onSubSettingsChange?: (s: SubSettings) => void;
+  onSubtitleOff?: () => void;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
   animeId?: number;
@@ -131,7 +132,7 @@ export default function RiftPlayer({
   qualityLabel = "", isHls = false, serverCount = 1, serverIndex = 0,
   downloadUrl, subCues, subElapsed = 0, subSettings, subEnabled = false,
   subNote,
-  onSubtitleClick, onSubSettingsChange,
+  onSubtitleClick, onSubSettingsChange, onSubtitleOff,
   skipIntro, skipOutro, animeId, autoPlay,
   onBack, onPrevEp, onNextEp, onRealQuality, onTimeUpdate, onDuration, onFail,
 }: Props) {
@@ -199,10 +200,8 @@ export default function RiftPlayer({
   const [autoPlayCountdown, setAutoPlayCountdown] = useState(0);
   const [showUnlockBtn,   setShowUnlockBtn]   = useState(false);
   const unlockBtnHideRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /* ── auto-close sub menu when controls hide ── */
-  useEffect(() => {
-    if (!showCtrl) setShowSubMenu(false);
-  }, [showCtrl]);
+  /* ── auto-close sub menu when controls hide — disabled for bottom sheet UX ── */
+  // useEffect(() => { if (!showCtrl) setShowSubMenu(false); }, [showCtrl]);
 
   /* ── orientation lock ── */
   useEffect(() => {
@@ -418,6 +417,7 @@ export default function RiftPlayer({
         maxStarvationDelay: 4,
         maxLoadingDelay: 4,
         enableCEA708Captions: false,
+        renderTextTracksNatively: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
           xhr.timeout = 25000;
         },
@@ -758,7 +758,7 @@ export default function RiftPlayer({
       setTimeout(() => setFeedback(null), 200); gestRef.current.active = "none"; return;
     }
     if (g.active !== "none") { setTimeout(() => setFeedback(null), 800); gestRef.current.active = "none"; return; }
-    if (moved.current) return;
+    if (moved.current) { setFeedback(null); return; }
 
     const touch = e.changedTouches[0];
     /* In portrait (CSS-rotated 90° CW): video's left/right = screen's top/bottom (Y axis) */
@@ -1728,171 +1728,186 @@ export default function RiftPlayer({
         </AnimatePresence>
 
         {/* ════════════════════════════════════════
-            SUBTITLE SETTINGS MENU — inline dropdown (visible even when controls hidden)
+            SUBTITLE SETTINGS BOTTOM SHEET — slides up from bottom
         ════════════════════════════════════════ */}
         <AnimatePresence>
           {showSubMenu && !error && !isLocked && (
             <motion.div
-              key="submenu"
-              initial={{ opacity: 0, y: -10, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.95 }}
-              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute z-50 pointer-events-auto"
+              key="submenu-sheet"
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ duration: 0.30, ease: [0.22, 1, 0.36, 1] }}
+              drag="y"
+              dragConstraints={{ top: 0 }}
+              dragElastic={{ top: 0, bottom: 0.35 }}
+              onDragEnd={(_e, info) => { if (info.offset.y > 70) setShowSubMenu(false); }}
+              className="absolute bottom-0 left-0 right-0 z-50 pointer-events-auto"
               dir="rtl"
               style={{
-                top: isPortrait ? 72 : 48,
-                left: 14,
-                width: isPortrait ? "calc(100% - 28px)" : 230,
-                maxWidth: 340,
-                maxHeight: isPortrait ? "calc(100vh - 110px)" : "52vh",
-                background: "rgba(5,5,16,0.96)",
-                backdropFilter: "blur(40px) saturate(220%)",
-                border: "1px solid rgba(139,92,246,0.18)",
-                borderRadius: isPortrait ? 22 : 16,
-                padding: "0 0 4px",
-                boxShadow: "0 28px 72px rgba(0,0,0,0.80), 0 0 0 1px rgba(139,92,246,0.06) inset",
-                overflowX: "hidden",
+                background: "rgba(5,5,18,0.98)",
+                backdropFilter: "blur(44px) saturate(220%)",
+                borderTop: "1.5px solid rgba(139,92,246,0.22)",
+                borderRadius: "22px 22px 0 0",
+                paddingBottom: "max(20px, env(safe-area-inset-bottom))",
+                maxHeight: "75vh",
                 overflowY: "auto",
+                overflowX: "hidden",
                 touchAction: "pan-y",
+                boxShadow: "0 -16px 56px rgba(0,0,0,0.75)",
               }}
               onClick={e => e.stopPropagation()}
               onTouchStart={e => e.stopPropagation()}
               onTouchEnd={e => e.stopPropagation()}
             >
-              {/* ── Header bar ── */}
-              <div className="flex items-center justify-between px-3.5 py-2"
-                style={{ borderBottom: "1px solid rgba(139,92,246,0.12)", background: "rgba(139,92,246,0.08)" }}>
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-lg flex items-center justify-center"
+              {/* Drag handle */}
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-9 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.20)" }} />
+              </div>
+
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-2.5"
+                style={{ borderBottom: "1px solid rgba(139,92,246,0.10)" }}>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-xl flex items-center justify-center"
                     style={{ background: "rgba(139,92,246,0.28)", border: "1px solid rgba(139,92,246,0.40)" }}>
-                    <SubtitleIcon className="w-3 h-3 text-violet-300" />
+                    <SubtitleIcon className="w-3.5 h-3.5 text-violet-300" />
                   </div>
-                  <span className="text-white/85 text-[12px] font-black font-['Cairo']">الترجمة</span>
+                  <span className="text-white/90 text-[15px] font-black font-['Cairo']">إعدادات الترجمة</span>
                 </div>
                 <button onClick={() => setShowSubMenu(false)}
-                  className="w-6 h-6 rounded-full flex items-center justify-center active:bg-white/10 transition-colors">
-                  <X className="w-3 h-3 text-white/30" />
+                  className="w-7 h-7 rounded-full flex items-center justify-center active:bg-white/10">
+                  <X className="w-4 h-4 text-white/40" />
                 </button>
               </div>
 
-              {/* ── Content ── */}
-              <div className="px-3 py-2">
+              <div className="px-4 py-3.5">
 
-              {/* Not loaded yet */}
-              {!subEnabled && (
-                <div className="flex flex-col items-center gap-3 py-2">
-                  <p className="text-white/28 text-[11px] font-['Cairo'] text-center">
-                    {subNote || "الترجمة غير محملة"}
-                  </p>
-                  {onSubtitleClick && (
-                    <button
-                      onClick={() => { onSubtitleClick?.(); }}
-                      className="flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
-                      style={{ background: "rgba(139,92,246,0.22)", border: "1px solid rgba(139,92,246,0.40)", color: "#c4b5fd" }}
-                    >
-                      <SubtitleIcon className="w-3.5 h-3.5" />
-                      {subNote ? "إعادة المحاولة" : "تحميل الترجمة"}
-                    </button>
-                  )}
+                {/* ── Subtitle ON/OFF toggle row ── */}
+                <div className="flex items-center justify-between mb-4 px-3.5 py-2.5 rounded-2xl"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <div className="flex items-center gap-2.5">
+                    <SubtitleIcon className="w-4.5 h-4.5 text-white/60" style={{ width: 18, height: 18 }} />
+                    <span className="text-[14px] font-black font-['Cairo'] text-white/85">الترجمة</span>
+                    <div className="w-2 h-2 rounded-full"
+                      style={{ background: subEnabled ? "#22c55e" : "rgba(255,255,255,0.22)" }} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!subEnabled && onSubtitleClick && (
+                      <button
+                        onPointerDown={e => { e.stopPropagation(); onSubtitleClick?.(); }}
+                        className="px-4 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                        style={{ background: "rgba(139,92,246,0.28)", border: "1px solid rgba(139,92,246,0.45)", color: "#c4b5fd" }}>
+                        {subNote ? "إعادة المحاولة" : "تحميل"}
+                      </button>
+                    )}
+                    {subEnabled && onSubtitleOff && (
+                      <button
+                        onPointerDown={e => { e.stopPropagation(); onSubtitleOff?.(); }}
+                        className="px-4 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                        style={{ background: "rgba(239,68,68,0.18)", border: "1px solid rgba(239,68,68,0.32)", color: "#fca5a5" }}>
+                        إيقاف
+                      </button>
+                    )}
+                  </div>
                 </div>
-              )}
 
-              {/* Settings when loaded — elegant sectioned layout */}
-              {subEnabled && subSettings && onSubSettingsChange && (
-                <div className="flex flex-col gap-0">
+                {/* ── Settings when loaded ── */}
+                {subEnabled && subSettings && onSubSettingsChange && (
+                  <div className="flex flex-col gap-4">
 
-                  {/* ── حجم الخط ── */}
-                  <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 7, marginBottom: 7 }}>
-                    <p className="text-[9px] font-black font-['Cairo'] mb-1.5 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>حجم الخط</p>
-                    <div className="flex gap-1">
-                      {FONT_SIZES.map(f => {
-                        const active = subSettings.fontSize === f.sz;
-                        return (
-                          <button key={f.sz}
-                            onPointerDown={e => { e.stopPropagation(); updateSub({ fontSize: f.sz }); }}
-                            className="flex-1 py-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-90"
-                            style={{
-                              background: active ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
-                              border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
-                            }}>
-                            <span className="font-black font-['Cairo'] leading-none"
-                              style={{ fontSize: Math.min(f.sz * 0.52 + 5, 16), color: active ? "#c4b5fd" : "rgba(255,255,255,0.35)" }}>
-                              أ
-                            </span>
-                            <span className="text-[8px] font-['Cairo']" style={{ color: active ? "rgba(196,181,253,0.70)" : "rgba(255,255,255,0.22)" }}>
-                              {f.name}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* ── لون الخط ── */}
-                  <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: 7, marginBottom: 7 }}>
-                    <p className="text-[9px] font-black font-['Cairo'] mb-1.5 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>لون الخط</p>
-                    <div className="flex items-center gap-1">
-                      {SUB_COLORS.map(c => {
-                        const active = subSettings.color === c.v;
-                        return (
-                          <button key={c.v}
-                            onPointerDown={e => { e.stopPropagation(); updateSub({ color: c.v }); }}
-                            className="flex-1 py-1.5 rounded-xl flex flex-col items-center gap-1 transition-all active:scale-90"
-                            style={{
-                              background: active ? "rgba(124,58,237,0.18)" : "rgba(255,255,255,0.04)",
-                              border: `1.5px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
-                            }}>
-                            <span className="w-4 h-4 rounded-full shrink-0 block"
+                    {/* حجم الخط */}
+                    <div>
+                      <p className="text-[9px] font-black font-['Cairo'] mb-2 tracking-wider" style={{ color: "rgba(139,92,246,0.80)" }}>حجم الخط</p>
+                      <div className="flex gap-2">
+                        {FONT_SIZES.map(f => {
+                          const active = subSettings.fontSize === f.sz;
+                          return (
+                            <button key={f.sz}
+                              onPointerDown={e => { e.stopPropagation(); updateSub({ fontSize: f.sz }); }}
+                              className="flex-1 py-2 rounded-xl flex flex-col items-center justify-center gap-1 transition-all active:scale-90"
                               style={{
-                                background: c.v,
-                                boxShadow: active ? `0 0 0 2px rgba(139,92,246,0.7), 0 0 8px ${c.v}88` : "none",
-                              }} />
-                            <span className="text-[8px] font-['Cairo']" style={{ color: active ? "rgba(196,181,253,0.80)" : "rgba(255,255,255,0.22)" }}>
-                              {c.label}
-                            </span>
-                          </button>
-                        );
-                      })}
+                                background: active ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
+                                border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
+                              }}>
+                              <span className="font-black font-['Cairo'] leading-none"
+                                style={{ fontSize: Math.min(f.sz * 0.52 + 5, 16), color: active ? "#c4b5fd" : "rgba(255,255,255,0.35)" }}>
+                                أ
+                              </span>
+                              <span className="text-[8px] font-['Cairo']" style={{ color: active ? "rgba(196,181,253,0.70)" : "rgba(255,255,255,0.22)" }}>
+                                {f.name}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* ── موقع + سُمك + خلفية ── */}
-                  <div>
-                    <p className="text-[9px] font-black font-['Cairo'] mb-1.5 tracking-wider" style={{ color: "rgba(139,92,246,0.70)" }}>موقع الترجمة</p>
-                    <div className="flex gap-1 mb-2">
-                      {SUB_POSITIONS.map(p => {
-                        const active = subSettings.position === p.v;
-                        return (
-                          <button key={p.v}
-                            onPointerDown={e => { e.stopPropagation(); updateSub({ position: p.v as "top" | "center" | "bottom" }); }}
-                            className="flex-1 py-1.5 rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-90"
-                            style={{
-                              background: active ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
-                              border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
-                            }}>
-                            <span className="text-[12px] leading-none">{p.icon}</span>
-                            <span className="text-[10px] font-['Cairo'] font-bold"
-                              style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.30)" }}>
-                              {p.label}
-                            </span>
-                          </button>
-                        );
-                      })}
+                    {/* لون الخط */}
+                    <div>
+                      <p className="text-[9px] font-black font-['Cairo'] mb-2 tracking-wider" style={{ color: "rgba(139,92,246,0.80)" }}>لون الخط</p>
+                      <div className="flex items-center gap-2">
+                        {SUB_COLORS.map(c => {
+                          const active = subSettings.color === c.v;
+                          return (
+                            <button key={c.v}
+                              onPointerDown={e => { e.stopPropagation(); updateSub({ color: c.v }); }}
+                              className="flex-1 py-2 rounded-xl flex flex-col items-center gap-1 transition-all active:scale-90"
+                              style={{
+                                background: active ? "rgba(124,58,237,0.18)" : "rgba(255,255,255,0.04)",
+                                border: `1.5px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
+                              }}>
+                              <span className="w-5 h-5 rounded-full block"
+                                style={{
+                                  background: c.v,
+                                  boxShadow: active ? `0 0 0 2.5px rgba(139,92,246,0.7), 0 0 10px ${c.v}88` : "none",
+                                }} />
+                              <span className="text-[8px] font-['Cairo']" style={{ color: active ? "rgba(196,181,253,0.80)" : "rgba(255,255,255,0.22)" }}>
+                                {c.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* موقع الترجمة */}
+                    <div>
+                      <p className="text-[9px] font-black font-['Cairo'] mb-2 tracking-wider" style={{ color: "rgba(139,92,246,0.80)" }}>موقع الترجمة</p>
+                      <div className="flex gap-2">
+                        {SUB_POSITIONS.map(p => {
+                          const active = subSettings.position === p.v;
+                          return (
+                            <button key={p.v}
+                              onPointerDown={e => { e.stopPropagation(); updateSub({ position: p.v as "top" | "center" | "bottom" }); }}
+                              className="flex-1 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-90"
+                              style={{
+                                background: active ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
+                                border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
+                              }}>
+                              <span className="text-[14px] leading-none">{p.icon}</span>
+                              <span className="text-[11px] font-['Cairo'] font-bold"
+                                style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.30)" }}>
+                                {p.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {/* سُمك + خلفية */}
-                    <div className="flex gap-1">
+                    <div className="flex gap-2">
                       <button
                         onPointerDown={e => { e.stopPropagation(); updateSub({ bold: !subSettings.bold }); }}
-                        className="flex-1 py-1.5 rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-90"
+                        className="flex-1 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-90"
                         style={{
                           background: subSettings.bold ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
                           border: `1px solid ${subSettings.bold ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
                         }}>
-                        <span className="text-[13px] font-['Cairo'] font-black leading-none"
+                        <span className="text-[14px] font-['Cairo'] font-black leading-none"
                           style={{ color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.30)" }}>ع</span>
-                        <span className="text-[9px] font-['Cairo']"
+                        <span className="text-[10px] font-['Cairo']"
                           style={{ color: subSettings.bold ? "rgba(196,181,253,0.70)" : "rgba(255,255,255,0.22)" }}>
                           {subSettings.bold ? "عريض" : "عادي"}
                         </span>
@@ -1902,21 +1917,27 @@ export default function RiftPlayer({
                         return (
                           <button key={v}
                             onPointerDown={e => { e.stopPropagation(); updateSub({ bgOpacity: v }); }}
-                            className="flex-1 py-1.5 rounded-xl flex items-center justify-center gap-1 transition-all active:scale-90"
+                            className="flex-1 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-90"
                             style={{
                               background: active ? "rgba(124,58,237,0.28)" : "rgba(255,255,255,0.04)",
                               border: `1px solid ${active ? "rgba(139,92,246,0.55)" : "rgba(255,255,255,0.07)"}`,
                             }}>
-                            <span className="text-[11px] leading-none" style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.28)" }}>{l}</span>
-                            <span className="text-[9px] font-['Cairo']" style={{ color: active ? "rgba(196,181,253,0.70)" : "rgba(255,255,255,0.22)" }}>{name}</span>
+                            <span className="text-[12px] leading-none" style={{ color: active ? "#c4b5fd" : "rgba(255,255,255,0.28)" }}>{l}</span>
+                            <span className="text-[10px] font-['Cairo']" style={{ color: active ? "rgba(196,181,253,0.70)" : "rgba(255,255,255,0.22)" }}>{name}</span>
                           </button>
                         );
                       })}
                     </div>
-                  </div>
 
-                </div>
-              )}
+                  </div>
+                )}
+
+                {/* Not loaded hint */}
+                {!subEnabled && (
+                  <p className="text-white/25 text-[11px] font-['Cairo'] text-center py-2">
+                    {subNote || "اضغط تحميل لتفعيل الترجمة"}
+                  </p>
+                )}
 
               </div>
             </motion.div>
@@ -1924,6 +1945,33 @@ export default function RiftPlayer({
         </AnimatePresence>
 
       </div>
+
+      {/* ════════════════════════════════════════
+          PERSISTENT MINI PROGRESS BAR (always visible, shows skip zones)
+      ════════════════════════════════════════ */}
+      {!isEnded && !error && duration > 0 && (
+        <div className="absolute bottom-0 left-0 right-0 pointer-events-none" style={{ zIndex: 9, height: 3 }}>
+          <div className="absolute inset-0" style={{ background: "rgba(255,255,255,0.07)" }} />
+          <div className="absolute top-0 left-0 h-full"
+            style={{ width: `${Math.min(pct, 100)}%`, background: "rgba(139,92,246,0.60)", transition: "width 0.4s linear" }} />
+          {effectiveSkipIntro && (
+            <div className="absolute top-0 h-full"
+              style={{
+                left: `${(effectiveSkipIntro.start / duration) * 100}%`,
+                width: `${Math.max(0.5, (effectiveSkipIntro.end - effectiveSkipIntro.start) / duration * 100)}%`,
+                background: "rgba(250,204,21,0.90)",
+              }} />
+          )}
+          {effectiveSkipOutro && (
+            <div className="absolute top-0 h-full"
+              style={{
+                left: `${(effectiveSkipOutro.start / duration) * 100}%`,
+                width: `${Math.max(0.5, (effectiveSkipOutro.end - effectiveSkipOutro.start) / duration * 100)}%`,
+                background: "rgba(250,204,21,0.90)",
+              }} />
+          )}
+        </div>
+      )}
 
       {/* ════════════════════════════════════════
           SUBTITLE OVERLAY
