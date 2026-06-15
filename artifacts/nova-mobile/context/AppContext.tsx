@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { DEFAULT_CONFIG, fetchRemoteConfig, RemoteConfig } from "@/utils/api";
+import { getAuthToken } from "@/utils/secureApi";
 
 type Theme = "dark" | "amoled" | "violet" | "blue" | "pink";
 
@@ -49,6 +50,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     loadAll();
     refreshConfig();
+    // Pre-warm the auth token so first API call is instant
+    getAuthToken().catch(() => {});
   }, []);
 
   const loadAll = async () => {

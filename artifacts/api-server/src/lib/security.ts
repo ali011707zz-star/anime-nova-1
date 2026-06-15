@@ -98,7 +98,20 @@ export function encryptProxyUrl(proxyUrl: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 3. Rate Limiter داخل الذاكرة (بدون مكتبات خارجية)
+// 3. التحقق من معرّف العميل (X-Nova-Client header)
+// ═══════════════════════════════════════════════════════════════════════════════
+const VALID_CLIENT_IDS = new Set([
+  "nova-anime-mobile-v1",
+  "nova-anime-web-v1",
+]);
+
+export function validateClientId(clientId: string): boolean {
+  if (!clientId) return false;
+  return VALID_CLIENT_IDS.has(clientId.trim());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. Rate Limiter داخل الذاكرة (بدون مكتبات خارجية)
 // ═══════════════════════════════════════════════════════════════════════════════
 const rlMap = new Map<string, { count: number; reset: number }>();
 

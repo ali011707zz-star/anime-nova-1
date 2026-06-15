@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { fetch as expoFetch } from "expo/fetch";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Dimensions, Platform, Pressable,
@@ -12,6 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl, VideoSource } from "@/utils/api";
+import { secureStreamFetch } from "@/utils/secureApi";
 
 const { width: W, height: H } = Dimensions.get("window");
 const PLAYER_H = W * (9 / 16);
@@ -61,9 +61,8 @@ export default function WatchScreen() {
     const url = `${base}/api/anime/sources-stream?title=${encodeURIComponent(episodeTitle)}&english=${encodeURIComponent(episodeEnglish)}&ep=${ep}`;
 
     try {
-      const response = await expoFetch(url, {
+      const response = await secureStreamFetch(url, {
         signal: abortRef.current.signal,
-        headers: { Accept: "text/event-stream" },
       });
 
       const reader = response.body!.getReader();

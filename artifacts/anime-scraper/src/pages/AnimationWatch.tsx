@@ -490,7 +490,7 @@ export default function AnimationWatch() {
 
     getAppToken().then(tok => {
       if (!alive) return;
-      const tokParam = tok ? `&_tok=${encodeURIComponent(tok)}` : "";
+      const tokParam = tok ? `&_tok=${encodeURIComponent(tok)}&_client=nova-anime-web-v1` : "&_client=nova-anime-web-v1";
       const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodeURIComponent(title))}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}${tokParam}`;
       const es = new EventSource(q);
       localEs = es;

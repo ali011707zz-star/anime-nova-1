@@ -1,0 +1,1 @@
+- [API Security Architecture](api-security.md) — 3-layer security: helmet + rate-limit + HMAC token + client-ID

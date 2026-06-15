@@ -1,3 +1,5 @@
+import { secureFetch } from "./secureApi";
+
 export function getBaseUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
   if (!domain) return "";
@@ -6,7 +8,7 @@ export function getBaseUrl(): string {
 
 export async function fetchRemoteConfig() {
   try {
-    const res = await fetch(`${getBaseUrl()}/api/config`, {
+    const res = await secureFetch(`${getBaseUrl()}/api/config`, {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) throw new Error("config fetch failed");

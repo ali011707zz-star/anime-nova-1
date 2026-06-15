@@ -38,3 +38,8 @@ externalPort = 3000
 [[ports]]
 localPort = 24968
 externalPort = 80
+
+[userenv]
+
+[userenv.shared]
+APP_SECRET = "54015365697fb9d7f1e8e355b1f2cfbecab818172a080827f29eb9013cfb5e45"
