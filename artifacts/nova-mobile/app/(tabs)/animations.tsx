@@ -1,165 +1,437 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  ActivityIndicator, Dimensions, FlatList, Image,
-  Platform, Pressable, ScrollView, StyleSheet, Text, View,
+  View, Text, Pressable, TextInput, FlatList, Image,
+  ScrollView, ActivityIndicator, StyleSheet, Platform,
+  Animated,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useColors } from "@/hooks/useColors";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 
-const { width: W } = Dimensions.get("window");
-const CARD_W = (W - 48) / 3;
+const IMG = "https://image.tmdb.org/t/p/w342";
 
-type TMDBItem = {
-  id: number;
-  title?: string;
-  name?: string;
-  poster_path: string;
-  vote_average: number;
-  media_type?: string;
-};
+type MediaType = "movie" | "tv";
+interface Genre { id: number; ar: string }
 
-const TMDB_CATEGORIES = [
-  { label: "الرائج", value: "trending" },
-  { label: "الأعلى تقييماً", value: "top_rated" },
-  { label: "أفلام", value: "movies" },
-  { label: "مسلسلات", value: "tv" },
+const MOVIE_GENRES: Genre[] = [
+  { id: 0,     ar: "الكل" },
+  { id: 10751, ar: "عائلي" },
+  { id: 35,    ar: "كوميدي" },
+  { id: 12,    ar: "مغامرة" },
+  { id: 28,    ar: "أكشن" },
+  { id: 14,    ar: "فانتازيا" },
+  { id: 878,   ar: "خيال علمي" },
+  { id: 18,    ar: "دراما" },
 ];
+const TV_GENRES: Genre[] = [
+  { id: 0,     ar: "الكل" },
+  { id: 10751, ar: "عائلي" },
+  { id: 35,    ar: "كوميدي" },
+  { id: 10759, ar: "أكشن ومغامرة" },
+  { id: 10765, ar: "خيال علمي" },
+  { id: 10762, ar: "أطفال" },
+  { id: 18,    ar: "دراما" },
+];
+const SORT_MOVIE = [
+  { value: "popularity.desc",           label: "الأكثر مشاهدة" },
+  { value: "vote_average.desc",         label: "الأعلى تقييماً" },
+  { value: "primary_release_date.desc", label: "الأحدث" },
+  { value: "primary_release_date.asc",  label: "الأقدم" },
+] as const;
+const SORT_TV = [
+  { value: "popularity.desc",     label: "الأكثر مشاهدة" },
+  { value: "vote_average.desc",   label: "الأعلى تقييماً" },
+  { value: "first_air_date.desc", label: "الأحدث" },
+  { value: "first_air_date.asc",  label: "الأقدم" },
+] as const;
+const CUR_YEAR = new Date().getFullYear();
+const YEARS = ["الكل", ...Array.from({ length: 14 }, (_, i) => String(CUR_YEAR - i))];
 
-async function fetchAnimations(category: string): Promise<TMDBItem[]> {
-  const base = getBaseUrl();
-  try {
-    const res = await fetch(`${base}/api/anime/animations?category=${category}`);
-    if (!res.ok) throw new Error();
-    const data = await res.json();
-    return data.results || [];
-  } catch {
-    const endpoints: Record<string, string> = {
-      trending: "https://api.themoviedb.org/3/trending/all/week?api_key=dummy&with_genres=16&language=ar",
-      top_rated: "https://api.themoviedb.org/3/movie/top_rated?api_key=dummy&with_genres=16",
-      movies: "https://api.themoviedb.org/3/discover/movie?with_genres=16&sort_by=popularity.desc",
-      tv: "https://api.themoviedb.org/3/discover/tv?with_genres=16&sort_by=popularity.desc",
-    };
-    return [];
-  }
+interface TmdbItem {
+  id: number; title?: string; name?: string;
+  poster_path?: string; vote_average?: number;
+  release_date?: string; first_air_date?: string;
+  genre_ids?: number[];
 }
 
-function AnimCard({ item }: { item: TMDBItem }) {
-  const colors = useColors();
-  const router = useRouter();
-  const title = item.title || item.name || "بدون عنوان";
-  const posterUrl = item.poster_path ? `https://image.tmdb.org/t/p/w342${item.poster_path}` : null;
-
-  return (
-    <Pressable
-      style={[styles.card, { width: CARD_W }]}
-      onPress={() => router.push(`/watch?tmdb=${item.id}&title=${encodeURIComponent(title)}&type=${item.media_type || "movie"}`)}
-    >
-      <View style={[styles.cardImg, { height: CARD_W * 1.4, backgroundColor: colors.card, borderRadius: 10 }]}>
-        {posterUrl ? (
-          <Image source={{ uri: posterUrl }} style={[styles.fullImg, { borderRadius: 10 }]} resizeMode="cover" />
-        ) : (
-          <View style={styles.noImg}>
-            <Ionicons name="film-outline" size={32} color={colors.mutedForeground} />
-          </View>
-        )}
-        {item.vote_average > 0 && (
-          <View style={styles.scoreBadge}>
-            <Ionicons name="star" size={9} color="#FFD700" />
-            <Text style={styles.scoreText}>{item.vote_average.toFixed(1)}</Text>
-          </View>
-        )}
-      </View>
-      <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>{title}</Text>
-    </Pressable>
-  );
+function displayTitle(item: TmdbItem) {
+  return item.title || item.name || "—";
+}
+function yearLabel(item: TmdbItem) {
+  return (item.release_date || item.first_air_date || "").slice(0, 4);
+}
+function hasCjk(s: string) {
+  return /[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/u.test(s);
 }
 
 export default function AnimationsScreen() {
-  const colors = useColors();
   const insets = useSafeAreaInsets();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const [category, setCategory] = useState("trending");
+  const router = useRouter();
+  const topPad = Platform.OS === "web" ? 0 : insets.top;
 
-  const { data: items = [], isLoading } = useQuery({
-    queryKey: ["animations", category],
-    queryFn: () => fetchAnimations(category),
-  });
+  const [type, setType] = useState<MediaType>("movie");
+  const [genre, setGenre] = useState<number>(0);
+  const [sort, setSort] = useState("popularity.desc");
+  const [year, setYear] = useState("");
+  const [page, setPage] = useState(1);
+  const [items, setItems] = useState<TmdbItem[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchResults, setSearchResults] = useState<TmdbItem[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+
+  const genRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInput = useRef<TextInput>(null);
+
+  const genres = type === "movie" ? MOVIE_GENRES : TV_GENRES;
+  const sortOptions = (type === "movie" ? SORT_MOVIE : SORT_TV) as readonly { value: string; label: string }[];
+
+  useEffect(() => {
+    AsyncStorage.getItem("animation-notice-dismissed")
+      .then(v => { if (v === "1") setNoticeDismissed(true); });
+  }, []);
+
+  const load = useCallback(async (
+    t: MediaType, g: number, s: string, y: string, p: number, gen: number
+  ) => {
+    setLoading(true);
+    try {
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      const gParam = g === 0 ? "16" : `${g}`;
+      const base = getBaseUrl();
+      const url = `${base}/api/animation/browse?type=${t}&genre=${gParam}&sort=${encodeURIComponent(s)}&year=${y}&page=${p}`;
+      const r = await fetch(url, { signal: ctrl.signal });
+      if (genRef.current !== gen) return;
+      const data = await r.json();
+      const results: TmdbItem[] = (data.results || []).filter((item: TmdbItem) => {
+        const orig = item.title || "";
+        const name = item.name || "";
+        return !hasCjk(orig) || !hasCjk(name);
+      });
+      if (p === 1) setItems(results);
+      else setItems(prev => {
+        const ids = new Set(prev.map(i => i.id));
+        return [...prev, ...results.filter(i => !ids.has(i.id))];
+      });
+      setHasMore(p < (data.total_pages || 1));
+      setPage(p);
+    } catch {}
+    if (genRef.current === gen) setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const gen = ++genRef.current;
+    setItems([]); setPage(1); setHasMore(true);
+    load(type, genre, sort, year, 1, gen);
+  }, [type, genre, sort, year]);
+
+  useEffect(() => {
+    if (!searchQ.trim()) { setSearchResults([]); return; }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const base = getBaseUrl();
+        const r = await fetch(`${base}/api/animation/search?q=${encodeURIComponent(searchQ)}&type=${type}`);
+        const d = await r.json();
+        const filtered = (d.results || []).filter((item: TmdbItem) => {
+          const orig = item.title || ""; const name = item.name || "";
+          return !hasCjk(orig) || !hasCjk(name);
+        });
+        setSearchResults(filtered.slice(0, 10));
+      } catch { setSearchResults([]); }
+    }, 350);
+  }, [searchQ, type]);
+
+  const handleTypeChange = (t: MediaType) => {
+    if (t === type) return;
+    setType(t); setGenre(0); setSort("popularity.desc"); setYear(""); setPage(1);
+    setSearchQ(""); setSearchResults([]);
+  };
+
+  const activeFilterCount = (genre !== 0 ? 1 : 0) + (sort !== "popularity.desc" ? 1 : 0) + (year ? 1 : 0);
+
+  const renderItem = ({ item, index }: { item: TmdbItem; index: number }) => (
+    <Pressable
+      style={[s.card, { marginRight: index % 3 !== 2 ? 10 : 0 }]}
+      onPress={() => router.push(`/watch?tmdb=${item.id}&type=${type}&title=${encodeURIComponent(displayTitle(item))}`)}
+    >
+      <View style={s.cardImgWrap}>
+        {item.poster_path ? (
+          <Image source={{ uri: `${IMG}${item.poster_path}` }} style={s.cardImg} />
+        ) : (
+          <View style={[s.cardImg, s.noImg]}>
+            <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+          </View>
+        )}
+        <View style={s.cardGrad} />
+        {(item.vote_average || 0) > 0 && (
+          <View style={s.scoreBadge}>
+            <Ionicons name="star" size={8} color="#FBBF24" />
+            <Text style={s.scoreText}>{item.vote_average!.toFixed(1)}</Text>
+          </View>
+        )}
+        {yearLabel(item) ? (
+          <Text style={s.yearText}>{yearLabel(item)}</Text>
+        ) : null}
+      </View>
+      <Text style={s.cardTitle} numberOfLines={2}>{displayTitle(item)}</Text>
+    </Pressable>
+  );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 12 }]}>
-        <Text style={[styles.title, { color: colors.text }]}>أنيميشن</Text>
+    <View style={[s.container, { paddingTop: topPad }]}>
+      {/* ── Header ── */}
+      <View style={s.header}>
+        <View style={s.headerRow}>
+          <View>
+            <Text style={s.headerTitle}>رسوم متحركة</Text>
+            <Text style={s.headerSub}>
+              {type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable
+              onPress={() => setShowFilters(o => !o)}
+              style={[s.iconBtn, showFilters && s.iconBtnActive]}
+            >
+              <Ionicons name="options-outline" size={18} color={showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+              {activeFilterCount > 0 && (
+                <View style={s.filterBadge}><Text style={s.filterBadgeText}>{activeFilterCount}</Text></View>
+              )}
+            </Pressable>
+            <Pressable
+              onPress={() => { setSearchOpen(o => !o); setTimeout(() => searchInput.current?.focus(), 100); }}
+              style={[s.iconBtn, searchOpen && s.iconBtnActive]}
+            >
+              <Ionicons name="search-outline" size={18} color={searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Movie / TV tabs */}
+        <View style={s.typeTabs}>
+          {(["movie", "tv"] as MediaType[]).map((t) => (
+            <Pressable key={t} onPress={() => handleTypeChange(t)}
+              style={[s.typeTab, type === t && s.typeTabActive]}>
+              <Text style={[s.typeTabText, type === t && s.typeTabTextActive]}>
+                {t === "movie" ? "أفلام" : "مسلسلات"}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* Search */}
+        {searchOpen && (
+          <View style={s.searchWrap}>
+            <View style={s.searchBar}>
+              <Ionicons name="search-outline" size={16} color="rgba(255,255,255,0.3)" />
+              <TextInput
+                ref={searchInput}
+                value={searchQ}
+                onChangeText={setSearchQ}
+                placeholder={type === "movie" ? "ابحث عن فيلم أنيميشن…" : "ابحث عن مسلسل أنيميشن…"}
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                style={s.searchInput}
+              />
+              {searchQ ? (
+                <Pressable onPress={() => { setSearchQ(""); setSearchResults([]); }}>
+                  <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.4)" />
+                </Pressable>
+              ) : null}
+            </View>
+            {searchResults.length > 0 && (
+              <View style={s.searchDropdown}>
+                {searchResults.map(item => (
+                  <Pressable key={item.id}
+                    style={s.searchItem}
+                    onPress={() => {
+                      router.push(`/watch?tmdb=${item.id}&type=${type}&title=${encodeURIComponent(displayTitle(item))}`);
+                      setSearchOpen(false); setSearchQ("");
+                    }}>
+                    {item.poster_path ? (
+                      <Image source={{ uri: `${IMG}${item.poster_path}` }} style={s.searchItemImg} />
+                    ) : (
+                      <View style={[s.searchItemImg, s.noImg]}>
+                        <Ionicons name="film-outline" size={14} color="rgba(255,255,255,0.3)" />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.searchItemTitle} numberOfLines={1}>{displayTitle(item)}</Text>
+                      <Text style={s.searchItemYear}>{yearLabel(item)}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Filter panel */}
+        {showFilters && (
+          <View style={s.filterPanel}>
+            <Text style={s.filterLabel}>ترتيب حسب</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {sortOptions.map(opt => (
+                  <Pressable key={opt.value} onPress={() => setSort(opt.value)}
+                    style={[s.filterChip, sort === opt.value && s.filterChipActive]}>
+                    <Text style={[s.filterChipText, sort === opt.value && s.filterChipTextActive]}>{opt.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+
+            <Text style={[s.filterLabel, { marginTop: 10 }]}>السنة</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {YEARS.map(y => {
+                  const val = y === "الكل" ? "" : y;
+                  return (
+                    <Pressable key={y} onPress={() => setYear(val)}
+                      style={[s.filterChip, year === val && s.filterChipActive]}>
+                      <Text style={[s.filterChipText, year === val && s.filterChipTextActive]}>{y}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <Text style={[s.filterLabel, { marginTop: 10 }]}>النوع</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {genres.map(g => (
+                <Pressable key={g.id} onPress={() => setGenre(g.id)}
+                  style={[s.filterChip, genre === g.id && s.filterChipActive]}>
+                  <Text style={[s.filterChipText, genre === g.id && s.filterChipTextActive]}>{g.ar}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {activeFilterCount > 0 && (
+              <Pressable onPress={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
+                style={s.clearFiltersBtn}>
+                <Ionicons name="close-outline" size={14} color="rgba(252,165,165,0.8)" />
+                <Text style={s.clearFiltersText}>مسح الفلاتر ({activeFilterCount})</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catRow}>
-        {TMDB_CATEGORIES.map((c) => (
-          <Pressable
-            key={c.value}
-            onPress={() => setCategory(c.value)}
-            style={[styles.chip, {
-              backgroundColor: category === c.value ? colors.primary : colors.card,
-              borderColor: category === c.value ? colors.primary : colors.border,
-            }]}
-          >
-            <Text style={[styles.chipText, { color: category === c.value ? "#fff" : colors.mutedForeground }]}>
-              {c.label}
+      {/* ── Notice banner ── */}
+      {!noticeDismissed && (
+        <View style={s.notice}>
+          <Text style={{ fontSize: 16 }}>🙏🏽</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={s.noticeTitle}>تنبيه للمستخدمين</Text>
+            <Text style={s.noticeSub}>
+              قد لا تتوفر بعض أعمال الأنيميشن القديمة أو النادرة حالياً بسبب محدودية المصادر 🥺
             </Text>
+          </View>
+          <Pressable onPress={() => { setNoticeDismissed(true); AsyncStorage.setItem("animation-notice-dismissed", "1"); }}>
+            <Ionicons name="close-outline" size={18} color="rgba(251,191,36,0.6)" />
           </Pressable>
-        ))}
-      </ScrollView>
-
-      {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>جاري التحميل...</Text>
         </View>
-      ) : items.length === 0 ? (
-        <View style={styles.center}>
-          <Ionicons name="film-outline" size={64} color={colors.mutedForeground} />
-          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-            قسم الأنيميشن يعمل عبر مصادر الـ API
-          </Text>
-          <Text style={[styles.emptySubtext, { color: colors.mutedForeground }]}>
-            تأكد من تشغيل خادم الـ API
-          </Text>
+      )}
+
+      {/* ── Grid ── */}
+      {items.length === 0 && loading ? (
+        <View style={s.center}>
+          <ActivityIndicator color="#8B5CF6" size="large" />
+          <Text style={s.emptyText}>جارٍ تحميل المحتوى…</Text>
+        </View>
+      ) : items.length === 0 && !loading ? (
+        <View style={s.center}>
+          <Ionicons name="film-outline" size={56} color="rgba(139,92,246,0.4)" />
+          <Text style={s.emptyTitle}>لا توجد نتائج</Text>
+          <Pressable onPress={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
+            style={s.emptyBtn}>
+            <Text style={s.emptyBtnText}>مسح الفلاتر</Text>
+          </Pressable>
         </View>
       ) : (
         <FlatList
           data={items}
+          keyExtractor={(item, i) => `${item.id}-${i}`}
           numColumns={3}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.grid}
-          columnWrapperStyle={styles.row}
-          renderItem={({ item }) => <AnimCard item={item} />}
+          contentContainerStyle={s.grid}
           showsVerticalScrollIndicator={false}
+          renderItem={renderItem}
+          onEndReached={() => {
+            if (hasMore && !loading) {
+              const gen = genRef.current;
+              load(type, genre, sort, year, page + 1, gen);
+            }
+          }}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={loading && items.length > 0 ? (
+            <View style={{ padding: 20, alignItems: "center" }}>
+              <ActivityIndicator color="#8B5CF6" />
+            </View>
+          ) : null}
         />
       )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 10 },
-  title: { fontSize: 24, fontFamily: "Cairo_800ExtraBold" },
-  catRow: { paddingHorizontal: 16, gap: 8, marginBottom: 16, alignItems: "center" },
-  chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
-  chipText: { fontSize: 12, fontFamily: "Cairo_600SemiBold" },
-  grid: { paddingHorizontal: 16, paddingBottom: 100 },
-  row: { gap: 10, marginBottom: 10 },
-  card: { gap: 6 },
-  cardImg: { overflow: "hidden", position: "relative" },
-  fullImg: { width: "100%", height: "100%" },
-  noImg: { flex: 1, alignItems: "center", justifyContent: "center" },
-  scoreBadge: { position: "absolute", bottom: 6, left: 6, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2, flexDirection: "row", alignItems: "center", gap: 2 },
-  scoreText: { color: "#FFD700", fontSize: 9, fontWeight: "700" },
-  cardTitle: { fontSize: 12, fontFamily: "Cairo_600SemiBold", lineHeight: 16 },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#09090B" },
+  header: { backgroundColor: "#09090B", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10 },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  headerTitle: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  headerSub: { fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+  iconBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  iconBtnActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(139,92,246,0.4)" },
+  filterBadge: { position: "absolute", top: -4, left: -4, width: 16, height: 16, borderRadius: 8, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" },
+  filterBadgeText: { fontSize: 8, color: "#fff", fontWeight: "800" },
+  typeTabs: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  typeTab: { flex: 1, paddingVertical: 7, borderRadius: 16, alignItems: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  typeTabActive: { backgroundColor: "#7C3AED", borderColor: "rgba(139,92,246,0.5)" },
+  typeTabText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  typeTabTextActive: { color: "#fff" },
+  searchWrap: { marginBottom: 8 },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
+  searchInput: { flex: 1, color: "#fff", fontSize: 14, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  searchDropdown: { backgroundColor: "rgba(15,12,30,0.97)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  searchItem: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  searchItemImg: { width: 32, height: 44, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.08)" },
+  searchItemTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#fff" },
+  searchItemYear: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
+  filterPanel: { backgroundColor: "rgba(139,92,246,0.07)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(139,92,246,0.18)", padding: 12, marginBottom: 8 },
+  filterLabel: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.3)", marginBottom: 8, textTransform: "uppercase" },
+  filterChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  filterChipActive: { backgroundColor: "#7C3AED" },
+  filterChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.40)" },
+  filterChipTextActive: { color: "#fff" },
+  clearFiltersBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.16)", alignSelf: "flex-start" },
+  clearFiltersText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
+  notice: { flexDirection: "row", alignItems: "flex-start", gap: 10, margin: 12, padding: 12, borderRadius: 16, backgroundColor: "rgba(251,191,36,0.08)", borderWidth: 1, borderColor: "rgba(251,191,36,0.20)" },
+  noticeTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(251,191,36,0.9)", marginBottom: 3 },
+  noticeSub: { fontSize: 11, color: "rgba(251,191,36,0.5)", fontFamily: "Cairo_400Regular", lineHeight: 17 },
+  grid: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 100 },
+  card: { flex: 1 / 3, marginBottom: 14 },
+  cardImgWrap: { borderRadius: 14, overflow: "hidden", aspectRatio: 2 / 3, backgroundColor: "rgba(255,255,255,0.05)" },
+  cardImg: { width: "100%", height: "100%" },
+  noImg: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.08)" },
+  cardGrad: { ...StyleSheet.absoluteFillObject, backgroundColor: "transparent",
+    // gradient not easily possible, use overlay
+  },
+  scoreBadge: { position: "absolute", top: 6, left: 6, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 8, paddingHorizontal: 5, paddingVertical: 3, borderWidth: 1, borderColor: "rgba(251,191,36,0.18)" },
+  scoreText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#fff" },
+  yearText: { position: "absolute", bottom: 6, left: 6, fontSize: 8, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
+  cardTitle: { marginTop: 6, fontSize: 10.5, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.80)", lineHeight: 15, textAlign: "right" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  loadingText: { fontSize: 14, fontFamily: "Cairo_400Regular" },
-  emptyText: { fontSize: 15, fontFamily: "Cairo_600SemiBold", textAlign: "center", paddingHorizontal: 32 },
-  emptySubtext: { fontSize: 12, fontFamily: "Cairo_400Regular" },
+  emptyText: { fontSize: 13, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+  emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
+  emptyBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
+  emptyBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
 });
