@@ -1746,8 +1746,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 });
 
                 // Build list of (proxied URL, raw URL, label) for all servers
+                // Filter out Hindi/Bollywood-dubbed servers (name contains hindi/bolly/hin/urdu)
+                const HINDI_NAME_RE = /\b(hindi|bolly|bollywood|hin|urdu)\b/i;
                 const prepared = srvSorted
-                  .filter((srv: any) => !!srv.url)
+                  .filter((srv: any) => !!srv.url && !HINDI_NAME_RE.test(srv.name || ""))
                   .map((srv: any) => {
                     let rawUrl  = String(srv.url);
                     let referer = SC_REF_HLS;
