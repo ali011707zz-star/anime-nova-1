@@ -2,12 +2,10 @@
  * sourceCache.ts — نظام cache ذكي متعدد الطبقات للمصادر
  *
  * L1: Map في الذاكرة (instant, يُفقد عند restart)
- * L2: Replit PostgreSQL via Drizzle ORM (دائم، ينجو من restart)
+ * L2: Supabase REST API (دائم، ينجو من restart — لا يحتاج DNS لـ Supabase PostgreSQL)
  */
 
-import { db } from "./db.js";
-import { sourceCache as sourceCacheTable, cdnCache as cdnCacheTable } from "@workspace/db";
-import { eq, lt } from "drizzle-orm";
+import { sbSelect, sbUpsert, sbDelete, isSupabaseReady } from "./supabaseClient.js";
 
 // ── TTL بالميلي ثانية لكل موقع ──────────────────────────────────
 export const SITE_TTL: Record<string, number> = {
@@ -32,13 +30,13 @@ export const SITE_TTL: Record<string, number> = {
   aflaam:       24 * 3_600_000,
   stardima:     12 * 3_600_000,
   vyla:          4 * 3_600_000,
-  videasy:        2 * 3_600_000,  // tokens expire ~2h
-  videasy3:       2 * 3_600_000,  // animation section (same token expiry)
-  videasy_anim:   2 * 3_600_000,  // anime section English
-  vidlink_encdec: 2 * 3_600_000,  // tokens expire ~2h
-  vidlink_anim:   2 * 3_600_000,  // anime section English
+  videasy:        2 * 3_600_000,
+  videasy3:       2 * 3_600_000,
+  videasy_anim:   2 * 3_600_000,
+  vidlink_encdec: 2 * 3_600_000,
+  vidlink_anim:   2 * 3_600_000,
   // lordflix_anim: محذوف
-  vyla_anim:      4 * 3_600_000,  // Vyla SSE (stable URLs)
+  vyla_anim:      4 * 3_600_000,
   topcinemaa:     4 * 3_600_000,
   animeday_anim:  4 * 3_600_000,
   "2embed":       4 * 3_600_000,
@@ -103,44 +101,45 @@ setInterval(() => {
   for (const [k, v] of l1) { if (now > v.expiresAt) l1.delete(k); }
 }, 10 * 60_000);
 
-// ── L2: PostgreSQL via Drizzle ──
-async function pgGet(cacheKey: string): Promise<{ sources: any[]; expiresAt: number } | null> {
+// ── L2: Supabase REST ──
+async function sbGet(cacheKey: string): Promise<{ sources: any[]; expiresAt: number } | null> {
+  if (!isSupabaseReady) return null;
   try {
-    const rows = await db.select({
-      sources: sourceCacheTable.sources,
-      expiresAt: sourceCacheTable.expiresAt,
-    }).from(sourceCacheTable).where(eq(sourceCacheTable.cacheKey, cacheKey)).limit(1);
+    const rows = await sbSelect("source_cache", { cache_key: `eq.${cacheKey}` }, { limit: 1 });
     if (!rows[0]) return null;
-    return { sources: rows[0].sources as any[], expiresAt: Number(rows[0].expiresAt) };
+    return { sources: rows[0].sources as any[], expiresAt: Number(rows[0].expires_at) };
   } catch { return null; }
 }
 
-async function pgUpsert(cacheKey: string, site: string, sources: any[], expiresAt: number): Promise<void> {
+async function sbUpsertCache(cacheKey: string, site: string, sources: any[], expiresAt: number): Promise<void> {
+  if (!isSupabaseReady) return;
   try {
-    await db.insert(sourceCacheTable).values({
-      cacheKey,
+    await sbUpsert("source_cache", {
+      cache_key:  cacheKey,
       site,
       sources,
-      fetchedAt: Date.now(),
-      expiresAt,
-    }).onConflictDoUpdate({
-      target: sourceCacheTable.cacheKey,
-      set: { sources, fetchedAt: Date.now(), expiresAt },
-    });
+      fetched_at: Date.now(),
+      expires_at: expiresAt,
+    }, "cache_key");
   } catch (err) {
-    console.error(`[sourceCache] pgUpsert failed for ${site}:${cacheKey}`, err instanceof Error ? err.message : err);
+    console.error(`[sourceCache] sbUpsert failed for ${site}:${cacheKey}`, err instanceof Error ? err.message : err);
   }
 }
 
-async function pgDeleteExpired(): Promise<void> {
+async function sbDeleteExpired(): Promise<void> {
+  if (!isSupabaseReady) return;
   try {
-    await db.delete(sourceCacheTable).where(lt(sourceCacheTable.expiresAt, Date.now()));
+    await sbDelete("source_cache", { expires_at: `lt.${Date.now()}` });
   } catch { /* silent */ }
 }
 
-setInterval(pgDeleteExpired, 3_600_000);
+setInterval(sbDeleteExpired, 3_600_000);
 
-console.log("[sourceCache] Replit PostgreSQL L2 cache مفعّل ✓");
+if (isSupabaseReady) {
+  console.log("[sourceCache] Supabase REST L2 cache مفعّل ✓");
+} else {
+  console.warn("[sourceCache] ⚠️ SUPABASE_URL أو SUPABASE_SERVICE_ROLE_KEY غير موجودان — L2 cache معطّل");
+}
 
 // ── صنع مفتاح cache ──
 export function makeSourceCacheKey(site: string, title: string, ep: number): string {
@@ -161,7 +160,6 @@ export function makeAnimCacheKey(site: string, tmdbId: string, type: string, sea
 }
 
 // ── قراءة من Cache (L1 → L2) ──
-// stale=true يعني أن الـ cache انتهى لكن البيانات لا تزال مفيدة (stale-while-revalidate)
 export async function getFromSourceCache(
   key: string
 ): Promise<{ sources: any[]; expiresAt: number; stale?: boolean } | null> {
@@ -169,11 +167,10 @@ export async function getFromSourceCache(
   if (m && Date.now() < m.expiresAt) return m;
   l1.delete(key);
 
-  const row = await pgGet(key);
+  const row = await sbGet(key);
   if (!row) return null;
 
   if (Date.now() > row.expiresAt) {
-    // stale-while-revalidate: أرجع البيانات القديمة فوراً وشغّل التجديد خلفياً
     return { sources: row.sources, expiresAt: row.expiresAt, stale: true };
   }
 
@@ -190,7 +187,7 @@ export async function setSourceCache(
   if (!sources.length) return;
   const expiresAt = computeExpiry(site, sources);
   l1.set(key, { sources, expiresAt });
-  pgUpsert(key, site, sources, expiresAt);
+  sbUpsertCache(key, site, sources, expiresAt); // fire-and-forget
 }
 
 export function shouldRefreshCache(expiresAt: number): boolean {
@@ -198,14 +195,13 @@ export function shouldRefreshCache(expiresAt: number): boolean {
 }
 
 export function getCacheStats(): { l1Size: number; pgEnabled: boolean } {
-  return { l1Size: l1.size, pgEnabled: true };
+  return { l1Size: l1.size, pgEnabled: isSupabaseReady };
 }
 
 // ══════════════════════════════════════════════════════════════════
-//  CDN manifest cache — L1 (memory) + L2 (PostgreSQL)
-//  Only caches TEXT manifests (m3u8) — NOT binary segments
+//  CDN manifest cache — L1 (memory) + L2 (Supabase)
 // ══════════════════════════════════════════════════════════════════
-const CDN_MANIFEST_TTL = 15 * 60_000; // 15 دقيقة
+const CDN_MANIFEST_TTL = 15 * 60_000;
 
 const cdnL1 = new Map<string, { content: string; ct: string; expiresAt: number }>();
 
@@ -214,50 +210,47 @@ setInterval(() => {
   for (const [k, v] of cdnL1) { if (now > v.expiresAt) cdnL1.delete(k); }
 }, 5 * 60_000);
 
-async function cdnPgGet(key: string): Promise<{ content: string; ct: string } | null> {
+async function cdnSbGet(key: string): Promise<{ content: string; ct: string } | null> {
+  if (!isSupabaseReady) return null;
   try {
-    const rows = await db.select({
-      content:   cdnCacheTable.content,
-      ct:        cdnCacheTable.ct,
-      expiresAt: cdnCacheTable.expiresAt,
-    }).from(cdnCacheTable).where(eq(cdnCacheTable.cacheKey, key)).limit(1);
+    const rows = await sbSelect("cdn_cache", { cache_key: `eq.${key}` }, { limit: 1 });
     if (!rows[0]) return null;
-    if (Date.now() > Number(rows[0].expiresAt)) return null;
+    if (Date.now() > Number(rows[0].expires_at)) return null;
     return { content: rows[0].content, ct: rows[0].ct };
   } catch { return null; }
 }
 
-async function cdnPgUpsert(key: string, content: string, ct: string, expiresAt: number): Promise<void> {
+async function cdnSbUpsert(key: string, content: string, ct: string, expiresAt: number): Promise<void> {
+  if (!isSupabaseReady) return;
   try {
-    await db.insert(cdnCacheTable).values({
-      cacheKey: key, content, ct,
-      fetchedAt: Date.now(), expiresAt,
-    }).onConflictDoUpdate({
-      target: cdnCacheTable.cacheKey,
-      set: { content, ct, fetchedAt: Date.now(), expiresAt },
-    });
+    await sbUpsert("cdn_cache", {
+      cache_key:  key,
+      content,
+      ct,
+      fetched_at: Date.now(),
+      expires_at: expiresAt,
+    }, "cache_key");
   } catch { /* silent */ }
 }
 
 setInterval(async () => {
-  try { await db.delete(cdnCacheTable).where(lt(cdnCacheTable.expiresAt, Date.now())); } catch {}
+  if (!isSupabaseReady) return;
+  try { await sbDelete("cdn_cache", { expires_at: `lt.${Date.now()}` }); } catch {}
 }, 60 * 60_000);
 
-/** اقرأ manifest من L1 أولاً ثم L2 PostgreSQL */
 export async function cdnManifestGet(key: string): Promise<{ content: string; ct: string } | null> {
   const m = cdnL1.get(key);
   if (m && Date.now() < m.expiresAt) return { content: m.content, ct: m.ct };
   cdnL1.delete(key);
-  const pg = await cdnPgGet(key);
-  if (pg) {
-    cdnL1.set(key, { content: pg.content, ct: pg.ct, expiresAt: Date.now() + CDN_MANIFEST_TTL });
+  const sb = await cdnSbGet(key);
+  if (sb) {
+    cdnL1.set(key, { content: sb.content, ct: sb.ct, expiresAt: Date.now() + CDN_MANIFEST_TTL });
   }
-  return pg;
+  return sb;
 }
 
-/** اكتب manifest في L1 + L2 PostgreSQL */
 export function cdnManifestSet(key: string, content: string, ct: string): void {
   const expiresAt = Date.now() + CDN_MANIFEST_TTL;
   cdnL1.set(key, { content, ct, expiresAt });
-  cdnPgUpsert(key, content, ct, expiresAt); // fire-and-forget
+  cdnSbUpsert(key, content, ct, expiresAt); // fire-and-forget
 }

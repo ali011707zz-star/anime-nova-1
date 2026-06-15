@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { setConfig, resetTransporter } from "../auth/emailService.js";
 import { getEmailUser } from "../auth/emailAuth.js";
+import { sbSelect } from "../lib/supabaseClient.js";
 
 const router = Router();
 
@@ -32,9 +33,8 @@ router.get("/admin/smtp-status", async (req: Request, res: Response) => {
   if (!(await isAdmin(req)))
     return res.status(401).json({ error: "غير مصرّح" });
 
-  const { pool } = await import("../lib/db.js");
-  const r = await pool.query(`SELECT key FROM app_config WHERE key LIKE 'smtp_%'`);
-  const keys = r.rows.map((row: any) => row.key);
+  const rows = await sbSelect("app_config", {});
+  const keys = rows.filter((r: any) => r.key?.startsWith("smtp_")).map((r: any) => r.key);
   return res.json({
     configured: keys,
     hasUser: keys.includes("smtp_user"),

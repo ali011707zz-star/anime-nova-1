@@ -2,11 +2,8 @@ import type { Express, Request, Response } from "express";
 import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { sendVerifyEmail, sendPasswordResetEmail } from "./emailService.js";
-import { db, pool } from "../lib/db.js";
-import { users } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { sbSelect, sbInsert, sbUpsert, sbDelete, sbPatch } from "../lib/supabaseClient.js";
 
-/* ══ كودات التحقق — مخزّنة في PostgreSQL (تبقى عبر إعادة تشغيل السيرفر) ══ */
 const CODE_TTL_MS        = 10 * 60 * 1000;
 const MAX_ATTEMPTS       = 5;
 const RESEND_COOLDOWN_MS = 60 * 1000;
@@ -17,47 +14,44 @@ function generateCode(): string {
 
 async function setPendingCode(email: string, code: string, type: "signup" | "reset"): Promise<void> {
   const expiresAt = new Date(Date.now() + CODE_TTL_MS).toISOString();
-  await pool.query(
-    `INSERT INTO pending_verifications(email, code, type, expires_at, attempts, sent_at)
-     VALUES($1,$2,$3,$4,0,NOW())
-     ON CONFLICT(email) DO UPDATE
-       SET code=$2, type=$3, expires_at=$4, attempts=0, sent_at=NOW()`,
-    [email, code, type, expiresAt]
-  );
+  await sbUpsert("pending_verifications", {
+    email,
+    code,
+    type,
+    expires_at: expiresAt,
+    attempts:   0,
+    sent_at:    new Date().toISOString(),
+  }, "email");
 }
 
 async function getPendingCode(email: string): Promise<{ code: string; type: string; expiresAt: Date; attempts: number } | null> {
-  const r = await pool.query(
-    `SELECT code, type, expires_at, attempts FROM pending_verifications WHERE email=$1`,
-    [email]
-  );
-  if (!r.rows.length) return null;
-  const row = r.rows[0];
+  const rows = await sbSelect("pending_verifications", { email: `eq.${email}` }, { limit: 1 });
+  if (!rows.length) return null;
+  const row = rows[0];
   return { code: row.code, type: row.type, expiresAt: new Date(row.expires_at), attempts: row.attempts };
 }
 
 async function incrementAttempts(email: string): Promise<number> {
-  const r = await pool.query(
-    `UPDATE pending_verifications SET attempts=attempts+1 WHERE email=$1 RETURNING attempts`,
-    [email]
-  );
-  return r.rows[0]?.attempts ?? MAX_ATTEMPTS + 1;
+  const rows = await sbSelect("pending_verifications", { email: `eq.${email}` }, { limit: 1 });
+  const current = rows[0]?.attempts ?? 0;
+  const next = current + 1;
+  await sbPatch("pending_verifications", { email: `eq.${email}` }, { attempts: next });
+  return next;
 }
 
 async function deletePendingCode(email: string): Promise<void> {
-  await pool.query(`DELETE FROM pending_verifications WHERE email=$1`, [email]);
+  await sbDelete("pending_verifications", { email: `eq.${email}` });
 }
 
 async function getSentAt(email: string): Promise<Date | null> {
-  const r = await pool.query(
-    `SELECT sent_at FROM pending_verifications WHERE email=$1`,
-    [email]
-  );
-  return r.rows[0]?.sent_at ? new Date(r.rows[0].sent_at) : null;
+  const rows = await sbSelect("pending_verifications", { email: `eq.${email}` }, { limit: 1 });
+  return rows[0]?.sent_at ? new Date(rows[0].sent_at) : null;
 }
 
 async function cleanupExpiredCodes(): Promise<void> {
-  await pool.query(`DELETE FROM pending_verifications WHERE expires_at < NOW()`).catch(() => {});
+  try {
+    await sbDelete("pending_verifications", { expires_at: `lt.${new Date().toISOString()}` });
+  } catch { /* silent */ }
 }
 
 const scryptAsync = promisify(scrypt);
@@ -87,11 +81,11 @@ function sanitizeUsername(raw: string): string {
 
 async function generateUniqueUsername(base: string): Promise<string> {
   const clean = sanitizeUsername(base) || "user";
-  const rows = await db.select({ id: users.id }).from(users).where(eq(users.username, clean)).limit(1);
+  const rows = await sbSelect("users", { username: `eq.${clean}` }, { limit: 1 });
   if (!rows.length) return clean;
   const suffix    = Math.floor(100 + Math.random() * 900);
   const candidate = `${clean.slice(0, 17)}${suffix}`;
-  const rows2 = await db.select({ id: users.id }).from(users).where(eq(users.username, candidate)).limit(1);
+  const rows2 = await sbSelect("users", { username: `eq.${candidate}` }, { limit: 1 });
   if (!rows2.length) return candidate;
   return `${clean.slice(0, 14)}${Date.now() % 10000}`;
 }
@@ -111,7 +105,6 @@ function userPayload(u: any) {
 
 export function registerEmailAuthRoutes(app: Express): void {
 
-  /* ── Send verification code ─────────────────────────────────── */
   app.post("/api/auth/send-verify-code", async (req: Request, res: Response) => {
     try {
       await cleanupExpiredCodes();
@@ -121,14 +114,13 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       const emailKey = String(email).toLowerCase().trim();
 
-      // Cooldown: check last sent time from DB
       const sentAt = await getSentAt(emailKey);
       if (sentAt && Date.now() - sentAt.getTime() < RESEND_COOLDOWN_MS) {
         const wait = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - sentAt.getTime())) / 1000);
         return res.status(429).json({ error: `انتظر ${wait} ثانية قبل إعادة الإرسال` });
       }
 
-      const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, emailKey)).limit(1);
+      const existing = await sbSelect("users", { email: `eq.${emailKey}` }, { limit: 1 });
 
       if (type === "signup" && existing.length > 0)
         return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
@@ -147,7 +139,6 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       const resp: Record<string, any> = { sent: true };
       if (result.previewUrl) resp.previewUrl = result.previewUrl;
-      // وضع التطوير: لا يوجد SMTP حقيقي → أرسل الكود مباشرة ليُعرض في الواجهة
       if (!process.env.SMTP_USER) resp.devCode = code;
       return res.json(resp);
     } catch (err) {
@@ -156,7 +147,6 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Sign Up ─────────────────────────────────────────────────── */
   app.post("/api/auth/signup", async (req: Request, res: Response) => {
     try {
       const { email, password, displayName: rawName, verifyCode } = req.body || {};
@@ -189,7 +179,7 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       await deletePendingCode(emailKey);
 
-      const already = await db.select({ id: users.id }).from(users).where(eq(users.email, emailKey)).limit(1);
+      const already = await sbSelect("users", { email: `eq.${emailKey}` }, { limit: 1 });
       if (already.length > 0)
         return res.status(409).json({ error: "هذا البريد الإلكتروني مسجّل مسبقاً" });
 
@@ -199,15 +189,15 @@ export function registerEmailAuthRoutes(app: Express): void {
         : emailKey.split("@")[0];
       const username = await generateUniqueUsername(emailKey.split("@")[0]);
 
-      const [user] = await db.insert(users).values({
+      const user = await sbInsert("users", {
         email:          emailKey,
-        passwordHash,
-        displayName,
+        password_hash:  passwordHash,
+        display_name:   displayName,
         username,
-        emailVerified:  true,
-        firstName:      displayName.split(" ")[0] || null,
-        lastName:       displayName.split(" ").slice(1).join(" ") || null,
-      }).returning();
+        email_verified: true,
+        first_name:     displayName.split(" ")[0] || null,
+        last_name:      displayName.split(" ").slice(1).join(" ") || null,
+      });
 
       (req.session as any).userId = user.id;
       req.session.cookie.maxAge   = 30 * 24 * 60 * 60 * 1000;
@@ -219,7 +209,6 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Reset Password ──────────────────────────────────────────── */
   app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
     try {
       const { email, verifyCode, newPassword } = req.body || {};
@@ -247,13 +236,14 @@ export function registerEmailAuthRoutes(app: Express): void {
 
       await deletePendingCode(emailKey);
 
-      const userRows = await db.select().from(users).where(eq(users.email, emailKey)).limit(1);
+      const userRows = await sbSelect("users", { email: `eq.${emailKey}` }, { limit: 1 });
       if (!userRows.length) return res.status(404).json({ error: "المستخدم غير موجود" });
 
       const newHash = await hashPassword(String(newPassword));
-      await db.update(users)
-        .set({ passwordHash: newHash, updatedAt: new Date() })
-        .where(eq(users.id, userRows[0].id));
+      await sbPatch("users", { id: `eq.${userRows[0].id}` }, {
+        password_hash: newHash,
+        updated_at:    new Date().toISOString(),
+      });
 
       return res.json({ ok: true });
     } catch (err) {
@@ -262,20 +252,19 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Sign In ─────────────────────────────────────────────────── */
   app.post("/api/auth/signin", async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body || {};
       if (!email || !password)
         return res.status(400).json({ error: "البريد الإلكتروني وكلمة المرور مطلوبان" });
 
-      const rows = await db.select().from(users).where(eq(users.email, String(email).toLowerCase().trim())).limit(1);
+      const rows = await sbSelect("users", { email: `eq.${String(email).toLowerCase().trim()}` }, { limit: 1 });
       const user = rows[0];
 
-      if (!user || !user.passwordHash)
+      if (!user || !user.password_hash)
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
 
-      const valid = await verifyPassword(String(password), user.passwordHash);
+      const valid = await verifyPassword(String(password), user.password_hash);
       if (!valid)
         return res.status(401).json({ error: "بريد إلكتروني أو كلمة مرور غير صحيحة" });
 
@@ -289,17 +278,15 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Sign Out ────────────────────────────────────────────────── */
   app.post("/api/auth/signout", (req: Request, res: Response) => {
     req.session.destroy(() => res.json({ ok: true }));
   });
 
-  /* ── Get current user ────────────────────────────────────────── */
   app.get("/api/auth/me", async (req: Request, res: Response) => {
     const userId = (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
-      const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      const rows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
       if (!rows.length) {
         req.session.destroy(() => {});
         return res.status(401).json({ error: "غير مصرّح" });
@@ -310,19 +297,18 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Update Profile ──────────────────────────────────────────── */
   app.patch("/api/auth/profile", async (req: Request, res: Response) => {
     const userId = (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
       const { displayName, username, profileImageCustom, avatarColor } = req.body || {};
-      const updates: Record<string, any> = { updatedAt: new Date() };
+      const updates: Record<string, any> = { updated_at: new Date().toISOString() };
 
       if (typeof displayName === "string" && displayName.trim()) {
         const dn = displayName.trim().slice(0, 50);
-        updates.displayName = dn;
-        updates.firstName   = dn.split(" ")[0];
-        updates.lastName    = dn.split(" ").slice(1).join(" ") || null;
+        updates.display_name = dn;
+        updates.first_name   = dn.split(" ")[0];
+        updates.last_name    = dn.split(" ").slice(1).join(" ") || null;
       }
       if (typeof username === "string") {
         const cleaned = sanitizeUsername(username);
@@ -330,30 +316,29 @@ export function registerEmailAuthRoutes(app: Express): void {
           return res.status(400).json({ error: "اسم المستخدم يجب أن يحتوي على أحرف إنجليزية أو أرقام" });
         if (cleaned.length < 3)
           return res.status(400).json({ error: "اسم المستخدم يجب أن يكون 3 أحرف على الأقل" });
-        const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, cleaned)).limit(1);
+        const existing = await sbSelect("users", { username: `eq.${cleaned}` }, { limit: 1 });
         if (existing.length && existing[0].id !== userId)
           return res.status(409).json({ error: "اسم المستخدم مستخدم مسبقاً" });
         updates.username = cleaned;
       }
       if (typeof profileImageCustom === "string") {
-        updates.profileImageCustom = profileImageCustom.slice(0, 2_000_000);
+        updates.profile_image_custom = profileImageCustom.slice(0, 2_000_000);
       } else if (profileImageCustom === null) {
-        updates.profileImageCustom = null;
+        updates.profile_image_custom = null;
       }
       if (typeof avatarColor === "number" && avatarColor >= 0 && avatarColor <= 7) {
-        updates.avatarColor = avatarColor;
+        updates.avatar_color = avatarColor;
       }
 
-      const rows = await db.update(users).set(updates).where(eq(users.id, userId)).returning();
-      if (!rows.length) return res.status(404).json({ error: "المستخدم غير موجود" });
-      return res.json(userPayload(rows[0]));
+      const updated = await sbPatch("users", { id: `eq.${userId}` }, updates);
+      if (!updated) return res.status(404).json({ error: "المستخدم غير موجود" });
+      return res.json(userPayload(updated));
     } catch (err) {
       console.error("[profile]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
     }
   });
 
-  /* ── Change Password ─────────────────────────────────────────── */
   app.post("/api/auth/change-password", async (req: Request, res: Response) => {
     const userId = (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
@@ -364,17 +349,20 @@ export function registerEmailAuthRoutes(app: Express): void {
       if (String(newPassword).length < 6)
         return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
 
-      const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      const rows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
       const user = rows[0];
-      if (!user?.passwordHash)
+      if (!user?.password_hash)
         return res.status(401).json({ error: "المستخدم غير موجود" });
 
-      const valid = await verifyPassword(String(currentPassword), user.passwordHash);
+      const valid = await verifyPassword(String(currentPassword), user.password_hash);
       if (!valid)
         return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
 
       const newHash = await hashPassword(String(newPassword));
-      await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, userId));
+      await sbPatch("users", { id: `eq.${userId}` }, {
+        password_hash: newHash,
+        updated_at:    new Date().toISOString(),
+      });
       return res.json({ ok: true });
     } catch (err) {
       console.error("[change-password]", err);
@@ -382,12 +370,11 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Delete Account ──────────────────────────────────────────── */
   app.delete("/api/auth/account", async (req: Request, res: Response) => {
     const userId = (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
-      await db.delete(users).where(eq(users.id, userId));
+      await sbDelete("users", { id: `eq.${userId}` });
       req.session.destroy(() => {});
       return res.json({ ok: true });
     } catch (err) {
@@ -396,14 +383,13 @@ export function registerEmailAuthRoutes(app: Express): void {
     }
   });
 
-  /* ── Check username availability ─────────────────────────────── */
   app.get("/api/auth/check-username/:username", async (req: Request, res: Response) => {
     const userId  = (req.session as any)?.userId;
     const cleaned = sanitizeUsername(req.params.username);
     if (!cleaned || cleaned.length < 3)
       return res.json({ available: false, reason: "قصير جداً" });
     try {
-      const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, cleaned)).limit(1);
+      const existing = await sbSelect("users", { username: `eq.${cleaned}` }, { limit: 1 });
       const available = !existing.length || existing[0].id === userId;
       return res.json({ available, username: cleaned });
     } catch {
@@ -412,23 +398,22 @@ export function registerEmailAuthRoutes(app: Express): void {
   });
 }
 
-/* ── Get authed user from session ────────────────────────────── */
 export async function getEmailUser(req: Request): Promise<any | null> {
   const userId = (req.session as any)?.userId || (req.session as any)?.emailUserId;
   if (!userId) return null;
   try {
-    const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const rows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
     if (!rows.length) return null;
     const u = rows[0];
     return {
       id:              u.id,
       email:           u.email,
-      displayName:     u.displayName,
+      displayName:     u.display_name,
       username:        u.username,
-      avatarColor:     u.avatarColor ?? 0,
-      profileImageUrl: u.profileImageCustom || u.profileImageUrl,
+      avatarColor:     u.avatar_color ?? 0,
+      profileImageUrl: u.profile_image_custom || u.profile_image_url,
       authType:        "email" as const,
-      createdAt:       u.createdAt,
+      createdAt:       u.created_at,
     };
   } catch { return null; }
 }

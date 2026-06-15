@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { pool } from "../lib/db.js";
+import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 
 const router = Router();
 
@@ -19,20 +19,21 @@ router.post("/api/report", async (req, res) => {
     return;
   }
 
-  // ── 1. حفظ في قاعدة البيانات دائماً (الطريقة الأساسية) ─────────────────
+  // ── 1. حفظ في Supabase دائماً ────────────────────────────────────────────
   try {
-    await pool.query(
-      `INSERT INTO reports (type, message, page, user_display_name)
-       VALUES ($1, $2, $3, $4)`,
-      [type || "other", message.trim(), page || null, userDisplayName || null]
-    );
+    await sbInsert("reports", {
+      type:              type || "other",
+      message:           message.trim(),
+      page:              page || null,
+      user_display_name: userDisplayName || null,
+    });
   } catch (dbErr) {
-    console.error("[report] DB error:", dbErr);
+    console.error("[report] Supabase error:", dbErr);
     res.status(500).json({ ok: false, error: "فشل حفظ التقرير في قاعدة البيانات" });
     return;
   }
 
-  // ── 2. إرسال Telegram اختياري — لا يُفشل الطلب إن لم يكن مُهيَّأ ───────
+  // ── 2. إرسال Telegram اختياري ─────────────────────────────────────────────
   if (BOT_TOKEN && CHAT_ID) {
     const typeLabel: Record<string, string> = {
       bug:        "🐛 خلل تقني",
@@ -72,13 +73,10 @@ router.post("/api/report", async (req, res) => {
   res.json({ ok: true });
 });
 
-// ── قراءة التقارير (للمراجعة الداخلية) ─────────────────────────────────────
-router.get("/api/report/list", async (req, res) => {
+// ── قراءة التقارير ────────────────────────────────────────────────────────────
+router.get("/api/report/list", async (_req, res) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT id, type, message, page, user_display_name, created_at
-       FROM reports ORDER BY created_at DESC LIMIT 100`
-    );
+    const rows = await sbSelect("reports", { order: "created_at.desc" }, { limit: 100 });
     res.json({ ok: true, reports: rows });
   } catch (err) {
     console.error("[report] list error:", err);
