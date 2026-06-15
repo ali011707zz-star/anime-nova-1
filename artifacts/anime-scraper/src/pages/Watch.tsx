@@ -1187,7 +1187,27 @@ function MegaEmbedPlayer({
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
 }) {
   const [isFs, setIsFs] = useState(false);
+  const [showBar, setShowBar] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hideTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* schedule bar hide after 3 s */
+  const scheduleHide = useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setShowBar(false), 3000);
+  }, []);
+
+  /* show bar + restart hide timer */
+  const revealBar = useCallback(() => {
+    setShowBar(true);
+    scheduleHide();
+  }, [scheduleHide]);
+
+  useEffect(() => {
+    /* start the initial hide countdown */
+    scheduleHide();
+    return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); };
+  }, [scheduleHide]);
 
   useEffect(() => {
     const fn = () => {
@@ -1198,15 +1218,12 @@ function MegaEmbedPlayer({
       }
     };
     document.addEventListener("fullscreenchange", fn);
-    // Auto-fullscreen + landscape lock on mount — gesture is fresh from user tap
     const timer = setTimeout(() => {
       const el = containerRef.current;
       if (el && !document.fullscreenElement) {
         el.requestFullscreen?.()
           .then(() => {
-            try {
-              (screen.orientation as any).lock?.("landscape").catch(() => {});
-            } catch {}
+            try { (screen.orientation as any).lock?.("landscape").catch(() => {}); } catch {}
           })
           .catch(() => {});
       }
@@ -1229,44 +1246,54 @@ function MegaEmbedPlayer({
   return (
     <motion.div
       ref={containerRef}
-      className="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden"
+      className="fixed inset-0 z-50 bg-black overflow-hidden"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
       dir="rtl"
+      /* tap anywhere to toggle bar visibility */
+      onClick={revealBar}
     >
-      {/* ── Top bar ── */}
-      <div className="flex items-center gap-3 px-4 pt-safe pt-4 pb-2 shrink-0"
-        style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.82) 0%, transparent 100%)" }}>
-        <button onClick={onBack}
-          className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-all shrink-0"
-          style={{ border: "1px solid rgba(255,255,255,0.1)" }}>
-          <ChevronRight className="w-5 h-5 text-white/80" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <p className="text-white/85 text-[13px] font-bold font-['Cairo'] truncate">{title}</p>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</span>
-            <span className="text-white/20 text-[10px]">·</span>
-            <span className="text-emerald-400/70 text-[10px] font-bold font-['Cairo']">{getEmbedLabel(src)} · داخل التطبيق</span>
-          </div>
-        </div>
-        <button onClick={toggleFs}
-          className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-all shrink-0"
-          style={{ border: "1px solid rgba(255,255,255,0.1)" }}>
-          {isFs ? <Minimize2 className="w-4 h-4 text-white/70" /> : <Maximize2 className="w-4 h-4 text-white/70" />}
-        </button>
-      </div>
+      {/* ── iframe fills entire screen ── */}
+      <iframe
+        key={src}
+        src={src}
+        className="absolute inset-0 w-full h-full border-0 bg-black"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+        allow="fullscreen; autoplay"
+        title={`${title} - الحلقة ${ep}`}
+      />
 
-      {/* ── Mega iframe (sandboxed — cannot open new tabs or navigate away) ── */}
-      <div className="flex-1 relative min-h-0">
-        <iframe
-          key={src}
-          src={src}
-          className="absolute inset-0 w-full h-full border-0 bg-black"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
-          allow="fullscreen; autoplay"
-          title={`${title} - الحلقة ${ep}`}
-        />
+      {/* ── Top bar overlay (auto-hides) ── */}
+      <div
+        className="absolute inset-x-0 top-0 pointer-events-none z-10"
+        style={{
+          opacity: showBar ? 1 : 0,
+          transition: "opacity 0.35s ease",
+        }}
+      >
+        <div
+          className="flex items-center gap-3 px-4 pt-4 pb-6 pointer-events-auto"
+          style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.80) 0%, transparent 100%)" }}
+        >
+          <button
+            onClick={e => { e.stopPropagation(); onBack(); }}
+            className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-all shrink-0"
+            style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            <ChevronRight className="w-5 h-5 text-white/80" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-white/85 text-[13px] font-bold font-['Cairo'] truncate">{title}</p>
+            <span className="text-white/35 text-[11px] font-['Cairo']">الحلقة {ep}</span>
+          </div>
+          <button
+            onClick={e => { e.stopPropagation(); toggleFs(); }}
+            className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center active:scale-90 transition-all shrink-0"
+            style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            {isFs ? <Minimize2 className="w-4 h-4 text-white/70" /> : <Maximize2 className="w-4 h-4 text-white/70" />}
+          </button>
+        </div>
       </div>
 
     </motion.div>
@@ -1638,6 +1665,8 @@ function EpisodePlayer({
   useEffect(() => {
     if (prevUrlForSubRef.current === currentUrl) return;
     prevUrlForSubRef.current = currentUrl;
+    // Reset timing offset on every server switch so old adjustments don't bleed over
+    setSubOffset(0);
     if (subChoice === "off") return;
     const saved = subChoice;
     // Check cache first — apply immediately if available, else short delay
