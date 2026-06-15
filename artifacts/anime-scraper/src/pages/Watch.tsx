@@ -973,12 +973,12 @@ function ScraperPicker({
         </button>
 
         {/* Centered content */}
-        <div className="relative h-full flex flex-col items-center justify-center gap-6 px-6">
+        <div className="relative h-full flex flex-col items-center justify-center gap-4 px-6">
           {/* Prayer */}
           <motion.p
             initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05, duration: 0.4 }}
-            className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide text-center">
+            className="text-white/85 text-[13px] font-black font-['Cairo'] tracking-wide text-center">
             اللهم صلِّ وسلِّم على نبينا محمد ﷺ
           </motion.p>
 
@@ -992,14 +992,14 @@ function ScraperPicker({
               <div className="absolute -inset-4 rounded-[28px] pointer-events-none"
                 style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.22) 0%, transparent 68%)" }} />
               <img src={cover} alt={title}
-                className="w-44 h-[248px] rounded-2xl object-cover"
-                style={{ boxShadow: "0 28px 72px rgba(0,0,0,0.88), 0 0 0 1px rgba(255,255,255,0.08)" }} />
+                className="rounded-2xl object-cover"
+                style={{ width: "clamp(130px, 40vw, 176px)", height: "clamp(184px, 57vw, 248px)", boxShadow: "0 28px 72px rgba(0,0,0,0.88), 0 0 0 1px rgba(255,255,255,0.08)" }} />
             </motion.div>
           ) : (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              className="w-44 h-[248px] rounded-2xl bg-white/[0.03] flex items-center justify-center"
-              style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
+              className="rounded-2xl bg-white/[0.03] flex items-center justify-center"
+              style={{ width: "clamp(130px, 40vw, 176px)", height: "clamp(184px, 57vw, 248px)", boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
               <div className="w-16 h-16 rounded-full bg-violet-500/15 flex items-center justify-center">
                 <div className="w-7 h-7 rounded-full bg-violet-500/35" />
               </div>
@@ -2874,12 +2874,12 @@ export default function WatchPage() {
           <X className="w-5 h-5 text-white/60" />
         </button>
 
-        <div className="relative h-full flex flex-col items-center justify-center gap-6 px-6">
+        <div className="relative h-full flex flex-col items-center justify-center gap-4 px-6">
           {/* Prayer — ABOVE poster */}
           <motion.p
             initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05, duration: 0.4 }}
-            className="text-white/85 text-[14px] font-black font-['Cairo'] tracking-wide text-center">
+            className="text-white/85 text-[13px] font-black font-['Cairo'] tracking-wide text-center">
             اللهم صلِّ وسلِّم على نبينا محمد ﷺ
           </motion.p>
 
@@ -2894,12 +2894,12 @@ export default function WatchPage() {
               <div className="absolute -inset-4 rounded-[28px] pointer-events-none"
                 style={{ background: "radial-gradient(ellipse, rgba(139,92,246,0.25) 0%, transparent 68%)" }} />
               <img src={cover} alt={title || "أنمي"}
-                className="w-44 h-[248px] rounded-2xl object-cover"
-                style={{ boxShadow: "0 28px 72px rgba(0,0,0,0.90), 0 0 0 1px rgba(255,255,255,0.09)" }} />
+                className="rounded-2xl object-cover"
+                style={{ width: "clamp(130px, 40vw, 176px)", height: "clamp(184px, 57vw, 248px)", boxShadow: "0 28px 72px rgba(0,0,0,0.90), 0 0 0 1px rgba(255,255,255,0.09)" }} />
             </motion.div>
           ) : (
-            <div className="w-44 h-[248px] rounded-2xl bg-white/[0.03] flex items-center justify-center"
-              style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
+            <div className="rounded-2xl bg-white/[0.03] flex items-center justify-center"
+              style={{ width: "clamp(130px, 40vw, 176px)", height: "clamp(184px, 57vw, 248px)", boxShadow: "0 0 0 1px rgba(255,255,255,0.06)" }}>
               <div className="w-16 h-16 rounded-full bg-violet-500/15 flex items-center justify-center">
                 <div className="w-7 h-7 rounded-full bg-violet-500/35" />
               </div>
