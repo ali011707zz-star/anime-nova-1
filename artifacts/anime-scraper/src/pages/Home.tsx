@@ -367,7 +367,7 @@ export default function Home() {
         <div
           ref={heroContainerRef}
           className="relative w-full overflow-hidden select-none"
-          style={{ height: 390 }}
+          style={{ height: "clamp(310px, 50dvh, 390px)" }}
           onMouseMove={handleHeroMouseMove}
           onMouseLeave={handleHeroMouseLeave}
           onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
@@ -412,7 +412,7 @@ export default function Home() {
           <div className="absolute bottom-0 left-0 right-0 h-32" style={{ background: "linear-gradient(to top, rgba(109,40,217,0.12), transparent)" }} />
 
           {/* ── Content Row ── */}
-          <div className="absolute inset-0 flex items-end pb-10 px-5">
+          <div className="absolute inset-0 flex items-end pb-7 px-4">
             <div className="flex items-end justify-between w-full gap-4">
 
               {/* Left: Text + Buttons */}
@@ -452,7 +452,7 @@ export default function Home() {
                   {/* Title — big & bold */}
                   <motion.h1
                     className="font-black text-white mb-1.5 tracking-tight leading-none"
-                    style={{ fontSize: "clamp(28px, 6vw, 42px)", textShadow: "0 4px 30px rgba(0,0,0,0.9)" }}
+                    style={{ fontSize: "clamp(21px, 6.5vw, 42px)", textShadow: "0 4px 30px rgba(0,0,0,0.9)" }}
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, delay: 0.09 }}
@@ -462,7 +462,7 @@ export default function Home() {
 
                   {/* Subtitle */}
                   <motion.p
-                    className="text-white/45 text-xs font-bold mb-5"
+                    className="text-white/45 text-xs font-bold mb-3"
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, delay: 0.11 }}
@@ -483,7 +483,7 @@ export default function Home() {
                       <motion.button
                         whileTap={{ scale: 0.93 }}
                         whileHover={{ scale: 1.03 }}
-                        className="relative overflow-hidden text-white text-sm font-black px-7 py-3.5 rounded-2xl flex items-center gap-2 shadow-2xl"
+                        className="relative overflow-hidden text-white text-sm font-black px-5 py-3 rounded-2xl flex items-center gap-2 shadow-2xl"
                         style={{ background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)", boxShadow: "0 8px 28px rgba(109,40,217,0.5)" }}
                       >
                         <Play className="w-4 h-4 fill-current relative z-10" />
@@ -494,7 +494,7 @@ export default function Home() {
                       <motion.button
                         whileTap={{ scale: 0.93 }}
                         whileHover={{ scale: 1.03, backgroundColor: "rgba(255,255,255,0.15)" }}
-                        className="bg-white/8 backdrop-blur-xl text-white text-sm font-black px-5 py-3.5 rounded-2xl border border-white/15 flex items-center gap-1.5 transition-colors"
+                        className="bg-white/8 backdrop-blur-xl text-white text-sm font-black px-3.5 py-3 rounded-2xl border border-white/15 flex items-center gap-1.5 transition-colors"
                       >
                         <Info className="w-4 h-4" /> التفاصيل
                       </motion.button>
