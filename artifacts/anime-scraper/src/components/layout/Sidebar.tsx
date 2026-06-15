@@ -236,7 +236,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               {/* بطاقة تعريفية */}
               <div className="mx-4 rounded-2xl p-3 text-center"
                 style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <div className="flex items-center justify-center gap-1 mb-0.5">
+                <div className="flex items-center justify-center gap-1 mb-0.5" dir="ltr">
                   <span className="text-[13px] font-black text-white/70">ANIME</span>
                   <span className="text-[13px] font-black"
                     style={{ background: 'linear-gradient(135deg,#A78BFA,#7C3AED)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>NOVA</span>
