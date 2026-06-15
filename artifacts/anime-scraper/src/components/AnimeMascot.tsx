@@ -1,8 +1,8 @@
 import { motion } from "framer-motion";
 
 /**
- * AnimeMascot — شخصية Sukuna-inspired chibi (Jujutsu Kaisen)
- * شعر وردي/كريمسون، وشوم مميزة، عيون حمراء بحدقة شقية
+ * AnimeMascot — Sukuna chibi دقيق (Jujutsu Kaisen)
+ * بشرة شاحبة، شعر رمادي/أبيض، ماسة على الجبهة، وشوم تحت العينين
  * حركة: خطوتان يمين ثم رجوع — تكرار مستمر
  */
 export function AnimeMascot({ className }: { className?: string }) {
@@ -24,7 +24,6 @@ export function AnimeMascot({ className }: { className?: string }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.4, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
     >
-      {/* overflow:visible lets the walking motion go outside SVG bounds */}
       <svg
         viewBox="0 0 100 128"
         width="96"
@@ -33,229 +32,208 @@ export function AnimeMascot({ className }: { className?: string }) {
         aria-hidden="true"
       >
         <defs>
-          {/* Skin tone */}
-          <radialGradient id="sk" cx="40%" cy="38%" r="65%">
-            <stop offset="0%" stopColor="#FFE0BE" />
-            <stop offset="100%" stopColor="#E8AA72" />
+          {/* بشرة شاحبة — رمادية بيضاء مثل سوكونا */}
+          <radialGradient id="sk" cx="42%" cy="36%" r="68%">
+            <stop offset="0%" stopColor="#EAE6E0" />
+            <stop offset="60%" stopColor="#D8D2C8" />
+            <stop offset="100%" stopColor="#C4BEB4" />
           </radialGradient>
-          {/* Hot-pink → crimson hair */}
-          <linearGradient id="hr" x1="0" y1="0" x2="0.3" y2="1">
-            <stop offset="0%" stopColor="#FF5FAE" />
-            <stop offset="55%" stopColor="#E0196A" />
-            <stop offset="100%" stopColor="#991240" />
+          {/* شعر رمادي أبيض */}
+          <radialGradient id="hr" cx="45%" cy="30%" r="65%">
+            <stop offset="0%" stopColor="#D8D4CC" />
+            <stop offset="50%" stopColor="#B8B2A8" />
+            <stop offset="100%" stopColor="#8C887E" />
+          </radialGradient>
+          {/* ملابس حمراء */}
+          <linearGradient id="rd" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#CC2020" />
+            <stop offset="100%" stopColor="#9A1010" />
           </linearGradient>
-          {/* Crimson red eyes */}
-          <radialGradient id="ey" cx="32%" cy="28%" r="72%">
-            <stop offset="0%" stopColor="#FF3030" />
-            <stop offset="55%" stopColor="#AA0018" />
-            <stop offset="100%" stopColor="#440008" />
-          </radialGradient>
-          {/* Dark jacket */}
-          <linearGradient id="jk" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#1a1828" />
-            <stop offset="100%" stopColor="#0e0d18" />
+          {/* داخل الملابس */}
+          <linearGradient id="col" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#2a2520" />
+            <stop offset="100%" stopColor="#1a1510" />
           </linearGradient>
         </defs>
 
-        {/* ── Ground shadow (static, outside moving group) ── */}
+        {/* ── ظل أرضي ── */}
         <motion.ellipse
           cx={50} cy={124} rx={20} ry={3.5}
-          fill="rgba(200,0,40,0.22)"
+          fill="rgba(0,0,0,0.28)"
           animate={{ x: [0, 22, 44, 22, 0], scaleX: [1, 0.88, 0.76, 0.88, 1] }}
           transition={baseT}
           style={{ transformOrigin: "50px 124px" }}
         />
 
-        {/* ══════════════ CHARACTER — slides L → R → L ══════════════ */}
+        {/* ══════════════ الشخصية — تمشي يميناً ويساراً ══════════════ */}
         <motion.g
           animate={{ x: [0, 22, 44, 22, 0], y: [0, -2, 0, -2, 0] }}
           transition={baseT}
         >
 
-          {/* ── LEGS ── */}
-          {/* Left leg — pivot at hip */}
+          {/* ── الأرجل ── */}
           <motion.g
             style={{ transformOrigin: "37px 90px" }}
             animate={{ rotate: [4, -24, 26, -24, 4] }}
             transition={baseT}
           >
-            {/* Pant leg */}
-            <rect x={32} y={90} width={11} height={28} rx={5.5} fill="url(#jk)" />
-            {/* Crimson cuff */}
-            <rect x={31.5} y={109} width={12} height={5} rx={2.5} fill="#B01030" />
-            {/* Sandal platform */}
-            <rect x={29} y={115} width={17} height={6} rx={3} fill="#111" />
-            {/* Sandal strap */}
-            <rect x={31} y={114} width={13} height={2.5} rx={1.2} fill="#C41E3A" />
+            <rect x={32} y={90} width={11} height={28} rx={5.5} fill="url(#rd)" />
+            <rect x={30} y={113} width={16} height={6} rx={3} fill="#1a1510" />
+            <rect x={31} y={112} width={13} height={2.5} rx={1.2} fill="#8B1010" />
           </motion.g>
 
-          {/* Right leg */}
           <motion.g
             style={{ transformOrigin: "61px 90px" }}
             animate={{ rotate: [-4, 26, -24, 26, -4] }}
             transition={baseT}
           >
-            <rect x={56} y={90} width={11} height={28} rx={5.5} fill="url(#jk)" />
-            <rect x={55.5} y={109} width={12} height={5} rx={2.5} fill="#B01030" />
-            <rect x={53} y={115} width={17} height={6} rx={3} fill="#111" />
-            <rect x={55} y={114} width={13} height={2.5} rx={1.2} fill="#C41E3A" />
+            <rect x={56} y={90} width={11} height={28} rx={5.5} fill="url(#rd)" />
+            <rect x={54} y={113} width={16} height={6} rx={3} fill="#1a1510" />
+            <rect x={55} y={112} width={13} height={2.5} rx={1.2} fill="#8B1010" />
           </motion.g>
 
-          {/* ── BODY / KIMONO ── */}
-          <rect x={25} y={56} width={50} height={37} rx={11} fill="url(#jk)" />
-          {/* Obi / belt */}
-          <rect x={25} y={85} width={50} height={6} rx={3} fill="#B01030" />
-          {/* Collar open V */}
-          <path d="M50,56 L42,72 L50,78 L58,72 Z" fill="#0b0b14" opacity={0.7} />
-          {/* Inner collar lining */}
-          <path d="M50,56 L44,68 L50,73 L56,68 Z" fill="#C41E3A" opacity={0.35} />
-          {/* Chest tattoo lines (Sukuna body markings) */}
-          <path d="M37,64 L34,76" stroke="#C41E3A" strokeWidth={1.8} strokeLinecap="round" opacity={0.75} />
-          <path d="M63,64 L66,76" stroke="#C41E3A" strokeWidth={1.8} strokeLinecap="round" opacity={0.75} />
-          {/* Extra tattoo dots */}
-          <circle cx={38} cy={78} r={2} fill="#C41E3A" opacity={0.6} />
-          <circle cx={62} cy={78} r={2} fill="#C41E3A" opacity={0.6} />
+          {/* ── الجسم — كيمونو أحمر ── */}
+          <rect x={24} y={55} width={52} height={38} rx={11} fill="url(#rd)" />
+          {/* حزام / أوبي */}
+          <rect x={24} y={85} width={52} height={6} rx={3} fill="#7A0C0C" />
+          {/* فتحة الياقة */}
+          <path d="M50,55 L41,70 L50,77 L59,70 Z" fill="url(#col)" />
+          {/* بطانة داخلية */}
+          <path d="M50,55 L44,67 L50,72 L56,67 Z" fill="#CC2020" opacity={0.45} />
+          {/* أزرار الكيمونو — دوائر زيتونية مثل الصورة */}
+          <circle cx={44} cy={80} r={2.5} fill="#6B6030" />
+          <circle cx={56} cy={80} r={2.5} fill="#6B6030" />
+          <circle cx={50} cy={76} r={2.5} fill="#6B6030" />
+          {/* وشم الصدر */}
+          <path d="M36,63 L33,74" stroke="#7A0000" strokeWidth={1.5} strokeLinecap="round" opacity={0.6} />
+          <path d="M64,63 L67,74" stroke="#7A0000" strokeWidth={1.5} strokeLinecap="round" opacity={0.6} />
 
-          {/* ── LEFT ARM ── pivot at shoulder */}
+          {/* ── الذراع اليسرى ── */}
           <motion.g
-            style={{ transformOrigin: "25px 62px" }}
+            style={{ transformOrigin: "24px 62px" }}
             animate={{ rotate: [6, -18, 20, -18, 6] }}
             transition={baseT}
           >
-            <rect x={10} y={62} width={15} height={26} rx={7.5} fill="url(#jk)" />
-            {/* Sleeve cuff */}
-            <rect x={9.5} y={80} width={16} height={5} rx={2.5} fill="#B01030" />
-            {/* Hand — clenched fist suggestion */}
-            <rect x={11} y={85} width={13} height={11} rx={5.5} fill="url(#sk)" />
-            {/* Knuckle lines */}
-            <line x1={13} y1={90} x2={22} y2={90} stroke="#D4956A" strokeWidth={0.8} opacity={0.5} />
-            {/* Hand tattoo (Sukuna's cursed mark) */}
-            <circle cx={17.5} cy={88} r={2.5} fill="#C41E3A" opacity={0.65} />
-            <path d="M17.5,85.5 L17.5,90.5 M15,88 L20,88" stroke="#8B0020" strokeWidth={0.8} opacity={0.8} />
+            <rect x={9} y={62} width={15} height={24} rx={7.5} fill="url(#rd)" />
+            <rect x={9} y={79} width={15} height={4} rx={2} fill="#7A0C0C" />
+            <rect x={10} y={83} width={13} height={10} rx={5.5} fill="url(#sk)" />
+            <line x1={12} y1={88} x2={21} y2={88} stroke="#B0AA9C" strokeWidth={0.7} opacity={0.4} />
           </motion.g>
 
-          {/* ── RIGHT ARM ── */}
+          {/* ── الذراع اليمنى ── */}
           <motion.g
-            style={{ transformOrigin: "75px 62px" }}
+            style={{ transformOrigin: "76px 62px" }}
             animate={{ rotate: [-6, 20, -18, 20, -6] }}
             transition={baseT}
           >
-            <rect x={75} y={62} width={15} height={26} rx={7.5} fill="url(#jk)" />
-            <rect x={74.5} y={80} width={16} height={5} rx={2.5} fill="#B01030" />
-            <rect x={76} y={85} width={13} height={11} rx={5.5} fill="url(#sk)" />
-            <line x1={78} y1={90} x2={87} y2={90} stroke="#D4956A" strokeWidth={0.8} opacity={0.5} />
-            <circle cx={82.5} cy={88} r={2.5} fill="#C41E3A" opacity={0.65} />
-            <path d="M82.5,85.5 L82.5,90.5 M80,88 L85,88" stroke="#8B0020" strokeWidth={0.8} opacity={0.8} />
+            <rect x={76} y={62} width={15} height={24} rx={7.5} fill="url(#rd)" />
+            <rect x={76} y={79} width={15} height={4} rx={2} fill="#7A0C0C" />
+            <rect x={77} y={83} width={13} height={10} rx={5.5} fill="url(#sk)" />
+            <line x1={79} y1={88} x2={88} y2={88} stroke="#B0AA9C" strokeWidth={0.7} opacity={0.4} />
           </motion.g>
 
-          {/* ── NECK ── */}
+          {/* ── الرقبة ── */}
           <rect x={43.5} y={49} width={13} height={10} rx={6.5} fill="url(#sk)" />
-          {/* Neck tattoo line */}
-          <line x1={50} y1={50} x2={50} y2={57} stroke="#C41E3A" strokeWidth={1.2} strokeLinecap="round" opacity={0.5} />
+          {/* وشم الرقبة — خطوط رأسية مثل الصورة */}
+          <line x1={47} y1={51} x2={47} y2={58} stroke="#5a5550" strokeWidth={1} strokeLinecap="round" opacity={0.55} />
+          <line x1={50} y1={50} x2={50} y2={58} stroke="#5a5550" strokeWidth={1.1} strokeLinecap="round" opacity={0.65} />
+          <line x1={53} y1={51} x2={53} y2={58} stroke="#5a5550" strokeWidth={1} strokeLinecap="round" opacity={0.55} />
 
-          {/* ══ HAIR — back layer ══ */}
-          {/* Large back circle */}
-          <circle cx={50} cy={28} r={27} fill="url(#hr)" />
-          {/* Back side hair hanging down */}
-          <ellipse cx={24} cy={48} rx={8} ry={18} fill="#991240" transform="rotate(-14,24,48)" />
-          <ellipse cx={76} cy={48} rx={8} ry={18} fill="#991240" transform="rotate(14,76,48)" />
+          {/* ══ الشعر — الطبقة الخلفية ══ */}
+          <circle cx={50} cy={27} r={27} fill="url(#hr)" />
+          {/* جانبا الشعر */}
+          <ellipse cx={25} cy={46} rx={7} ry={16} fill="#8C887E" transform="rotate(-12,25,46)" />
+          <ellipse cx={75} cy={46} rx={7} ry={16} fill="#8C887E" transform="rotate(12,75,46)" />
 
-          {/* ── HAIR SPIKES (5 prominent spikes — wild Sukuna style) ── */}
-          {/* Spike 1 — far left, angled outward */}
-          <polygon points="22,26 11,4 29,22" fill="#E0196A" />
-          {/* Spike 2 — left */}
-          <polygon points="31,17 27,-2 41,14" fill="#FF3D8A" />
-          {/* Spike 3 — center (tallest) */}
-          <polygon points="44,11 50,-8 56,11" fill="#FF5FAE" />
-          {/* Spike 4 — right */}
-          <polygon points="59,17 73,-2 69,14" fill="#FF3D8A" />
-          {/* Spike 5 — far right */}
-          <polygon points="71,26 89,4 78,22" fill="#E0196A" />
-          {/* Spike highlight overlay (lighter on leading edge) */}
-          <polygon points="44,11 50,-8 50,11" fill="rgba(255,180,210,0.30)" />
+          {/* ── أشواك الشعر — رمادية قصيرة مبعثرة (مثل سوكونا) ── */}
+          <polygon points="24,22 15,6 31,19" fill="#C4C0B6" />
+          <polygon points="33,15 29,-1 42,12" fill="#D0CCC2" />
+          <polygon points="43,10 49,-6 55,10" fill="#D8D4CC" />
+          <polygon points="57,15 71,-1 67,12" fill="#D0CCC2" />
+          <polygon points="68,22 85,6 69,19" fill="#C4C0B6" />
+          {/* ظل على الأشواك */}
+          <polygon points="43,10 49,-6 49,10" fill="rgba(255,255,255,0.22)" />
 
-          {/* ── HEAD ── */}
-          <circle cx={50} cy={30} r={22} fill="url(#sk)" />
+          {/* ── الرأس ── */}
+          <circle cx={50} cy={29} r={22} fill="url(#sk)" />
 
-          {/* ── HAIR FRONT FRINGE (wild strands over forehead) ── */}
-          <path d="M33,20 Q28,12 30,6 Q35,10 36,18 Z" fill="#E0196A" />
-          <path d="M39,14 Q37,5 42,3 Q45,9 43,16 Z" fill="#C41E3A" />
-          <path d="M47,12 Q46,3 50,2 Q53,8 52,14 Z" fill="#FF5FAE" />
-          <path d="M54,13 Q57,4 62,5 Q61,11 58,16 Z" fill="#C41E3A" />
-          <path d="M63,20 Q70,12 70,6 Q65,10 63,18 Z" fill="#E0196A" />
-          {/* Fringe highlight */}
-          <path d="M47,12 Q50,5 53,12 Q51,9 50,9 Q49,9 47,12 Z" fill="rgba(255,180,210,0.40)" />
+          {/* ── فرقعة الشعر الأمامية — خصلات رمادية ── */}
+          <path d="M34,19 Q29,11 31,5 Q36,10 37,17 Z" fill="#B8B4A8" />
+          <path d="M40,13 Q38,4 43,2 Q46,8 44,15 Z" fill="#C4C0B6" />
+          <path d="M47,11 Q46,2 50,1 Q54,7 52,13 Z" fill="#D0CCC2" />
+          <path d="M54,12 Q57,3 62,4 Q61,10 58,15 Z" fill="#C4C0B6" />
+          <path d="M62,19 Q69,11 69,5 Q64,10 63,17 Z" fill="#B8B4A8" />
+          {/* بريق على الشعر */}
+          <path d="M47,11 Q50,4 53,11 Q51,8 50,8 Q49,8 47,11 Z" fill="rgba(255,255,255,0.30)" />
 
-          {/* ══ FACE ══ */}
+          {/* ════ الوجه ════ */}
 
-          {/* ── SUKUNA TATTOO MARKS — most distinctive feature ── */}
-          {/* Under LEFT eye — two curved lines */}
-          <path d="M31,37 Q27,42 28,47" stroke="#1a0530" strokeWidth={2.2} fill="none" strokeLinecap="round" />
-          <path d="M34,38 Q31,43 32,48" stroke="#1a0530" strokeWidth={1.6} fill="none" strokeLinecap="round" />
-          {/* Under RIGHT eye */}
-          <path d="M69,37 Q73,42 72,47" stroke="#1a0530" strokeWidth={2.2} fill="none" strokeLinecap="round" />
-          <path d="M66,38 Q69,43 68,48" stroke="#1a0530" strokeWidth={1.6} fill="none" strokeLinecap="round" />
-          {/* Cheek side marks */}
-          <path d="M29,33 L25,32" stroke="#1a0530" strokeWidth={1.6} strokeLinecap="round" />
-          <path d="M71,33 L75,32" stroke="#1a0530" strokeWidth={1.6} strokeLinecap="round" />
-          {/* Forehead marks (3 lines) */}
-          <line x1={46} y1={18} x2={44} y2={13} stroke="#1a0530" strokeWidth={1.4} strokeLinecap="round" opacity={0.7} />
-          <line x1={50} y1={17} x2={50} y2={12} stroke="#1a0530" strokeWidth={1.4} strokeLinecap="round" opacity={0.7} />
-          <line x1={54} y1={18} x2={56} y2={13} stroke="#1a0530" strokeWidth={1.4} strokeLinecap="round" opacity={0.7} />
-          {/* Chin mark */}
-          <path d="M48,49 Q50,52 52,49" stroke="#1a0530" strokeWidth={1.3} fill="none" strokeLinecap="round" opacity={0.6} />
+          {/* ── وشم الجبهة — ماسة / معيّن ← أبرز علامات سوكونا ── */}
+          <path
+            d="M50,13 L53.5,17 L50,21 L46.5,17 Z"
+            fill="#2a2520"
+            opacity={0.85}
+          />
 
-          {/* ── EYES ── */}
-          {/* Left eye white */}
-          <ellipse cx={37} cy={29} rx={8} ry={7.5} fill="white" />
-          {/* Upper lid shadow */}
-          <path d="M29,26 Q37,19 45,26" fill="#1a1828" opacity={0.25} />
-          {/* Red iris */}
-          <ellipse cx={37} cy={29} rx={6} ry={6} fill="url(#ey)" />
-          {/* Slit pupil — Sukuna's curse mark */}
-          <rect x={36} y={23.5} width={2.2} height={11} rx={1.1} fill="#0a0008" />
-          {/* Iris ring detail */}
-          <ellipse cx={37} cy={29} rx={5.5} ry={5.5} fill="none" stroke="rgba(255,80,80,0.4)" strokeWidth={0.8} />
-          {/* Eye highlights */}
-          <circle cx={34} cy={26} r={2} fill="rgba(255,255,255,0.88)" />
-          <circle cx={39} cy={32} r={0.9} fill="rgba(255,255,255,0.55)" />
-          {/* Lower eyelid line */}
-          <path d="M30,33 Q37,36 44,33" stroke="#C47060" strokeWidth={0.8} fill="none" opacity={0.5} />
+          {/* ── وشوم تحت العينين — خطوط مائلة للأسفل ── */}
+          {/* يسار */}
+          <line x1={31} y1={37} x2={28} y2={43} stroke="#2a2520" strokeWidth={2} strokeLinecap="round" />
+          <line x1={34} y1={37} x2={31} y2={44} stroke="#2a2520" strokeWidth={1.5} strokeLinecap="round" opacity={0.75} />
+          {/* يمين */}
+          <line x1={69} y1={37} x2={72} y2={43} stroke="#2a2520" strokeWidth={2} strokeLinecap="round" />
+          <line x1={66} y1={37} x2={69} y2={44} stroke="#2a2520" strokeWidth={1.5} strokeLinecap="round" opacity={0.75} />
 
-          {/* Right eye */}
-          <ellipse cx={63} cy={29} rx={8} ry={7.5} fill="white" />
-          <path d="M55,26 Q63,19 71,26" fill="#1a1828" opacity={0.25} />
-          <ellipse cx={63} cy={29} rx={6} ry={6} fill="url(#ey)" />
-          <rect x={61.8} y={23.5} width={2.2} height={11} rx={1.1} fill="#0a0008" />
-          <ellipse cx={63} cy={29} rx={5.5} ry={5.5} fill="none" stroke="rgba(255,80,80,0.4)" strokeWidth={0.8} />
-          <circle cx={60} cy={26} r={2} fill="rgba(255,255,255,0.88)" />
-          <circle cx={65} cy={32} r={0.9} fill="rgba(255,255,255,0.55)" />
-          <path d="M56,33 Q63,36 70,33" stroke="#C47060" strokeWidth={0.8} fill="none" opacity={0.5} />
+          {/* ── علامات جانبية على الخد — مثل الصورة ── */}
+          <line x1={27} y1={33} x2={23} y2={31} stroke="#2a2520" strokeWidth={1.4} strokeLinecap="round" opacity={0.6} />
+          <line x1={73} y1={33} x2={77} y2={31} stroke="#2a2520" strokeWidth={1.4} strokeLinecap="round" opacity={0.6} />
 
-          {/* Eyelashes — sharp, angular (Sukuna's look) */}
-          {/* Left eye top lashes */}
-          <path d="M30,24 L27,20" stroke="#1a1828" strokeWidth={1.5} strokeLinecap="round" />
-          <path d="M32,22.5 L30,18.5" stroke="#1a1828" strokeWidth={1.4} strokeLinecap="round" />
-          <path d="M37,21.5 L37,17.5" stroke="#1a1828" strokeWidth={1.3} strokeLinecap="round" />
-          <path d="M42,22.5 L44.5,19" stroke="#1a1828" strokeWidth={1.4} strokeLinecap="round" />
-          <path d="M44,24 L47,20.5" stroke="#1a1828" strokeWidth={1.5} strokeLinecap="round" />
-          {/* Right eye top lashes */}
-          <path d="M56,24 L53,20.5" stroke="#1a1828" strokeWidth={1.5} strokeLinecap="round" />
-          <path d="M58,22.5 L55.5,19" stroke="#1a1828" strokeWidth={1.4} strokeLinecap="round" />
-          <path d="M63,21.5 L63,17.5" stroke="#1a1828" strokeWidth={1.3} strokeLinecap="round" />
-          <path d="M68,22.5 L70,18.5" stroke="#1a1828" strokeWidth={1.4} strokeLinecap="round" />
-          <path d="M70,24 L73,20" stroke="#1a1828" strokeWidth={1.5} strokeLinecap="round" />
+          {/* ── وشم الذقن ── */}
+          <path d="M48,48 Q50,51 52,48" stroke="#2a2520" strokeWidth={1.3} fill="none" strokeLinecap="round" opacity={0.55} />
 
-          {/* ── NOSE ── */}
-          <ellipse cx={50} cy={37} rx={2} ry={1.4} fill="#D4906A" />
+          {/* ── العيون ── */}
+          {/* بياض العين الأيسر — مائل قليلاً للأسفل (نظرة متعجرفة) */}
+          <ellipse cx={36} cy={30} rx={8} ry={6.5} fill="#E8E8F0" />
+          {/* جفن علوي — ثقيل متجهم */}
+          <path d="M28,27 Q36,22 44,27 L44,29 Q36,25 28,29 Z" fill="#2a2520" opacity={0.22} />
+          {/* قزحية — بنية حمراء صغيرة */}
+          <ellipse cx={36} cy={30.5} rx={4.5} ry={5} fill="#5C1810" />
+          <ellipse cx={36} cy={30.5} rx={3.5} ry={4} fill="#7A2218" />
+          {/* حدقة صغيرة */}
+          <ellipse cx={36} cy={30.5} rx={2} ry={2.5} fill="#0d0808" />
+          {/* بريق */}
+          <circle cx={34.5} cy={28.5} r={1.4} fill="rgba(255,255,255,0.82)" />
+          <circle cx={38} cy={32} r={0.7} fill="rgba(255,255,255,0.45)" />
+          {/* خط الجفن السفلي */}
+          <path d="M28.5,34 Q36,37 43.5,34" stroke="#9a9090" strokeWidth={0.7} fill="none" opacity={0.4} />
 
-          {/* ── MOUTH — Sukuna's signature cocky smirk ── */}
-          {/* Main smirk: raised on left, drops on right */}
-          <path d="M39,44 Q44,41 50,43 Q56,45 60,42" stroke="#8B3010" strokeWidth={2} fill="none" strokeLinecap="round" />
-          {/* Subtle upper lip */}
-          <path d="M41,43.5 Q50,40 59,42.5" stroke="#B04020" strokeWidth={0.9} fill="none" strokeLinecap="round" opacity={0.45} />
-          {/* Small fang hint on left corner */}
-          <path d="M40,44 L39,47 L42,46" fill="white" stroke="#ccc" strokeWidth={0.5} />
+          {/* العين اليمنى */}
+          <ellipse cx={64} cy={30} rx={8} ry={6.5} fill="#E8E8F0" />
+          <path d="M56,27 Q64,22 72,27 L72,29 Q64,25 56,29 Z" fill="#2a2520" opacity={0.22} />
+          <ellipse cx={64} cy={30.5} rx={4.5} ry={5} fill="#5C1810" />
+          <ellipse cx={64} cy={30.5} rx={3.5} ry={4} fill="#7A2218" />
+          <ellipse cx={64} cy={30.5} rx={2} ry={2.5} fill="#0d0808" />
+          <circle cx={62.5} cy={28.5} r={1.4} fill="rgba(255,255,255,0.82)" />
+          <circle cx={66} cy={32} r={0.7} fill="rgba(255,255,255,0.45)" />
+          <path d="M56.5,34 Q64,37 71.5,34" stroke="#9a9090" strokeWidth={0.7} fill="none" opacity={0.4} />
+
+          {/* ── حواجب — غليظة داكنة ومائلة (غاضبة) ── */}
+          {/* حاجب أيسر */}
+          <path d="M28,23 Q36,19.5 44,21" stroke="#1a1410" strokeWidth={2.8} fill="none" strokeLinecap="round" />
+          {/* حاجب أيمن */}
+          <path d="M56,21 Q64,19.5 72,23" stroke="#1a1410" strokeWidth={2.8} fill="none" strokeLinecap="round" />
+
+          {/* خط بين الحاجبين */}
+          <line x1={49} y1={22} x2={51} y2={20} stroke="#2a2520" strokeWidth={1.2} strokeLinecap="round" opacity={0.5} />
+
+          {/* ── الأنف ── */}
+          <ellipse cx={50} cy={38} rx={2} ry={1.3} fill="#B8B2A8" opacity={0.8} />
+          {/* خط الأنف مثل الصورة */}
+          <path d="M47,35 Q50,33 53,35" stroke="#8a8480" strokeWidth={0.9} fill="none" opacity={0.5} />
+
+          {/* ── الفم — نصف ابتسامة متعجرفة ── */}
+          <path d="M40,44 Q46,42 50,43 Q55,44.5 59,42" stroke="#7a6860" strokeWidth={1.8} fill="none" strokeLinecap="round" />
+          {/* شفة علوية خفيفة */}
+          <path d="M43,43 Q50,40.5 57,43" stroke="#8a7870" strokeWidth={0.9} fill="none" strokeLinecap="round" opacity={0.4} />
 
         </motion.g>
       </svg>
