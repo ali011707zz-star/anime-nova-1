@@ -1162,6 +1162,7 @@ interface UnifiedSource {
   directUrl?: string; directType?: "hls" | "mp4";
   isEmbed?: boolean;
   subtitleUrl?: string;
+  hasBuiltinSub?: boolean;
 }
 
 const SKIP_EXTRACT_HOSTS = [
@@ -3725,11 +3726,12 @@ async function getKawaiiAnimeSources(
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 17,
+        qualityRank: 3,          // آخر أولوية — ترجمة إنجليزية مدمجة في الـ stream
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
         subtitleUrl,
+        hasBuiltinSub: true,     // ترجمة إنجليزية مدمجة في الـ HLS — لا تُشغَّل ترجمة خارجية
       } as UnifiedSource;
     });
   } catch { return []; }

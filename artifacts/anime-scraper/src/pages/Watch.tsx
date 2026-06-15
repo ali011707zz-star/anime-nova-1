@@ -75,7 +75,7 @@ interface SubSettings {
   bold: boolean;
   position: "top" | "center" | "bottom";  // subtitle placement
 }
-const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 24, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
 function loadSubSettings(): SubSettings {
   try {
     const raw = localStorage.getItem("sub-settings-v1");
@@ -126,6 +126,7 @@ interface FetchedSrc {
   url: string; directUrl?: string; qualityRank?: number;
   name?: string; site?: string; isEmbed?: boolean;
   subtitleUrl?: string;
+  hasBuiltinSub?: boolean;
 }
 
 /* ── All known scrapers — shown immediately in picker ── */
@@ -1172,7 +1173,6 @@ function ScraperPicker({
 
         {/* Episode comments */}
         <EpComments commKey={`nova-ep-comments-${animeId}-${ep}`} />
-        <div style={{ height: "max(32px, env(safe-area-inset-bottom))" }} />
       </div>
     </div>
   );
@@ -2749,7 +2749,8 @@ export default function WatchPage() {
         if (!srvMap[tier].includes(u)) srvMap[tier].push(u);
       }
       setPlayerDlUrl(undefined);
-      setPlayerSubUrl(firstSrc.subtitleUrl || undefined);
+      // hasBuiltinSub: ترجمة مدمجة في الـ stream (مثل kawaii) — لا تُضاف ترجمة خارجية لتجنب التداخل
+      setPlayerSubUrl(firstSrc.hasBuiltinSub ? undefined : (firstSrc.subtitleUrl || undefined));
       setPlayerSrcSite(firstSrc.site || "");
       setPlayerServers(srvMap);
       setQuality(clickedTier);
@@ -2857,9 +2858,9 @@ export default function WatchPage() {
 
     /* Store download URL + subtitle URL for player */
     setPlayerDlUrl(getDownloadUrl(src) || undefined);
-    // سي بانيل (SeePanal/SeeDrama) ترجمة مدمجة — لا تُشغّل الترجمة الخارجية
-    const isSeePanal = src.site === "seepanel";
-    setPlayerSubUrl(isSeePanal ? undefined : (src.subtitleUrl || undefined));
+    // hasBuiltinSub أو seepanel: ترجمة مدمجة في الـ stream — لا تُشغّل ترجمة خارجية لتجنب التداخل
+    const skipExternalSub = src.hasBuiltinSub || src.site === "seepanel";
+    setPlayerSubUrl(skipExternalSub ? undefined : (src.subtitleUrl || undefined));
     setPlayerSrcSite(src.site || "");
     setPlayerServers(servers);
     setQuality(clickedTier);
