@@ -181,9 +181,11 @@ export default function AnimationWatch() {
   const lastProgressSave = useRef(0);
   const histSavedRef     = useRef(false);
   const autoPlayedRef      = useRef(false);
-  const autoPlayAttemptsRef = useRef(0); // max cascade retries
+  const autoPlayAttemptsRef = useRef(0);
   // upgradedToFhdRef removed — auto-upgrade disabled for animation section
   const sourceCountRef     = useRef(0);
+  const sourcesRef         = useRef<Source[]>([]);
+  const sseDoneRef         = useRef(false);
 
   /* ── Navigate back (episode list for TV, detail for movie) ── */
   const goToDetail = useCallback(() => {
@@ -196,6 +198,10 @@ export default function AnimationWatch() {
     } else navigate("/animations");
   }, [tmdbId, type, season, navigate]);
 
+  /* ── Keep sourcesRef + sseDoneRef in sync ── */
+  useEffect(() => { sourcesRef.current = sources; }, [sources]);
+  useEffect(() => { sseDoneRef.current = sseDone; }, [sseDone]);
+
   /* ── onFail ref pattern (prevents cascade bug) ── */
   const onFailRef    = useRef<() => void>(() => {});
   const stableOnFail = useCallback(() => onFailRef.current(), []);
@@ -206,7 +212,7 @@ export default function AnimationWatch() {
     setStep("playing");
   }, []);
 
-  /* Update onFail: retry with raw directUrl once, then mark failed — no cascade */
+  /* ── playNext: retry direct URL once, then auto-cascade to next OK source ── */
   const playNext = useCallback(() => {
     setSelSrc(sel => {
       if (!sel) { setStep("sources"); return sel; }
@@ -217,23 +223,38 @@ export default function AnimationWatch() {
         sel.directUrl &&
         sel.proxyUrl &&
         sel.proxyUrl !== sel.directUrl &&
-        !sel.directUrl.startsWith("/api/"); // raw URL, not another proxy
+        !sel.directUrl.startsWith("/api/");
 
       if (hasRawFallback) {
-        // Retry: play the raw directUrl directly (browser may bypass CDN restriction)
         const retrySrc: Source = { ...sel, proxyUrl: sel.directUrl, _retriedDirect: true };
         setSources(prev => prev.map(s => s.url === sel.url ? retrySrc : s));
         setTimeout(() => playSource(retrySrc), 0);
         return retrySrc;
       }
 
-      // All attempts exhausted → mark failed, return to picker
-      setSources(prev => prev.map(s => s.url === sel.url ? { ...s, status: "fail" as const } : s));
-      // Allow auto-play to try next source (up to 4 cascade attempts)
-      if (autoPlayAttemptsRef.current < 4) {
+      // Mark current source as failed
+      const updatedSources = sourcesRef.current.map(
+        s => s.url === sel.url ? { ...s, status: "fail" as const } : s
+      );
+      setSources(updatedSources);
+
+      // Find next untried OK source
+      const nextSrc = updatedSources.find(s => s.status === "ok" && s.url !== sel.url);
+      if (nextSrc) {
+        // Cascade seamlessly — stay on "playing" step, no picker flash
+        autoPlayAttemptsRef.current += 1;
+        setTimeout(() => playSource(nextSrc), 0);
+        return sel;
+      }
+
+      // No more OK sources available
+      if (sseDoneRef.current) {
+        // SSE done → nothing more coming → show picker
+        setStep("sources");
+      } else {
+        // SSE still running → wait for new sources to arrive via autoplay effect
         autoPlayedRef.current = false;
       }
-      setStep("sources");
       return sel;
     });
   }, [playSource]);
@@ -1355,13 +1376,13 @@ function AnimSourceRow({
         {/* Label + quality */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-            <p className="text-[12.5px] font-black font-['Cairo'] leading-tight"
-              style={{ color: isFailed ? "rgba(252,165,165,0.75)" : "rgba(255,255,255,0.92)" }}>
-              سيرفر {idx + 1}
-            </p>
-            <span className="text-[11px] font-black px-2 py-0.5 rounded-md tracking-wide"
-              style={{ color: "rgba(255,255,255,0.80)", background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.18)", fontFamily: "monospace" }}>
+            <p className="text-[13px] font-black font-['Cairo'] leading-tight truncate max-w-[180px]"
+              style={{ color: isFailed ? "rgba(252,165,165,0.75)" : "rgba(255,255,255,0.94)" }}>
               {src.label}
+            </p>
+            <span className="text-[9px] font-mono px-1.5 py-[2px] rounded shrink-0"
+              style={{ color: "rgba(255,255,255,0.28)", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}>
+              #{idx + 1}
             </span>
           </div>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
