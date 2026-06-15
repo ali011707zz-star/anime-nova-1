@@ -1751,7 +1751,7 @@ function EpisodePlayer({
           {servers.length > 1 && (
             <>
               <span className="text-white/18 text-[8px]">·</span>
-              <span className="text-white/28 text-[10px] font-['Cairo']">سيرفر {currentServer + 1}/{servers.length}</span>
+              <span className="text-white/60 text-[13px] font-black font-['Cairo']">سيرفر {currentServer + 1}/{servers.length}</span>
             </>
           )}
           {!allQualityIdentical && (

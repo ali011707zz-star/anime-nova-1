@@ -1329,10 +1329,17 @@ function AnimSourceRow({
 
         {/* Label + quality */}
         <div className="flex-1 min-w-0">
-          <p className="text-[12.5px] font-black font-['Cairo'] leading-tight truncate"
-            style={{ color: isFailed ? "rgba(252,165,165,0.75)" : "rgba(255,255,255,0.92)" }}>
-            {src.label}
-          </p>
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="text-[11px] font-black font-['Cairo'] shrink-0"
+              style={{ color: isFailed ? "rgba(252,165,165,0.55)" : "rgba(255,255,255,0.45)" }}>
+              سيرفر {idx + 1}
+            </span>
+            <span className="text-white/15 text-[8px]">·</span>
+            <p className="text-[12.5px] font-black font-['Cairo'] leading-tight truncate"
+              style={{ color: isFailed ? "rgba(252,165,165,0.75)" : "rgba(255,255,255,0.92)" }}>
+              {src.label}
+            </p>
+          </div>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             {isFailed ? (
               <span className="text-[9px] font-black font-['Cairo'] px-2 py-[3px] rounded-lg"

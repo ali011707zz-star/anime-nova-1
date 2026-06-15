@@ -1257,7 +1257,7 @@ export default function RiftPlayer({
                       )}
                       <span className="text-white/40 text-[11px] font-['Cairo']">عربي مترجم</span>
                       {serverCount > 1 && (
-                        <span className="text-white/25 text-[10px] font-['Cairo']">{serverIndex + 1}/{serverCount}</span>
+                        <span className="text-white/60 text-[13px] font-black font-['Cairo']">سيرفر {serverIndex + 1}/{serverCount}</span>
                       )}
                     </div>
                     {/* Row 2: anime title */}
