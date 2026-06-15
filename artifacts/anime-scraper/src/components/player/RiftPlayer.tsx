@@ -1262,7 +1262,7 @@ export default function RiftPlayer({
                     </div>
                     {/* Row 2: anime title */}
                     <h1 className="text-white font-black leading-snug truncate"
-                      style={{ fontSize: 15, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
+                      style={{ fontSize: 26, textShadow: "0 2px 14px rgba(0,0,0,0.95)", letterSpacing: "-0.01em" }}>
                       {title || "Nova Player"}
                     </h1>
                     {/* Row 3: episode badge */}
