@@ -202,6 +202,11 @@ export default function RiftPlayer({
   const [isEnded,         setIsEnded]         = useState(false);
   const [autoPlayCountdown, setAutoPlayCountdown] = useState(0);
   const [showUnlockBtn,   setShowUnlockBtn]   = useState(false);
+
+  /* ── rAF subtitle sync: reads videoRef.currentTime directly at 60fps ── */
+  const subRafRef    = useRef<number | null>(null);
+  const subOffsetRef = useRef(subOffset);
+  const [subActiveCue, setSubActiveCue] = useState<SubCue | null>(null);
   const unlockBtnHideRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* ── auto-close sub menu when controls hide — disabled for bottom sheet UX ── */
   // useEffect(() => { if (!showCtrl) setShowSubMenu(false); }, [showCtrl]);
@@ -406,13 +411,13 @@ export default function RiftPlayer({
         testBandwidth: false,
         capLevelToPlayerSize: true,   // لا ترفع الجودة أعلى من دقة الشاشة
         /* ── إعادة المحاولة: صبر أطول يمنع الانقطاع بسبب CDN بطيء ── */
-        fragLoadingMaxRetry: 10,
-        fragLoadingRetryDelay: 2000,
-        fragLoadingMaxRetryTimeout: 45000,
-        manifestLoadingMaxRetry: 5,
-        manifestLoadingRetryDelay: 1500,
-        levelLoadingMaxRetry: 5,
-        levelLoadingRetryDelay: 1500,
+        fragLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 800,
+        fragLoadingMaxRetryTimeout: 12000,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingMaxRetry: 4,
+        levelLoadingRetryDelay: 1000,
         /* ── مراقبة buffer stall: تسمح بوقت استرداد أطول ── */
         highBufferWatchdogPeriod: 5,
         nudgeOffset: 0.5,
@@ -482,6 +487,24 @@ export default function RiftPlayer({
       if (failTimer.current) clearTimeout(failTimer.current);
     };
   }, [loadSource]);
+
+  /* ── rAF subtitle cue lookup — reads videoRef.currentTime directly at 60fps ──
+     Eliminates React scheduler latency from subtitle display.
+     Only triggers setState when the active cue actually CHANGES (≤1 render/cue). */
+  useEffect(() => {
+    if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
+    if (!subCues?.length || !subEnabled) { setSubActiveCue(null); return; }
+    let lastKey = "";
+    const tick = () => {
+      const ct = (videoRef.current?.currentTime ?? 0) + subOffsetRef.current;
+      const cue = subCues.find(c => ct >= c.start && ct <= c.end) ?? null;
+      const key = cue ? `${cue.start}` : "";
+      if (key !== lastKey) { lastKey = key; setSubActiveCue(cue); }
+      subRafRef.current = requestAnimationFrame(tick);
+    };
+    subRafRef.current = requestAnimationFrame(tick);
+    return () => { if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; } };
+  }, [subCues, subEnabled]);
 
   /* ── Resume: seek to saved position once duration is known ── */
   useEffect(() => {
@@ -832,11 +855,8 @@ export default function RiftPlayer({
     transform: "rotate(90deg)", transformOrigin: "center center", zIndex: 60,
   } : { position: "absolute", inset: 0 };
 
-  /* ── subtitle active cue ── */
-  // Use local currentTime for subtitle lookup — eliminates parent round-trip latency.
-  // subElapsed kept for backward compat; subOffset allows user timing adjustment.
-  const _subT = currentTime + subOffset;
-  const subActive = subCues?.find(c => _subT >= c.start && _subT <= c.end);
+  /* ── subtitle: keep offset ref in sync with prop (used by rAF loop) ── */
+  subOffsetRef.current = subOffset;
 
   /* ── subtitle position style ── */
   function subPositionStyle(pos: "top" | "center" | "bottom", ctrlVisible: boolean): React.CSSProperties {
@@ -2211,7 +2231,7 @@ export default function RiftPlayer({
       {/* ════════════════════════════════════════
           SUBTITLE OVERLAY
       ════════════════════════════════════════ */}
-      {subCues && subSettings && subActive && (
+      {subCues && subSettings && subActiveCue && (
         <div
           className="absolute left-0 right-0 flex justify-center pointer-events-none"
           style={{
@@ -2253,7 +2273,7 @@ export default function RiftPlayer({
                 ].join(", "),
               }}
             >
-              {subActive.text}
+              {subActiveCue.text}
             </p>
           </div>
         </div>

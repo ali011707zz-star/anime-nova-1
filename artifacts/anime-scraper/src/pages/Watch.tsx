@@ -1496,6 +1496,27 @@ function EpisodePlayer({
       }
       setSubCues([]);
       setSubStatus("translating");
+
+      // 🔤 Phase 1: عرض الترجمة الإنجليزية فوراً ريثما تنتهي الترجمة العربية
+      let arDone = false;
+      void (async () => {
+        try {
+          const rawVtt = isTranslateUrl
+            ? (() => { try { return new URL("http://x" + track.url).searchParams.get("url"); } catch { return null; } })()
+            : track.url;
+          if (!rawVtt || signal?.aborted) return;
+          const enR = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawVtt)}`, {
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!enR.ok || signal?.aborted || arDone) return;
+          const enCues = parseSrt(await enR.text());
+          if (enCues.length && !signal?.aborted && !arDone) {
+            setSubCues(enCues); setSubLang("eng"); setSubState("ready");
+          }
+        } catch { /* ignore — translation will still load */ }
+      })();
+
+      // 🌍 Phase 2: ترجمة عربية كاملة (تُستبدل الإنجليزية عند الانتهاء)
       const vttUrl = isTranslateUrl
         ? track.url
         : `/api/anime/translate-vtt?url=${encodeURIComponent(track.url)}&from=en&to=ar`;
@@ -1509,6 +1530,7 @@ function EpisodePlayer({
           return { start: toSec(s||""), end: toSec(e||""), text: c.text };
         }).filter(c => c.start < c.end && c.text.trim());
         if (!cues.length || (signal && signal.aborted)) { setSubStatus("failed"); return false; }
+        arDone = true;
         // 💾 حفظ بالمفتاحين: الموحّد (لتسريع تغيير السيرفر) + URL (للرجوع)
         setCachedCues(normKey, cues);
         setCachedCues(urlKey,  cues);
@@ -1579,11 +1601,28 @@ function EpisodePlayer({
       if (cachedHit) {
         setSubCues(cachedHit); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
       }
-      setSubStatus("loading");
+      setSubStatus("translating");
       setSubState("loading");
       setSubCues([]);
       try {
         if (subtitleUrl.startsWith("/api/anime/translate-vtt")) {
+          // 🔤 Phase 1: عرض إنجليزي فوري ريثما تنتهي الترجمة
+          let arAutoloadDone = false;
+          const rawEnUrl = (() => { try { return new URL("http://x" + subtitleUrl).searchParams.get("url"); } catch { return null; } })();
+          if (rawEnUrl) {
+            void (async () => {
+              try {
+                const enR = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawEnUrl)}`, { signal: AbortSignal.timeout(10_000) });
+                if (enR.ok && !arAutoloadDone) {
+                  const enCues = parseSrt(await enR.text());
+                  if (enCues.length && !arAutoloadDone) {
+                    setSubCues(enCues); setSubLang("eng"); setSubState("ready"); setSubStatus("translating");
+                  }
+                }
+              } catch {}
+            })();
+          }
+          // 🌍 Phase 2: الترجمة العربية الكاملة
           const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(45_000) });
           if (r.ok) {
             const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
@@ -1593,12 +1632,27 @@ function EpisodePlayer({
                 return { start: toSec(s||""), end: toSec(e||""), text: c.text };
               }).filter(c => c.start < c.end && c.text.trim());
               if (cues.length) {
+                arAutoloadDone = true;
                 setCachedCues(subtitleUrl, cues); // 💾
                 setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
               }
             }
           }
         } else {
+          // 🔤 Phase 1: عرض إنجليزي فوري
+          let arFetchDone = false;
+          void (async () => {
+            try {
+              const enR = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10_000) });
+              if (enR.ok && !arFetchDone) {
+                const enCues = parseSrt(await enR.text());
+                if (enCues.length && !arFetchDone) {
+                  setSubCues(enCues); setSubLang("eng"); setSubState("ready"); setSubStatus("translating");
+                }
+              }
+            } catch {}
+          })();
+          // 🌍 Phase 2: ترجمة عربية
           const r = await fetch(
             `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
             { signal: AbortSignal.timeout(45_000) },
@@ -1611,15 +1665,11 @@ function EpisodePlayer({
                 return { start: toSec(s||""), end: toSec(e||""), text: c.text };
               }).filter(c => c.start < c.end && c.text.trim());
               if (cues.length) {
+                arFetchDone = true;
                 setCachedCues(subtitleUrl, cues); // 💾
                 setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
               }
             }
-          }
-          const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10_000) });
-          if (r2.ok) {
-            const cues = parseSrt(await r2.text());
-            if (cues.length) { setSubCues(cues); setSubLang("eng"); setSubState("ready"); setSubStatus("ready"); return; }
           }
         }
       } catch { /* fall through to API discovery */ }
