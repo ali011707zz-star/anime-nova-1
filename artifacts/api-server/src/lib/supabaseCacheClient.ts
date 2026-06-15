@@ -1,24 +1,52 @@
 /**
- * supabaseCacheClient.ts — Supabase REST API للكاش المشترك بين جميع المستخدمين
- *
- * يُستخدم فقط لجداول الكاش: source_cache · subtitle_cache · cdn_cache · app_config
- * (لا يتصل بـ PostgreSQL لأن Replit يمنع DNS لـ Supabase DB)
- *
- * Fallback: إذا لم تكن SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY موجودتين،
- *           يُعيد نتائج فارغة بدون أخطاء (الكاش سيعتمد فقط على L1 في الذاكرة).
+ * supabaseCacheClient.ts — PostgreSQL cache client (migrated from Supabase REST to direct pg)
+ * Uses the same DATABASE_URL as the rest of the app.
+ * Maintains the same API surface so sourceCache.ts needs no changes.
  */
 
-const SB_URL = process.env.SUPABASE_URL || "";
-const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+import pg from "pg";
 
-export const isCacheDbReady = !!(SB_URL && SB_KEY);
+const { Pool } = pg;
 
-const SB_HEADERS = isCacheDbReady ? {
-  "apikey":        SB_KEY,
-  "Authorization": `Bearer ${SB_KEY}`,
-  "Content-Type":  "application/json",
-  "Prefer":        "return=representation",
-} : {} as Record<string, string>;
+let pool: pg.Pool | null = null;
+
+function getPool(): pg.Pool {
+  if (!pool) {
+    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  }
+  return pool;
+}
+
+export const isCacheDbReady = !!process.env.DATABASE_URL;
+
+function parseFilter(
+  filter: Record<string, string>,
+  startIdx = 1
+): { clause: string; values: any[] } {
+  const conditions: string[] = [];
+  const values: any[] = [];
+  let idx = startIdx;
+  const skipKeys = new Set(["order", "limit", "offset", "select"]);
+
+  for (const [col, raw] of Object.entries(filter)) {
+    if (skipKeys.has(col)) continue;
+    const dotIdx = raw.indexOf(".");
+    if (dotIdx === -1) continue;
+    const op = raw.slice(0, dotIdx);
+    const val = raw.slice(dotIdx + 1);
+    switch (op) {
+      case "eq":
+        if (val === "null") conditions.push(`"${col}" IS NULL`);
+        else { conditions.push(`"${col}" = $${idx++}`); values.push(val); }
+        break;
+      case "lt": conditions.push(`"${col}" < $${idx++}`); values.push(val); break;
+      case "lte": conditions.push(`"${col}" <= $${idx++}`); values.push(val); break;
+      case "gt": conditions.push(`"${col}" > $${idx++}`); values.push(val); break;
+      case "gte": conditions.push(`"${col}" >= $${idx++}`); values.push(val); break;
+    }
+  }
+  return { clause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", values };
+}
 
 /** SELECT rows from a cache table */
 export async function cacheSelect<T = any>(
@@ -28,13 +56,12 @@ export async function cacheSelect<T = any>(
 ): Promise<T[]> {
   if (!isCacheDbReady) return [];
   try {
-    const q = new URLSearchParams(params);
-    if (opts.limit) q.set("limit", String(opts.limit));
-    const url = `${SB_URL}/rest/v1/${table}?select=*&${q.toString()}`;
-    const r = await fetch(url, { headers: SB_HEADERS, signal: AbortSignal.timeout(6_000) });
-    if (!r.ok) return [];
-    const data = await r.json();
-    return Array.isArray(data) ? data : [];
+    const db = getPool();
+    const { clause, values } = parseFilter(params);
+    const limitClause = opts.limit ? `LIMIT ${opts.limit}` : "";
+    const sql = `SELECT * FROM "${table}" ${clause} ${limitClause}`.trim();
+    const result = await db.query(sql, values);
+    return result.rows as T[];
   } catch { return []; }
 }
 
@@ -46,19 +73,26 @@ export async function cacheUpsert<T = any>(
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const headers = {
-      ...SB_HEADERS,
-      "Prefer": `resolution=merge-duplicates,return=representation${onConflict ? `,on_conflict=${onConflict}` : ""}`,
-    };
-    const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(row),
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (!r.ok) return null;
-    const data = await r.json();
-    return Array.isArray(data) ? data[0] ?? null : data;
+    const db = getPool();
+    const cols = Object.keys(row);
+    const vals = Object.values(row);
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(", ");
+    const colNames = cols.map((c) => `"${c}"`).join(", ");
+
+    let conflictClause = "DO NOTHING";
+    if (onConflict) {
+      const conflictCols = onConflict.split(",").map((c) => `"${c.trim()}"`).join(", ");
+      const updateCols = cols
+        .filter((c) => !onConflict.split(",").map((x) => x.trim()).includes(c))
+        .map((c) => `"${c}" = EXCLUDED."${c}"`);
+      conflictClause = updateCols.length
+        ? `(${conflictCols}) DO UPDATE SET ${updateCols.join(", ")}`
+        : `(${conflictCols}) DO NOTHING`;
+    }
+
+    const sql = `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) ON CONFLICT ${conflictClause} RETURNING *`;
+    const result = await db.query(sql, vals);
+    return (result.rows[0] as T) ?? null;
   } catch { return null; }
 }
 
@@ -69,15 +103,14 @@ export async function cacheInsert<T = any>(
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
-      method: "POST",
-      headers: SB_HEADERS,
-      body: JSON.stringify(row),
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (!r.ok) return null;
-    const data = await r.json();
-    return Array.isArray(data) ? data[0] ?? null : data;
+    const db = getPool();
+    const cols = Object.keys(row);
+    const vals = Object.values(row);
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(", ");
+    const colNames = cols.map((c) => `"${c}"`).join(", ");
+    const sql = `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) RETURNING *`;
+    const result = await db.query(sql, vals);
+    return (result.rows[0] as T) ?? null;
   } catch { return null; }
 }
 
@@ -88,13 +121,11 @@ export async function cacheDelete(
 ): Promise<boolean> {
   if (!isCacheDbReady) return false;
   try {
-    const q = new URLSearchParams(filter);
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?${q.toString()}`, {
-      method: "DELETE",
-      headers: SB_HEADERS,
-      signal: AbortSignal.timeout(6_000),
-    });
-    return r.ok;
+    const db = getPool();
+    const { clause, values } = parseFilter(filter);
+    const sql = `DELETE FROM "${table}" ${clause}`;
+    await db.query(sql, values);
+    return true;
   } catch { return false; }
 }
 
@@ -106,21 +137,19 @@ export async function cachePatch<T = any>(
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const q = new URLSearchParams(filter);
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?${q.toString()}`, {
-      method: "PATCH",
-      headers: SB_HEADERS,
-      body: JSON.stringify(data),
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (!r.ok) return null;
-    const res = await r.json();
-    return Array.isArray(res) ? res[0] ?? null : res;
+    const db = getPool();
+    const dataKeys = Object.keys(data);
+    const dataVals = Object.values(data);
+    const setClauses = dataKeys.map((k, i) => `"${k}" = $${i + 1}`).join(", ");
+    const { clause, values: filterVals } = parseFilter(filter, dataKeys.length + 1);
+    const sql = `UPDATE "${table}" SET ${setClauses} ${clause} RETURNING *`;
+    const result = await db.query(sql, [...dataVals, ...filterVals]);
+    return (result.rows[0] as T) ?? null;
   } catch { return null; }
 }
 
 if (isCacheDbReady) {
-  console.log("[cacheClient] ✅ Supabase REST جاهز للكاش المشترك");
+  console.log("[cacheClient] ✅ PostgreSQL جاهز للكاش المشترك (L2 cache)");
 } else {
-  console.warn("[cacheClient] ⚠️ SUPABASE_URL غير موجود — الكاش L2 معطّل (L1 ذاكرة فقط)");
+  console.warn("[cacheClient] ⚠️ DATABASE_URL غير موجود — الكاش L2 معطّل (L1 ذاكرة فقط)");
 }
