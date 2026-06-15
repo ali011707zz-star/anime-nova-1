@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Nova Anime",
+    "slug": "nova-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "nova-mobile",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#09090B",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#09090B"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nova.anime",
+      "backgroundColor": "#09090B"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#09090B"
+      },
+      "package": "com.nova.anime",
+      "backgroundColor": "#09090B"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://replit.com/"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-video"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
