@@ -6375,8 +6375,59 @@ router.get("/anime/subtitle-tracks", async (req, res) => {
     } catch { /* silent */ }
   }
 
+  // ── Step 3.6: Jimaku (jimaku.cc) — Japanese anime subtitles, requires JIMAKU_API_KEY ──
+  const jimakuItems: Track[] = [];
+  const jimakuKey = (process.env.JIMAKU_API_KEY || "").trim();
+  if (jimakuKey && anilistId) {
+    try {
+      const searchUrl = `https://jimaku.cc/api/entries/search?anilist_id=${encodeURIComponent(anilistId)}`;
+      const searchR = await fetch(searchUrl, {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          "Authorization": `Bearer ${jimakuKey}`,
+          "Accept": "application/json",
+        },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (searchR.ok) {
+        const entries: any[] = await searchR.json();
+        const entry = Array.isArray(entries) ? entries[0] : null;
+        if (entry?.id) {
+          const filesUrl = `https://jimaku.cc/api/entries/${entry.id}/files?episode=${ep}`;
+          const filesR = await fetch(filesUrl, {
+            headers: {
+              "User-Agent": BROWSER_UA,
+              "Authorization": `Bearer ${jimakuKey}`,
+              "Accept": "application/json",
+            },
+            signal: AbortSignal.timeout(8_000),
+          });
+          if (filesR.ok) {
+            const files: any[] = await filesR.json();
+            const subFiles = Array.isArray(files) ? files.filter((f: any) =>
+              f.url && /\.(srt|ass|vtt|ssa)$/i.test(f.name || ""),
+            ) : [];
+            subFiles.slice(0, 2).forEach((f: any, i: number) => {
+              const sfx = i > 0 ? ` ${i + 1}` : "";
+              // Detect Arabic subs by filename hint
+              const isAr = /(arabic|ar[_.\-]|عربي)/i.test(f.name || "");
+              const langCode = isAr ? "ar" : "en";
+              const proxyUrl = `/api/anime/proxy-text?url=${encodeURIComponent(f.url)}`;
+              jimakuItems.push({
+                id: `${langCode}-jimaku-${i}`,
+                lang: langCode,
+                label: isAr ? `عربي · Jimaku${sfx}` : `إنجليزي · Jimaku${sfx}`,
+                url: proxyUrl,
+              });
+            });
+          }
+        }
+      }
+    } catch { /* silent — API key may be invalid or network error */ }
+  }
+
   // ── Step 4: Merge + auto-translate fallback ──────────────────────
-  const all: Track[] = [...wyzieItems, ...subdlItems, ...anikotoItems];
+  const all: Track[] = [...wyzieItems, ...subdlItems, ...anikotoItems, ...jimakuItems];
   const hasAr  = all.some(t => t.lang === "ar");
   const firstEn = all.find(t => t.lang === "en");
 
