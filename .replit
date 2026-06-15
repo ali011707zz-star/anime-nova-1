@@ -30,6 +30,10 @@ args = "Start API Server"
 task = "workflow.run"
 args = "CF Proxy"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Nova Mobile"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -65,6 +69,18 @@ outputType = "console"
 task = "shell.exec"
 args = "pip install flask curl_cffi -q && CF_PROXY_PORT=8000 python3.11 scripts/cf_proxy.py"
 waitForPort = 8000
+
+[[workflows.workflow]]
+name = "Nova Mobile"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm install && PORT=8099 BASE_PATH=/nova-mobile/ pnpm --filter @workspace/nova-mobile run dev"
+waitForPort = 8099
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "FLASK_VANILLA_JS"
@@ -102,6 +118,10 @@ externalPort = 3001
 [[ports]]
 localPort = 24968
 externalPort = 3000
+
+[[ports]]
+localPort = 8099
+externalPort = 8099
 
 [nix]
 channel = "stable-25_05"
