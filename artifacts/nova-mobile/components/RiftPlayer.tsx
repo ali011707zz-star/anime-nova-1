@@ -334,6 +334,12 @@ export function RiftPlayer({
   const [showSeekSheet, setShowSeekSheet]     = useState(false);
   const [reportSent, setReportSent]           = useState(false);
 
+  /* ─── Web player features ported to mobile ─── */
+  const [bufferedPct, setBufferedPct]       = useState(0);        // buffer bar
+  const [sleepTimer, setSleepTimer]         = useState(0);        // 0=off, minutes
+  const [sleepRemaining, setSleepRemaining] = useState(0);        // countdown seconds
+  const [showSleepSheet, setShowSleepSheet] = useState(false);
+
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
   const dblTapLeft        = useRef(new Animated.Value(0)).current;
@@ -440,6 +446,11 @@ export function RiftPlayer({
           setIsEnded(true);
           setIsPlaying(false);
         }
+        /* ── Buffer bar tracking ── */
+        try {
+          const buf = (player as any).bufferedPosition || 0;
+          setBufferedPct(dur > 0 ? Math.min(buf / dur, 1) : 0);
+        } catch {}
       } catch {}
     }, 500);
     return () => { if (progressTimer.current) clearInterval(progressTimer.current); };
@@ -544,6 +555,24 @@ export function RiftPlayer({
     }
     return undefined;
   }, [skipIntro, skipOutro]);
+
+  /* ─── Sleep timer countdown ─── */
+  useEffect(() => {
+    if (sleepTimer === 0) { setSleepRemaining(0); return; }
+    setSleepRemaining(sleepTimer * 60);
+    const tick = setInterval(() => {
+      setSleepRemaining(r => {
+        if (r <= 1) {
+          clearInterval(tick);
+          try { player.pause(); } catch {}
+          setSleepTimer(0);
+          return 0;
+        }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [sleepTimer]); // eslint-disable-line
 
   /* ─── Auto-play countdown when episode ends ─── */
   useEffect(() => {
@@ -659,7 +688,7 @@ export function RiftPlayer({
           setFeedback({ type: "seek", value: newPos, delta: seekDelta });
         } else if (gestureTypeRef.current === "vol") {
           const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-          const newVol = Math.max(0, Math.min(1, gestureStartVal.current + delta));
+          const newVol = Math.max(0, Math.min(2, gestureStartVal.current + delta)); // 200% max
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
@@ -774,10 +803,10 @@ export function RiftPlayer({
   /* ─── Progress ─── */
   const progress = duration > 0 ? Math.min(position / duration, 1) : 0;
 
-  /* ─── Volume sync to player ─── */
+  /* ─── Volume sync to player (clamp 0-1 for hardware, allow 0-2 for UI boost) ─── */
   useEffect(() => {
     volumeRef.current = volume;
-    try { player.volume = volume; } catch {}
+    try { player.volume = Math.min(1, volume); } catch {}
   }, [volume, player]);
 
   const markerPctIntro = duration > 0 && skipIntro
@@ -913,15 +942,25 @@ export function RiftPlayer({
         </Animated.View>
       )}
 
-      {/* ── Volume feedback ── */}
+      {/* ── Volume feedback (يدعم 0-200% Volume Boost مثل مشغل الويب) ── */}
       {feedback?.type === "volume" && (
         <View style={s.feedbackRight} pointerEvents="none">
-          <View style={s.feedbackBarWrap}>
-            <View style={[s.feedbackBarFill, { height: `${Math.round(feedback.value * 100)}%` as any }]} />
+          <View style={[s.feedbackBarWrap, feedback.value > 1 && { borderColor: "rgba(139,92,246,0.35)", borderWidth: 1 }]}>
+            <View style={[
+              s.feedbackBarFill,
+              { height: `${Math.min(Math.round(feedback.value * 50), 100)}%` as any },
+              feedback.value > 1 && { backgroundColor: "rgba(167,139,250,0.90)" },
+            ]} />
           </View>
-          <View style={s.feedbackPill}>
-            <Ionicons name="volume-high" size={12} color="rgba(255,255,255,0.75)" />
-            <Text style={s.feedbackPillText}>{Math.round(feedback.value * 100)}%</Text>
+          <View style={[s.feedbackPill, feedback.value > 1 && { borderColor: "rgba(139,92,246,0.50)", backgroundColor: "rgba(15,10,30,0.85)" }]}>
+            <Ionicons
+              name={feedback.value === 0 ? "volume-mute" : feedback.value > 1 ? "volume-high" : "volume-medium"}
+              size={12}
+              color={feedback.value > 1 ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
+            />
+            <Text style={[s.feedbackPillText, feedback.value > 1 && { color: "#c4b5fd" }]}>
+              {Math.round(feedback.value * 100)}%{feedback.value > 1 ? " 🔊" : ""}
+            </Text>
           </View>
         </View>
       )}
@@ -1118,6 +1157,20 @@ export function RiftPlayer({
                 <Ionicons name="camera" size={16} color="rgba(255,255,255,0.60)" />
               </Pressable>
 
+              {/* Sleep Timer — مؤقت النوم (من مشغل الويب) */}
+              <Pressable
+                onPress={() => { setShowSleepSheet(true); fadeIn(); }}
+                style={[s.topBtn, sleepTimer > 0 && s.topBtnActive]}
+                hitSlop={10}
+              >
+                {sleepTimer > 0
+                  ? <Text style={{ color: "#c4b5fd", fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 14 }}>
+                      {Math.floor(sleepRemaining / 60)}:{String(sleepRemaining % 60).padStart(2, "0")}
+                    </Text>
+                  : <Ionicons name="moon-outline" size={15} color="rgba(255,255,255,0.60)" />
+                }
+              </Pressable>
+
               {/* Report Issue (Anime Rift feature) */}
               <Pressable onPress={() => { setShowReportSheet(true); setReportSent(false); fadeIn(); }} style={s.topBtn} hitSlop={10}>
                 <Ionicons name="flag-outline" size={16} color="rgba(255,255,255,0.60)" />
@@ -1197,6 +1250,10 @@ export function RiftPlayer({
               {...seekBarPan.panHandlers}
             >
               <View style={s.progressBg} />
+              {/* Buffer bar — مثل مشغل الويب */}
+              {bufferedPct > 0 && (
+                <View style={[s.bufferBar, { width: `${bufferedPct * 100}%` as any }]} />
+              )}
               {/* Skip intro marker */}
               {markerPctIntro && (
                 <View style={[s.skipMarker, {
@@ -1210,6 +1267,19 @@ export function RiftPlayer({
                   left: `${markerPctOutro.start}%` as any,
                   width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
                 }]} />
+              )}
+              {/* OP/ED Tick marks — علامات مضيئة عند حدود الـ segments (مثل مشغل الويب) */}
+              {markerPctIntro && (
+                <>
+                  <View style={[s.skipTick, { left: `${markerPctIntro.start}%` as any }]} />
+                  <View style={[s.skipTick, { left: `${Math.min(markerPctIntro.end, 99.5)}%` as any }]} />
+                </>
+              )}
+              {markerPctOutro && (
+                <>
+                  <View style={[s.skipTick, { left: `${markerPctOutro.start}%` as any }]} />
+                  <View style={[s.skipTick, { left: `${Math.min(markerPctOutro.end, 99.5)}%` as any }]} />
+                </>
               )}
               {/* Progress fill (purple → violet gradient) */}
               <LinearGradient
@@ -1378,6 +1448,61 @@ export function RiftPlayer({
                   ))}
                 </ScrollView>
               )}
+            </View>
+          </Pressable>
+        </Pressable>
+      )}
+
+      {/* ════════════════════════════════════════
+          SLEEP TIMER SHEET (مؤقت النوم - من مشغل الويب)
+      ════════════════════════════════════════ */}
+      {showSleepSheet && (
+        <Pressable style={s.sheetBg} onPress={() => setShowSleepSheet(false)}>
+          <Pressable onPress={e => e.stopPropagation()}>
+            <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
+              <View style={s.sheetHandle} />
+              <View style={s.sheetHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Ionicons name="moon" size={16} color="#a78bfa" />
+                  <Text style={s.sheetTitle}>مؤقت النوم</Text>
+                </View>
+                {sleepTimer > 0 && (
+                  <View style={s.sleepBadge}>
+                    <Text style={s.sleepBadgeText}>
+                      يتوقف خلال {Math.floor(sleepRemaining / 60)}:{String(sleepRemaining % 60).padStart(2, "0")}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[s.sheetItemDesc, { paddingHorizontal: 12, paddingBottom: 8, color: "rgba(255,255,255,0.35)" }]}>
+                يوقف التشغيل تلقائياً بعد المدة المحددة
+              </Text>
+              {([0, 15, 30, 45, 60] as const).map(mins => (
+                <Pressable
+                  key={mins}
+                  style={[s.sheetItem, mins === sleepTimer && s.sheetItemActive]}
+                  onPress={() => { setSleepTimer(mins); setShowSleepSheet(false); }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <Ionicons
+                      name={mins === 0 ? "close-circle-outline" : "moon-outline"}
+                      size={17}
+                      color={mins === sleepTimer ? "#c4b5fd" : "rgba(255,255,255,0.55)"}
+                    />
+                    <View>
+                      <Text style={[s.sheetItemText, mins === sleepTimer && { color: "#c4b5fd" }]}>
+                        {mins === 0 ? "إيقاف المؤقت" : `${mins} دقيقة`}
+                      </Text>
+                      {mins > 0 && (
+                        <Text style={s.sheetItemDesc}>{mins === 15 ? "للحلقة القصيرة" : mins === 30 ? "نصف ساعة" : mins === 45 ? "ثلاثة أرباع ساعة" : "ساعة كاملة"}</Text>
+                      )}
+                    </View>
+                  </View>
+                  {mins === sleepTimer && (
+                    <Ionicons name="checkmark-circle" size={18} color="#7C3AED" />
+                  )}
+                </Pressable>
+              ))}
             </View>
           </Pressable>
         </Pressable>
@@ -2105,4 +2230,35 @@ const s = StyleSheet.create({
   /* Reset all button */
   resetAllBtn: { paddingVertical: 11, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.22)" },
   resetAllBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.82)" },
+
+  /* ══════ Buffer bar (web player port) ══════ */
+  bufferBar: {
+    position: "absolute", left: 0, height: 6,
+    backgroundColor: "rgba(255,255,255,0.22)",
+    borderRadius: 3, zIndex: 2,
+  },
+
+  /* ══════ OP/ED Tick marks (web player port) ══════ */
+  skipTick: {
+    position: "absolute",
+    width: 2.5, height: 14,
+    backgroundColor: "#facc15",
+    borderRadius: 1.5,
+    top: "50%" as any, marginTop: -7,
+    zIndex: 6,
+    shadowColor: "#facc15",
+    shadowOpacity: 0.90,
+    shadowRadius: 4,
+    elevation: 6,
+  },
+
+  /* ══════ Sleep timer sheet (web player port) ══════ */
+  sleepBadge: {
+    backgroundColor: "rgba(139,92,246,0.18)",
+    borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3,
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.38)",
+  },
+  sleepBadgeText: {
+    color: "#c4b5fd", fontSize: 10, fontFamily: "Cairo_700Bold",
+  },
 });
