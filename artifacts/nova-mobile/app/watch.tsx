@@ -25,6 +25,8 @@ interface Src {
   label?: string; server?: string; quality?: string;
   site?: string; isEmbed?: boolean; subtitleUrl?: string;
   name?: string;
+  skipIntro?: { start: number; end: number };
+  skipOutro?: { start: number; end: number };
 }
 
 interface AniInfo {
@@ -162,6 +164,17 @@ const QUALITY_TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 
 
 function normCdnHost(url: string): string {
   try {
+    if (url.includes("/api/anime/hls-proxy") || url.includes("/api/anime/video-proxy") || url.includes("/api/anime/seg-proxy")) {
+      const qIdx = url.indexOf("?");
+      if (qIdx !== -1) {
+        const params = new URLSearchParams(url.slice(qIdx + 1));
+        const inner = params.get("url") || "";
+        if (inner) {
+          const host = new URL(inner).hostname.replace(/^www\./, "");
+          return host.replace(/^[a-z]\d*\./, "");
+        }
+      }
+    }
     const base = url.startsWith("/") ? "https://x.com" + url : url;
     const host = new URL(base).hostname.replace(/^www\./, "");
     return host.replace(/^[a-z]\d*\./, "");
@@ -490,6 +503,8 @@ export default function WatchScreen() {
         title={displayTitle}
         episode={epNum}
         initialPosition={resumeTime}
+        skipIntro={playingSrc?.skipIntro}
+        skipOutro={playingSrc?.skipOutro}
         onBack={() => { saveProgress(); setScreen("picker"); }}
         onNextEpisode={() => goEp(epNum + 1)}
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
