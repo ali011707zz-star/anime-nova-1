@@ -1163,6 +1163,8 @@ interface UnifiedSource {
   isEmbed?: boolean;
   subtitleUrl?: string;
   hasBuiltinSub?: boolean;
+  skipIntro?: { start: number; end: number };
+  skipOutro?: { start: number; end: number };
 }
 
 const SKIP_EXTRACT_HOSTS = [
@@ -3716,17 +3718,33 @@ async function getKawaiiAnimeSources(
     const data = await r.json() as {
       sources?: Array<{ url: string; quality?: string; isM3U8?: boolean; type?: string }>;
       subtitles?: Array<{ url: string; lang?: string; label?: string }>;
+      intro?: { start: number; end: number };
+      outro?: { start: number; end: number };
     };
     if (!data.sources?.length) return [];
 
-    // فقط الترجمة العربية — لا نستخدم الإنجليزية لأن مقاطع kawaii تحتوي
-    // على ترجمة إنجليزية مدمجة في الـ HLS stream، تمريرها يُظهر ترجمتين
+    // kawaii يوفر فقط ترجمة إنجليزية — نمررها عبر translate-vtt للحصول على عربي
     const findSub = (tag: string) => data.subtitles?.find(s =>
       (s.lang || s.label || "").toLowerCase().includes(tag)
     );
-    const subEntry = findSub("arabic") || findSub("arab") || findSub("ar");
-    const subtitleUrl = subEntry?.url || undefined;
-    const subLangLabel = subEntry ? "عربي" : null;
+    const arEntry  = findSub("arabic") || findSub("arab") || findSub("ar");
+    const enEntry  = findSub("english") || findSub("en");
+    const rawSubUrl = arEntry?.url || enEntry?.url || undefined;
+
+    // إذا كانت الترجمة إنجليزية → نترجمها تلقائياً عبر translate-vtt
+    const subtitleUrl = rawSubUrl
+      ? (arEntry
+          ? rawSubUrl
+          : `/api/anime/translate-vtt?url=${encodeURIComponent(rawSubUrl)}&from=en&to=ar`)
+      : undefined;
+
+    const subLangLabel = rawSubUrl ? "عربي" : null;
+
+    // بيانات تخطي المقدمة/الخاتمة من API مباشرة
+    const skipIntro = data.intro?.start !== undefined && data.intro?.end !== undefined
+      ? { start: data.intro.start, end: data.intro.end } : undefined;
+    const skipOutro = data.outro?.start !== undefined && data.outro?.end !== undefined
+      ? { start: data.outro.start, end: data.outro.end } : undefined;
 
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
@@ -3740,12 +3758,13 @@ async function getKawaiiAnimeSources(
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 3,          // آخر أولوية — ترجمة إنجليزية مدمجة في الـ stream
+        qualityRank: 3,          // أولوية منخفضة — صوت ياباني مترجم
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
         subtitleUrl,
-        hasBuiltinSub: true,     // ترجمة إنجليزية مدمجة في الـ HLS — لا تُشغَّل ترجمة خارجية
+        skipIntro,
+        skipOutro,
       } as UnifiedSource;
     });
   } catch { return []; }
