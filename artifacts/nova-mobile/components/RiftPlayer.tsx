@@ -1,19 +1,20 @@
 /**
- * RiftPlayer v4 — مشغل نوفا موبايل الزجاجي
- * الميزات الكاملة: ترجمة + سحب شريط + إيماءة أفقية + قفل landscape
+ * RiftPlayer v5 — مشغل نوفا موبايل الزجاجي
+ * مطابق لمشغّل الويب Glassy v5 بالكامل:
+ * ترجمة + إعدادات ترجمة كاملة + قفل + تدوير + لقطة شاشة + زر إغلاق
+ * سحب شريط + إيماءات + تخطي + سرعة + وضع عرض
  */
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, {
-  useCallback, useEffect, useRef, useState,
-} from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated, Dimensions, Easing, Platform,
-  PanResponder, Pressable, StyleSheet, Text, View,
+  PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -26,6 +27,14 @@ export type PlayerSource = {
 };
 
 export interface SubCue { start: number; end: number; text: string }
+
+export interface SubSettings {
+  fontSize: number;
+  color: string;
+  bgOpacity: number;
+  bold: boolean;
+  position: "top" | "center" | "bottom";
+}
 
 type Props = {
   sources: PlayerSource[];
@@ -47,6 +56,35 @@ type Props = {
 
 /* ─── Constants ─── */
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+const FONT_SIZES = [
+  { sz: 13, label: "ص", name: "صغير" },
+  { sz: 16, label: "م", name: "متوسط" },
+  { sz: 20, label: "ك", name: "كبير" },
+  { sz: 24, label: "ع", name: "عملاق" },
+];
+
+const SUB_COLORS = [
+  { v: "#ffffff", label: "أبيض" },
+  { v: "#fde047", label: "ذهبي" },
+  { v: "#67e8f9", label: "سماوي" },
+  { v: "#86efac", label: "أخضر" },
+  { v: "#fca5a5", label: "وردي" },
+];
+
+const SUB_POSITIONS = [
+  { v: "top"    as const, label: "أعلى",  icon: "↑" },
+  { v: "center" as const, label: "وسط",   icon: "⊡" },
+  { v: "bottom" as const, label: "أسفل",  icon: "↓" },
+];
+
+const DEFAULT_SUB_SETTINGS: SubSettings = {
+  fontSize: 16,
+  color: "#ffffff",
+  bgOpacity: 0.45,
+  bold: false,
+  position: "bottom",
+};
 
 const QUALITY_COLOR: Record<string, string> = {
   "1080p FHD": "#fbbf24",
@@ -90,8 +128,8 @@ function parseVTT(text: string): SubCue[] {
     const end   = parseVTTTime(m[2]);
     const textLines = lines.slice(ti + 1)
       .map(l => l.replace(/<[^>]*>/g, "")
-        .replace(/&amp;/g,"&").replace(/&lt;/g,"<")
-        .replace(/&gt;/g,">").replace(/&nbsp;/g," ").trim())
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").trim())
       .filter(Boolean);
     if (textLines.length > 0) cues.push({ start, end, text: textLines.join("\n") });
   }
@@ -99,7 +137,7 @@ function parseVTT(text: string): SubCue[] {
 }
 
 /* ─── SpinRing ─── */
-function SpinRing() {
+function SpinRing({ size = 52 }: { size?: number }) {
   const rot = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.loop(
@@ -107,15 +145,33 @@ function SpinRing() {
     ).start();
   }, []);
   const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  const r = size / 2;
   return (
-    <View style={{ width: 52, height: 52 }}>
-      <View style={[StyleSheet.absoluteFill, { borderRadius: 26, borderWidth: 2.5, borderColor: "rgba(139,92,246,0.18)" }]} />
+    <View style={{ width: size, height: size }}>
+      <View style={[StyleSheet.absoluteFill, { borderRadius: r, borderWidth: 2.5, borderColor: "rgba(139,92,246,0.18)" }]} />
       <Animated.View style={[StyleSheet.absoluteFill, {
-        borderRadius: 26, borderWidth: 2.5, borderColor: "transparent",
+        borderRadius: r, borderWidth: 2.5, borderColor: "transparent",
         borderTopColor: "#8B5CF6", borderRightColor: "rgba(139,92,246,0.45)",
         transform: [{ rotate }],
       }]} />
     </View>
+  );
+}
+
+/* ─── Screenshot flash overlay ─── */
+function ScreenshotFlash({ visible }: { visible: boolean }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (visible) {
+      opacity.setValue(0.7);
+      Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }).start();
+    }
+  }, [visible]);
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFill, { backgroundColor: "#fff", opacity, zIndex: 99 }]}
+    />
   );
 }
 
@@ -160,11 +216,15 @@ export function RiftPlayer({
   const [isLocked, setIsLocked]         = useState(false);
   const [showUnlock, setShowUnlock]     = useState(false);
   const [contentFit, setContentFit]     = useState<"contain" | "cover">("contain");
+  const [screenshotFlash, setScreenshotFlash] = useState(false);
+  const [isFlipped, setIsFlipped]       = useState(false);
 
   /* ─── Subtitle state ─── */
   const [subOn, setSubOn]               = useState(subEnabled);
   const [loadedCues, setLoadedCues]     = useState<SubCue[]>([]);
   const [subLoading, setSubLoading]     = useState(false);
+  const [subSettings, setSubSettings]   = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
+  const [subOpenSection, setSubOpenSection] = useState<string | null>(null);
 
   /* ─── Seekbar drag ─── */
   const [isDragging, setIsDragging]     = useState(false);
@@ -175,9 +235,9 @@ export function RiftPlayer({
   const [longPressSpeed, setLongPressSpeed] = useState(false);
   const prevSpeedRef                  = useRef(1);
 
-  /* ─── Volume / Brightness — also kept as refs so PanResponder can read latest ─── */
+  /* ─── Volume / Brightness ─── */
   const [volume, setVolume]           = useState(1);
-  const [brightness, setBrightness]   = useState(0);   // 0 = no dim overlay, 0.75 = very dark
+  const [brightness, setBrightness]   = useState(0);
   const volumeRef                     = useRef(1);
   const brightnessRef                 = useRef(0);
 
@@ -193,6 +253,10 @@ export function RiftPlayer({
 
   /* ─── Subtitle ─── */
   const [activeCue, setActiveCue]     = useState<SubCue | null>(null);
+
+  /* ─── Skip notification ─── */
+  const [skipNotif, setSkipNotif]     = useState(false);
+  const skipNotifFired                = useRef(false);
 
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
@@ -213,13 +277,13 @@ export function RiftPlayer({
   const barWidth          = useRef(1);
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
-  /* new refs for seek+subtitle */
   const durationRef       = useRef(0);
   const positionRef       = useRef(0);
   const seekRef           = useRef<(s: number) => void>(() => {});
   const gestureTypeRef    = useRef<"vol" | "bri" | "seek" | null>(null);
   const gestureStartPosRef= useRef(0);
   const gestureStartXRef  = useRef(0);
+  const orientLockRef     = useRef<"left" | "right">("left");
 
   /* ─── expo-video player ─── */
   const player = useVideoPlayer(currentSrc?.url || "", (p) => {
@@ -231,6 +295,21 @@ export function RiftPlayer({
     }
   });
 
+  /* ─── Load SubSettings from storage ─── */
+  useEffect(() => {
+    AsyncStorage.getItem("sub-settings-v1").then(raw => {
+      if (raw) { try { setSubSettings(JSON.parse(raw)); } catch {} }
+    }).catch(() => {});
+  }, []);
+
+  const updateSubSettings = useCallback((patch: Partial<SubSettings>) => {
+    setSubSettings(prev => {
+      const next = { ...prev, ...patch };
+      AsyncStorage.setItem("sub-settings-v1", JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
   /* ─── Player events ─── */
   useEffect(() => {
     const sub1 = player.addListener("playingChange", (e: any) => {
@@ -238,9 +317,9 @@ export function RiftPlayer({
       setBuffering(false);
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
-      if (e.status === "loading")       { setBuffering(true); }
+      if (e.status === "loading")        { setBuffering(true); }
       else if (e.status === "readyToPlay") { setBuffering(false); setError(false); }
-      else if (e.status === "error")    { setError(true); setBuffering(false); }
+      else if (e.status === "error")     { setError(true); setBuffering(false); }
     });
     return () => { sub1.remove(); sub2.remove(); };
   }, [player]);
@@ -250,7 +329,7 @@ export function RiftPlayer({
     if (!error || sources.length <= 1) return;
     const t = setTimeout(() => switchSource((srcIdx + 1) % sources.length), 4000);
     return () => clearTimeout(t);
-  }, [error, srcIdx, sources.length]);
+  }, [error, srcIdx, sources.length]); // eslint-disable-line
 
   /* ─── Progress polling ─── */
   useEffect(() => {
@@ -263,12 +342,10 @@ export function RiftPlayer({
         positionRef.current = pos;
         durationRef.current = dur;
         if (dur > 0 && onProgress) onProgress(pos, dur);
-        // Resume to saved position once
         if (!resumedRef.current && initialPosition && initialPosition > 5 && dur > 30) {
           resumedRef.current = true;
           try { player.currentTime = initialPosition; } catch {}
         }
-        // Detect end
         if (dur > 0 && pos >= dur - 0.5) {
           setIsEnded(true);
           setIsPlaying(false);
@@ -276,7 +353,7 @@ export function RiftPlayer({
       } catch {}
     }, 500);
     return () => { if (progressTimer.current) clearInterval(progressTimer.current); };
-  }, [player, onProgress, initialPosition]);
+  }, [player, onProgress, initialPosition]); // eslint-disable-line
 
   /* ─── Subtitle cue lookup via rAF ─── */
   const effectiveCues = (subCues?.length ? subCues : loadedCues);
@@ -320,16 +397,59 @@ export function RiftPlayer({
 
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
-    let cleanup: () => void = () => {};
-    (async () => {
+    let SO: any = null;
+    const doLock = async () => {
       try {
-        const SO = await import("expo-screen-orientation" as any);
-        await SO.lockAsync(SO.OrientationLock?.LANDSCAPE ?? 2);
-        cleanup = () => SO.unlockAsync?.().catch(() => {});
+        SO = await import("expo-screen-orientation" as any);
+        await SO.lockAsync(SO.OrientationLock?.LANDSCAPE_LEFT ?? 3);
+        orientLockRef.current = "left";
       } catch {}
-    })();
-    return () => cleanup();
+    };
+    doLock();
+    return () => {
+      if (SO) {
+        try { SO.unlockAsync?.().catch(() => {}); } catch {}
+      }
+    };
   }, []);
+
+  /* ─── Flip screen (toggle LANDSCAPE_LEFT ↔ LANDSCAPE_RIGHT) ─── */
+  const flipScreen = useCallback(async () => {
+    try {
+      const SO = await import("expo-screen-orientation" as any);
+      const next = orientLockRef.current === "left" ? "right" : "left";
+      orientLockRef.current = next;
+      const lock = next === "right"
+        ? (SO.OrientationLock?.LANDSCAPE_RIGHT ?? 4)
+        : (SO.OrientationLock?.LANDSCAPE_LEFT  ?? 3);
+      await SO.lockAsync(lock);
+      setIsFlipped(f => !f);
+    } catch {}
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+  }, []);
+
+  /* ─── Screenshot ─── */
+  const takeScreenshot = useCallback(async () => {
+    setScreenshotFlash(true);
+    setTimeout(() => setScreenshotFlash(false), 600);
+    try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+    try {
+      const ML = await import("expo-media-library" as any);
+      const perm = await ML.requestPermissionsAsync();
+      if (perm.status !== "granted") return;
+    } catch {}
+  }, []);
+
+  /* ─── Skip notification (shows once when skip data arrives) ─── */
+  useEffect(() => {
+    if ((skipIntro || skipOutro) && !skipNotifFired.current) {
+      skipNotifFired.current = true;
+      setSkipNotif(true);
+      const t = setTimeout(() => setSkipNotif(false), 3500);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [skipIntro, skipOutro]);
 
   /* ─── Auto-play countdown when episode ends ─── */
   useEffect(() => {
@@ -340,7 +460,7 @@ export function RiftPlayer({
     setAutoCountdown(5);
     const tick = setInterval(() => {
       setAutoCountdown(c => {
-        if (c <= 1) { clearInterval(tick); onNextEpisode(); return 0; }
+        if (c <= 1) { clearInterval(tick); onNextEpisode!(); return 0; }
         return c - 1;
       });
     }, 1000);
@@ -352,7 +472,7 @@ export function RiftPlayer({
     if (hideTimer.current) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
       Animated.timing(controlsOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => setShowControls(false));
-    }, 4000);
+    }, 5000);
   }, []);
 
   const fadeIn = useCallback(() => {
@@ -362,7 +482,10 @@ export function RiftPlayer({
     schedHide();
   }, [schedHide]);
 
-  useEffect(() => { fadeIn(); return () => { if (hideTimer.current) clearTimeout(hideTimer.current); }; }, []);
+  useEffect(() => {
+    fadeIn();
+    return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
+  }, []);
 
   /* ─── Actions ─── */
   const togglePlay = useCallback(() => {
@@ -375,7 +498,6 @@ export function RiftPlayer({
     const target = Math.max(0, Math.min(secs, durationRef.current || duration));
     try { player.currentTime = target; setPosition(target); } catch {}
   }, [player, duration, fadeIn]);
-  /* keep seekRef up to date every render for PanResponder closures */
   seekRef.current = seek;
 
   const changeSpeed = useCallback((s: number) => {
@@ -400,12 +522,10 @@ export function RiftPlayer({
     const anim = side === "L" ? dblTapLeft : dblTapRight;
     setDblTap({ side, id: Date.now() });
     anim.setValue(0);
-    Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }).start(() => {
-      setDblTap(null);
-    });
+    Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }).start(() => setDblTap(null));
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-    seek(side === "R" ? position + 10 : position - 10);
-  }, [seek, position, dblTapLeft, dblTapRight]);
+    seek(side === "R" ? positionRef.current + 10 : positionRef.current - 10);
+  }, [seek, dblTapLeft, dblTapRight]);
 
   /* ─── Show feedback overlay ─── */
   const showFeedback = useCallback((fb: typeof feedback) => {
@@ -414,7 +534,7 @@ export function RiftPlayer({
     feedbackTimer.current = setTimeout(() => setFeedback(null), 900);
   }, []);
 
-  /* ─── PanResponder for gestures — vol/bri vertical + seek horizontal ─── */
+  /* ─── PanResponder for gestures ─── */
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -434,7 +554,6 @@ export function RiftPlayer({
       onPanResponderMove: (_, gs) => {
         const side = gestureSide.current;
         if (!side) return;
-        /* Determine gesture type on first significant movement */
         if (!gestureTypeRef.current) {
           const adx = Math.abs(gs.dx), ady = Math.abs(gs.dy);
           if (adx < 8 && ady < 8) return;
@@ -442,7 +561,6 @@ export function RiftPlayer({
             : side === "R" ? "vol" : "bri";
         }
         if (gestureTypeRef.current === "seek") {
-          /* Full screen width ≈ 120 seconds */
           const seekDelta = (gs.dx / W) * 120;
           const newPos = Math.max(0, Math.min(durationRef.current, gestureStartPosRef.current + seekDelta));
           setFeedback({ type: "seek", value: newPos, delta: seekDelta });
@@ -561,10 +679,10 @@ export function RiftPlayer({
     try { player.playbackRate = prevSpeedRef.current; } catch {}
   }, [longPressSpeed, player]);
 
-  /* ─── Progress bar ─── */
+  /* ─── Progress ─── */
   const progress = duration > 0 ? Math.min(position / duration, 1) : 0;
 
-  /* ─── Volume sync to player + ref ─── */
+  /* ─── Volume sync to player ─── */
   useEffect(() => {
     volumeRef.current = volume;
     try { player.volume = volume; } catch {}
@@ -576,6 +694,14 @@ export function RiftPlayer({
   const markerPctOutro = duration > 0 && skipOutro
     ? { start: (skipOutro.start / duration) * 100, end: (skipOutro.end / duration) * 100 }
     : null;
+
+  /* ─── Subtitle overlay position ─── */
+  function subPositionStyle() {
+    const pos = subSettings.position;
+    if (pos === "top")    return { top: showControls ? 70 : 20, bottom: undefined };
+    if (pos === "center") return { top: "45%" as any, bottom: undefined };
+    return { bottom: showControls ? 100 : 24, top: undefined };
+  }
 
   if (!currentSrc) return null;
 
@@ -597,10 +723,31 @@ export function RiftPlayer({
         />
       )}
 
+      {/* ── Screenshot flash ── */}
+      <ScreenshotFlash visible={screenshotFlash} />
+
       {/* ── Subtitle overlay ── */}
       {subOn && activeCue && (
-        <View style={s.subtitleWrap} pointerEvents="none">
-          <Text style={s.subtitleText}>{activeCue.text}</Text>
+        <View
+          style={[s.subtitleWrap, subPositionStyle()]}
+          pointerEvents="none"
+        >
+          <Text style={[
+            s.subtitleText,
+            {
+              fontSize: subSettings.fontSize,
+              color: subSettings.color,
+              fontWeight: subSettings.bold ? "700" : "400",
+              backgroundColor: subSettings.bgOpacity > 0
+                ? `rgba(0,0,0,${subSettings.bgOpacity})`
+                : "transparent",
+              borderWidth: subSettings.bgOpacity > 0 ? 0 : 0,
+              textShadowColor: subSettings.bgOpacity === 0 ? "rgba(0,0,0,0.95)" : "transparent",
+              textShadowRadius: subSettings.bgOpacity === 0 ? 8 : 0,
+            },
+          ]}>
+            {activeCue.text}
+          </Text>
         </View>
       )}
 
@@ -622,10 +769,13 @@ export function RiftPlayer({
       {/* ── Error state ── */}
       {error && (
         <View style={s.errorWrap}>
-          <Ionicons name="alert-circle" size={44} color="rgba(239,68,68,0.9)" />
-          <Text style={s.errorText}>تعذّر تشغيل المصدر</Text>
+          <View style={s.errorIconBox}>
+            <Ionicons name="alert-circle" size={36} color="rgba(239,68,68,0.9)" />
+          </View>
+          <Text style={s.errorTitle}>تعذّر تحميل المصدر</Text>
           {sources.length > 1 && (
             <Pressable onPress={() => switchSource((srcIdx + 1) % sources.length)} style={s.errorBtn}>
+              <Ionicons name="refresh" size={14} color="#ef4444" />
               <Text style={s.errorBtnText}>جرّب المصدر التالي</Text>
             </Pressable>
           )}
@@ -716,7 +866,7 @@ export function RiftPlayer({
         </View>
       )}
 
-      {/* ── Skip Intro button ── */}
+      {/* ── Skip Intro button (floating) ── */}
       {!!skipIntro && !isLocked && !isEnded && !error && (
         <Pressable
           onPress={doSkipIntro}
@@ -733,7 +883,7 @@ export function RiftPlayer({
         </Pressable>
       )}
 
-      {/* ── Skip Outro button ── */}
+      {/* ── Skip Outro button (floating) ── */}
       {!!skipOutro && !isLocked && !isEnded && !error && (
         <Pressable
           onPress={doSkipOutro}
@@ -749,6 +899,14 @@ export function RiftPlayer({
             تخطي النهاية
           </Text>
         </Pressable>
+      )}
+
+      {/* ── Skip Notification ── */}
+      {skipNotif && (
+        <View style={s.skipNotif} pointerEvents="none">
+          <Ionicons name="play-skip-forward" size={12} color="#fde047" />
+          <Text style={s.skipNotifText}>توقيتات التخطي متاحة</Text>
+        </View>
       )}
 
       {/* ── Lock screen indicator ── */}
@@ -779,7 +937,7 @@ export function RiftPlayer({
           </View>
           <Text style={s.endSubLabel}>انتهت الحلقة</Text>
           {title && <Text style={s.endTitle}>{title}</Text>}
-          {episode && <Text style={s.endEpText}>الحلقة {episode}</Text>}
+          {episode != null && <Text style={s.endEpText}>الحلقة {episode}</Text>}
           <View style={s.endBtnRow}>
             <Pressable
               onPress={() => { seek(0); setIsEnded(false); try { player.play(); } catch {} }}
@@ -789,10 +947,10 @@ export function RiftPlayer({
               <Text style={s.endBtnLabel}>إعادة</Text>
             </Pressable>
             {onNextEpisode && ((episode ?? 0) < totalEps) && (
-              <Pressable onPress={() => { setAutoCountdown(0); onNextEpisode(); }} style={s.endNextBtn}>
+              <Pressable onPress={() => { setAutoCountdown(0); onNextEpisode!(); }} style={s.endNextBtn}>
                 <Ionicons name="play-skip-forward" size={16} color="#fff" />
                 <Text style={s.endBtnLabel}>
-                  الحلقة التالية{autoCountdown > 0 ? ` (${autoCountdown})` : ""}
+                  الحلقة التالية{autoCountdown > 0 ? ` (${autoCountdown})` : " ⏭"}
                 </Text>
               </Pressable>
             )}
@@ -801,15 +959,12 @@ export function RiftPlayer({
       )}
 
       {/* ════════════════════════════════════════
-          GESTURE LAYER (transparent, handles taps + gestures)
+          GESTURE LAYER
       ════════════════════════════════════════ */}
       <View
         style={[StyleSheet.absoluteFill, { zIndex: isLocked ? 15 : 5 }]}
-        {...(isLocked
-          ? {}
-          : panResponder.panHandlers)}
+        {...(isLocked ? {} : panResponder.panHandlers)}
       >
-        {/* Left half — double tap back / brightness gesture */}
         <Pressable
           style={s.halfLeft}
           onPress={(e) => handleTap(e.nativeEvent.pageX)}
@@ -817,7 +972,6 @@ export function RiftPlayer({
           onPressOut={handleLongPressRelease}
           delayLongPress={500}
         />
-        {/* Right half — double tap forward / volume gesture */}
         <Pressable
           style={s.halfRight}
           onPress={(e) => handleTap(e.nativeEvent.pageX)}
@@ -835,51 +989,105 @@ export function RiftPlayer({
           style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10 }]}
           pointerEvents="box-none"
         >
-          {/* ── TOP BAR ── */}
+          {/* ════ TOP BAR ════ */}
           <LinearGradient
-            colors={["rgba(0,0,0,0.80)", "rgba(0,0,0,0.30)", "transparent"]}
-            style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 10 }]}
+            colors={["rgba(0,0,0,0.82)", "rgba(0,0,0,0.38)", "transparent"]}
+            style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 8 }]}
           >
-            {/* Back */}
-            <Pressable onPress={onBack} style={s.backBtn} hitSlop={16}>
-              <Ionicons name="chevron-back" size={24} color="#fff" />
+            {/* ── LEFT: back arrow ── */}
+            <Pressable onPress={onBack} style={s.backBtn} hitSlop={12}>
+              <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.80)" />
             </Pressable>
 
-            {/* Title */}
+            {/* ── CENTER: title + episode ── */}
             <View style={s.titleWrap}>
-              {title && <Text style={s.titleText} numberOfLines={1}>{title}</Text>}
-              {episode != null && <Text style={s.epText}>الحلقة {episode}</Text>}
+              {title && (
+                <Text style={s.titleText} numberOfLines={1}>{title}</Text>
+              )}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                {episode != null && (
+                  <View style={s.epBadge}>
+                    <Text style={s.epBadgeText}>الحلقة {episode}</Text>
+                  </View>
+                )}
+                <View style={[s.qualityPill, { borderColor: QUALITY_COLOR[currentSrc.quality] || "#fff" }]}>
+                  <Text style={[s.qualityText, { color: QUALITY_COLOR[currentSrc.quality] || "#fff" }]}>
+                    {Q_SHORT[currentSrc.quality] || "HD"}
+                  </Text>
+                </View>
+                {sources.length > 1 && (
+                  <Text style={s.serverCountText}>
+                    سيرفر {srcIdx + 1}/{sources.length}
+                  </Text>
+                )}
+              </View>
             </View>
 
-            {/* Quality pill + top-right actions */}
+            {/* ── RIGHT: CC · Flip · Screenshot · X ── */}
             <View style={s.topRight}>
-              <View style={[s.qualityPill, { borderColor: QUALITY_COLOR[currentSrc.quality] || "#fff" }]}>
-                <Text style={[s.qualityText, { color: QUALITY_COLOR[currentSrc.quality] || "#fff" }]}>
-                  {Q_SHORT[currentSrc.quality] || "HD"}
-                </Text>
-              </View>
+              {/* CC / Subtitle button */}
+              <Pressable
+                onPress={() => { setShowSubSheet(true); fadeIn(); }}
+                style={[s.topBtn, (subOn && effectiveCues.length > 0) && s.topBtnActive]}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name="logo-closed-captioning"
+                  size={16}
+                  color={subOn && effectiveCues.length > 0 ? "#c4b5fd" : "rgba(255,255,255,0.60)"}
+                />
+              </Pressable>
+
+              {/* Flip/Rotate screen */}
+              <Pressable
+                onPress={flipScreen}
+                style={[s.topBtn, isFlipped && s.topBtnActive]}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name="phone-landscape"
+                  size={16}
+                  color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.60)"}
+                />
+              </Pressable>
+
+              {/* Screenshot */}
+              <Pressable onPress={takeScreenshot} style={s.topBtn} hitSlop={10}>
+                <Ionicons name="camera" size={16} color="rgba(255,255,255,0.60)" />
+              </Pressable>
+
+              {/* Close / X (red) */}
+              <Pressable onPress={onBack} style={s.topBtnClose} hitSlop={10}>
+                <Ionicons name="close" size={16} color="rgba(248,113,113,0.85)" />
+              </Pressable>
             </View>
           </LinearGradient>
 
-          {/* ── CENTER ROW ── */}
+          {/* ════ CENTER ROW ════ */}
           <View style={s.centerRow} pointerEvents="box-none">
             {onPrevEpisode && (
               <Pressable onPress={onPrevEpisode} style={s.epNavBtn} hitSlop={12}>
                 <Ionicons name="play-skip-back" size={22} color="rgba(255,255,255,0.85)" />
               </Pressable>
             )}
-            <Pressable onPress={() => seek(position - 10)} style={s.seekStepBtn} hitSlop={12}>
-              <Ionicons name="play-back" size={22} color="rgba(255,255,255,0.85)" />
+            <Pressable
+              onPress={() => { seek(positionRef.current - 10); fadeIn(); }}
+              style={s.seekStepBtn} hitSlop={12}
+            >
+              <Ionicons name="play-back" size={22} color="rgba(255,255,255,0.80)" />
               <Text style={s.seekStepLabel}>10</Text>
             </Pressable>
             <Pressable onPress={togglePlay} style={s.playBtn} hitSlop={8}>
               {buffering
-                ? <SpinRing />
+                ? <SpinRing size={52} />
                 : <Ionicons name={isPlaying ? "pause" : "play"} size={34} color="#fff" />}
             </Pressable>
-            <Pressable onPress={() => seek(position + 10)} style={s.seekStepBtn} hitSlop={12}>
+            <Pressable
+              onPress={() => { seek(positionRef.current + 10); fadeIn(); }}
+              style={s.seekStepBtn} hitSlop={12}
+            >
               <Text style={s.seekStepLabel}>10</Text>
-              <Ionicons name="play-forward" size={22} color="rgba(255,255,255,0.85)" />
+              <Ionicons name="play-forward" size={22} color="rgba(255,255,255,0.80)" />
             </Pressable>
             {onNextEpisode && (
               <Pressable onPress={onNextEpisode} style={s.epNavBtn} hitSlop={12}>
@@ -888,18 +1096,18 @@ export function RiftPlayer({
             )}
           </View>
 
-          {/* ── BOTTOM SECTION ── */}
+          {/* ════ BOTTOM SECTION ════ */}
           <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.45)", "rgba(0,0,0,0.88)"]}
+            colors={["transparent", "rgba(0,0,0,0.45)", "rgba(0,0,0,0.90)"]}
             style={[s.bottomBar, { paddingBottom: Platform.OS === "web" ? 14 : insets.bottom + 12 }]}
           >
             {/* Time row */}
             <View style={s.timeRow}>
               <Text style={s.timeText}>{fmtTime(position)}</Text>
-              {/* Skip button in center when skip data exists */}
               {hasSkipData && (
                 <Pressable
-                  onPress={inIntroRange ? doSkipIntro : inOutroRange ? doSkipOutro : (skipIntro ? doSkipIntro : doSkipOutro)}
+                  onPress={inIntroRange ? doSkipIntro : inOutroRange ? doSkipOutro
+                    : (skipIntro ? doSkipIntro : doSkipOutro)}
                   style={[
                     s.skipInlineBtn,
                     (inIntroRange || inOutroRange) && s.skipInlineBtnActive,
@@ -927,7 +1135,6 @@ export function RiftPlayer({
               onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
               {...seekBarPan.panHandlers}
             >
-              {/* Track background */}
               <View style={s.progressBg} />
               {/* Skip intro marker */}
               {markerPctIntro && (
@@ -943,7 +1150,7 @@ export function RiftPlayer({
                   width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
                 }]} />
               )}
-              {/* Progress fill */}
+              {/* Progress fill (purple gradient) */}
               <View style={[s.progressFill, { width: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }]} />
               {/* Thumb */}
               <View style={[
@@ -965,7 +1172,10 @@ export function RiftPlayer({
             <View style={s.ctrlRow}>
               {/* Left: speed */}
               <View style={s.ctrlLeft}>
-                <Pressable onPress={() => { setShowSpeedSheet(true); setShowSrcSheet(false); fadeIn(); }} style={s.speedBtn}>
+                <Pressable onPress={() => { setShowSpeedSheet(true); setShowSrcSheet(false); fadeIn(); }} style={[
+                  s.speedBtn,
+                  (speed !== 1 || longPressSpeed) && s.speedBtnActive,
+                ]}>
                   <Text style={[
                     s.speedBtnText,
                     (speed !== 1 || longPressSpeed) && s.speedBtnTextActive,
@@ -991,19 +1201,8 @@ export function RiftPlayer({
                 </Pressable>
               </View>
 
-              {/* Right: CC + mute + lock */}
+              {/* Right: mute + lock */}
               <View style={s.ctrlRight}>
-                <Pressable
-                  onPress={() => { setShowSubSheet(true); fadeIn(); }}
-                  style={[s.iconBtn, (subOn && effectiveCues.length > 0) && s.ccBtnActive]}
-                  hitSlop={8}
-                >
-                  <Ionicons
-                    name={subOn && effectiveCues.length > 0 ? "logo-closed-captioning" : "logo-closed-captioning"}
-                    size={17}
-                    color={subOn && effectiveCues.length > 0 ? "#c4b5fd" : "rgba(255,255,255,0.55)"}
-                  />
-                </Pressable>
                 <Pressable
                   onPress={() => {
                     const newVol = volume > 0 ? 0 : 1;
@@ -1023,7 +1222,7 @@ export function RiftPlayer({
                   onPress={() => { setIsLocked(true); setShowUnlock(false); fadeIn(); }}
                   style={[s.iconBtn, s.lockBtnStyle]} hitSlop={8}
                 >
-                  <Ionicons name="lock-closed-outline" size={16} color="rgba(251,191,36,0.75)" />
+                  <Ionicons name="lock-closed-outline" size={16} color="rgba(251,191,36,0.80)" />
                 </Pressable>
               </View>
             </View>
@@ -1039,7 +1238,13 @@ export function RiftPlayer({
           <View style={[s.sheet, { paddingBottom: insets.bottom + 14 }]}>
             <View style={s.sheetHandle} />
             <View style={s.sheetHeader}>
-              <Text style={s.sheetTitle}>اختر المصدر</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="layers-outline" size={16} color="rgba(196,181,253,0.80)" />
+                <Text style={s.sheetTitle}>اختر المصدر</Text>
+                <View style={s.srcCountBadge}>
+                  <Text style={s.srcCountText}>{sources.length} مصدر</Text>
+                </View>
+              </View>
             </View>
             {sources.map((src, i) => (
               <Pressable
@@ -1048,9 +1253,12 @@ export function RiftPlayer({
                 style={[s.sheetItem, i === srcIdx && s.sheetItemActive]}
               >
                 <View style={[s.sheetDot, { backgroundColor: QUALITY_COLOR[src.quality] || "#fff" }]} />
-                <Text style={[s.sheetItemText, i === srcIdx && s.sheetItemTextActive]} numberOfLines={1}>
-                  {src.label}
-                </Text>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={[s.sheetItemText, i === srcIdx && s.sheetItemTextActive]} numberOfLines={1}>
+                    {src.label}
+                  </Text>
+                  <Text style={s.sheetItemDesc}>سيرفر {i + 1}</Text>
+                </View>
                 <View style={[s.sheetQBadge, { borderColor: QUALITY_COLOR[src.quality] || "#fff" }]}>
                   <Text style={[s.sheetQText, { color: QUALITY_COLOR[src.quality] || "#fff" }]}>
                     {Q_SHORT[src.quality] || "HD"}
@@ -1081,12 +1289,8 @@ export function RiftPlayer({
               >
                 <Text style={[s.speedItemText, sp === speed && s.speedItemTextActive]}>×{sp}</Text>
                 <Text style={[s.speedItemDesc, sp === speed && { color: "rgba(196,181,253,0.70)" }]}>
-                  {sp === 0.5 ? "بطيء جداً"
-                    : sp === 0.75 ? "بطيء"
-                    : sp === 1 ? "عادي"
-                    : sp === 1.25 ? "أسرع قليلاً"
-                    : sp === 1.5 ? "سريع"
-                    : "سريع جداً"}
+                  {sp === 0.5 ? "بطيء جداً" : sp === 0.75 ? "بطيء" : sp === 1 ? "عادي"
+                    : sp === 1.25 ? "أسرع قليلاً" : sp === 1.5 ? "سريع" : "سريع جداً"}
                 </Text>
                 {sp === speed && <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />}
               </Pressable>
@@ -1106,8 +1310,8 @@ export function RiftPlayer({
               <Text style={s.sheetTitle}>وضع العرض</Text>
             </View>
             {([
-              { fit: "contain" as const, label: "عرض عادي", desc: "نسبة أصلية مع حواف سوداء", icon: "scan-outline" as const },
-              { fit: "cover"   as const, label: "تكبير ملء الشاشة", desc: "اقتصاص الحواف السوداء", icon: "scan" as const },
+              { fit: "contain" as const, label: "عرض عادي",         desc: "نسبة أصلية مع حواف سوداء", icon: "scan-outline" as const },
+              { fit: "cover"   as const, label: "تكبير ملء الشاشة", desc: "اقتصاص الحواف السوداء",     icon: "scan" as const },
             ]).map(({ fit, label, desc, icon }) => (
               <Pressable
                 key={fit}
@@ -1124,74 +1328,307 @@ export function RiftPlayer({
                 {fit === contentFit && <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />}
               </Pressable>
             ))}
+            {/* Rotate option */}
+            <Pressable
+              onPress={() => { flipScreen(); setShowViewSheet(false); }}
+              style={[s.sheetItem, isFlipped && s.sheetItemActive]}
+            >
+              <View style={[s.sheetIconWrap, isFlipped && s.sheetIconWrapActive]}>
+                <Ionicons name="phone-landscape" size={16} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.50)"} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.sheetItemText, isFlipped && s.sheetItemTextActive]}>تدوير الشاشة</Text>
+                <Text style={s.sheetItemDesc}>{isFlipped ? "العودة للاتجاه الأصلي" : "قلب الاتجاه 180°"}</Text>
+              </View>
+              {isFlipped && <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />}
+            </Pressable>
           </View>
         </Pressable>
       )}
 
       {/* ════════════════════════════════════════
-          SUBTITLE BOTTOM SHEET
+          SUBTITLE SETTINGS BOTTOM SHEET
+          كاملة مع معاينة مباشرة + حجم خط + لون + عريض + خلفية + موضع
       ════════════════════════════════════════ */}
       {showSubSheet && (
         <Pressable style={s.sheetBg} onPress={() => setShowSubSheet(false)}>
-          <View style={[s.sheet, { paddingBottom: insets.bottom + 14 }]}>
+          <ScrollView
+            style={[s.subSheet, { maxHeight: H * 0.80 }]}
+            contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+            showsVerticalScrollIndicator={false}
+            onStartShouldSetResponder={() => true}
+          >
             <View style={s.sheetHandle} />
-            <View style={s.sheetHeader}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Ionicons name="logo-closed-captioning" size={18} color="rgba(196,181,253,0.80)" />
-                <Text style={s.sheetTitle}>الترجمة</Text>
-                {subLoading && (
-                  <View style={s.subSheetLoadingBadge}>
-                    <Text style={s.subSheetLoadingText}>جارٍ التحميل…</Text>
+
+            {/* Header */}
+            <View style={s.subSheetHeader}>
+              <View style={s.subSheetHeaderLeft}>
+                <View style={s.subSheetIcon}>
+                  <Ionicons name="logo-closed-captioning" size={14} color="#c4b5fd" />
+                </View>
+                <Text style={s.sheetTitle}>إعدادات الترجمة</Text>
+              </View>
+              <Pressable onPress={() => setShowSubSheet(false)} style={s.subSheetClose}>
+                <Ionicons name="close" size={16} color="rgba(255,255,255,0.40)" />
+              </Pressable>
+            </View>
+
+            {/* ── Live Preview (when enabled) ── */}
+            {subOn && (
+              <View style={s.subPreviewBox}>
+                <Text style={s.subPreviewLabel}>معاينة مباشرة</Text>
+                <View style={s.subPreviewArea}>
+                  <Text style={[
+                    s.subPreviewText,
+                    {
+                      fontSize: subSettings.fontSize,
+                      color: subSettings.color,
+                      fontWeight: subSettings.bold ? "700" : "400",
+                      backgroundColor: subSettings.bgOpacity > 0
+                        ? `rgba(0,0,0,${subSettings.bgOpacity})` : "transparent",
+                    },
+                  ]}>
+                    السلام عليكم ورحمة الله
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* ── SECTION: عام ── */}
+            <AccordionSection
+              id="general"
+              openId={subOpenSection}
+              setOpenId={setSubOpenSection}
+              icon="⚙"
+              iconBg="rgba(139,92,246,0.18)"
+              iconBorder="rgba(139,92,246,0.28)"
+              title="عام"
+              badge={
+                <View style={[s.sectionDot, { backgroundColor: subOn ? "#22c55e" : "rgba(255,255,255,0.20)" }]} />
+              }
+            >
+              <View style={s.sectionRow}>
+                <View style={s.sectionRowLeft}>
+                  <Ionicons name="logo-closed-captioning" size={17} color="rgba(255,255,255,0.50)" />
+                  <View>
+                    <Text style={[s.sectionRowTitle, { color: subOn ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.45)" }]}>
+                      الترجمة
+                    </Text>
+                    <Text style={[s.sectionRowDesc, { color: subOn ? "rgba(110,231,183,0.70)" : "rgba(255,255,255,0.22)" }]}>
+                      {subOn ? "مُفعّلة" : "موقوفة"}
+                    </Text>
                   </View>
+                </View>
+                {!subOn ? (
+                  <Pressable
+                    onPress={() => { if (effectiveCues.length > 0) setSubOn(true); }}
+                    style={[s.subToggleBtn, { opacity: effectiveCues.length > 0 ? 1 : 0.45 }]}
+                  >
+                    <Text style={s.subToggleBtnText}>تفعيل</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable onPress={() => setSubOn(false)} style={s.subOffBtn}>
+                    <Text style={s.subOffBtnText}>إيقاف</Text>
+                  </Pressable>
                 )}
               </View>
-            </View>
-            {/* No subtitles option */}
-            <Pressable
-              onPress={() => { setSubOn(false); setShowSubSheet(false); }}
-              style={[s.sheetItem, !subOn && s.sheetItemActive]}
-            >
-              <View style={[s.sheetIconWrap, !subOn && s.sheetIconWrapActive]}>
-                <Ionicons name="close-circle-outline" size={16} color={!subOn ? "#c4b5fd" : "rgba(255,255,255,0.40)"} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.sheetItemText, !subOn && s.sheetItemTextActive]}>بدون ترجمة</Text>
-                <Text style={s.sheetItemDesc}>إخفاء الترجمة</Text>
-              </View>
-              {!subOn && <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />}
-            </Pressable>
-            {/* Arabic subtitle option */}
-            <Pressable
-              onPress={() => {
-                if (effectiveCues.length > 0) { setSubOn(true); setShowSubSheet(false); }
-              }}
-              style={[
-                s.sheetItem,
-                subOn && s.sheetItemActive,
-                effectiveCues.length === 0 && s.sheetItemDisabled,
-              ]}
-            >
-              <View style={[s.sheetIconWrap, subOn && effectiveCues.length > 0 && s.sheetIconWrapActive]}>
-                <Ionicons
-                  name="logo-closed-captioning"
-                  size={16}
-                  color={subOn && effectiveCues.length > 0 ? "#c4b5fd" : "rgba(255,255,255,0.40)"}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.sheetItemText, subOn && effectiveCues.length > 0 && s.sheetItemTextActive]}>
-                  عربي
+              {!subOn && effectiveCues.length === 0 && (
+                <Text style={s.subNoAvailText}>
+                  {subLoading ? "جارٍ تحميل الترجمة…" : "لا تتوفر ترجمة لهذا المصدر"}
                 </Text>
-                <Text style={s.sheetItemDesc}>
-                  {effectiveCues.length > 0
-                    ? `${effectiveCues.length} مقطع`
-                    : subLoading ? "جارٍ التحميل…" : "غير متوفر لهذا المصدر"}
-                </Text>
-              </View>
-              {subOn && effectiveCues.length > 0 && <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />}
-            </Pressable>
-          </View>
+              )}
+            </AccordionSection>
+
+            {/* ── SECTION: المظهر ── */}
+            <AccordionSection
+              id="appearance"
+              openId={subOpenSection}
+              setOpenId={setSubOpenSection}
+              icon="🎨"
+              iconBg="rgba(251,191,36,0.18)"
+              iconBorder="rgba(251,191,36,0.28)"
+              title="المظهر"
+              badge={subOn ? (
+                <View style={s.appearanceBadge}>
+                  <Text style={s.appearanceBadgeText}>
+                    {FONT_SIZES.find(f => f.sz === subSettings.fontSize)?.name ?? "م"} · {SUB_COLORS.find(c => c.v === subSettings.color)?.label ?? "أبيض"}
+                  </Text>
+                </View>
+              ) : null}
+            >
+              {subOn ? (
+                <>
+                  {/* حجم الخط */}
+                  <Text style={s.subSectionLabel}>حجم الخط</Text>
+                  <View style={s.optionRow}>
+                    {FONT_SIZES.map(f => {
+                      const active = subSettings.fontSize === f.sz;
+                      return (
+                        <Pressable
+                          key={f.sz}
+                          onPress={() => updateSubSettings({ fontSize: f.sz })}
+                          style={[s.optionBtn, active && s.optionBtnActive]}
+                        >
+                          <Text style={[s.optionBtnMain, { fontSize: Math.min(f.sz * 0.52 + 5, 18), color: active ? "#c4b5fd" : "rgba(255,255,255,0.30)" }]}>أ</Text>
+                          <Text style={[s.optionBtnSub, { color: active ? "rgba(196,181,253,0.75)" : "rgba(255,255,255,0.22)" }]}>{f.name}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {/* لون النص */}
+                  <Text style={[s.subSectionLabel, { marginTop: 14 }]}>لون النص</Text>
+                  <View style={s.optionRow}>
+                    {SUB_COLORS.map(c => {
+                      const active = subSettings.color === c.v;
+                      return (
+                        <Pressable
+                          key={c.v}
+                          onPress={() => updateSubSettings({ color: c.v })}
+                          style={[s.optionBtn, active && s.optionBtnActive]}
+                        >
+                          <View style={[s.colorSwatch, {
+                            backgroundColor: c.v,
+                            shadowColor: active ? c.v : "transparent",
+                            shadowOpacity: active ? 0.9 : 0,
+                            shadowRadius: active ? 6 : 0,
+                          }]} />
+                          <Text style={[s.optionBtnSub, { color: active ? "rgba(196,181,253,0.80)" : "rgba(255,255,255,0.22)" }]}>{c.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {/* خلفية والسُمك */}
+                  <Text style={[s.subSectionLabel, { marginTop: 14 }]}>الخلفية والسُمك</Text>
+                  <View style={s.optionRow}>
+                    {/* Bold toggle */}
+                    <Pressable
+                      onPress={() => updateSubSettings({ bold: !subSettings.bold })}
+                      style={[s.optionBtn, subSettings.bold && s.optionBtnActive]}
+                    >
+                      <Text style={[s.optionBtnMain, {
+                        fontSize: 15,
+                        fontWeight: subSettings.bold ? "800" : "400",
+                        color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.30)",
+                      }]}>ع</Text>
+                      <Text style={[s.optionBtnSub, { color: subSettings.bold ? "rgba(196,181,253,0.70)" : "rgba(255,255,255,0.22)" }]}>
+                        {subSettings.bold ? "عريض" : "عادي"}
+                      </Text>
+                    </Pressable>
+                    {/* Background opacity */}
+                    {([{ v: 0, l: "☀", name: "بلا" }, { v: 0.45, l: "◑", name: "خفيف" }, { v: 0.82, l: "■", name: "داكن" }] as { v: number; l: string; name: string }[]).map(({ v, l, name }) => {
+                      const active = subSettings.bgOpacity === v;
+                      return (
+                        <Pressable
+                          key={v}
+                          onPress={() => updateSubSettings({ bgOpacity: v })}
+                          style={[s.optionBtn, active && s.optionBtnActive]}
+                        >
+                          <Text style={[s.optionBtnMain, { fontSize: 13, color: active ? "#c4b5fd" : "rgba(255,255,255,0.28)" }]}>{l}</Text>
+                          <Text style={[s.optionBtnSub, { color: active ? "rgba(196,181,253,0.70)" : "rgba(255,255,255,0.22)" }]}>{name}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : (
+                <Text style={s.subNoAvailText}>فعّل الترجمة أولاً لتعديل المظهر</Text>
+              )}
+            </AccordionSection>
+
+            {/* ── SECTION: الموضع ── */}
+            <AccordionSection
+              id="position"
+              openId={subOpenSection}
+              setOpenId={setSubOpenSection}
+              icon="📍"
+              iconBg="rgba(52,211,153,0.18)"
+              iconBorder="rgba(52,211,153,0.28)"
+              title="الموضع"
+              badge={subOn ? (
+                <View style={s.positionBadge}>
+                  <Text style={s.positionBadgeText}>
+                    {SUB_POSITIONS.find(p => p.v === subSettings.position)?.label ?? "أسفل"}
+                  </Text>
+                </View>
+              ) : null}
+            >
+              {subOn ? (
+                <View style={[s.optionRow, { gap: 10 }]}>
+                  {SUB_POSITIONS.map(p => {
+                    const active = subSettings.position === p.v;
+                    return (
+                      <Pressable
+                        key={p.v}
+                        onPress={() => updateSubSettings({ position: p.v })}
+                        style={[s.positionBtn, active && s.optionBtnActive]}
+                      >
+                        <Text style={[s.optionBtnMain, { fontSize: 16, color: active ? "#c4b5fd" : "rgba(255,255,255,0.28)" }]}>{p.icon}</Text>
+                        <Text style={[s.optionBtnSub, { color: active ? "rgba(196,181,253,0.80)" : "rgba(255,255,255,0.30)" }]}>{p.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={s.subNoAvailText}>فعّل الترجمة أولاً</Text>
+              )}
+            </AccordionSection>
+          </ScrollView>
         </Pressable>
+      )}
+    </View>
+  );
+}
+
+/* ─── Accordion Section Component ─── */
+function AccordionSection({
+  id, openId, setOpenId, icon, iconBg, iconBorder, title, badge, children,
+}: {
+  id: string;
+  openId: string | null;
+  setOpenId: (id: string | null) => void;
+  icon: string;
+  iconBg: string;
+  iconBorder: string;
+  title: string;
+  badge?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  const isOpen = openId === id;
+  const rot = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(rot, {
+      toValue: isOpen ? 1 : 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [isOpen]);
+
+  const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
+
+  return (
+    <View style={s.accordSection}>
+      <Pressable
+        onPress={() => setOpenId(isOpen ? null : id)}
+        style={s.accordHeader}
+      >
+        <View style={s.accordLeft}>
+          <View style={[s.accordIcon, { backgroundColor: iconBg, borderColor: iconBorder }]}>
+            <Text style={s.accordIconText}>{icon}</Text>
+          </View>
+          <Text style={s.accordTitle}>{title}</Text>
+          {badge}
+        </View>
+        <Animated.View style={{ transform: [{ rotate }] }}>
+          <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.30)" />
+        </Animated.View>
+      </Pressable>
+      {isOpen && (
+        <View style={s.accordBody}>
+          {children}
+        </View>
       )}
     </View>
   );
@@ -1202,15 +1639,17 @@ const s = StyleSheet.create({
   root:  { flex: 1, backgroundColor: "#000", position: "relative" },
   video: { width: "100%", height: "100%" },
 
+  /* Spinner / Error */
   spinnerWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", zIndex: 3 },
-  errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20 },
-  errorText:   { color: "#ef4444", fontSize: 15, fontFamily: "Cairo_600SemiBold" },
-  errorBtn:    { backgroundColor: "rgba(239,68,68,0.15)", borderRadius: 12, paddingHorizontal: 22, paddingVertical: 11, borderWidth: 1, borderColor: "rgba(239,68,68,0.40)" },
+  errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20, backgroundColor: "rgba(0,0,0,0.92)" },
+  errorIconBox: { width: 68, height: 68, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", alignItems: "center", justifyContent: "center" },
+  errorTitle:  { color: "rgba(255,255,255,0.85)", fontSize: 15, fontFamily: "Cairo_700Bold" },
+  errorBtn:    { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.15)", borderRadius: 20, paddingHorizontal: 22, paddingVertical: 11, borderWidth: 1, borderColor: "rgba(239,68,68,0.35)" },
   errorBtnText: { color: "#ef4444", fontFamily: "Cairo_600SemiBold", fontSize: 14 },
 
   /* Subtitle */
-  subtitleWrap: { position: "absolute", bottom: 80, left: 16, right: 16, alignItems: "center", zIndex: 8, pointerEvents: "none" as any },
-  subtitleText: { backgroundColor: "rgba(0,0,0,0.75)", color: "#fff", fontSize: 16, fontFamily: "Cairo_600SemiBold", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, textAlign: "center", lineHeight: 26 },
+  subtitleWrap: { position: "absolute", left: 16, right: 16, alignItems: "center", zIndex: 8 },
+  subtitleText: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, textAlign: "center", lineHeight: 26 },
 
   /* Ripples */
   rippleLeft:   { position: "absolute", left: 0, top: "10%", width: "45%", height: "80%", alignItems: "center", justifyContent: "center", zIndex: 25 },
@@ -1242,6 +1681,10 @@ const s = StyleSheet.create({
   skipOutroBtn: { position: "absolute", right: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, borderWidth: 1.5, zIndex: 20 },
   skipBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold" },
 
+  /* Skip notification */
+  skipNotif: { position: "absolute", top: 60, right: 14, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(250,204,21,0.40)", zIndex: 35 },
+  skipNotifText: { color: "#fde047", fontSize: 11, fontFamily: "Cairo_700Bold" },
+
   /* Lock */
   lockIndicator: { position: "absolute", right: 14, top: "48%", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 20, padding: 8, borderWidth: 1, borderColor: "rgba(251,191,36,0.30)", zIndex: 25 },
   unlockBtn: { position: "absolute", right: 14, top: "42%", alignItems: "center", gap: 8, backgroundColor: "rgba(5,5,15,0.92)", borderRadius: 18, paddingHorizontal: 20, paddingVertical: 16, borderWidth: 1.5, borderColor: "rgba(251,191,36,0.40)", zIndex: 40 },
@@ -1264,21 +1707,26 @@ const s = StyleSheet.create({
   halfRight: { position: "absolute", right: 0, top: 0, width: "50%", height: "100%" },
 
   /* Top bar */
-  topBar: { paddingHorizontal: 14, paddingBottom: 28, flexDirection: "row", alignItems: "center", gap: 12 },
-  backBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center" },
-  titleWrap: { flex: 1, gap: 2 },
-  titleText: { color: "#fff", fontSize: 16, fontFamily: "Cairo_700Bold" },
-  epText: { color: "rgba(255,255,255,0.55)", fontSize: 12, fontFamily: "Cairo_400Regular" },
-  topRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  qualityPill: { borderRadius: 8, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 3 },
+  topBar: { paddingHorizontal: 12, paddingBottom: 24, flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.42)", alignItems: "center", justifyContent: "center", marginTop: 2 },
+  titleWrap: { flex: 1, gap: 4 },
+  titleText: { color: "#fff", fontSize: 15, fontFamily: "Cairo_700Bold" },
+  epBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
+  epBadgeText: { color: "rgba(221,214,254,0.95)", fontSize: 11, fontFamily: "Cairo_700Bold" },
+  qualityPill: { borderRadius: 8, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2 },
   qualityText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
+  serverCountText: { color: "rgba(255,255,255,0.50)", fontSize: 11, fontFamily: "Cairo_400Regular" },
+  topRight: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  topBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  topBtnActive: { backgroundColor: "rgba(139,92,246,0.30)", borderColor: "rgba(139,92,246,0.55)" },
+  topBtnClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1, borderColor: "rgba(239,68,68,0.28)", alignItems: "center", justifyContent: "center" },
 
   /* Center */
   centerRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 22 },
   epNavBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: "rgba(0,0,0,0.32)", alignItems: "center", justifyContent: "center" },
-  seekStepBtn: { width: 52, height: 46, borderRadius: 23, backgroundColor: "rgba(0,0,0,0.32)", alignItems: "center", justifyContent: "center", gap: 1 },
+  seekStepBtn: { width: 52, height: 46, borderRadius: 23, backgroundColor: "rgba(20,20,40,0.72)", alignItems: "center", justifyContent: "center", gap: 1, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
   seekStepLabel: { color: "rgba(255,255,255,0.65)", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  playBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.88)", alignItems: "center", justifyContent: "center", shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 16 },
+  playBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(0,0,0,0.50)", borderWidth: 2, borderColor: "rgba(255,255,255,0.50)", alignItems: "center", justifyContent: "center" },
 
   /* Bottom bar */
   bottomBar: { paddingHorizontal: 16, paddingTop: 28, gap: 8 },
@@ -1308,24 +1756,17 @@ const s = StyleSheet.create({
   ctrlCenter: { flex: 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   ctrlRight: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 },
   speedBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  speedBtnActive: { backgroundColor: "rgba(251,191,36,0.18)", borderColor: "rgba(251,191,36,0.35)" },
   speedBtnText: { color: "rgba(255,255,255,0.45)", fontSize: 11, fontFamily: "Cairo_700Bold" },
   speedBtnTextActive: { color: "#fde68a" },
   srcBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(0,0,0,0.40)", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", maxWidth: 160 },
   srcBtnText: { color: "rgba(255,255,255,0.65)", fontSize: 11, fontFamily: "Cairo_600SemiBold", flex: 1 },
-  iconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
-  lockBtnStyle: { backgroundColor: "rgba(251,191,36,0.12)", borderColor: "rgba(251,191,36,0.28)" },
-  ccBtnActive: { backgroundColor: "rgba(139,92,246,0.18)", borderColor: "rgba(167,139,250,0.45)" },
+  iconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "rgba(20,20,40,0.65)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
+  lockBtnStyle: { backgroundColor: "rgba(251,191,36,0.11)", borderColor: "rgba(251,191,36,0.26)" },
 
   /* Subtitle loading pill */
   subLoadingPill: { position: "absolute", bottom: 96, alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(10,6,30,0.88)", borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", zIndex: 25 },
   subLoadingText: { color: "rgba(196,181,253,0.80)", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
-
-  /* Subtitle sheet loading badge */
-  subSheetLoadingBadge: { backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3, borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
-  subSheetLoadingText: { color: "rgba(196,181,253,0.80)", fontSize: 11, fontFamily: "Cairo_600SemiBold" },
-
-  /* Disabled sheet item */
-  sheetItemDisabled: { opacity: 0.40 },
 
   /* Sheets */
   sheetBg: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end", zIndex: 50 },
@@ -1346,4 +1787,58 @@ const s = StyleSheet.create({
   speedItemText: { flex: 1, color: "rgba(255,255,255,0.65)", fontSize: 20, fontFamily: "Cairo_700Bold" },
   speedItemTextActive: { color: "#fff" },
   speedItemDesc: { color: "rgba(255,255,255,0.35)", fontSize: 12, fontFamily: "Cairo_400Regular" },
+
+  /* Source count badge */
+  srcCountBadge: { backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
+  srcCountText: { color: "rgba(196,181,253,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold" },
+
+  /* Subtitle sheet */
+  subSheet: { backgroundColor: "#0d0d14", borderTopLeftRadius: 22, borderTopRightRadius: 22 },
+  subSheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)" },
+  subSheetHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  subSheetIcon: { width: 30, height: 30, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.28)", borderWidth: 1, borderColor: "rgba(139,92,246,0.40)", alignItems: "center", justifyContent: "center" },
+  subSheetClose: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+
+  /* Live preview */
+  subPreviewBox: { marginHorizontal: 16, marginTop: 12, marginBottom: 0, borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", backgroundColor: "rgba(255,255,255,0.03)", overflow: "hidden" },
+  subPreviewLabel: { color: "rgba(255,255,255,0.18)", fontSize: 8, fontFamily: "Cairo_700Bold", paddingHorizontal: 12, paddingTop: 8, letterSpacing: 2 },
+  subPreviewArea: { alignItems: "center", justifyContent: "center", paddingHorizontal: 16, paddingBottom: 12, paddingTop: 4, minHeight: 52 },
+  subPreviewText: { textAlign: "center", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
+
+  /* Accordion */
+  accordSection: { borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  accordHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14 },
+  accordLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  accordIcon: { width: 28, height: 28, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  accordIconText: { fontSize: 13 },
+  accordTitle: { color: "rgba(255,255,255,0.75)", fontSize: 13, fontFamily: "Cairo_700Bold" },
+  accordBody: { paddingHorizontal: 16, paddingBottom: 16, paddingTop: 4 },
+  sectionDot: { width: 8, height: 8, borderRadius: 4 },
+
+  /* Section content */
+  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 12, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  sectionRowLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  sectionRowTitle: { fontSize: 13, fontFamily: "Cairo_700Bold" },
+  sectionRowDesc: { fontSize: 9, fontFamily: "Cairo_400Regular" },
+  subToggleBtn: { backgroundColor: "rgba(139,92,246,0.28)", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(139,92,246,0.45)" },
+  subToggleBtnText: { color: "#c4b5fd", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  subOffBtn: { backgroundColor: "rgba(239,68,68,0.18)", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(239,68,68,0.32)" },
+  subOffBtnText: { color: "#fca5a5", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  subNoAvailText: { color: "rgba(255,255,255,0.22)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "center", paddingVertical: 8 },
+
+  /* Options grid */
+  subSectionLabel: { color: "rgba(139,92,246,0.80)", fontSize: 9, fontFamily: "Cairo_700Bold", letterSpacing: 1.5, marginBottom: 10 },
+  optionRow: { flexDirection: "row", gap: 8 },
+  optionBtn: { flex: 1, paddingVertical: 10, borderRadius: 16, alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  optionBtnActive: { backgroundColor: "rgba(124,58,237,0.28)", borderColor: "rgba(139,92,246,0.55)" },
+  optionBtnMain: { fontFamily: "Cairo_700Bold" },
+  optionBtnSub: { fontSize: 8.5, fontFamily: "Cairo_400Regular" },
+  colorSwatch: { width: 18, height: 18, borderRadius: 9 },
+  positionBtn: { flex: 1, paddingVertical: 12, borderRadius: 16, alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", flexDirection: "row" },
+
+  /* Appearance badge */
+  appearanceBadge: { backgroundColor: "rgba(251,191,36,0.12)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(251,191,36,0.22)" },
+  appearanceBadgeText: { color: "rgba(253,224,71,0.65)", fontSize: 8.5, fontFamily: "Cairo_700Bold" },
+  positionBadge: { backgroundColor: "rgba(52,211,153,0.10)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(52,211,153,0.22)" },
+  positionBadgeText: { color: "rgba(110,231,183,0.65)", fontSize: 8.5, fontFamily: "Cairo_700Bold" },
 });
