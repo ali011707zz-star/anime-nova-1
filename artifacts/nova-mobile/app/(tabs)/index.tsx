@@ -17,6 +17,7 @@ import {
   AIRING_QUERY, AnilistMedia, anilistQuery,
   POPULAR_QUERY, TRENDING_QUERY,
   SEASONAL_QUERY, TOP_RATED_QUERY, MOVIES_QUERY, UPCOMING_QUERY,
+  ACTION_QUERY, ROMANCE_QUERY, ISEKAI_QUERY, FANTASY_QUERY,
   getCurrentSeason,
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
@@ -69,6 +70,26 @@ export default function HomeScreen() {
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(UPCOMING_QUERY),
   });
 
+  const { data: actionAnime, refetch: refetchAc } = useQuery({
+    queryKey: ["actionAnime"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(ACTION_QUERY),
+  });
+
+  const { data: romanceAnime, refetch: refetchRo } = useQuery({
+    queryKey: ["romanceAnime"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(ROMANCE_QUERY),
+  });
+
+  const { data: isekaiAnime, refetch: refetchIs } = useQuery({
+    queryKey: ["isekaiAnime"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(ISEKAI_QUERY),
+  });
+
+  const { data: fantasyAnime, refetch: refetchFa } = useQuery({
+    queryKey: ["fantasyAnime"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(FANTASY_QUERY),
+  });
+
   const isLoading = loadingT || loadingP || loadingA;
 
   const trendingList = trending?.Page?.media || [];
@@ -78,12 +99,16 @@ export default function HomeScreen() {
   const topRatedList = topRated?.Page?.media || [];
   const moviesList = movies?.Page?.media || [];
   const upcomingList = upcoming?.Page?.media || [];
+  const actionList = actionAnime?.Page?.media || [];
+  const romanceList = romanceAnime?.Page?.media || [];
+  const isekaiList = isekaiAnime?.Page?.media || [];
+  const fantasyList = fantasyAnime?.Page?.media || [];
 
   const heroItems = trendingList.slice(0, 5).filter((m) => m.bannerImage || m.coverImage.extraLarge);
   const recentHistory = watchHistory.slice(0, 10);
 
   const refresh = async () => {
-    await Promise.all([refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM(), refetchU()]);
+    await Promise.all([refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM(), refetchU(), refetchAc(), refetchRo(), refetchIs(), refetchFa()]);
   };
 
   return (
@@ -206,6 +231,38 @@ export default function HomeScreen() {
                 size="md"
                 onSeeAll={() => router.push("/browse")}
               />
+              {actionList.length > 0 && (
+                <SectionRow
+                  title="🥊 أنمي أكشن"
+                  items={actionList}
+                  size="md"
+                  onSeeAll={() => router.push("/browse")}
+                />
+              )}
+              {romanceList.length > 0 && (
+                <SectionRow
+                  title="💕 أنمي رومانسي"
+                  items={romanceList}
+                  size="md"
+                  onSeeAll={() => router.push("/browse")}
+                />
+              )}
+              {isekaiList.length > 0 && (
+                <SectionRow
+                  title="🌍 أنمي إيسيكاي"
+                  items={isekaiList}
+                  size="md"
+                  onSeeAll={() => router.push("/browse")}
+                />
+              )}
+              {fantasyList.length > 0 && (
+                <SectionRow
+                  title="✨ أنمي فانتازيا"
+                  items={fantasyList}
+                  size="md"
+                  onSeeAll={() => router.push("/browse")}
+                />
+              )}
               <SectionRow
                 title="🗓️ قريباً"
                 items={upcomingList}

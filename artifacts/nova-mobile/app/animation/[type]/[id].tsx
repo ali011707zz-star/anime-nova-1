@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, Pressable, Image, ScrollView, Modal,
-  ActivityIndicator, StyleSheet, Platform, Dimensions,
+  ActivityIndicator, StyleSheet, Platform, Dimensions, Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -392,12 +392,17 @@ export default function AnimationDetailScreen() {
             <Ionicons name="close" size={20} color="#fff" />
           </Pressable>
           <Text style={s.trailerHeaderText}>الإعلان الدعائي</Text>
-          <View style={{ width: 36 }} />
+          <Pressable
+            onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${trailerKey}`)}
+            style={s.trailerClose}
+          >
+            <Ionicons name="open" size={18} color="rgba(255,255,255,0.7)" />
+          </Pressable>
         </View>
         {trailerKey ? (
           <WebView
             source={{
-              uri: `https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1`,
+              uri: `https://www.youtube.com/embed/${trailerKey}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1&enablejsapi=1`,
             }}
             style={{ flex: 1 }}
             allowsFullscreenVideo
@@ -406,7 +411,8 @@ export default function AnimationDetailScreen() {
             javaScriptEnabled
             domStorageEnabled
             originWhitelist={["*"]}
-            userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            mixedContentMode="always"
+            userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
           />
         ) : null}
       </View>

@@ -73,7 +73,7 @@ export default function LibraryScreen() {
         <FlatList
           data={watchHistory}
           keyExtractor={(item) => `${item.animeId}-${item.ep}`}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 100 }]}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <Pressable
@@ -115,7 +115,7 @@ export default function LibraryScreen() {
           data={favorites}
           keyExtractor={(item) => item.id.toString()}
           numColumns={3}
-          contentContainerStyle={styles.favGrid}
+          contentContainerStyle={[styles.favGrid, { paddingBottom: insets.bottom + 100 }]}
           columnWrapperStyle={{ gap: 10 }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (

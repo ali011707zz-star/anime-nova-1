@@ -127,6 +127,42 @@ query UpcomingAnime {
   }
 }`;
 
+export const ACTION_QUERY = `
+query ActionAnime {
+  Page(page: 1, perPage: 20) {
+    media(genre: "Action", type: ANIME, isAdult: false, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const ROMANCE_QUERY = `
+query RomanceAnime {
+  Page(page: 1, perPage: 20) {
+    media(genre: "Romance", type: ANIME, isAdult: false, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const ISEKAI_QUERY = `
+query IsekaiAnime {
+  Page(page: 1, perPage: 20) {
+    media(genre: "Isekai", type: ANIME, isAdult: false, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const FANTASY_QUERY = `
+query FantasyAnime {
+  Page(page: 1, perPage: 20) {
+    media(genre: "Fantasy", type: ANIME, isAdult: false, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
 export const SCHEDULE_QUERY = `
 query Schedule($airingAt_greater: Int!, $airingAt_lesser: Int!) {
   Page(page: 1, perPage: 50) {
