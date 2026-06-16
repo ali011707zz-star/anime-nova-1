@@ -169,7 +169,7 @@ export default function AnimationsScreen() {
           <Image source={{ uri: `${IMG}${item.poster_path}` }} style={s.cardImg} />
         ) : (
           <View style={[s.cardImg, s.noImg]}>
-            <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+            <Ionicons name="film" size={28} color="rgba(255,255,255,0.2)" />
           </View>
         )}
         <View style={s.cardGrad} />
@@ -203,7 +203,7 @@ export default function AnimationsScreen() {
               onPress={() => setShowFilters(o => !o)}
               style={[s.iconBtn, showFilters && s.iconBtnActive]}
             >
-              <Ionicons name="options-outline" size={18} color={showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+              <Ionicons name="options" size={18} color={showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
               {activeFilterCount > 0 && (
                 <View style={s.filterBadge}><Text style={s.filterBadgeText}>{activeFilterCount}</Text></View>
               )}
@@ -212,7 +212,7 @@ export default function AnimationsScreen() {
               onPress={() => { setSearchOpen(o => !o); setTimeout(() => searchInput.current?.focus(), 100); }}
               style={[s.iconBtn, searchOpen && s.iconBtnActive]}
             >
-              <Ionicons name="search-outline" size={18} color={searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+              <Ionicons name="search" size={18} color={searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
             </Pressable>
           </View>
         </View>
@@ -233,7 +233,7 @@ export default function AnimationsScreen() {
         {searchOpen && (
           <View style={s.searchWrap}>
             <View style={s.searchBar}>
-              <Ionicons name="search-outline" size={16} color="rgba(255,255,255,0.3)" />
+              <Ionicons name="search" size={16} color="rgba(255,255,255,0.3)" />
               <TextInput
                 ref={searchInput}
                 value={searchQ}
@@ -261,7 +261,7 @@ export default function AnimationsScreen() {
                       <Image source={{ uri: `${IMG}${item.poster_path}` }} style={s.searchItemImg} />
                     ) : (
                       <View style={[s.searchItemImg, s.noImg]}>
-                        <Ionicons name="film-outline" size={14} color="rgba(255,255,255,0.3)" />
+                        <Ionicons name="film" size={14} color="rgba(255,255,255,0.3)" />
                       </View>
                     )}
                     <View style={{ flex: 1 }}>
@@ -318,7 +318,7 @@ export default function AnimationsScreen() {
             {activeFilterCount > 0 && (
               <Pressable onPress={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
                 style={s.clearFiltersBtn}>
-                <Ionicons name="close-outline" size={14} color="rgba(252,165,165,0.8)" />
+                <Ionicons name="close" size={14} color="rgba(252,165,165,0.8)" />
                 <Text style={s.clearFiltersText}>مسح الفلاتر ({activeFilterCount})</Text>
               </Pressable>
             )}
@@ -337,7 +337,7 @@ export default function AnimationsScreen() {
             </Text>
           </View>
           <Pressable onPress={() => { setNoticeDismissed(true); AsyncStorage.setItem("animation-notice-dismissed", "1"); }}>
-            <Ionicons name="close-outline" size={18} color="rgba(251,191,36,0.6)" />
+            <Ionicons name="close" size={18} color="rgba(251,191,36,0.6)" />
           </Pressable>
         </View>
       )}
@@ -350,7 +350,7 @@ export default function AnimationsScreen() {
         </View>
       ) : items.length === 0 && !loading ? (
         <View style={s.center}>
-          <Ionicons name="film-outline" size={56} color="rgba(139,92,246,0.4)" />
+          <Ionicons name="film" size={56} color="rgba(139,92,246,0.4)" />
           <Text style={s.emptyTitle}>لا توجد نتائج</Text>
           <Pressable onPress={() => { setGenre(0); setSort("popularity.desc"); setYear(""); }}
             style={s.emptyBtn}>

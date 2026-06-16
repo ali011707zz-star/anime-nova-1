@@ -108,7 +108,7 @@ export default function AnimationEpisodesScreen() {
             <Image source={{ uri: `${IMG_S}${item.still_path}` }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           ) : (
             <View style={s.epThumbPlaceholder}>
-              <Ionicons name="play-circle-outline" size={20} color="rgba(255,255,255,0.15)" />
+              <Ionicons name="play-circle" size={20} color="rgba(255,255,255,0.15)" />
             </View>
           )}
           <View style={s.epThumbOverlay} />
@@ -141,7 +141,7 @@ export default function AnimationEpisodesScreen() {
           <View style={s.epMeta}>
             {item.runtime ? (
               <View style={s.epMetaItem}>
-                <Ionicons name="time-outline" size={9} color="rgba(255,255,255,0.22)" />
+                <Ionicons name="time" size={9} color="rgba(255,255,255,0.22)" />
                 <Text style={s.epMetaText}>
                   {item.runtime < 60 ? `${item.runtime} دقيقة` : `${Math.floor(item.runtime / 60)} ساعة`}
                 </Text>
@@ -234,7 +234,7 @@ export default function AnimationEpisodesScreen() {
         </View>
       ) : episodes.length === 0 ? (
         <View style={s.center}>
-          <Ionicons name="play-circle-outline" size={48} color="rgba(255,255,255,0.12)" />
+          <Ionicons name="play-circle" size={48} color="rgba(255,255,255,0.12)" />
           <Text style={s.emptyText}>لا توجد حلقات لهذا الموسم</Text>
         </View>
       ) : (

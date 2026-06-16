@@ -231,7 +231,7 @@ function SourceRow({ src, globalIdx, onPlay }: { src: Src; globalIdx: number; on
       {/* Left icon */}
       <View style={[d.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
         <Ionicons
-          name={src.isEmbed ? "tv-outline" : "play-circle-outline"}
+          name={src.isEmbed ? "tv" : "play-circle"}
           size={14}
           color={qs.text}
         />
@@ -486,7 +486,7 @@ export default function WatchScreen() {
           </Pressable>
           <Text style={[d.playerTitle, { flex: 1 }]} numberOfLines={1}>{displayTitle}</Text>
           <Pressable onPress={() => setScreen("picker")} style={d.srcSwitchBtn}>
-            <Ionicons name="layers-outline" size={16} color="#fff" />
+            <Ionicons name="layers" size={16} color="#fff" />
           </Pressable>
         </View>
       </View>
@@ -579,7 +579,7 @@ export default function WatchScreen() {
           <View style={d.scoreRow}>
             <View style={{ flexDirection: "row", gap: 2, alignItems: "center" }}>
               {[1,2,3,4,5].map(i => (
-                <Ionicons key={i} name={animeScore/2 >= i ? "star" : "star-outline"} size={14} color={animeScore/2 >= i ? "#fbbf24" : "rgba(255,255,255,0.15)"} />
+                <Ionicons key={i} name={animeScore/2 >= i ? "star" : "star"} size={14} color={animeScore/2 >= i ? "#fbbf24" : "rgba(255,255,255,0.15)"} />
               ))}
             </View>
             <Text style={d.scoreVal}>{animeScore.toFixed(1)}</Text>
@@ -603,13 +603,13 @@ export default function WatchScreen() {
           <View style={d.metaRow}>
             {animeStudio && (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Ionicons name="sparkles-outline" size={12} color="rgba(255,255,255,0.35)" />
+                <Ionicons name="sparkles" size={12} color="rgba(255,255,255,0.35)" />
                 <Text style={d.metaText}>{animeStudio}</Text>
               </View>
             )}
             {animeSeason && (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Ionicons name="calendar-outline" size={12} color="rgba(255,255,255,0.35)" />
+                <Ionicons name="calendar" size={12} color="rgba(255,255,255,0.35)" />
                 <Text style={d.metaText}>{animeSeason}</Text>
               </View>
             )}
@@ -639,14 +639,14 @@ export default function WatchScreen() {
         {/* ── Resume hint ── */}
         {resumeTime > 10 && (
           <View style={d.resumeBanner}>
-            <Ionicons name="play-circle-outline" size={16} color="rgba(196,181,253,0.8)" />
+            <Ionicons name="play-circle" size={16} color="rgba(196,181,253,0.8)" />
             <Text style={d.resumeText}>▶ استئناف من {Math.floor(resumeTime / 60)}:{String(Math.floor(resumeTime % 60)).padStart(2,"0")}</Text>
           </View>
         )}
 
         {/* ── Comments button ── */}
         <Pressable onPress={() => setShowComments(true)} style={d.commentsBtn}>
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color="rgba(139,92,246,0.9)" />
+          <Ionicons name="chatbubble-ellipses" size={16} color="rgba(139,92,246,0.9)" />
           <Text style={d.commentsBtnText}>التعليقات</Text>
           <Ionicons name="chevron-forward" size={13} color="rgba(139,92,246,0.5)" />
         </Pressable>
@@ -705,7 +705,7 @@ export default function WatchScreen() {
           })
         ) : !loading ? (
           <View style={d.noSrcs}>
-            <View style={d.noSrcsIcon}><Ionicons name="warning-outline" size={28} color="rgba(239,68,68,0.5)" /></View>
+            <View style={d.noSrcsIcon}><Ionicons name="warning" size={28} color="rgba(239,68,68,0.5)" /></View>
             <Text style={d.noSrcsTitle}>الحلقة {epNum} غير متوفرة بعد</Text>
             <Text style={d.noSrcsHint}>المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.</Text>
             <Pressable onPress={fetchSources} style={d.retryBtn}>

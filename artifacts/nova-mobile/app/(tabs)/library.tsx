@@ -12,8 +12,8 @@ import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 
 const TABS = [
-  { label: "متابعة", icon: "play-circle-outline" as const },
-  { label: "المفضلة", icon: "heart-outline" as const },
+  { label: "متابعة", icon: "play-circle" as const },
+  { label: "المفضلة", icon: "heart" as const },
 ];
 
 export default function LibraryScreen() {
@@ -52,7 +52,7 @@ export default function LibraryScreen() {
       {isEmpty ? (
         <View style={styles.center}>
           <Ionicons
-            name={activeTab === 0 ? "play-circle-outline" : "heart-outline"}
+            name={activeTab === 0 ? "play-circle" : "heart"}
             size={64}
             color={colors.mutedForeground}
           />
@@ -105,7 +105,7 @@ export default function LibraryScreen() {
                 onPress={() => removeFromHistory(item.animeId)}
                 style={styles.deleteBtn}
               >
-                <Ionicons name="trash-outline" size={18} color={colors.mutedForeground} />
+                <Ionicons name="trash" size={18} color={colors.mutedForeground} />
               </Pressable>
             </Pressable>
           )}

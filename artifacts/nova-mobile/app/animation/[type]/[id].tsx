@@ -40,7 +40,7 @@ function StarRow({ score }: { score: number }) {
         return (
           <Ionicons
             key={i}
-            name={filled ? "star" : "star-outline"}
+            name={filled ? "star" : "star"}
             size={13}
             color={filled ? "#FBBF24" : "rgba(255,255,255,0.15)"}
           />
@@ -128,7 +128,7 @@ export default function AnimationDetailScreen() {
   if (!detail) {
     return (
       <View style={[s.center, { paddingTop: insets.top }]}>
-        <Ionicons name="film-outline" size={48} color="rgba(139,92,246,0.4)" />
+        <Ionicons name="film" size={48} color="rgba(139,92,246,0.4)" />
         <Text style={s.emptyText}>لم يتم العثور على البيانات</Text>
         <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backBtn}>
           <Text style={s.backBtnText}>العودة</Text>
@@ -183,7 +183,7 @@ export default function AnimationDetailScreen() {
           )}
         </View>
         <View style={s.typePill}>
-          <Ionicons name={isTV ? "tv-outline" : "film-outline"} size={11} color="#8B5CF6" />
+          <Ionicons name={isTV ? "tv" : "film"} size={11} color="#8B5CF6" />
           <Text style={s.typePillText}>{isTV ? "مسلسل" : "فيلم"}</Text>
         </View>
       </View>
@@ -195,7 +195,7 @@ export default function AnimationDetailScreen() {
             <Image source={{ uri: `${IMG_W}${detail.poster_path}` }} style={s.coverImg} />
           ) : (
             <View style={[s.coverImg, s.coverPlaceholder]}>
-              <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+              <Ionicons name="film" size={28} color="rgba(255,255,255,0.2)" />
             </View>
           )}
         </View>
@@ -237,7 +237,7 @@ export default function AnimationDetailScreen() {
       {/* ── Studios ── */}
       {studios ? (
         <View style={s.studioRow}>
-          <Ionicons name="business-outline" size={12} color="rgba(255,255,255,0.3)" />
+          <Ionicons name="business" size={12} color="rgba(255,255,255,0.3)" />
           <Text style={s.studioText}>{studios}</Text>
         </View>
       ) : null}
@@ -267,7 +267,7 @@ export default function AnimationDetailScreen() {
       <View style={s.actionRow}>
         <Pressable onPress={toggleSave} style={s.actionBtn}>
           <Ionicons
-            name={saved ? "bookmark" : "bookmark-outline"}
+            name={saved ? "bookmark" : "bookmark"}
             size={20}
             color={saved ? "#8B5CF6" : "rgba(255,255,255,0.45)"}
           />
@@ -275,12 +275,12 @@ export default function AnimationDetailScreen() {
         </Pressable>
         {isTV && (
           <Pressable onPress={() => router.push(getEpisodesUrl() as any)} style={s.actionBtn}>
-            <Ionicons name="list-outline" size={20} color="rgba(255,255,255,0.45)" />
+            <Ionicons name="list" size={20} color="rgba(255,255,255,0.45)" />
             <Text style={s.actionLabel}>الحلقات</Text>
           </Pressable>
         )}
         <Pressable onPress={() => setShowComments(true)} style={s.actionBtn}>
-          <Ionicons name="chatbubble-outline" size={20} color="rgba(255,255,255,0.45)" />
+          <Ionicons name="chatbubble" size={20} color="rgba(255,255,255,0.45)" />
           <Text style={s.actionLabel}>التعليقات</Text>
         </Pressable>
       </View>
@@ -315,7 +315,7 @@ export default function AnimationDetailScreen() {
                   />
                 ) : (
                   <View style={[s.castImg, s.castPlaceholder]}>
-                    <Ionicons name="person-outline" size={16} color="rgba(255,255,255,0.2)" />
+                    <Ionicons name="person" size={16} color="rgba(255,255,255,0.2)" />
                   </View>
                 )}
                 <Text style={s.castName} numberOfLines={2}>{c.name}</Text>
@@ -343,7 +343,7 @@ export default function AnimationDetailScreen() {
                   <Image source={{ uri: `${IMG_W}${r.poster_path}` }} style={s.recImg} />
                 ) : (
                   <View style={[s.recImg, s.recPlaceholder]}>
-                    <Ionicons name="film-outline" size={18} color="rgba(255,255,255,0.2)" />
+                    <Ionicons name="film" size={18} color="rgba(255,255,255,0.2)" />
                   </View>
                 )}
                 {(r.vote_average || 0) > 0 && (

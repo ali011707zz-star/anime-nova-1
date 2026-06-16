@@ -112,7 +112,7 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
   return (
     <Pressable onPress={() => onPlay(src)} style={w.srcRow}>
       <View style={[w.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-        <Ionicons name={isEmbed ? "tv-outline" : "desktop-outline"} size={14} color={qs.text} />
+        <Ionicons name={isEmbed ? "tv" : "desktop"} size={14} color={qs.text} />
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -349,7 +349,7 @@ export default function AnimationWatchScreen() {
             </View>
           ) : (
             <View style={[w.posterImg, w.posterPlaceholder]}>
-              <Ionicons name="film-outline" size={36} color="rgba(139,92,246,0.4)" />
+              <Ionicons name="film" size={36} color="rgba(139,92,246,0.4)" />
             </View>
           )}
           <View style={{ alignItems: "center", gap: 8 }}>
@@ -462,14 +462,14 @@ export default function AnimationWatchScreen() {
             <Image source={{ uri: posterUrl }} style={w.pickerPoster} resizeMode="cover" />
           ) : (
             <View style={[w.pickerPoster, w.pickerPosterPlaceholder]}>
-              <Ionicons name="film-outline" size={28} color="rgba(255,255,255,0.2)" />
+              <Ionicons name="film" size={28} color="rgba(255,255,255,0.2)" />
             </View>
           )}
           <View style={{ flex: 1, gap: 6 }}>
             <Text style={w.pickerTitle} numberOfLines={2}>{titleStr || "—"}</Text>
             <View style={w.pickerMetaRow}>
               <View style={w.pickerMetaPill}>
-                <Ionicons name={type === "movie" ? "film-outline" : "tv-outline"} size={10} color="rgba(139,92,246,0.8)" />
+                <Ionicons name={type === "movie" ? "film" : "tv"} size={10} color="rgba(139,92,246,0.8)" />
                 <Text style={w.pickerMetaText}>{type === "movie" ? "فيلم" : `م${season} • ح${ep}`}</Text>
               </View>
               {totalDirect > 0 && (
@@ -491,7 +491,7 @@ export default function AnimationWatchScreen() {
 
         {/* Comments button */}
         <Pressable onPress={() => setShowComments(true)} style={w.commentsBtn}>
-          <Ionicons name="chatbubble-ellipses-outline" size={15} color="rgba(139,92,246,0.9)" />
+          <Ionicons name="chatbubble-ellipses" size={15} color="rgba(139,92,246,0.9)" />
           <Text style={w.commentsBtnText}>التعليقات</Text>
           <Ionicons name="chevron-forward" size={13} color="rgba(139,92,246,0.5)" />
         </Pressable>
@@ -535,7 +535,7 @@ export default function AnimationWatchScreen() {
         {/* Empty state */}
         {!loading && totalDirect === 0 && totalEmbed === 0 && (
           <View style={w.empty}>
-            <Ionicons name="search-outline" size={48} color="rgba(139,92,246,0.3)" />
+            <Ionicons name="search" size={48} color="rgba(139,92,246,0.3)" />
             <Text style={w.emptyTitle}>لا توجد مصادر متاحة</Text>
             <Text style={w.emptySub}>
               {type === "tv"
@@ -552,7 +552,7 @@ export default function AnimationWatchScreen() {
         {/* "Still searching..." message while loading */}
         {loading && totalDirect === 0 && (
           <View style={w.searchingWrap}>
-            <Ionicons name="hourglass-outline" size={32} color="rgba(139,92,246,0.4)" />
+            <Ionicons name="hourglass" size={32} color="rgba(139,92,246,0.4)" />
             <Text style={w.searchingText}>لا تزال المصادر تُجمَع، انتظر قليلاً…</Text>
           </View>
         )}

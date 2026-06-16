@@ -81,7 +81,7 @@ function EpisodeRow({
         onPress={e => { onToggleWatched(n); }}
         style={[ep_s.eyeBtn, watched && ep_s.eyeBtnWatched]}
       >
-        <Ionicons name={watched ? "eye" : "eye-off-outline"} size={14} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
+        <Ionicons name={watched ? "eye" : "eye-off"} size={14} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
       </Pressable>
     </Pressable>
   );
@@ -236,7 +236,7 @@ export default function EpisodeListScreen() {
         </View>
         {/* Search */}
         <View style={ep_s.searchBar}>
-          <Ionicons name="search-outline" size={15} color="rgba(255,255,255,0.25)" />
+          <Ionicons name="search" size={15} color="rgba(255,255,255,0.25)" />
           <TextInput
             value={search}
             onChangeText={setSearch}
@@ -247,7 +247,7 @@ export default function EpisodeListScreen() {
           />
           {search ? (
             <Pressable onPress={() => setSearch("")}>
-              <Ionicons name="close-outline" size={16} color="rgba(255,255,255,0.3)" />
+              <Ionicons name="close" size={16} color="rgba(255,255,255,0.3)" />
             </Pressable>
           ) : null}
         </View>

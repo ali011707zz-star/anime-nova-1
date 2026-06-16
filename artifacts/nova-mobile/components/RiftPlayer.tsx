@@ -177,7 +177,7 @@ export function RiftPlayer({
       {/* Error state */}
       {error && (
         <View style={s.errorWrap}>
-          <Ionicons name="alert-circle-outline" size={40} color="rgba(239,68,68,0.9)" />
+          <Ionicons name="alert-circle" size={40} color="rgba(239,68,68,0.9)" />
           <Text style={s.errorText}>تعذّر تشغيل المصدر</Text>
           {sources.length > 1 && (
             <Pressable
@@ -255,7 +255,7 @@ export function RiftPlayer({
 
           {/* Source btn */}
           <Pressable onPress={() => setShowSrcSheet(true)} style={s.srcBtn}>
-            <Ionicons name="layers-outline" size={15} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="layers" size={15} color="rgba(255,255,255,0.7)" />
             <Text style={s.srcBtnText}>{currentSrc.label}</Text>
             <Ionicons name="chevron-up" size={13} color="rgba(255,255,255,0.5)" />
           </Pressable>
