@@ -107,6 +107,22 @@ function fmtTime(secs: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/**
+ * Binary search for active subtitle cue — O(log n).
+ * Vidstack technique applied to React Native: cues pre-sorted once,
+ * bisect replaces linear find() for 60fps subtitle loop.
+ */
+function bisectCue(cues: SubCue[], ct: number): SubCue | null {
+  let lo = 0, hi = cues.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (cues[mid].start <= ct) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  if (hi >= 0 && cues[hi].end >= ct) return cues[hi];
+  return null;
+}
+
 /* ─── VTT Parser ─── */
 function parseVTTTime(s: string): number {
   const parts = s.replace(",", ".").split(":");
@@ -356,15 +372,17 @@ export function RiftPlayer({
   }, [player, onProgress, initialPosition]); // eslint-disable-line
 
   /* ─── Subtitle cue lookup via rAF ─── */
+  /* Vidstack technique: pre-sort once → binary search O(log n) at 60fps */
   const effectiveCues = (subCues?.length ? subCues : loadedCues);
   useEffect(() => {
     if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
     if (!effectiveCues.length || !subOn) { setActiveCue(null); return; }
+    const sorted = [...effectiveCues].sort((a, b) => a.start - b.start);
     let lastKey = "";
     const tick = () => {
       try {
         const ct = player.currentTime || 0;
-        const cue = effectiveCues.find(c => ct >= c.start && ct <= c.end) ?? null;
+        const cue = bisectCue(sorted, ct);
         const key = cue ? `${cue.start}` : "";
         if (key !== lastKey) { lastKey = key; setActiveCue(cue); }
       } catch {}
@@ -721,22 +739,26 @@ export function RiftPlayer({
           style={[s.subtitleWrap, subPositionStyle()]}
           pointerEvents="none"
         >
-          <Text style={[
-            s.subtitleText,
-            {
-              fontSize: subSettings.fontSize,
-              color: subSettings.color,
-              fontWeight: subSettings.bold ? "700" : "400",
-              backgroundColor: subSettings.bgOpacity > 0
-                ? `rgba(0,0,0,${subSettings.bgOpacity})`
-                : "transparent",
-              borderWidth: subSettings.bgOpacity > 0 ? 0 : 0,
-              textShadowColor: subSettings.bgOpacity === 0 ? "rgba(0,0,0,0.95)" : "transparent",
-              textShadowRadius: subSettings.bgOpacity === 0 ? 8 : 0,
-            },
-          ]}>
-            {activeCue.text}
-          </Text>
+          {/* Vidstack technique: split multi-line VTT cues → each line as separate Text */}
+          {activeCue.text.split(/\r?\n/).map((line, i) => (
+            <Text key={i} style={[
+              s.subtitleText,
+              i > 0 && { marginTop: 2 },
+              {
+                fontSize: subSettings.fontSize,
+                color: subSettings.color,
+                fontWeight: subSettings.bold ? "700" : "400",
+                backgroundColor: subSettings.bgOpacity > 0
+                  ? `rgba(0,0,0,${subSettings.bgOpacity})`
+                  : "transparent",
+                textShadowColor: subSettings.bgOpacity === 0 ? "rgba(0,0,0,0.95)" : "transparent",
+                textShadowRadius: subSettings.bgOpacity === 0 ? 8 : 0,
+                textShadowOffset: { width: 0, height: 1 },
+              },
+            ]}>
+              {line || " "}
+            </Text>
+          ))}
         </View>
       )}
 
