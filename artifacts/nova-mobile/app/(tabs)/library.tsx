@@ -40,7 +40,7 @@ const TABS = [
 export default function LibraryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const topPad = Platform.OS === "web" ? 67 : Math.max(insets.top, 0);
+  const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, 0);
   const router = useRouter();
   const { watchHistory, favorites, removeFromHistory, toggleFavorite } = useApp();
 

@@ -278,7 +278,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { theme, setTheme, watchHistory, favorites, refreshConfig } = useApp();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const topPad = Platform.OS === "web" ? 0 : insets.top;
 
   const { toast, show: showToast } = useToast();
   const [notifs, setNotifs] = useState(true);

@@ -44,7 +44,7 @@ export default function HomeScreen() {
   const { watchHistory } = useApp();
   const [showDrawer, setShowDrawer] = useState(false);
 
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { season, year } = getCurrentSeason();
 
   /* TMDB animation movies */
@@ -140,10 +140,10 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={colors.primary} />}
       >
         {/* Header */}
-        <View style={[styles.header, { paddingTop: topPad + 12 }]}>
+        <View style={[styles.header, { paddingTop: topPad + 6 }]}>
           <View style={styles.logoRow}>
             <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={styles.logoBadge}>
-              <Ionicons name="play" size={14} color="#fff" />
+              <Ionicons name="play" size={10} color="#fff" />
             </LinearGradient>
             <Text style={[styles.logoText, { color: colors.text }]}>
               Anime <Text style={{ color: colors.primary }}>NOVA</Text>
@@ -344,10 +344,10 @@ const styles = StyleSheet.create({
   },
   logoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   logoBadge: {
-    width: 30, height: 30, borderRadius: 8,
+    width: 22, height: 22, borderRadius: 6,
     alignItems: "center", justifyContent: "center",
   },
-  logoText: { fontSize: 20, fontFamily: "Cairo_800ExtraBold" },
+  logoText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold" },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
   iconBtn: { padding: 6 },
   sectionHeader: {
