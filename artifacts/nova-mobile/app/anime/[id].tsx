@@ -322,11 +322,6 @@ export default function AnimeDetailScreen() {
           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.backBtn}>
             <Ionicons name="arrow-back" size={20} color="#fff" />
           </Pressable>
-          {/* Fav */}
-          <Pressable onPress={handleFavorite}
-            style={[d.favBtn, isFav && { backgroundColor: "rgba(139,92,246,0.3)" }]}>
-            <Ionicons name="heart" size={20} color={isFav ? "#8B5CF6" : "#fff"} />
-          </Pressable>
         </View>
 
         {/* ── Cover + Title ── */}
@@ -402,11 +397,12 @@ export default function AnimeDetailScreen() {
           </View>
         )}
 
-        {/* ── 3-col action grid ── */}
+        {/* ── 4-col action grid ── */}
         <View style={d.actionGrid}>
           {[
-            { icon: "chatbubble",  label: "التعليقات", active: false, activeColor: "#8B5CF6", onPress: () => router.push(`/comments?animeId=${anime?.id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any) },
-            { icon: "add-circle",  label: "قائمتي",    active: saved,       activeColor: "#8B5CF6", onPress: toggleSave },
+            { icon: "chatbubble",  label: "التعليقات", active: false,        activeColor: "#8B5CF6", onPress: () => router.push(`/comments?animeId=${anime?.id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any) },
+            { icon: "add-circle",  label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", onPress: toggleSave },
+            { icon: "heart",       label: "المفضلة",   active: isFav,        activeColor: "#8B5CF6", onPress: handleFavorite },
             { icon: "star",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
             <Pressable key={label} onPress={onPress}
@@ -417,6 +413,9 @@ export default function AnimeDetailScreen() {
                 <Text style={[d.actionBtnSub, { color: "#FBBF24" }]}>{myRating}/10</Text>
               ) : null}
               {label === "قائمتي" && saved ? (
+                <Text style={[d.actionBtnSub, { color: "#8B5CF6" }]}>مضاف</Text>
+              ) : null}
+              {label === "المفضلة" && isFav ? (
                 <Text style={[d.actionBtnSub, { color: "#8B5CF6" }]}>مضاف</Text>
               ) : null}
             </Pressable>

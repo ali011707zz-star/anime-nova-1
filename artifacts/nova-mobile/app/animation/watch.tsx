@@ -12,7 +12,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureStreamFetch } from "@/utils/secureApi";
-import { CommentsSheet } from "@/components/CommentsSheet";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -156,7 +155,6 @@ export default function AnimationWatchScreen() {
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
   const [resumeTime, setResumeTime] = useState(0);
-  const [showComments, setShowComments] = useState(false);
 
   const abortRef         = useRef<AbortController | null>(null);
   const autoSelectedRef  = useRef(false);
@@ -519,7 +517,7 @@ export default function AnimationWatchScreen() {
         </View>
 
         {/* Comments button */}
-        <Pressable onPress={() => setShowComments(true)} style={w.commentsBtn}>
+        <Pressable onPress={() => router.push(`/comments?tmdbId=${tmdbId}&ep=${type !== "movie" ? ep : undefined}&title=${encodeURIComponent(titleStr || "")}` as any)} style={w.commentsBtn}>
           <Ionicons name="chatbubble-ellipses" size={15} color="rgba(139,92,246,0.9)" />
           <Text style={w.commentsBtnText}>التعليقات</Text>
           <Ionicons name="chevron-forward" size={13} color="rgba(139,92,246,0.5)" />
@@ -587,12 +585,6 @@ export default function AnimationWatchScreen() {
         )}
       </ScrollView>
 
-      <CommentsSheet
-        visible={showComments}
-        onClose={() => setShowComments(false)}
-        tmdbId={tmdbId}
-        episodeNumber={type !== "movie" ? ep : undefined}
-      />
     </View>
   );
 }

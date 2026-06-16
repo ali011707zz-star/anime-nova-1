@@ -476,24 +476,6 @@ export default function WatchScreen() {
       .replace(/\s+/g," ").trim();
   }, [aniInfo?.description]);
 
-  /* Episode nav pill */
-  const EpNav = (
-    <View style={d.epNav}>
-      <Pressable
-        onPress={() => epNum > 1 && goEp(epNum - 1)}
-        style={[d.epNavBtn, epNum <= 1 && { opacity: 0.25 }]}
-        disabled={epNum <= 1}
-      >
-        <Ionicons name="chevron-forward" size={13} color="rgba(255,255,255,0.65)" />
-        <Text style={d.epNavText}>السابقة</Text>
-      </Pressable>
-      <View style={d.epBadge}><Text style={d.epBadgeText}>الحلقة {epNum}</Text></View>
-      <Pressable onPress={() => goEp(epNum + 1)} style={d.epNavBtn}>
-        <Text style={[d.epNavText, { color: "rgba(196,181,253,0.92)" }]}>التالية</Text>
-        <Ionicons name="chevron-back" size={13} color="rgba(196,181,253,0.92)" />
-      </Pressable>
-    </View>
-  );
 
   /* ══ LOADING ══ */
   if (screen === "loading") return <LoadingScreen cover={cover} title={displayTitle} ep={epNum} onBack={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} />;
@@ -570,6 +552,7 @@ export default function WatchScreen() {
   /* ══ SOURCE PICKER ══ */
   const hasSrcs   = directSrcs.length > 0;
   const hasEmbeds = embedSrcs.length > 0;
+  let globalIdx = 0;
 
   function handlePlaySrc(src: Src) {
     setPlayingSrc(src);
@@ -581,132 +564,78 @@ export default function WatchScreen() {
     }
   }
 
-  /* synopsis is declared above early returns (Rules of Hooks) */
-
-  const animeScore  = aniInfo?.averageScore ? (aniInfo.averageScore / 10) : 0;
-  const genres      = aniInfo?.genres?.slice(0, 6) || [];
-  const animeStudio = aniInfo?.studios?.nodes?.[0]?.name || "";
-  const animeSeason = aniInfo?.seasonYear ? `${SEASON_MAP[aniInfo.season || ""] || ""} ${aniInfo.seasonYear}`.trim() : "";
-  const statusInfo  = aniInfo?.status ? STATUS_MAP[aniInfo.status] : null;
-
-  let globalIdx = 0;
-
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
-      {cover ? <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.07 }]} blurRadius={Platform.OS === "ios" ? 20 : 6} resizeMode="cover" /> : null}
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-
-        {/* ── Top bar: back + episode nav ── */}
-        <View style={[d.pickerTop, { paddingTop: topPad + 4 }]}>
-          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.pickerBackBtn}>
-            <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.7)" />
+      {/* ── Header ── */}
+      <View style={[d.header, { paddingTop: topPad + 4 }]}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.headerBack}>
+          <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.7)" />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={d.headerTitle} numberOfLines={1}>{displayTitle}</Text>
+          <Text style={d.headerSub}>الحلقة {epNum}</Text>
+        </View>
+        {loading && <ActivityIndicator color="#8B5CF6" size="small" />}
+        {!loading && (
+          <Pressable onPress={fetchSources} style={d.headerRefreshBtn}>
+            <Ionicons name="refresh" size={14} color="#8B5CF6" />
           </Pressable>
-          {EpNav}
-        </View>
+        )}
+      </View>
 
-        {/* ── Small poster + title row (like web) ── */}
-        <View style={d.heroRow}>
-          <View style={d.heroPosterWrap}>
-            <View style={d.heroPosterGlow} />
-            <View style={d.heroPosterFrame}>
-              {cover ? (
-                <Image source={{ uri: cover }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
-              ) : (
-                <View style={{ flex: 1, backgroundColor: "rgba(255,255,255,0.05)", alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name="play" size={24} color="rgba(255,255,255,0.2)" />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={d.pickerScrollContent}>
+
+        {/* ── Poster row ── */}
+        <View style={d.pickerRow}>
+          {cover ? (
+            <Image source={{ uri: cover }} style={d.pickerPoster} resizeMode="cover" />
+          ) : (
+            <View style={[d.pickerPoster, d.pickerPosterFallback]}>
+              <Ionicons name="play" size={26} color="rgba(255,255,255,0.2)" />
+            </View>
+          )}
+          <View style={{ flex: 1, gap: 6 }}>
+            <Text style={d.pickerTitle} numberOfLines={2}>{displayTitle}</Text>
+            <View style={d.pickerPillRow}>
+              <View style={d.pickerPill}>
+                <Ionicons name="tv" size={10} color="rgba(139,92,246,0.8)" />
+                <Text style={d.pickerPillText}>الحلقة {epNum}</Text>
+              </View>
+              {hasSrcs && (
+                <View style={d.pickerPill}>
+                  <View style={[d.dot, { backgroundColor: "#22c55e" }]} />
+                  <Text style={d.pickerPillText}>{directSrcs.length} مصدر متاح</Text>
                 </View>
               )}
             </View>
-            {aniInfo?.format && FORMAT_MAP[aniInfo.format] && (
-              <View style={d.heroPosterFormatBadge}>
-                <Text style={d.heroPosterFormatText}>{FORMAT_MAP[aniInfo.format]}</Text>
+            {/* Episode navigation */}
+            <View style={d.epNavRow}>
+              <Pressable
+                onPress={() => epNum > 1 && goEp(epNum - 1)}
+                style={[d.epNavPill, epNum <= 1 && { opacity: 0.28 }]}
+                disabled={epNum <= 1}
+              >
+                <Ionicons name="chevron-forward" size={11} color="rgba(255,255,255,0.65)" />
+                <Text style={d.epNavPillText}>السابقة</Text>
+              </Pressable>
+              <Pressable onPress={() => goEp(epNum + 1)} style={d.epNavPill}>
+                <Text style={[d.epNavPillText, { color: "rgba(196,181,253,0.9)" }]}>التالية</Text>
+                <Ionicons name="chevron-back" size={11} color="rgba(196,181,253,0.9)" />
+              </Pressable>
+            </View>
+            {loading && (
+              <View style={d.loadingBar}>
+                <ActivityIndicator color="#8B5CF6" size="small" />
+                <Text style={d.loadingBarText}>جاري جلب المصادر…</Text>
               </View>
             )}
-          </View>
-
-          <View style={d.heroMeta}>
-            <Text style={d.heroTitle} numberOfLines={2}>{displayTitle}</Text>
-            {aniInfo?.title?.native || aniInfo?.title?.romaji ? (
-              <Text style={d.heroNative} numberOfLines={1}>{aniInfo.title.native || aniInfo.title.romaji}</Text>
-            ) : null}
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-              <View style={d.epChip}><Text style={d.epChipText}>الحلقة {epNum}</Text></View>
-              {statusInfo && (
-                <View style={[d.statusChip, { backgroundColor: statusInfo.bg, borderColor: statusInfo.border }]}>
-                  <Text style={[d.statusChipText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
-                </View>
-              )}
-            </View>
           </View>
         </View>
-
-        {/* ── Score row ── */}
-        {animeScore > 0 && (
-          <View style={d.scoreRow}>
-            <View style={{ flexDirection: "row", gap: 2, alignItems: "center" }}>
-              {[1,2,3,4,5].map(i => (
-                <Ionicons key={i} name={animeScore/2 >= i ? "star" : "star"} size={14} color={animeScore/2 >= i ? "#fbbf24" : "rgba(255,255,255,0.15)"} />
-              ))}
-            </View>
-            <Text style={d.scoreVal}>{animeScore.toFixed(1)}</Text>
-            <Text style={d.scoreSub}>/ 10</Text>
-          </View>
-        )}
-
-        {/* ── Genre tags ── */}
-        {genres.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={d.genresRow} style={{ marginTop: 12 }}>
-            {genres.map(g => (
-              <View key={g} style={d.genreTag}>
-                <Text style={d.genreText}>{GENRE_MAP[g] || g}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        )}
-
-        {/* ── Studio / Season row ── */}
-        {(animeStudio || animeSeason) && (
-          <View style={d.metaRow}>
-            {animeStudio && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Ionicons name="sparkles" size={12} color="rgba(255,255,255,0.35)" />
-                <Text style={d.metaText}>{animeStudio}</Text>
-              </View>
-            )}
-            {animeSeason && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Ionicons name="calendar" size={12} color="rgba(255,255,255,0.35)" />
-                <Text style={d.metaText}>{animeSeason}</Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* ── Synopsis ── */}
-        {synopsis.length > 0 && (
-          <View style={d.synopsisWrap}>
-            <View style={d.synopsisHeader}>
-              <View style={d.synopsisBar} />
-              <Text style={d.synopsisTitle}>القصة</Text>
-            </View>
-            <View style={d.synopsisCard}>
-              <Text style={d.synopsisText} numberOfLines={synopsisExpanded ? undefined : 4}>
-                {synopsis}
-              </Text>
-              {synopsis.length > 200 && (
-                <Pressable onPress={() => setSynopsisExpanded(!synopsisExpanded)} style={{ marginTop: 6 }}>
-                  <Text style={d.synopsisToggle}>{synopsisExpanded ? "أقل ▲" : "المزيد ▼"}</Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-        )}
 
         {/* ── Resume hint ── */}
         {resumeTime > 10 && (
           <View style={d.resumeBanner}>
-            <Ionicons name="play-circle" size={16} color="rgba(196,181,253,0.8)" />
+            <Ionicons name="play-circle" size={15} color="rgba(196,181,253,0.8)" />
             <Text style={d.resumeText}>▶ استئناف من {Math.floor(resumeTime / 60)}:{String(Math.floor(resumeTime % 60)).padStart(2,"0")}</Text>
           </View>
         )}
@@ -716,93 +645,42 @@ export default function WatchScreen() {
           onPress={() => router.push(`/comments?animeId=${anime}&ep=${epNum}&title=${encodeURIComponent(titleStr)}` as any)}
           style={d.commentsBtn}
         >
-          <Ionicons name="chatbubble-ellipses" size={16} color="rgba(139,92,246,0.9)" />
+          <Ionicons name="chatbubble-ellipses" size={15} color="rgba(139,92,246,0.9)" />
           <Text style={d.commentsBtnText}>التعليقات</Text>
           <Ionicons name="chevron-forward" size={13} color="rgba(139,92,246,0.5)" />
         </Pressable>
 
-        {/* ── Sources header ── */}
-        <View style={d.srcHeader}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={d.srcHeaderBar} />
-            <Text style={d.srcHeaderTitle}>مصادر المشاهدة</Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            {(hasSrcs || hasEmbeds) && (
-              <View style={d.srcCountBadge}>
-                <Text style={d.srcCountText}>{directSrcs.length + embedSrcs.length} مصدر</Text>
-              </View>
-            )}
-            {loading && <ActivityIndicator size="small" color="#8B5CF6" />}
-          </View>
-        </View>
-
-        {/* Warning banner */}
-        {(hasSrcs || hasEmbeds) && (
-          <View style={d.warnBanner}>
-            <Text style={{ fontSize: 13 }}>⚠️</Text>
-            <Text style={d.warnBannerText}>
-              <Text style={{ color: "rgba(253,224,71,0.8)", fontFamily: "Cairo_800ExtraBold" }}>السيرفر لا يعمل؟</Text>
-              {" "}جرّب سيرفراً آخر.
-            </Text>
-          </View>
-        )}
-
         {/* ── Quality-grouped sources ── */}
-        {hasSrcs ? (
-          (["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
-            const srcs = grouped[q];
-            if (!srcs.length) return null;
-            const qs = QUALITY_STYLE[q];
-            const sectionStart = globalIdx;
-            globalIdx += srcs.length;
-            return (
-              <View key={q}>
-                <View style={d.qHeader}>
-                  <View style={[d.qDot, { backgroundColor: qs.dot, shadowColor: qs.dot, shadowOpacity: 0.7, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } }]} />
-                  <Text style={[d.qLabel, { color: qs.text }]}>{Q_LABEL[q]}</Text>
-                  <View style={[d.qCountBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-                    <Text style={[d.qCountText, { color: qs.text }]}>{srcs.length}</Text>
-                  </View>
-                </View>
-                <View style={d.srcSection}>
-                  {srcs.map((src, i) => (
-                    <SourceRow key={`${src.site}-${i}`} src={src} globalIdx={sectionStart + i} onPlay={handlePlaySrc} />
-                  ))}
+        {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
+          const srcs = grouped[q];
+          if (!srcs.length) return null;
+          const qs = QUALITY_STYLE[q];
+          const sectionStart = globalIdx;
+          globalIdx += srcs.length;
+          return (
+            <View key={q} style={d.tierSection}>
+              <View style={d.tierHeader}>
+                <View style={[d.tierDot, { backgroundColor: qs.dot, shadowColor: qs.dot, shadowOpacity: 0.7, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } }]} />
+                <Text style={[d.tierTitle, { color: qs.text }]}>{Q_LABEL[q]}</Text>
+                <View style={[d.tierCount, { backgroundColor: qs.badge, borderColor: qs.border }]}>
+                  <Text style={[d.tierCountText, { color: qs.text }]}>{srcs.length}</Text>
                 </View>
               </View>
-            );
-          })
-        ) : !loading ? (
-          <View style={d.noSrcs}>
-            <View style={d.noSrcsIcon}><Ionicons name="warning" size={28} color="rgba(239,68,68,0.5)" /></View>
-            <Text style={d.noSrcsTitle}>الحلقة {epNum} غير متوفرة بعد</Text>
-            <Text style={d.noSrcsHint}>المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.</Text>
-            <Pressable onPress={fetchSources} style={d.retryBtn}>
-              <Text style={d.retryText}>إعادة المحاولة</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={d.fetchingMsg}>
-            <Text style={d.fetchingText}>جاري البحث في المصادر...</Text>
-          </View>
-        )}
+              <View style={d.srcSection}>
+                {srcs.map((src, i) => (
+                  <SourceRow key={`${src.site}-${i}`} src={src} globalIdx={sectionStart + i} onPlay={handlePlaySrc} />
+                ))}
+              </View>
+            </View>
+          );
+        })}
 
         {/* ── Embed fallbacks ── */}
         {hasEmbeds && (
-          <View style={{ marginTop: 20 }}>
-            <View style={d.srcHeader}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={[d.srcHeaderBar, { backgroundColor: "#6366f1" }]} />
-                <Text style={d.srcHeaderTitle}>سيرفرات احتياطية</Text>
-              </View>
-              <View style={[d.srcCountBadge, { backgroundColor: "rgba(99,102,241,0.12)", borderColor: "rgba(99,102,241,0.28)" }]}>
-                <Text style={[d.srcCountText, { color: "rgba(165,180,252,0.8)" }]}>{embedSrcs.length}</Text>
-              </View>
-            </View>
-            <View style={d.embedNote}>
-              <Text style={{ fontSize: 12 }}>ℹ️</Text>
-              <Text style={d.embedNoteText}>تُشغَّل داخل مشغّل مدمج — جرّبها إن لم تعمل المصادر المباشرة</Text>
+          <View style={d.tierSection}>
+            <View style={d.tierHeader}>
+              <View style={[d.tierDot, { backgroundColor: "#64748b" }]} />
+              <Text style={[d.tierTitle, { color: "rgba(148,163,184,0.7)" }]}>سيرفرات احتياطية</Text>
             </View>
             <View style={d.srcSection}>
               {embedSrcs.map((src, i) => (
@@ -811,8 +689,28 @@ export default function WatchScreen() {
             </View>
           </View>
         )}
-      </ScrollView>
 
+        {/* ── Empty state ── */}
+        {!loading && !hasSrcs && !hasEmbeds && (
+          <View style={d.empty}>
+            <Ionicons name="warning" size={48} color="rgba(239,68,68,0.3)" />
+            <Text style={d.emptyTitle}>الحلقة {epNum} غير متوفرة بعد</Text>
+            <Text style={d.emptySub}>المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.</Text>
+            <Pressable onPress={fetchSources} style={d.retryBigBtn}>
+              <Ionicons name="refresh" size={16} color="#c4b5fd" />
+              <Text style={d.retryBigText}>إعادة المحاولة</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* ── Searching state ── */}
+        {loading && !hasSrcs && (
+          <View style={d.searchingWrap}>
+            <Ionicons name="hourglass" size={32} color="rgba(139,92,246,0.4)" />
+            <Text style={d.searchingText}>لا تزال المصادر تُجمَع، انتظر قليلاً…</Text>
+          </View>
+        )}
+      </ScrollView>
     </View>
   );
 }
@@ -844,31 +742,52 @@ const d = StyleSheet.create({
   /* Embed player top bar */
   embedTopRow: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
 
-  /* Picker top bar */
-  pickerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
-  pickerBackBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  /* Picker header */
+  header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  headerBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", alignItems: "center", justifyContent: "center" },
+  headerTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
+  headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
+
+  /* Picker content */
+  pickerScrollContent: { padding: 16, paddingBottom: 100, gap: 16 },
+  pickerRow: { flexDirection: "row", gap: 14, alignItems: "flex-start" },
+  pickerPoster: { width: 80, height: 115, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  pickerPosterFallback: { backgroundColor: "rgba(139,92,246,0.08)", alignItems: "center", justifyContent: "center" },
+  pickerTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" },
+  pickerPillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  pickerPill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 8, paddingVertical: 4 },
+  pickerPillText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)" },
+  dot: { width: 5, height: 5, borderRadius: 2.5 },
+  loadingBar: { flexDirection: "row", alignItems: "center", gap: 8 },
+  loadingBarText: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
+
+  /* Episode nav (compact, inside poster row) */
+  epNavRow: { flexDirection: "row", gap: 6 },
+  epNavPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.4)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  epNavPillText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
 
   /* Comments button */
-  commentsBtn: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 12, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },
+  commentsBtn: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },
   commentsBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
 
-  /* Episode nav */
-  epNav: { flexDirection: "row", alignItems: "center", gap: 8 },
-  epNavBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
-  epNavText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
-  epBadge: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(109,40,217,0.55)", borderWidth: 1, borderColor: "rgba(139,92,246,0.38)" },
-  epBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)" },
+  /* Quality tier sections */
+  tierSection: { gap: 8 },
+  tierHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  tierDot: { width: 6, height: 6, borderRadius: 3 },
+  tierTitle: { flex: 1, fontSize: 11, fontFamily: "Cairo_700Bold" },
+  tierCount: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 7, borderWidth: 1 },
+  tierCountText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
 
-  /* Hero section (poster + meta) */
-  heroRow: { flexDirection: "row", alignItems: "flex-start", gap: 16, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
-  heroPosterWrap: { position: "relative", alignItems: "center" },
-  heroPosterGlow: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18, backgroundColor: "rgba(139,92,246,0.22)", transform: [{ scale: 0.95 }, { translateY: 8 }] },
-  heroPosterFrame: { width: 72, height: 102, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
-  heroPosterFormatBadge: { position: "absolute", bottom: -10, alignSelf: "center", backgroundColor: "#1C1C22", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  heroPosterFormatText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.6)" },
-  heroMeta: { flex: 1, paddingBottom: 8 },
-  heroTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 26 },
-  heroNative: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 },
+  /* Empty / searching states */
+  empty: { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 60 },
+  emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
+  emptySub: { fontSize: 12, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 18 },
+  retryBigBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 20, paddingVertical: 11 },
+  retryBigText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  searchingWrap: { alignItems: "center", gap: 12, paddingVertical: 40 },
+  searchingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+
   epChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.32)" },
   epChipText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.92)" },
   statusChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1 },

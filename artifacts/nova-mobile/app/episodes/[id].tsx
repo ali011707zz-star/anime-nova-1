@@ -253,11 +253,6 @@ export default function EpisodeListScreen() {
           <Ionicons name="chevron-forward" size={18} color="#fff" />
         </Pressable>
 
-        {/* Comments button */}
-        <Pressable onPress={() => router.push(`/comments?animeId=${id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any)} style={ep_s.commentsBtn}>
-          <Ionicons name="chatbubbles" size={16} color="#c4b5fd" />
-        </Pressable>
-
         {/* Cover + info */}
         <View style={ep_s.heroBottom}>
           {anime.coverImage?.large ? (
@@ -336,21 +331,14 @@ export default function EpisodeListScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 100 }}
         ListHeaderComponent={
-          <>
-            <Pressable
-              onPress={() => watchEp(displayedEps[0] || 1)}
-              style={ep_s.watchFromBtn}>
-              <Ionicons name="play" size={14} color="#8B5CF6" />
-              <Text style={ep_s.watchFromBtnText}>
-                {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
-              </Text>
-            </Pressable>
-            <Pressable onPress={() => router.push(`/comments?animeId=${id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any)} style={ep_s.commentsListBtn}>
-              <Ionicons name="chatbubbles" size={16} color="#c4b5fd" />
-              <Text style={ep_s.commentsListBtnText}>التعليقات والنقاشات العامة</Text>
-              <Ionicons name="chevron-back" size={14} color="rgba(196,181,253,0.5)" />
-            </Pressable>
-          </>
+          <Pressable
+            onPress={() => watchEp(displayedEps[0] || 1)}
+            style={ep_s.watchFromBtn}>
+            <Ionicons name="play" size={14} color="#8B5CF6" />
+            <Text style={ep_s.watchFromBtnText}>
+              {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
+            </Text>
+          </Pressable>
         }
         renderItem={({ item: n }) => (
           <EpisodeRow
