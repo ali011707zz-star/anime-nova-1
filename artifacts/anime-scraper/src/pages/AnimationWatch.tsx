@@ -41,21 +41,39 @@ function setAnimSubCached(key: string, cues: SubCue[]) {
 
 function parseSrt(srt: string): SubCue[] {
   const cues: SubCue[] = [];
+  const normalized = srt.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // ── X-TIMESTAMP-MAP: HLS-native VTT (e.g. Videasy cc.boopigcdn.com) ──
+  // Header: X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000
+  // → offset = 900000/90000 = 10 s → all cues appear 10 s late without this fix.
+  let tsOffset = 0;
+  const tsMapM = normalized.match(/X-TIMESTAMP-MAP=MPEGTS:(\d+),LOCAL:([\d:.]+)/i);
+  if (tsMapM) {
+    const mpegts = parseInt(tsMapM[1], 10) / 90000;
+    const lStr = tsMapM[2].trim();
+    const lm3 = lStr.match(/^(\d+):(\d{2}):(\d{2})[,.](\d{1,3})/);
+    const lm2 = lStr.match(/^(\d+):(\d{2})[,.](\d{1,3})/);
+    const local = lm3
+      ? parseInt(lm3[1])*3600 + parseInt(lm3[2])*60 + parseInt(lm3[3]) + parseInt(lm3[4].padEnd(3,"0"))/1000
+      : lm2 ? parseInt(lm2[1])*60 + parseInt(lm2[2]) + parseInt(lm2[3].padEnd(3,"0"))/1000 : 0;
+    tsOffset = Math.max(0, mpegts - local);
+  }
   const toSec = (ts: string) => {
     const t = ts.trim();
     /* HH:MM:SS,mmm or HH:MM:SS.mmm */
     const m3 = t.match(/^(\d+):(\d{2}):(\d{2})[,.](\d{1,3})/);
     if (m3) {
-      return parseInt(m3[1]) * 3600 + parseInt(m3[2]) * 60 + parseInt(m3[3]) + parseInt(m3[4].padEnd(3,"0")) / 1000;
+      const raw = parseInt(m3[1]) * 3600 + parseInt(m3[2]) * 60 + parseInt(m3[3]) + parseInt(m3[4].padEnd(3,"0")) / 1000;
+      return Math.max(0, raw - tsOffset);
     }
     /* MM:SS.mmm  (VTT short format — no hours) */
     const m2 = t.match(/^(\d+):(\d{2})[,.](\d{1,3})/);
     if (m2) {
-      return parseInt(m2[1]) * 60 + parseInt(m2[2]) + parseInt(m2[3].padEnd(3,"0")) / 1000;
+      const raw = parseInt(m2[1]) * 60 + parseInt(m2[2]) + parseInt(m2[3].padEnd(3,"0")) / 1000;
+      return Math.max(0, raw - tsOffset);
     }
     return 0;
   };
-  const blocks = srt.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split(/\n{2,}/);
+  const blocks = normalized.split(/\n{2,}/);
   for (const block of blocks) {
     const lines = block.trim().split("\n");
     const timeLine = lines.find(l => l.includes("-->"));

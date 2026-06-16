@@ -339,12 +339,25 @@ function fmtTime(s: number) {
 /* ══════════════════════════════════ SRT PARSER ══════════════ */
 function parseSrt(srt: string): SubCue[] {
   const cues: SubCue[] = [];
-  const blocks = srt.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split(/\n{2,}/);
+  const normalized = srt.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // ── X-TIMESTAMP-MAP: HLS-native VTT (e.g. Videasy cc.boopigcdn.com) ──
+  // Header: X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000
+  // → offset = 900000/90000 = 10 s → all cues appear 10 s late without this fix.
+  let tsOffset = 0;
+  const tsMapM = normalized.match(/X-TIMESTAMP-MAP=MPEGTS:(\d+),LOCAL:([\d:.]+)/i);
+  if (tsMapM) {
+    const mpegts = parseInt(tsMapM[1], 10) / 90000;
+    const lm = tsMapM[2].match(/^(\d+):(\d{2}):(\d{2})[,.](\d{3})/);
+    const local = lm ? parseInt(lm[1])*3600 + parseInt(lm[2])*60 + parseInt(lm[3]) + parseInt(lm[4])/1000 : 0;
+    tsOffset = Math.max(0, mpegts - local);
+  }
   const toSec = (ts: string) => {
-    const m = ts.match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/);
+    const m = ts.match(/(\d+):(\d{2}):(\d{2})[,.](\d{3})/);
     if (!m) return 0;
-    return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 1000;
+    const raw = parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 1000;
+    return Math.max(0, raw - tsOffset);
   };
+  const blocks = normalized.split(/\n{2,}/);
   for (const block of blocks) {
     const lines = block.trim().split("\n");
     const timeLine = lines.find(l => l.includes("-->"));
