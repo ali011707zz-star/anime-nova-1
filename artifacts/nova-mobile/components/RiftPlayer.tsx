@@ -7,6 +7,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -209,7 +210,6 @@ export function RiftPlayer({
 
   /* ─── UI state ─── */
   const [showControls, setShowControls] = useState(true);
-  const [showSrcSheet, setShowSrcSheet] = useState(false);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
   const [showSubSheet, setShowSubSheet]   = useState(false);
@@ -397,32 +397,23 @@ export function RiftPlayer({
 
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
-    let SO: any = null;
-    const doLock = async () => {
-      try {
-        SO = await import("expo-screen-orientation" as any);
-        await SO.lockAsync(SO.OrientationLock?.LANDSCAPE_LEFT ?? 3);
-        orientLockRef.current = "left";
-      } catch {}
-    };
-    doLock();
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT)
+      .then(() => { orientLockRef.current = "left"; })
+      .catch(() => {});
     return () => {
-      if (SO) {
-        try { SO.unlockAsync?.().catch(() => {}); } catch {}
-      }
+      ScreenOrientation.unlockAsync().catch(() => {});
     };
   }, []);
 
   /* ─── Flip screen (toggle LANDSCAPE_LEFT ↔ LANDSCAPE_RIGHT) ─── */
   const flipScreen = useCallback(async () => {
     try {
-      const SO = await import("expo-screen-orientation" as any);
       const next = orientLockRef.current === "left" ? "right" : "left";
       orientLockRef.current = next;
       const lock = next === "right"
-        ? (SO.OrientationLock?.LANDSCAPE_RIGHT ?? 4)
-        : (SO.OrientationLock?.LANDSCAPE_LEFT  ?? 3);
-      await SO.lockAsync(lock);
+        ? ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT
+        : ScreenOrientation.OrientationLock.LANDSCAPE_LEFT;
+      await ScreenOrientation.lockAsync(lock);
       setIsFlipped(f => !f);
     } catch {}
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
@@ -511,7 +502,6 @@ export function RiftPlayer({
     setSrcIdx(idx);
     setError(false);
     setBuffering(true);
-    setShowSrcSheet(false);
     setIsEnded(false);
     resumedRef.current = false;
     try { player.replace(sources[idx].url); } catch {}
@@ -1115,7 +1105,7 @@ export function RiftPlayer({
             <View style={s.ctrlRow}>
               {/* Left: speed */}
               <View style={s.ctrlLeft}>
-                <Pressable onPress={() => { setShowSpeedSheet(true); setShowSrcSheet(false); fadeIn(); }} style={[
+                <Pressable onPress={() => { setShowSpeedSheet(true); fadeIn(); }} style={[
                   s.speedBtn,
                   (speed !== 1 || longPressSpeed) && s.speedBtnActive,
                 ]}>
@@ -1128,7 +1118,7 @@ export function RiftPlayer({
                 </Pressable>
               </View>
 
-              {/* Center: view mode + source */}
+              {/* Center: view mode */}
               <View style={s.ctrlCenter}>
                 <Pressable onPress={() => { setShowViewSheet(true); fadeIn(); }} style={s.iconBtn} hitSlop={8}>
                   <Ionicons
@@ -1136,11 +1126,6 @@ export function RiftPlayer({
                     size={17}
                     color={contentFit === "cover" ? "#c4b5fd" : "rgba(255,255,255,0.60)"}
                   />
-                </Pressable>
-                <Pressable onPress={() => { setShowSrcSheet(true); fadeIn(); }} style={s.srcBtn}>
-                  <Ionicons name="layers-outline" size={14} color="rgba(255,255,255,0.65)" />
-                  <Text style={s.srcBtnText} numberOfLines={1}>{currentSrc.label}</Text>
-                  <Ionicons name="chevron-up" size={12} color="rgba(255,255,255,0.40)" />
                 </Pressable>
               </View>
 
@@ -1209,46 +1194,6 @@ export function RiftPlayer({
         </Animated.View>
       )}
 
-      {/* ════════════════════════════════════════
-          SOURCE BOTTOM SHEET
-      ════════════════════════════════════════ */}
-      {showSrcSheet && (
-        <Pressable style={s.sheetBg} onPress={() => setShowSrcSheet(false)}>
-          <View style={[s.sheet, { paddingBottom: insets.bottom + 14 }]}>
-            <View style={s.sheetHandle} />
-            <View style={s.sheetHeader}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Ionicons name="layers-outline" size={16} color="rgba(196,181,253,0.80)" />
-                <Text style={s.sheetTitle}>اختر المصدر</Text>
-                <View style={s.srcCountBadge}>
-                  <Text style={s.srcCountText}>{sources.length} مصدر</Text>
-                </View>
-              </View>
-            </View>
-            {sources.map((src, i) => (
-              <Pressable
-                key={i}
-                onPress={() => switchSource(i)}
-                style={[s.sheetItem, i === srcIdx && s.sheetItemActive]}
-              >
-                <View style={[s.sheetDot, { backgroundColor: QUALITY_COLOR[src.quality] || "#fff" }]} />
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={[s.sheetItemText, i === srcIdx && s.sheetItemTextActive]} numberOfLines={1}>
-                    {src.label}
-                  </Text>
-                  <Text style={s.sheetItemDesc}>سيرفر {i + 1}</Text>
-                </View>
-                <View style={[s.sheetQBadge, { borderColor: QUALITY_COLOR[src.quality] || "#fff" }]}>
-                  <Text style={[s.sheetQText, { color: QUALITY_COLOR[src.quality] || "#fff" }]}>
-                    {Q_SHORT[src.quality] || "HD"}
-                  </Text>
-                </View>
-                {i === srcIdx && <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />}
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      )}
 
       {/* ════════════════════════════════════════
           SPEED BOTTOM SHEET
