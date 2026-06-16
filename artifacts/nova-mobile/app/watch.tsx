@@ -13,7 +13,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureStreamFetch } from "@/utils/secureApi";
-import { CommentsSheet } from "@/components/CommentsSheet";
 
 const { width: W } = Dimensions.get("window");
 
@@ -292,7 +291,6 @@ export default function WatchScreen() {
   const [resumeTime, setResumeTime] = useState(0);
   const [aniInfo, setAniInfo]     = useState<AniInfo | null>(null);
   const [synopsisExpanded, setSynopsisExpanded] = useState(false);
-  const [showComments, setShowComments] = useState(false);
 
   const abortRef        = useRef<AbortController | null>(null);
   const autoSelectedRef = useRef(false);
@@ -458,6 +456,15 @@ export default function WatchScreen() {
     })).filter(s => s.url),
   [directSrcs]);
 
+  /* Synopsis — must be before any early returns (Rules of Hooks) */
+  const synopsis = useMemo(() => {
+    const raw = aniInfo?.description || "";
+    return raw.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
+      .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+      .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
+      .replace(/\s+/g," ").trim();
+  }, [aniInfo?.description]);
+
   /* Episode nav pill */
   const EpNav = (
     <View style={d.epNav}>
@@ -540,14 +547,7 @@ export default function WatchScreen() {
     }
   }
 
-  /* Synopsis processed */
-  const synopsis = useMemo(() => {
-    const raw = aniInfo?.description || "";
-    return raw.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
-      .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
-      .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
-      .replace(/\s+/g," ").trim();
-  }, [aniInfo?.description]);
+  /* synopsis is declared above early returns (Rules of Hooks) */
 
   const animeScore  = aniInfo?.averageScore ? (aniInfo.averageScore / 10) : 0;
   const genres      = aniInfo?.genres?.slice(0, 6) || [];
@@ -678,7 +678,10 @@ export default function WatchScreen() {
         )}
 
         {/* ── Comments button ── */}
-        <Pressable onPress={() => setShowComments(true)} style={d.commentsBtn}>
+        <Pressable
+          onPress={() => router.push(`/comments?animeId=${anime}&ep=${epNum}&title=${encodeURIComponent(titleStr)}` as any)}
+          style={d.commentsBtn}
+        >
           <Ionicons name="chatbubble-ellipses" size={16} color="rgba(139,92,246,0.9)" />
           <Text style={d.commentsBtnText}>التعليقات</Text>
           <Ionicons name="chevron-forward" size={13} color="rgba(139,92,246,0.5)" />
@@ -776,12 +779,6 @@ export default function WatchScreen() {
         )}
       </ScrollView>
 
-      <CommentsSheet
-        visible={showComments}
-        onClose={() => setShowComments(false)}
-        animeId={parseInt(anime!)}
-        episodeNumber={epNum}
-      />
     </View>
   );
 }
