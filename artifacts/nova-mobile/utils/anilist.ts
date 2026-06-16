@@ -100,6 +100,33 @@ query SeasonalAnime($season: MediaSeason!, $year: Int!) {
   }
 }`;
 
+export const TOP_RATED_QUERY = `
+query TopRatedAnime {
+  Page(page: 1, perPage: 20) {
+    media(sort: SCORE_DESC, type: ANIME, isAdult: false, averageScore_greater: 70) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const MOVIES_QUERY = `
+query AnimeMovies {
+  Page(page: 1, perPage: 20) {
+    media(format: MOVIE, type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
+export const UPCOMING_QUERY = `
+query UpcomingAnime {
+  Page(page: 1, perPage: 20) {
+    media(status: NOT_YET_RELEASED, type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+      id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
+    }
+  }
+}`;
+
 export const SCHEDULE_QUERY = `
 query Schedule($airingAt_greater: Int!, $airingAt_lesser: Int!) {
   Page(page: 1, perPage: 50) {

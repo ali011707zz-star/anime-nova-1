@@ -5,9 +5,9 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useVideoPlayer, VideoView } from "expo-video";
 import WebView from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
@@ -400,16 +400,17 @@ export default function WatchScreen() {
     router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}`);
   }
 
-  /* Player */
-  const playUrl = (playingSrc?.directUrl || playingSrc?.url) ?? "";
-  const player  = useVideoPlayer(
-    screen === "native" && playUrl ? playUrl : null,
-    (p) => {
-      p.loop = false;
-      if (resumeTime > 0) { try { (p as any).currentTime = resumeTime; } catch {} }
-      p.play();
-    }
-  );
+  /* Build RiftPlayer sources from directSrcs */
+  const riftSources = useMemo((): PlayerSource[] =>
+    directSrcs.map(s => ({
+      url: s.directUrl || s.url || "",
+      label: (() => {
+        const def = SCRAPER_DEFS.find(d => d.site === s.site);
+        return def?.name || getCdnDisplayName(s.directUrl || s.url || "");
+      })(),
+      quality: getSrcQualityTier(s),
+    })).filter(s => s.url),
+  [directSrcs]);
 
   /* Episode nav pill */
   const EpNav = (
@@ -431,34 +432,29 @@ export default function WatchScreen() {
   );
 
   /* ══ LOADING ══ */
-  if (screen === "loading") return <LoadingScreen cover={cover} title={displayTitle} ep={epNum} onBack={() => router.back()} />;
+  if (screen === "loading") return <LoadingScreen cover={cover} title={displayTitle} ep={epNum} onBack={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} />;
 
-  /* ══ NATIVE PLAYER ══ */
-  if (screen === "native" && playingSrc) return (
-    <View style={{ flex: 1, backgroundColor: "#000" }}>
-      <VideoView player={player} style={{ flex: 1 }} allowsFullscreen allowsPictureInPicture contentFit="contain" nativeControls />
-      {/* Top gradient overlay */}
-      <LinearGradient colors={["rgba(0,0,0,0.88)", "rgba(0,0,0,0.0)"]} style={[d.playerTopGrad, { paddingTop: topPad + 4 }]} pointerEvents="box-none">
-        <View style={d.playerTopRow}>
-          <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.playerBackBtn}>
-            <Ionicons name="arrow-back" size={18} color="#fff" />
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={d.playerTitle} numberOfLines={1}>{displayTitle}</Text>
-            <Text style={d.playerEp}>الحلقة {epNum}</Text>
-          </View>
-          <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.srcSwitchBtn}>
-            <Ionicons name="layers-outline" size={16} color="#fff" />
-            <Text style={d.srcSwitchText}>السيرفرات</Text>
-          </Pressable>
-        </View>
-      </LinearGradient>
-      {/* Bottom gradient overlay */}
-      <LinearGradient colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.85)"]} style={d.playerBottomGrad} pointerEvents="box-none">
-        {EpNav}
-      </LinearGradient>
-    </View>
-  );
+  /* ══ RIFT PLAYER ══ */
+  if (screen === "native" && riftSources.length > 0) {
+    const startIdx = riftSources.findIndex(s => s.url === (playingSrc?.directUrl || playingSrc?.url)) ?? 0;
+    return (
+      <RiftPlayer
+        sources={riftSources}
+        initialSourceIndex={Math.max(0, startIdx)}
+        title={displayTitle}
+        episode={epNum}
+        initialPosition={resumeTime}
+        onBack={() => { saveProgress(); setScreen("picker"); }}
+        onNextEpisode={() => goEp(epNum + 1)}
+        onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
+        onProgress={(pos, dur) => {
+          lastTimeRef.current = pos;
+          if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
+          if (dur > 0) addToHistory({ animeId: parseInt(anime!), ep: epNum, title: titleStr, english: englishStr, thumbnail: cover, position: pos, duration: dur, updatedAt: Date.now() });
+        }}
+      />
+    );
+  }
 
   /* ══ EMBED PLAYER ══ */
   if (screen === "embed" && playingSrc) {
@@ -523,7 +519,7 @@ export default function WatchScreen() {
 
         {/* ── Top bar: back + episode nav ── */}
         <View style={[d.pickerTop, { paddingTop: topPad + 4 }]}>
-          <Pressable onPress={() => router.back()} style={d.pickerBackBtn}>
+          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.pickerBackBtn}>
             <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.7)" />
           </Pressable>
           {EpNav}

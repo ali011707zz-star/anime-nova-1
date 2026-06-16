@@ -126,7 +126,7 @@ export default function AnimationDetailScreen() {
       <View style={[s.center, { paddingTop: insets.top }]}>
         <Ionicons name="film-outline" size={48} color="rgba(139,92,246,0.4)" />
         <Text style={s.emptyText}>لم يتم العثور على البيانات</Text>
-        <Pressable onPress={() => router.back()} style={s.backBtn}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backBtn}>
           <Text style={s.backBtnText}>العودة</Text>
         </Pressable>
       </View>
@@ -163,7 +163,7 @@ export default function AnimationDetailScreen() {
           style={StyleSheet.absoluteFillObject}
         />
         <View style={[s.heroTopRow, { paddingTop: insets.top + 8 }]}>
-          <Pressable onPress={() => router.back()} style={s.backCircle}>
+          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)" as any)} style={s.backCircle}>
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </Pressable>
           {score > 0 && (
@@ -237,7 +237,7 @@ export default function AnimationDetailScreen() {
       <View style={s.watchBtnWrap}>
         <Pressable
           style={s.watchBtn}
-          onPress={() => router.push(isTV ? getEpisodesUrl() : getWatchUrl())}
+          onPress={() => router.push((isTV ? getEpisodesUrl() : getWatchUrl()) as any)}
         >
           <LinearGradient
             colors={["#8B5CF6", "#6D28D9", "#5B21B6"]}
@@ -265,7 +265,7 @@ export default function AnimationDetailScreen() {
           <Text style={[s.actionLabel, saved && { color: "#8B5CF6" }]}>قائمتي</Text>
         </Pressable>
         {isTV && (
-          <Pressable onPress={() => router.push(getEpisodesUrl())} style={s.actionBtn}>
+          <Pressable onPress={() => router.push(getEpisodesUrl() as any)} style={s.actionBtn}>
             <Ionicons name="list-outline" size={20} color="rgba(255,255,255,0.45)" />
             <Text style={s.actionLabel}>الحلقات</Text>
           </Pressable>
