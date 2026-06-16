@@ -212,7 +212,7 @@ export default function SearchScreen() {
         <View style={s.header}>
           {/* Search bar */}
           <View style={s.searchBar}>
-            <Ionicons name="search-outline" size={18} color="rgba(255,255,255,0.3)" />
+            <Ionicons name="search" size={18} color="rgba(255,255,255,0.3)" />
             <TextInput
               ref={inputRef}
               value={query}
@@ -234,7 +234,7 @@ export default function SearchScreen() {
             <Pressable
               onPress={() => setShowFilters(f => !f)}
               style={[s.filterToggle, (showFilters || activeFilterCount > 0) && s.filterToggleActive]}>
-              <Ionicons name="options-outline" size={14} color={showFilters || activeFilterCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.45)"} />
+              <Ionicons name="options" size={14} color={showFilters || activeFilterCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.45)"} />
               <Text style={[s.filterToggleText, (showFilters || activeFilterCount > 0) && s.filterToggleTextActive]}>
                 فلاتر
               </Text>
@@ -337,7 +337,7 @@ export default function SearchScreen() {
                 <View style={s.historyChips}>
                   {history.map((h, i) => (
                     <Pressable key={i} onPress={() => setQuery(h)} style={s.historyChip}>
-                      <Ionicons name="time-outline" size={12} color="rgba(255,255,255,0.4)" />
+                      <Ionicons name="time" size={12} color="rgba(255,255,255,0.4)" />
                       <Text style={s.historyChipText}>{h}</Text>
                     </Pressable>
                   ))}
@@ -346,7 +346,7 @@ export default function SearchScreen() {
             )}
             <View style={s.idleWrap}>
               <View style={s.idleIcon}>
-                <Ionicons name="search-outline" size={28} color="rgba(139,92,246,0.4)" />
+                <Ionicons name="search" size={28} color="rgba(139,92,246,0.4)" />
               </View>
               <Text style={s.idleText}>ابحث عن أنميك المفضل</Text>
               <Text style={s.idleSub}>أو استخدم الفلاتر لاستكشاف الأنميات</Text>
@@ -384,7 +384,7 @@ export default function SearchScreen() {
         {!loading && results.length === 0 && !showEmpty && (
           <View style={s.emptyWrap}>
             <View style={s.emptyIcon}>
-              <Ionicons name="search-outline" size={28} color="rgba(255,255,255,0.15)" />
+              <Ionicons name="search" size={28} color="rgba(255,255,255,0.15)" />
             </View>
             <Text style={s.emptyText}>
               {query ? `لا توجد نتائج لـ "${query}"` : "لا توجد نتائج بهذه الفلاتر"}

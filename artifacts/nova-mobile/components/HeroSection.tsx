@@ -102,7 +102,7 @@ export function HeroSection({ items }: Props) {
                     style={[styles.detailBtn, { borderColor: colors.border }]}
                     onPress={() => router.push(`/anime/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
                   >
-                    <Ionicons name="information-circle-outline" size={16} color="#fff" />
+                    <Ionicons name="information-circle" size={16} color="#fff" />
                     <Text style={styles.watchBtnText}>تفاصيل</Text>
                   </Pressable>
                 </View>

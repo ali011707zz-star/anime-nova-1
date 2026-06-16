@@ -184,7 +184,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
             disabled={liking.has(c.id)}
           >
             <Ionicons
-              name={c.liked ? "heart" : "heart-outline"}
+              name={c.liked ? "heart" : "heart"}
               size={14}
               color={c.liked ? "#f87171" : "rgba(255,255,255,0.3)"}
             />
@@ -194,12 +194,12 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
             onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }}
             style={cs.actionBtn}
           >
-            <Ionicons name="return-up-back-outline" size={14} color="rgba(139,92,246,0.7)" />
+            <Ionicons name="return-up-back" size={14} color="rgba(139,92,246,0.7)" />
             <Text style={[cs.actionBtnText, { color: "rgba(139,92,246,0.7)" }]}>رد</Text>
           </Pressable>
           {c.userId === myUserId && (
             <Pressable onPress={() => deleteComment(c)} style={cs.actionBtn}>
-              <Ionicons name="trash-outline" size={13} color="rgba(239,68,68,0.45)" />
+              <Ionicons name="trash" size={13} color="rgba(239,68,68,0.45)" />
             </Pressable>
           )}
         </View>
@@ -229,7 +229,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
         {/* Header */}
         <View style={cs.header}>
           <View style={cs.headerLeft}>
-            <Ionicons name="chatbubbles-outline" size={18} color="#8B5CF6" />
+            <Ionicons name="chatbubbles" size={18} color="#8B5CF6" />
             <Text style={cs.headerTitle}>التعليقات</Text>
             {comments.length > 0 && (
               <View style={cs.countBadge}>
@@ -238,7 +238,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
             )}
           </View>
           <Pressable onPress={loadComments} style={cs.refreshBtn}>
-            <Ionicons name="refresh-outline" size={16} color="rgba(255,255,255,0.4)" />
+            <Ionicons name="refresh" size={16} color="rgba(255,255,255,0.4)" />
           </Pressable>
         </View>
 
@@ -249,7 +249,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
           </View>
         ) : comments.length === 0 ? (
           <View style={cs.emptyWrap}>
-            <Ionicons name="chatbubble-ellipses-outline" size={40} color="rgba(139,92,246,0.25)" />
+            <Ionicons name="chatbubble-ellipses" size={40} color="rgba(139,92,246,0.25)" />
             <Text style={cs.emptyText}>لا توجد تعليقات بعد</Text>
             <Text style={cs.emptySubtext}>كن أول من يعلّق!</Text>
           </View>
@@ -269,7 +269,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
           <View style={cs.inputArea}>
             {replyTo && (
               <View style={cs.replyBanner}>
-                <Ionicons name="return-up-back-outline" size={13} color="rgba(139,92,246,0.7)" />
+                <Ionicons name="return-up-back" size={13} color="rgba(139,92,246,0.7)" />
                 <Text style={cs.replyBannerText} numberOfLines={1}>
                   رد على {replyTo.username}: {replyTo.text}
                 </Text>
@@ -280,7 +280,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
             )}
             {postError && (
               <View style={cs.errorBanner}>
-                <Ionicons name="alert-circle-outline" size={13} color="#f87171" />
+                <Ionicons name="alert-circle" size={13} color="#f87171" />
                 <Text style={cs.errorBannerText}>{postError}</Text>
                 <Pressable onPress={() => setPostError(null)}>
                   <Ionicons name="close" size={13} color="rgba(255,255,255,0.3)" />

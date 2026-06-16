@@ -105,10 +105,10 @@ export default function HomeScreen() {
           </View>
           <View style={styles.headerRight}>
             <Pressable onPress={() => router.push("/schedule")} style={styles.iconBtn}>
-              <Ionicons name="calendar-outline" size={22} color={colors.mutedForeground} />
+              <Ionicons name="calendar" size={22} color={colors.mutedForeground} />
             </Pressable>
             <Pressable onPress={() => router.push("/settings")} style={styles.iconBtn}>
-              <Ionicons name="settings-outline" size={22} color={colors.mutedForeground} />
+              <Ionicons name="settings" size={22} color={colors.mutedForeground} />
             </Pressable>
           </View>
         </View>

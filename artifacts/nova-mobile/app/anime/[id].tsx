@@ -244,7 +244,7 @@ export default function AnimeDetailScreen() {
           {/* Fav */}
           <Pressable onPress={handleFavorite}
             style={[d.favBtn, isFav && { backgroundColor: "rgba(139,92,246,0.3)" }]}>
-            <Ionicons name={isFav ? "heart" : "heart-outline"} size={20} color={isFav ? "#8B5CF6" : "#fff"} />
+            <Ionicons name={isFav ? "heart" : "heart"} size={20} color={isFav ? "#8B5CF6" : "#fff"} />
           </Pressable>
         </View>
 
@@ -279,7 +279,7 @@ export default function AnimeDetailScreen() {
               ) : null}
               {anime.episodes ? (
                 <View style={d.statItem}>
-                  <Ionicons name="play-circle-outline" size={11} color="rgba(255,255,255,0.4)" />
+                  <Ionicons name="play-circle" size={11} color="rgba(255,255,255,0.4)" />
                   <Text style={[d.statText, { color: "rgba(255,255,255,0.55)" }]}>{anime.episodes} حلقة</Text>
                 </View>
               ) : null}
@@ -314,9 +314,9 @@ export default function AnimeDetailScreen() {
         {/* ── 3-col action grid ── */}
         <View style={d.actionGrid}>
           {[
-            { icon: "chatbubble-outline",  label: "التعليقات", active: false, activeColor: "#8B5CF6", onPress: () => setShowComments(true) },
-            { icon: "add-circle-outline",  label: "قائمتي",    active: saved,       activeColor: "#8B5CF6", onPress: toggleSave },
-            { icon: "star-outline",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
+            { icon: "chatbubble",  label: "التعليقات", active: false, activeColor: "#8B5CF6", onPress: () => setShowComments(true) },
+            { icon: "add-circle",  label: "قائمتي",    active: saved,       activeColor: "#8B5CF6", onPress: toggleSave },
+            { icon: "star",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
             <Pressable key={label} onPress={onPress}
               style={[d.actionBtn, active && { backgroundColor: activeColor + "18", borderColor: activeColor + "40" }]}>

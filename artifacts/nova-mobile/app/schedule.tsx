@@ -102,7 +102,7 @@ export default function ScheduleScreen() {
         </View>
       ) : schedules.length === 0 ? (
         <View style={styles.center}>
-          <Ionicons name="calendar-outline" size={64} color={colors.mutedForeground} />
+          <Ionicons name="calendar" size={64} color={colors.mutedForeground} />
           <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>لا يوجد بث هذا اليوم</Text>
         </View>
       ) : (

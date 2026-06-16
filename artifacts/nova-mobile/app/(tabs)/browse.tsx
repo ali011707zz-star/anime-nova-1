@@ -236,7 +236,7 @@ export default function BrowseScreen() {
           </View>
           {(view === "list" || hasFilters) && (
             <Pressable onPress={clearAll} style={g.clearBtn}>
-              <Ionicons name="close-outline" size={14} color="rgba(252,165,165,0.8)" />
+              <Ionicons name="close" size={14} color="rgba(252,165,165,0.8)" />
               <Text style={g.clearBtnText}>مسح</Text>
             </Pressable>
           )}
@@ -290,7 +290,7 @@ export default function BrowseScreen() {
             </ScrollView>
 
             <View style={g.searchWrap}>
-              <Ionicons name="search-outline" size={14} color="rgba(255,255,255,0.25)" />
+              <Ionicons name="search" size={14} color="rgba(255,255,255,0.25)" />
               <TextInput
                 value={search}
                 onChangeText={setSearch}
@@ -300,7 +300,7 @@ export default function BrowseScreen() {
               />
               {search ? (
                 <Pressable onPress={() => setSearch("")}>
-                  <Ionicons name="close-outline" size={16} color="rgba(255,255,255,0.3)" />
+                  <Ionicons name="close" size={16} color="rgba(255,255,255,0.3)" />
                 </Pressable>
               ) : null}
             </View>
@@ -347,7 +347,7 @@ export default function BrowseScreen() {
               ListEmptyComponent={
                 !loading ? (
                   <View style={g.center}>
-                    <Ionicons name="film-outline" size={48} color="rgba(255,255,255,0.15)" />
+                    <Ionicons name="film" size={48} color="rgba(255,255,255,0.15)" />
                     <Text style={g.emptyText}>لا توجد أنميات بهذه الفلاتر</Text>
                   </View>
                 ) : null

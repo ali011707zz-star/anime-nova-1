@@ -21,10 +21,10 @@ const THEMES: { label: string; value: string; dot: string; desc: string }[] = [
 ];
 
 const REPORT_TYPES = [
-  { id: "bug",        label: "خلل تقني",     icon: "bug-outline" as const,        color: "#f87171",   bg: "rgba(239,68,68,0.12)",    border: "rgba(239,68,68,0.25)" },
-  { id: "suggestion", label: "اقتراح",        icon: "bulb-outline" as const,        color: "#fbbf24",   bg: "rgba(251,191,36,0.10)",   border: "rgba(251,191,36,0.22)" },
-  { id: "content",    label: "محتوى مفقود",   icon: "film-outline" as const,        color: "#a78bfa",   bg: "rgba(139,92,246,0.12)",   border: "rgba(139,92,246,0.25)" },
-  { id: "other",      label: "أخرى",          icon: "chatbubble-outline" as const,  color: "#38bdf8",   bg: "rgba(56,189,248,0.10)",   border: "rgba(56,189,248,0.22)" },
+  { id: "bug",        label: "خلل تقني",     icon: "bug" as const,        color: "#f87171",   bg: "rgba(239,68,68,0.12)",    border: "rgba(239,68,68,0.25)" },
+  { id: "suggestion", label: "اقتراح",        icon: "bulb" as const,        color: "#fbbf24",   bg: "rgba(251,191,36,0.10)",   border: "rgba(251,191,36,0.22)" },
+  { id: "content",    label: "محتوى مفقود",   icon: "film" as const,        color: "#a78bfa",   bg: "rgba(139,92,246,0.12)",   border: "rgba(139,92,246,0.25)" },
+  { id: "other",      label: "أخرى",          icon: "chatbubble" as const,  color: "#38bdf8",   bg: "rgba(56,189,248,0.10)",   border: "rgba(56,189,248,0.22)" },
 ];
 
 /* ── Toast ── */
@@ -124,7 +124,7 @@ function ReportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
           </Pressable>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <View style={ts.reportIconWrap}>
-              <Ionicons name="alert-circle-outline" size={16} color="#c4b5fd" />
+              <Ionicons name="alert-circle" size={16} color="#c4b5fd" />
             </View>
             <Text style={ts.reportTitle}>التواصل معنا</Text>
           </View>
@@ -252,7 +252,7 @@ function NavRow({ icon, iconColor, iconBg, label, sub, badge, onPress, external 
         </View>
         {sub && <Text style={ts.navSub}>{sub}</Text>}
       </View>
-      <Ionicons name={external ? "open-outline" : "chevron-back"} size={14} color="rgba(255,255,255,0.2)" />
+      <Ionicons name={external ? "open" : "chevron-back"} size={14} color="rgba(255,255,255,0.2)" />
     </Pressable>
   );
 }
@@ -262,7 +262,7 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
   return (
     <Pressable onPress={onPress} style={ts.dangerRow}>
       <View style={ts.dangerIcon}>
-        <Ionicons name="trash-outline" size={16} color="#f87171" />
+        <Ionicons name="trash" size={16} color="#f87171" />
       </View>
       <View style={ts.navText}>
         <Text style={ts.dangerLabel}>{label}</Text>
@@ -373,7 +373,7 @@ export default function SettingsScreen() {
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
           <View style={ts.headerIconWrap}>
-            <Ionicons name="settings-outline" size={16} color="#c4b5fd" />
+            <Ionicons name="settings" size={16} color="#c4b5fd" />
           </View>
           <Text style={ts.headerTitle}>الإعدادات</Text>
         </View>
@@ -392,7 +392,7 @@ export default function SettingsScreen() {
             style={ts.profileCard}
           >
             <View style={ts.profileAvatar}>
-              <Ionicons name="person-outline" size={24} color="rgba(255,255,255,0.3)" />
+              <Ionicons name="person" size={24} color="rgba(255,255,255,0.3)" />
             </View>
             <View style={{ flex: 1, alignItems: "flex-end" }}>
               <Text style={ts.profileLoginTitle}>تسجيل الدخول</Text>
@@ -510,7 +510,7 @@ export default function SettingsScreen() {
                 backgroundColor: notifs ? "rgba(251,191,36,0.10)" : "rgba(255,255,255,0.05)"
               }]}>
                 <Ionicons
-                  name={notifs ? "notifications" : "notifications-off-outline"}
+                  name={notifs ? "notifications" : "notifications-off"}
                   size={16}
                   color={notifs ? "#fbbf24" : "rgba(255,255,255,0.3)"}
                 />
@@ -539,7 +539,7 @@ export default function SettingsScreen() {
             {/* Version */}
             <View style={ts.navRow}>
               <View style={[ts.navIcon, { backgroundColor: "rgba(139,92,246,0.10)" }]}>
-                <Ionicons name="phone-portrait-outline" size={16} color="#a78bfa" />
+                <Ionicons name="phone-portrait" size={16} color="#a78bfa" />
               </View>
               <View style={[ts.navText, { alignItems: "flex-end" }]}>
                 <Text style={ts.navLabel}>إصدار التطبيق</Text>
@@ -550,7 +550,7 @@ export default function SettingsScreen() {
             {/* Privacy */}
             <View style={ts.navRow}>
               <View style={[ts.navIcon, { backgroundColor: "rgba(20,184,166,0.10)" }]}>
-                <Ionicons name="shield-checkmark-outline" size={16} color="#2dd4bf" />
+                <Ionicons name="shield-checkmark" size={16} color="#2dd4bf" />
               </View>
               <View style={[ts.navText, { alignItems: "flex-end" }]}>
                 <Text style={ts.navLabel}>الخصوصية والأمان</Text>
@@ -559,19 +559,19 @@ export default function SettingsScreen() {
             </View>
             {/* Report issue */}
             <NavRow
-              icon="alert-circle-outline" iconColor="#38bdf8" iconBg="rgba(56,189,248,0.10)"
+              icon="alert-circle" iconColor="#38bdf8" iconBg="rgba(56,189,248,0.10)"
               label="الإبلاغ عن مشكلة" sub="أخبرنا إذا واجهت أي خلل · يصلنا مباشرة"
               onPress={() => setShowReport(true)}
             />
             {/* Contact */}
             <NavRow
-              icon="chatbubble-outline" iconColor="#f472b6" iconBg="rgba(236,72,153,0.10)"
+              icon="chatbubble" iconColor="#f472b6" iconBg="rgba(236,72,153,0.10)"
               label="تواصل معنا" sub="اقتراحات · شراكات · مساعدة · يصلنا فوراً"
               onPress={() => setShowReport(true)}
             />
             {/* Telegram */}
             <NavRow
-              icon="paper-plane-outline" iconColor="#34d399" iconBg="rgba(20,184,166,0.10)"
+              icon="paper-plane" iconColor="#34d399" iconBg="rgba(20,184,166,0.10)"
               label="مجموعتنا الرسمية" sub="انضم لقروب تيليجرام الرسمي"
               onPress={() => Linking.openURL("https://t.me/Anime_NOVA_0")}
               external
@@ -606,7 +606,7 @@ export default function SettingsScreen() {
         <View style={ts.disclaimer}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
             <View style={ts.disclaimerIcon}>
-              <Ionicons name="shield-outline" size={14} color="#a78bfa" />
+              <Ionicons name="shield" size={14} color="#a78bfa" />
             </View>
             <Text style={ts.disclaimerTitle}>إخلاء المسؤولية</Text>
           </View>

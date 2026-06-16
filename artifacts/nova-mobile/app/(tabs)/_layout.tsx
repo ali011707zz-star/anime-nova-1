@@ -54,7 +54,7 @@ export default function TabLayout() {
         name="index"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "home" : "home-outline"} label="الرئيسية" color={color} focused={focused} />
+            <TabIcon name={focused ? "home" : "home"} label="الرئيسية" color={color} focused={focused} />
           ),
         }}
       />
@@ -62,7 +62,7 @@ export default function TabLayout() {
         name="search"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "search" : "search-outline"} label="بحث" color={color} focused={focused} />
+            <TabIcon name={focused ? "search" : "search"} label="بحث" color={color} focused={focused} />
           ),
         }}
       />
@@ -70,7 +70,7 @@ export default function TabLayout() {
         name="browse"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "grid" : "grid-outline"} label="تصفح" color={color} focused={focused} />
+            <TabIcon name={focused ? "grid" : "grid"} label="تصفح" color={color} focused={focused} />
           ),
         }}
       />
@@ -78,7 +78,7 @@ export default function TabLayout() {
         name="animations"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "film" : "film-outline"} label="أنيميشن" color={color} focused={focused} />
+            <TabIcon name={focused ? "film" : "film"} label="أنيميشن" color={color} focused={focused} />
           ),
         }}
       />
@@ -86,7 +86,7 @@ export default function TabLayout() {
         name="library"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name={focused ? "bookmark" : "bookmark-outline"} label="قائمتي" color={color} focused={focused} />
+            <TabIcon name={focused ? "bookmark" : "bookmark"} label="قائمتي" color={color} focused={focused} />
           ),
         }}
       />
