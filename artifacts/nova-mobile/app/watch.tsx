@@ -85,7 +85,7 @@ const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isE
   { site: "seepanel",     tag: "SP", name: "سي بانيل",    desc: "عربي مدبلج · HLS نظيف"  },
   { site: "arabseed",     tag: "AS", name: "عرب سيد",      desc: "عربي مدبلج/مترجم · MP4" },
   { site: "animephoenix", tag: "PH", name: "فينكس أنمي",  desc: "1080p · MKV مباشر"   },
-  { site: "starcima_anim",tag: "SC", name: "StarCima",     desc: "TMDB · HLS · صوت ياباني" },
+  // starcima_anim: محذوف من الأنمي — يرسل صوتاً هندياً
   { site: "videasy_anim", tag: "VE", name: "Videasy",      desc: "TMDB · ترجمة عربية", isEn: true },
   { site: "vidlink_anim", tag: "VL", name: "VidLink",      desc: "TMDB · ترجمة عربية", isEn: true },
   { site: "lordflix_anim",tag: "LF", name: "LordFlix",     desc: "TMDB · ترجمة عربية", isEn: true },
@@ -648,6 +648,78 @@ export default function WatchScreen() {
           </View>
         </View>
 
+        {/* ── Anime info — status / score / genres / studio / synopsis ── */}
+        {aniInfo && (
+          <View style={d.aniInfoCard}>
+            {/* Status + Format row */}
+            <View style={d.aniInfoBadgeRow}>
+              {aniInfo.status && STATUS_MAP[aniInfo.status] && (
+                <View style={[d.aniStatusBadge, {
+                  backgroundColor: STATUS_MAP[aniInfo.status].bg,
+                  borderColor: STATUS_MAP[aniInfo.status].border,
+                }]}>
+                  <View style={[d.aniStatusDot, { backgroundColor: STATUS_MAP[aniInfo.status].color }]} />
+                  <Text style={[d.aniStatusText, { color: STATUS_MAP[aniInfo.status].color }]}>
+                    {STATUS_MAP[aniInfo.status].label}
+                  </Text>
+                </View>
+              )}
+              {aniInfo.format && FORMAT_MAP[aniInfo.format] && (
+                <View style={d.aniFormatBadge}>
+                  <Text style={d.aniFormatText}>{FORMAT_MAP[aniInfo.format]}</Text>
+                </View>
+              )}
+              {aniInfo.seasonYear ? (
+                <View style={d.aniFormatBadge}>
+                  <Text style={d.aniFormatText}>
+                    {aniInfo.season && SEASON_MAP[aniInfo.season] ? `${SEASON_MAP[aniInfo.season]} ` : ""}{aniInfo.seasonYear}
+                  </Text>
+                </View>
+              ) : null}
+              {aniInfo.averageScore ? (
+                <View style={d.aniScoreBadge}>
+                  <Text style={d.aniScoreText}>★ {(aniInfo.averageScore / 10).toFixed(1)}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {/* Genres */}
+            {aniInfo.genres && aniInfo.genres.length > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={d.aniGenresScroll}>
+                {aniInfo.genres.slice(0, 7).map((g: string) => (
+                  <View key={g} style={d.aniGenreTag}>
+                    <Text style={d.aniGenreText}>{GENRE_MAP[g] || g}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            {/* Studio */}
+            {aniInfo.studios?.nodes?.[0]?.name && (
+              <Text style={d.aniStudioText}>
+                🎬 {aniInfo.studios.nodes[0].name}
+              </Text>
+            )}
+
+            {/* Synopsis */}
+            {synopsis ? (
+              <View style={d.aniSynopsisWrap}>
+                <Text
+                  style={d.aniSynopsisText}
+                  numberOfLines={synopsisExpanded ? undefined : 3}
+                >
+                  {synopsis}
+                </Text>
+                <Pressable onPress={() => setSynopsisExpanded(e => !e)}>
+                  <Text style={d.aniSynopsisToggle}>
+                    {synopsisExpanded ? "← طيّ القصة" : "اقرأ المزيد ←"}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+        )}
+
         {/* ── Resume hint ── */}
         {resumeTime > 10 && (
           <View style={d.resumeBanner}>
@@ -888,4 +960,22 @@ const d = StyleSheet.create({
   /* Embed note */
   embedNote: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 10, padding: 10, borderRadius: 12, backgroundColor: "rgba(99,102,241,0.08)", borderWidth: 1, borderColor: "rgba(99,102,241,0.20)" },
   embedNoteText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(199,210,254,0.65)", flex: 1 },
+
+  /* ── Anime info card ── */
+  aniInfoCard: { backgroundColor: "rgba(17,17,26,0.92)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", padding: 14, gap: 12 },
+  aniInfoBadgeRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, alignItems: "center" },
+  aniStatusBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, borderWidth: 1 },
+  aniStatusDot: { width: 6, height: 6, borderRadius: 3 },
+  aniStatusText: { fontSize: 10.5, fontFamily: "Cairo_700Bold" },
+  aniFormatBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 9, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  aniFormatText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.60)" },
+  aniScoreBadge: { flexDirection: "row", alignItems: "center", paddingHorizontal: 9, paddingVertical: 4, borderRadius: 9, backgroundColor: "rgba(251,191,36,0.10)", borderWidth: 1, borderColor: "rgba(251,191,36,0.25)" },
+  aniScoreText: { fontSize: 10.5, fontFamily: "Cairo_800ExtraBold", color: "rgba(253,224,71,0.90)" },
+  aniGenresScroll: { flexDirection: "row", gap: 7, paddingVertical: 2 },
+  aniGenreTag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.09)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
+  aniGenreText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(167,139,250,0.85)" },
+  aniStudioText: { fontSize: 10.5, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.38)" },
+  aniSynopsisWrap: { gap: 6 },
+  aniSynopsisText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(180,180,184,0.80)", lineHeight: 21, textAlign: "right" },
+  aniSynopsisToggle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(139,92,246,0.75)", textAlign: "left" },
 });
