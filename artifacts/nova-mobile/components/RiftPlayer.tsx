@@ -252,6 +252,7 @@ export function RiftPlayer({
   const [subLoading, setSubLoading]     = useState(false);
   const [subSettings, setSubSettings]   = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
   const [subOpenSection, setSubOpenSection] = useState<string | null>(null);
+  const [showOffsetControls, setShowOffsetControls] = useState(false);
   /* subOffset: seconds to shift subtitle timing; positive = show earlier (fix late subs) */
   const [subOffset, setSubOffset]       = useState(0);
   const subOffsetRef                    = useRef(0);
@@ -330,9 +331,8 @@ export function RiftPlayer({
     AsyncStorage.getItem("sub-settings-v1").then(raw => {
       if (raw) { try { setSubSettings(JSON.parse(raw)); } catch {} }
     }).catch(() => {});
-    AsyncStorage.getItem("sub-offset-v1").then(raw => {
-      if (raw) { try { const v = parseFloat(raw); if (!isNaN(v)) { setSubOffset(v); subOffsetRef.current = v; } } catch {} }
-    }).catch(() => {});
+    /* sub-offset intentionally NOT restored from storage — resets to 0 on each session
+       so X-TIMESTAMP-MAP auto-sync is always fresh without manual intervention */
   }, []);
 
   /* Keep ref in sync with state so the rAF closure always sees latest offset */
@@ -426,6 +426,9 @@ export function RiftPlayer({
   useEffect(() => {
     const url = currentSrc?.subtitleUrl;
     if (!url) { setLoadedCues([]); return; }
+    // Auto-sync: reset timing offset on every new subtitle URL so X-TIMESTAMP-MAP takes over
+    setSubOffset(0);
+    subOffsetRef.current = 0;
     let cancelled = false;
     setSubLoading(true);
     setLoadedCues([]);
@@ -1579,50 +1582,70 @@ export function RiftPlayer({
                 </View>
               ) : undefined}
             >
-              {/* ── Subtitle offset ── */}
-              <Text style={s.subSectionLabel}>إزاحة التوقيت (تأخير / تقديم)</Text>
-
-              {/* Current offset display */}
-              <View style={s.offsetDisplayRow}>
-                <View style={s.offsetDisplayBox}>
-                  <Text style={[s.offsetValueText, subOffset !== 0 && { color: "#c4b5fd" }]}>
-                    {subOffset > 0 ? `+${subOffset}` : subOffset}ث
-                  </Text>
-                  <Text style={s.offsetHintText}>التوقيت الحالي</Text>
-                </View>
-                {subOffset !== 0 && (
-                  <Pressable
-                    onPress={() => {
-                      setSubOffset(0);
-                      subOffsetRef.current = 0;
-                      AsyncStorage.setItem("sub-offset-v1", "0").catch(() => {});
-                    }}
-                    style={s.offsetResetBtn}
-                    hitSlop={8}
-                  >
-                    <Text style={s.offsetResetText}>↩ صفر</Text>
-                  </Pressable>
-                )}
-              </View>
-
-              {/* +/- buttons */}
-              <View style={s.offsetBtnsRow}>
-                <Pressable onPress={() => updateSubOffset(-2)} style={s.offsetBtn} hitSlop={6}>
-                  <Text style={s.offsetBtnText}>-2ث</Text>
-                </Pressable>
-                <Pressable onPress={() => updateSubOffset(-0.5)} style={s.offsetBtn} hitSlop={6}>
-                  <Text style={s.offsetBtnText}>-½ث</Text>
-                </Pressable>
-                <Pressable onPress={() => updateSubOffset(0.5)} style={[s.offsetBtn, s.offsetBtnPos]} hitSlop={6}>
-                  <Text style={[s.offsetBtnText, { color: "#c4b5fd" }]}>+½ث</Text>
-                </Pressable>
-                <Pressable onPress={() => updateSubOffset(2)} style={[s.offsetBtn, s.offsetBtnPos]} hitSlop={6}>
-                  <Text style={[s.offsetBtnText, { color: "#c4b5fd" }]}>+2ث</Text>
-                </Pressable>
-              </View>
-              <Text style={[s.subNoAvailText, { marginTop: 4 }]}>
-                {subOffset > 0 ? "الترجمة ستظهر مبكراً" : subOffset < 0 ? "الترجمة ستظهر متأخرة" : "الترجمة متزامنة مع الصوت"}
+              {/* ── Subtitle offset — auto-synced; manual controls hidden by default ── */}
+              <Pressable
+                onPress={() => setShowOffsetControls(v => !v)}
+                style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}
+                hitSlop={8}
+              >
+                <Text style={[s.subSectionLabel, { flex: 1, marginBottom: 0 }]}>
+                  ضبط التوقيت اليدوي
+                  {subOffset !== 0 ? (
+                    <Text style={{ color: "#c4b5fd" }}> ({subOffset > 0 ? `+${subOffset}` : subOffset}ث)</Text>
+                  ) : null}
+                </Text>
+                <Text style={{ color: "rgba(255,255,255,0.25)", fontSize: 10 }}>
+                  {showOffsetControls ? "▲" : "▼"}
+                </Text>
+              </Pressable>
+              <Text style={[s.subNoAvailText, { marginBottom: 8 }]}>
+                التزامن تلقائي — الضبط اليدوي للحالات الاستثنائية فقط
               </Text>
+
+              {showOffsetControls && (
+                <>
+                  {/* Current offset display */}
+                  <View style={s.offsetDisplayRow}>
+                    <View style={s.offsetDisplayBox}>
+                      <Text style={[s.offsetValueText, subOffset !== 0 && { color: "#c4b5fd" }]}>
+                        {subOffset > 0 ? `+${subOffset}` : subOffset}ث
+                      </Text>
+                      <Text style={s.offsetHintText}>التوقيت الحالي</Text>
+                    </View>
+                    {subOffset !== 0 && (
+                      <Pressable
+                        onPress={() => {
+                          setSubOffset(0);
+                          subOffsetRef.current = 0;
+                        }}
+                        style={s.offsetResetBtn}
+                        hitSlop={8}
+                      >
+                        <Text style={s.offsetResetText}>↩ صفر</Text>
+                      </Pressable>
+                    )}
+                  </View>
+
+                  {/* +/- buttons */}
+                  <View style={s.offsetBtnsRow}>
+                    <Pressable onPress={() => updateSubOffset(-2)} style={s.offsetBtn} hitSlop={6}>
+                      <Text style={s.offsetBtnText}>-2ث</Text>
+                    </Pressable>
+                    <Pressable onPress={() => updateSubOffset(-0.5)} style={s.offsetBtn} hitSlop={6}>
+                      <Text style={s.offsetBtnText}>-½ث</Text>
+                    </Pressable>
+                    <Pressable onPress={() => updateSubOffset(0.5)} style={[s.offsetBtn, s.offsetBtnPos]} hitSlop={6}>
+                      <Text style={[s.offsetBtnText, { color: "#c4b5fd" }]}>+½ث</Text>
+                    </Pressable>
+                    <Pressable onPress={() => updateSubOffset(2)} style={[s.offsetBtn, s.offsetBtnPos]} hitSlop={6}>
+                      <Text style={[s.offsetBtnText, { color: "#c4b5fd" }]}>+2ث</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={[s.subNoAvailText, { marginTop: 4 }]}>
+                    {subOffset > 0 ? "الترجمة ستظهر مبكراً" : subOffset < 0 ? "الترجمة ستظهر متأخرة" : "الترجمة متزامنة مع الصوت"}
+                  </Text>
+                </>
+              )}
 
               {/* Divider */}
               <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.06)", marginVertical: 14 }} />
