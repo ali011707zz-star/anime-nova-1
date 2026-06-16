@@ -251,6 +251,9 @@ export function RiftPlayer({
   const [subLoading, setSubLoading]     = useState(false);
   const [subSettings, setSubSettings]   = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
   const [subOpenSection, setSubOpenSection] = useState<string | null>(null);
+  /* subOffset: seconds to shift subtitle timing; positive = show earlier (fix late subs) */
+  const [subOffset, setSubOffset]       = useState(0);
+  const subOffsetRef                    = useRef(0);
 
   /* ─── Seekbar drag ─── */
   const [isDragging, setIsDragging]     = useState(false);
@@ -321,17 +324,32 @@ export function RiftPlayer({
     }
   });
 
-  /* ─── Load SubSettings from storage ─── */
+  /* ─── Load SubSettings + subOffset from storage ─── */
   useEffect(() => {
     AsyncStorage.getItem("sub-settings-v1").then(raw => {
       if (raw) { try { setSubSettings(JSON.parse(raw)); } catch {} }
     }).catch(() => {});
+    AsyncStorage.getItem("sub-offset-v1").then(raw => {
+      if (raw) { try { const v = parseFloat(raw); if (!isNaN(v)) { setSubOffset(v); subOffsetRef.current = v; } } catch {} }
+    }).catch(() => {});
   }, []);
+
+  /* Keep ref in sync with state so the rAF closure always sees latest offset */
+  useEffect(() => { subOffsetRef.current = subOffset; }, [subOffset]);
 
   const updateSubSettings = useCallback((patch: Partial<SubSettings>) => {
     setSubSettings(prev => {
       const next = { ...prev, ...patch };
       AsyncStorage.setItem("sub-settings-v1", JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const updateSubOffset = useCallback((delta: number) => {
+    setSubOffset(prev => {
+      const next = Math.max(-10, Math.min(10, parseFloat((prev + delta).toFixed(1))));
+      subOffsetRef.current = next;
+      AsyncStorage.setItem("sub-offset-v1", String(next)).catch(() => {});
       return next;
     });
   }, []);
@@ -392,7 +410,8 @@ export function RiftPlayer({
     const tick = () => {
       try {
         const ct = player.currentTime || 0;
-        const cue = bisectCue(sorted, ct);
+        /* Apply user offset: positive offset → look earlier in subtitle timeline (fixes late subs) */
+        const cue = bisectCue(sorted, ct - subOffsetRef.current);
         const key = cue ? `${cue.start}` : "";
         if (key !== lastKey) { lastKey = key; setActiveCue(cue); }
       } catch {}
@@ -1540,6 +1559,85 @@ export function RiftPlayer({
                 <Text style={s.subNoAvailText}>فعّل الترجمة أولاً</Text>
               )}
             </AccordionSection>
+
+            {/* ── SECTION: السلوك ── */}
+            <AccordionSection
+              id="behavior"
+              openId={subOpenSection}
+              setOpenId={setSubOpenSection}
+              icon="⚡"
+              iconBg="rgba(239,68,68,0.15)"
+              iconBorder="rgba(239,68,68,0.25)"
+              title="السلوك"
+              badge={subOffset !== 0 ? (
+                <View style={s.offsetBadge}>
+                  <Text style={s.offsetBadgeText}>
+                    {subOffset > 0 ? `+${subOffset}` : subOffset}ث
+                  </Text>
+                </View>
+              ) : undefined}
+            >
+              {/* ── Subtitle offset ── */}
+              <Text style={s.subSectionLabel}>إزاحة التوقيت (تأخير / تقديم)</Text>
+
+              {/* Current offset display */}
+              <View style={s.offsetDisplayRow}>
+                <View style={s.offsetDisplayBox}>
+                  <Text style={[s.offsetValueText, subOffset !== 0 && { color: "#c4b5fd" }]}>
+                    {subOffset > 0 ? `+${subOffset}` : subOffset}ث
+                  </Text>
+                  <Text style={s.offsetHintText}>التوقيت الحالي</Text>
+                </View>
+                {subOffset !== 0 && (
+                  <Pressable
+                    onPress={() => {
+                      setSubOffset(0);
+                      subOffsetRef.current = 0;
+                      AsyncStorage.setItem("sub-offset-v1", "0").catch(() => {});
+                    }}
+                    style={s.offsetResetBtn}
+                    hitSlop={8}
+                  >
+                    <Text style={s.offsetResetText}>↩ صفر</Text>
+                  </Pressable>
+                )}
+              </View>
+
+              {/* +/- buttons */}
+              <View style={s.offsetBtnsRow}>
+                <Pressable onPress={() => updateSubOffset(-2)} style={s.offsetBtn} hitSlop={6}>
+                  <Text style={s.offsetBtnText}>-2ث</Text>
+                </Pressable>
+                <Pressable onPress={() => updateSubOffset(-0.5)} style={s.offsetBtn} hitSlop={6}>
+                  <Text style={s.offsetBtnText}>-½ث</Text>
+                </Pressable>
+                <Pressable onPress={() => updateSubOffset(0.5)} style={[s.offsetBtn, s.offsetBtnPos]} hitSlop={6}>
+                  <Text style={[s.offsetBtnText, { color: "#c4b5fd" }]}>+½ث</Text>
+                </Pressable>
+                <Pressable onPress={() => updateSubOffset(2)} style={[s.offsetBtn, s.offsetBtnPos]} hitSlop={6}>
+                  <Text style={[s.offsetBtnText, { color: "#c4b5fd" }]}>+2ث</Text>
+                </Pressable>
+              </View>
+              <Text style={[s.subNoAvailText, { marginTop: 4 }]}>
+                {subOffset > 0 ? "الترجمة ستظهر مبكراً" : subOffset < 0 ? "الترجمة ستظهر متأخرة" : "الترجمة متزامنة مع الصوت"}
+              </Text>
+
+              {/* Divider */}
+              <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.06)", marginVertical: 14 }} />
+
+              {/* Reset all settings */}
+              <Pressable
+                onPress={() => {
+                  updateSubSettings({ fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" });
+                }}
+                style={s.resetAllBtn}
+              >
+                <Text style={s.resetAllBtnText}>↩ إعادة ضبط جميع إعدادات الترجمة</Text>
+              </Pressable>
+              <Text style={[s.subNoAvailText, { paddingTop: 4 }]}>
+                تُحفظ الإعدادات تلقائياً بين الجلسات
+              </Text>
+            </AccordionSection>
           </ScrollView>
         </Pressable>
       )}
@@ -1801,4 +1899,26 @@ const s = StyleSheet.create({
   appearanceBadgeText: { color: "rgba(253,224,71,0.65)", fontSize: 8.5, fontFamily: "Cairo_700Bold" },
   positionBadge: { backgroundColor: "rgba(52,211,153,0.10)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(52,211,153,0.22)" },
   positionBadgeText: { color: "rgba(110,231,183,0.65)", fontSize: 8.5, fontFamily: "Cairo_700Bold" },
+
+  /* Offset badge (shown in accordion header when offset != 0) */
+  offsetBadge: { backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
+  offsetBadgeText: { color: "rgba(196,181,253,0.85)", fontSize: 8.5, fontFamily: "Cairo_700Bold" },
+
+  /* Offset display row */
+  offsetDisplayRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
+  offsetDisplayBox: { alignItems: "center", gap: 2 },
+  offsetValueText: { fontSize: 28, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)", lineHeight: 32 },
+  offsetHintText: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" },
+  offsetResetBtn: { backgroundColor: "rgba(239,68,68,0.15)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: "rgba(239,68,68,0.28)" },
+  offsetResetText: { color: "rgba(252,165,165,0.90)", fontSize: 12, fontFamily: "Cairo_700Bold" },
+
+  /* Offset ± buttons row */
+  offsetBtnsRow: { flexDirection: "row", gap: 8, marginBottom: 4 },
+  offsetBtn: { flex: 1, paddingVertical: 11, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)" },
+  offsetBtnPos: { backgroundColor: "rgba(139,92,246,0.08)", borderColor: "rgba(139,92,246,0.30)" },
+  offsetBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.90)" },
+
+  /* Reset all button */
+  resetAllBtn: { paddingVertical: 11, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.22)" },
+  resetAllBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.82)" },
 });
