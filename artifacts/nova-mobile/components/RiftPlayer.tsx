@@ -93,11 +93,20 @@ export function RiftPlayer({
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
       if (e.status === "loading") setBuffering(true);
-      else if (e.status === "readyToPlay") setBuffering(false);
+      else if (e.status === "readyToPlay") { setBuffering(false); setError(false); }
       else if (e.status === "error") { setError(true); setBuffering(false); }
     });
     return () => { sub.remove(); sub2.remove(); };
   }, [player]);
+
+  /* Auto-advance to next source on error after 4 seconds */
+  useEffect(() => {
+    if (!error || sources.length <= 1) return;
+    const timer = setTimeout(() => {
+      switchSource((srcIdx + 1) % sources.length);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [error, srcIdx, sources.length]);
 
   useEffect(() => {
     progressTimer.current = setInterval(() => {

@@ -135,7 +135,7 @@ export default function BrowseScreen() {
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
 
-  const [view, setView] = useState<"genres" | "list">("genres");
+  const [view, setView] = useState<"genres" | "list">("list");
   const [activeGenre, setActiveGenre] = useState("");
   const [activeGenreAr, setActiveGenreAr] = useState("");
   const [format, setFormat] = useState("");
@@ -207,7 +207,7 @@ export default function BrowseScreen() {
     setView("list"); setPage(1); setItems([]);
   }
   function clearAll() {
-    setView("genres"); setActiveGenre(""); setActiveGenreAr("");
+    setView("list"); setActiveGenre(""); setActiveGenreAr("");
     setFormat(""); setSort("POPULARITY_DESC"); setSeason(""); setYear("");
   }
 
@@ -234,12 +234,21 @@ export default function BrowseScreen() {
               <Text style={g.headerSub}>{filteredItems.length} أنمي متاح</Text>
             )}
           </View>
-          {(view === "list" || hasFilters) && (
-            <Pressable onPress={clearAll} style={g.clearBtn}>
-              <Ionicons name="close" size={14} color="rgba(252,165,165,0.8)" />
-              <Text style={g.clearBtnText}>مسح</Text>
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            <Pressable
+              onPress={() => setView(view === "genres" ? "list" : "genres")}
+              style={[g.genreToggleBtn, view === "genres" && g.genreToggleBtnActive]}
+            >
+              <Ionicons name="grid" size={12} color={view === "genres" ? "#c4b5fd" : "rgba(255,255,255,0.4)"} />
+              <Text style={[g.genreToggleText, view === "genres" && { color: "#c4b5fd" }]}>التصنيفات</Text>
             </Pressable>
-          )}
+            {(view === "list" && hasFilters) && (
+              <Pressable onPress={clearAll} style={g.clearBtn}>
+                <Ionicons name="close" size={14} color="rgba(252,165,165,0.8)" />
+                <Text style={g.clearBtnText}>مسح</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
 
         {/* Format chips */}
@@ -379,6 +388,9 @@ const g = StyleSheet.create({
   headerSub: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
   clearBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
   clearBtnText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(252,165,165,0.8)" },
+  genreToggleBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  genreToggleBtnActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.35)" },
+  genreToggleText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
   chipRow: { marginBottom: 4 },
   chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
   chipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },

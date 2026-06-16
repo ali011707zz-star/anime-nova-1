@@ -6,12 +6,12 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import WebView from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
-import { CommentsSheet } from "@/components/CommentsSheet";
 
 const { width: W } = Dimensions.get("window");
 
@@ -146,7 +146,6 @@ export default function AnimeDetailScreen() {
   const [tab, setTab] = useState<"chars" | "related" | "similar">("chars");
   const [showTrailer, setShowTrailer] = useState(false);
   const [showRating, setShowRating] = useState(false);
-  const [showComments, setShowComments] = useState(false);
   const [myRating, setMyRating] = useState(0);
   const [saved, setSaved] = useState(false);
   const [warnDismissed, setWarnDismissed] = useState(false);
@@ -313,7 +312,7 @@ export default function AnimeDetailScreen() {
         {/* ── 3-col action grid ── */}
         <View style={d.actionGrid}>
           {[
-            { icon: "chatbubble",  label: "التعليقات", active: false, activeColor: "#8B5CF6", onPress: () => setShowComments(true) },
+            { icon: "chatbubble",  label: "التعليقات", active: false, activeColor: "#8B5CF6", onPress: () => router.push(`/comments?animeId=${anime?.id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any) },
             { icon: "add-circle",  label: "قائمتي",    active: saved,       activeColor: "#8B5CF6", onPress: toggleSave },
             { icon: "star",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
@@ -544,44 +543,39 @@ export default function AnimeDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* ── Trailer Modal — opens YouTube natively ── */}
-      <Modal visible={showTrailer} animationType="fade" transparent onRequestClose={() => setShowTrailer(false)}>
-        <Pressable style={d.trailerOverlay} onPress={() => setShowTrailer(false)}>
-          <View style={d.trailerSheet}>
-            <View style={d.trailerSheetHeader}>
-              <Ionicons name="logo-youtube" size={22} color="#FF0000" />
-              <Text style={d.trailerModalTitle}>الإعلان الدعائي</Text>
-              <Pressable onPress={() => setShowTrailer(false)} style={d.trailerCloseBtn}>
-                <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
-              </Pressable>
-            </View>
-            <Image
-              source={{ uri: anime.trailer?.thumbnail || `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg` }}
-              style={d.trailerSheetImg}
-            />
-            <View style={d.trailerSheetActions}>
-              <Pressable
-                onPress={() => { setShowTrailer(false); Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`); }}
-                style={d.trailerYTBtn}
-              >
-                <Ionicons name="logo-youtube" size={18} color="#fff" />
-                <Text style={d.trailerYTBtnText}>فتح في يوتيوب</Text>
-              </Pressable>
-              <Pressable onPress={() => setShowTrailer(false)} style={d.trailerCancelBtn}>
-                <Text style={d.trailerCancelText}>إلغاء</Text>
-              </Pressable>
-            </View>
+      {/* ── Trailer Modal — in-app YouTube player ── */}
+      <Modal visible={showTrailer} animationType="slide" onRequestClose={() => setShowTrailer(false)}>
+        <View style={{ flex: 1, backgroundColor: "#000" }}>
+          <View style={[d.trailerSheetHeader, { paddingTop: topPad + 4 }]}>
+            <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+            <Text style={[d.trailerModalTitle, { flex: 1 }]}>الإعلان الدعائي</Text>
+            <Pressable
+              onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`)}
+              style={d.trailerCloseBtn}
+            >
+              <Ionicons name="open-outline" size={16} color="rgba(255,255,255,0.5)" />
+            </Pressable>
+            <Pressable onPress={() => setShowTrailer(false)} style={d.trailerCloseBtn}>
+              <Ionicons name="close" size={18} color="rgba(255,255,255,0.6)" />
+            </Pressable>
           </View>
-        </Pressable>
+          <WebView
+            source={{
+              uri: `https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1`,
+            }}
+            style={{ flex: 1 }}
+            allowsFullscreenVideo
+            allowsInlineMediaPlayback
+            mediaPlaybackRequiresUserAction={false}
+            javaScriptEnabled
+            domStorageEnabled
+            originWhitelist={["*"]}
+            mixedContentMode="always"
+          />
+        </View>
       </Modal>
 
-      {/* ── Comments bottom sheet ── */}
-      <CommentsSheet
-        visible={showComments}
-        onClose={() => setShowComments(false)}
-        animeId={anime?.id}
-        title={anime?.title?.romaji}
-      />
+      {/* ── Comments — navigated via router ── */}
 
       {/* ── Rating bottom sheet ── */}
       <Modal visible={showRating} animationType="slide" transparent onRequestClose={() => setShowRating(false)}>

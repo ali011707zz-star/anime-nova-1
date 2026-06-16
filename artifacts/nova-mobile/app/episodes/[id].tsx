@@ -9,7 +9,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { CommentsSheet } from "@/components/CommentsSheet";
 
 /* ── AniList query ── */
 const ANIME_QUERY = `
@@ -100,7 +99,6 @@ export default function EpisodeListScreen() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
-  const [showComments, setShowComments] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -208,7 +206,7 @@ export default function EpisodeListScreen() {
         </Pressable>
 
         {/* Comments button */}
-        <Pressable onPress={() => setShowComments(true)} style={ep_s.commentsBtn}>
+        <Pressable onPress={() => router.push(`/comments?animeId=${id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any)} style={ep_s.commentsBtn}>
           <Ionicons name="chatbubbles" size={16} color="#c4b5fd" />
         </Pressable>
 
@@ -299,7 +297,7 @@ export default function EpisodeListScreen() {
                 {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
               </Text>
             </Pressable>
-            <Pressable onPress={() => setShowComments(true)} style={ep_s.commentsListBtn}>
+            <Pressable onPress={() => router.push(`/comments?animeId=${id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any)} style={ep_s.commentsListBtn}>
               <Ionicons name="chatbubbles" size={16} color="#c4b5fd" />
               <Text style={ep_s.commentsListBtnText}>التعليقات والنقاشات</Text>
               <Ionicons name="chevron-back" size={14} color="rgba(196,181,253,0.5)" />
@@ -318,12 +316,6 @@ export default function EpisodeListScreen() {
         )}
       />
 
-      <CommentsSheet
-        visible={showComments}
-        onClose={() => setShowComments(false)}
-        animeId={anime?.id ? parseInt(id) : undefined}
-        title={anime?.title?.romaji}
-      />
     </View>
   );
 }
