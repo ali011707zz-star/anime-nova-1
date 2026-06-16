@@ -18,49 +18,97 @@ const { width: W } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
-type Screen = "loading" | "picker" | "native" | "embed";
+type Screen  = "loading" | "picker" | "native" | "embed";
 
 interface Src {
-  url?: string;
-  directUrl?: string;
-  qualityRank?: number;
-  label?: string;
-  server?: string;
-  quality?: string;
-  site?: string;
-  isEmbed?: boolean;
-  subtitleUrl?: string;
+  url?: string; directUrl?: string; qualityRank?: number;
+  label?: string; server?: string; quality?: string;
+  site?: string; isEmbed?: boolean; subtitleUrl?: string;
+  name?: string;
 }
 
-/* ── Scraper definitions (from web) ── */
-const SCRAPER_DEFS: { site: string; tag: string; name: string; isEn?: boolean }[] = [
-  { site: "shahiid",       tag: "SH",  name: "شاهيد أنمي" },
-  { site: "animelek",      tag: "AL",  name: "أنمي ليك" },
-  { site: "animedar",      tag: "AD",  name: "أنمي دار" },
-  { site: "okanime",       tag: "OK",  name: "أوك أنمي" },
-  { site: "ristoanime",    tag: "RS",  name: "ريستو أنمي" },
-  { site: "animeify",      tag: "MG",  name: "أنمي فاي" },
-  { site: "kawaii",        tag: "KW",  name: "كواي أنمي" },
-  { site: "anikoto",       tag: "AK",  name: "AniKoto" },
-  { site: "animepahe",     tag: "AP",  name: "AnimePahe" },
-  { site: "animewitcher",  tag: "AW",  name: "AnimeWitcher" },
-  { site: "anineko",       tag: "AN",  name: "AniNeko" },
-  { site: "mitanime",      tag: "MT",  name: "ميتا أنمي" },
-  { site: "animeday",      tag: "DY",  name: "أنمي داي" },
-  { site: "seepanel",      tag: "SP",  name: "سي بانيل" },
-  { site: "arabseed",      tag: "AS",  name: "عرب سيد" },
-  { site: "animephoenix",  tag: "PH",  name: "فينكس أنمي" },
-  { site: "starcima_anim", tag: "SC",  name: "StarCima" },
-  { site: "videasy_anim",  tag: "VE",  name: "Videasy",    isEn: true },
-  { site: "vidlink_anim",  tag: "VL",  name: "VidLink",    isEn: true },
-  { site: "lordflix_anim", tag: "LF",  name: "LordFlix",   isEn: true },
-  { site: "vyla_anim",     tag: "VY",  name: "Vyla",       isEn: true },
+interface AniInfo {
+  title?: { romaji?: string; native?: string };
+  averageScore?: number;
+  genres?: string[];
+  description?: string;
+  format?: string;
+  status?: string;
+  studios?: { nodes?: { name: string }[] };
+  seasonYear?: number;
+  season?: string;
+}
+
+/* ── AniList fetch ── */
+const ANILIST_Q = `query ($id: Int) {
+  Media(id: $id, type: ANIME) {
+    title { romaji native }
+    averageScore genres format status season seasonYear
+    description(asHtml: false)
+    studios(isMain: true) { nodes { name } }
+  }
+}`;
+
+async function fetchAniInfo(id: number): Promise<AniInfo | null> {
+  try {
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: ANILIST_Q, variables: { id } }),
+    });
+    const d = await r.json();
+    return d?.data?.Media || null;
+  } catch { return null; }
+}
+
+/* ── Scraper definitions ── */
+const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isEn?: boolean }[] = [
+  { site: "shahiid",      tag: "SH", name: "شاهيد أنمي",  desc: "عربي مدبلج / مترجم" },
+  { site: "animelek",     tag: "AL", name: "أنمي ليك",    desc: "عربي مدبلج / مترجم" },
+  { site: "animedar",     tag: "AD", name: "أنمي دار",    desc: "عربي مترجم"          },
+  { site: "okanime",      tag: "OK", name: "أوك أنمي",    desc: "عربي مترجم"          },
+  { site: "ristoanime",   tag: "RS", name: "ريستو أنمي",  desc: "عربي مترجم"          },
+  { site: "animeify",     tag: "MG", name: "أنمي فاي",    desc: "عربي · ميغا"         },
+  { site: "kawaii",       tag: "KW", name: "كواي أنمي",   desc: "1080p · مباشر"       },
+  { site: "anikoto",      tag: "AK", name: "AniKoto",      desc: "ياباني مترجم · 1080p" },
+  { site: "animepahe",    tag: "AP", name: "AnimePahe",    desc: "ياباني مترجم · HLS نظيف" },
+  { site: "animewitcher", tag: "AW", name: "AnimeWitcher", desc: "PD/ST · مباشر"       },
+  { site: "anineko",      tag: "AN", name: "AniNeko",      desc: "ياباني مترجم · HLS"  },
+  { site: "mitanime",     tag: "MT", name: "ميتا أنمي",   desc: "ياباني مترجم"        },
+  { site: "animeday",     tag: "DY", name: "أنمي داي",    desc: "عربي مدبلج · HLS مباشر" },
+  { site: "seepanel",     tag: "SP", name: "سي بانيل",    desc: "عربي مدبلج · HLS نظيف"  },
+  { site: "arabseed",     tag: "AS", name: "عرب سيد",      desc: "عربي مدبلج/مترجم · MP4" },
+  { site: "animephoenix", tag: "PH", name: "فينكس أنمي",  desc: "1080p · MKV مباشر"   },
+  { site: "starcima_anim",tag: "SC", name: "StarCima",     desc: "TMDB · HLS · صوت ياباني" },
+  { site: "videasy_anim", tag: "VE", name: "Videasy",      desc: "TMDB · ترجمة عربية", isEn: true },
+  { site: "vidlink_anim", tag: "VL", name: "VidLink",      desc: "TMDB · ترجمة عربية", isEn: true },
+  { site: "lordflix_anim",tag: "LF", name: "LordFlix",     desc: "TMDB · ترجمة عربية", isEn: true },
+  { site: "vyla_anim",    tag: "VY", name: "Vyla",         desc: "TMDB · HLS · ترجمة", isEn: true },
 ];
+
+const STATUS_MAP: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  RELEASING        : { label: "يُبث الآن",  color: "#34d399", bg: "rgba(52,211,153,0.12)",  border: "rgba(52,211,153,0.30)" },
+  FINISHED         : { label: "مكتمل",      color: "#60a5fa", bg: "rgba(96,165,250,0.12)",  border: "rgba(96,165,250,0.30)" },
+  NOT_YET_RELEASED : { label: "قريباً",     color: "#fbbf24", bg: "rgba(251,191,36,0.12)",  border: "rgba(251,191,36,0.30)" },
+  CANCELLED        : { label: "ملغى",       color: "#f87171", bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.30)" },
+  HIATUS           : { label: "متوقف",      color: "#fb923c", bg: "rgba(251,146,60,0.12)",  border: "rgba(251,146,60,0.30)" },
+};
+const FORMAT_MAP: Record<string, string> = { TV: "مسلسل", MOVIE: "فيلم", OVA: "OVA", ONA: "ONA", SPECIAL: "خاص" };
+const SEASON_MAP: Record<string, string> = { WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف" };
+const GENRE_MAP: Record<string, string> = {
+  "Action": "أكشن", "Adventure": "مغامرة", "Comedy": "كوميدي", "Drama": "دراما",
+  "Fantasy": "فانتازيا", "Horror": "رعب", "Mecha": "ميكا", "Mystery": "غموض",
+  "Psychological": "نفسي", "Romance": "رومانسي", "Sci-Fi": "خيال علمي",
+  "Slice of Life": "حياة يومية", "Sports": "رياضي", "Supernatural": "خوارق",
+  "Thriller": "إثارة", "Isekai": "إيسيكاي", "Military": "عسكري",
+  "School": "مدرسي", "Magic": "سحر", "Historical": "تاريخي",
+  "Shounen": "شونين", "Seinen": "سيينين", "Shoujo": "شوجو",
+};
 
 /* ── Quality helpers ── */
 function getSrcQualityTier(s: Src): Quality {
   const rank = s.qualityRank ?? 0;
-  const name = (s.label || s.server || s.quality || "").toLowerCase();
+  const name = (s.label || s.name || s.server || s.quality || "").toLowerCase();
   if (name.includes("1080") || name.includes("fhd")) return "1080p FHD";
   if (name.includes("720")  || name.includes("hd"))  return "720p HD";
   if (name.includes("360")  || name.includes("sd"))  return "360p SD";
@@ -68,43 +116,44 @@ function getSrcQualityTier(s: Src): Quality {
   if (rank >= 9)  return "720p HD";
   return "360p SD";
 }
-
 function shouldShowSrc(s: Src): boolean {
   const url = (s.directUrl || s.url || "").toLowerCase();
   if (url.includes("mp4upload")) return false;
   if (s.isEmbed) return false;
   return true;
 }
-
 function isEmbedFallback(s: Src): boolean {
   if (!s.isEmbed) return false;
   const url = (s.directUrl || s.url || "").toLowerCase();
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
-
 function getCdnDisplayName(url: string): string {
   const u = url.toLowerCase();
-  if (u.includes("workers.dev")) return "Phoenix CDN";
-  if (u.includes("filemoon")) return "FileMoon";
+  if (u.includes("workers.dev"))                        return "Phoenix CDN";
+  if (u.includes("filemoon"))                           return "FileMoon";
   if (u.includes("streamwish") || u.includes("wishembed")) return "StreamWish";
-  if (u.includes("vidhide")) return "VidHide";
-  if (u.includes("streamtape")) return "StreamTape";
-  if (u.includes("sendvid")) return "SendVid";
-  if (u.includes("vidmoly")) return "VidMoly";
-  if (u.includes("hls-proxy")) return "HLS بث";
-  if (u.includes("video-proxy")) return "مباشر MP4";
-  if (u.match(/\.(mp4|mkv|webm)([?#]|$)/i)) return "مباشر";
-  if (u.match(/\.m3u8([?#]|$)/i)) return "HLS";
+  if (u.includes("vidhide"))                            return "VidHide";
+  if (u.includes("streamtape"))                         return "StreamTape";
+  if (u.includes("sendvid"))                            return "SendVid";
+  if (u.includes("vidmoly"))                            return "VidMoly";
+  if (u.includes("hls-proxy"))                          return "HLS بث";
+  if (u.includes("video-proxy"))                        return "مباشر MP4";
+  if (u.match(/\.(mp4|mkv|webm)([?#]|$)/i))            return "مباشر";
+  if (u.match(/\.m3u8([?#]|$)/i))                      return "HLS";
   return "مصدر";
 }
 
-const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string; label: string }> = {
-  "1080p FHD": { dot: "#fbbf24", badge: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.26)", text: "rgba(253,224,71,0.95)", label: "جودة عالية جداً · FHD 1080" },
-  "720p HD":   { dot: "#34d399", badge: "rgba(52,211,153,0.09)", border: "rgba(52,211,153,0.24)", text: "rgba(110,231,183,0.92)", label: "جودة عالية · HD 720" },
-  "360p SD":   { dot: "#94a3b8", badge: "rgba(148,163,184,0.07)", border: "rgba(148,163,184,0.16)", text: "rgba(148,163,184,0.70)", label: "جودة متوسطة · SD 360" },
+const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string }> = {
+  "1080p FHD": { dot: "#fbbf24", badge: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.26)", text: "rgba(253,224,71,0.95)" },
+  "720p HD":   { dot: "#34d399", badge: "rgba(52,211,153,0.09)", border: "rgba(52,211,153,0.24)", text: "rgba(110,231,183,0.92)" },
+  "360p SD":   { dot: "#94a3b8", badge: "rgba(148,163,184,0.07)",border: "rgba(148,163,184,0.16)",text: "rgba(148,163,184,0.70)" },
+};
+const Q_LABEL: Record<Quality, string> = {
+  "1080p FHD": "جودة عالية جداً · FHD 1080",
+  "720p HD":   "جودة عالية · HD 720",
+  "360p SD":   "جودة متوسطة · SD 360",
 };
 const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
-
 const QUALITY_TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
 
 function normCdnHost(url: string): string {
@@ -137,18 +186,11 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
   const insets = useSafeAreaInsets();
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
-      {cover ? (
-        <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.15 }]} blurRadius={Platform.OS === "ios" ? 24 : 8} resizeMode="cover" />
-      ) : null}
-      <LinearGradient
-        colors={["rgba(7,7,13,0.85)", "rgba(7,7,13,0.5)", "rgba(7,7,13,0.92)"]}
-        style={StyleSheet.absoluteFill}
-      />
-      {/* Back */}
+      {cover ? <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.15 }]} blurRadius={Platform.OS === "ios" ? 24 : 8} resizeMode="cover" /> : null}
+      <LinearGradient colors={["rgba(7,7,13,0.85)", "rgba(7,7,13,0.5)", "rgba(7,7,13,0.92)"]} style={StyleSheet.absoluteFill} />
       <Pressable onPress={onBack} style={[d.ldBackBtn, { top: (Platform.OS === "ios" ? insets.top : 16) + 4 }]}>
         <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.6)" />
       </Pressable>
-      {/* Content */}
       <View style={d.ldContent}>
         <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
         {cover ? (
@@ -163,9 +205,7 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
         )}
         <View style={{ alignItems: "center", gap: 8 }}>
           {title ? <Text style={d.ldTitle} numberOfLines={2}>{title}</Text> : null}
-          <View style={d.ldEpBadge}>
-            <Text style={d.ldEpText}>الحلقة {ep}</Text>
-          </View>
+          <View style={d.ldEpBadge}><Text style={d.ldEpText}>الحلقة {ep}</Text></View>
         </View>
         <View style={{ alignItems: "center", gap: 12 }}>
           <SpinRing />
@@ -176,21 +216,29 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
   );
 }
 
-/* ── Source row ── */
-function SourceRow({ src, idx, globalIdx, onPlay }: { src: Src; idx: number; globalIdx: number; onPlay: (s: Src) => void }) {
+/* ── Source row (matches web design) ── */
+function SourceRow({ src, globalIdx, onPlay }: { src: Src; globalIdx: number; onPlay: (s: Src) => void }) {
   const url = src.directUrl || src.url || "";
   const def = SCRAPER_DEFS.find(d => d.site === src.site);
   const tag = def?.tag || "??";
   const cdn = getCdnDisplayName(url);
-  const q = getSrcQualityTier(src);
-  const qs = QUALITY_STYLE[q];
+  const q   = getSrcQualityTier(src);
+  const qs  = QUALITY_STYLE[q];
+
   return (
     <Pressable onPress={() => onPlay(src)} style={d.srcRow}>
+      {/* Left icon */}
       <View style={[d.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-        <Ionicons name={src.isEmbed ? "tv-outline" : "monitor-outline"} size={14} color={qs.text} />
+        <Ionicons
+          name={src.isEmbed ? "tv-outline" : "play-circle-outline"}
+          size={14}
+          color={qs.text}
+        />
       </View>
+
+      {/* Center info */}
       <View style={d.srcInfo}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 2 }}>
           <Text style={d.srcNum}>سيرفر {globalIdx + 1}</Text>
           <View style={d.srcTag}><Text style={d.srcTagText}>{tag}</Text></View>
           {def?.isEn && (
@@ -199,6 +247,8 @@ function SourceRow({ src, idx, globalIdx, onPlay }: { src: Src; idx: number; glo
         </View>
         <Text style={d.srcCdn}>{cdn}</Text>
       </View>
+
+      {/* Right: quality badge + play btn */}
       <View style={d.srcRight}>
         <View style={[d.srcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
           <Text style={[d.srcQText, { color: qs.text }]}>{Q_SHORT[q]}</Text>
@@ -222,60 +272,54 @@ export default function WatchScreen() {
   const { addToHistory } = useApp();
   const topPad = Platform.OS === "ios" ? insets.top : 16;
 
-  const [screen, setScreen]     = useState<Screen>("loading");
-  const [sources, setSources]   = useState<Src[]>([]);
-  const [loading, setLoading]   = useState(true);
+  const [screen, setScreen]       = useState<Screen>("loading");
+  const [sources, setSources]     = useState<Src[]>([]);
+  const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<Src | null>(null);
-  const [cover, setCover]       = useState<string>("");
+  const [cover, setCover]         = useState("");
   const [resumeTime, setResumeTime] = useState(0);
-  const abortRef = useRef<AbortController | null>(null);
-  const autoSelectedRef = useRef(false);
-  const lastSaveTs = useRef(0);
-  const lastTimeRef = useRef(0);
+  const [aniInfo, setAniInfo]     = useState<AniInfo | null>(null);
+  const [synopsisExpanded, setSynopsisExpanded] = useState(false);
 
-  const epNum = parseInt(ep || "1");
-  const titleStr = decodeURIComponent(title || "");
+  const abortRef        = useRef<AbortController | null>(null);
+  const autoSelectedRef = useRef(false);
+  const lastTimeRef     = useRef(0);
+
+  const epNum      = parseInt(ep || "1");
+  const titleStr   = decodeURIComponent(title || "");
   const englishStr = decodeURIComponent(english || "");
   const displayTitle = englishStr || titleStr;
+  const progressKey  = `wp-${anime}-${epNum}`;
 
-  /* Progress key */
-  const progressKey = `wp-${anime}-${epNum}`;
-
-  /* Load cover + resume time */
+  /* Load cover + resume + AniList */
   useEffect(() => {
-    if (anime) {
-      setCover(`https://img.anili.st/media/${anime}`);
-      AsyncStorage.getItem(progressKey).then(v => { if (v) setResumeTime(parseFloat(v) || 0); });
-    }
+    if (!anime) return;
+    const id = parseInt(anime);
+    setCover(`https://img.anili.st/media/${id}`);
+    AsyncStorage.getItem(progressKey).then(v => { if (v) setResumeTime(parseFloat(v) || 0); });
+    fetchAniInfo(id).then(info => { if (info) setAniInfo(info); });
   }, [anime, progressKey]);
 
   /* ── SSE fetch ── */
   const fetchSources = useCallback(async () => {
     if (!anime || !ep) return;
-    setLoading(true);
-    setSources([]);
-    setScreen("loading");
+    setLoading(true); setSources([]); setScreen("loading");
     autoSelectedRef.current = false;
-
     abortRef.current?.abort();
     abortRef.current = new AbortController();
-
     const base = getBaseUrl();
-    const url = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}`;
-
+    const url  = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}`;
     try {
       const response = await secureStreamFetch(url, { signal: abortRef.current.signal });
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
+      const reader   = response.body!.getReader();
+      const decoder  = new TextDecoder();
+      let buffer     = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
@@ -286,33 +330,19 @@ export default function WatchScreen() {
                 const key = src.directUrl || src.url;
                 if (prev.find(s => (s.directUrl || s.url) === key)) return prev;
                 const next = [...prev, src];
-                /* Auto-play: pick best direct source */
                 if (!autoSelectedRef.current && shouldShowSrc(src)) {
                   autoSelectedRef.current = true;
-                  /* Schedule setScreen on next tick to avoid state in reducer */
-                  setTimeout(() => {
-                    setPlayingSrc(src);
-                    setScreen("native");
-                  }, 0);
+                  setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
                 } else if (!autoSelectedRef.current && isEmbedFallback(src)) {
                   autoSelectedRef.current = true;
-                  setTimeout(() => {
-                    setPlayingSrc(src);
-                    setScreen("embed");
-                  }, 0);
+                  setTimeout(() => { setPlayingSrc(src); setScreen("embed"); }, 0);
                 }
-                /* Always show picker too — even if auto-playing, user can switch */
                 if (next.length === 1) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 return next;
               });
             } else if (data.type === "done") {
               setLoading(false);
-              setSources(prev => {
-                if (prev.length === 0) {
-                  setTimeout(() => setScreen("picker"), 0);
-                }
-                return prev;
-              });
+              setSources(prev => { if (prev.length === 0) setTimeout(() => setScreen("picker"), 0); return prev; });
             } else if (data.type === "error") {
               setLoading(false);
             }
@@ -321,32 +351,22 @@ export default function WatchScreen() {
       }
     } catch (e: any) {
       if (e?.name !== "AbortError") setLoading(false);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, [anime, ep, titleStr, englishStr]);
 
-  useEffect(() => {
-    fetchSources();
-    return () => abortRef.current?.abort();
-  }, [fetchSources]);
+  useEffect(() => { fetchSources(); return () => abortRef.current?.abort(); }, [fetchSources]);
 
-  /* Add to history when playing */
+  /* History */
   useEffect(() => {
     if (playingSrc && anime) {
-      addToHistory({
-        animeId: parseInt(anime), ep: epNum,
-        title: titleStr, english: englishStr,
-        thumbnail: cover, updatedAt: Date.now(),
-      });
+      addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: cover, updatedAt: Date.now() });
     }
   }, [playingSrc]);
 
-  /* ── Source grouping ── */
+  /* Source grouping */
   const { directSrcs, embedSrcs } = useMemo(() => {
     const seen = new Set<string>();
-    const direct: Src[] = [];
-    const embeds: Src[] = [];
+    const direct: Src[] = [], embeds: Src[] = [];
     for (const s of sources) {
       const key = s.directUrl || s.url || "";
       if (seen.has(normCdnHost(key))) continue;
@@ -355,8 +375,7 @@ export default function WatchScreen() {
       else if (isEmbedFallback(s)) embeds.push(s);
     }
     direct.sort((a, b) => {
-      const ta = QUALITY_TIER_RANK[getSrcQualityTier(a)];
-      const tb = QUALITY_TIER_RANK[getSrcQualityTier(b)];
+      const ta = QUALITY_TIER_RANK[getSrcQualityTier(a)], tb = QUALITY_TIER_RANK[getSrcQualityTier(b)];
       if (ta !== tb) return tb - ta;
       return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
     });
@@ -369,122 +388,89 @@ export default function WatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQualityTier(s) === "360p SD"),
   }), [directSrcs]);
 
-  /* ── Save progress ── */
+  /* Save progress */
   const saveProgress = useCallback(async () => {
     const t = lastTimeRef.current;
-    if (t > 10) {
-      await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
-    }
+    if (t > 10) await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
   }, [progressKey]);
 
-  /* ── Navigate episode ── */
+  /* Navigate episode */
   function goEp(n: number) {
     saveProgress();
     router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}`);
   }
 
-  /* ── Player ── */
+  /* Player */
   const playUrl = (playingSrc?.directUrl || playingSrc?.url) ?? "";
-  const player = useVideoPlayer(
+  const player  = useVideoPlayer(
     screen === "native" && playUrl ? playUrl : null,
     (p) => {
       p.loop = false;
-      if (resumeTime > 0) {
-        try { (p as any).currentTime = resumeTime; } catch {}
-      }
+      if (resumeTime > 0) { try { (p as any).currentTime = resumeTime; } catch {} }
       p.play();
     }
   );
 
-  /* ── EpNav shared ── */
+  /* Episode nav pill */
   const EpNav = (
     <View style={d.epNav}>
-      <Pressable onPress={() => epNum > 1 && goEp(epNum - 1)}
-        style={[d.epNavBtn, epNum <= 1 && { opacity: 0.25 }]} disabled={epNum <= 1}>
-        <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.65)" />
+      <Pressable
+        onPress={() => epNum > 1 && goEp(epNum - 1)}
+        style={[d.epNavBtn, epNum <= 1 && { opacity: 0.25 }]}
+        disabled={epNum <= 1}
+      >
+        <Ionicons name="chevron-forward" size={13} color="rgba(255,255,255,0.65)" />
         <Text style={d.epNavText}>السابقة</Text>
       </Pressable>
-      <View style={d.epBadge}>
-        <Text style={d.epBadgeText}>الحلقة {epNum}</Text>
-      </View>
+      <View style={d.epBadge}><Text style={d.epBadgeText}>الحلقة {epNum}</Text></View>
       <Pressable onPress={() => goEp(epNum + 1)} style={d.epNavBtn}>
-        <Text style={d.epNavText}>التالية</Text>
-        <Ionicons name="chevron-back" size={14} color="rgba(196,181,253,0.92)" />
+        <Text style={[d.epNavText, { color: "rgba(196,181,253,0.92)" }]}>التالية</Text>
+        <Ionicons name="chevron-back" size={13} color="rgba(196,181,253,0.92)" />
       </Pressable>
     </View>
   );
 
-  /* ══════════════════ SCREENS ══════════════════ */
+  /* ══ LOADING ══ */
+  if (screen === "loading") return <LoadingScreen cover={cover} title={displayTitle} ep={epNum} onBack={() => router.back()} />;
 
-  /* Loading */
-  if (screen === "loading") {
-    return (
-      <LoadingScreen
-        cover={cover} title={displayTitle} ep={epNum}
-        onBack={() => router.back()}
-      />
-    );
-  }
-
-  /* Native player */
-  if (screen === "native" && playingSrc) {
-    return (
-      <View style={{ flex: 1, backgroundColor: "#000" }}>
-        <VideoView
-          player={player}
-          style={{ flex: 1 }}
-          allowsFullscreen
-          allowsPictureInPicture
-          contentFit="contain"
-          nativeControls
-        />
-        {/* Top overlay */}
-        <LinearGradient
-          colors={["rgba(0,0,0,0.85)", "transparent"]}
-          style={[d.playerTopGrad, { paddingTop: topPad + 4 }]}
-          pointerEvents="box-none"
-        >
-          <View style={d.playerTopRow}>
-            <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.playerBackBtn}>
-              <Ionicons name="arrow-back" size={18} color="#fff" />
-            </Pressable>
-            <View style={{ flex: 1 }}>
-              <Text style={d.playerTitle} numberOfLines={1}>{displayTitle}</Text>
-              <Text style={d.playerEp}>الحلقة {epNum}</Text>
-            </View>
-            <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.srcSwitchBtn}>
-              <Ionicons name="layers-outline" size={16} color="#fff" />
-              <Text style={d.srcSwitchText}>السيرفرات</Text>
-            </Pressable>
+  /* ══ NATIVE PLAYER ══ */
+  if (screen === "native" && playingSrc) return (
+    <View style={{ flex: 1, backgroundColor: "#000" }}>
+      <VideoView player={player} style={{ flex: 1 }} allowsFullscreen allowsPictureInPicture contentFit="contain" nativeControls />
+      {/* Top gradient overlay */}
+      <LinearGradient colors={["rgba(0,0,0,0.88)", "rgba(0,0,0,0.0)"]} style={[d.playerTopGrad, { paddingTop: topPad + 4 }]} pointerEvents="box-none">
+        <View style={d.playerTopRow}>
+          <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.playerBackBtn}>
+            <Ionicons name="arrow-back" size={18} color="#fff" />
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={d.playerTitle} numberOfLines={1}>{displayTitle}</Text>
+            <Text style={d.playerEp}>الحلقة {epNum}</Text>
           </View>
-        </LinearGradient>
-        {/* Bottom ep nav */}
-        <LinearGradient
-          colors={["transparent", "rgba(0,0,0,0.85)"]}
-          style={d.playerBottomGrad}
-          pointerEvents="box-none"
-        >
-          {EpNav}
-        </LinearGradient>
-      </View>
-    );
-  }
+          <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.srcSwitchBtn}>
+            <Ionicons name="layers-outline" size={16} color="#fff" />
+            <Text style={d.srcSwitchText}>السيرفرات</Text>
+          </Pressable>
+        </View>
+      </LinearGradient>
+      {/* Bottom gradient overlay */}
+      <LinearGradient colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.85)"]} style={d.playerBottomGrad} pointerEvents="box-none">
+        {EpNav}
+      </LinearGradient>
+    </View>
+  );
 
-  /* Embed player */
+  /* ══ EMBED PLAYER ══ */
   if (screen === "embed" && playingSrc) {
     const embedUrl = playingSrc.directUrl || playingSrc.url || "";
     return (
       <View style={{ flex: 1, backgroundColor: "#000" }}>
         <WebView
-          source={{ uri: embedUrl }}
-          style={{ flex: 1 }}
-          allowsFullscreenVideo
-          allowsInlineMediaPlayback
+          source={{ uri: embedUrl }} style={{ flex: 1 }}
+          allowsFullscreenVideo allowsInlineMediaPlayback
           mediaPlaybackRequiresUserAction={false}
-          javaScriptEnabled
-          domStorageEnabled
+          javaScriptEnabled domStorageEnabled
         />
-        {/* Top overlay */}
         <View style={[d.embedTopRow, { paddingTop: topPad + 4 }]}>
           <Pressable onPress={() => setScreen("picker")} style={d.playerBackBtn}>
             <Ionicons name="arrow-back" size={18} color="#fff" />
@@ -498,31 +484,44 @@ export default function WatchScreen() {
     );
   }
 
-  /* ══ Source Picker ══ */
-  const hasSrcs = directSrcs.length > 0;
+  /* ══ SOURCE PICKER ══ */
+  const hasSrcs   = directSrcs.length > 0;
   const hasEmbeds = embedSrcs.length > 0;
 
   function handlePlaySrc(src: Src) {
     setPlayingSrc(src);
-    if (src.isEmbed || (!src.directUrl && !src.url?.match(/\.(m3u8|mp4|mkv|webm)/i) && src.url?.startsWith("https://"))) {
+    const url = src.directUrl || src.url || "";
+    if (src.isEmbed || (!src.directUrl && !url.match(/\.(m3u8|mp4|mkv|webm)/i) && url.startsWith("https://"))) {
       setScreen("embed");
     } else {
       setScreen("native");
     }
   }
 
+  /* Synopsis processed */
+  const synopsis = useMemo(() => {
+    const raw = aniInfo?.description || "";
+    return raw.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
+      .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+      .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
+      .replace(/\s+/g," ").trim();
+  }, [aniInfo?.description]);
+
+  const animeScore  = aniInfo?.averageScore ? (aniInfo.averageScore / 10) : 0;
+  const genres      = aniInfo?.genres?.slice(0, 6) || [];
+  const animeStudio = aniInfo?.studios?.nodes?.[0]?.name || "";
+  const animeSeason = aniInfo?.seasonYear ? `${SEASON_MAP[aniInfo.season || ""] || ""} ${aniInfo.seasonYear}`.trim() : "";
+  const statusInfo  = aniInfo?.status ? STATUS_MAP[aniInfo.status] : null;
+
   let globalIdx = 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
-      {/* Banner background */}
-      {cover ? (
-        <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.08 }]} blurRadius={Platform.OS === "ios" ? 20 : 6} resizeMode="cover" />
-      ) : null}
+      {cover ? <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.07 }]} blurRadius={Platform.OS === "ios" ? 20 : 6} resizeMode="cover" /> : null}
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
 
-        {/* ── Top bar ── */}
+        {/* ── Top bar: back + episode nav ── */}
         <View style={[d.pickerTop, { paddingTop: topPad + 4 }]}>
           <Pressable onPress={() => router.back()} style={d.pickerBackBtn}>
             <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.7)" />
@@ -530,25 +529,111 @@ export default function WatchScreen() {
           {EpNav}
         </View>
 
-        {/* ── Anime mini-card ── */}
-        <View style={d.animeCard}>
-          {cover ? (
-            <Image source={{ uri: cover }} style={d.animeCardCover} resizeMode="cover" />
-          ) : null}
-          <View style={d.animeCardBody}>
-            <Text style={d.animeCardGlow} />
-            <Text style={d.animeCardTitle} numberOfLines={2}>{displayTitle}</Text>
-            {titleStr && titleStr !== displayTitle ? (
-              <Text style={d.animeCardAr} numberOfLines={1}>{titleStr}</Text>
-            ) : null}
-            <View style={d.animeCardEpBadge}>
-              <Text style={d.animeCardEpText}>الحلقة {epNum}</Text>
+        {/* ── Small poster + title row (like web) ── */}
+        <View style={d.heroRow}>
+          <View style={d.heroPosterWrap}>
+            <View style={d.heroPosterGlow} />
+            <View style={d.heroPosterFrame}>
+              {cover ? (
+                <Image source={{ uri: cover }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+              ) : (
+                <View style={{ flex: 1, backgroundColor: "rgba(255,255,255,0.05)", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="play" size={24} color="rgba(255,255,255,0.2)" />
+                </View>
+              )}
             </View>
-            {resumeTime > 10 ? (
-              <Text style={d.resumeHint}>▶ استئناف من {Math.floor(resumeTime / 60)}:{String(Math.floor(resumeTime % 60)).padStart(2,"0")}</Text>
+            {aniInfo?.format && FORMAT_MAP[aniInfo.format] && (
+              <View style={d.heroPosterFormatBadge}>
+                <Text style={d.heroPosterFormatText}>{FORMAT_MAP[aniInfo.format]}</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={d.heroMeta}>
+            <Text style={d.heroTitle} numberOfLines={2}>{displayTitle}</Text>
+            {aniInfo?.title?.native || aniInfo?.title?.romaji ? (
+              <Text style={d.heroNative} numberOfLines={1}>{aniInfo.title.native || aniInfo.title.romaji}</Text>
             ) : null}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              <View style={d.epChip}><Text style={d.epChipText}>الحلقة {epNum}</Text></View>
+              {statusInfo && (
+                <View style={[d.statusChip, { backgroundColor: statusInfo.bg, borderColor: statusInfo.border }]}>
+                  <Text style={[d.statusChipText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
+                </View>
+              )}
+            </View>
           </View>
         </View>
+
+        {/* ── Score row ── */}
+        {animeScore > 0 && (
+          <View style={d.scoreRow}>
+            <View style={{ flexDirection: "row", gap: 2, alignItems: "center" }}>
+              {[1,2,3,4,5].map(i => (
+                <Ionicons key={i} name={animeScore/2 >= i ? "star" : "star-outline"} size={14} color={animeScore/2 >= i ? "#fbbf24" : "rgba(255,255,255,0.15)"} />
+              ))}
+            </View>
+            <Text style={d.scoreVal}>{animeScore.toFixed(1)}</Text>
+            <Text style={d.scoreSub}>/ 10</Text>
+          </View>
+        )}
+
+        {/* ── Genre tags ── */}
+        {genres.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={d.genresRow} style={{ marginTop: 12 }}>
+            {genres.map(g => (
+              <View key={g} style={d.genreTag}>
+                <Text style={d.genreText}>{GENRE_MAP[g] || g}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* ── Studio / Season row ── */}
+        {(animeStudio || animeSeason) && (
+          <View style={d.metaRow}>
+            {animeStudio && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name="sparkles-outline" size={12} color="rgba(255,255,255,0.35)" />
+                <Text style={d.metaText}>{animeStudio}</Text>
+              </View>
+            )}
+            {animeSeason && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name="calendar-outline" size={12} color="rgba(255,255,255,0.35)" />
+                <Text style={d.metaText}>{animeSeason}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Synopsis ── */}
+        {synopsis.length > 0 && (
+          <View style={d.synopsisWrap}>
+            <View style={d.synopsisHeader}>
+              <View style={d.synopsisBar} />
+              <Text style={d.synopsisTitle}>القصة</Text>
+            </View>
+            <View style={d.synopsisCard}>
+              <Text style={d.synopsisText} numberOfLines={synopsisExpanded ? undefined : 4}>
+                {synopsis}
+              </Text>
+              {synopsis.length > 200 && (
+                <Pressable onPress={() => setSynopsisExpanded(!synopsisExpanded)} style={{ marginTop: 6 }}>
+                  <Text style={d.synopsisToggle}>{synopsisExpanded ? "أقل ▲" : "المزيد ▼"}</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* ── Resume hint ── */}
+        {resumeTime > 10 && (
+          <View style={d.resumeBanner}>
+            <Ionicons name="play-circle-outline" size={16} color="rgba(196,181,253,0.8)" />
+            <Text style={d.resumeText}>▶ استئناف من {Math.floor(resumeTime / 60)}:{String(Math.floor(resumeTime % 60)).padStart(2,"0")}</Text>
+          </View>
+        )}
 
         {/* ── Sources header ── */}
         <View style={d.srcHeader}>
@@ -570,11 +655,14 @@ export default function WatchScreen() {
         {(hasSrcs || hasEmbeds) && (
           <View style={d.warnBanner}>
             <Text style={{ fontSize: 13 }}>⚠️</Text>
-            <Text style={d.warnBannerText}><Text style={{ color: "rgba(253,224,71,0.8)", fontFamily: "Cairo_800ExtraBold" }}>السيرفر لا يعمل؟</Text> جرّب سيرفراً آخر.</Text>
+            <Text style={d.warnBannerText}>
+              <Text style={{ color: "rgba(253,224,71,0.8)", fontFamily: "Cairo_800ExtraBold" }}>السيرفر لا يعمل؟</Text>
+              {" "}جرّب سيرفراً آخر.
+            </Text>
           </View>
         )}
 
-        {/* ── Main sources grouped by quality ── */}
+        {/* ── Quality-grouped sources ── */}
         {hasSrcs ? (
           (["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
             const srcs = grouped[q];
@@ -584,17 +672,16 @@ export default function WatchScreen() {
             globalIdx += srcs.length;
             return (
               <View key={q}>
-                {/* Quality section header */}
                 <View style={d.qHeader}>
                   <View style={[d.qDot, { backgroundColor: qs.dot, shadowColor: qs.dot, shadowOpacity: 0.7, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } }]} />
-                  <Text style={[d.qLabel, { color: qs.text }]}>{qs.label}</Text>
+                  <Text style={[d.qLabel, { color: qs.text }]}>{Q_LABEL[q]}</Text>
                   <View style={[d.qCountBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
                     <Text style={[d.qCountText, { color: qs.text }]}>{srcs.length}</Text>
                   </View>
                 </View>
                 <View style={d.srcSection}>
                   {srcs.map((src, i) => (
-                    <SourceRow key={`${src.site}-${i}`} src={src} idx={i} globalIdx={sectionStart + i} onPlay={handlePlaySrc} />
+                    <SourceRow key={`${src.site}-${i}`} src={src} globalIdx={sectionStart + i} onPlay={handlePlaySrc} />
                   ))}
                 </View>
               </View>
@@ -633,7 +720,7 @@ export default function WatchScreen() {
             </View>
             <View style={d.srcSection}>
               {embedSrcs.map((src, i) => (
-                <SourceRow key={`embed-${i}`} src={src} idx={i} globalIdx={globalIdx + i} onPlay={handlePlaySrc} />
+                <SourceRow key={`embed-${i}`} src={src} globalIdx={globalIdx + i} onPlay={handlePlaySrc} />
               ))}
             </View>
           </View>
@@ -656,70 +743,123 @@ const d = StyleSheet.create({
   ldEpBadge: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: "rgba(124,58,237,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
   ldEpText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.9)" },
   ldHint: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)", textAlign: "center", lineHeight: 22, paddingHorizontal: 8 },
-  /* Native player */
-  playerTopGrad: { position: "absolute", top: 0, left: 0, right: 0, paddingBottom: 40, zIndex: 10 },
+
+  /* Native player overlays */
+  playerTopGrad: { position: "absolute", top: 0, left: 0, right: 0, paddingBottom: 48, zIndex: 10 },
   playerTopRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, gap: 10 },
   playerBackBtn: { width: 36, height: 36, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
   playerTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#fff" },
   playerEp: { fontSize: 10, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular" },
   srcSwitchBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   srcSwitchText: { fontSize: 10, color: "#fff", fontFamily: "Cairo_700Bold" },
-  playerBottomGrad: { position: "absolute", bottom: 0, left: 0, right: 0, paddingTop: 40, zIndex: 10 },
-  /* Embed player */
+  playerBottomGrad: { position: "absolute", bottom: 0, left: 0, right: 0, paddingTop: 48, zIndex: 10 },
+
+  /* Embed player top bar */
   embedTopRow: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
+
+  /* Picker top bar */
+  pickerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
+  pickerBackBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+
   /* Episode nav */
-  epNav: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
-  epNavBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
+  epNav: { flexDirection: "row", alignItems: "center", gap: 8 },
+  epNavBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
   epNavText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
-  epBadge: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: "rgba(109,40,217,0.55)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.38)" },
+  epBadge: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 12, backgroundColor: "rgba(109,40,217,0.55)", borderWidth: 1, borderColor: "rgba(139,92,246,0.38)" },
   epBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.92)" },
-  /* Picker */
-  pickerTop: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 8, gap: 6 },
-  pickerBackBtn: { width: 36, height: 36, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
-  animeCard: { flexDirection: "row", marginHorizontal: 16, marginBottom: 16, gap: 14, alignItems: "center" },
-  animeCardCover: { width: 64, height: 90, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
-  animeCardBody: { flex: 1, gap: 6 },
-  animeCardGlow: {},
-  animeCardTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 22 },
-  animeCardAr: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  animeCardEpBadge: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 3, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
-  animeCardEpText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.9)" },
-  resumeHint: { fontSize: 9, color: "rgba(52,211,153,0.7)", fontFamily: "Cairo_700Bold" },
-  srcHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 8 },
-  srcHeaderBar: { width: 4, height: 16, backgroundColor: "#8B5CF6", borderRadius: 2 },
-  srcHeaderTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  srcCountBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: "rgba(52,211,153,0.12)", borderWidth: 1, borderColor: "rgba(52,211,153,0.26)" },
-  srcCountText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(110,231,183,0.82)" },
-  warnBanner: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 12, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(251,191,36,0.07)", borderWidth: 1, borderColor: "rgba(251,191,36,0.15)" },
-  warnBannerText: { flex: 1, fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(253,224,71,0.55)", lineHeight: 16 },
-  qHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6 },
-  qDot: { width: 7, height: 7, borderRadius: 4 },
-  qLabel: { flex: 1, fontSize: 10, fontFamily: "Cairo_700Bold" },
-  qCountBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
-  qCountText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold" },
-  srcSection: { marginHorizontal: 12, borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)", backgroundColor: "rgba(255,255,255,0.015)" },
-  srcRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 12, gap: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
-  srcIcon: { width: 34, height: 34, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1 },
-  srcInfo: { flex: 1, gap: 3 },
-  srcNum: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
-  srcTag: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
-  srcTagText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.8)", fontStyle: "normal" },
-  srcEnBadge: { paddingHorizontal: 5, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(59,130,246,0.14)", borderWidth: 1, borderColor: "rgba(59,130,246,0.3)" },
-  srcEnText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(147,197,253,0.9)" },
-  srcCdn: { fontSize: 9, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
-  srcRight: { flexDirection: "row", alignItems: "center", gap: 6 },
-  srcQBadge: { paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, borderWidth: 1 },
-  srcQText: { fontSize: 8, fontFamily: "Cairo_800ExtraBold" },
-  srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: "#7C3AED", borderWidth: 1, borderColor: "rgba(167,139,250,0.25)" },
-  srcPlayText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  noSrcs: { alignItems: "center", paddingVertical: 40, gap: 12, paddingHorizontal: 24 },
-  noSrcsIcon: { width: 56, height: 56, borderRadius: 20, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.18)", alignItems: "center", justifyContent: "center" },
-  noSrcsTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.7)" },
-  noSrcsHint: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.28)", textAlign: "center", lineHeight: 20 },
-  retryBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 14, backgroundColor: "rgba(124,58,237,0.18)", borderWidth: 1, borderColor: "rgba(124,58,237,0.3)" },
-  retryText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.9)" },
-  fetchingMsg: { alignItems: "center", paddingVertical: 24 },
-  fetchingText: { fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)" },
-  embedNote: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: "rgba(99,102,241,0.07)", borderWidth: 1, borderColor: "rgba(99,102,241,0.18)" },
-  embedNoteText: { flex: 1, fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(165,180,252,0.6)", lineHeight: 16 },
+
+  /* Hero section (poster + meta) */
+  heroRow: { flexDirection: "row", alignItems: "flex-start", gap: 16, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
+  heroPosterWrap: { position: "relative", alignItems: "center" },
+  heroPosterGlow: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18, backgroundColor: "rgba(139,92,246,0.22)", transform: [{ scale: 0.95 }, { translateY: 8 }] },
+  heroPosterFrame: { width: 72, height: 102, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
+  heroPosterFormatBadge: { position: "absolute", bottom: -10, alignSelf: "center", backgroundColor: "#1C1C22", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  heroPosterFormatText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.6)" },
+  heroMeta: { flex: 1, paddingBottom: 8 },
+  heroTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 26 },
+  heroNative: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 },
+  epChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.32)" },
+  epChipText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.92)" },
+  statusChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1 },
+  statusChipText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold" },
+
+  /* Score */
+  scoreRow: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "rgba(251,191,36,0.06)", borderWidth: 1, borderColor: "rgba(251,191,36,0.16)" },
+  scoreVal: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" },
+  scoreSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" },
+
+  /* Genres */
+  genresRow: { paddingHorizontal: 16, gap: 8 },
+  genreTag: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  genreText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)" },
+
+  /* Studio/season */
+  metaRow: { flexDirection: "row", gap: 16, paddingHorizontal: 16, marginTop: 10, flexWrap: "wrap" },
+  metaText: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)" },
+
+  /* Synopsis */
+  synopsisWrap: { marginTop: 16, paddingHorizontal: 16 },
+  synopsisHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  synopsisBar: { width: 4, height: 16, borderRadius: 2, backgroundColor: "#8B5CF6" },
+  synopsisTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  synopsisCard: { backgroundColor: "#111116", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  synopsisText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "#B4B4B8", lineHeight: 22, textAlign: "right" },
+  synopsisToggle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(139,92,246,0.8)", textAlign: "left" },
+
+  /* Resume */
+  resumeBanner: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 12, padding: 10, borderRadius: 12, backgroundColor: "rgba(124,58,237,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)" },
+  resumeText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.8)" },
+
+  /* Sources header */
+  srcHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 20, paddingBottom: 10 },
+  srcHeaderBar: { width: 3, height: 16, borderRadius: 2, backgroundColor: "#8B5CF6" },
+  srcHeaderTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.88)" },
+  srcCountBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
+  srcCountText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(167,139,250,0.8)" },
+
+  /* Warning banner */
+  warnBanner: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 12, padding: 10, borderRadius: 12, backgroundColor: "rgba(251,191,36,0.07)", borderWidth: 1, borderColor: "rgba(251,191,36,0.18)" },
+  warnBannerText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(253,224,71,0.65)", flex: 1 },
+
+  /* Quality section */
+  qHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
+  qDot: { width: 7, height: 7, borderRadius: 3.5 },
+  qLabel: { flex: 1, fontSize: 11, fontFamily: "Cairo_700Bold" },
+  qCountBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, borderWidth: 1 },
+  qCountText: { fontSize: 10, fontFamily: "Cairo_700Bold" },
+
+  /* Source section */
+  srcSection: { marginHorizontal: 16, borderRadius: 16, overflow: "hidden", backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 8 },
+
+  /* Source Row */
+  srcRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.04)" },
+  srcIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  srcInfo: { flex: 1, minWidth: 0 },
+  srcNum: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.90)" },
+  srcTag: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  srcTagText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.80)", fontVariant: ["tabular-nums"] },
+  srcEnBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(59,130,246,0.14)", borderWidth: 1, borderColor: "rgba(59,130,246,0.30)" },
+  srcEnText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(147,197,253,0.90)" },
+  srcCdn: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 },
+  srcRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  srcQBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
+  srcQText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold" },
+  srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(124,58,237,0.90)", borderWidth: 1, borderColor: "rgba(167,139,250,0.25)" },
+  srcPlayText: { fontSize: 10.5, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+
+  /* No sources */
+  noSrcs: { alignItems: "center", gap: 12, paddingVertical: 48, paddingHorizontal: 32 },
+  noSrcsIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.18)", alignItems: "center", justifyContent: "center" },
+  noSrcsTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.7)", textAlign: "center" },
+  noSrcsHint: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", textAlign: "center", lineHeight: 20 },
+  retryBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, backgroundColor: "rgba(124,58,237,0.25)", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
+  retryText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.9)" },
+
+  /* Fetching message */
+  fetchingMsg: { alignItems: "center", paddingVertical: 32 },
+  fetchingText: { fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)" },
+
+  /* Embed note */
+  embedNote: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 10, padding: 10, borderRadius: 12, backgroundColor: "rgba(99,102,241,0.08)", borderWidth: 1, borderColor: "rgba(99,102,241,0.20)" },
+  embedNoteText: { fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(199,210,254,0.65)", flex: 1 },
 });
