@@ -3,7 +3,7 @@
     "name": "Nova Anime",
     "slug": "nova-mobile",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "nova-mobile",
     "userInterfaceStyle": "dark",
@@ -17,7 +17,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.nova.anime",
-      "backgroundColor": "#09090B"
+      "backgroundColor": "#09090B",
+      "infoPlist": {
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -41,7 +48,8 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-video"
+      "expo-video",
+      "expo-screen-orientation"
     ],
     "experiments": {
       "typedRoutes": true,
