@@ -621,7 +621,6 @@ export function RiftPlayer({
   const SKIP_LEAD = 8;
   const inIntroRange = !!skipIntro && position >= Math.max(0, skipIntro.start - SKIP_LEAD) && position < skipIntro.end;
   const inOutroRange = !!skipOutro && position >= Math.max(0, skipOutro.start - SKIP_LEAD) && position <= skipOutro.end;
-  const hasSkipData  = !!(skipIntro || skipOutro);
 
   const doSkipIntro = useCallback(() => {
     if (skipIntro) seek(skipIntro.end);
@@ -866,41 +865,6 @@ export function RiftPlayer({
         </View>
       )}
 
-      {/* ── Skip Intro button (floating) ── */}
-      {!!skipIntro && !isLocked && !isEnded && !error && (
-        <Pressable
-          onPress={doSkipIntro}
-          style={[
-            s.skipBtn,
-            { backgroundColor: inIntroRange ? "rgba(250,204,21,0.95)" : "rgba(12,10,2,0.82)" },
-            { borderColor: inIntroRange ? "rgba(253,224,71,0.85)" : "rgba(250,204,21,0.55)" },
-          ]}
-        >
-          <Ionicons name="play-skip-forward" size={13} color={inIntroRange ? "#110d00" : "rgba(253,224,71,0.95)"} />
-          <Text style={[s.skipBtnText, { color: inIntroRange ? "#110d00" : "rgba(253,224,71,0.95)" }]}>
-            تخطي المقدمة
-          </Text>
-        </Pressable>
-      )}
-
-      {/* ── Skip Outro button (floating) ── */}
-      {!!skipOutro && !isLocked && !isEnded && !error && (
-        <Pressable
-          onPress={doSkipOutro}
-          style={[
-            s.skipOutroBtn,
-            { bottom: skipIntro ? 116 : 72 },
-            { backgroundColor: inOutroRange ? "rgba(167,139,250,0.95)" : "rgba(8,6,20,0.82)" },
-            { borderColor: inOutroRange ? "rgba(196,181,253,0.85)" : "rgba(167,139,250,0.55)" },
-          ]}
-        >
-          <Ionicons name="play-skip-forward" size={13} color={inOutroRange ? "#fff" : "rgba(196,181,253,0.95)"} />
-          <Text style={[s.skipBtnText, { color: inOutroRange ? "#fff" : "rgba(196,181,253,0.95)" }]}>
-            تخطي النهاية
-          </Text>
-        </Pressable>
-      )}
-
       {/* ── Skip Notification ── */}
       {skipNotif && (
         <View style={s.skipNotif} pointerEvents="none">
@@ -1104,27 +1068,6 @@ export function RiftPlayer({
             {/* Time row */}
             <View style={s.timeRow}>
               <Text style={s.timeText}>{fmtTime(position)}</Text>
-              {hasSkipData && (
-                <Pressable
-                  onPress={inIntroRange ? doSkipIntro : inOutroRange ? doSkipOutro
-                    : (skipIntro ? doSkipIntro : doSkipOutro)}
-                  style={[
-                    s.skipInlineBtn,
-                    (inIntroRange || inOutroRange) && s.skipInlineBtnActive,
-                  ]}
-                  hitSlop={8}
-                >
-                  <Ionicons name="play-skip-forward" size={11}
-                    color={(inIntroRange || inOutroRange) ? "#1a1200" : "rgba(253,224,71,0.70)"} />
-                  <Text style={[
-                    s.skipInlineBtnText,
-                    (inIntroRange || inOutroRange) && s.skipInlineBtnTextActive,
-                  ]}>
-                    {inIntroRange ? "تخطي المقدمة" : inOutroRange ? "تخطي النهاية"
-                      : skipIntro ? "تخطي المقدمة" : "تخطي النهاية"}
-                  </Text>
-                </Pressable>
-              )}
               <Text style={[s.timeText, { opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
@@ -1227,6 +1170,42 @@ export function RiftPlayer({
               </View>
             </View>
           </LinearGradient>
+
+          {/* ── Skip Intro button (inside controls, above seekbar) ── */}
+          {!!skipIntro && (
+            <Pressable
+              onPress={doSkipIntro}
+              style={[
+                s.skipBtn,
+                { bottom: insets.bottom + 130 },
+                { backgroundColor: inIntroRange ? "rgba(250,204,21,0.95)" : "rgba(12,10,2,0.82)" },
+                { borderColor: inIntroRange ? "rgba(253,224,71,0.85)" : "rgba(250,204,21,0.55)" },
+              ]}
+            >
+              <Ionicons name="play-skip-forward" size={13} color={inIntroRange ? "#110d00" : "rgba(253,224,71,0.95)"} />
+              <Text style={[s.skipBtnText, { color: inIntroRange ? "#110d00" : "rgba(253,224,71,0.95)" }]}>
+                تخطي المقدمة
+              </Text>
+            </Pressable>
+          )}
+
+          {/* ── Skip Outro button (inside controls, above intro button) ── */}
+          {!!skipOutro && (
+            <Pressable
+              onPress={doSkipOutro}
+              style={[
+                s.skipOutroBtn,
+                { bottom: skipIntro ? insets.bottom + 186 : insets.bottom + 130 },
+                { backgroundColor: inOutroRange ? "rgba(167,139,250,0.95)" : "rgba(8,6,20,0.82)" },
+                { borderColor: inOutroRange ? "rgba(196,181,253,0.85)" : "rgba(167,139,250,0.55)" },
+              ]}
+            >
+              <Ionicons name="play-skip-forward" size={13} color={inOutroRange ? "#fff" : "rgba(196,181,253,0.95)"} />
+              <Text style={[s.skipBtnText, { color: inOutroRange ? "#fff" : "rgba(196,181,253,0.95)" }]}>
+                تخطي النهاية
+              </Text>
+            </Pressable>
+          )}
         </Animated.View>
       )}
 
@@ -1677,7 +1656,7 @@ const s = StyleSheet.create({
   longPressBadgeText: { color: "rgba(253,224,71,0.90)", fontSize: 12, fontFamily: "Cairo_700Bold" },
 
   /* Skip buttons */
-  skipBtn: { position: "absolute", bottom: 72, right: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, borderWidth: 1.5, zIndex: 20 },
+  skipBtn: { position: "absolute", right: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, borderWidth: 1.5, zIndex: 20 },
   skipOutroBtn: { position: "absolute", right: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, borderWidth: 1.5, zIndex: 20 },
   skipBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold" },
 
@@ -1732,12 +1711,6 @@ const s = StyleSheet.create({
   bottomBar: { paddingHorizontal: 16, paddingTop: 28, gap: 8 },
   timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 },
   timeText: { color: "rgba(255,255,255,0.75)", fontSize: 11, fontFamily: "Cairo_400Regular", minWidth: 40, textAlign: "center" },
-
-  /* Skip inline */
-  skipInlineBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, backgroundColor: "rgba(250,204,21,0.10)", borderWidth: 1, borderColor: "rgba(250,204,21,0.22)" },
-  skipInlineBtnActive: { backgroundColor: "rgba(250,204,21,0.90)", borderColor: "rgba(253,224,71,0.75)" },
-  skipInlineBtnText: { color: "rgba(253,224,71,0.70)", fontSize: 11, fontFamily: "Cairo_700Bold" },
-  skipInlineBtnTextActive: { color: "#1a1200" },
 
   /* Progress bar */
   progressWrap: { height: 32, justifyContent: "center", position: "relative", marginHorizontal: 2 },
