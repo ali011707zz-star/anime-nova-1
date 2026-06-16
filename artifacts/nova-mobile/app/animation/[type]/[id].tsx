@@ -10,7 +10,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { CommentsSheet } from "@/components/CommentsSheet";
 
 const { width: W } = Dimensions.get("window");
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -60,7 +59,6 @@ export default function AnimationDetailScreen() {
   const [descAr, setDescAr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [showFull, setShowFull] = useState(false);
-  const [showComments, setShowComments] = useState(false);
   const [showTrailer, setShowTrailer] = useState(false);
 
   const saveKey = `anim-saved-${type}-${id}`;
@@ -279,7 +277,10 @@ export default function AnimationDetailScreen() {
             <Text style={s.actionLabel}>الحلقات</Text>
           </Pressable>
         )}
-        <Pressable onPress={() => setShowComments(true)} style={s.actionBtn}>
+        <Pressable
+          onPress={() => router.push(`/comments?tmdbId=${id}&title=${encodeURIComponent(title)}` as any)}
+          style={s.actionBtn}
+        >
           <Ionicons name="chatbubble" size={20} color="rgba(255,255,255,0.45)" />
           <Text style={s.actionLabel}>التعليقات</Text>
         </Pressable>
@@ -418,13 +419,6 @@ export default function AnimationDetailScreen() {
       </View>
     </Modal>
 
-    {/* ── Comments Sheet ── */}
-    <CommentsSheet
-      visible={showComments}
-      onClose={() => setShowComments(false)}
-      tmdbId={String(id)}
-      title={detail.original_title || detail.original_name || detail.title || detail.name}
-    />
   </View>
   );
 }

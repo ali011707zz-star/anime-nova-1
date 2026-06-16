@@ -29,7 +29,7 @@ export default function ScheduleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const topPad = Platform.OS === "web" ? 67 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
+  const topPad = Platform.OS === "web" ? 0 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
   const now = new Date();
   const todayDay = now.getDay();
