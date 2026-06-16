@@ -109,5 +109,8 @@ export async function secureStreamFetch(
     "User-Agent": APP_UA,
   };
   if (token) headers["X-App-Token"] = token;
-  return expoFetch(url, { ...options, headers }) as unknown as Response;
+  const { body: _body, signal: _signal, ...restOpts } = options;
+  const body = _body === null ? undefined : _body;
+  const signal = _signal === null ? undefined : _signal;
+  return expoFetch(url, { ...restOpts, body, signal, headers }) as unknown as Response;
 }

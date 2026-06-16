@@ -74,13 +74,13 @@ waitForPort = 8000
 name = "Nova Mobile"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm install && PORT=8099 BASE_PATH=/nova-mobile/ pnpm --filter @workspace/nova-mobile run dev"
-waitForPort = 8099
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm install && EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN PORT=8099 BASE_PATH=/nova-mobile/ pnpm --filter @workspace/nova-mobile run dev"
+waitForPort = 8099
 
 [agent]
 stack = "FLASK_VANILLA_JS"
@@ -118,10 +118,6 @@ externalPort = 3001
 [[ports]]
 localPort = 8099
 externalPort = 8099
-
-[[ports]]
-localPort = 23209
-externalPort = 3002
 
 [[ports]]
 localPort = 24968

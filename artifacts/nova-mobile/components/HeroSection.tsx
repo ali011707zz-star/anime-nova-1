@@ -138,5 +138,5 @@ const styles = StyleSheet.create({
   detailBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
   watchBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   dots: { position: "absolute", bottom: 12, left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 4 },
-  dot: { height: 6, borderRadius: 3, transition: "width 0.3s" as never },
+  dot: { height: 6, borderRadius: 3 },
 });

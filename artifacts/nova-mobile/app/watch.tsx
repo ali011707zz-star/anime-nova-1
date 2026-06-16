@@ -13,7 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureStreamFetch } from "@/utils/secureApi";
-import CommentsSheet from "@/components/CommentsSheet";
+import { CommentsSheet } from "@/components/CommentsSheet";
 
 const { width: W } = Dimensions.get("window");
 
@@ -263,6 +263,13 @@ function SourceRow({ src, globalIdx, onPlay }: { src: Src; globalIdx: number; on
   );
 }
 
+/* ── Resolve relative API URLs to absolute ── */
+function resolveUrl(url: string | undefined, base: string): string {
+  if (!url) return "";
+  if (url.startsWith("/")) return base + url;
+  return url;
+}
+
 /* ═══════════════════════════════════════ MAIN ═══ */
 export default function WatchScreen() {
   const { anime, ep, title, english } = useLocalSearchParams<{
@@ -327,7 +334,11 @@ export default function WatchScreen() {
           try {
             const data = JSON.parse(line.slice(6));
             if (data.type === "source" && (data.directUrl || data.url)) {
-              const src: Src = data;
+              const src: Src = {
+                ...data,
+                directUrl: resolveUrl(data.directUrl, base),
+                url: resolveUrl(data.url, base),
+              };
               setSources(prev => {
                 const key = src.directUrl || src.url;
                 if (prev.find(s => (s.directUrl || s.url) === key)) return prev;
