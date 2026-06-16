@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  View, Text, Pressable, Image, ScrollView,
+  View, Text, Pressable, Image, ScrollView, Modal,
   ActivityIndicator, StyleSheet, Platform, Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { WebView } from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { CommentsSheet } from "@/components/CommentsSheet";
 
 const { width: W } = Dimensions.get("window");
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -58,6 +60,8 @@ export default function AnimationDetailScreen() {
   const [descAr, setDescAr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [showFull, setShowFull] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [showTrailer, setShowTrailer] = useState(false);
 
   const saveKey = `anim-saved-${type}-${id}`;
 
@@ -144,7 +148,12 @@ export default function AnimationDetailScreen() {
   const studios = (detail.production_companies || []).slice(0, 2).map((c: any) => c.name).join(" · ");
   const isTV = type === "tv";
 
+  const trailerKey = (detail.videos?.results || []).find(
+    (v: any) => v.site === "YouTube" && (v.type === "Trailer" || v.type === "Teaser")
+  )?.key || null;
+
   return (
+  <View style={{ flex: 1, backgroundColor: "#09090B" }}>
     <ScrollView style={s.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
 
       {/* ── Hero Banner ── */}
@@ -270,6 +279,10 @@ export default function AnimationDetailScreen() {
             <Text style={s.actionLabel}>الحلقات</Text>
           </Pressable>
         )}
+        <Pressable onPress={() => setShowComments(true)} style={s.actionBtn}>
+          <Ionicons name="chatbubble-outline" size={20} color="rgba(255,255,255,0.45)" />
+          <Text style={s.actionLabel}>التعليقات</Text>
+        </Pressable>
       </View>
 
       {/* ── Overview ── */}
@@ -347,7 +360,66 @@ export default function AnimationDetailScreen() {
           </ScrollView>
         </View>
       )}
+
+      {/* ── Trailer section ── */}
+      {trailerKey ? (
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>الإعلان الدعائي</Text>
+          <Pressable onPress={() => setShowTrailer(true)} style={s.trailerBtn}>
+            <Image
+              source={{ uri: `https://img.youtube.com/vi/${trailerKey}/hqdefault.jpg` }}
+              style={s.trailerImg}
+            />
+            <LinearGradient colors={["transparent", "rgba(0,0,0,0.8)"]} style={StyleSheet.absoluteFill} />
+            <View style={s.trailerPlayWrap}>
+              <View style={s.trailerPlay}>
+                <Ionicons name="play" size={22} color="#fff" style={{ marginLeft: 2 }} />
+              </View>
+            </View>
+            <View style={s.trailerLabelWrap}>
+              <Text style={s.trailerLabelText}>العرض الدعائي</Text>
+            </View>
+          </Pressable>
+        </View>
+      ) : null}
     </ScrollView>
+
+    {/* ── Trailer Modal ── */}
+    <Modal visible={showTrailer} animationType="slide" onRequestClose={() => setShowTrailer(false)}>
+      <View style={{ flex: 1, backgroundColor: "#000" }}>
+        <View style={[s.trailerHeader, { paddingTop: insets.top + 4 }]}>
+          <Pressable onPress={() => setShowTrailer(false)} style={s.trailerClose}>
+            <Ionicons name="close" size={20} color="#fff" />
+          </Pressable>
+          <Text style={s.trailerHeaderText}>الإعلان الدعائي</Text>
+          <View style={{ width: 36 }} />
+        </View>
+        {trailerKey ? (
+          <WebView
+            source={{
+              uri: `https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1`,
+            }}
+            style={{ flex: 1 }}
+            allowsFullscreenVideo
+            allowsInlineMediaPlayback
+            mediaPlaybackRequiresUserAction={false}
+            javaScriptEnabled
+            domStorageEnabled
+            originWhitelist={["*"]}
+            userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+          />
+        ) : null}
+      </View>
+    </Modal>
+
+    {/* ── Comments Sheet ── */}
+    <CommentsSheet
+      visible={showComments}
+      onClose={() => setShowComments(false)}
+      tmdbId={String(id)}
+      title={detail.original_title || detail.original_name || detail.title || detail.name}
+    />
+  </View>
   );
 }
 
@@ -415,4 +487,14 @@ const s = StyleSheet.create({
   recScoreBadge: { position: "absolute", top: 5, left: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
   recScoreText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: "#fff" },
   recTitle: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.7)", lineHeight: 13, textAlign: "right" },
+
+  trailerBtn: { marginHorizontal: 16, borderRadius: 18, overflow: "hidden", aspectRatio: 16 / 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  trailerImg: { width: "100%", height: "100%" },
+  trailerPlayWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  trailerPlay: { width: 60, height: 60, borderRadius: 30, backgroundColor: "#DC2626", alignItems: "center", justifyContent: "center" },
+  trailerLabelWrap: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 12 },
+  trailerLabelText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  trailerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
+  trailerClose: { width: 36, height: 36, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  trailerHeaderText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 });
