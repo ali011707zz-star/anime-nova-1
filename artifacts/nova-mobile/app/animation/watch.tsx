@@ -290,7 +290,7 @@ export default function AnimationWatchScreen() {
     const direct: AnimSrc[] = [];
     const embeds: AnimSrc[] = [];
     for (const src of sources) {
-      const key = (src.proxyUrl || src.directUrl || src.url || "").split("?")[0];
+      const key = src.proxyUrl || src.directUrl || src.url || "";
       if (seen.has(key)) continue;
       seen.add(key);
       if (isDirectPlayable(src)) direct.push(src);

@@ -150,9 +150,6 @@ export default function HomeScreen() {
             </Text>
           </View>
           <View style={styles.headerRight}>
-            <Pressable onPress={() => router.push("/schedule")} style={styles.iconBtn}>
-              <Ionicons name="calendar" size={22} color={colors.mutedForeground} />
-            </Pressable>
             <Pressable onPress={() => setShowDrawer(true)} style={styles.iconBtn}>
               <Ionicons name="menu" size={26} color={colors.text} />
             </Pressable>
