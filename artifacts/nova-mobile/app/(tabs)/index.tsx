@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   Platform, Pressable, RefreshControl, ScrollView,
   StyleSheet, Text, View,
@@ -18,9 +18,83 @@ import {
   POPULAR_QUERY, TRENDING_QUERY,
   SEASONAL_QUERY, TOP_RATED_QUERY, MOVIES_QUERY, UPCOMING_QUERY,
   ACTION_QUERY, ROMANCE_QUERY, ISEKAI_QUERY, FANTASY_QUERY,
+  TODAY_EPISODES_QUERY,
   getCurrentSeason,
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
+
+const TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8";
+const ECCHI_BLOCKED = new Set(["Ecchi", "Hentai"]);
+
+type TodayEp = {
+  episode: number;
+  airingAt: number;
+  media: {
+    id: number;
+    title: { romaji: string; english?: string };
+    coverImage: { large: string };
+    averageScore?: number;
+    popularity?: number;
+    isAdult?: boolean;
+    genres?: string[];
+  };
+};
+
+type TmdbMovie = {
+  id: number;
+  title: string;
+  poster_path: string | null;
+  vote_average: number;
+};
+
+function TodayEpisodesRow({ items, colors, router }: { items: TodayEp[]; colors: any; router: any }) {
+  if (!items.length) return null;
+  return (
+    <View style={{ marginTop: 24 }}>
+      <View style={[styles.sectionHeader]}>
+        <View style={styles.sectionLeft}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#ef4444" }} />
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>أحدث الحلقات</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(239,68,68,0.12)", paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, borderWidth: 1, borderColor: "rgba(239,68,68,0.25)" }}>
+            <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: "#ef4444" }} />
+            <Text style={{ fontSize: 9, fontFamily: "Cairo_700Bold", color: "#ef4444" }}>LIVE</Text>
+          </View>
+        </View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+        {items.map((ep, idx) => {
+          const media = ep.media;
+          const title = media.title.english || media.title.romaji;
+          const cover = media.coverImage.large;
+          return (
+            <Pressable
+              key={`${media.id}-${ep.episode}-${idx}`}
+              onPress={() => router.push(`/watch?anime=${media.id}&ep=${ep.episode}&title=${encodeURIComponent(media.title.romaji)}&english=${encodeURIComponent(media.title.english || "")}`)}
+              style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <Image source={{ uri: cover }} style={todayStyles.img} contentFit="cover" />
+              <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                <View style={todayStyles.epBadge}>
+                  <Text style={todayStyles.epBadgeText}>حلقة {ep.episode}</Text>
+                </View>
+                <Text style={todayStyles.title} numberOfLines={2}>{title}</Text>
+              </LinearGradient>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+const todayStyles = StyleSheet.create({
+  card: { width: 110, height: 155, borderRadius: 12, overflow: "hidden", borderWidth: 1, position: "relative" },
+  img: { width: "100%", height: "100%" },
+  grad: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 8, paddingTop: 24, gap: 4 },
+  epBadge: { backgroundColor: "#ef4444", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, alignSelf: "flex-start" },
+  epBadgeText: { color: "#fff", fontSize: 9, fontFamily: "Cairo_800ExtraBold" },
+  title: { color: "#fff", fontSize: 9.5, fontFamily: "Cairo_600SemiBold", lineHeight: 14 },
+});
 
 const SEASON_AR: Record<string, string> = {
   WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
@@ -34,6 +108,38 @@ export default function HomeScreen() {
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const { season, year } = getCurrentSeason();
+
+  /* Today's airing episodes */
+  const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
+  useEffect(() => {
+    const now = Math.floor(Date.now() / 1000);
+    const gt  = now - 72 * 3600;
+    const lt  = now + 12 * 3600;
+    fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: TODAY_EPISODES_QUERY, variables: { gt, lt } }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        const arr: TodayEp[] = (d.data?.Page?.airingSchedules || []).filter(
+          (s: TodayEp) => !s.media?.isAdult && !(s.media?.genres || []).some((g: string) => ECCHI_BLOCKED.has(g))
+        );
+        const seen = new Set<number>();
+        const unique = arr.filter(s => { if (seen.has(s.media.id)) return false; seen.add(s.media.id); return true; });
+        setTodayEps(unique.slice(0, 15));
+      })
+      .catch(() => {});
+  }, []);
+
+  /* TMDB animation movies */
+  const [animMovies, setAnimMovies] = useState<TmdbMovie[]>([]);
+  useEffect(() => {
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=ar&with_genres=16&sort_by=popularity.desc&page=1`)
+      .then(r => r.json())
+      .then(d => setAnimMovies((d.results || []).slice(0, 12)))
+      .catch(() => {});
+  }, []);
 
   const { data: trending, isLoading: loadingT, refetch: refetchT } = useQuery({
     queryKey: ["trending"],
@@ -146,6 +252,9 @@ export default function HomeScreen() {
         ) : (
           <HeroSection items={heroItems} />
         )}
+
+        {/* Today's Episodes — LIVE */}
+        <TodayEpisodesRow items={todayEps} colors={colors} router={router} />
 
         {/* Continue Watching */}
         {recentHistory.length > 0 && (
@@ -269,6 +378,45 @@ export default function HomeScreen() {
                 size="md"
                 onSeeAll={() => router.push("/browse")}
               />
+
+              {/* TMDB Animation Movies */}
+              {animMovies.length > 0 && (
+                <View style={{ marginTop: 8 }}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionLeft}>
+                      <View style={[styles.sectionDot, { backgroundColor: "#06b6d4" }]} />
+                      <Text style={[styles.sectionTitle, { color: colors.text }]}>🎨 أفلام أنيميشن عالمية</Text>
+                    </View>
+                    <Pressable onPress={() => router.push("/(tabs)/animation" as any)} style={styles.seeAllBtn}>
+                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
+                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                    </Pressable>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+                    {animMovies.map((m) => {
+                      const poster = m.poster_path ? `https://image.tmdb.org/t/p/w300${m.poster_path}` : null;
+                      return (
+                        <Pressable
+                          key={m.id}
+                          onPress={() => router.push(`/animation/movie/${m.id}`)}
+                          style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        >
+                          {poster ? (
+                            <Image source={{ uri: poster }} style={todayStyles.img} contentFit="cover" />
+                          ) : (
+                            <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                              <Ionicons name="film" size={28} color="rgba(255,255,255,0.2)" />
+                            </View>
+                          )}
+                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                            <Text style={todayStyles.title} numberOfLines={2}>{m.title}</Text>
+                          </LinearGradient>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
             </>
           )}
         </View>
