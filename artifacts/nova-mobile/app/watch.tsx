@@ -477,6 +477,7 @@ export default function WatchScreen() {
         return def?.name || getCdnDisplayName(s.directUrl || s.url || "");
       })(),
       quality: getSrcQualityTier(s),
+      subtitleUrl: s.subtitleUrl,
     })).filter(s => s.url),
   [directSrcs]);
 
