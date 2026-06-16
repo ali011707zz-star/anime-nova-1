@@ -1,6 +1,6 @@
 /**
- * RiftPlayer v3 — مشغل نوفا موبايل الزجاجي
- * يحتوي على نفس مميزات مشغل الويب بالكامل
+ * RiftPlayer v4 — مشغل نوفا موبايل الزجاجي
+ * الميزات الكاملة: ترجمة + سحب شريط + إيماءة أفقية + قفل landscape
  */
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -22,6 +22,7 @@ export type PlayerSource = {
   url: string;
   label: string;
   quality: "1080p FHD" | "720p HD" | "360p SD";
+  subtitleUrl?: string;
 };
 
 export interface SubCue { start: number; end: number; text: string }
@@ -65,6 +66,36 @@ function fmtTime(secs: number): string {
   const s = Math.floor(secs % 60);
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/* ─── VTT Parser ─── */
+function parseVTTTime(s: string): number {
+  const parts = s.replace(",", ".").split(":");
+  let sec = 0;
+  for (const p of parts) sec = sec * 60 + parseFloat(p);
+  return isNaN(sec) ? 0 : sec;
+}
+
+function parseVTT(text: string): SubCue[] {
+  const cues: SubCue[] = [];
+  const blocks = text.split(/\n\n+/);
+  for (const block of blocks) {
+    const lines = block.trim().split("\n");
+    let ti = 0;
+    if (ti < lines.length && !lines[ti].includes("-->")) ti++;
+    if (ti >= lines.length) continue;
+    const m = lines[ti].match(/(\d[\d:.]*)\s*-->\s*(\d[\d:.]*)/);
+    if (!m) continue;
+    const start = parseVTTTime(m[1]);
+    const end   = parseVTTTime(m[2]);
+    const textLines = lines.slice(ti + 1)
+      .map(l => l.replace(/<[^>]*>/g, "")
+        .replace(/&amp;/g,"&").replace(/&lt;/g,"<")
+        .replace(/&gt;/g,">").replace(/&nbsp;/g," ").trim())
+      .filter(Boolean);
+    if (textLines.length > 0) cues.push({ start, end, text: textLines.join("\n") });
+  }
+  return cues;
 }
 
 /* ─── SpinRing ─── */
@@ -125,9 +156,19 @@ export function RiftPlayer({
   const [showSrcSheet, setShowSrcSheet] = useState(false);
   const [showSpeedSheet, setShowSpeedSheet] = useState(false);
   const [showViewSheet, setShowViewSheet] = useState(false);
+  const [showSubSheet, setShowSubSheet]   = useState(false);
   const [isLocked, setIsLocked]         = useState(false);
   const [showUnlock, setShowUnlock]     = useState(false);
   const [contentFit, setContentFit]     = useState<"contain" | "cover">("contain");
+
+  /* ─── Subtitle state ─── */
+  const [subOn, setSubOn]               = useState(subEnabled);
+  const [loadedCues, setLoadedCues]     = useState<SubCue[]>([]);
+  const [subLoading, setSubLoading]     = useState(false);
+
+  /* ─── Seekbar drag ─── */
+  const [isDragging, setIsDragging]     = useState(false);
+  const [dragPct, setDragPct]           = useState(0);
 
   /* ─── Speed ─── */
   const [speed, setSpeed]             = useState(1);
@@ -172,6 +213,13 @@ export function RiftPlayer({
   const barWidth          = useRef(1);
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
+  /* new refs for seek+subtitle */
+  const durationRef       = useRef(0);
+  const positionRef       = useRef(0);
+  const seekRef           = useRef<(s: number) => void>(() => {});
+  const gestureTypeRef    = useRef<"vol" | "bri" | "seek" | null>(null);
+  const gestureStartPosRef= useRef(0);
+  const gestureStartXRef  = useRef(0);
 
   /* ─── expo-video player ─── */
   const player = useVideoPlayer(currentSrc?.url || "", (p) => {
@@ -212,6 +260,8 @@ export function RiftPlayer({
         const dur = player.duration || 0;
         setPosition(pos);
         setDuration(dur);
+        positionRef.current = pos;
+        durationRef.current = dur;
         if (dur > 0 && onProgress) onProgress(pos, dur);
         // Resume to saved position once
         if (!resumedRef.current && initialPosition && initialPosition > 5 && dur > 30) {
@@ -229,14 +279,15 @@ export function RiftPlayer({
   }, [player, onProgress, initialPosition]);
 
   /* ─── Subtitle cue lookup via rAF ─── */
+  const effectiveCues = (subCues?.length ? subCues : loadedCues);
   useEffect(() => {
     if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
-    if (!subCues?.length || !subEnabled) { setActiveCue(null); return; }
+    if (!effectiveCues.length || !subOn) { setActiveCue(null); return; }
     let lastKey = "";
     const tick = () => {
       try {
         const ct = player.currentTime || 0;
-        const cue = subCues.find(c => ct >= c.start && ct <= c.end) ?? null;
+        const cue = effectiveCues.find(c => ct >= c.start && ct <= c.end) ?? null;
         const key = cue ? `${cue.start}` : "";
         if (key !== lastKey) { lastKey = key; setActiveCue(cue); }
       } catch {}
@@ -244,7 +295,41 @@ export function RiftPlayer({
     };
     subRafRef.current = requestAnimationFrame(tick);
     return () => { if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; } };
-  }, [subCues, subEnabled, player]);
+  }, [effectiveCues, subOn, player]);
+
+  /* ─── VTT loading when source changes ─── */
+  useEffect(() => {
+    const url = currentSrc?.subtitleUrl;
+    if (!url) { setLoadedCues([]); return; }
+    let cancelled = false;
+    setSubLoading(true);
+    setLoadedCues([]);
+    fetch(url, { headers: { "Accept": "text/vtt,text/plain,*/*" } })
+      .then(r => r.text())
+      .then(text => {
+        if (!cancelled) {
+          const cues = parseVTT(text);
+          setLoadedCues(cues);
+          if (cues.length > 0) setSubOn(true);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoadedCues([]); })
+      .finally(() => { if (!cancelled) setSubLoading(false); });
+    return () => { cancelled = true; };
+  }, [currentSrc?.subtitleUrl]);
+
+  /* ─── Screen orientation lock to landscape ─── */
+  useEffect(() => {
+    let cleanup: () => void = () => {};
+    (async () => {
+      try {
+        const SO = await import("expo-screen-orientation" as any);
+        await SO.lockAsync(SO.OrientationLock?.LANDSCAPE ?? 2);
+        cleanup = () => SO.unlockAsync?.().catch(() => {});
+      } catch {}
+    })();
+    return () => cleanup();
+  }, []);
 
   /* ─── Auto-play countdown when episode ends ─── */
   useEffect(() => {
@@ -287,9 +372,11 @@ export function RiftPlayer({
 
   const seek = useCallback((secs: number) => {
     fadeIn();
-    const target = Math.max(0, Math.min(secs, duration));
+    const target = Math.max(0, Math.min(secs, durationRef.current || duration));
     try { player.currentTime = target; setPosition(target); } catch {}
   }, [player, duration, fadeIn]);
+  /* keep seekRef up to date every render for PanResponder closures */
+  seekRef.current = seek;
 
   const changeSpeed = useCallback((s: number) => {
     setSpeed(s);
@@ -327,40 +414,87 @@ export function RiftPlayer({
     feedbackTimer.current = setTimeout(() => setFeedback(null), 900);
   }, []);
 
-  /* ─── PanResponder for gestures — uses refs to avoid stale closures ─── */
+  /* ─── PanResponder for gestures — vol/bri vertical + seek horizontal ─── */
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) =>
-        Math.abs(gs.dy) > 8 && Math.abs(gs.dy) > Math.abs(gs.dx) * 1.3,
+      onMoveShouldSetPanResponder: (_, gs) => {
+        const adx = Math.abs(gs.dx), ady = Math.abs(gs.dy);
+        return (ady > 8 && ady > adx * 1.3) || (adx > 10 && adx > ady * 1.3);
+      },
       onPanResponderGrant: (evt, gs) => {
         const side: "L" | "R" = evt.nativeEvent.pageX < W / 2 ? "L" : "R";
         gestureSide.current = side;
+        gestureTypeRef.current = null;
         gestureStartY.current = gs.y0;
+        gestureStartXRef.current = gs.x0;
         gestureStartVal.current = side === "R" ? volumeRef.current : brightnessRef.current;
+        gestureStartPosRef.current = positionRef.current;
       },
       onPanResponderMove: (_, gs) => {
         const side = gestureSide.current;
         if (!side) return;
-        // dy is negative when swiping up (increase), positive when down (decrease)
-        const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
-        if (side === "R") {
+        /* Determine gesture type on first significant movement */
+        if (!gestureTypeRef.current) {
+          const adx = Math.abs(gs.dx), ady = Math.abs(gs.dy);
+          if (adx < 8 && ady < 8) return;
+          gestureTypeRef.current = adx > ady * 1.3 ? "seek"
+            : side === "R" ? "vol" : "bri";
+        }
+        if (gestureTypeRef.current === "seek") {
+          /* Full screen width ≈ 120 seconds */
+          const seekDelta = (gs.dx / W) * 120;
+          const newPos = Math.max(0, Math.min(durationRef.current, gestureStartPosRef.current + seekDelta));
+          setFeedback({ type: "seek", value: newPos, delta: seekDelta });
+        } else if (gestureTypeRef.current === "vol") {
+          const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
           const newVol = Math.max(0, Math.min(1, gestureStartVal.current + delta));
           volumeRef.current = newVol;
           setVolume(newVol);
           setFeedback({ type: "volume", value: newVol });
         } else {
-          // Brightness dim overlay: 0 = bright, 0.75 = very dark; swiping UP reduces overlay
+          const delta = -(gs.moveY - gestureStartY.current) / (H * 0.55);
           const newBri = Math.max(0, Math.min(0.75, gestureStartVal.current - delta));
           brightnessRef.current = newBri;
           setBrightness(newBri);
           setFeedback({ type: "brightness", value: newBri });
         }
       },
-      onPanResponderRelease: () => {
+      onPanResponderRelease: (_, gs) => {
+        if (gestureTypeRef.current === "seek") {
+          const seekDelta = (gs.dx / W) * 120;
+          const newPos = Math.max(0, Math.min(durationRef.current, gestureStartPosRef.current + seekDelta));
+          seekRef.current(newPos);
+        }
+        gestureTypeRef.current = null;
         gestureSide.current = null;
         if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
         feedbackTimer.current = setTimeout(() => setFeedback(null), 900);
+      },
+    })
+  ).current;
+
+  /* ─── Seekbar drag PanResponder ─── */
+  const seekBarPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        const x = Math.max(0, e.nativeEvent.locationX);
+        const pct = Math.min(1, x / Math.max(1, barWidth.current));
+        setIsDragging(true);
+        setDragPct(pct);
+      },
+      onPanResponderMove: (e) => {
+        const x = Math.max(0, e.nativeEvent.locationX);
+        const pct = Math.min(1, x / Math.max(1, barWidth.current));
+        setDragPct(pct);
+      },
+      onPanResponderRelease: (e) => {
+        const x = Math.max(0, e.nativeEvent.locationX);
+        const pct = Math.min(1, x / Math.max(1, barWidth.current));
+        setIsDragging(false);
+        seekRef.current(pct * durationRef.current);
       },
     })
   ).current;
@@ -464,9 +598,17 @@ export function RiftPlayer({
       )}
 
       {/* ── Subtitle overlay ── */}
-      {subEnabled && activeCue && (
+      {subOn && activeCue && (
         <View style={s.subtitleWrap} pointerEvents="none">
           <Text style={s.subtitleText}>{activeCue.text}</Text>
+        </View>
+      )}
+
+      {/* ── Subtitle loading indicator ── */}
+      {subLoading && (
+        <View style={s.subLoadingPill} pointerEvents="none">
+          <Ionicons name="logo-closed-captioning" size={12} color="rgba(167,139,250,0.70)" />
+          <Text style={s.subLoadingText}>جاري تحميل الترجمة…</Text>
         </View>
       )}
 
@@ -781,8 +923,9 @@ export function RiftPlayer({
             {/* Progress bar */}
             <View
               ref={barRef}
-              style={s.progressWrap}
+              style={[s.progressWrap, isDragging && s.progressWrapDragging]}
               onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
+              {...seekBarPan.panHandlers}
             >
               {/* Track background */}
               <View style={s.progressBg} />
@@ -801,17 +944,21 @@ export function RiftPlayer({
                 }]} />
               )}
               {/* Progress fill */}
-              <View style={[s.progressFill, { width: `${Math.min(progress * 100, 100)}%` as any }]} />
+              <View style={[s.progressFill, { width: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }]} />
               {/* Thumb */}
-              <View style={[s.thumb, { left: `${Math.min(progress * 100, 100)}%` as any }]} />
-              {/* Touch area */}
-              <Pressable
-                style={[StyleSheet.absoluteFill, { zIndex: 5 }]}
-                onPress={(e) => {
-                  const x = e.nativeEvent.locationX;
-                  seek((x / barWidth.current) * duration);
-                }}
-              />
+              <View style={[
+                s.thumb,
+                { left: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any },
+                isDragging && s.thumbDragging,
+              ]} />
+              {/* Drag time tooltip */}
+              {isDragging && (
+                <View style={[s.dragTooltip, {
+                  left: `${Math.max(4, Math.min(88, (isDragging ? dragPct : progress) * 100 - 6))}%` as any,
+                }]}>
+                  <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
+                </View>
+              )}
             </View>
 
             {/* Controls row */}
@@ -844,8 +991,19 @@ export function RiftPlayer({
                 </Pressable>
               </View>
 
-              {/* Right: mute + lock */}
+              {/* Right: CC + mute + lock */}
               <View style={s.ctrlRight}>
+                <Pressable
+                  onPress={() => { setShowSubSheet(true); fadeIn(); }}
+                  style={[s.iconBtn, (subOn && effectiveCues.length > 0) && s.ccBtnActive]}
+                  hitSlop={8}
+                >
+                  <Ionicons
+                    name={subOn && effectiveCues.length > 0 ? "logo-closed-captioning" : "logo-closed-captioning"}
+                    size={17}
+                    color={subOn && effectiveCues.length > 0 ? "#c4b5fd" : "rgba(255,255,255,0.55)"}
+                  />
+                </Pressable>
                 <Pressable
                   onPress={() => {
                     const newVol = volume > 0 ? 0 : 1;
@@ -969,6 +1127,72 @@ export function RiftPlayer({
           </View>
         </Pressable>
       )}
+
+      {/* ════════════════════════════════════════
+          SUBTITLE BOTTOM SHEET
+      ════════════════════════════════════════ */}
+      {showSubSheet && (
+        <Pressable style={s.sheetBg} onPress={() => setShowSubSheet(false)}>
+          <View style={[s.sheet, { paddingBottom: insets.bottom + 14 }]}>
+            <View style={s.sheetHandle} />
+            <View style={s.sheetHeader}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="logo-closed-captioning" size={18} color="rgba(196,181,253,0.80)" />
+                <Text style={s.sheetTitle}>الترجمة</Text>
+                {subLoading && (
+                  <View style={s.subSheetLoadingBadge}>
+                    <Text style={s.subSheetLoadingText}>جارٍ التحميل…</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+            {/* No subtitles option */}
+            <Pressable
+              onPress={() => { setSubOn(false); setShowSubSheet(false); }}
+              style={[s.sheetItem, !subOn && s.sheetItemActive]}
+            >
+              <View style={[s.sheetIconWrap, !subOn && s.sheetIconWrapActive]}>
+                <Ionicons name="close-circle-outline" size={16} color={!subOn ? "#c4b5fd" : "rgba(255,255,255,0.40)"} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.sheetItemText, !subOn && s.sheetItemTextActive]}>بدون ترجمة</Text>
+                <Text style={s.sheetItemDesc}>إخفاء الترجمة</Text>
+              </View>
+              {!subOn && <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />}
+            </Pressable>
+            {/* Arabic subtitle option */}
+            <Pressable
+              onPress={() => {
+                if (effectiveCues.length > 0) { setSubOn(true); setShowSubSheet(false); }
+              }}
+              style={[
+                s.sheetItem,
+                subOn && s.sheetItemActive,
+                effectiveCues.length === 0 && s.sheetItemDisabled,
+              ]}
+            >
+              <View style={[s.sheetIconWrap, subOn && effectiveCues.length > 0 && s.sheetIconWrapActive]}>
+                <Ionicons
+                  name="logo-closed-captioning"
+                  size={16}
+                  color={subOn && effectiveCues.length > 0 ? "#c4b5fd" : "rgba(255,255,255,0.40)"}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.sheetItemText, subOn && effectiveCues.length > 0 && s.sheetItemTextActive]}>
+                  عربي
+                </Text>
+                <Text style={s.sheetItemDesc}>
+                  {effectiveCues.length > 0
+                    ? `${effectiveCues.length} مقطع`
+                    : subLoading ? "جارٍ التحميل…" : "غير متوفر لهذا المصدر"}
+                </Text>
+              </View>
+              {subOn && effectiveCues.length > 0 && <Ionicons name="checkmark-circle" size={16} color="#8B5CF6" />}
+            </Pressable>
+          </View>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -1068,11 +1292,15 @@ const s = StyleSheet.create({
   skipInlineBtnTextActive: { color: "#1a1200" },
 
   /* Progress bar */
-  progressWrap: { height: 28, justifyContent: "center", position: "relative", marginHorizontal: 2 },
+  progressWrap: { height: 32, justifyContent: "center", position: "relative", marginHorizontal: 2 },
+  progressWrapDragging: { height: 44 },
   progressBg: { position: "absolute", left: 0, right: 0, height: 5, backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 3 },
   skipMarker: { position: "absolute", height: 7, backgroundColor: "rgba(250,204,21,0.85)", borderRadius: 3, top: "50%", marginTop: -3.5, zIndex: 2 },
   progressFill: { position: "absolute", left: 0, height: 5, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -2.5, zIndex: 3 },
   thumb: { position: "absolute", top: "50%", width: 16, height: 16, borderRadius: 8, backgroundColor: "#fff", marginLeft: -8, marginTop: -8, shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 4, zIndex: 4 },
+  thumbDragging: { width: 22, height: 22, borderRadius: 11, marginLeft: -11, marginTop: -11, backgroundColor: "#c4b5fd", shadowColor: "#8B5CF6", shadowOpacity: 0.8, shadowRadius: 10 },
+  dragTooltip: { position: "absolute", bottom: "100%", marginBottom: 6, backgroundColor: "rgba(10,6,30,0.95)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(139,92,246,0.40)", zIndex: 10 },
+  dragTooltipText: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold" },
 
   /* Controls row */
   ctrlRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
@@ -1086,6 +1314,18 @@ const s = StyleSheet.create({
   srcBtnText: { color: "rgba(255,255,255,0.65)", fontSize: 11, fontFamily: "Cairo_600SemiBold", flex: 1 },
   iconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
   lockBtnStyle: { backgroundColor: "rgba(251,191,36,0.12)", borderColor: "rgba(251,191,36,0.28)" },
+  ccBtnActive: { backgroundColor: "rgba(139,92,246,0.18)", borderColor: "rgba(167,139,250,0.45)" },
+
+  /* Subtitle loading pill */
+  subLoadingPill: { position: "absolute", bottom: 96, alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(10,6,30,0.88)", borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", zIndex: 25 },
+  subLoadingText: { color: "rgba(196,181,253,0.80)", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
+
+  /* Subtitle sheet loading badge */
+  subSheetLoadingBadge: { backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3, borderWidth: 1, borderColor: "rgba(139,92,246,0.35)" },
+  subSheetLoadingText: { color: "rgba(196,181,253,0.80)", fontSize: 11, fontFamily: "Cairo_600SemiBold" },
+
+  /* Disabled sheet item */
+  sheetItemDisabled: { opacity: 0.40 },
 
   /* Sheets */
   sheetBg: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end", zIndex: 50 },
