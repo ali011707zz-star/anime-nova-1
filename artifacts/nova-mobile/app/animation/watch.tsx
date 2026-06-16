@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureStreamFetch } from "@/utils/secureApi";
+import CommentsSheet from "@/components/CommentsSheet";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -149,6 +150,7 @@ export default function AnimationWatchScreen() {
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
   const [resumeTime, setResumeTime] = useState(0);
+  const [showComments, setShowComments] = useState(false);
 
   const abortRef         = useRef<AbortController | null>(null);
   const autoSelectedRef  = useRef(false);
@@ -476,6 +478,13 @@ export default function AnimationWatchScreen() {
           </View>
         </View>
 
+        {/* Comments button */}
+        <Pressable onPress={() => setShowComments(true)} style={w.commentsBtn}>
+          <Ionicons name="chatbubble-ellipses-outline" size={15} color="rgba(139,92,246,0.9)" />
+          <Text style={w.commentsBtnText}>التعليقات</Text>
+          <Ionicons name="chevron-forward" size={13} color="rgba(139,92,246,0.5)" />
+        </Pressable>
+
         {/* Sources — grouped by quality */}
         {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(tier => {
           const srcs = grouped[tier];
@@ -537,6 +546,13 @@ export default function AnimationWatchScreen() {
           </View>
         )}
       </ScrollView>
+
+      <CommentsSheet
+        visible={showComments}
+        onClose={() => setShowComments(false)}
+        tmdbId={tmdbId}
+        episodeNumber={type !== "movie" ? ep : undefined}
+      />
     </View>
   );
 }
@@ -557,6 +573,8 @@ const w = StyleSheet.create({
   epBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   loadHint: { fontSize: 11, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 18 },
   topBackBtn: { position: "absolute", left: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
+  commentsBtn: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },
+  commentsBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
 
   /* Video top bar */
   videoTopBar: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingBottom: 20 },

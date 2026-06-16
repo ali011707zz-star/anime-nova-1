@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
+import { CommentsSheet } from "@/components/CommentsSheet";
 
 const { width: W } = Dimensions.get("window");
 
@@ -146,6 +147,7 @@ export default function AnimeDetailScreen() {
   const [tab, setTab] = useState<"chars" | "related" | "similar">("chars");
   const [showTrailer, setShowTrailer] = useState(false);
   const [showRating, setShowRating] = useState(false);
+  const [showComments, setShowComments] = useState(false);
   const [myRating, setMyRating] = useState(0);
   const [saved, setSaved] = useState(false);
   const [warnDismissed, setWarnDismissed] = useState(false);
@@ -312,7 +314,7 @@ export default function AnimeDetailScreen() {
         {/* ── 3-col action grid ── */}
         <View style={d.actionGrid}>
           {[
-            { icon: "chatbubble-outline",  label: "التعليقات", active: false, activeColor: "#8B5CF6", onPress: () => {} },
+            { icon: "chatbubble-outline",  label: "التعليقات", active: false, activeColor: "#8B5CF6", onPress: () => setShowComments(true) },
             { icon: "add-circle-outline",  label: "قائمتي",    active: saved,       activeColor: "#8B5CF6", onPress: toggleSave },
             { icon: "star-outline",        label: "تقييمي",    active: myRating > 0, activeColor: "#FBBF24", onPress: () => setShowRating(true) },
           ].map(({ icon, label, active, activeColor, onPress }) => (
@@ -554,13 +556,28 @@ export default function AnimeDetailScreen() {
             <View style={{ width: 36 }} />
           </View>
           <WebView
-            source={{ uri: `https://www.youtube.com/embed/${trailerYT}?autoplay=1` }}
+            source={{
+              uri: `https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1`,
+            }}
             style={{ flex: 1 }}
             allowsFullscreenVideo
+            allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
+            javaScriptEnabled
+            domStorageEnabled
+            originWhitelist={["*"]}
+            userAgent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
           />
         </View>
       </Modal>
+
+      {/* ── Comments bottom sheet ── */}
+      <CommentsSheet
+        visible={showComments}
+        onClose={() => setShowComments(false)}
+        animeId={anime?.id}
+        title={anime?.title?.romaji}
+      />
 
       {/* ── Rating bottom sheet ── */}
       <Modal visible={showRating} animationType="slide" transparent onRequestClose={() => setShowRating(false)}>
