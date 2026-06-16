@@ -35,12 +35,23 @@ async function saveWatched(animeId: string, watched: Set<number>) {
   await AsyncStorage.setItem(`watched-${animeId}`, JSON.stringify([...watched]));
 }
 
+/* ── Comment counts storage (simple cache) ── */
+async function getCommentCounts(animeId: string): Promise<Record<number, number>> {
+  try {
+    const v = await AsyncStorage.getItem(`ep-comment-counts-${animeId}`);
+    return v ? JSON.parse(v) : {};
+  } catch { return {}; }
+}
+async function saveCommentCounts(animeId: string, counts: Record<number, number>) {
+  await AsyncStorage.setItem(`ep-comment-counts-${animeId}`, JSON.stringify(counts));
+}
+
 /* ── Episode thumbnail row ── */
 function EpisodeRow({
-  n, anime, epData, watched, onToggleWatched, onWatch,
+  n, anime, epData, watched, commentCount, onToggleWatched, onWatch, onComment,
 }: {
-  n: number; anime: any; epData: any[]; watched: boolean;
-  onToggleWatched: (n: number) => void; onWatch: (n: number) => void;
+  n: number; anime: any; epData: any[]; watched: boolean; commentCount: number;
+  onToggleWatched: (n: number) => void; onWatch: (n: number) => void; onComment: (n: number) => void;
 }) {
   const ep = epData?.find((e: any) => e.mal_id === n || e.episode_id === n);
   const thumb = ep?.images?.jpg?.image_url || anime?.coverImage?.large;
@@ -76,6 +87,17 @@ function EpisodeRow({
         <Text style={[ep_s.epNum, watched && { color: "#8B5CF6" }]}>الحلقة {n}</Text>
       </View>
 
+      {/* Comment button */}
+      <Pressable
+        onPress={e => { onComment(n); }}
+        style={ep_s.commentBtn}
+      >
+        <Ionicons name="chatbubble-ellipses" size={13} color={commentCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.2)"} />
+        {commentCount > 0 && (
+          <Text style={ep_s.commentCount}>{commentCount}</Text>
+        )}
+      </Pressable>
+
       {/* Eye toggle */}
       <Pressable
         onPress={e => { onToggleWatched(n); }}
@@ -99,12 +121,14 @@ export default function EpisodeListScreen() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
+  const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     setEpData([]); setPage(1); setSearch("");
     getWatched(id).then(setWatched);
+    getCommentCounts(id).then(setCommentCounts);
 
     fetch("https://graphql.anilist.co", {
       method: "POST",
@@ -120,6 +144,25 @@ export default function EpisodeListScreen() {
           .catch(() => {});
       }
     }).finally(() => setLoading(false));
+  }, [id]);
+
+  /* Load comment counts from server (background, non-blocking) */
+  useEffect(() => {
+    if (!id) return;
+    fetch(`${getBaseUrl()}/api/comments/count?animeId=${id}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.counts && typeof d.counts === "object") {
+          const numericCounts: Record<number, number> = {};
+          for (const [k, v] of Object.entries(d.counts)) {
+            const n = parseInt(k);
+            if (!isNaN(n)) numericCounts[n] = v as number;
+          }
+          setCommentCounts(numericCounts);
+          saveCommentCounts(id, numericCounts);
+        }
+      })
+      .catch(() => {});
   }, [id]);
 
   const toggleWatched = useCallback((n: number) => {
@@ -141,6 +184,11 @@ export default function EpisodeListScreen() {
     const t = encodeURIComponent(anime?.title?.romaji || "");
     const eng = encodeURIComponent(anime?.title?.english || "");
     router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}`);
+  }
+
+  function openComments(n: number) {
+    const t = encodeURIComponent(anime?.title?.romaji || "");
+    router.push(`/comments?animeId=${id}&title=${t}&ep=${n}` as any);
   }
 
   const total = useMemo(() => {
@@ -299,7 +347,7 @@ export default function EpisodeListScreen() {
             </Pressable>
             <Pressable onPress={() => router.push(`/comments?animeId=${id}&title=${encodeURIComponent(anime?.title?.romaji || "")}` as any)} style={ep_s.commentsListBtn}>
               <Ionicons name="chatbubbles" size={16} color="#c4b5fd" />
-              <Text style={ep_s.commentsListBtnText}>التعليقات والنقاشات</Text>
+              <Text style={ep_s.commentsListBtnText}>التعليقات والنقاشات العامة</Text>
               <Ionicons name="chevron-back" size={14} color="rgba(196,181,253,0.5)" />
             </Pressable>
           </>
@@ -310,8 +358,10 @@ export default function EpisodeListScreen() {
             anime={anime}
             epData={epData}
             watched={watched.has(n)}
+            commentCount={commentCounts[n] || 0}
             onToggleWatched={toggleWatched}
             onWatch={watchEp}
+            onComment={openComments}
           />
         )}
       />
@@ -359,6 +409,17 @@ const ep_s = StyleSheet.create({
   playBtn: { width: 22, height: 22, backgroundColor: "rgba(139,92,246,0.9)", borderRadius: 11, alignItems: "center", justifyContent: "center" },
   info: { flex: 1 },
   epNum: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
+  commentBtn: {
+    width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.15)",
+    position: "relative",
+  },
+  commentCount: {
+    position: "absolute", top: -4, right: -4,
+    minWidth: 14, height: 14, backgroundColor: "#8B5CF6", borderRadius: 7,
+    fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold",
+    textAlign: "center", lineHeight: 14, paddingHorizontal: 2,
+  },
   eyeBtn: { width: 30, height: 30, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   eyeBtnWatched: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
 });
