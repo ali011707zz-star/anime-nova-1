@@ -1741,7 +1741,20 @@ function EpisodePlayer({
     setSubOffset(0);
     if (subChoice === "off") return;
     const saved = subChoice;
-    // 1. Check normalized episode cache (persists across server switches)
+    /* ── FIX: Videasy desync — if new source has its OWN subtitleUrl (Videasy, kawaii, AniKoto),
+       NEVER use the normKey cache which may hold timing from a DIFFERENT source.
+       The subtitleUrl effect below will load the correct timing for this source. ── */
+    if (subtitleUrl) {
+      const cached = getCachedCues(subtitleUrl);
+      if (cached) {
+        setSubCues(cached); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+      } else {
+        // Clear stale cues from previous source; subtitleUrl effect will load fresh
+        setSubCues([]); setSubState("idle"); setSubStatus("off");
+      }
+      return;
+    }
+    // 1. No subtitleUrl → use normalized episode cache (safe: same ep, user-loaded translation)
     const normKey = animeId ? `sub-ar-${animeId}-ep${ep}` : null;
     if (normKey) {
       const normCached = getCachedCues(normKey);
@@ -1750,15 +1763,7 @@ function EpisodePlayer({
         return;
       }
     }
-    // 2. Check subtitleUrl cache
-    if (subtitleUrl) {
-      const cached = getCachedCues(subtitleUrl);
-      if (cached) {
-        setSubCues(cached); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
-        return;
-      }
-    }
-    // 3. No cache — re-apply immediately (no artificial delay)
+    // 2. No cache — re-apply immediately (no artificial delay)
     changeSubChoice(saved);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUrl]);
