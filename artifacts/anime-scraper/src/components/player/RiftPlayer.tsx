@@ -234,6 +234,7 @@ export default function RiftPlayer({
   const [isEnded,         setIsEnded]         = useState(false);
   const [autoPlayCountdown, setAutoPlayCountdown] = useState(0);
   const [showUnlockBtn,   setShowUnlockBtn]   = useState(false);
+  const [showShortcuts,   setShowShortcuts]   = useState(false);
 
   /* ── rAF subtitle sync: reads videoRef.currentTime directly at 60fps ── */
   const subRafRef    = useRef<number | null>(null);
@@ -628,6 +629,63 @@ export default function RiftPlayer({
     }
     return undefined;
   }, [skipIntro, skipOutro]);
+
+  /* ── keyboard shortcuts (video.js inspired) — ? shows overlay, space/arrows etc ── */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      switch (e.key) {
+        case "?":
+          e.preventDefault();
+          setShowShortcuts(v => !v);
+          break;
+        case " ":
+        case "k":
+          e.preventDefault();
+          togglePlay();
+          break;
+        case "ArrowRight":
+        case "l":
+          e.preventDefault();
+          skip(10);
+          showControls();
+          break;
+        case "ArrowLeft":
+        case "j":
+          e.preventDefault();
+          skip(-10);
+          showControls();
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setVolume(v => { const nV = Math.min(1, v + 0.1); volumeRef.current = nV; if (gainNodeRef.current) gainNodeRef.current.gain.value = nV; if (videoRef.current) videoRef.current.volume = nV; return nV; });
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          setVolume(v => { const nV = Math.max(0, v - 0.1); volumeRef.current = nV; if (gainNodeRef.current) gainNodeRef.current.gain.value = nV; if (videoRef.current) videoRef.current.volume = nV; return nV; });
+          break;
+        case "f":
+        case "F":
+          e.preventDefault();
+          toggleFs();
+          break;
+        case "m":
+        case "M":
+          e.preventDefault();
+          toggleMute();
+          break;
+        case "Escape":
+          if (showShortcuts) { e.preventDefault(); setShowShortcuts(false); }
+          break;
+        default: break;
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showShortcuts]);
 
   /* ── controls ── */
   function togglePlay() {
@@ -2332,6 +2390,49 @@ export default function RiftPlayer({
                 {line || "\u00A0"}
               </p>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Keyboard Shortcuts Overlay (video.js inspired — press ? to toggle) ── */}
+      {showShortcuts && (
+        <div
+          className="absolute inset-0 z-[500] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(6px)" }}
+          onClick={() => setShowShortcuts(false)}
+        >
+          <div
+            className="rounded-2xl p-6 max-w-sm w-full mx-4"
+            style={{ background: "rgba(18,14,30,0.95)", border: "1px solid rgba(139,92,246,0.22)" }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-white font-bold text-sm font-['Cairo']">اختصارات لوحة المفاتيح</h3>
+              <button onClick={() => setShowShortcuts(false)} className="text-white/40 hover:text-white/70 transition-colors text-lg leading-none">×</button>
+            </div>
+            <div className="grid gap-2">
+              {[
+                { key: "مسافة / K", label: "تشغيل / إيقاف" },
+                { key: "→ / L", label: "تقديم 10 ثوانٍ" },
+                { key: "← / J", label: "رجوع 10 ثوانٍ" },
+                { key: "↑", label: "رفع الصوت 10%" },
+                { key: "↓", label: "خفض الصوت 10%" },
+                { key: "F", label: "ملء الشاشة" },
+                { key: "M", label: "كتم الصوت" },
+                { key: "?", label: "عرض / إخفاء الاختصارات" },
+              ].map(({ key, label }) => (
+                <div key={key} className="flex items-center justify-between gap-3">
+                  <span className="text-white/55 text-[11px] font-['Cairo']">{label}</span>
+                  <kbd
+                    className="text-[10px] font-mono px-2 py-0.5 rounded-md shrink-0"
+                    style={{ background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.30)", color: "#c4b5fd" }}
+                  >
+                    {key}
+                  </kbd>
+                </div>
+              ))}
+            </div>
+            <p className="text-white/20 text-[9px] text-center mt-4 font-['Cairo']">اضغط Esc أو ? أو انقر خارج اللوحة للإغلاق</p>
           </div>
         </div>
       )}

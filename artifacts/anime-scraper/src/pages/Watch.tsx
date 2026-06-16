@@ -1427,6 +1427,7 @@ function EpisodePlayer({
   const [subCues,      setSubCues]     = useState<SubCue[]>([]);
   const [subLang,      setSubLang]     = useState<string | null>(null);
   const [subOffset,    setSubOffset]   = useState(0);
+  const [showOffsetControls, setShowOffsetControls] = useState(false);
   const [showSubPanel, setShowSubPanel] = useState(false);
   const [subSettings,  setSubSettings] = useState<SubSettings>(loadSubSettings);
   const [isLandscape,  setIsLandscape] = useState(() => typeof window !== "undefined" && window.innerWidth > window.innerHeight);
@@ -1740,6 +1741,8 @@ function EpisodePlayer({
         return;
       }
     }
+    // Auto-sync: reset offset to 0 on every new subtitle source so X-TIMESTAMP-MAP takes over
+    setSubOffset(0);
     setSubState("idle");
     setSubCues([]);
     setSubLang(null);
@@ -2379,27 +2382,41 @@ function EpisodePlayer({
                     </div>
                   </div>
 
-                  {/* Timing offset */}
+                  {/* Timing offset — auto-synced via X-TIMESTAMP-MAP; manual fine-tune hidden by default */}
                   <div>
-                    <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>
-                      إزاحة التوقيت{subOffset !== 0 && <span className="mr-1.5 text-violet-300/60 normal-case">{subOffset > 0 ? "+" : ""}{subOffset.toFixed(1)}s</span>}
+                    <button
+                      onClick={() => setShowOffsetControls(v => !v)}
+                      className="flex items-center gap-1.5 w-full text-right"
+                    >
+                      <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em]" style={{ color: "rgba(255,255,255,0.18)" }}>
+                        ضبط يدوي للتوقيت
+                        {subOffset !== 0 && <span className="mr-1.5 text-violet-300/60 normal-case">{subOffset > 0 ? "+" : ""}{subOffset.toFixed(1)}s</span>}
+                      </p>
+                      <span className="text-[8px] mr-auto" style={{ color: "rgba(255,255,255,0.15)" }}>
+                        {showOffsetControls ? "▲" : "▼"}
+                      </span>
+                    </button>
+                    <p className="text-[8px] font-['Cairo'] mt-0.5 mb-1.5" style={{ color: "rgba(255,255,255,0.12)" }}>
+                      التزامن تلقائي — الضبط اليدوي للحالات الاستثنائية فقط
                     </p>
-                    <div className="flex gap-1.5">
-                      {([-2, -0.5, 0.5, 2] as number[]).map(d => (
-                        <button key={d} onClick={() => adjustOffset(d)}
-                          className="flex-1 py-2 rounded-xl text-white/40 text-[10px] font-bold active:scale-90 transition-transform"
-                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", fontFamily: "monospace" }}>
-                          {d > 0 ? "+" : ""}{d}s
-                        </button>
-                      ))}
-                      {subOffset !== 0 && (
-                        <button onClick={() => setSubOffset(0)}
-                          className="px-2.5 py-2 rounded-xl text-[10px] active:scale-90 transition-transform"
-                          style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(252,165,165,0.70)", fontFamily: "Cairo, sans-serif" }}>
-                          ✕
-                        </button>
-                      )}
-                    </div>
+                    {showOffsetControls && (
+                      <div className="flex gap-1.5 mt-1.5">
+                        {([-2, -0.5, 0.5, 2] as number[]).map(d => (
+                          <button key={d} onClick={() => adjustOffset(d)}
+                            className="flex-1 py-2 rounded-xl text-white/40 text-[10px] font-bold active:scale-90 transition-transform"
+                            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", fontFamily: "monospace" }}>
+                            {d > 0 ? "+" : ""}{d}s
+                          </button>
+                        ))}
+                        {subOffset !== 0 && (
+                          <button onClick={() => setSubOffset(0)}
+                            className="px-2.5 py-2 rounded-xl text-[10px] active:scale-90 transition-transform"
+                            style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(252,165,165,0.70)", fontFamily: "Cairo, sans-serif" }}>
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
