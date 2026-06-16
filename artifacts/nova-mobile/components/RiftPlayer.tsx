@@ -164,6 +164,44 @@ function parseVTT(text: string): SubCue[] {
   return cues;
 }
 
+/* ─── PulseRing (نبض أرجواني حول زر التشغيل عند الإيقاف المؤقت) ─── */
+function PulseRing() {
+  const scale1 = useRef(new Animated.Value(1)).current;
+  const opacity1 = useRef(new Animated.Value(0.65)).current;
+  const scale2 = useRef(new Animated.Value(1)).current;
+  const opacity2 = useRef(new Animated.Value(0.35)).current;
+  useEffect(() => {
+    const pulse = (sc: Animated.Value, op: Animated.Value, delay: number) =>
+      Animated.loop(Animated.sequence([
+        Animated.delay(delay),
+        Animated.parallel([
+          Animated.timing(sc, { toValue: 1.85, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(op, { toValue: 0, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(sc, { toValue: 1, duration: 0, useNativeDriver: true }),
+          Animated.timing(op, { toValue: delay === 0 ? 0.65 : 0.35, duration: 0, useNativeDriver: true }),
+        ]),
+      ]));
+    pulse(scale1, opacity1, 0).start();
+    pulse(scale2, opacity2, 550).start();
+  }, []);
+  return (
+    <>
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", width: 90, height: 90, borderRadius: 45,
+        borderWidth: 2, borderColor: "#8B5CF6",
+        transform: [{ scale: scale1 }], opacity: opacity1,
+      }} />
+      <Animated.View pointerEvents="none" style={{
+        position: "absolute", width: 90, height: 90, borderRadius: 45,
+        borderWidth: 1.5, borderColor: "#a78bfa",
+        transform: [{ scale: scale2 }], opacity: opacity2,
+      }} />
+    </>
+  );
+}
+
 /* ─── SpinRing ─── */
 function SpinRing({ size = 52 }: { size?: number }) {
   const rot = useRef(new Animated.Value(0)).current;
@@ -288,6 +326,13 @@ export function RiftPlayer({
   /* ─── Skip notification ─── */
   const [skipNotif, setSkipNotif]     = useState(false);
   const skipNotifFired                = useRef(false);
+
+  /* ─── Anime Rift features ─── */
+  const [seekDuration, setSeekDuration] = useState(10);
+  const seekDurationRef               = useRef(10);
+  const [showReportSheet, setShowReportSheet] = useState(false);
+  const [showSeekSheet, setShowSeekSheet]     = useState(false);
+  const [reportSent, setReportSent]           = useState(false);
 
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
@@ -482,6 +527,13 @@ export function RiftPlayer({
     } catch {}
   }, []);
 
+  /* ─── Load seek duration preference (Anime Rift: manageTheInternalPlayerSeekDuration) ─── */
+  useEffect(() => {
+    AsyncStorage.getItem("nova-seek-duration").then(v => {
+      if (v) { const n = Number(v); setSeekDuration(n); seekDurationRef.current = n; }
+    });
+  }, []);
+
   /* ─── Skip notification (shows once when skip data arrives) ─── */
   useEffect(() => {
     if ((skipIntro || skipOutro) && !skipNotifFired.current) {
@@ -565,7 +617,7 @@ export function RiftPlayer({
     anim.setValue(0);
     Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }).start(() => setDblTap(null));
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-    seek(side === "R" ? positionRef.current + 10 : positionRef.current - 10);
+    seek(side === "R" ? positionRef.current + seekDurationRef.current : positionRef.current - seekDurationRef.current);
   }, [seek, dblTapLeft, dblTapRight]);
 
   /* ─── Show feedback overlay ─── */
@@ -1001,7 +1053,7 @@ export function RiftPlayer({
         >
           {/* ════ TOP BAR ════ */}
           <LinearGradient
-            colors={["rgba(0,0,0,0.82)", "rgba(0,0,0,0.38)", "transparent"]}
+            colors={["rgba(0,0,0,0.92)", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.10)", "transparent"]}
             style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 8 }]}
           >
             {/* ── LEFT: back arrow ── */}
@@ -1066,6 +1118,11 @@ export function RiftPlayer({
                 <Ionicons name="camera" size={16} color="rgba(255,255,255,0.60)" />
               </Pressable>
 
+              {/* Report Issue (Anime Rift feature) */}
+              <Pressable onPress={() => { setShowReportSheet(true); setReportSent(false); fadeIn(); }} style={s.topBtn} hitSlop={10}>
+                <Ionicons name="flag-outline" size={16} color="rgba(255,255,255,0.60)" />
+              </Pressable>
+
               {/* Close / X (red) */}
               <Pressable onPress={onBack} style={s.topBtnClose} hitSlop={10}>
                 <Ionicons name="close" size={16} color="rgba(248,113,113,0.85)" />
@@ -1080,35 +1137,40 @@ export function RiftPlayer({
                 <Ionicons name="play-skip-back" size={22} color="rgba(255,255,255,0.85)" />
               </Pressable>
             )}
-            {/* ── Back 10s ── */}
+
+            {/* ── Back Ns ── */}
             <Pressable
-              onPress={() => { seek(positionRef.current - 10); fadeIn(); }}
+              onPress={() => { seek(positionRef.current - seekDurationRef.current); fadeIn(); }}
               style={s.seekStepBtn} hitSlop={14}
             >
-              <Ionicons name="arrow-undo-outline" size={26} color="rgba(255,255,255,0.88)" />
-              <Text style={s.seekStepLabel}>10</Text>
+              <Ionicons name="arrow-undo" size={22} color="#fff" />
+              <Text style={s.seekStepLabel}>{seekDuration}</Text>
             </Pressable>
 
-            {/* ── Play / Pause ── */}
-            <Pressable onPress={togglePlay} style={s.playBtn} hitSlop={8}>
-              {buffering
-                ? <SpinRing size={52} />
-                : <Ionicons
-                    name={isPlaying ? "pause" : "play"}
-                    size={36}
-                    color="#fff"
-                    style={!isPlaying ? { marginLeft: 4 } : undefined}
-                  />}
-            </Pressable>
+            {/* ── Play / Pause (with PulseRing when paused) ── */}
+            <View style={{ alignItems: "center", justifyContent: "center" }}>
+              {!isPlaying && !buffering && <PulseRing />}
+              <Pressable onPress={togglePlay} style={s.playBtn} hitSlop={8}>
+                {buffering
+                  ? <SpinRing size={50} />
+                  : <Ionicons
+                      name={isPlaying ? "pause" : "play"}
+                      size={34}
+                      color="#fff"
+                      style={!isPlaying ? { marginLeft: 5 } : undefined}
+                    />}
+              </Pressable>
+            </View>
 
-            {/* ── Forward 10s ── */}
+            {/* ── Forward Ns ── */}
             <Pressable
-              onPress={() => { seek(positionRef.current + 10); fadeIn(); }}
+              onPress={() => { seek(positionRef.current + seekDurationRef.current); fadeIn(); }}
               style={s.seekStepBtn} hitSlop={14}
             >
-              <Text style={s.seekStepLabel}>10</Text>
-              <Ionicons name="arrow-redo-outline" size={26} color="rgba(255,255,255,0.88)" />
+              <Text style={s.seekStepLabel}>{seekDuration}</Text>
+              <Ionicons name="arrow-redo" size={22} color="#fff" />
             </Pressable>
+
             {onNextEpisode && (
               <Pressable onPress={onNextEpisode} style={s.epNavBtn} hitSlop={12}>
                 <Ionicons name="play-skip-forward" size={22} color="rgba(255,255,255,0.85)" />
@@ -1149,8 +1211,12 @@ export function RiftPlayer({
                   width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
                 }]} />
               )}
-              {/* Progress fill (purple gradient) */}
-              <View style={[s.progressFill, { width: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }]} />
+              {/* Progress fill (purple → violet gradient) */}
+              <LinearGradient
+                colors={["#7C3AED", "#8B5CF6", "#a78bfa"]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={[s.progressFill, { width: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }]}
+              />
               {/* Thumb */}
               <View style={[
                 s.thumb,
@@ -1181,6 +1247,9 @@ export function RiftPlayer({
                   ]}>
                     ×{longPressSpeed ? 2 : speed}
                   </Text>
+                </Pressable>
+                <Pressable onPress={() => { setShowSeekSheet(true); fadeIn(); }} style={[s.speedBtn, { marginLeft: 6 }]}>
+                  <Text style={s.speedBtnText}>⏩{seekDuration}s</Text>
                 </Pressable>
               </View>
 
@@ -1260,6 +1329,96 @@ export function RiftPlayer({
         </Animated.View>
       )}
 
+
+      {/* ════════════════════════════════════════
+          REPORT ISSUE SHEET (مستوحى من Anime Rift)
+      ════════════════════════════════════════ */}
+      {showReportSheet && (
+        <Pressable style={s.sheetBg} onPress={() => { setShowReportSheet(false); setReportSent(false); }}>
+          <Pressable onPress={e => e.stopPropagation()}>
+            <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
+              <View style={s.sheetHandle} />
+              <View style={s.sheetHeader}>
+                <Text style={s.sheetTitle}>{reportSent ? "✅ تم إرسال التقرير" : "🚩 الإبلاغ عن مشكلة"}</Text>
+              </View>
+              {reportSent ? (
+                <View style={{ paddingVertical: 28, alignItems: "center" }}>
+                  <Text style={{ color: "rgba(255,255,255,0.55)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center" }}>
+                    شكراً، سنراجع المشكلة قريباً وسنعمل على إصلاحها
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+                  {([
+                    { key: "videoNotWorking",  label: "الفيديو لا يعمل",                    icon: "videocam-off-outline" },
+                    { key: "stuckLoading",     label: "الفيديو عالق في التحميل",            icon: "hourglass-outline" },
+                    { key: "wrongEpisode",     label: "تم تحميل الحلقة الخطأ",             icon: "shuffle-outline" },
+                    { key: "wrongSubtitle",    label: "لغة الترجمة مفقودة أو غير صحيحة",  icon: "text-outline" },
+                    { key: "subSync",          label: "مشكلة في تزامن الترجمة",            icon: "sync-outline" },
+                    { key: "audioSync",        label: "مشكلة في تزامن الصوت",             icon: "volume-medium-outline" },
+                    { key: "audioNotWorking",  label: "الصوت لا يعمل",                     icon: "volume-mute-outline" },
+                    { key: "episodeCut",       label: "الحلقة مقطوعة أو غير مكتملة",      icon: "cut-outline" },
+                    { key: "badQuality",       label: "جودة الفيديو سيئة",                 icon: "eye-off-outline" },
+                    { key: "other",            label: "مشكلة أخرى",                        icon: "ellipsis-horizontal-outline" },
+                  ] as const).map(issue => (
+                    <Pressable
+                      key={issue.key}
+                      style={s.sheetItem}
+                      onPress={() => {
+                        setReportSent(true);
+                        setTimeout(() => { setShowReportSheet(false); setReportSent(false); }, 2000);
+                      }}
+                    >
+                      <View style={s.sheetIconWrap}>
+                        <Ionicons name={issue.icon as any} size={17} color="rgba(255,255,255,0.55)" />
+                      </View>
+                      <Text style={s.sheetItemText}>{issue.label}</Text>
+                      <Ionicons name="chevron-forward" size={15} color="rgba(255,255,255,0.20)" />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          </Pressable>
+        </Pressable>
+      )}
+
+      {/* ════════════════════════════════════════
+          SEEK DURATION SHEET (مدة التخطي - Anime Rift)
+      ════════════════════════════════════════ */}
+      {showSeekSheet && (
+        <Pressable style={s.sheetBg} onPress={() => setShowSeekSheet(false)}>
+          <Pressable onPress={e => e.stopPropagation()}>
+            <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
+              <View style={s.sheetHandle} />
+              <View style={s.sheetHeader}>
+                <Text style={s.sheetTitle}>⏩ مدة التخطي</Text>
+              </View>
+              <Text style={[s.sheetItemDesc, { paddingHorizontal: 12, paddingBottom: 8, color: "rgba(255,255,255,0.35)" }]}>
+                اختر المدة الافتراضية عند الضغط على زر التخطي أو النقر المزدوج
+              </Text>
+              {[5, 10, 15, 30, 60].map(d => (
+                <Pressable
+                  key={d}
+                  style={[s.sheetItem, d === seekDuration && s.sheetItemActive]}
+                  onPress={() => {
+                    setSeekDuration(d);
+                    seekDurationRef.current = d;
+                    AsyncStorage.setItem("nova-seek-duration", String(d));
+                    setShowSeekSheet(false);
+                  }}
+                >
+                  <View style={[s.sheetIconWrap, d === seekDuration && s.sheetIconWrapActive]}>
+                    <Ionicons name="timer-outline" size={17} color={d === seekDuration ? "#c4b5fd" : "rgba(255,255,255,0.55)"} />
+                  </View>
+                  <Text style={[s.sheetItemText, d === seekDuration && s.sheetItemTextActive]}>{d} ثانية</Text>
+                  {d === seekDuration && <Ionicons name="checkmark-circle" size={17} color="#8B5CF6" />}
+                </Pressable>
+              ))}
+            </View>
+          </Pressable>
+        </Pressable>
+      )}
 
       {/* ════════════════════════════════════════
           SPEED BOTTOM SHEET
@@ -1797,7 +1956,7 @@ const s = StyleSheet.create({
 
   /* Top bar */
   topBar: { paddingHorizontal: 12, paddingBottom: 24, flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.42)", alignItems: "center", justifyContent: "center", marginTop: 2 },
+  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.50)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", marginTop: 2 },
   titleWrap: { flex: 1, gap: 4 },
   titleText: { color: "#fff", fontSize: 15, fontFamily: "Cairo_700Bold" },
   epBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
@@ -1805,17 +1964,17 @@ const s = StyleSheet.create({
   qualityPill: { borderRadius: 8, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2 },
   qualityText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
   serverCountText: { color: "rgba(255,255,255,0.50)", fontSize: 11, fontFamily: "Cairo_400Regular" },
-  topRight: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
-  topBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  topRight: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
+  topBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.11)", borderWidth: 1, borderColor: "rgba(255,255,255,0.17)", alignItems: "center", justifyContent: "center" },
   topBtnActive: { backgroundColor: "rgba(139,92,246,0.30)", borderColor: "rgba(139,92,246,0.55)" },
-  topBtnClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1, borderColor: "rgba(239,68,68,0.28)", alignItems: "center", justifyContent: "center" },
+  topBtnClose: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1, borderColor: "rgba(239,68,68,0.28)", alignItems: "center", justifyContent: "center" },
 
   /* Center */
-  centerRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18 },
-  epNavBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
-  seekStepBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 26, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
-  seekStepLabel: { color: "#fff", fontSize: 15, fontFamily: "Cairo_800ExtraBold" },
-  playBtn: { width: 78, height: 78, borderRadius: 39, backgroundColor: "rgba(255,255,255,0.13)", borderWidth: 2, borderColor: "rgba(255,255,255,0.55)", alignItems: "center", justifyContent: "center" },
+  centerRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 22 },
+  epNavBtn: { width: 50, height: 50, borderRadius: 25, backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)", alignItems: "center", justifyContent: "center" },
+  seekStepBtn: { width: 58, height: 58, alignItems: "center", justifyContent: "center", borderRadius: 29, backgroundColor: "rgba(255,255,255,0.11)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)", gap: 2 },
+  seekStepLabel: { color: "#fff", fontSize: 13, fontFamily: "Cairo_800ExtraBold", lineHeight: 15 },
+  playBtn: { width: 90, height: 90, borderRadius: 45, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 2, borderColor: "rgba(167,139,250,0.70)", alignItems: "center", justifyContent: "center", shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 20, elevation: 12 },
 
   /* Bottom bar */
   bottomBar: { paddingHorizontal: 16, paddingTop: 28, gap: 8 },
@@ -1823,13 +1982,13 @@ const s = StyleSheet.create({
   timeText: { color: "rgba(255,255,255,0.75)", fontSize: 11, fontFamily: "Cairo_400Regular", minWidth: 40, textAlign: "center" },
 
   /* Progress bar */
-  progressWrap: { height: 32, justifyContent: "center", position: "relative", marginHorizontal: 2 },
-  progressWrapDragging: { height: 44 },
-  progressBg: { position: "absolute", left: 0, right: 0, height: 5, backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 3 },
-  skipMarker: { position: "absolute", height: 7, backgroundColor: "rgba(250,204,21,0.85)", borderRadius: 3, top: "50%", marginTop: -3.5, zIndex: 2 },
-  progressFill: { position: "absolute", left: 0, height: 5, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -2.5, zIndex: 3 },
-  thumb: { position: "absolute", top: "50%", width: 16, height: 16, borderRadius: 8, backgroundColor: "#fff", marginLeft: -8, marginTop: -8, shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 4, zIndex: 4 },
-  thumbDragging: { width: 22, height: 22, borderRadius: 11, marginLeft: -11, marginTop: -11, backgroundColor: "#c4b5fd", shadowColor: "#8B5CF6", shadowOpacity: 0.8, shadowRadius: 10 },
+  progressWrap: { height: 34, justifyContent: "center", position: "relative", marginHorizontal: 2 },
+  progressWrapDragging: { height: 48 },
+  progressBg: { position: "absolute", left: 0, right: 0, height: 6, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 3 },
+  skipMarker: { position: "absolute", height: 8, backgroundColor: "rgba(250,204,21,0.85)", borderRadius: 4, top: "50%", marginTop: -4, zIndex: 2 },
+  progressFill: { position: "absolute", left: 0, height: 6, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -3, zIndex: 3 },
+  thumb: { position: "absolute", top: "50%", width: 18, height: 18, borderRadius: 9, backgroundColor: "#fff", marginLeft: -9, marginTop: -9, shadowColor: "#8B5CF6", shadowOpacity: 0.5, shadowRadius: 6, elevation: 4, zIndex: 4 },
+  thumbDragging: { width: 26, height: 26, borderRadius: 13, marginLeft: -13, marginTop: -13, backgroundColor: "#c4b5fd", shadowColor: "#8B5CF6", shadowOpacity: 1, shadowRadius: 14, elevation: 8 },
   dragTooltip: { position: "absolute", bottom: "100%", marginBottom: 6, backgroundColor: "rgba(10,6,30,0.95)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(139,92,246,0.40)", zIndex: 10 },
   dragTooltipText: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold" },
 
