@@ -5977,8 +5977,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
-      // ── StarCima — TMDB-native ياباني (CDN: phim1280.tv/dzink418hun → صوت ياباني ✅) ──
-      scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
+      // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
+      // scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
       scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep),  false),
       scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep),  false),
@@ -6094,8 +6094,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
-      // ── TMDB-native (StarCima ياباني + مصادر إنجليزية) ─────────────────────
-      case "starcima_anim": (await race(getStarCimaAnimeSources(title, english, ep), SCRAPER_MS, [])).forEach(collectSrc); break;
+      // ── TMDB-native (StarCima محذوف من الأنمي — مصادر إنجليزية) ─────────────────────
+      // case "starcima_anim": محذوف — يرسل صوتاً هندياً في قسم الأنمي
       case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       case "vidlink_anim":  (await race(getVidLinkAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       // lordflix_anim: محذوف
