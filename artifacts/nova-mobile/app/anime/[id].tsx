@@ -140,20 +140,20 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle }: {
   const n = e.node;
   const isFav = favIds.has(n.id);
   return (
-    <Pressable
-      onLongPress={() => onToggle({ id: n.id, name: n.name?.full || "", image: n.image?.large, animeId, animeTitle })}
-      style={d.charCard}
-    >
+    <View style={d.charCard}>
       <View style={[d.charImgWrap, e.role === "MAIN" && d.charImgMain]}>
         {n.image?.large ? <Image source={{ uri: n.image.large }} style={d.charImg} /> : null}
-        {isFav && (
-          <View style={d.charHeartBadge}>
-            <Ionicons name="heart" size={8} color="#f43f5e" />
-          </View>
-        )}
+        {/* Heart button — tap to toggle favourite */}
+        <Pressable
+          onPress={() => onToggle({ id: n.id, name: n.name?.full || "", image: n.image?.large, animeId, animeTitle })}
+          style={[d.charHeartBtn, isFav && d.charHeartBtnActive]}
+          hitSlop={6}
+        >
+          <Ionicons name={isFav ? "heart" : "heart-outline"} size={12} color={isFav ? "#f43f5e" : "rgba(255,255,255,0.80)"} />
+        </Pressable>
       </View>
       <Text style={d.charName} numberOfLines={2}>{n.name?.full}</Text>
-    </Pressable>
+    </View>
   );
 }
 
@@ -806,7 +806,8 @@ const d = StyleSheet.create({
   charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.7, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "#1C1C22", position: "relative" },
   charImgMain: { borderColor: "rgba(139,92,246,0.4)", borderWidth: 2 },
   charImg: { width: "100%", height: "100%" },
-  charHeartBadge: { position: "absolute", top: 4, left: 4, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 8, padding: 3, zIndex: 1 },
+  charHeartBtn: { position: "absolute", bottom: 4, right: 4, backgroundColor: "rgba(0,0,0,0.60)", borderRadius: 10, padding: 4, zIndex: 2, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.25)", borderColor: "rgba(244,63,94,0.60)" },
   charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
   emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   relCard: { width: 100, gap: 6 },
