@@ -4,7 +4,7 @@ import { Search, Star, Loader2, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* AniList cover IDs that reliably have banner images */
-const GENRES: { ar: string; en: string; color: string; animeId: number }[] = [
+const GENRES: { ar: string; en: string; color: string; animeId: number; adult?: boolean }[] = [
   { ar: "أكشن",        en: "Action",        color: "#EF4444", animeId: 21459  },
   { ar: "مغامرة",      en: "Adventure",     color: "#F97316", animeId: 113415 },
   { ar: "كوميدي",      en: "Comedy",        color: "#EAB308", animeId: 21202  },
@@ -21,6 +21,7 @@ const GENRES: { ar: string; en: string; color: string; animeId: number }[] = [
   { ar: "ميكا",        en: "Mecha",         color: "#94A3B8", animeId: 30     },
   { ar: "موسيقى",      en: "Music",         color: "#A78BFA", animeId: 100916 },
   { ar: "إثارة",       en: "Thriller",      color: "#DC2626", animeId: 30002  },
+  { ar: "إيتشي",       en: "Ecchi",         color: "#F472B6", animeId: 11617,  adult: true },
 ];
 
 /* Stable AniList cover URLs — large format, always available */
@@ -51,10 +52,11 @@ function buildQuery(genre: string, format: string, year: number | "", page: numb
   const ff = format ? `, format: ${format}` : `, format_in: [TV, MOVIE, OVA, ONA]`;
   const yf = year   ? `, seasonYear: ${year}` : "";
   const sf = season && year ? `, season: ${season}` : "";
+  const notIn = genre === "Ecchi" ? `["Hentai"]` : `["Ecchi", "Hentai"]`;
   return `query {
   Page(page: ${page}, perPage: 24) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Ecchi", "Hentai"]${gf}${ff}${yf}${sf}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ${notIn}${gf}${ff}${yf}${sf}) {
       id title { romaji } coverImage { large } averageScore episodes format status
     }
   }
@@ -251,7 +253,8 @@ export default function Browse() {
                   transition={{ delay: i * 0.03 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => { setSelectedGenre(g.en); setShowGenreGrid(false); }}
-                  className="relative h-[80px] rounded-2xl overflow-hidden border border-white/8 active:border-white/20"
+                  className="relative h-[80px] rounded-2xl overflow-hidden active:border-white/20"
+                  style={{ border: g.adult ? `1px solid ${g.color}55` : "1px solid rgba(255,255,255,0.08)" }}
                 >
                   {/* Cover image */}
                   <img
@@ -271,10 +274,16 @@ export default function Browse() {
                     }}
                   />
                   {/* Frosted glass label */}
-                  <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
                     <span className="text-white font-black text-[17px] font-['Cairo'] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
                       {g.ar}
                     </span>
+                    {g.adult && (
+                      <span className="text-[8px] font-black px-2 py-0.5 rounded-full"
+                        style={{ background: "rgba(0,0,0,0.65)", color: "#fda4af", border: "1px solid rgba(244,114,182,0.45)" }}>
+                        +17 · محتوى حساس
+                      </span>
+                    )}
                   </div>
                 </motion.button>
               ))}

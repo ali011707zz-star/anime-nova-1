@@ -6,6 +6,7 @@ import { Link } from 'wouter';
 const SCHEDULE_QUERY = `
 query ($page: Int, $perPage: Int, $weekStart: Int, $weekEnd: Int) {
   Page(page: $page, perPage: $perPage) {
+    pageInfo { hasNextPage }
     airingSchedules(airingAt_greater: $weekStart, airingAt_lesser: $weekEnd, sort: TIME) {
       airingAt
       episode
@@ -188,41 +189,50 @@ export default function Schedule() {
     const weekStart = Math.floor(todayMidnight.getTime() / 1000);
     const weekEnd = weekStart + 7 * 86400;
 
-    fetch('https://graphql.anilist.co', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: SCHEDULE_QUERY, variables: { page: 1, perPage: 50, weekStart, weekEnd } }),
-    })
-      .then(r => r.json())
-      .then(d => {
-        const ECCHI_BLOCKED = new Set(["Ecchi", "Hentai"]);
-        const items: any[] = (d.data?.Page?.airingSchedules || []).filter((s: any) => {
-          if (s.media?.isAdult) return false;
-          const genres: string[] = s.media?.genres || [];
-          return !genres.some((g: string) => ECCHI_BLOCKED.has(g));
+    const fetchAll = async () => {
+      let page = 1;
+      let allItems: any[] = [];
+      let hasNext = true;
+      while (hasNext && page <= 5) {
+        const res = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: SCHEDULE_QUERY, variables: { page, perPage: 50, weekStart, weekEnd } }),
         });
-        const grouped: Record<string, any[]> = {};
+        const d = await res.json();
+        const pageData = d.data?.Page;
+        allItems = [...allItems, ...(pageData?.airingSchedules || [])];
+        hasNext = pageData?.pageInfo?.hasNextPage ?? false;
+        page++;
+      }
 
-        items.forEach((item: any) => {
-          const date = new Date(item.airingAt * 1000);
-          const day = DAYS_AR[date.getDay()];
-          if (!grouped[day]) grouped[day] = [];
-          grouped[day].push(item);
-        });
+      const ADULT_BLOCKED = new Set(["Hentai"]);
+      const items = allItems.filter((s: any) => {
+        if (s.media?.isAdult) return false;
+        const genres: string[] = s.media?.genres || [];
+        return !genres.some((g: string) => ADULT_BLOCKED.has(g));
+      });
+      const grouped: Record<string, any[]> = {};
 
-        Object.values(grouped).forEach(arr => arr.sort((a, b) => a.airingAt - b.airingAt));
+      items.forEach((item: any) => {
+        const date = new Date(item.airingAt * 1000);
+        const day = DAYS_AR[date.getDay()];
+        if (!grouped[day]) grouped[day] = [];
+        grouped[day].push(item);
+      });
 
-        // Always show all 7 days starting from today
-        const allDays = Array.from({ length: 7 }, (_, i) => DAYS_AR[(todayIdx + i) % 7]);
-        setSchedule(grouped);
-        setOrderedDays(allDays);
+      Object.values(grouped).forEach(arr => arr.sort((a, b) => a.airingAt - b.airingAt));
 
-        // Default: "أحدث التحديثات" if there are aired-today items, otherwise today
-        const now = Math.floor(Date.now() / 1000);
-        const todayAired = (grouped[today] || []).filter(i => i.airingAt < now);
-        setActiveDay(todayAired.length > 0 ? UPDATES_KEY : today);
-      })
-      .finally(() => setLoading(false));
+      const allDays = Array.from({ length: 7 }, (_, i) => DAYS_AR[(todayIdx + i) % 7]);
+      setSchedule(grouped);
+      setOrderedDays(allDays);
+
+      const now = Math.floor(Date.now() / 1000);
+      const todayAired = (grouped[today] || []).filter(i => i.airingAt < now);
+      setActiveDay(todayAired.length > 0 ? UPDATES_KEY : today);
+    };
+
+    fetchAll().finally(() => setLoading(false));
   }, []);
 
   // Auto-scroll the active tab into view (centered)
