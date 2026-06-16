@@ -24,6 +24,38 @@ function fmtTime(s: number) {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+/**
+ * Binary search for active subtitle cue — O(log n) vs O(n) linear find().
+ * Vidstack technique: cues are sorted by start time → bisect to first candidate,
+ * then check only candidates whose start ≤ ct (end check on hit).
+ */
+function bisectCue(cues: SubCue[], ct: number): SubCue | null {
+  let lo = 0, hi = cues.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (cues[mid].start <= ct) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  // hi now points to last cue with start ≤ ct
+  if (hi >= 0 && cues[hi].end >= ct) return cues[hi];
+  return null;
+}
+
+/**
+ * Returns best initial HLS ABR bandwidth estimate in bps.
+ * Uses navigator.connection.downlink (Mbps) when available (Chrome/Android).
+ * Vidstack technique: seed ABR with real network info for faster quality selection.
+ */
+function getInitialBandwidthEstimate(): number {
+  try {
+    const conn = (navigator as any).connection;
+    if (conn?.downlink && conn.downlink > 0) {
+      return Math.min(conn.downlink * 1_000_000, 20_000_000);
+    }
+  } catch {}
+  return 3_000_000; // 3Mbps safe default
+}
+
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 function FlipScreenIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
@@ -394,6 +426,10 @@ export default function RiftPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
+        /* ── Vidstack: defer segment loading until we know the resume position ──
+           autoStartLoad:false → hls.startLoad(position) in MANIFEST_PARSED
+           eliminates the double-seek that causes the initial black flash. */
+        autoStartLoad: false,
         /* ── Buffer: بداية سريعة ثم تخزين مسبق كافٍ للاستقرار ── */
         maxBufferLength: 60,          // تخزين 1 دقيقة — يقلل وقت التوقف
         maxMaxBufferLength: 300,      // 5 دقائق حد أقصى حين السرعة كافية
@@ -405,11 +441,16 @@ export default function RiftPlayer({
         progressive: true,
         /* ── يبدأ بأقل جودة (0) للتشغيل الفوري ثم يرفع تلقائياً ── */
         startLevel: 0,
-        abrEwmaDefaultEstimate: 2_000_000, // 2Mbps تقدير أكثر واقعية
+        /* ── Vidstack: seed ABR with real network speed (navigator.connection) ── */
+        abrEwmaDefaultEstimate: getInitialBandwidthEstimate(),
         abrBandWidthFactor: 0.92,
         abrBandWidthUpFactor: 0.82,
         testBandwidth: false,
         capLevelToPlayerSize: true,   // لا ترفع الجودة أعلى من دقة الشاشة
+        /* ── Vidstack: interruptSwitch:false — waits for current fragment to finish
+           before switching quality → eliminates micro-stalls during ABR switches ── */
+        // @ts-ignore — property exists in hls.js ≥1.4 but not yet in older typedefs
+        interruptSwitch: false,
         /* ── إعادة المحاولة: صبر أطول يمنع الانقطاع بسبب CDN بطيء ── */
         fragLoadingMaxRetry: 4,
         fragLoadingRetryDelay: 800,
@@ -436,17 +477,18 @@ export default function RiftPlayer({
         if (hlsRef.current !== hls) return;
         // تعطيل مسارات الترجمة المدمجة في HLS (مثل kawaii) — نعتمد على overlay خاص بنا
         try { hls.subtitleTrack = -1; } catch { /* ignore */ }
+        /* ── Vidstack technique: startLoad(position) instead of load→seek
+           Starts buffering FROM the resume position directly, avoiding
+           the initial-segment-download → seek → re-download cycle. ── */
+        const rt = resumeTimeRef.current;
+        const startPos = (!resumedRef.current && rt && rt >= 5) ? rt : -1;
+        if (startPos > 0) {
+          resumedRef.current = true;
+          setCurrentTime(startPos);
+        }
+        hls.startLoad(startPos);
         setError(null); setLoading(false); showControls();
         v.play().catch(() => {});
-      });
-      hls.on(Hls.Events.LEVEL_LOADED, () => {
-        if (hlsRef.current !== hls) return;
-        const rt = resumeTimeRef.current;
-        if (!resumedRef.current && rt && rt >= 5 && v.duration > 30 && rt < v.duration - 10) {
-          v.currentTime = rt;
-          setCurrentTime(rt);
-          resumedRef.current = true;
-        }
       });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (hlsRef.current !== hls) return;
@@ -489,15 +531,18 @@ export default function RiftPlayer({
   }, [loadSource]);
 
   /* ── rAF subtitle cue lookup — reads videoRef.currentTime directly at 60fps ──
-     Eliminates React scheduler latency from subtitle display.
+     Vidstack technique: binary search O(log n) instead of linear find() O(n).
+     Pre-sort cues once on effect entry — avoids re-sorting every frame.
      Only triggers setState when the active cue actually CHANGES (≤1 render/cue). */
   useEffect(() => {
     if (subRafRef.current) { cancelAnimationFrame(subRafRef.current); subRafRef.current = null; }
     if (!subCues?.length || !subEnabled) { setSubActiveCue(null); return; }
+    // Pre-sort once so binary search assumptions hold
+    const sorted = [...subCues].sort((a, b) => a.start - b.start);
     let lastKey = "";
     const tick = () => {
       const ct = (videoRef.current?.currentTime ?? 0) + subOffsetRef.current;
-      const cue = subCues.find(c => ct >= c.start && ct <= c.end) ?? null;
+      const cue = bisectCue(sorted, ct);
       const key = cue ? `${cue.start}` : "";
       if (key !== lastKey) { lastKey = key; setSubActiveCue(cue); }
       subRafRef.current = requestAnimationFrame(tick);
@@ -2238,6 +2283,9 @@ export default function RiftPlayer({
             zIndex: 70,
             padding: "0 16px",
             transition: "top 0.3s ease, bottom 0.3s ease",
+            /* GPU compositing layer — avoids layout recalc on every cue change */
+            willChange: "transform",
+            contain: "layout style",
             ...subPositionStyle(subSettings.position ?? "bottom", showCtrl),
           }}
         >
@@ -2252,29 +2300,38 @@ export default function RiftPlayer({
               border: subSettings.bgOpacity > 0 ? "1px solid rgba(255,255,255,0.07)" : "none",
             }}
           >
-            <p
-              dir="auto"
-              style={{
-                color: subSettings.color,
-                fontSize: subSettings.fontSize,
-                fontWeight: subSettings.bold ? 700 : 500,
-                fontFamily: "'Cairo', sans-serif",
-                lineHeight: 1.55,
-                margin: 0,
-                wordBreak: "break-word",
-                overflowWrap: "break-word",
-                textShadow: [
-                  "-1px -1px 0 rgba(0,0,0,0.72)",
-                  "1px  -1px 0 rgba(0,0,0,0.72)",
-                  "1px   1px 0 rgba(0,0,0,0.72)",
-                  "-1px  1px 0 rgba(0,0,0,0.72)",
-                  "0px   0px 6px rgba(0,0,0,0.60)",
-                  "0px   3px 10px rgba(0,0,0,0.50)",
-                ].join(", "),
-              }}
-            >
-              {subActiveCue.text}
-            </p>
+            {/* ── Vidstack technique: split on \n for proper multi-line VTT cues.
+                Each line rendered as its own element → correct line-break cadence.
+                -webkit-text-stroke gives sharper outline than text-shadow alone. ── */}
+            {subActiveCue.text.split(/\r?\n/).map((line, i) => (
+              <p
+                key={i}
+                dir="auto"
+                style={{
+                  color: subSettings.color,
+                  fontSize: subSettings.fontSize,
+                  fontWeight: subSettings.bold ? 700 : 500,
+                  fontFamily: "'Cairo', sans-serif",
+                  lineHeight: 1.55,
+                  margin: i === 0 ? 0 : "2px 0 0",
+                  wordBreak: "break-word",
+                  overflowWrap: "break-word",
+                  /* Vidstack-style: crisp text-stroke outline instead of blurry shadow */
+                  WebkitTextStroke: "1px rgba(0,0,0,0.85)",
+                  textShadow: subSettings.bgOpacity === 0 ? [
+                    "-1px -1px 0 rgba(0,0,0,0.80)",
+                    "1px  -1px 0 rgba(0,0,0,0.80)",
+                    "1px   1px 0 rgba(0,0,0,0.80)",
+                    "-1px  1px 0 rgba(0,0,0,0.80)",
+                    "0px   0px 8px rgba(0,0,0,0.70)",
+                    "0px   3px 14px rgba(0,0,0,0.55)",
+                  ].join(", ") : "none",
+                  paintOrder: "stroke fill" as any,
+                }}
+              >
+                {line || "\u00A0"}
+              </p>
+            ))}
           </div>
         </div>
       )}
