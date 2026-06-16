@@ -334,7 +334,7 @@ export default function WatchScreen() {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     const base = getBaseUrl();
-    const url  = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}`;
+    const url  = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}&anime=${anime || ""}`;
     try {
       const response = await secureStreamFetch(url, { signal: abortRef.current.signal });
       if (!response.body) {

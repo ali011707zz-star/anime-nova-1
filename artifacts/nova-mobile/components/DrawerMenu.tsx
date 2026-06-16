@@ -3,7 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
-  Animated, Dimensions, Modal, Platform, Pressable,
+  Animated, Dimensions, Easing, Modal, Platform, Pressable,
   ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -58,18 +58,28 @@ export function DrawerMenu({ visible, onClose }: Props) {
     }).catch(() => {});
   }, [visible]);
 
-  const slideX = useRef(new Animated.Value(-DRAWER_W)).current;
+  const slideX = useRef(new Animated.Value(DRAWER_W)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
       Animated.parallel([
-        Animated.spring(slideX, { toValue: 0, useNativeDriver: true, tension: 60, friction: 12 }),
+        Animated.timing(slideX, {
+          toValue: 0,
+          duration: 300,
+          easing: Easing.bezier(0.22, 1, 0.36, 1),
+          useNativeDriver: true,
+        }),
         Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
       ]).start();
     } else {
       Animated.parallel([
-        Animated.timing(slideX, { toValue: -DRAWER_W, duration: 220, useNativeDriver: true }),
+        Animated.timing(slideX, {
+          toValue: DRAWER_W,
+          duration: 240,
+          easing: Easing.bezier(0.4, 0, 1, 1),
+          useNativeDriver: true,
+        }),
         Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
       ]).start();
     }
