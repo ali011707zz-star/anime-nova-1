@@ -212,6 +212,7 @@ export default function AnimationWatchScreen() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let currentEvent = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -221,11 +222,17 @@ export default function AnimationWatchScreen() {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
+          if (line === "") { currentEvent = ""; continue; }
+          if (line.startsWith(": ")) continue;
+          if (line.startsWith("event: ")) { currentEvent = line.slice(7).trim(); continue; }
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
+            const evType = currentEvent || data.type || "";
+            const isSource = evType === "source" || (!evType && (data.url || data.directUrl || data.proxyUrl));
+            const isDone = evType === "done";
 
-            if (data.type === "source") {
+            if (isSource) {
               const src: AnimSrc = {
                 ...data,
                 directUrl: resolveUrl(data.directUrl, base),
@@ -238,7 +245,6 @@ export default function AnimationWatchScreen() {
 
               setSources(prev => {
                 const next = [...prev, src];
-                /* Auto-play best source */
                 if (!autoSelectedRef.current && (isDirectPlayable(src) || isEmbedSrc(src))) {
                   autoSelectedRef.current = true;
                   setTimeout(() => {
@@ -252,7 +258,7 @@ export default function AnimationWatchScreen() {
                 return next;
               });
 
-            } else if (data.type === "done") {
+            } else if (isDone) {
               setLoading(false);
               setSources(prev => {
                 if (prev.length === 0) setTimeout(() => setScreen("picker"), 0);
