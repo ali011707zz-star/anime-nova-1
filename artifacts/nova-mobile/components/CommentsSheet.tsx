@@ -181,7 +181,7 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
           <Pressable
             onPress={() => toggleLike(c)}
             style={cs.actionBtn}
-            disabled={!myUserId || liking.has(c.id)}
+            disabled={liking.has(c.id)}
           >
             <Ionicons
               name={c.liked ? "heart" : "heart-outline"}
@@ -190,15 +190,13 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
             />
             {c.likes > 0 && <Text style={[cs.actionBtnText, c.liked && { color: "#f87171" }]}>{c.likes}</Text>}
           </Pressable>
-          {myUserId && (
-            <Pressable
-              onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }}
-              style={cs.actionBtn}
-            >
-              <Ionicons name="return-up-back-outline" size={14} color="rgba(139,92,246,0.7)" />
-              <Text style={[cs.actionBtnText, { color: "rgba(139,92,246,0.7)" }]}>رد</Text>
-            </Pressable>
-          )}
+          <Pressable
+            onPress={() => { setReplyTo(c); setTimeout(() => inputRef.current?.focus(), 100); }}
+            style={cs.actionBtn}
+          >
+            <Ionicons name="return-up-back-outline" size={14} color="rgba(139,92,246,0.7)" />
+            <Text style={[cs.actionBtnText, { color: "rgba(139,92,246,0.7)" }]}>رد</Text>
+          </Pressable>
           {c.userId === myUserId && (
             <Pressable onPress={() => deleteComment(c)} style={cs.actionBtn}>
               <Ionicons name="trash-outline" size={13} color="rgba(239,68,68,0.45)" />

@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureStreamFetch } from "@/utils/secureApi";
-import CommentsSheet from "@/components/CommentsSheet";
+import { CommentsSheet } from "@/components/CommentsSheet";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -38,6 +38,12 @@ const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: strin
 };
 const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
 const TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
+
+function resolveUrl(url: string | undefined, base: string): string {
+  if (!url) return "";
+  if (url.startsWith("/")) return base + url;
+  return url;
+}
 
 function getSrcQuality(src: AnimSrc): Quality {
   const tierStr = (src.tier || "").toLowerCase();
@@ -220,7 +226,12 @@ export default function AnimationWatchScreen() {
             const data = JSON.parse(line.slice(6));
 
             if (data.type === "source") {
-              const src: AnimSrc = data;
+              const src: AnimSrc = {
+                ...data,
+                directUrl: resolveUrl(data.directUrl, base),
+                url: resolveUrl(data.url, base),
+                proxyUrl: resolveUrl(data.proxyUrl, base),
+              };
               const key = src.proxyUrl || src.directUrl || src.url || "";
               if (!key || seenKeys.current.has(key)) continue;
               seenKeys.current.add(key);

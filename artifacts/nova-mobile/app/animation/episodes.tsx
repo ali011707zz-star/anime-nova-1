@@ -265,7 +265,7 @@ const s = StyleSheet.create({
   seasonTabs: { marginTop: 4 },
   seasonCard: { width: 78, height: 106, borderRadius: 13, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", position: "relative" },
   seasonCardActive: { borderColor: "rgba(167,139,250,0.55)", shadowColor: "#7C3AED", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 },
-  seasonCardOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "transparent", background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.3) 100%)" as any },
+  seasonCardOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)" },
   seasonCardGlow: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(139,92,246,0.18)" },
   seasonActiveDot: { position: "absolute", top: 6, right: 6, width: 6, height: 6, borderRadius: 3, backgroundColor: "#a78bfa" },
   seasonCardContent: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 6, alignItems: "center" },
