@@ -6,7 +6,6 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { WebView } from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
@@ -545,36 +544,35 @@ export default function AnimeDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* ── Trailer Modal ── */}
-      <Modal visible={showTrailer} animationType="slide" onRequestClose={() => setShowTrailer(false)}>
-        <View style={{ flex: 1, backgroundColor: "#000" }}>
-          <View style={[d.trailerModalHeader, { paddingTop: topPad + 4 }]}>
-            <Pressable onPress={() => setShowTrailer(false)} style={d.trailerCloseBtn}>
-              <Ionicons name="close" size={20} color="#fff" />
-            </Pressable>
-            <Text style={d.trailerModalTitle}>الإعلان الدعائي</Text>
-            <Pressable
-              onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`)}
-              style={d.trailerCloseBtn}
-            >
-              <Ionicons name="open" size={18} color="rgba(255,255,255,0.7)" />
-            </Pressable>
+      {/* ── Trailer Modal — opens YouTube natively ── */}
+      <Modal visible={showTrailer} animationType="fade" transparent onRequestClose={() => setShowTrailer(false)}>
+        <Pressable style={d.trailerOverlay} onPress={() => setShowTrailer(false)}>
+          <View style={d.trailerSheet}>
+            <View style={d.trailerSheetHeader}>
+              <Ionicons name="logo-youtube" size={22} color="#FF0000" />
+              <Text style={d.trailerModalTitle}>الإعلان الدعائي</Text>
+              <Pressable onPress={() => setShowTrailer(false)} style={d.trailerCloseBtn}>
+                <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
+              </Pressable>
+            </View>
+            <Image
+              source={{ uri: anime.trailer?.thumbnail || `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg` }}
+              style={d.trailerSheetImg}
+            />
+            <View style={d.trailerSheetActions}>
+              <Pressable
+                onPress={() => { setShowTrailer(false); Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`); }}
+                style={d.trailerYTBtn}
+              >
+                <Ionicons name="logo-youtube" size={18} color="#fff" />
+                <Text style={d.trailerYTBtnText}>فتح في يوتيوب</Text>
+              </Pressable>
+              <Pressable onPress={() => setShowTrailer(false)} style={d.trailerCancelBtn}>
+                <Text style={d.trailerCancelText}>إلغاء</Text>
+              </Pressable>
+            </View>
           </View>
-          <WebView
-            source={{
-              uri: `https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1&enablejsapi=1`,
-            }}
-            style={{ flex: 1 }}
-            allowsFullscreenVideo
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            javaScriptEnabled
-            domStorageEnabled
-            originWhitelist={["*"]}
-            mixedContentMode="always"
-            userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
-          />
-        </View>
+        </Pressable>
       </Modal>
 
       {/* ── Comments bottom sheet ── */}
@@ -702,9 +700,17 @@ const d = StyleSheet.create({
   simImg: { width: "100%", height: "100%", resizeMode: "cover" },
   simScore: { position: "absolute", top: 5, right: 5, flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
   simTitle: { fontSize: 9, color: "rgba(255,255,255,0.55)", fontFamily: "Cairo_700Bold", lineHeight: 13 },
-  trailerModalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12, backgroundColor: "#000" },
-  trailerCloseBtn: { width: 36, height: 36, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  trailerModalTitle: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#fff" },
+  trailerOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.8)", justifyContent: "flex-end" },
+  trailerSheet: { backgroundColor: "#111116", borderTopLeftRadius: 28, borderTopRightRadius: 28, borderTopWidth: 1, borderColor: "rgba(255,255,255,0.07)", overflow: "hidden" },
+  trailerSheetHeader: { flexDirection: "row", alignItems: "center", gap: 10, padding: 18, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  trailerModalTitle: { flex: 1, fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  trailerCloseBtn: { width: 32, height: 32, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  trailerSheetImg: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
+  trailerSheetActions: { padding: 16, gap: 10 },
+  trailerYTBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: "#DC2626", borderRadius: 16, paddingVertical: 14 },
+  trailerYTBtnText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  trailerCancelBtn: { alignItems: "center", paddingVertical: 10 },
+  trailerCancelText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.35)" },
   ratingOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "flex-end" },
   ratingSheet: { backgroundColor: "#111116", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)" },
   ratingTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", marginBottom: 6 },

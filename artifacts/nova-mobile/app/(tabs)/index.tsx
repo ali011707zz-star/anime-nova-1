@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
+import { DrawerMenu } from "@/components/DrawerMenu";
 import { HeroSection } from "@/components/HeroSection";
 import { SectionRow, SkeletonRow } from "@/components/SectionRow";
 import { useColors } from "@/hooks/useColors";
@@ -105,6 +106,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { watchHistory } = useApp();
+  const [showDrawer, setShowDrawer] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const { season, year } = getCurrentSeason();
@@ -238,8 +240,8 @@ export default function HomeScreen() {
             <Pressable onPress={() => router.push("/schedule")} style={styles.iconBtn}>
               <Ionicons name="calendar" size={22} color={colors.mutedForeground} />
             </Pressable>
-            <Pressable onPress={() => router.push("/settings")} style={styles.iconBtn}>
-              <Ionicons name="settings" size={22} color={colors.mutedForeground} />
+            <Pressable onPress={() => setShowDrawer(true)} style={styles.iconBtn}>
+              <Ionicons name="menu" size={26} color={colors.text} />
             </Pressable>
           </View>
         </View>
@@ -421,6 +423,7 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
+      <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />
     </View>
   );
 }

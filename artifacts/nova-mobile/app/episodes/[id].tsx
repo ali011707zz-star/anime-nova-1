@@ -9,6 +9,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
+import { CommentsSheet } from "@/components/CommentsSheet";
 
 /* ── AniList query ── */
 const ANIME_QUERY = `
@@ -99,6 +100,7 @@ export default function EpisodeListScreen() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [watched, setWatched] = useState<Set<number>>(new Set());
+  const [showComments, setShowComments] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -205,6 +207,11 @@ export default function EpisodeListScreen() {
           <Ionicons name="chevron-forward" size={18} color="#fff" />
         </Pressable>
 
+        {/* Comments button */}
+        <Pressable onPress={() => setShowComments(true)} style={ep_s.commentsBtn}>
+          <Ionicons name="chatbubbles" size={16} color="#c4b5fd" />
+        </Pressable>
+
         {/* Cover + info */}
         <View style={ep_s.heroBottom}>
           {anime.coverImage?.large ? (
@@ -283,14 +290,21 @@ export default function EpisodeListScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 100 }}
         ListHeaderComponent={
-          <Pressable
-            onPress={() => watchEp(displayedEps[0] || 1)}
-            style={ep_s.watchFromBtn}>
-            <Ionicons name="play" size={14} color="#8B5CF6" />
-            <Text style={ep_s.watchFromBtnText}>
-              {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
-            </Text>
-          </Pressable>
+          <>
+            <Pressable
+              onPress={() => watchEp(displayedEps[0] || 1)}
+              style={ep_s.watchFromBtn}>
+              <Ionicons name="play" size={14} color="#8B5CF6" />
+              <Text style={ep_s.watchFromBtnText}>
+                {watchedCount > 0 ? `متابعة من حيث توقفت (${watchedCount + 1})` : "مشاهدة من البداية"}
+              </Text>
+            </Pressable>
+            <Pressable onPress={() => setShowComments(true)} style={ep_s.commentsListBtn}>
+              <Ionicons name="chatbubbles" size={16} color="#c4b5fd" />
+              <Text style={ep_s.commentsListBtnText}>التعليقات والنقاشات</Text>
+              <Ionicons name="chevron-back" size={14} color="rgba(196,181,253,0.5)" />
+            </Pressable>
+          </>
         }
         renderItem={({ item: n }) => (
           <EpisodeRow
@@ -303,6 +317,13 @@ export default function EpisodeListScreen() {
           />
         )}
       />
+
+      <CommentsSheet
+        visible={showComments}
+        onClose={() => setShowComments(false)}
+        animeId={anime?.id ? parseInt(id) : undefined}
+        title={anime?.title?.romaji}
+      />
     </View>
   );
 }
@@ -313,6 +334,9 @@ const ep_s = StyleSheet.create({
   notFound: { fontSize: 14, color: "rgba(255,255,255,0.4)", fontFamily: "Cairo_400Regular" },
   hero: { height: 220, justifyContent: "flex-end", overflow: "hidden" },
   backBtn: { position: "absolute", right: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  commentsBtn: { position: "absolute", left: 14, top: 12, width: 36, height: 36, backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.4)" },
+  commentsListBtn: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },
+  commentsListBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
   heroBottom: { flexDirection: "row", alignItems: "flex-end", gap: 12, paddingHorizontal: 14, paddingBottom: 14 },
   heroCover: { width: 64, height: 88, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   heroInfo: { flex: 1, paddingBottom: 4 },

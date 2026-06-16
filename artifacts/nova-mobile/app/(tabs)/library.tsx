@@ -81,7 +81,7 @@ export default function LibraryScreen() {
               style={[styles.historyItem, { backgroundColor: colors.card, borderColor: colors.border }]}
             >
               <View style={styles.historyImgWrap}>
-                <Image source={{ uri: item.thumbnail }} style={styles.historyImg} contentFit="cover" />
+                <Image source={item.thumbnail ? { uri: item.thumbnail } : undefined} style={[styles.historyImg, { backgroundColor: "#1C1C22" }]} contentFit="cover" />
                 <LinearGradient colors={["transparent", "rgba(0,0,0,0.6)"]} style={StyleSheet.absoluteFill} />
                 <View style={styles.playIcon}>
                   <Ionicons name="play" size={20} color="#fff" />
@@ -123,7 +123,7 @@ export default function LibraryScreen() {
               onPress={() => router.push(`/anime/${item.id}?title=${encodeURIComponent(item.title)}&english=${encodeURIComponent(item.english)}`)}
               style={styles.favCard}
             >
-              <Image source={{ uri: item.thumbnail }} style={[styles.favImg, { borderRadius: 10 }]} contentFit="cover" />
+              <Image source={item.thumbnail ? { uri: item.thumbnail } : undefined} style={[styles.favImg, { borderRadius: 10, backgroundColor: "#1C1C22" }]} contentFit="cover" />
               <Pressable
                 onPress={() => toggleFavorite(item)}
                 style={[styles.favRemove, { backgroundColor: "rgba(0,0,0,0.6)" }]}
