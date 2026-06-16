@@ -383,3 +383,18 @@ const styles = StyleSheet.create({
     position: "absolute", top: 8, right: 8,
   },
 });
+
+const todayStyles = StyleSheet.create({
+  card: {
+    width: 130, height: 190, borderRadius: 12,
+    overflow: "hidden", borderWidth: 1, position: "relative",
+  },
+  img: { width: "100%", height: "100%" },
+  grad: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    paddingHorizontal: 8, paddingBottom: 8, paddingTop: 40,
+  },
+  title: {
+    color: "#fff", fontSize: 11, fontFamily: "Cairo_600SemiBold", lineHeight: 15,
+  },
+});
