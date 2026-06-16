@@ -1024,24 +1024,34 @@ export function RiftPlayer({
                 <Ionicons name="play-skip-back" size={22} color="rgba(255,255,255,0.85)" />
               </Pressable>
             )}
+            {/* ── Back 10s ── */}
             <Pressable
               onPress={() => { seek(positionRef.current - 10); fadeIn(); }}
-              style={s.seekStepBtn} hitSlop={12}
+              style={s.seekStepBtn} hitSlop={14}
             >
-              <Ionicons name="play-back" size={22} color="rgba(255,255,255,0.80)" />
+              <Ionicons name="arrow-undo-outline" size={26} color="rgba(255,255,255,0.88)" />
               <Text style={s.seekStepLabel}>10</Text>
             </Pressable>
+
+            {/* ── Play / Pause ── */}
             <Pressable onPress={togglePlay} style={s.playBtn} hitSlop={8}>
               {buffering
                 ? <SpinRing size={52} />
-                : <Ionicons name={isPlaying ? "pause" : "play"} size={34} color="#fff" />}
+                : <Ionicons
+                    name={isPlaying ? "pause" : "play"}
+                    size={36}
+                    color="#fff"
+                    style={!isPlaying ? { marginLeft: 4 } : undefined}
+                  />}
             </Pressable>
+
+            {/* ── Forward 10s ── */}
             <Pressable
               onPress={() => { seek(positionRef.current + 10); fadeIn(); }}
-              style={s.seekStepBtn} hitSlop={12}
+              style={s.seekStepBtn} hitSlop={14}
             >
               <Text style={s.seekStepLabel}>10</Text>
-              <Ionicons name="play-forward" size={22} color="rgba(255,255,255,0.80)" />
+              <Ionicons name="arrow-redo-outline" size={26} color="rgba(255,255,255,0.88)" />
             </Pressable>
             {onNextEpisode && (
               <Pressable onPress={onNextEpisode} style={s.epNavBtn} hitSlop={12}>
@@ -1646,11 +1656,11 @@ const s = StyleSheet.create({
   topBtnClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1, borderColor: "rgba(239,68,68,0.28)", alignItems: "center", justifyContent: "center" },
 
   /* Center */
-  centerRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 22 },
-  epNavBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: "rgba(0,0,0,0.32)", alignItems: "center", justifyContent: "center" },
-  seekStepBtn: { width: 52, height: 46, borderRadius: 23, backgroundColor: "rgba(20,20,40,0.72)", alignItems: "center", justifyContent: "center", gap: 1, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
-  seekStepLabel: { color: "rgba(255,255,255,0.65)", fontSize: 9, fontFamily: "Cairo_700Bold" },
-  playBtn: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(0,0,0,0.50)", borderWidth: 2, borderColor: "rgba(255,255,255,0.50)", alignItems: "center", justifyContent: "center" },
+  centerRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18 },
+  epNavBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
+  seekStepBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 26, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  seekStepLabel: { color: "#fff", fontSize: 15, fontFamily: "Cairo_800ExtraBold" },
+  playBtn: { width: 78, height: 78, borderRadius: 39, backgroundColor: "rgba(255,255,255,0.13)", borderWidth: 2, borderColor: "rgba(255,255,255,0.55)", alignItems: "center", justifyContent: "center" },
 
   /* Bottom bar */
   bottomBar: { paddingHorizontal: 16, paddingTop: 28, gap: 8 },
