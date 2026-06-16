@@ -16,7 +16,7 @@ query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal title { romaji english }
     coverImage { large extraLarge }
-    bannerImage episodes duration status
+    bannerImage episodes duration status format
     nextAiringEpisode { episode }
     averageScore genres
   }
@@ -183,7 +183,8 @@ export default function EpisodeListScreen() {
     });
     const t = encodeURIComponent(anime?.title?.romaji || "");
     const eng = encodeURIComponent(anime?.title?.english || "");
-    router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}`);
+    const fmt = encodeURIComponent(anime?.format || "");
+    router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}`);
   }
 
   function openComments(n: number) {

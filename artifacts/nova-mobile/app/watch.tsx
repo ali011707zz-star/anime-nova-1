@@ -178,7 +178,7 @@ function normCdnHost(url: string): string {
     const base = url.startsWith("/") ? "https://x.com" + url : url;
     const host = new URL(base).hostname.replace(/^www\./, "");
     return host.replace(/^[a-z]\d*\./, "");
-  } catch { return url.slice(0, 40); }
+  } catch { return url; }
 }
 
 /* ── Spinning loader ── */
@@ -288,8 +288,8 @@ function resolveUrl(url: string | undefined, base: string): string {
 
 /* ═══════════════════════════════════════ MAIN ═══ */
 export default function WatchScreen() {
-  const { anime, ep, title, english } = useLocalSearchParams<{
-    anime: string; ep: string; title: string; english: string;
+  const { anime, ep, title, english, format } = useLocalSearchParams<{
+    anime: string; ep: string; title: string; english: string; format?: string;
   }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -347,7 +347,7 @@ export default function WatchScreen() {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     const base = getBaseUrl();
-    const url  = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}&anime=${anime || ""}`;
+    const url  = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}&anime=${anime || ""}&format=${encodeURIComponent(format || "")}`;
     try {
       const response = await secureStreamFetch(url, { signal: abortRef.current.signal });
       if (!response.body) {
@@ -420,7 +420,7 @@ export default function WatchScreen() {
         return prev;
       });
     }
-  }, [anime, ep, titleStr, englishStr]);
+  }, [anime, ep, titleStr, englishStr, format]);
 
   useEffect(() => { fetchSources(); return () => abortRef.current?.abort(); }, [fetchSources]);
 
@@ -437,8 +437,8 @@ export default function WatchScreen() {
     const direct: Src[] = [], embeds: Src[] = [];
     for (const s of sources) {
       const key = s.directUrl || s.url || "";
-      if (seen.has(normCdnHost(key))) continue;
-      seen.add(normCdnHost(key));
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
       if (shouldShowSrc(s)) direct.push(s);
       else if (isEmbedFallback(s)) embeds.push(s);
     }
@@ -465,7 +465,7 @@ export default function WatchScreen() {
   /* Navigate episode */
   function goEp(n: number) {
     saveProgress();
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}`);
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}`);
   }
 
   /* Build RiftPlayer sources from directSrcs */
