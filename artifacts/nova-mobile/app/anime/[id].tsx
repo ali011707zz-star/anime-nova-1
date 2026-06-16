@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, Pressable, Image, ScrollView,
   ActivityIndicator, StyleSheet, Platform, Modal,
-  Dimensions, TextInput, Linking,
+  Dimensions, Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
+import { getBaseUrl } from "@/utils/api";
 
 const { width: W } = Dimensions.get("window");
 
@@ -28,6 +29,7 @@ query ($id: Int) {
     startDate { year month day }
     endDate { year month day }
     averageScore meanScore popularity favourites
+    nextAiringEpisode { airingAt episode timeUntilAiring }
     genres tags { name rank }
     studios { nodes { name isAnimationStudio } }
     trailer { id site thumbnail }
@@ -85,6 +87,15 @@ function fmtRuntime(min?: number | null) {
   if (!min) return null;
   if (min >= 60) return `${Math.floor(min/60)}س ${min%60}د`;
   return `${min} دقيقة`;
+}
+
+function fmtCountdown(secs: number) {
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (d > 0) return `${d} يوم و ${h} ساعة`;
+  if (h > 0) return `${h} ساعة و ${m} دقيقة`;
+  return `${m} دقيقة`;
 }
 
 function getAgeRating(genres: string[], isAdult?: boolean) {
@@ -149,13 +160,15 @@ export default function AnimeDetailScreen() {
   const [myRating, setMyRating] = useState(0);
   const [saved, setSaved] = useState(false);
   const [warnDismissed, setWarnDismissed] = useState(false);
-  const [hoverRating, setHoverRating] = useState(0);
+  const [descAr, setDescAr] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
 
   const isFav = anime ? isFavorite(anime.id) : false;
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
+    setDescAr(null);
     fetch("https://graphql.anilist.co", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -163,12 +176,41 @@ export default function AnimeDetailScreen() {
     }).then(r => r.json()).then(data => {
       const a = data.data?.Media;
       setAnime(a);
+      if (a?.nextAiringEpisode?.timeUntilAiring) {
+        setCountdown(a.nextAiringEpisode.timeUntilAiring);
+      }
+      if (a?.description) {
+        const cacheKey = `desc-ar-${id}`;
+        AsyncStorage.getItem(cacheKey).then(cached => {
+          if (cached) { setDescAr(cached); return; }
+          const stripped = stripHtml(a.description).substring(0, 500);
+          fetch(`${getBaseUrl()}/api/anime/translate?text=${encodeURIComponent(stripped)}`)
+            .then(r2 => r2.json()).then(d2 => {
+              const t = d2.translated;
+              if (t && t !== stripped && t.length > 10) {
+                setDescAr(t);
+                AsyncStorage.setItem(cacheKey, t);
+              } else {
+                setDescAr(stripped);
+              }
+            }).catch(() => { setDescAr(stripped); });
+        });
+      }
     }).finally(() => setLoading(false));
 
     AsyncStorage.getItem(`my-rating-${id}`).then(v => { if (v) setMyRating(parseInt(v)); });
     AsyncStorage.getItem(`saved-${id}`).then(v => { if (v === "1") setSaved(true); });
     AsyncStorage.getItem(`adult-warn-${id}`).then(v => { if (v === "1") setWarnDismissed(true); });
   }, [id]);
+
+  /* Update countdown timer every minute */
+  useEffect(() => {
+    if (!countdown || countdown <= 0) return;
+    const timer = setInterval(() => {
+      setCountdown(prev => (prev && prev > 60) ? prev - 60 : 0);
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [countdown]);
 
   const handleFavorite = useCallback(async () => {
     if (!anime) return;
@@ -206,7 +248,7 @@ export default function AnimeDetailScreen() {
   );
   if (!anime) return null;
 
-  const desc = stripHtml(anime.description);
+  const desc = descAr || stripHtml(anime.description);
   const mainChars = (anime.characters?.edges || []).filter((e: any) => e.role === "MAIN");
   const suppChars = (anime.characters?.edges || []).filter((e: any) => e.role === "SUPPORTING");
   const related = anime.relations?.edges || [];
@@ -218,6 +260,7 @@ export default function AnimeDetailScreen() {
   const allTimeRank = anime.rankings?.find((r: any) => r.allTime && r.type === "RATED")?.rank;
   const ageRating = getAgeRating(anime.genres || [], anime.isAdult);
   const studio = anime.studios?.nodes?.find((s: any) => s.isAnimationStudio)?.name || anime.studios?.nodes?.[0]?.name;
+  const nextEp = anime.nextAiringEpisode;
 
   return (
     <View style={[d.container, { paddingTop: topPad }]}>
@@ -242,7 +285,7 @@ export default function AnimeDetailScreen() {
           {/* Fav */}
           <Pressable onPress={handleFavorite}
             style={[d.favBtn, isFav && { backgroundColor: "rgba(139,92,246,0.3)" }]}>
-            <Ionicons name={isFav ? "heart" : "heart"} size={20} color={isFav ? "#8B5CF6" : "#fff"} />
+            <Ionicons name="heart" size={20} color={isFav ? "#8B5CF6" : "#fff"} />
           </Pressable>
         </View>
 
@@ -285,8 +328,18 @@ export default function AnimeDetailScreen() {
           </View>
         </View>
 
+        {/* ── Next episode countdown ── */}
+        {nextEp && countdown && countdown > 0 ? (
+          <View style={d.countdownBox}>
+            <Ionicons name="time" size={14} color="#a78bfa" />
+            <Text style={d.countdownText}>
+              الحلقة {nextEp.episode} تُبث بعد {fmtCountdown(countdown)}
+            </Text>
+          </View>
+        ) : null}
+
         {/* ── Watch button ── */}
-        <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
+        <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16 }}>
           <Pressable
             onPress={() => router.push(`/episodes/${id}?title=${encodeURIComponent(anime.title?.romaji || "")}&english=${encodeURIComponent(anime.title?.english || "")}`)}
             style={d.watchBtn}
@@ -561,7 +614,7 @@ export default function AnimeDetailScreen() {
           </View>
           <WebView
             source={{
-              uri: `https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1`,
+              uri: `https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1&enablejsapi=1`,
             }}
             style={{ flex: 1 }}
             allowsFullscreenVideo
@@ -571,11 +624,27 @@ export default function AnimeDetailScreen() {
             domStorageEnabled
             originWhitelist={["*"]}
             mixedContentMode="always"
+            onShouldStartLoadWithRequest={(req) => {
+              const url = req.url;
+              if (
+                url.startsWith("https://www.youtube.com/embed/") ||
+                url.startsWith("https://www.youtube.com/watch") ||
+                url.startsWith("about:") ||
+                url.startsWith("data:") ||
+                url.startsWith("blob:") ||
+                url.includes("googlevideo.com") ||
+                url.includes("ytimg.com") ||
+                url.includes("googleapis.com") ||
+                url.includes("youtube.com")
+              ) {
+                return true;
+              }
+              Linking.openURL(url).catch(() => {});
+              return false;
+            }}
           />
         </View>
       </Modal>
-
-      {/* ── Comments — navigated via router ── */}
 
       {/* ── Rating bottom sheet ── */}
       <Modal visible={showRating} animationType="slide" transparent onRequestClose={() => setShowRating(false)}>
@@ -626,6 +695,13 @@ const d = StyleSheet.create({
   statsRow: { flexDirection: "row", gap: 10 },
   statItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   statText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff" },
+  countdownBox: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: 16, marginTop: 12, paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: 12, backgroundColor: "rgba(139,92,246,0.08)",
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.2)",
+  },
+  countdownText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa", flex: 1 },
   watchBtn: { height: 52, borderRadius: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: "#7C3AED" },
   watchBtnIcon: { width: 32, height: 32, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, alignItems: "center", justifyContent: "center" },
   watchBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
@@ -647,71 +723,63 @@ const d = StyleSheet.create({
   malStatSub: { fontSize: 9, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", marginTop: 2 },
   section: { paddingHorizontal: 16, marginTop: 18 },
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
-  sectionBar: { width: 4, height: 18, backgroundColor: "#8B5CF6", borderRadius: 2 },
-  sectionTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  descBox: { backgroundColor: "#111116", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", borderRadius: 18, padding: 14 },
-  descText: { fontSize: 13, color: "#B4B4B8", lineHeight: 24, fontFamily: "Cairo_400Regular", textAlign: "right" },
-  readMoreBtn: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 10 },
-  readMoreText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
-  genreChip: { paddingHorizontal: 12, paddingVertical: 7, backgroundColor: "#18181B", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  genreChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)" },
-  metaBox: { borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", overflow: "hidden", backgroundColor: "rgba(255,255,255,0.025)" },
-  metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  sectionBar: { width: 3, height: 16, backgroundColor: "#8B5CF6", borderRadius: 2 },
+  sectionTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  descBox: { backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  descText: { fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 22, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  readMoreBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 10 },
+  readMoreText: { fontSize: 12, color: "#8B5CF6", fontFamily: "Cairo_700Bold" },
+  genreChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)" },
+  genreChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  metaBox: { backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", overflow: "hidden" },
+  metaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
   metaLabel: { fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
-  metaValue: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.8)", maxWidth: "60%", textAlign: "right" },
-  metaBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
-  metaBadgeText: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" },
-  trailerBtn: { borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", aspectRatio: 16 / 9 },
-  trailerImg: { width: "100%", height: "100%" },
-  trailerPlayBtn: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
-  trailerPlay: { width: 64, height: 64, backgroundColor: "#DC2626", borderRadius: 32, alignItems: "center", justifyContent: "center" },
-  trailerBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 14 },
-  trailerLabel: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  trailerSub: { fontSize: 10, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular" },
-  tabNav: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.08)", marginBottom: 14 },
+  metaValue: { fontSize: 11, color: "rgba(255,255,255,0.8)", fontFamily: "Cairo_700Bold", textAlign: "right", flex: 1, marginRight: 8 },
+  metaBadge: { backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  metaBadgeText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  trailerBtn: { height: 180, borderRadius: 16, overflow: "hidden", position: "relative", backgroundColor: "#111" },
+  trailerImg: { width: "100%", height: "100%", resizeMode: "cover" },
+  trailerPlayBtn: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
+  trailerPlay: { width: 56, height: 56, backgroundColor: "rgba(255,0,0,0.85)", borderRadius: 28, alignItems: "center", justifyContent: "center", shadowColor: "#FF0000", shadowOpacity: 0.5, shadowRadius: 12, elevation: 8 },
+  trailerBottom: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 12 },
+  trailerLabel: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  trailerSub: { fontSize: 10, color: "rgba(255,255,255,0.55)", fontFamily: "Cairo_400Regular", marginTop: 2 },
+  trailerSheetHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: "#111" },
+  trailerModalTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  trailerCloseBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 12 },
+  tabNav: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", marginBottom: 14 },
   tabBtn: { flex: 1, alignItems: "center", paddingBottom: 10, position: "relative" },
-  tabBtnText: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.3)" },
-  tabBtnTextActive: { color: "#c4b5fd" },
-  tabIndicator: { position: "absolute", bottom: 0, left: 0, right: 0, height: 2, backgroundColor: "#8B5CF6", borderRadius: 1 },
-  tabSubTitle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.35)", marginBottom: 10, textAlign: "center" },
-  charGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  charCard: { width: (W - 32 - 24) / 4, alignItems: "center", gap: 6 },
-  charImgWrap: { width: "100%", aspectRatio: 3 / 4, borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  charImgMain: { borderColor: "rgba(139,92,246,0.5)" },
-  charImg: { width: "100%", height: "100%", resizeMode: "cover" },
-  charName: { fontSize: 8, color: "rgba(255,255,255,0.5)", fontFamily: "Cairo_700Bold", textAlign: "center", lineHeight: 12 },
-  emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 13, fontFamily: "Cairo_400Regular", paddingVertical: 24 },
-  relCard: { width: 110, gap: 4 },
-  relImgWrap: { width: 110, height: 155, borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "#18181B", position: "relative" },
-  relImg: { width: "100%", height: "100%", resizeMode: "cover" },
-  relTypeBadge: { position: "absolute", top: 6, right: 6, backgroundColor: "rgba(139,92,246,0.9)", borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 },
+  tabBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.35)" },
+  tabBtnTextActive: { color: "#fff" },
+  tabIndicator: { position: "absolute", bottom: 0, left: "20%", right: "20%", height: 2, backgroundColor: "#8B5CF6", borderRadius: 1 },
+  tabSubTitle: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_700Bold", marginBottom: 10, textAlign: "right" },
+  charGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  charCard: { width: (W - 32 - 60) / 5, alignItems: "center", gap: 4 },
+  charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.7, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "#1C1C22" },
+  charImgMain: { borderColor: "rgba(139,92,246,0.4)", borderWidth: 2 },
+  charImg: { width: "100%", height: "100%" },
+  charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
+  emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
+  relCard: { width: 100, gap: 6 },
+  relImgWrap: { width: 100, height: 140, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: "#1C1C22" },
+  relImg: { width: "100%", height: "100%" },
+  relTypeBadge: { position: "absolute", top: 5, right: 5, backgroundColor: "rgba(0,0,0,0.75)", borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 },
   relTypeBadgeText: { fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold" },
-  relScoreBadge: { position: "absolute", top: 6, left: 6, flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
-  relTitle: { fontSize: 9, color: "rgba(255,255,255,0.65)", fontFamily: "Cairo_700Bold", lineHeight: 13 },
-  simGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  simCard: { width: (W - 32 - 20) / 3, gap: 6 },
-  simImgWrap: { width: "100%", aspectRatio: 2 / 3, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", backgroundColor: "#18181B", position: "relative" },
-  simImg: { width: "100%", height: "100%", resizeMode: "cover" },
-  simScore: { position: "absolute", top: 5, right: 5, flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
-  simTitle: { fontSize: 9, color: "rgba(255,255,255,0.55)", fontFamily: "Cairo_700Bold", lineHeight: 13 },
-  trailerOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.8)", justifyContent: "flex-end" },
-  trailerSheet: { backgroundColor: "#111116", borderTopLeftRadius: 28, borderTopRightRadius: 28, borderTopWidth: 1, borderColor: "rgba(255,255,255,0.07)", overflow: "hidden" },
-  trailerSheetHeader: { flexDirection: "row", alignItems: "center", gap: 10, padding: 18, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
-  trailerModalTitle: { flex: 1, fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  trailerCloseBtn: { width: 32, height: 32, backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  trailerSheetImg: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
-  trailerSheetActions: { padding: 16, gap: 10 },
-  trailerYTBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: "#DC2626", borderRadius: 16, paddingVertical: 14 },
-  trailerYTBtnText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  trailerCancelBtn: { alignItems: "center", paddingVertical: 10 },
-  trailerCancelText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.35)" },
-  ratingOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "flex-end" },
-  ratingSheet: { backgroundColor: "#111116", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)" },
-  ratingTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", marginBottom: 6 },
-  ratingSub: { fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular", textAlign: "center", marginBottom: 20 },
+  relScoreBadge: { position: "absolute", bottom: 5, left: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
+  relTitle: { fontSize: 10, color: "rgba(255,255,255,0.7)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  simGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  simCard: { width: (W - 32 - 16) / 3, gap: 4 },
+  simImgWrap: { width: "100%", aspectRatio: 0.7, borderRadius: 12, overflow: "hidden", position: "relative", backgroundColor: "#1C1C22" },
+  simImg: { width: "100%", height: "100%" },
+  simScore: { position: "absolute", bottom: 5, left: 5, flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2 },
+  simTitle: { fontSize: 10, color: "rgba(255,255,255,0.65)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  ratingOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+  ratingSheet: { backgroundColor: "#18181B", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, gap: 16, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)" },
+  ratingTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
+  ratingSub: { fontSize: 12, color: "rgba(255,255,255,0.4)", fontFamily: "Cairo_400Regular", textAlign: "center" },
   ratingBtns: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
-  ratingNum: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  ratingNumActive: { backgroundColor: "rgba(234,179,8,0.2)", borderColor: "rgba(234,179,8,0.4)" },
-  ratingNumText: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.25)" },
-  ratingNumTextActive: { color: "#EAB308" },
+  ratingNum: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  ratingNumActive: { backgroundColor: "rgba(139,92,246,0.25)", borderColor: "#8B5CF6" },
+  ratingNumText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.5)" },
+  ratingNumTextActive: { color: "#fff" },
 });
