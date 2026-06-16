@@ -29,7 +29,7 @@ export default function ScheduleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const topPad = Platform.OS === "web" ? 67 : Math.max(insets.top, Platform.OS === "android" ? 28 : 44);
 
   const now = new Date();
   const todayDay = now.getDay();
@@ -58,7 +58,7 @@ export default function ScheduleScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: topPad + 8 }]}>
+      <View style={[styles.header, { paddingTop: topPad + 16 }]}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </Pressable>

@@ -130,17 +130,30 @@ function MetaRow({ label, value, badge }: { label: string; value: string; badge?
   );
 }
 
-function CharCard({ e }: { e: any }) {
+function CharCard({ e, animeId, animeTitle, favIds, onToggle }: {
+  e: any;
+  animeId: number;
+  animeTitle: string;
+  favIds: Set<number>;
+  onToggle: (c: { id: number; name: string; image?: string; animeId: number; animeTitle: string }) => void;
+}) {
   const n = e.node;
+  const isFav = favIds.has(n.id);
   return (
-    <View style={d.charCard}>
+    <Pressable
+      onLongPress={() => onToggle({ id: n.id, name: n.name?.full || "", image: n.image?.large, animeId, animeTitle })}
+      style={d.charCard}
+    >
       <View style={[d.charImgWrap, e.role === "MAIN" && d.charImgMain]}>
-        {n.image?.large ? (
-          <Image source={{ uri: n.image.large }} style={d.charImg} />
-        ) : null}
+        {n.image?.large ? <Image source={{ uri: n.image.large }} style={d.charImg} /> : null}
+        {isFav && (
+          <View style={d.charHeartBadge}>
+            <Ionicons name="heart" size={8} color="#f43f5e" />
+          </View>
+        )}
       </View>
       <Text style={d.charName} numberOfLines={2}>{n.name?.full}</Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -162,8 +175,35 @@ export default function AnimeDetailScreen() {
   const [warnDismissed, setWarnDismissed] = useState(false);
   const [descAr, setDescAr] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [favCharIds, setFavCharIds] = useState<Set<number>>(new Set());
 
   const isFav = anime ? isFavorite(anime.id) : false;
+
+  useEffect(() => {
+    AsyncStorage.getItem("fav-characters").then(raw => {
+      if (!raw) return;
+      try {
+        const arr = JSON.parse(raw) as Array<{ id: number }>;
+        setFavCharIds(new Set(arr.map(c => c.id)));
+      } catch {}
+    });
+  }, []);
+
+  const toggleChar = useCallback(async (char: { id: number; name: string; image?: string; animeId: number; animeTitle: string }) => {
+    const raw = await AsyncStorage.getItem("fav-characters");
+    const arr = raw ? (JSON.parse(raw) as any[]) : [];
+    const exists = arr.findIndex(c => c.id === char.id);
+    let updated: any[];
+    if (exists >= 0) {
+      updated = arr.filter((_: any, i: number) => i !== exists);
+      setFavCharIds(prev => { const next = new Set(prev); next.delete(char.id); return next; });
+    } else {
+      updated = [char, ...arr];
+      setFavCharIds(prev => new Set([...prev, char.id]));
+    }
+    await AsyncStorage.setItem("fav-characters", JSON.stringify(updated));
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -509,7 +549,7 @@ export default function AnimeDetailScreen() {
                 <>
                   <Text style={d.tabSubTitle}>الشخصيات الرئيسية</Text>
                   <View style={d.charGrid}>
-                    {mainChars.map((e: any) => <CharCard key={e.node.id} e={e} />)}
+                    {mainChars.map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} />)}
                   </View>
                 </>
               )}
@@ -517,7 +557,7 @@ export default function AnimeDetailScreen() {
                 <>
                   <Text style={[d.tabSubTitle, { marginTop: 12 }]}>الشخصيات المساعدة</Text>
                   <View style={d.charGrid}>
-                    {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e} />)}
+                    {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e} animeId={anime.id} animeTitle={anime.title?.romaji || ""} favIds={favCharIds} onToggle={toggleChar} />)}
                   </View>
                 </>
               )}
@@ -755,9 +795,10 @@ const d = StyleSheet.create({
   tabSubTitle: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_700Bold", marginBottom: 10, textAlign: "right" },
   charGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   charCard: { width: (W - 32 - 60) / 5, alignItems: "center", gap: 4 },
-  charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.7, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "#1C1C22" },
+  charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.7, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "#1C1C22", position: "relative" },
   charImgMain: { borderColor: "rgba(139,92,246,0.4)", borderWidth: 2 },
   charImg: { width: "100%", height: "100%" },
+  charHeartBadge: { position: "absolute", top: 4, left: 4, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 8, padding: 3, zIndex: 1 },
   charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
   emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   relCard: { width: 100, gap: 6 },
