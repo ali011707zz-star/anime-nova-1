@@ -133,6 +133,16 @@ function parseVTTTime(s: string): number {
 
 function parseVTT(text: string): SubCue[] {
   const cues: SubCue[] = [];
+  // ── X-TIMESTAMP-MAP: HLS-native VTT (e.g. Videasy cc.boopigcdn.com) ──
+  // Header: X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000
+  // → offset = 900000/90000 = 10 s → subtract from every cue to fix late-subtitle bug.
+  let tsOffset = 0;
+  const tsMapM = text.match(/X-TIMESTAMP-MAP=MPEGTS:(\d+),LOCAL:([\d:.]+)/i);
+  if (tsMapM) {
+    const mpegts = parseInt(tsMapM[1], 10) / 90000;
+    const local  = parseVTTTime(tsMapM[2].trim());
+    tsOffset = Math.max(0, mpegts - local);
+  }
   const blocks = text.split(/\n\n+/);
   for (const block of blocks) {
     const lines = block.trim().split("\n");
@@ -141,8 +151,8 @@ function parseVTT(text: string): SubCue[] {
     if (ti >= lines.length) continue;
     const m = lines[ti].match(/(\d[\d:.]*)\s*-->\s*(\d[\d:.]*)/);
     if (!m) continue;
-    const start = parseVTTTime(m[1]);
-    const end   = parseVTTTime(m[2]);
+    const start = Math.max(0, parseVTTTime(m[1]) - tsOffset);
+    const end   = Math.max(0, parseVTTTime(m[2]) - tsOffset);
     const textLines = lines.slice(ti + 1)
       .map(l => l.replace(/<[^>]*>/g, "")
         .replace(/&amp;/g, "&").replace(/&lt;/g, "<")

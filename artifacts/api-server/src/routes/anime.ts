@@ -6728,9 +6728,49 @@ router.get("/anime/proxy-text", async (req, res) => {
 //  Fetches a VTT/SRT subtitle file and returns translated cue array
 // ════════════════════════════════════════════════════════════════════
 
-/** Parse a VTT or SRT file into timing + plain-text pairs */
+/**
+ * Shift a VTT timestamp string by subtracting `offsetSec` seconds.
+ * Handles both HH:MM:SS.mmm and MM:SS.mmm formats.
+ * Used to correct X-TIMESTAMP-MAP offsets in HLS-native VTT files.
+ */
+function shiftVttTimestamp(timeStr: string, offsetSec: number): string {
+  const toSec = (s: string): number => {
+    const m3 = s.match(/^(\d+):(\d{2}):(\d{2})[,.](\d{1,3})/);
+    if (m3) return parseInt(m3[1])*3600 + parseInt(m3[2])*60 + parseInt(m3[3]) + parseInt(m3[4].padEnd(3,"0"))/1000;
+    const m2 = s.match(/^(\d+):(\d{2})[,.](\d{1,3})/);
+    if (m2) return parseInt(m2[1])*60 + parseInt(m2[2]) + parseInt(m2[3].padEnd(3,"0"))/1000;
+    return 0;
+  };
+  const clamped = Math.max(0, toSec(timeStr) - offsetSec);
+  const h  = Math.floor(clamped / 3600);
+  const m  = Math.floor((clamped % 3600) / 60);
+  const s  = clamped % 60;
+  const ms = Math.round((s % 1) * 1000);
+  const ss = Math.floor(s);
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(ss).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
+}
+
+/** Parse a VTT or SRT file into timing + plain-text pairs.
+ *  Handles X-TIMESTAMP-MAP header (HLS-native VTT, e.g. Videasy cc.boopigcdn.com):
+ *    X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000
+ *  → offset = 900000/90000 = 10 s → subtract from every cue to fix late-subtitle bug. */
 function parseVttCues(text: string): Array<{ timing: string; rawText: string }> {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // ── X-TIMESTAMP-MAP: subtract MPEG-TS base offset so VOD cues start at media-time 0 ──
+  let tsOffset = 0;
+  const tsMapM = normalized.match(/X-TIMESTAMP-MAP=MPEGTS:(\d+),LOCAL:([\d:.]+)/i);
+  if (tsMapM) {
+    const mpegts = parseInt(tsMapM[1], 10) / 90000; // 90 kHz clock → seconds
+    const lStr = tsMapM[2].trim();
+    const lm3 = lStr.match(/^(\d+):(\d{2}):(\d{2})[,.](\d{1,3})/);
+    const lm2 = lStr.match(/^(\d+):(\d{2})[,.](\d{1,3})/);
+    const local = lm3
+      ? parseInt(lm3[1])*3600 + parseInt(lm3[2])*60 + parseInt(lm3[3]) + parseInt(lm3[4].padEnd(3,"0"))/1000
+      : lm2 ? parseInt(lm2[1])*60 + parseInt(lm2[2]) + parseInt(lm2[3].padEnd(3,"0"))/1000 : 0;
+    tsOffset = Math.max(0, mpegts - local); // e.g. 900000/90000 - 0 = 10.0 s
+  }
+
   const blocks = normalized.split(/\n{2,}/);
   const cues: Array<{ timing: string; rawText: string }> = [];
   for (const block of blocks) {
@@ -6741,7 +6781,11 @@ function parseVttCues(text: string): Array<{ timing: string; rawText: string }> 
     if (timingIdx === -1) continue;
     // Keep only the timestamp part (drop VTT cue settings like "align:start")
     const timingFull = lines[timingIdx];
-    const timing = timingFull.split("-->").map(s => s.trim().split(/\s/)[0]).join(" --> ");
+    const rawParts = timingFull.split("-->").map(s => s.trim().split(/\s/)[0]);
+    // Apply X-TIMESTAMP-MAP correction to each timestamp
+    const timing = tsOffset > 0
+      ? rawParts.map(p => shiftVttTimestamp(p, tsOffset)).join(" --> ")
+      : rawParts.join(" --> ");
     const rawText = lines
       .slice(timingIdx + 1)
       .join(" ")
