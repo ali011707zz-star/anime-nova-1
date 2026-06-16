@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View, Text, Pressable, Image, ScrollView, ActivityIndicator,
-  StyleSheet, Platform, Dimensions, Animated, Easing,
+  StyleSheet, Platform, Dimensions, Animated, Easing, Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -512,6 +512,29 @@ export default function WatchScreen() {
   /* ══ EMBED PLAYER ══ */
   if (screen === "embed" && playingSrc) {
     const embedUrl = playingSrc.directUrl || playingSrc.url || "";
+    if (Platform.OS === "web") {
+      return (
+        <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
+          <Pressable onPress={() => setScreen("picker")} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
+            <Ionicons name="arrow-back" size={18} color="#fff" />
+          </Pressable>
+          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
+          </View>
+          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>هذا المصدر يحتاج التطبيق الأصلي</Text>
+          <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>مصدر mega.nz / Vidmoly لا يدعم تشغيل الويب</Text>
+          <Pressable
+            onPress={() => Linking.openURL(embedUrl)}
+            style={{ backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)", marginTop: 4 }}
+          >
+            <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold", fontSize: 14 }}>فتح في المتصفح</Text>
+          </Pressable>
+          <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
+            <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
+          </Pressable>
+        </View>
+      );
+    }
     return (
       <View style={{ flex: 1, backgroundColor: "#000" }}>
         <WebView

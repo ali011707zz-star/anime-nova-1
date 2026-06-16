@@ -504,7 +504,16 @@ export default function AnimeDetailScreen() {
         {trailerYT ? (
           <View style={d.section}>
             <SectionHeader title="الإعلان الدعائي" />
-            <Pressable onPress={() => setShowTrailer(true)} style={d.trailerBtn}>
+            <Pressable
+              onPress={() => {
+                if (Platform.OS === "web") {
+                  Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`);
+                } else {
+                  setShowTrailer(true);
+                }
+              }}
+              style={d.trailerBtn}
+            >
               <Image
                 source={{ uri: anime.trailer?.thumbnail || `https://img.youtube.com/vi/${trailerYT}/hqdefault.jpg` }}
                 style={d.trailerImg}
