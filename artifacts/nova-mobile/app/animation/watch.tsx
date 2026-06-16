@@ -5,8 +5,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useVideoPlayer, VideoView } from "expo-video";
 import WebView from "react-native-webview";
+import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -105,7 +105,7 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
   return (
     <Pressable onPress={() => onPlay(src)} style={w.srcRow}>
       <View style={[w.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-        <Ionicons name={isEmbed ? "tv-outline" : "monitor-outline"} size={14} color={qs.text} />
+        <Ionicons name={isEmbed ? "tv-outline" : "desktop-outline"} size={14} color={qs.text} />
       </View>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -182,24 +182,6 @@ export default function AnimationWatchScreen() {
       }).catch(() => {});
     }
   }, [progressKey, tmdbId, type, ep, season, titleStr, posterUrl]);
-
-  /* ── Player ── */
-  const playUrl = playingSrc ? getPlayUrl(playingSrc) : "";
-  const player = useVideoPlayer(playUrl, p => {
-    p.loop = false;
-    if (resumeTime > 5 && playUrl) {
-      p.currentTime = resumeTime;
-    }
-  });
-
-  useEffect(() => {
-    if (!player || !playUrl) return;
-    const sub = player.addListener("timeUpdate", (e: any) => {
-      const t = e.currentTime ?? 0;
-      handleTimeUpdate(t);
-    });
-    return () => sub.remove();
-  }, [player, playUrl, handleTimeUpdate]);
 
   /* ── SSE fetch ── */
   const fetchSources = useCallback(async () => {
@@ -307,6 +289,15 @@ export default function AnimationWatchScreen() {
     "360p SD":   directSrcs.filter(s => getSrcQuality(s) === "360p SD"),
   }), [directSrcs]);
 
+  /* Build RiftPlayer sources from directSrcs */
+  const riftSources = useMemo((): PlayerSource[] =>
+    directSrcs.map(s => ({
+      url: getPlayUrl(s),
+      label: s.label || "مصدر",
+      quality: getSrcQuality(s),
+    })).filter(s => s.url),
+  [directSrcs]);
+
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
     if (screen === "native" || screen === "embed") {
@@ -321,7 +312,7 @@ export default function AnimationWatchScreen() {
     } else if (tmdbId) {
       router.push(`/animation/movie/${tmdbId}`);
     } else {
-      router.back();
+      router.canGoBack() ? router.back() : router.replace("/(tabs)/animations");
     }
   }, [screen, tmdbId, type, season, router, progressKey]);
 
@@ -365,38 +356,29 @@ export default function AnimationWatchScreen() {
     );
   }
 
-  /* ═══════════════════ NATIVE PLAYER ═══════════════════ */
-  if (screen === "native" && playingSrc) {
+  /* ═══════════════════ RIFT PLAYER ═══════════════════ */
+  if (screen === "native" && riftSources.length > 0) {
+    const startIdx = Math.max(0, riftSources.findIndex(s => s.url === getPlayUrl(playingSrc!)));
     return (
-      <View style={w.container}>
-        <VideoView
-          player={player}
-          style={w.video}
-          allowsFullscreen
-          allowsPictureInPicture
-          nativeControls
-        />
-        {/* Top overlay: back + title */}
-        <LinearGradient
-          colors={["rgba(0,0,0,0.75)", "transparent"]}
-          style={[w.videoTopBar, { paddingTop: topPad }]}
-          pointerEvents="box-none"
-        >
-          <Pressable onPress={() => setScreen("picker")} style={w.videoBackBtn}>
-            <Ionicons name="arrow-back" size={18} color="#fff" />
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={w.videoTitle} numberOfLines={1}>{titleStr}</Text>
-            {type !== "movie" && (
-              <Text style={w.videoEp}>الموسم {season} • الحلقة {ep}</Text>
-            )}
-          </View>
-          <Pressable onPress={() => setScreen("picker")} style={w.srcSwitchBtn}>
-            <Ionicons name="swap-horizontal" size={16} color="rgba(255,255,255,0.8)" />
-            <Text style={w.srcSwitchText}>تغيير المصدر</Text>
-          </Pressable>
-        </LinearGradient>
-      </View>
+      <RiftPlayer
+        sources={riftSources}
+        initialSourceIndex={startIdx}
+        title={titleStr}
+        episode={type !== "movie" ? ep : undefined}
+        initialPosition={resumeTime}
+        onBack={() => setScreen("picker")}
+        onProgress={(pos, _dur) => handleTimeUpdate(pos)}
+        onNextEpisode={type === "tv" ? () => {
+          const t = encodeURIComponent(titleStr);
+          const p = encodeURIComponent(posterUrl);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}`);
+        } : undefined}
+        onPrevEpisode={type === "tv" && ep > 1 ? () => {
+          const t = encodeURIComponent(titleStr);
+          const p = encodeURIComponent(posterUrl);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&title=${t}&poster=${p}`);
+        } : undefined}
+      />
     );
   }
 

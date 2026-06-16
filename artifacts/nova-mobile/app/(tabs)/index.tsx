@@ -16,8 +16,14 @@ import { useColors } from "@/hooks/useColors";
 import {
   AIRING_QUERY, AnilistMedia, anilistQuery,
   POPULAR_QUERY, TRENDING_QUERY,
+  SEASONAL_QUERY, TOP_RATED_QUERY, MOVIES_QUERY, UPCOMING_QUERY,
+  getCurrentSeason,
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
+
+const SEASON_AR: Record<string, string> = {
+  WINTER: "شتاء", SPRING: "ربيع", SUMMER: "صيف", FALL: "خريف",
+};
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -26,6 +32,7 @@ export default function HomeScreen() {
   const { watchHistory } = useApp();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const { season, year } = getCurrentSeason();
 
   const { data: trending, isLoading: loadingT, refetch: refetchT } = useQuery({
     queryKey: ["trending"],
@@ -42,18 +49,41 @@ export default function HomeScreen() {
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(AIRING_QUERY),
   });
 
+  const { data: seasonal, refetch: refetchS } = useQuery({
+    queryKey: ["seasonal", season, year],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(SEASONAL_QUERY, { season, year }),
+  });
+
+  const { data: topRated, refetch: refetchR } = useQuery({
+    queryKey: ["topRated"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(TOP_RATED_QUERY),
+  });
+
+  const { data: movies, refetch: refetchM } = useQuery({
+    queryKey: ["animeMovies"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
+  });
+
+  const { data: upcoming, refetch: refetchU } = useQuery({
+    queryKey: ["upcoming"],
+    queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(UPCOMING_QUERY),
+  });
+
   const isLoading = loadingT || loadingP || loadingA;
 
   const trendingList = trending?.Page?.media || [];
   const popularList = popular?.Page?.media || [];
   const airingList = airing?.Page?.media || [];
+  const seasonalList = seasonal?.Page?.media || [];
+  const topRatedList = topRated?.Page?.media || [];
+  const moviesList = movies?.Page?.media || [];
+  const upcomingList = upcoming?.Page?.media || [];
 
   const heroItems = trendingList.slice(0, 5).filter((m) => m.bannerImage || m.coverImage.extraLarge);
-
   const recentHistory = watchHistory.slice(0, 10);
 
   const refresh = async () => {
-    await Promise.all([refetchT(), refetchP(), refetchA()]);
+    await Promise.all([refetchT(), refetchP(), refetchA(), refetchS(), refetchR(), refetchM(), refetchU()]);
   };
 
   return (
@@ -69,11 +99,18 @@ export default function HomeScreen() {
             <LinearGradient colors={["#8B5CF6", "#6D28D9"]} style={styles.logoBadge}>
               <Ionicons name="play" size={14} color="#fff" />
             </LinearGradient>
-            <Text style={[styles.logoText, { color: colors.text }]}>Nova <Text style={{ color: colors.primary }}>Anime</Text></Text>
+            <Text style={[styles.logoText, { color: colors.text }]}>
+              Anime <Text style={{ color: colors.primary }}>NOVA</Text>
+            </Text>
           </View>
-          <Pressable onPress={() => router.push("/settings")} style={styles.settingsBtn}>
-            <Ionicons name="settings-outline" size={22} color={colors.mutedForeground} />
-          </Pressable>
+          <View style={styles.headerRight}>
+            <Pressable onPress={() => router.push("/schedule")} style={styles.iconBtn}>
+              <Ionicons name="calendar-outline" size={22} color={colors.mutedForeground} />
+            </Pressable>
+            <Pressable onPress={() => router.push("/settings")} style={styles.iconBtn}>
+              <Ionicons name="settings-outline" size={22} color={colors.mutedForeground} />
+            </Pressable>
+          </View>
         </View>
 
         <AnnouncementBanner />
@@ -89,7 +126,14 @@ export default function HomeScreen() {
         {recentHistory.length > 0 && (
           <View style={{ marginTop: 24 }}>
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>متابعة المشاهدة</Text>
+              <View style={styles.sectionLeft}>
+                <View style={[styles.sectionDot, { backgroundColor: "#22c55e" }]} />
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>متابعة المشاهدة</Text>
+              </View>
+              <Pressable onPress={() => router.push("/(tabs)/library")} style={styles.seeAllBtn}>
+                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
+                <Ionicons name="chevron-back" size={13} color={colors.primary} />
+              </Pressable>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
               {recentHistory.map((h) => (
@@ -108,7 +152,7 @@ export default function HomeScreen() {
                       </View>
                     )}
                   </LinearGradient>
-                  <View style={[styles.playOverlay]}>
+                  <View style={styles.playOverlay}>
                     <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.85)" />
                   </View>
                 </Pressable>
@@ -133,14 +177,38 @@ export default function HomeScreen() {
                 onSeeAll={() => router.push("/browse")}
               />
               <SectionRow
+                title={`🌸 أنمي ${SEASON_AR[season] ?? "الموسم"} ${year}`}
+                items={seasonalList}
+                size="md"
+                onSeeAll={() => router.push("/browse")}
+              />
+              <SectionRow
                 title="📡 يُعرض حالياً"
                 items={airingList}
                 size="md"
                 onSeeAll={() => router.push("/browse")}
               />
               <SectionRow
+                title="🏆 الأعلى تقييماً على الإطلاق"
+                items={topRatedList}
+                size="md"
+                onSeeAll={() => router.push("/browse")}
+              />
+              <SectionRow
                 title="⭐ الأكثر شعبية"
                 items={popularList}
+                size="md"
+                onSeeAll={() => router.push("/browse")}
+              />
+              <SectionRow
+                title="🎬 أفلام الأنمي"
+                items={moviesList}
+                size="md"
+                onSeeAll={() => router.push("/browse")}
+              />
+              <SectionRow
+                title="🗓️ قريباً"
+                items={upcomingList}
                 size="md"
                 onSeeAll={() => router.push("/browse")}
               />
@@ -154,19 +222,46 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 },
+  header: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16, paddingBottom: 8,
+  },
   logoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  logoBadge: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  logoBadge: {
+    width: 30, height: 30, borderRadius: 8,
+    alignItems: "center", justifyContent: "center",
+  },
   logoText: { fontSize: 20, fontFamily: "Cairo_800ExtraBold" },
-  settingsBtn: { padding: 4 },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 12 },
-  sectionTitle: { fontSize: 17, fontFamily: "Cairo_700Bold" },
-  historyCard: { width: 200, height: 120, borderRadius: 12, overflow: "hidden", borderWidth: 1, position: "relative" },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
+  iconBtn: { padding: 6 },
+  sectionHeader: {
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16, marginBottom: 12,
+  },
+  sectionLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  sectionDot: { width: 8, height: 8, borderRadius: 4 },
+  sectionTitle: { fontSize: 16, fontFamily: "Cairo_700Bold" },
+  seeAllBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
+  seeAllText: { fontSize: 13, fontFamily: "Cairo_600SemiBold" },
+  historyCard: {
+    width: 150, height: 105, borderRadius: 12,
+    overflow: "hidden", borderWidth: 1, position: "relative",
+  },
   historyImg: { width: "100%", height: "100%" },
-  historyGrad: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 8 },
-  historyEp: { color: "rgba(255,255,255,0.6)", fontSize: 10 },
-  historyTitle: { color: "#fff", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
-  historyProgress: { height: 2, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 1, marginTop: 4 },
+  historyGrad: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    padding: 8, gap: 2,
+  },
+  historyEp: { color: "#8B5CF6", fontSize: 10, fontFamily: "Cairo_700Bold" },
+  historyTitle: { color: "#fff", fontSize: 11, fontFamily: "Cairo_600SemiBold" },
+  historyProgress: {
+    height: 2, backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: 1, marginTop: 2,
+  },
   historyProgressFill: { height: 2, borderRadius: 1 },
-  playOverlay: { position: "absolute", top: "50%", left: "50%", transform: [{ translateX: -14 }, { translateY: -28 }] },
+  playOverlay: {
+    position: "absolute", top: 8, right: 8,
+  },
 });

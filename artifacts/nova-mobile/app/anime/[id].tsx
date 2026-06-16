@@ -198,7 +198,7 @@ export default function AnimeDetailScreen() {
 
   if (loading) return (
     <View style={[d.container, { paddingTop: topPad }]}>
-      <Pressable onPress={() => router.back()} style={{ padding: 16 }}>
+      <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={{ padding: 16 }}>
         <Ionicons name="arrow-back" size={22} color="#fff" />
       </Pressable>
       <View style={d.center}><ActivityIndicator color="#8B5CF6" size="large" /></View>
@@ -236,7 +236,7 @@ export default function AnimeDetailScreen() {
             style={StyleSheet.absoluteFill}
           />
           {/* Back */}
-          <Pressable onPress={() => router.back()} style={d.backBtn}>
+          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.backBtn}>
             <Ionicons name="arrow-back" size={20} color="#fff" />
           </Pressable>
           {/* Fav */}
