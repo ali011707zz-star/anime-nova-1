@@ -43,7 +43,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm install && PORT=5000 BASE_PATH=/ pnpm --filter @workspace/anime-scraper run dev"
+args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/anime-scraper run dev"
 waitForPort = 5000
 
 [[workflows.workflow]]
@@ -55,7 +55,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm install && pnpm --filter @workspace/api-server run build && PORT=8080 node --enable-source-maps artifacts/api-server/dist/index.mjs"
+args = "PORT=8080 node --enable-source-maps artifacts/api-server/dist/index.mjs"
 waitForPort = 8080
 
 [[workflows.workflow]]
