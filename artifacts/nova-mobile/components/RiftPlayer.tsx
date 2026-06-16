@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import * as ScreenOrientation from "expo-screen-orientation";
+import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -743,6 +744,7 @@ export function RiftPlayer({
 
   return (
     <View style={s.root}>
+      <StatusBar hidden />
       {/* ── Video ── */}
       <VideoView
         player={player}
