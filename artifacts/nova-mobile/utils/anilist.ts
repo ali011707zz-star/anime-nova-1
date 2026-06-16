@@ -127,6 +127,19 @@ query UpcomingAnime {
   }
 }`;
 
+export const TODAY_EPISODES_QUERY = `
+query TodayEpisodes($gt: Int!, $lt: Int!) {
+  Page(page: 1, perPage: 20) {
+    airingSchedules(airingAt_greater: $gt, airingAt_lesser: $lt, sort: TIME_DESC) {
+      episode airingAt
+      media {
+        id title { romaji english } coverImage { large } averageScore popularity
+        format isAdult genres
+      }
+    }
+  }
+}`;
+
 export const ACTION_QUERY = `
 query ActionAnime {
   Page(page: 1, perPage: 20) {

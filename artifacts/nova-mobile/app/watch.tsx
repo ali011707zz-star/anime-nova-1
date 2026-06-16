@@ -38,6 +38,8 @@ interface AniInfo {
   studios?: { nodes?: { name: string }[] };
   seasonYear?: number;
   season?: string;
+  coverImage?: { large?: string; extraLarge?: string };
+  bannerImage?: string;
 }
 
 /* ── AniList fetch ── */
@@ -47,6 +49,8 @@ const ANILIST_Q = `query ($id: Int) {
     averageScore genres format status season seasonYear
     description(asHtml: false)
     studios(isMain: true) { nodes { name } }
+    coverImage { large extraLarge }
+    bannerImage
   }
 }`;
 
@@ -306,8 +310,23 @@ export default function WatchScreen() {
     const id = parseInt(anime);
     setCover(`https://img.anili.st/media/${id}`);
     AsyncStorage.getItem(progressKey).then(v => { if (v) setResumeTime(parseFloat(v) || 0); });
-    fetchAniInfo(id).then(info => { if (info) setAniInfo(info); });
+    fetchAniInfo(id).then(info => {
+      if (info) {
+        setAniInfo(info);
+        const img = info.coverImage?.extraLarge || info.coverImage?.large;
+        if (img) setCover(img);
+      }
+    });
   }, [anime, progressKey]);
+
+  /* ── 35-second timeout fallback — prevents stuck loading screen ── */
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setScreen(s => s === "loading" ? "picker" : s);
+      setLoading(false);
+    }, 35000);
+    return () => clearTimeout(timeout);
+  }, [anime, ep]);
 
   /* ── SSE fetch ── */
   const fetchSources = useCallback(async () => {
@@ -320,7 +339,12 @@ export default function WatchScreen() {
     const url  = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}`;
     try {
       const response = await secureStreamFetch(url, { signal: abortRef.current.signal });
-      const reader   = response.body!.getReader();
+      if (!response.body) {
+        setLoading(false);
+        setScreen("picker");
+        return;
+      }
+      const reader   = response.body.getReader();
       const decoder  = new TextDecoder();
       let buffer     = "";
       while (true) {
@@ -363,8 +387,17 @@ export default function WatchScreen() {
         }
       }
     } catch (e: any) {
-      if (e?.name !== "AbortError") setLoading(false);
-    } finally { setLoading(false); }
+      if (e?.name !== "AbortError") {
+        setLoading(false);
+        setScreen(s => s === "loading" ? "picker" : s);
+      }
+    } finally {
+      setLoading(false);
+      setSources(prev => {
+        if (prev.length === 0) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+        return prev;
+      });
+    }
   }, [anime, ep, titleStr, englishStr]);
 
   useEffect(() => { fetchSources(); return () => abortRef.current?.abort(); }, [fetchSources]);
