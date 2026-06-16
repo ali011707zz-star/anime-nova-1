@@ -345,6 +345,7 @@ export default function WatchScreen() {
       const reader   = response.body.getReader();
       const decoder  = new TextDecoder();
       let buffer     = "";
+      let currentEvent = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -352,10 +353,20 @@ export default function WatchScreen() {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
         for (const line of lines) {
+          if (line === "") { currentEvent = ""; continue; }
+          if (line.startsWith(": ")) continue;
+          if (line.startsWith("event: ")) { currentEvent = line.slice(7).trim(); continue; }
           if (!line.startsWith("data: ")) continue;
+          const dataStr = line.slice(6);
+          if (dataStr === "[DONE]") {
+            setLoading(false);
+            setSources(prev => { if (prev.length === 0) setTimeout(() => setScreen("picker"), 0); return prev; });
+            continue;
+          }
           try {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === "source" && (data.directUrl || data.url)) {
+            const data = JSON.parse(dataStr);
+            const evType = currentEvent || data.type || "";
+            if (evType !== "done" && evType !== "error" && (data.directUrl || data.url)) {
               const src: Src = {
                 ...data,
                 directUrl: resolveUrl(data.directUrl, base),
@@ -375,10 +386,10 @@ export default function WatchScreen() {
                 if (next.length === 1) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 return next;
               });
-            } else if (data.type === "done") {
+            } else if (evType === "done") {
               setLoading(false);
               setSources(prev => { if (prev.length === 0) setTimeout(() => setScreen("picker"), 0); return prev; });
-            } else if (data.type === "error") {
+            } else if (evType === "error") {
               setLoading(false);
             }
           } catch {}
