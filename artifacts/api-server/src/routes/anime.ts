@@ -3852,6 +3852,80 @@ async function getAniKotoSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIVAULT — senshi · miruro · animeheaven
+//  صوت ياباني خام — AniList ID مباشر — HLS عبر AniVault hlsProxy
+//  https://anivault-scraper.up.railway.app
+// ════════════════════════════════════════════════════════════════════
+const ANIVAULT_BASE = "https://anivault-scraper.up.railway.app";
+const ANIVAULT_SOURCES = ["senshi", "miruro", "animeheaven"] as const;
+
+async function getAniVaultSources(
+  _title: string,
+  _english: string,
+  ep: number,
+  anilistId: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+
+  const results = await Promise.allSettled(
+    ANIVAULT_SOURCES.map(src =>
+      fetch(`${ANIVAULT_BASE}/api/watch/${src}/${anilistId}/${ep}/sub`, {
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+        signal: AbortSignal.timeout(15_000),
+      }).then(r => r.ok ? r.json() as Promise<Record<string, any>> : null)
+        .catch(() => null)
+    )
+  );
+
+  const sources: UnifiedSource[] = [];
+
+  for (const [i, result] of results.entries()) {
+    if (result.status !== "fulfilled" || !result.value) continue;
+    const data = result.value;
+    const srcName = ANIVAULT_SOURCES[i];
+
+    if (data.error || data.iframeOnly) continue;
+
+    // ── HLS (senshi / miruro) ────────────────────────────────────
+    if (data.m3u8 && data.hlsProxyUrl) {
+      // CDN (ninstream/uwucdn) يحجب Replit — نمرر عبر hlsProxy الخاص بـ AniVault
+      // ثم نلفّه بـ hls-proxy الخاص بنا ليُعيد كتابة segment URLs
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(data.hlsProxyUrl)}&ref=${encodeURIComponent(ANIVAULT_BASE + "/")}`;
+      const src: UnifiedSource = {
+        name: `AniVault · ${srcName} · 1080p · ياباني`,
+        url: data.m3u8 as string,
+        quality: "1080p",
+        qualityRank: 15,
+        site: "anivault",
+        directUrl: proxied,
+        directType: "hls",
+      };
+      if (data.intro) src.skipIntro = { start: data.intro.start, end: data.intro.end };
+      if (data.outro) src.skipOutro = { start: data.outro.start, end: data.outro.end };
+      sources.push(src);
+    }
+    // ── MP4 مباشر (animeheaven) ──────────────────────────────────
+    else if ((data.rawStreamUrl || data.mp4) && !data.iframeOnly) {
+      const rawMp4 = (data.rawStreamUrl || data.mp4) as string;
+      // animeheaven CDN (co.animeheaven.me) يُردّ بـ 200 من Replit مباشرة
+      const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawMp4)}&ref=${encodeURIComponent("https://animeheaven.me/")}`;
+      sources.push({
+        name: `AniVault · ${srcName} · 1080p · ياباني`,
+        url: rawMp4,
+        quality: "1080p",
+        qualityRank: 14,
+        site: "anivault",
+        directUrl: proxied,
+        directType: "mp4",
+      });
+    }
+  }
+
+  return sources;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  ANINEKO (anineko.to) — صوت ياباني + ترجمة إنجليزية → عربية
 //  Multi-quality HLS (360p / 720p / 1080p) عبر vibeplayer.site
 // ════════════════════════════════════════════════════════════════════
@@ -5971,6 +6045,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
+      scrapeCached("anivault",     () => getAniVaultSources(title, english, ep, anilistId),     false),
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
@@ -6075,7 +6150,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // scrapers that use probe-only (no deep extraction)
-  const probeOnly = new Set(["animeify","kawaii","anikoto","animewitcher","anineko","mitanime"]);
+  const probeOnly = new Set(["animeify","kawaii","anikoto","anivault","animewitcher","anineko","mitanime"]);
 
   try {
     switch (site) {
@@ -6090,6 +6165,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anivault":    (await race(getAniVaultSources(title, english, ep, anilistId),    SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;

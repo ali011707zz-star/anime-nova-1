@@ -1,3 +1,4 @@
+- [AniVault scraper](anivault-scraper.md) — senshi/miruro/animeheaven via Railway API; CDN blocks Replit → double-proxy through hlsProxyUrl; single Japanese audio track confirmed
 - [Nova Mobile animation pages](nova-mobile-animation.md) — 3 new pages: animation/[type]/[id].tsx (detail), animation/episodes.tsx (season tabs), animation/watch.tsx (SSE+VideoView); fix animations.tsx nav to detail page; /api/config route at /config (prefix /api added by app.use)
 - [Security system (token auth + URL encryption)](security-system.md) — AES-256 URL encryption + HMAC 5-min tokens; APP_SECRET env var; token endpoint POST /api/auth/anon-token
 - [Active anime sources 2026-06](active-sources-2026-06.md) — CONFIRMED WORKING: shahiid/animedar/animeify/animephoenix/seepanel/animelek/kawaii/anikoto/mitanime/arabseed; DISABLED: anineko(403)+ristoanime(CF AJAX challenge)
