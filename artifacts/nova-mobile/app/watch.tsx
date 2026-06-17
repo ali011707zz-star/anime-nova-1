@@ -151,7 +151,7 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
       {cover ? <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.15 }]} blurRadius={Platform.OS === "ios" ? 24 : 8} resizeMode="cover" /> : null}
       <LinearGradient colors={["rgba(7,7,13,0.85)", "rgba(7,7,13,0.5)", "rgba(7,7,13,0.92)"]} style={StyleSheet.absoluteFill} />
       <Pressable onPress={onBack} style={[d.ldBackBtn, { top: (Platform.OS === "ios" ? insets.top : 16) + 4 }]}>
-        <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.6)" />
+        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.6)" />
       </Pressable>
       <View style={d.ldContent}>
         <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>

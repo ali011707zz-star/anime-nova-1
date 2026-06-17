@@ -349,21 +349,16 @@ export default function AnimationWatchScreen() {
         ) : null}
         <LinearGradient colors={["rgba(9,9,11,0.88)", "rgba(9,9,11,0.55)", "rgba(9,9,11,0.92)"]} style={StyleSheet.absoluteFill} />
 
-        {/* Top bar */}
-        <View style={[w.loadTopBar, { paddingTop: topPad + 4 }]}>
-          <Pressable onPress={handleBack} style={w.loadBackBtn}>
-            <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.75)" />
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            {titleStr ? <Text style={w.loadTopTitle} numberOfLines={1}>{titleStr}</Text> : null}
-            {type !== "movie" && (
-              <Text style={w.loadTopSub}>الموسم {season} · الحلقة {ep}</Text>
-            )}
-          </View>
-        </View>
+        {/* Back button — absolute on right */}
+        <Pressable onPress={handleBack} style={[w.loadBackBtn, { top: topPad + 4 }]}>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.75)" />
+        </Pressable>
 
         {/* Center card */}
         <View style={w.loadCard}>
+          {/* Prayer text — at TOP like web design */}
+          <Text style={w.loadPrayerText}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
+
           {/* Poster */}
           <View style={w.loadPosterWrap}>
             {posterUrl ? (
@@ -394,11 +389,8 @@ export default function AnimationWatchScreen() {
           {/* Spinner + hint */}
           <View style={{ alignItems: "center", gap: 10 }}>
             <SpinRing />
-            <Text style={w.loadHintNew}>جاري البحث عن أفضل المصادر…</Text>
+            <Text style={w.loadHintNew}>⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</Text>
           </View>
-
-          {/* Prayer text */}
-          <Text style={w.loadPrayerText}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
         </View>
       </View>
     );
@@ -645,7 +637,7 @@ const w = StyleSheet.create({
 
   /* Loading screen — redesigned */
   loadTopBar: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingBottom: 10, zIndex: 10 },
-  loadBackBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
+  loadBackBtn: { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", zIndex: 10 },
   loadTopTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.88)" },
   loadTopSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
   loadCard: { flex: 1, alignItems: "center", justifyContent: "center", gap: 22, paddingHorizontal: 28, paddingBottom: 40 },
@@ -657,7 +649,7 @@ const w = StyleSheet.create({
   loadEpBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 14, paddingVertical: 6 },
   loadEpBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   loadHintNew: { fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
-  loadPrayerText: { fontSize: 10, color: "rgba(255,255,255,0.18)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  loadPrayerText: { fontSize: 13, color: "rgba(255,255,255,0.85)", fontFamily: "Cairo_800ExtraBold", textAlign: "center" },
   topBackBtn: { position: "absolute", left: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
   commentsBtn: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },
   commentsBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
