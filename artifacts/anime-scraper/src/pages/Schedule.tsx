@@ -360,7 +360,7 @@ export default function Schedule() {
             >
               <span className="text-base leading-none">{DAY_ICONS[dayIdx]}</span>
               <span className="text-[10px] font-black leading-tight"
-                style={{ color: isActive ? "#e2d9fc" : isDayToday ? "#a78bfa" : "rgba(255,255,255,0.50)" }}>
+                style={{ color: isActive ? "#e2d9fc" : isDayToday ? "#c4b5fd" : "rgba(255,255,255,0.88)" }}>
                 {day}
               </span>
               <span className="text-[8px] font-bold font-mono"
