@@ -453,7 +453,7 @@ export function RiftPlayer({
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
       if (e.status === "loading")        { setBuffering(true); }
-      else if (e.status === "readyToPlay") { setBuffering(false); setError(false); }
+      else if (e.status === "readyToPlay") { setBuffering(false); setError(false); try { player.play(); } catch {} }
       else if (e.status === "error")     { setError(true); setBuffering(false); }
     });
     return () => { sub1.remove(); sub2.remove(); };
@@ -1678,9 +1678,7 @@ export function RiftPlayer({
                   </Pressable>
                 )}
                 <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
-                  {buffering && !error
-                    ? <ActivityIndicator size={18} color="#fff" />
-                    : <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { marginLeft: 3 }} />}
+                  <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { marginLeft: 3 }} />
                 </Pressable>
                 {!isPortrait && (
                   <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
