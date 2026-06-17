@@ -364,16 +364,22 @@ export default function AnimationWatchScreen() {
 
           {/* Poster */}
           <View style={w.loadPosterWrap}>
+            <View style={w.loadPosterGlow} />
             {posterUrl ? (
-              <>
-                <View style={w.loadPosterGlow} />
-                <Image source={{ uri: posterUrl }} style={w.loadPosterImg} resizeMode="cover" />
-              </>
+              <Image source={{ uri: posterUrl }} style={w.loadPosterImg} resizeMode="cover" />
             ) : (
               <View style={[w.loadPosterImg, w.loadPosterPlaceholder]}>
                 <Ionicons name={type === "movie" ? "film" : "tv"} size={40} color="rgba(139,92,246,0.35)" />
               </View>
             )}
+            {posterUrl && (
+              <LinearGradient colors={["transparent", "rgba(0,0,0,0.55)"]} style={w.ldPosterFade} />
+            )}
+            <View style={w.ldPlayOverlay}>
+              <View style={w.ldPlayBtn}>
+                <Ionicons name="play" size={28} color="#fff" style={{ marginLeft: 4 }} />
+              </View>
+            </View>
           </View>
 
           {/* Title + badge */}
@@ -645,8 +651,11 @@ const w = StyleSheet.create({
   loadTopSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
   loadCard: { flex: 1, alignItems: "center", justifyContent: "center", gap: 22, paddingHorizontal: 28, paddingBottom: 40 },
   loadPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
-  loadPosterGlow: { position: "absolute", width: 130, height: 130, borderRadius: 65, backgroundColor: "rgba(109,40,217,0.30)", transform: [{ scale: 1.5 }] },
-  loadPosterImg: { width: 120, height: 170, borderRadius: 16, borderWidth: 2, borderColor: "rgba(139,92,246,0.4)" },
+  loadPosterGlow: { position: "absolute", width: 245, height: 315, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.28)", shadowColor: "#7C3AED", shadowOpacity: 0.55, shadowRadius: 40, elevation: 20 },
+  loadPosterImg: { width: 176, height: 248, borderRadius: 20, borderWidth: 1.5, borderColor: "rgba(139,92,246,0.35)", shadowColor: "#000", shadowOpacity: 0.60, shadowRadius: 20, elevation: 12 },
+  ldPosterFade: { position: "absolute", bottom: 0, left: 0, right: 0, height: 80, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
+  ldPlayOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
+  ldPlayBtn: { width: 62, height: 62, borderRadius: 31, backgroundColor: "rgba(109,40,217,0.82)", borderWidth: 2, borderColor: "rgba(167,139,250,0.45)", alignItems: "center", justifyContent: "center", shadowColor: "#6D28D9", shadowOpacity: 0.60, shadowRadius: 22, elevation: 14 },
   loadPosterPlaceholder: { backgroundColor: "rgba(20,10,50,0.9)", alignItems: "center", justifyContent: "center" },
   loadCardTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 24 },
   loadEpBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 14, paddingVertical: 6 },

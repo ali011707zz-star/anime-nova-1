@@ -434,7 +434,7 @@ const s = StyleSheet.create({
   backBtnText: { color: "#c4b5fd", fontSize: 13, fontFamily: "Cairo_700Bold" },
 
   heroTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16 },
-  backCircle: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
+  backCircle: { position: "absolute", right: 14, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
   scorePill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(251,191,36,0.3)", paddingHorizontal: 8, paddingVertical: 5 },
   scorePillText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#FDE047" },
   typePill: { position: "absolute", bottom: 60, left: 14, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(139,92,246,0.3)", paddingHorizontal: 7, paddingVertical: 4 },
