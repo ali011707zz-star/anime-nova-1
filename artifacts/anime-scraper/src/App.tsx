@@ -58,7 +58,6 @@ const Schedule           = lazy(() => import("@/pages/Schedule"));
 const Library            = lazy(() => import("@/pages/Library"));
 const WatchHistory       = lazy(() => import("@/pages/WatchHistory"));
 const Browse             = lazy(() => import("@/pages/Browse"));
-const News               = lazy(() => import("@/pages/News"));
 const Settings           = lazy(() => import("@/pages/Settings"));
 const Profile            = lazy(() => import("@/pages/Profile"));
 const NotFound           = lazy(() => import("@/pages/not-found"));
@@ -83,7 +82,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/news", "/browse", "/animation/", "/auth", "/subscription"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/browse", "/animation/", "/auth", "/subscription"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
@@ -161,7 +160,6 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/library"                 component={Library} />
                 <Route path="/history"                 component={WatchHistory} />
                 <Route path="/browse"                  component={Browse} />
-                <Route path="/news"                    component={News} />
                 <Route path="/updates"                 component={Updates} />
                 <Route path="/settings"               component={Settings} />
                 <Route path="/profile"                component={Profile} />
