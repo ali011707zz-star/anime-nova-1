@@ -290,15 +290,17 @@ export default function AnimationDetailScreen() {
       {overview ? (
         <View style={s.section}>
           <Text style={s.sectionTitle}>القصة</Text>
-          <Text style={s.overviewText} numberOfLines={showFull ? undefined : 4}>
-            {overview}
-          </Text>
-          {overview.length > 200 && (
-            <Pressable onPress={() => setShowFull(p => !p)} style={s.showMoreBtn}>
-              <Text style={s.showMoreText}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
-              <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={13} color="#8B5CF6" />
-            </Pressable>
-          )}
+          <View style={s.storyBox}>
+            <Text style={s.overviewText} numberOfLines={showFull ? undefined : 4}>
+              {overview}
+            </Text>
+            {overview.length > 200 && (
+              <Pressable onPress={() => setShowFull(p => !p)} style={s.showMoreBtn}>
+                <Text style={s.showMoreText}>{showFull ? "عرض أقل" : "عرض المزيد"}</Text>
+                <Ionicons name={showFull ? "chevron-up" : "chevron-down"} size={13} color="#8B5CF6" />
+              </Pressable>
+            )}
+          </View>
         </View>
       ) : null}
 
@@ -470,9 +472,10 @@ const s = StyleSheet.create({
   actionLabel: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
 
   section: { marginTop: 22 },
-  sectionTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", paddingHorizontal: 16, marginBottom: 12 },
-  overviewText: { fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 22, fontFamily: "Cairo_400Regular", paddingHorizontal: 16, textAlign: "right" },
-  showMoreBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 16, marginTop: 8 },
+  sectionTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", paddingHorizontal: 16, marginBottom: 10 },
+  storyBox: { marginHorizontal: 16, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", padding: 14 },
+  overviewText: { fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 22, fontFamily: "Cairo_400Regular", textAlign: "right" },
+  showMoreBtn: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 10 },
   showMoreText: { fontSize: 12, color: "#8B5CF6", fontFamily: "Cairo_700Bold" },
 
   castCard: { width: 70, alignItems: "center", gap: 5 },
