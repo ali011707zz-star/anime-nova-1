@@ -407,12 +407,12 @@ export function RiftPlayer({
        Android ExoPlayer: 3s min buffer before playback starts */
     try {
       (p as any).bufferOptions = {
-        preferredForwardBufferDuration: 8,  // iOS: ابدأ الفيديو بسرعة (8ث مسبق)
+        preferredForwardBufferDuration: 12, // iOS: مسبق 12ث لتجنب الانقطاع
         waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً بدون انتظار
-        minBufferMs: 1500,                  // Android: ابدأ بعد 1.5ث فقط
+        minBufferMs: 1000,                  // Android: ابدأ بعد 1ث فقط (أسرع)
         maxBufferMs: 30000,                 // Android: احتفظ بـ30ث في الذاكرة
-        bufferForPlaybackMs: 600,           // Android: ابدأ التشغيل بعد 0.6ث
-        bufferForPlaybackAfterRebufferMs: 1500, // Android: استأنف بعد 1.5ث
+        bufferForPlaybackMs: 400,           // Android: ابدأ بعد 0.4ث (أسرع بدء)
+        bufferForPlaybackAfterRebufferMs: 1200, // Android: استأنف بعد 1.2ث
       };
     } catch {}
   });
