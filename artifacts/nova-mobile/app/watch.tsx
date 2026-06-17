@@ -200,14 +200,13 @@ function SourceRow({ src, globalIdx, onPlay }: { src: Src; globalIdx: number; on
 
       {/* Center info */}
       <View style={d.srcInfo}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 2 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <Text style={d.srcNum}>سيرفر {globalIdx + 1}</Text>
           <View style={d.srcTag}><Text style={d.srcTagText}>{tag}</Text></View>
           {def?.isEn && (
-            <View style={d.srcEnBadge}><Text style={d.srcEnText}>🎌 ياباني</Text></View>
+            <View style={d.srcEnBadge}><Text style={d.srcEnText}>🎌 ياباني/إنجليزي</Text></View>
           )}
         </View>
-        <Text style={d.srcCdn}>{cdn}</Text>
       </View>
 
       {/* Right: quality badge + play btn */}
@@ -405,17 +404,18 @@ export default function WatchScreen() {
   }
 
   /* Build RiftPlayer sources from directSrcs */
-  const riftSources = useMemo((): PlayerSource[] =>
-    directSrcs.map(s => ({
+  const riftSources = useMemo((): PlayerSource[] => {
+    const base = getBaseUrl();
+    return directSrcs.map(s => ({
       url: s.directUrl || s.url || "",
       label: (() => {
         const def = SCRAPER_DEFS.find(d => d.site === s.site);
         return def?.name || getCdnDisplayName(s.directUrl || s.url || "");
       })(),
       quality: getSrcQualityTier(s),
-      subtitleUrl: s.subtitleUrl,
-    })).filter(s => s.url),
-  [directSrcs]);
+      subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : undefined,
+    })).filter(s => s.url);
+  }, [directSrcs]);
 
 
 
@@ -686,7 +686,7 @@ const d = StyleSheet.create({
 
   /* ── Info card (cover + title + ep badge) ── */
   infoCard: { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
-  infoPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
+  infoPosterWrap: { width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
   infoPosterGlow: { position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: "rgba(109,40,217,0.28)" },
   infoPoster: { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
   infoMeta: { flex: 1, gap: 8, paddingTop: 2 },
