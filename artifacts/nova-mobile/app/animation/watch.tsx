@@ -57,7 +57,7 @@ function getSrcQuality(src: AnimSrc): Quality {
   if (lbl.startsWith("vyla") || lbl.startsWith("starcima") || lbl.startsWith("videasy") ||
       lbl.startsWith("vidlink") || lbl.startsWith("aflaam") || lbl.startsWith("arabseed") ||
       lbl.startsWith("seepanel") || lbl.startsWith("lordflix") || lbl.startsWith("topcinem") ||
-      lbl.startsWith("vixsrc")) return "1080p FHD";
+      lbl.startsWith("stardima")) return "1080p FHD";
 
   if (url.includes("hls-proxy")) return "720p HD";
   if (url.includes(".mp4") || url.includes("video-proxy")) return "720p HD";
