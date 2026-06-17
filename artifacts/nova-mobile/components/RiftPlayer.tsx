@@ -387,6 +387,7 @@ export function RiftPlayer({
   const subRafRef         = useRef<any>(null);
   const durationRef       = useRef(0);
   const positionRef       = useRef(0);
+  const urlCueCacheRef    = useRef<Map<string, SubCue[]>>(new Map());
   const seekRef           = useRef<(s: number) => void>(() => {});
   const gestureTypeRef    = useRef<"vol" | "bri" | "seek" | null>(null);
   const gestureStartPosRef= useRef(0);
@@ -406,12 +407,12 @@ export function RiftPlayer({
        Android ExoPlayer: 3s min buffer before playback starts */
     try {
       (p as any).bufferOptions = {
-        preferredForwardBufferDuration: 20, // iOS: pre-buffer 20 seconds ahead
-        waitsToMinimizeStalling: false,     // iOS: start playing ASAP, don't wait
-        minBufferMs: 3000,                  // Android: 3s min before play
-        maxBufferMs: 25000,                 // Android: cache up to 25s
-        bufferForPlaybackMs: 1500,          // Android: start after 1.5s buffered
-        bufferForPlaybackAfterRebufferMs: 2500, // Android: resume after 2.5s
+        preferredForwardBufferDuration: 8,  // iOS: ابدأ الفيديو بسرعة (8ث مسبق)
+        waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً بدون انتظار
+        minBufferMs: 1500,                  // Android: ابدأ بعد 1.5ث فقط
+        maxBufferMs: 30000,                 // Android: احتفظ بـ30ث في الذاكرة
+        bufferForPlaybackMs: 600,           // Android: ابدأ التشغيل بعد 0.6ث
+        bufferForPlaybackAfterRebufferMs: 1500, // Android: استأنف بعد 1.5ث
       };
     } catch {}
   });
@@ -522,11 +523,23 @@ export function RiftPlayer({
   }, [effectiveCues, subOn, player]);
 
   /* ─── VTT loading when source changes ─── */
-  /* Caches parsed Arabic cues in AsyncStorage (key: sub-ar-{anilistId}-{episode})
-     so switching servers for the same episode skips re-translation entirely.      */
+  /* Cache priority:
+     0. urlCueCacheRef (in-memory per URL) — instant, no stutter when switching servers
+     1. AsyncStorage (translated subs only, keyed by episode)
+     2. Network fetch
+  */
   useEffect(() => {
     const url = currentSrc?.subtitleUrl;
     if (!url) { setLoadedCues([]); return; }
+
+    /* ── 0. In-memory URL cache — instant when same URL (server switch) ── */
+    const urlHit = urlCueCacheRef.current.get(url);
+    if (urlHit?.length) {
+      setLoadedCues(urlHit);
+      setSubOn(true);
+      return;
+    }
+
     setSubOffset(0);
     subOffsetRef.current = 0;
     let cancelled = false;
@@ -542,9 +555,10 @@ export function RiftPlayer({
           if (cached && !cancelled) {
             const cues: SubCue[] = JSON.parse(cached);
             if (cues.length > 0) {
+              urlCueCacheRef.current.set(url, cues); // populate URL cache
               setLoadedCues(cues);
               setSubOn(true);
-              return; // served from cache — no network call needed
+              return;
             }
           }
         } catch {}
@@ -558,11 +572,12 @@ export function RiftPlayer({
         const text = await r.text();
         if (cancelled) return;
         const cues = parseVTT(text);
+        if (cues.length > 0) urlCueCacheRef.current.set(url, cues); // populate URL cache
         setLoadedCues(cues);
         if (cues.length > 0) {
-          if (!cancelled) setSubLoading(false); // hide badge immediately once cues are ready
+          if (!cancelled) setSubLoading(false);
           setSubOn(true);
-          /* ── 2. Save to cache if this was a translation ── */
+          /* ── 2. Save to AsyncStorage if this was a translation ── */
           if (cacheKey && isTranslated) {
             AsyncStorage.setItem(cacheKey, JSON.stringify(cues)).catch(() => {});
           }
