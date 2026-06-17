@@ -336,9 +336,16 @@ export function RiftPlayer({
 
   /* ─── Web player features ported to mobile ─── */
   const [bufferedPct, setBufferedPct]       = useState(0);        // buffer bar
-  const [sleepTimer, setSleepTimer]         = useState(0);        // 0=off, minutes
-  const [sleepRemaining, setSleepRemaining] = useState(0);        // countdown seconds
+  const [sleepTimer, setSleepTimer]         = useState(0);
+  const [sleepRemaining, setSleepRemaining] = useState(0);
   const [showSleepSheet, setShowSleepSheet] = useState(false);
+
+  /* ─── New UI state ─── */
+  const [isMuted, setIsMuted]             = useState(false);
+  const [isPortrait, setIsPortrait]       = useState(false);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [showFitMenu, setShowFitMenu]     = useState(false);
+  const prevVolRef                        = useRef(1);
 
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
@@ -538,6 +545,36 @@ export function RiftPlayer({
     } catch {}
   }, []);
 
+  /* ─── Orientation change listener ─── */
+  useEffect(() => {
+    const detect = async () => {
+      try {
+        const o = await ScreenOrientation.getOrientationAsync();
+        setIsPortrait(
+          o === ScreenOrientation.Orientation.PORTRAIT_UP ||
+          o === ScreenOrientation.Orientation.PORTRAIT_DOWN
+        );
+      } catch {}
+    };
+    detect();
+    const sub = ScreenOrientation.addOrientationChangeListener((e) => {
+      const o = e.orientationInfo.orientation;
+      setIsPortrait(
+        o === ScreenOrientation.Orientation.PORTRAIT_UP ||
+        o === ScreenOrientation.Orientation.PORTRAIT_DOWN
+      );
+    });
+    return () => sub.remove();
+  }, []);
+
+  /* ─── Mute sync ─── */
+  useEffect(() => {
+    try {
+      if (isMuted) { prevVolRef.current = volumeRef.current; player.volume = 0; }
+      else { player.volume = Math.min(1, prevVolRef.current || 1); }
+    } catch {}
+  }, [isMuted, player]);
+
   /* ─── Load seek duration preference (Anime Rift: manageTheInternalPlayerSeekDuration) ─── */
   useEffect(() => {
     AsyncStorage.getItem("nova-seek-duration").then(v => {
@@ -608,14 +645,6 @@ export function RiftPlayer({
   useEffect(() => {
     fadeIn();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
-  }, []);
-
-  /* ─── Auto landscape on mount ─── */
-  useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => {});
-    return () => {
-      ScreenOrientation.unlockAsync().catch(() => {});
-    };
   }, []);
 
   /* ─── Back: unlock orientation then go back ─── */
@@ -1105,115 +1134,170 @@ export function RiftPlayer({
           pointerEvents="box-none"
         >
           {/* ════ TOP BAR ════ */}
-          <View style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 8 }]}>
+          <LinearGradient
+            colors={["rgba(0,0,0,0.82)", "transparent"]}
+            style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
+          >
+            {/* ← زر الرجوع */}
             <Pressable onPress={handleBack} style={s.backBtn} hitSlop={12}>
-              <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.85)" />
+              <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.90)" />
             </Pressable>
-          </View>
 
-          {/* ════ CENTER: زر تشغيل/إيقاف كبير ════ */}
+            {/* أزرار اليمين: لقطة + تدوير + إغلاق */}
+            <View style={s.topRightRow}>
+              <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
+                <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
+              </Pressable>
+              <Pressable onPress={flipScreen} style={[s.topIconBtn, isFlipped && s.topIconBtnActive]} hitSlop={10}>
+                <Ionicons name="phone-landscape-outline" size={18} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
+              </Pressable>
+              <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
+                <Ionicons name="close" size={18} color="rgba(239,68,68,0.90)" />
+              </Pressable>
+            </View>
+          </LinearGradient>
+
+          {/* ════ CENTER ════ */}
           <View style={s.centerOverlay} pointerEvents="box-none">
-            <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-              <Ionicons
-                name={isPlaying ? "pause" : "play"}
-                size={38}
-                color="#fff"
-                style={isPlaying ? undefined : { marginLeft: 4 }}
-              />
-            </Pressable>
+            {isPortrait ? (
+              /* وضع عمودي: أزرار التخطي + التشغيل */
+              <View style={s.centerPortraitRow}>
+                <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
+                  <Ionicons name="play-back" size={24} color="#fff" />
+                  <Text style={s.centerSeekLabel}>10</Text>
+                </Pressable>
+                <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                  <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />
+                </Pressable>
+                <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
+                  <Ionicons name="play-forward" size={24} color="#fff" />
+                  <Text style={s.centerSeekLabel}>10</Text>
+                </Pressable>
+              </View>
+            ) : (
+              /* وضع أفقي: التشغيل فقط في المنتصف */
+              <View style={s.centerLandscapeWrap}>
+                <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                  <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />
+                </Pressable>
+              </View>
+            )}
           </View>
 
           {/* ════ BOTTOM SECTION ════ */}
           <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.55)", "rgba(0,0,0,0.92)"]}
-            style={[s.bottomSection, { paddingBottom: Platform.OS === "web" ? 18 : insets.bottom + 14 }]}
+            colors={["transparent", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"]}
+            style={[s.bottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
           >
-            {/* ── وقت الفيديو ── */}
+            {/* الوقت */}
             <View style={s.timeRow}>
               <Text style={s.timeText}>{fmtTime(position)}</Text>
               <Text style={[s.timeText, { opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
-            {/* ── شريط التقدم الاحترافي ── */}
+            {/* شريط التقدم */}
             <View
               ref={barRef}
               style={[s.progressWrap, isDragging && s.progressWrapDragging]}
               onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
               {...seekBarPan.panHandlers}
             >
-              {/* خلفية الشريط */}
               <View style={s.progressBg} />
-              {/* Buffer */}
-              {bufferedPct > 0 && (
-                <View style={[s.bufferBar, { width: `${bufferedPct * 100}%` as any }]} />
-              )}
-              {/* Intro marker */}
-              {markerPctIntro && (
-                <View style={[s.skipMarker, {
-                  left: `${markerPctIntro.start}%` as any,
-                  width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
-                }]} />
-              )}
-              {/* Outro marker */}
-              {markerPctOutro && (
-                <View style={[s.skipMarker, {
-                  left: `${markerPctOutro.start}%` as any,
-                  width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
-                }]} />
-              )}
-              {/* التقدم المملوء بتدرج بنفسجي */}
+              {bufferedPct > 0 && <View style={[s.bufferBar, { width: `${bufferedPct * 100}%` as any }]} />}
+              {markerPctIntro && <View style={[s.skipMarker, { left: `${markerPctIntro.start}%` as any, width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any }]} />}
+              {markerPctOutro && <View style={[s.skipMarker, { left: `${markerPctOutro.start}%` as any, width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any }]} />}
               <LinearGradient
                 colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                 style={[s.progressFill, { width: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }]}
               />
-              {/* الـ thumb */}
-              <View style={[
-                s.thumb,
-                { left: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any },
-                isDragging && s.thumbDragging,
-              ]} />
-              {/* tooltip عند السحب */}
+              <View style={[s.thumb, { left: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }, isDragging && s.thumbDragging]} />
               {isDragging && (
-                <View style={[s.dragTooltip, {
-                  left: `${Math.max(4, Math.min(88, (isDragging ? dragPct : progress) * 100 - 6))}%` as any,
-                }]}>
+                <View style={[s.dragTooltip, { left: `${Math.max(4, Math.min(88, (isDragging ? dragPct : progress) * 100 - 6))}%` as any }]}>
                   <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
                 </View>
               )}
             </View>
 
-            {/* ── أزرار التحكم السفلية ── */}
+            {/* ── صف أزرار التحكم السفلي ── */}
             <View style={s.bottomCtrlRow}>
-              {/* تراجع 10 ثواني */}
-              <Pressable
-                onPress={() => seek(positionRef.current - 10)}
-                style={s.seekCtrlBtn}
-                hitSlop={10}
-              >
-                <Ionicons name="play-back" size={20} color="rgba(255,255,255,0.90)" />
-                <Text style={s.seekCtrlLabel}>10</Text>
-              </Pressable>
 
-              {/* تشغيل / إيقاف */}
-              <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
-                <Ionicons
-                  name={isPlaying ? "pause" : "play"}
-                  size={26}
-                  color="#fff"
-                  style={isPlaying ? undefined : { marginLeft: 3 }}
-                />
-              </Pressable>
+              {/* يسار: قفل + ملء شاشة */}
+              <View style={s.bottomSide}>
+                <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
+                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
+                </Pressable>
+                <View>
+                  {showFitMenu && (
+                    <View style={s.fitDropdown}>
+                      {([
+                        { fit: "contain", label: "مع الحواف",   icon: "expand-outline"  },
+                        { fit: "cover",   label: "ملء الشاشة", icon: "scan-outline"    },
+                        { fit: "fill",    label: "تمديد كامل", icon: "resize-outline"  },
+                      ] as const).map(({ fit, label, icon }) => (
+                        <Pressable
+                          key={fit}
+                          onPress={() => { setContentFit(fit); setShowFitMenu(false); fadeIn(); }}
+                          style={[s.dropItem, contentFit === fit && s.dropItemActive]}
+                        >
+                          <Ionicons name={icon} size={12} color={contentFit === fit ? "#c4b5fd" : "rgba(255,255,255,0.60)"} />
+                          <Text style={[s.dropItemText, contentFit === fit && s.dropItemTextActive]}>{label}</Text>
+                          {contentFit === fit && <Ionicons name="checkmark" size={11} color="#c4b5fd" />}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                  <Pressable onPress={() => { setShowFitMenu(v => !v); setShowSpeedMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, showFitMenu && s.ctrlIconBtnActive]} hitSlop={10}>
+                    <Ionicons name="scan-outline" size={16} color={showFitMenu ? "#c4b5fd" : "rgba(255,255,255,0.80)"} />
+                  </Pressable>
+                </View>
+              </View>
 
-              {/* تقديم 10 ثواني */}
-              <Pressable
-                onPress={() => seek(positionRef.current + 10)}
-                style={s.seekCtrlBtn}
-                hitSlop={10}
-              >
-                <Ionicons name="play-forward" size={20} color="rgba(255,255,255,0.90)" />
-                <Text style={s.seekCtrlLabel}>10</Text>
-              </Pressable>
+              {/* وسط: تخطي + تشغيل (وضع أفقي فقط) */}
+              <View style={s.bottomCenter}>
+                {!isPortrait && (
+                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
+                    <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
+                    <Text style={s.seekCtrlLabel}>10</Text>
+                  </Pressable>
+                )}
+                <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
+                  <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { marginLeft: 3 }} />
+                </Pressable>
+                {!isPortrait && (
+                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
+                    <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
+                    <Text style={s.seekCtrlLabel}>10</Text>
+                  </Pressable>
+                )}
+              </View>
+
+              {/* يمين: كتم + سرعة */}
+              <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
+                <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
+                  <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
+                </Pressable>
+                <View>
+                  {showSpeedMenu && (
+                    <View style={s.speedDropdown}>
+                      {SPEEDS.map(sp => (
+                        <Pressable
+                          key={sp}
+                          onPress={() => { changeSpeed(sp); setShowSpeedMenu(false); }}
+                          style={[s.dropItem, speed === sp && s.dropItemActive]}
+                        >
+                          <Text style={[s.dropSpeedNum, speed === sp && s.dropItemTextActive]}>{sp}x</Text>
+                          {speed === sp && <Ionicons name="checkmark" size={11} color="#c4b5fd" style={{ marginLeft: "auto" as any }} />}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                  <Pressable onPress={() => { setShowSpeedMenu(v => !v); setShowFitMenu(false); fadeIn(); }} style={[s.ctrlIconBtn, s.ctrlSpeedBtn, showSpeedMenu && s.ctrlIconBtnActive]} hitSlop={10}>
+                    <Text style={[s.speedLabel, speed !== 1 && s.speedLabelActive]}>{speed}x</Text>
+                  </Pressable>
+                </View>
+              </View>
+
             </View>
           </LinearGradient>
         </Animated.View>
@@ -1349,39 +1433,110 @@ const s = StyleSheet.create({
   halfLeft:  { position: "absolute", left: 0, top: 0, width: "50%", height: "100%" },
   halfRight: { position: "absolute", right: 0, top: 0, width: "50%", height: "100%" },
 
-  /* Top bar */
-  topBar: { paddingHorizontal: 12, paddingBottom: 12, flexDirection: "row", alignItems: "flex-start" },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.55)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center", marginTop: 2 },
-
-  /* Center play/pause overlay */
-  centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center" },
-  centerPlayBtn: {
-    width: 76, height: 76, borderRadius: 38,
-    backgroundColor: "rgba(139,92,246,0.28)",
-    borderWidth: 2, borderColor: "rgba(167,139,250,0.75)",
+  /* ── Top bar ── */
+  topBar: {
+    paddingHorizontal: 14, paddingBottom: 18,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+  },
+  backBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
     alignItems: "center", justifyContent: "center",
-    shadowColor: "#8B5CF6", shadowOpacity: 0.70, shadowRadius: 22, elevation: 14,
+  },
+  topRightRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  topIconBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
+    alignItems: "center", justifyContent: "center",
+  },
+  topIconBtnActive: { backgroundColor: "rgba(139,92,246,0.30)", borderColor: "rgba(167,139,250,0.55)" },
+  topCloseBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: "rgba(239,68,68,0.12)", borderWidth: 1, borderColor: "rgba(239,68,68,0.28)",
+    alignItems: "center", justifyContent: "center",
   },
 
-  /* Bottom section */
-  bottomSection: { paddingHorizontal: 16, paddingTop: 22, gap: 6 },
+  /* ── Center overlay ── */
+  centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center" },
+  centerLandscapeWrap: { marginTop: 55, alignItems: "center" },
+  centerPortraitRow: { flexDirection: "row", alignItems: "center", gap: 28 },
+  centerSeekBtn: {
+    width: 58, height: 58, borderRadius: 29,
+    backgroundColor: "rgba(0,0,0,0.38)", borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
+    alignItems: "center", justifyContent: "center", gap: 3,
+  },
+  centerSeekLabel: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", lineHeight: 13 },
+  centerPlayBtn: {
+    width: 74, height: 74, borderRadius: 37,
+    backgroundColor: "rgba(139,92,246,0.30)",
+    borderWidth: 2, borderColor: "rgba(167,139,250,0.80)",
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#8B5CF6", shadowOpacity: 0.75, shadowRadius: 24, elevation: 16,
+  },
 
-  /* Bottom controls row */
-  bottomCtrlRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 28, marginTop: 4, marginBottom: 2 },
+  /* ── Bottom section ── */
+  bottomSection: { paddingHorizontal: 16, paddingTop: 20, gap: 5 },
+
+  /* ── Bottom controls row ── */
+  bottomCtrlRow: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginTop: 4, marginBottom: 2,
+  },
+  bottomSide: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  bottomCenter: { flexDirection: "row", alignItems: "center", gap: 14 },
+
+  /* ── Seek buttons (in bottom row, landscape) ── */
   seekCtrlBtn: {
-    width: 52, height: 52, borderRadius: 26,
-    backgroundColor: "rgba(255,255,255,0.10)",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
+    width: 46, height: 46, borderRadius: 23,
+    backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
     alignItems: "center", justifyContent: "center", gap: 2,
   },
-  seekCtrlLabel: { color: "rgba(255,255,255,0.75)", fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 12 },
+  seekCtrlLabel: { color: "rgba(255,255,255,0.70)", fontSize: 9, fontFamily: "Cairo_700Bold", lineHeight: 11 },
+
+  /* ── Bottom play button ── */
   bottomPlayBtn: {
-    width: 62, height: 62, borderRadius: 31,
-    backgroundColor: "rgba(139,92,246,0.85)",
-    borderWidth: 2, borderColor: "rgba(196,181,253,0.70)",
+    width: 58, height: 58, borderRadius: 29,
+    backgroundColor: "rgba(139,92,246,0.88)",
+    borderWidth: 2, borderColor: "rgba(196,181,253,0.75)",
     alignItems: "center", justifyContent: "center",
-    shadowColor: "#8B5CF6", shadowOpacity: 0.60, shadowRadius: 16, elevation: 10,
+    shadowColor: "#8B5CF6", shadowOpacity: 0.65, shadowRadius: 18, elevation: 12,
   },
+
+  /* ── Icon control buttons ── */
+  ctrlIconBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
+    alignItems: "center", justifyContent: "center",
+  },
+  ctrlIconBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.50)" },
+  ctrlIconBtnMuted:  { backgroundColor: "rgba(239,68,68,0.14)", borderColor: "rgba(239,68,68,0.30)" },
+  ctrlSpeedBtn: { paddingHorizontal: 4, minWidth: 42 },
+  speedLabel: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  speedLabelActive: { color: "#c4b5fd" },
+
+  /* ── Dropdown menus ── */
+  fitDropdown: {
+    position: "absolute", bottom: 44, left: 0,
+    backgroundColor: "rgba(12,8,28,0.97)",
+    borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)",
+    paddingVertical: 6, paddingHorizontal: 4, minWidth: 130, zIndex: 60,
+    shadowColor: "#000", shadowOpacity: 0.6, shadowRadius: 12, elevation: 20,
+  },
+  speedDropdown: {
+    position: "absolute", bottom: 44, right: 0,
+    backgroundColor: "rgba(12,8,28,0.97)",
+    borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)",
+    paddingVertical: 6, paddingHorizontal: 4, minWidth: 100, zIndex: 60,
+    shadowColor: "#000", shadowOpacity: 0.6, shadowRadius: 12, elevation: 20,
+  },
+  dropItem: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10,
+  },
+  dropItemActive: { backgroundColor: "rgba(139,92,246,0.20)" },
+  dropItemText: { color: "rgba(255,255,255,0.65)", fontSize: 12, fontFamily: "Cairo_600SemiBold", flex: 1 },
+  dropItemTextActive: { color: "#c4b5fd" },
+  dropSpeedNum: { color: "rgba(255,255,255,0.75)", fontSize: 15, fontFamily: "Cairo_700Bold", flex: 1 },
   titleWrap: { flex: 1, gap: 4 },
   titleText: { color: "#fff", fontSize: 15, fontFamily: "Cairo_700Bold" },
   epBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
