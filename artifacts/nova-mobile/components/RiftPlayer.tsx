@@ -43,6 +43,7 @@ type Props = {
   initialSourceIndex?: number;
   title?: string;
   episode?: number;
+  anilistId?: number;
   onBack: () => void;
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
@@ -247,13 +248,14 @@ export function RiftPlayer({
   initialSourceIndex = 0,
   title,
   episode,
+  anilistId,
   onBack,
   onNextEpisode,
   onPrevEpisode,
   onProgress,
   initialPosition,
-  skipIntro,
-  skipOutro,
+  skipIntro: skipIntroProp,
+  skipOutro: skipOutroProp,
   subCues,
   subEnabled = false,
   autoPlayNext = true,
@@ -280,7 +282,7 @@ export function RiftPlayer({
   const [showSubSheet, setShowSubSheet]   = useState(false);
   const [isLocked, setIsLocked]         = useState(false);
   const [showUnlock, setShowUnlock]     = useState(false);
-  const [contentFit, setContentFit]     = useState<"contain" | "cover">("contain");
+  const [contentFit, setContentFit]     = useState<"contain" | "cover" | "fill">("contain");
   const [screenshotFlash, setScreenshotFlash] = useState(false);
   const [isFlipped, setIsFlipped]       = useState(false);
 
@@ -349,6 +351,12 @@ export function RiftPlayer({
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
   const prevVolRef                        = useRef(1);
   const subPanelX                         = useRef(new Animated.Value(400)).current;
+
+  /* ─── AniSkip: fetch skip times if not provided by source ─── */
+  const [fetchedSkipIntro, setFetchedSkipIntro] = useState<{ start: number; end: number } | undefined>(undefined);
+  const [fetchedSkipOutro, setFetchedSkipOutro] = useState<{ start: number; end: number } | undefined>(undefined);
+  const skipIntro = skipIntroProp ?? fetchedSkipIntro;
+  const skipOutro = skipOutroProp ?? fetchedSkipOutro;
 
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
@@ -537,14 +545,18 @@ export function RiftPlayer({
   }, []);
 
   /* ─── Screenshot ─── */
+  const rootViewRef = useRef<View>(null);
   const takeScreenshot = useCallback(async () => {
     setScreenshotFlash(true);
     setTimeout(() => setScreenshotFlash(false), 600);
     try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+    if (Platform.OS === "web") return; // web browsers block video frame capture
     try {
+      const VS = await import("react-native-view-shot" as any);
+      const uri: string = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.9 });
       const ML = await import("expo-media-library" as any);
       const perm = await ML.requestPermissionsAsync();
-      if (perm.status !== "granted") return;
+      if (perm.status === "granted") await ML.saveToLibraryAsync(uri);
     } catch {}
   }, []);
 
@@ -577,6 +589,35 @@ export function RiftPlayer({
       else { player.volume = Math.min(1, prevVolRef.current || 1); }
     } catch {}
   }, [isMuted, player]);
+
+  /* ─── AniSkip: جلب أوقات المقدمة/النهاية إذا لم تُوفَّر بالمصدر ─── */
+  useEffect(() => {
+    if (skipIntroProp || skipOutroProp || !anilistId || !episode) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // 1. Get MAL ID from AniList
+        const alRes = await fetch("https://graphql.anilist.co", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: "query($id:Int){Media(id:$id){idMal}}", variables: { id: anilistId } }),
+        });
+        const alData = await alRes.json();
+        const malId: number | null = alData?.data?.Media?.idMal;
+        if (!malId || cancelled) return;
+        // 2. Fetch skip times from AniSkip
+        const skipRes = await fetch(`https://api.aniskip.com/v1/skip-times/${malId}/${episode}?types[]=op&types[]=ed`);
+        const skipData = await skipRes.json();
+        if (cancelled || !skipData?.found) return;
+        for (const r of (skipData.results ?? [])) {
+          const s = { start: r.interval.start_time, end: r.interval.end_time };
+          if (r.skip_type === "op")  setFetchedSkipIntro(s);
+          if (r.skip_type === "ed")  setFetchedSkipOutro(s);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [anilistId, episode]); // eslint-disable-line
 
   /* ─── Subtitle panel slide animation ─── */
   useEffect(() => {
@@ -883,7 +924,7 @@ export function RiftPlayer({
   if (!currentSrc) return null;
 
   return (
-    <View style={s.root}>
+    <View ref={rootViewRef} style={s.root}>
       <StatusBar hidden />
       {/* ── Video ── */}
       <VideoView
@@ -1153,7 +1194,7 @@ export function RiftPlayer({
             style={[
               s.subPanel,
               isPortrait ? s.subPanelPortrait : s.subPanelLandscape,
-              { transform: [{ translateY: subPanelX }] },
+              { transform: [{ translateX: subPanelX }] },
             ]}
           >
             <Pressable onPress={() => {}} style={{ flex: 1 }}>
@@ -1293,7 +1334,7 @@ export function RiftPlayer({
               <View style={s.topInfoRow}>
                 {episode != null && (
                   <View style={s.topEpBadge}>
-                    <Text style={s.topEpText}>ح {episode}</Text>
+                    <Text style={s.topEpText}>الحلقة {episode}</Text>
                   </View>
                 )}
                 {currentSrc?.quality ? (
@@ -1316,11 +1357,11 @@ export function RiftPlayer({
               >
                 <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
               </Pressable>
-              {/* زر تدوير الشاشة — تصميم محسّن */}
+              {/* زر تدوير الشاشة ↻ */}
               <Pressable onPress={flipScreen} style={[s.topRotateBtn, isFlipped && s.topRotateBtnActive]} hitSlop={10}>
-                <Ionicons name="phone-landscape-outline" size={15} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
+                <Ionicons name="repeat-outline" size={16} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
                 <Text style={[s.topRotateLabel, isFlipped && s.topRotateLabelActive]}>
-                  {isFlipped ? "عمودي" : "أفقي"}
+                  {isFlipped ? "↺" : "↻"}
                 </Text>
               </Pressable>
               {/* زر الإغلاق فقط (بدون سهم رجوع) */}
@@ -1647,22 +1688,21 @@ const s = StyleSheet.create({
   topCCText: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.5 },
   topCCTextActive: { color: "#c4b5fd" },
 
-  /* ── Subtitle centre modal ── */
+  /* ── Subtitle side panel (slides in from right like main options menu) ── */
   subPanelBackdrop: {
-    backgroundColor: "rgba(0,0,0,0.60)",
+    backgroundColor: "rgba(0,0,0,0.45)",
     zIndex: 50,
-    alignItems: "center", justifyContent: "center",
+    justifyContent: "flex-end",
+    alignItems: "flex-end",
   },
   subPanel: {
-    backgroundColor: "rgba(8,5,22,0.98)",
-    borderRadius: 22,
-    borderWidth: 1, borderColor: "rgba(139,92,246,0.30)",
-    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 28, elevation: 30,
-    maxHeight: "85%",
-    overflow: "hidden",
+    position: "absolute", top: 0, bottom: 0, right: 0,
+    backgroundColor: "rgba(5,3,18,0.97)",
+    borderLeftWidth: 1, borderLeftColor: "rgba(139,92,246,0.22)",
+    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 24, elevation: 30,
   },
-  subPanelPortrait:  { width: "92%" },
-  subPanelLandscape: { width: "58%", maxWidth: 480 },
+  subPanelPortrait:  { width: "82%" },
+  subPanelLandscape: { width: "40%" },
 
   subPanelHeader: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
@@ -1792,8 +1832,8 @@ const s = StyleSheet.create({
   },
 
   /* ── Center overlay ── */
-  centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center" },
-  centerLandscapeWrap: { marginTop: 55, alignItems: "center" },
+  centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60 },
+  centerLandscapeWrap: { alignItems: "center" },
   centerPortraitRow: { flexDirection: "row", alignItems: "center", gap: 28 },
   centerSeekBtn: {
     width: 58, height: 58, borderRadius: 29,
@@ -1984,7 +2024,6 @@ const s = StyleSheet.create({
   subNoAvailText: { color: "rgba(255,255,255,0.22)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "center", paddingVertical: 8 },
 
   /* Options grid */
-  subSectionLabel: { color: "rgba(139,92,246,0.80)", fontSize: 9, fontFamily: "Cairo_700Bold", letterSpacing: 1.5, marginBottom: 10 },
   optionRow: { flexDirection: "row", gap: 8 },
   optionBtn: { flex: 1, paddingVertical: 10, borderRadius: 16, alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
   optionBtnActive: { backgroundColor: "rgba(124,58,237,0.28)", borderColor: "rgba(139,92,246,0.55)" },
