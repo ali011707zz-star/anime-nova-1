@@ -49,13 +49,19 @@ function timeAgo(ts: number): string {
   return `منذ ${Math.floor(diff / 604800)} أسبوع`;
 }
 
-async function gqlFetch(query: string) {
-  const r = await fetch("https://graphql.anilist.co", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
-  });
-  return (await r.json()).data?.Page;
+async function gqlFetch(query: string): Promise<any> {
+  try {
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    if (!r.ok) return null;
+    const json = await r.json();
+    return json?.data?.Page ?? null;
+  } catch {
+    return null;
+  }
 }
 
 type Tab = "airing" | "upcoming" | "trending";
@@ -70,15 +76,18 @@ export default function NewsScreen() {
   const [upcoming, setUpcoming] = useState<any[]>([]);
   const [trending, setTrending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
 
   useEffect(() => {
     setLoading(true);
+    setFetchError(false);
     Promise.all([
       gqlFetch(RECENTLY_AIRED_Q),
       gqlFetch(UPCOMING_Q),
       gqlFetch(TRENDING_Q),
     ]).then(([a, u, t]) => {
-      const schedules = (a?.airingSchedules || []).filter((s: any) => s.media);
+      if (!a && !u && !t) { setFetchError(true); return; }
+      const schedules = ((a?.airingSchedules) || []).filter((s: any) => s?.media);
       const seen = new Set<number>();
       const unique = schedules.filter((s: any) => {
         if (seen.has(s.media.id)) return false;
@@ -87,7 +96,7 @@ export default function NewsScreen() {
       setAiring(unique);
       setUpcoming(u?.media || []);
       setTrending(t?.media || []);
-    }).finally(() => setLoading(false));
+    }).catch(() => setFetchError(true)).finally(() => setLoading(false));
   }, []);
 
   const TABS: { id: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; color: string }[] = [
@@ -270,6 +279,31 @@ export default function NewsScreen() {
           <ActivityIndicator size="large" color="#8B5CF6" />
           <Text style={s.loadingText}>جاري التحميل...</Text>
         </View>
+      ) : fetchError ? (
+        <View style={s.loading}>
+          <Ionicons name="cloud-offline-outline" size={48} color="rgba(139,92,246,0.35)" />
+          <Text style={s.errorTitle}>تعذّر الاتصال بـ AniList</Text>
+          <Text style={s.loadingText}>تحقق من اتصالك بالإنترنت ثم أعد المحاولة</Text>
+          <Pressable
+            onPress={() => {
+              setLoading(true);
+              setFetchError(false);
+              Promise.all([gqlFetch(RECENTLY_AIRED_Q), gqlFetch(UPCOMING_Q), gqlFetch(TRENDING_Q)])
+                .then(([a, u, t]) => {
+                  if (!a && !u && !t) { setFetchError(true); return; }
+                  const schedules = ((a?.airingSchedules) || []).filter((s: any) => s?.media);
+                  const seen = new Set<number>();
+                  setAiring(schedules.filter((s: any) => { if (seen.has(s.media.id)) return false; seen.add(s.media.id); return true; }));
+                  setUpcoming(u?.media || []);
+                  setTrending(t?.media || []);
+                }).catch(() => setFetchError(true)).finally(() => setLoading(false));
+            }}
+            style={s.retryBtn}
+          >
+            <Ionicons name="refresh" size={14} color="#c4b5fd" />
+            <Text style={s.retryText}>إعادة المحاولة</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={listData}
@@ -311,7 +345,10 @@ const s = StyleSheet.create({
   },
   tabText: { fontSize: 10, fontFamily: "Cairo_700Bold" },
   loading: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  loadingText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)" },
+  loadingText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", textAlign: "center", paddingHorizontal: 24 },
+  errorTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)", textAlign: "center" },
+  retryBtn: { flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 18, paddingVertical: 10, marginTop: 4 },
+  retryText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   list: { paddingHorizontal: 14, paddingBottom: 100, gap: 10 },
 
   card: {
