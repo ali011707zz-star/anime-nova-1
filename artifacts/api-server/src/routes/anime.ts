@@ -6479,8 +6479,47 @@ router.get("/anime/subtitle-tracks", async (req, res) => {
     } catch { /* silent — API key may be invalid or network error */ }
   }
 
+  // ── Step 3.8: Kitsunekko Mirror (GitHub) — ترجمة يابانية → عربي تلقائي ──
+  // يبحث في أرشيف kitsunekko-mirror عن ملف SRT مطابق للأنمي والحلقة
+  const kitsunekkoItems: Track[] = [];
+  const kQuery = (english || title).replace(/[^\w\s]/g, " ").trim();
+  if (kQuery) {
+    try {
+      const ghUrl = `https://api.github.com/search/code?q=${encodeURIComponent(kQuery)}+repo:Ajatt-Tools/kitsunekko-mirror+in:path&per_page=15`;
+      const ghR = await fetch(ghUrl, {
+        headers: { "User-Agent": BROWSER_UA, "Accept": "application/vnd.github+json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (ghR.ok) {
+        const ghData = await ghR.json() as any;
+        const items: any[] = ghData.items || [];
+        const epPad = String(ep).padStart(2, "0");
+        const epPatterns = [
+          new RegExp(`[-_\\s]0*${ep}[\\s._\\[\\(]`),
+          new RegExp(`E${epPad}`),
+          new RegExp(`episode[_\\s-]?0*${ep}\\b`, "i"),
+        ];
+        const picked = items.find((item: any) => {
+          const name: string = item.name || "";
+          if (!/\.(srt|ass|vtt)$/i.test(name)) return false;
+          if (/\[ch[st]\]|[\u4e00-\u9fff]/.test(name)) return false;
+          return epPatterns.some(p => p.test(name));
+        });
+        if (picked) {
+          const rawUrl = `https://raw.githubusercontent.com/Ajatt-Tools/kitsunekko-mirror/main/${picked.path}`;
+          kitsunekkoItems.push({
+            id: "ar-kitsunekko",
+            lang: "ar-auto",
+            label: "عربي مُترجم · Kitsunekko",
+            url: `/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=ja&to=ar`,
+          });
+        }
+      }
+    } catch { /* silent — GitHub rate limit or network */ }
+  }
+
   // ── Step 4: Merge + auto-translate fallback ──────────────────────
-  const all: Track[] = [...wyzieItems, ...subdlItems, ...anikotoItems, ...jimakuItems];
+  const all: Track[] = [...wyzieItems, ...subdlItems, ...anikotoItems, ...jimakuItems, ...kitsunekkoItems];
   const hasAr  = all.some(t => t.lang === "ar");
   const firstEn = all.find(t => t.lang === "en");
 
