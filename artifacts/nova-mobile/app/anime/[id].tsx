@@ -505,13 +505,7 @@ export default function AnimeDetailScreen() {
           <View style={d.section}>
             <SectionHeader title="الإعلان الدعائي" />
             <Pressable
-              onPress={() => {
-                if (Platform.OS === "web") {
-                  Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`);
-                } else {
-                  setShowTrailer(true);
-                }
-              }}
+              onPress={() => setShowTrailer(true)}
               style={d.trailerBtn}
             >
               <Image

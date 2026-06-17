@@ -327,10 +327,8 @@ export default function WatchScreen() {
                 if (!autoSelectedRef.current && shouldShowSrc(src)) {
                   autoSelectedRef.current = true;
                   setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
-                } else if (!autoSelectedRef.current && isEmbedFallback(src)) {
-                  autoSelectedRef.current = true;
-                  setTimeout(() => { setPlayingSrc(src); setScreen("embed"); }, 0);
                 }
+                /* iFrame / embed sources are never auto-selected — user picks manually */
                 if (next.length === 1) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 return next;
               });
@@ -653,8 +651,8 @@ const d = StyleSheet.create({
   ldContent: { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },
   ldPrayer: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center" },
   ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
-  ldGlow: { position: "absolute", width: 200, height: 260, borderRadius: 32, backgroundColor: "rgba(139,92,246,0.22)" },
-  ldPoster: { width: 140, height: 198, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  ldGlow: { position: "absolute", width: 230, height: 295, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.30)", shadowColor: "#8B5CF6", shadowOpacity: 0.45, shadowRadius: 32, elevation: 18 },
+  ldPoster: { width: 165, height: 233, borderRadius: 22, borderWidth: 1.5, borderColor: "rgba(139,92,246,0.35)", shadowColor: "#000", shadowOpacity: 0.55, shadowRadius: 16, elevation: 10 },
   ldTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 26 },
   ldEpBadge: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: "rgba(124,58,237,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
   ldEpText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.9)" },
