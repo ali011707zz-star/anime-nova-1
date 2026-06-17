@@ -493,53 +493,67 @@ export default function AnimationWatchScreen() {
 
   return (
     <View style={[w.container, { paddingTop: topPad }]}>
-      {/* Header */}
+      {/* Blurred backdrop */}
+      {posterUrl ? (
+        <Image source={{ uri: posterUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.07 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" />
+      ) : null}
+      <LinearGradient colors={["rgba(7,7,13,0.97)", "rgba(7,7,13,0.88)"]} style={StyleSheet.absoluteFill} />
+
+      {/* ── Header: 3-zone fixed layout ── */}
       <View style={w.header}>
-        <Pressable onPress={handleBack} style={w.headerBack}>
-          <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.7)" />
-        </Pressable>
-        <View style={{ flex: 1 }}>
+        {/* Left: refresh */}
+        <View style={w.headerLeft}>
+          {loading
+            ? <ActivityIndicator color="#8B5CF6" size="small" />
+            : <Pressable onPress={fetchSources} style={w.retryBtn}>
+                <Ionicons name="refresh" size={13} color="#8B5CF6" />
+              </Pressable>
+          }
+        </View>
+        {/* Center: title */}
+        <View style={w.headerCenter}>
           <Text style={w.headerTitle} numberOfLines={1}>{titleStr || "مشاهدة"}</Text>
           {type !== "movie" && (
             <Text style={w.headerSub}>الموسم {season} • الحلقة {ep}</Text>
           )}
         </View>
-        {loading && <ActivityIndicator color="#8B5CF6" size="small" />}
-        {!loading && (
-          <Pressable onPress={fetchSources} style={w.retryBtn}>
-            <Ionicons name="refresh" size={14} color="#8B5CF6" />
-          </Pressable>
-        )}
+        {/* Right: back button (always same position) */}
+        <Pressable onPress={handleBack} style={w.headerBack}>
+          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
+        </Pressable>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={w.pickerContent} showsVerticalScrollIndicator={false}>
-        {/* Poster row */}
-        <View style={w.pickerTop}>
+
+        {/* ── Info card ── */}
+        <View style={w.infoCard}>
           {posterUrl ? (
-            <Image source={{ uri: posterUrl }} style={w.pickerPoster} resizeMode="cover" />
+            <View style={w.infoPosterWrap}>
+              <View style={w.infoPosterGlow} />
+              <Image source={{ uri: posterUrl }} style={w.infoPoster} resizeMode="cover" />
+            </View>
           ) : (
-            <View style={[w.pickerPoster, w.pickerPosterPlaceholder]}>
-              <Ionicons name="film" size={28} color="rgba(255,255,255,0.2)" />
+            <View style={[w.infoPoster, w.infoPosterPlaceholder]}>
+              <Ionicons name="film" size={26} color="rgba(139,92,246,0.4)" />
             </View>
           )}
-          <View style={{ flex: 1, gap: 6 }}>
-            <Text style={w.pickerTitle} numberOfLines={2}>{titleStr || "—"}</Text>
-            <View style={w.pickerMetaRow}>
-              <View style={w.pickerMetaPill}>
-                <Ionicons name={type === "movie" ? "film" : "tv"} size={10} color="rgba(139,92,246,0.8)" />
-                <Text style={w.pickerMetaText}>{type === "movie" ? "فيلم" : `م${season} • ح${ep}`}</Text>
+          <View style={w.infoMeta}>
+            <Text style={w.infoTitle} numberOfLines={2}>{titleStr || "—"}</Text>
+            <View style={w.infoEpRow}>
+              <View style={w.infoEpBadge}>
+                <Ionicons name={type === "movie" ? "film" : "tv"} size={10} color="#a78bfa" />
+                <Text style={w.infoEpText}>{type === "movie" ? "فيلم" : `م${season} • ح${ep}`}</Text>
               </View>
               {totalDirect > 0 && (
-                <View style={w.pickerMetaPill}>
+                <View style={w.infoSrcBadge}>
                   <View style={[w.dot, { backgroundColor: "#22c55e" }]} />
-                  <Text style={w.pickerMetaText}>{totalDirect} مصدر متاح</Text>
+                  <Text style={w.infoSrcText}>{totalDirect} مصدر</Text>
                 </View>
               )}
             </View>
-            {/* Loading bar */}
             {loading && (
               <View style={w.loadingBar}>
-                <ActivityIndicator color="#8B5CF6" size="small" />
+                <ActivityIndicator color="#8B5CF6" size="small" style={{ transform: [{ scale: 0.75 }] }} />
                 <Text style={w.loadingBarText}>جاري جلب المصادر…</Text>
               </View>
             )}
@@ -567,10 +581,12 @@ export default function AnimationWatchScreen() {
                   <Text style={[w.tierCountText, { color: qs.text }]}>{srcs.length}</Text>
                 </View>
               </View>
-              {srcs.map((src, i) => {
-                const idx = globalIdx++;
-                return <SrcRow key={idx} src={src} idx={idx} onPlay={playSrc} />;
-              })}
+              <View style={w.srcSection}>
+                {srcs.map((src, i) => {
+                  const idx = globalIdx++;
+                  return <SrcRow key={idx} src={src} idx={idx} onPlay={playSrc} />;
+                })}
+              </View>
             </View>
           );
         })}
@@ -582,10 +598,12 @@ export default function AnimationWatchScreen() {
               <View style={[w.tierDot, { backgroundColor: "#64748b" }]} />
               <Text style={[w.tierTitle, { color: "rgba(148,163,184,0.7)" }]}>مصادر بإطار</Text>
             </View>
-            {embedSrcs.map((src, i) => {
-              const idx = globalIdx++;
-              return <SrcRow key={idx} src={src} idx={idx} onPlay={playSrc} />;
-            })}
+            <View style={w.srcSection}>
+              {embedSrcs.map((src, i) => {
+                const idx = globalIdx++;
+                return <SrcRow key={idx} src={src} idx={idx} onPlay={playSrc} />;
+              })}
+            </View>
           </View>
         )}
 
@@ -650,51 +668,63 @@ const w = StyleSheet.create({
   srcSwitchBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   srcSwitchText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.8)" },
 
-  /* Picker */
-  header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
-  headerBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
+  /* ── Picker header: 3-zone fixed layout ── */
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
+  headerLeft: { width: 36, alignItems: "flex-start", justifyContent: "center" },
+  headerCenter: { flex: 1, alignItems: "center" },
+  headerBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  headerTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
+  headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
   retryBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
 
-  pickerContent: { padding: 16, paddingBottom: 100, gap: 16 },
-  pickerTop: { flexDirection: "row", gap: 14, alignItems: "flex-start" },
-  pickerPoster: { width: 80, height: 115, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
-  pickerPosterPlaceholder: { backgroundColor: "rgba(139,92,246,0.08)", alignItems: "center", justifyContent: "center" },
-  pickerTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right" },
-  pickerMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  pickerMetaPill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 8, paddingVertical: 4 },
-  pickerMetaText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)" },
+  pickerContent: { padding: 14, paddingBottom: 100, gap: 12 },
+
+  /* ── Info card ── */
+  infoCard: { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
+  infoPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
+  infoPosterGlow: { position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: "rgba(109,40,217,0.28)" },
+  infoPoster: { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+  infoPosterPlaceholder: { backgroundColor: "rgba(139,92,246,0.08)", alignItems: "center", justifyContent: "center" },
+  infoMeta: { flex: 1, gap: 8, paddingTop: 2 },
+  infoTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right", lineHeight: 22 },
+  infoEpRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  infoEpBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
+  infoEpText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  infoSrcBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(34,197,94,0.10)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(34,197,94,0.22)", paddingHorizontal: 10, paddingVertical: 5 },
+  infoSrcText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.85)" },
+
   dot: { width: 5, height: 5, borderRadius: 2.5 },
   loadingBar: { flexDirection: "row", alignItems: "center", gap: 8 },
   loadingBarText: { fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
 
-  tierSection: { gap: 8 },
-  tierHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  tierSection: { gap: 6 },
+  tierHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 2 },
+  srcSection: { borderRadius: 16, overflow: "hidden", backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
   tierDot: { width: 6, height: 6, borderRadius: 3 },
   tierTitle: { flex: 1, fontSize: 11, fontFamily: "Cairo_700Bold" },
   tierCount: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 7, borderWidth: 1 },
   tierCountText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
 
-  srcRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, backgroundColor: "#111116", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
-  srcIcon: { width: 38, height: 38, borderRadius: 11, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  srcNum: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
-  srcTag: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)" },
-  srcTagText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  srcLabel: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.6)", marginTop: 2 },
+  /* Source row — inside glass card */
+  srcRow: { flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.05)" },
+  srcIcon: { width: 34, height: 34, borderRadius: 11, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  srcNum: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.92)" },
+  srcTag: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  srcTagText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.82)", fontVariant: ["tabular-nums"] },
+  srcLabel: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)", marginTop: 2 },
   srcRight: { alignItems: "flex-end", gap: 6 },
   srcQBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, borderWidth: 1 },
   srcDot: { width: 4, height: 4, borderRadius: 2 },
   srcQText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
-  srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(139,92,246,0.22)", borderRadius: 7, paddingHorizontal: 9, paddingVertical: 4 },
-  srcPlayText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#fff" },
+  srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(109,40,217,0.88)", borderRadius: 10, paddingHorizontal: 11, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
+  srcPlayText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 
   empty: { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 60 },
-  emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
-  emptySub: { fontSize: 12, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 18 },
+  emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  emptySub: { fontSize: 12, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20, paddingHorizontal: 24 },
   retryBigBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 20, paddingVertical: 11 },
   retryBigText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
 
-  searchingWrap: { alignItems: "center", gap: 12, paddingVertical: 40 },
-  searchingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  searchingWrap: { alignItems: "center", gap: 14, paddingVertical: 40 },
+  searchingText: { fontSize: 12, color: "rgba(255,255,255,0.32)", fontFamily: "Cairo_400Regular", textAlign: "center" },
 });

@@ -512,37 +512,72 @@ export default function WatchScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
-      {/* ── Header ── */}
+      {/* ── Blurred backdrop ── */}
+      {cover ? (
+        <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.08 }]} blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" />
+      ) : null}
+      <LinearGradient colors={["rgba(7,7,13,0.97)", "rgba(7,7,13,0.88)"]} style={StyleSheet.absoluteFill} />
+
+      {/* ── Header (back button always RIGHT = RTL start) ── */}
       <View style={[d.header, { paddingTop: topPad + 4 }]}>
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.headerBack}>
-          <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.7)" />
-        </Pressable>
-        <View style={{ flex: 1 }}>
+        {/* Left side: ep nav + refresh */}
+        <View style={d.headerLeft}>
+          <Pressable
+            disabled={epNum <= 1}
+            onPress={() => epNum > 1 && goEp(epNum - 1)}
+            style={[d.epNavBtn, epNum <= 1 && { opacity: 0.22 }]}
+          >
+            <Ionicons name="chevron-forward" size={12} color="rgba(255,255,255,0.55)" />
+            <Text style={d.epNavText}>السابقة</Text>
+          </Pressable>
+          <Pressable onPress={() => goEp(epNum + 1)} style={[d.epNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" }]}>
+            <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
+            <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
+          </Pressable>
+          {loading
+            ? <ActivityIndicator color="#8B5CF6" size="small" />
+            : <Pressable onPress={fetchSources} style={d.headerRefreshBtn}>
+                <Ionicons name="refresh" size={13} color="#8B5CF6" />
+              </Pressable>
+          }
+        </View>
+        {/* Center: title */}
+        <View style={d.headerCenter}>
           <Text style={d.headerTitle} numberOfLines={1}>{displayTitle}</Text>
           <Text style={d.headerSub}>الحلقة {epNum}</Text>
         </View>
-        {/* ep navigation */}
-        <Pressable
-          disabled={epNum <= 1}
-          onPress={() => epNum > 1 && goEp(epNum - 1)}
-          style={[d.epNavBtn, epNum <= 1 && { opacity: 0.25 }]}
-        >
-          <Ionicons name="chevron-forward" size={13} color="rgba(255,255,255,0.55)" />
-          <Text style={d.epNavText}>السابقة</Text>
+        {/* Right: back button (fixed position = always same spot) */}
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.headerBack}>
+          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
         </Pressable>
-        <Pressable onPress={() => goEp(epNum + 1)} style={d.epNavBtn}>
-          <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
-          <Ionicons name="chevron-back" size={13} color="rgba(196,181,253,0.9)" />
-        </Pressable>
-        {loading
-          ? <ActivityIndicator color="#8B5CF6" size="small" style={{ marginLeft: 4 }} />
-          : <Pressable onPress={fetchSources} style={d.headerRefreshBtn}>
-              <Ionicons name="refresh" size={14} color="#8B5CF6" />
-            </Pressable>
-        }
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={d.pickerScrollContent}>
+
+        {/* ── Anime info card ── */}
+        <View style={d.infoCard}>
+          {cover ? (
+            <View style={d.infoPosterWrap}>
+              <View style={d.infoPosterGlow} />
+              <Image source={{ uri: cover }} style={d.infoPoster} resizeMode="cover" />
+            </View>
+          ) : null}
+          <View style={d.infoMeta}>
+            <Text style={d.infoTitle} numberOfLines={2}>{displayTitle}</Text>
+            <View style={d.infoEpRow}>
+              <View style={d.infoEpBadge}>
+                <Ionicons name="play-circle" size={10} color="#a78bfa" />
+                <Text style={d.infoEpText}>الحلقة {epNum}</Text>
+              </View>
+              {hasSrcs && (
+                <View style={d.infoSrcBadge}>
+                  <View style={[d.infoDot, { backgroundColor: "#22c55e" }]} />
+                  <Text style={d.infoSrcText}>{directSrcs.length} مصدر</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
 
         {/* ── Quality-grouped sources ── */}
         {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(q => {
@@ -554,7 +589,7 @@ export default function WatchScreen() {
           return (
             <View key={q} style={d.tierSection}>
               <View style={d.tierHeader}>
-                <View style={[d.tierDot, { backgroundColor: qs.dot, shadowColor: qs.dot, shadowOpacity: 0.7, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } }]} />
+                <View style={[d.tierDot, { backgroundColor: qs.dot }]} />
                 <Text style={[d.tierTitle, { color: qs.text }]}>{Q_LABEL[q]}</Text>
                 <View style={[d.tierCount, { backgroundColor: qs.badge, borderColor: qs.border }]}>
                   <Text style={[d.tierCountText, { color: qs.text }]}>{srcs.length}</Text>
@@ -587,11 +622,13 @@ export default function WatchScreen() {
         {/* ── Empty state ── */}
         {!loading && !hasSrcs && !hasEmbeds && (
           <View style={d.empty}>
-            <Ionicons name="warning" size={48} color="rgba(239,68,68,0.3)" />
+            <View style={d.emptyIcon}>
+              <Ionicons name="warning-outline" size={32} color="rgba(239,68,68,0.55)" />
+            </View>
             <Text style={d.emptyTitle}>الحلقة {epNum} غير متوفرة بعد</Text>
             <Text style={d.emptySub}>المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.</Text>
             <Pressable onPress={fetchSources} style={d.retryBigBtn}>
-              <Ionicons name="refresh" size={16} color="#c4b5fd" />
+              <Ionicons name="refresh" size={15} color="#c4b5fd" />
               <Text style={d.retryBigText}>إعادة المحاولة</Text>
             </Pressable>
           </View>
@@ -600,7 +637,7 @@ export default function WatchScreen() {
         {/* ── Searching state ── */}
         {loading && !hasSrcs && (
           <View style={d.searchingWrap}>
-            <Ionicons name="hourglass" size={32} color="rgba(139,92,246,0.4)" />
+            <SpinRing />
             <Text style={d.searchingText}>لا تزال المصادر تُجمَع، انتظر قليلاً…</Text>
           </View>
         )}
@@ -636,54 +673,69 @@ const d = StyleSheet.create({
   /* Embed player top bar */
   embedTopRow: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingBottom: 10, backgroundColor: "rgba(0,0,0,0.7)", gap: 10, zIndex: 10 },
 
-  /* Picker header */
-  header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
-  headerBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
-  headerRefreshBtn: { width: 34, height: 34, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
-  epNavBtn: { flexDirection: "row", alignItems: "center", gap: 3, height: 34, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", paddingHorizontal: 10, justifyContent: "center" },
-  epNavText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
+  /* ── Picker header: fixed 3-zone layout ── */
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)", gap: 8 },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 5 },
+  headerCenter: { flex: 1, alignItems: "center" },
+  headerBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  headerTitle: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
+  headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  headerRefreshBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
+  epNavBtn: { flexDirection: "row", alignItems: "center", gap: 2, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", paddingHorizontal: 8, justifyContent: "center" },
+  epNavText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
+
+  /* ── Info card (cover + title + ep badge) ── */
+  infoCard: { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
+  infoPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
+  infoPosterGlow: { position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: "rgba(109,40,217,0.28)" },
+  infoPoster: { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+  infoMeta: { flex: 1, gap: 8, paddingTop: 2 },
+  infoTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "right", lineHeight: 22 },
+  infoEpRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  infoEpBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(124,58,237,0.18)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 10, paddingVertical: 5 },
+  infoEpText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  infoSrcBadge: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(34,197,94,0.10)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(34,197,94,0.22)", paddingHorizontal: 10, paddingVertical: 5 },
+  infoDot: { width: 5, height: 5, borderRadius: 2.5 },
+  infoSrcText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.85)" },
 
   /* Picker content */
-  pickerScrollContent: { padding: 16, paddingBottom: 100, gap: 14 },
+  pickerScrollContent: { padding: 14, paddingBottom: 100, gap: 12 },
   dot: { width: 5, height: 5, borderRadius: 2.5 },
 
   /* Quality tier sections */
-  tierSection: { gap: 8 },
-  tierHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  tierSection: { gap: 6 },
+  tierHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 2 },
   tierDot: { width: 6, height: 6, borderRadius: 3 },
   tierTitle: { flex: 1, fontSize: 11, fontFamily: "Cairo_700Bold" },
   tierCount: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 7, borderWidth: 1 },
   tierCountText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
 
   /* Empty / searching states */
-  empty: { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 60 },
-  emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.4)" },
-  emptySub: { fontSize: 12, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 18 },
+  emptyIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.18)", alignItems: "center", justifyContent: "center" },
+  empty: { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 50 },
+  emptyTitle: { fontSize: 15, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  emptySub: { fontSize: 12, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20, paddingHorizontal: 24 },
   retryBigBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 20, paddingVertical: 11 },
   retryBigText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  searchingWrap: { alignItems: "center", gap: 12, paddingVertical: 40 },
-  searchingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  searchingWrap: { alignItems: "center", gap: 14, paddingVertical: 40 },
+  searchingText: { fontSize: 12, color: "rgba(255,255,255,0.32)", fontFamily: "Cairo_400Regular", textAlign: "center" },
 
-
-  /* Source section */
-  srcSection: { marginHorizontal: 16, borderRadius: 16, overflow: "hidden", backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 8 },
+  /* Source section — glass card container */
+  srcSection: { borderRadius: 16, overflow: "hidden", backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
 
   /* Source Row */
-  srcRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.04)" },
-  srcIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  srcRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 11, gap: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.05)" },
+  srcIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   srcInfo: { flex: 1, minWidth: 0 },
-  srcNum: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.90)" },
+  srcNum: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.92)" },
   srcTag: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
-  srcTagText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.80)", fontVariant: ["tabular-nums"] },
+  srcTagText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.82)", fontVariant: ["tabular-nums"] },
   srcEnBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(59,130,246,0.14)", borderWidth: 1, borderColor: "rgba(59,130,246,0.30)" },
-  srcEnText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(147,197,253,0.90)" },
-  srcCdn: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 },
-  srcRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  srcEnText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(147,197,253,0.92)" },
+  srcCdn: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.32)", marginTop: 2 },
+  srcRight: { flexDirection: "row", alignItems: "center", gap: 7 },
   srcQBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
   srcQText: { fontSize: 9, fontFamily: "Cairo_800ExtraBold" },
-  srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(124,58,237,0.90)", borderWidth: 1, borderColor: "rgba(167,139,250,0.25)" },
+  srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 10, backgroundColor: "rgba(109,40,217,0.88)", borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
   srcPlayText: { fontSize: 10.5, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-
 });
