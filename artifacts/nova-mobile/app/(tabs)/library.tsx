@@ -255,6 +255,7 @@ export default function LibraryScreen() {
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.tabsRow}
+        style={s.tabsScroll}
       >
         {TABS.map((tab, i) => {
           const active = activeTab === i;
@@ -439,12 +440,13 @@ function EmptyState({ icon, title, desc, onBrowse, colors }: {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 4, flexDirection: "row", alignItems: "center", gap: 8 },
+  header: { paddingHorizontal: 16, paddingBottom: 0, flexDirection: "row", alignItems: "center", gap: 8 },
   title: { fontSize: 24, fontFamily: "Cairo_800ExtraBold" },
   countBadge: { borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 },
   countText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
 
-  tabsRow: { paddingHorizontal: 16, gap: 8, marginBottom: 8, alignItems: "center" },
+  tabsScroll: { flexGrow: 0, flexShrink: 0 },
+  tabsRow: { paddingHorizontal: 16, gap: 8, paddingTop: 8, paddingBottom: 8, alignItems: "center" },
   tabBtn: {
     flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 13, paddingVertical: 8,
@@ -456,7 +458,7 @@ const s = StyleSheet.create({
 
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    marginHorizontal: 16, marginBottom: 14,
+    marginHorizontal: 16, marginBottom: 8,
     paddingHorizontal: 12, paddingVertical: 9,
     borderRadius: 12, borderWidth: 1,
   },
@@ -499,7 +501,7 @@ const s = StyleSheet.create({
   charName: { fontSize: 10, fontFamily: "Cairo_600SemiBold", textAlign: "center", lineHeight: 13 },
   charAnime: { fontSize: 8, fontFamily: "Cairo_400Regular", textAlign: "center" },
 
-  empty: { alignItems: "center", gap: 14, paddingHorizontal: 32, paddingTop: 40 },
+  empty: { alignItems: "center", gap: 14, paddingHorizontal: 32, paddingTop: 16 },
   emptyIconWrap: { width: 80, height: 80, borderRadius: 40, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   emptyTitle: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "center" },
   emptyDesc: { fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20 },
