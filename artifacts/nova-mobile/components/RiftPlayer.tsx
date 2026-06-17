@@ -354,6 +354,11 @@ export function RiftPlayer({
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
   const prevVolRef                        = useRef(1);
   const subPanelX                         = useRef(new Animated.Value(400)).current;
+  /* ─── Whisper audio transcription ─── */
+  const [whisperStatus, setWhisperStatus] = useState<"idle"|"loading"|"ready"|"error">("idle");
+  const [whisperLang,   setWhisperLang]   = useState<string>("");
+  /* ─── Position to restore when switching sources (keeps resumedRef approach) ─── */
+  const switchPosRef = useRef(0);
 
   /* ─── AniSkip: fetch skip times if not provided by source ─── */
   const [fetchedSkipIntro, setFetchedSkipIntro] = useState<{ start: number; end: number } | undefined>(undefined);
@@ -472,9 +477,13 @@ export function RiftPlayer({
         positionRef.current = pos;
         durationRef.current = dur;
         if (dur > 0 && onProgress) onProgress(pos, dur);
-        if (!resumedRef.current && initialPosition && initialPosition > 5 && dur > 30) {
+        /* ── Restore position: either after server-switch or initial load ── */
+        const restorePos = switchPosRef.current > 5 ? switchPosRef.current
+                         : (initialPosition && initialPosition > 5) ? initialPosition : 0;
+        if (!resumedRef.current && restorePos > 5 && dur > 30) {
           resumedRef.current = true;
-          try { player.currentTime = initialPosition; } catch {}
+          switchPosRef.current = 0;
+          try { player.currentTime = restorePos; } catch {}
         }
         if (dur > 0 && pos >= dur - 0.5) {
           setIsEnded(true);
@@ -810,13 +819,52 @@ export function RiftPlayer({
   }, [player, fadeIn]);
 
   const switchSource = useCallback((idx: number) => {
+    /* ── Save current position before replacing source ── */
+    const savedPos = player.currentTime || 0;
+    if (savedPos > 5) switchPosRef.current = savedPos;
     setSrcIdx(idx);
     setError(false);
     setBuffering(true);
     setIsEnded(false);
     resumedRef.current = false;
+    /* Reset whisper status when source changes */
+    setWhisperStatus("idle");
+    setWhisperLang("");
     try { player.replace(sources[idx].url); } catch {}
   }, [player, sources]);
+
+  /* ─── Whisper audio transcription ─── */
+  const triggerWhisper = useCallback(async () => {
+    if (whisperStatus === "loading") return;
+    const url = currentSrc?.url;
+    if (!url) return;
+    setWhisperStatus("loading");
+    setWhisperLang("");
+    const base = getBaseUrl();
+    try {
+      const r = await fetch(`${base}/api/anime/whisper-transcribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, duration: 120 }),
+      });
+      if (!r.ok) throw new Error(`${r.status}`);
+      const d = await r.json() as {
+        language?: string; language_ar?: string;
+        cues?: Array<{ start: number; end: number; text: string }>;
+      };
+      if (!d.cues?.length) throw new Error("no cues");
+      setLoadedCues(d.cues as SubCue[]);
+      setSubOn(true);
+      setWhisperStatus("ready");
+      setWhisperLang(d.language_ar || d.language || "");
+      /* Cache transcription so server-switches don't re-fetch */
+      if (anilistId && episode) {
+        AsyncStorage.setItem(`sub-ar-${anilistId}-${episode}`, JSON.stringify(d.cues)).catch(() => {});
+      }
+    } catch {
+      setWhisperStatus("error");
+    }
+  }, [whisperStatus, currentSrc?.url, anilistId, episode]);
 
   /* ─── Double tap ripple ─── */
   const triggerDblTap = useCallback((side: "L" | "R") => {
@@ -1283,6 +1331,29 @@ export function RiftPlayer({
                     <Text style={s.subEmptyCCText}>CC</Text>
                   </View>
                   <Text style={s.subEmptyText}>لا توجد ترجمات متاحة</Text>
+                  {/* ── Whisper transcription button ── */}
+                  <Pressable
+                    onPress={triggerWhisper}
+                    disabled={whisperStatus === "loading"}
+                    style={[s.whisperBtn, whisperStatus === "loading" && s.whisperBtnLoading]}
+                  >
+                    {whisperStatus === "loading" ? (
+                      <ActivityIndicator size="small" color="#c4b5fd" />
+                    ) : (
+                      <Ionicons name="mic-outline" size={15} color={whisperStatus === "error" ? "#fca5a5" : "#c4b5fd"} />
+                    )}
+                    <Text style={[s.whisperBtnText, whisperStatus === "error" && { color: "#fca5a5" }]}>
+                      {whisperStatus === "idle"    ? "ترجمة صوتية (Whisper)" :
+                       whisperStatus === "loading" ? "جاري التحليل الصوتي..." :
+                       whisperStatus === "error"   ? "فشل — أعد المحاولة"    :
+                       "إعادة الترجمة الصوتية"}
+                    </Text>
+                  </Pressable>
+                  {whisperStatus === "error" && (
+                    <Text style={{ color: "rgba(252,165,165,0.7)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "center", marginTop: 4 }}>
+                      تأكد من تشغيل خدمة Whisper
+                    </Text>
+                  )}
                 </View>
               ) : (
                 <View style={s.subPanelBody}>
@@ -1377,6 +1448,29 @@ export function RiftPlayer({
                       <View style={[s.subToggleThumb, subSettings.bold && s.subToggleThumbOn]} />
                     </Pressable>
                   </View>
+
+                  {/* ─ Whisper re-transcription (inside has-subs section) ─ */}
+                  <View style={s.subPanelDivider} />
+                  <Pressable
+                    onPress={triggerWhisper}
+                    disabled={whisperStatus === "loading"}
+                    style={[s.whisperBtn, whisperStatus === "loading" && s.whisperBtnLoading, { marginTop: 4 }]}
+                  >
+                    {whisperStatus === "loading" ? (
+                      <ActivityIndicator size="small" color="#c4b5fd" />
+                    ) : (
+                      <Ionicons name="mic-outline" size={15} color={whisperStatus === "error" ? "#fca5a5" : whisperStatus === "ready" ? "#86efac" : "#c4b5fd"} />
+                    )}
+                    <Text style={[s.whisperBtnText,
+                      whisperStatus === "error" && { color: "#fca5a5" },
+                      whisperStatus === "ready" && { color: "#86efac" },
+                    ]}>
+                      {whisperStatus === "idle"    ? "ترجمة صوتية (Whisper)" :
+                       whisperStatus === "loading" ? "جاري التحليل الصوتي..." :
+                       whisperStatus === "error"   ? "فشل — أعد المحاولة"    :
+                       `✓ ${whisperLang ? `لغة: ${whisperLang}` : "ترجمة جاهزة"}`}
+                    </Text>
+                  </Pressable>
 
                 </View>
               )}
@@ -1804,6 +1898,15 @@ const s = StyleSheet.create({
   },
   subEmptyCCText: { color: "rgba(255,255,255,0.35)", fontSize: 22, fontFamily: "Cairo_700Bold", letterSpacing: 2 },
   subEmptyText: { color: "rgba(255,255,255,0.35)", fontSize: 14, fontFamily: "Cairo_400Regular" },
+
+  whisperBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
+    backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 12,
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.35)",
+    paddingHorizontal: 16, paddingVertical: 9, marginTop: 10,
+  },
+  whisperBtnLoading: { borderColor: "rgba(139,92,246,0.20)", backgroundColor: "rgba(139,92,246,0.10)" },
+  whisperBtnText: { color: "#c4b5fd", fontSize: 13, fontFamily: "Cairo_700Bold" },
 
   subPanelBody: { paddingHorizontal: 16, paddingTop: 6, gap: 4 },
 
