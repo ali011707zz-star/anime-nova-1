@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getBaseUrl } from "@/utils/api";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -55,6 +56,7 @@ type Props = {
   subEnabled?: boolean;
   autoPlayNext?: boolean;
   totalEps?: number;
+  episodeTitle?: string;
 };
 
 /* ─── Constants ─── */
@@ -260,6 +262,7 @@ export function RiftPlayer({
   subEnabled = false,
   autoPlayNext = true,
   totalEps = 999,
+  episodeTitle,
 }: Props) {
   const insets = useSafeAreaInsets();
 
@@ -290,6 +293,7 @@ export function RiftPlayer({
   const [subOn, setSubOn]               = useState(subEnabled);
   const [loadedCues, setLoadedCues]     = useState<SubCue[]>([]);
   const [subLoading, setSubLoading]     = useState(false);
+  const [autoSubSource, setAutoSubSource] = useState<string | null>(null);
   const [subSettings, setSubSettings]   = useState<SubSettings>(DEFAULT_SUB_SETTINGS);
   const [subOpenSection, setSubOpenSection] = useState<string | null>(null);
   const [showOffsetControls, setShowOffsetControls] = useState(false);
@@ -615,6 +619,45 @@ export function RiftPlayer({
           if (r.skip_type === "ed")  setFetchedSkipOutro(s);
         }
       } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [anilistId, episode]); // eslint-disable-line
+
+  /* ─── Auto-fetch subtitles from multi-source API (jimaku.cc → animetosho) ─── */
+  useEffect(() => {
+    if (!anilistId || !episode) return;
+    if (currentSrc?.subtitleUrl || subCues?.length) return;
+    let cancelled = false;
+    setAutoSubSource(null);
+    (async () => {
+      try {
+        const base = getBaseUrl();
+        if (!base) return;
+        const res = await fetch(
+          `${base}/api/anime/subtitles?anilistId=${anilistId}&ep=${episode}`,
+          { signal: AbortSignal.timeout(9000) }
+        );
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const tracks: any[] = data.tracks || [];
+        if (cancelled || tracks.length === 0) return;
+        const track = tracks[0];
+        const vttUrl = track.url.startsWith("/") ? `${base}${track.url}` : track.url;
+        setSubLoading(true);
+        const vttRes = await fetch(vttUrl, {
+          headers: { Accept: "text/vtt,text/plain,*/*" },
+          signal: AbortSignal.timeout(7000),
+        });
+        const text = await vttRes.text();
+        if (cancelled) return;
+        const cues = parseVTT(text);
+        if (cues.length > 0) {
+          setLoadedCues(cues);
+          setSubOn(true);
+          setAutoSubSource(track.source || "auto");
+        }
+      } catch {}
+      finally { if (!cancelled) setSubLoading(false); }
     })();
     return () => { cancelled = true; };
   }, [anilistId, episode]); // eslint-disable-line
@@ -1343,6 +1386,14 @@ export function RiftPlayer({
                   </View>
                 ) : null}
               </View>
+              {episodeTitle ? (
+                <Text style={s.topEpTitle} numberOfLines={1}>{episodeTitle}</Text>
+              ) : null}
+              {autoSubSource ? (
+                <View style={s.autoSubBadge}>
+                  <Text style={s.autoSubBadgeText}>✦ ترجمة {autoSubSource === "jimaku" ? "Jimaku" : autoSubSource === "animetosho" ? "Animetosho" : "تلقائية"}</Text>
+                </View>
+              ) : null}
             </View>
 
             {/* أزرار اليمين: لقطة + ترجمة + تدوير + إغلاق */}
@@ -1598,8 +1649,8 @@ const s = StyleSheet.create({
   root:  { flex: 1, backgroundColor: "#000", position: "relative" },
   video: { width: "100%", height: "100%" },
 
-  /* Spinner — sits over the bottom play button, not screen centre */
-  spinnerWrap: { position: "absolute", bottom: 32, left: 0, right: 0, alignItems: "center", justifyContent: "center", zIndex: 3 },
+  /* Spinner — top area of screen */
+  spinnerWrap: { position: "absolute", top: 72, left: 0, right: 0, alignItems: "center", justifyContent: "center", zIndex: 3 },
   errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20, backgroundColor: "rgba(0,0,0,0.92)" },
   errorIconBox: { width: 68, height: 68, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", alignItems: "center", justifyContent: "center" },
   errorTitle:  { color: "rgba(255,255,255,0.85)", fontSize: 15, fontFamily: "Cairo_700Bold" },
@@ -1618,9 +1669,9 @@ const s = StyleSheet.create({
   rippleLabel:  { alignItems: "center", gap: 4, zIndex: 2 },
   rippleSecs:   { fontSize: 14, fontWeight: "900", fontFamily: "Cairo_700Bold" },
 
-  /* Gesture feedback */
-  feedbackRight: { position: "absolute", right: 18, top: "30%", alignItems: "center", gap: 10, zIndex: 30 },
-  feedbackLeft:  { position: "absolute", left: 18,  top: "30%", alignItems: "center", gap: 10, zIndex: 30 },
+  /* Gesture feedback — centered vertically */
+  feedbackRight: { position: "absolute", right: 18, top: "45%", alignItems: "center", gap: 10, zIndex: 30, transform: [{ translateY: -60 }] },
+  feedbackLeft:  { position: "absolute", left: 18,  top: "45%", alignItems: "center", gap: 10, zIndex: 30, transform: [{ translateY: -60 }] },
   feedbackCenter:{ position: "absolute", left: "20%", right: "20%", top: "40%", alignItems: "center", zIndex: 30 },
   feedbackBarWrap: { width: 4, height: 110, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 2, overflow: "hidden", justifyContent: "flex-end" },
   feedbackBarFill: { width: "100%", backgroundColor: "rgba(255,255,255,0.85)", borderRadius: 2 },
@@ -1804,6 +1855,19 @@ const s = StyleSheet.create({
   },
   topQualityText: {
     color: "rgba(253,224,71,0.90)", fontSize: 10, fontFamily: "Cairo_700Bold",
+  },
+  topEpTitle: {
+    color: "rgba(255,255,255,0.65)", fontSize: 10, fontFamily: "Cairo_400Regular",
+    marginTop: 3, maxWidth: 200,
+    textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 },
+  },
+  autoSubBadge: {
+    marginTop: 3, alignSelf: "flex-start",
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+    backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)",
+  },
+  autoSubBadgeText: {
+    color: "rgba(196,181,253,0.85)", fontSize: 9, fontFamily: "Cairo_600SemiBold",
   },
   topRightRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   topIconBtn: {
