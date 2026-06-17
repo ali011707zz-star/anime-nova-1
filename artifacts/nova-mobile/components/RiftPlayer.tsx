@@ -12,7 +12,7 @@ import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Animated, Dimensions, Easing, Platform,
+  ActivityIndicator, Animated, Dimensions, Easing, Platform,
   PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -396,6 +396,19 @@ export function RiftPlayer({
     if (initialPosition && initialPosition > 5) {
       try { p.currentTime = initialPosition; } catch {}
     }
+    /* Buffer tuning — reduces initial delay + stutter
+       iOS: start immediately without waiting for large buffer
+       Android ExoPlayer: 3s min buffer before playback starts */
+    try {
+      (p as any).bufferOptions = {
+        preferredForwardBufferDuration: 20, // iOS: pre-buffer 20 seconds ahead
+        waitsToMinimizeStalling: false,     // iOS: start playing ASAP, don't wait
+        minBufferMs: 3000,                  // Android: 3s min before play
+        maxBufferMs: 25000,                 // Android: cache up to 25s
+        bufferForPlaybackMs: 1500,          // Android: start after 1.5s buffered
+        bufferForPlaybackAfterRebufferMs: 2500, // Android: resume after 2.5s
+      };
+    } catch {}
   });
 
   /* ─── Load SubSettings + subOffset from storage ─── */
@@ -1051,12 +1064,6 @@ export function RiftPlayer({
         </View>
       )}
 
-      {/* ── Buffering spinner — positioned over the bottom play button ── */}
-      {buffering && !error && (
-        <View style={s.spinnerWrap} pointerEvents="none">
-          <SpinRing size={42} />
-        </View>
-      )}
 
       {/* ── Error state ── */}
       {error && (
@@ -1451,7 +1458,9 @@ export function RiftPlayer({
                   <Text style={s.centerSeekLabel}>10</Text>
                 </Pressable>
                 <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                  <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />
+                  {buffering && !error
+                    ? <ActivityIndicator size={32} color="#fff" />
+                    : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />}
                 </Pressable>
                 <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
                   <Ionicons name="play-forward" size={24} color="#fff" />
@@ -1462,7 +1471,9 @@ export function RiftPlayer({
               /* وضع أفقي: التشغيل فقط في المنتصف */
               <View style={s.centerLandscapeWrap}>
                 <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                  <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />
+                  {buffering && !error
+                    ? <ActivityIndicator size={32} color="#fff" />
+                    : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />}
                 </Pressable>
               </View>
             )}
@@ -1564,7 +1575,9 @@ export function RiftPlayer({
                   </Pressable>
                 )}
                 <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
-                  <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { marginLeft: 3 }} />
+                  {buffering && !error
+                    ? <ActivityIndicator size={18} color="#fff" />
+                    : <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { marginLeft: 3 }} />}
                 </Pressable>
                 {!isPortrait && (
                   <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
@@ -1669,7 +1682,6 @@ const s = StyleSheet.create({
   video: { width: "100%", height: "100%" },
 
   /* Spinner — top area of screen */
-  spinnerWrap: { position: "absolute", top: 72, left: 0, right: 0, alignItems: "center", justifyContent: "center", zIndex: 3 },
   errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20, backgroundColor: "rgba(0,0,0,0.92)" },
   errorIconBox: { width: 68, height: 68, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", alignItems: "center", justifyContent: "center" },
   errorTitle:  { color: "rgba(255,255,255,0.85)", fontSize: 15, fontFamily: "Cairo_700Bold" },

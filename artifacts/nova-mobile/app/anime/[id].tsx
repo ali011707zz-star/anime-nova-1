@@ -280,8 +280,9 @@ export default function AnimeDetailScreen() {
 
   if (loading) return (
     <View style={[d.container, { paddingTop: topPad }]}>
-      <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={{ padding: 16 }}>
-        <Ionicons name="arrow-back" size={22} color="#fff" />
+      <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+        style={{ position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 }}>
+        <Ionicons name="chevron-forward" size={20} color="#fff" />
       </Pressable>
       <View style={d.center}><ActivityIndicator color="#8B5CF6" size="large" /></View>
     </View>
@@ -320,7 +321,7 @@ export default function AnimeDetailScreen() {
           />
           {/* Back */}
           <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} style={d.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="#fff" />
+            <Ionicons name="chevron-forward" size={20} color="#fff" />
           </Pressable>
         </View>
 
@@ -727,7 +728,7 @@ const d = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#09090B" },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   hero: { height: 240, justifyContent: "flex-end", overflow: "hidden" },
-  backBtn: { position: "absolute", left: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  backBtn: { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   favBtn: { position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   infoRow: { flexDirection: "row", paddingHorizontal: 16, marginTop: -52, gap: 14, alignItems: "flex-end" },
   cover: { width: 100, height: 145, borderRadius: 16, borderWidth: 2, borderColor: "#09090B" },
