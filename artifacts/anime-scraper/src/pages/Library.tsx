@@ -314,8 +314,8 @@ export default function Library() {
                           {/* Cover */}
                           <div className="relative shrink-0">
                             {cover
-                              ? <img src={isAnim && cover ? `https://image.tmdb.org/t/p/w200${cover}` : cover} alt="" className="w-16 h-[84px] rounded-xl object-cover border border-white/10" />
-                              : <div className="w-16 h-[84px] rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
+                              ? <img src={isAnim && cover ? `https://image.tmdb.org/t/p/w200${cover}` : cover} alt="" className="w-12 h-[64px] rounded-xl object-cover border border-white/10" />
+                              : <div className="w-12 h-[64px] rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
                                   {isAnim ? <Clapperboard className="w-6 h-6 text-white/20" /> : <PlayCircle className="w-6 h-6 text-white/20" />}
                                 </div>
                             }
@@ -436,8 +436,8 @@ export default function Library() {
                               {/* Cover */}
                               <div className="relative shrink-0">
                                 {coverSrc
-                                  ? <img src={coverSrc} alt="" className="w-14 h-[72px] rounded-xl object-cover border border-white/10" />
-                                  : <div className="w-14 h-[72px] rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
+                                  ? <img src={coverSrc} alt="" className="w-11 h-[58px] rounded-xl object-cover border border-white/10" />
+                                  : <div className="w-11 h-[58px] rounded-xl bg-white/5 flex items-center justify-center border border-white/10">
                                       {isAnim ? <Clapperboard className="w-5 h-5 text-white/20" /> : <PlayCircle className="w-5 h-5 text-white/20" />}
                                     </div>
                                 }
@@ -560,7 +560,7 @@ export default function Library() {
                 </Link>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-2.5">
                 {sortedSaved.map((anime, i) => {
                   const status = STATUS_LABEL[anime.status] || { ar: anime.status, cls: "bg-zinc-600 text-white" };
                   const year = anime.startDate?.year;

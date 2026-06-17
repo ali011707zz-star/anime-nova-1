@@ -235,10 +235,9 @@ export default function AnimeDetail() {
           setLoading(false);
           return;
         }
-        // حظر محتوى الإيتشي — إعادة التوجيه للرئيسية فوراً
-        const blockedGenres = new Set(["Ecchi", "Hentai"]);
+        const blockedGenres = new Set(["Hentai"]);
         const hasBlockedGenre = (a.genres || []).some((g: string) => blockedGenres.has(g));
-        if (a.isAdult || hasBlockedGenre) {
+        if (hasBlockedGenre) {
           navigate("/");
           return;
         }
