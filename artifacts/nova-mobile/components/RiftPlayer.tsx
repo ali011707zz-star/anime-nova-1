@@ -6,6 +6,7 @@
  */
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -609,6 +610,20 @@ export function RiftPlayer({
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, []);
 
+  /* ─── Auto landscape on mount ─── */
+  useEffect(() => {
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => {});
+    return () => {
+      ScreenOrientation.unlockAsync().catch(() => {});
+    };
+  }, []);
+
+  /* ─── Back: unlock orientation then go back ─── */
+  const handleBack = useCallback(() => {
+    ScreenOrientation.unlockAsync().catch(() => {});
+    onBack();
+  }, [onBack]);
+
   /* ─── Actions ─── */
   const togglePlay = useCallback(() => {
     fadeIn();
@@ -1086,16 +1101,121 @@ export function RiftPlayer({
       ════════════════════════════════════════ */}
       {showControls && !error && !isEnded && !isLocked && (
         <Animated.View
-          style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10 }]}
+          style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10, flexDirection: "column" }]}
           pointerEvents="box-none"
         >
           {/* ════ TOP BAR ════ */}
           <View style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 8 }]}>
-            {/* ── زر الرجوع فقط ── */}
-            <Pressable onPress={onBack} style={s.backBtn} hitSlop={12}>
-              <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.80)" />
+            <Pressable onPress={handleBack} style={s.backBtn} hitSlop={12}>
+              <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.85)" />
             </Pressable>
           </View>
+
+          {/* ════ CENTER: زر تشغيل/إيقاف كبير ════ */}
+          <View style={s.centerOverlay} pointerEvents="box-none">
+            <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+              <Ionicons
+                name={isPlaying ? "pause" : "play"}
+                size={38}
+                color="#fff"
+                style={isPlaying ? undefined : { marginLeft: 4 }}
+              />
+            </Pressable>
+          </View>
+
+          {/* ════ BOTTOM SECTION ════ */}
+          <LinearGradient
+            colors={["transparent", "rgba(0,0,0,0.55)", "rgba(0,0,0,0.92)"]}
+            style={[s.bottomSection, { paddingBottom: Platform.OS === "web" ? 18 : insets.bottom + 14 }]}
+          >
+            {/* ── وقت الفيديو ── */}
+            <View style={s.timeRow}>
+              <Text style={s.timeText}>{fmtTime(position)}</Text>
+              <Text style={[s.timeText, { opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+            </View>
+
+            {/* ── شريط التقدم الاحترافي ── */}
+            <View
+              ref={barRef}
+              style={[s.progressWrap, isDragging && s.progressWrapDragging]}
+              onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
+              {...seekBarPan.panHandlers}
+            >
+              {/* خلفية الشريط */}
+              <View style={s.progressBg} />
+              {/* Buffer */}
+              {bufferedPct > 0 && (
+                <View style={[s.bufferBar, { width: `${bufferedPct * 100}%` as any }]} />
+              )}
+              {/* Intro marker */}
+              {markerPctIntro && (
+                <View style={[s.skipMarker, {
+                  left: `${markerPctIntro.start}%` as any,
+                  width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
+                }]} />
+              )}
+              {/* Outro marker */}
+              {markerPctOutro && (
+                <View style={[s.skipMarker, {
+                  left: `${markerPctOutro.start}%` as any,
+                  width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
+                }]} />
+              )}
+              {/* التقدم المملوء بتدرج بنفسجي */}
+              <LinearGradient
+                colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={[s.progressFill, { width: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }]}
+              />
+              {/* الـ thumb */}
+              <View style={[
+                s.thumb,
+                { left: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any },
+                isDragging && s.thumbDragging,
+              ]} />
+              {/* tooltip عند السحب */}
+              {isDragging && (
+                <View style={[s.dragTooltip, {
+                  left: `${Math.max(4, Math.min(88, (isDragging ? dragPct : progress) * 100 - 6))}%` as any,
+                }]}>
+                  <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* ── أزرار التحكم السفلية ── */}
+            <View style={s.bottomCtrlRow}>
+              {/* تراجع 10 ثواني */}
+              <Pressable
+                onPress={() => seek(positionRef.current - 10)}
+                style={s.seekCtrlBtn}
+                hitSlop={10}
+              >
+                <Ionicons name="play-back" size={20} color="rgba(255,255,255,0.90)" />
+                <Text style={s.seekCtrlLabel}>10</Text>
+              </Pressable>
+
+              {/* تشغيل / إيقاف */}
+              <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
+                <Ionicons
+                  name={isPlaying ? "pause" : "play"}
+                  size={26}
+                  color="#fff"
+                  style={isPlaying ? undefined : { marginLeft: 3 }}
+                />
+              </Pressable>
+
+              {/* تقديم 10 ثواني */}
+              <Pressable
+                onPress={() => seek(positionRef.current + 10)}
+                style={s.seekCtrlBtn}
+                hitSlop={10}
+              >
+                <Ionicons name="play-forward" size={20} color="rgba(255,255,255,0.90)" />
+                <Text style={s.seekCtrlLabel}>10</Text>
+              </Pressable>
+            </View>
+          </LinearGradient>
         </Animated.View>
       )}
 
@@ -1231,7 +1351,37 @@ const s = StyleSheet.create({
 
   /* Top bar */
   topBar: { paddingHorizontal: 12, paddingBottom: 12, flexDirection: "row", alignItems: "flex-start" },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.50)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", marginTop: 2 },
+  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.55)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center", marginTop: 2 },
+
+  /* Center play/pause overlay */
+  centerOverlay: { flex: 1, alignItems: "center", justifyContent: "center" },
+  centerPlayBtn: {
+    width: 76, height: 76, borderRadius: 38,
+    backgroundColor: "rgba(139,92,246,0.28)",
+    borderWidth: 2, borderColor: "rgba(167,139,250,0.75)",
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#8B5CF6", shadowOpacity: 0.70, shadowRadius: 22, elevation: 14,
+  },
+
+  /* Bottom section */
+  bottomSection: { paddingHorizontal: 16, paddingTop: 22, gap: 6 },
+
+  /* Bottom controls row */
+  bottomCtrlRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 28, marginTop: 4, marginBottom: 2 },
+  seekCtrlBtn: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.20)",
+    alignItems: "center", justifyContent: "center", gap: 2,
+  },
+  seekCtrlLabel: { color: "rgba(255,255,255,0.75)", fontSize: 10, fontFamily: "Cairo_700Bold", lineHeight: 12 },
+  bottomPlayBtn: {
+    width: 62, height: 62, borderRadius: 31,
+    backgroundColor: "rgba(139,92,246,0.85)",
+    borderWidth: 2, borderColor: "rgba(196,181,253,0.70)",
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#8B5CF6", shadowOpacity: 0.60, shadowRadius: 16, elevation: 10,
+  },
   titleWrap: { flex: 1, gap: 4 },
   titleText: { color: "#fff", fontSize: 15, fontFamily: "Cairo_700Bold" },
   epBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: "rgba(139,92,246,0.22)", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
