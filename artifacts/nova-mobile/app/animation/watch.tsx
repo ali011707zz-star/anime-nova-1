@@ -325,12 +325,14 @@ export default function AnimationWatchScreen() {
     if (lastTimeRef.current > 5) {
       AsyncStorage.setItem(progressKey, String(Math.floor(lastTimeRef.current))).catch(() => {});
     }
-    if (tmdbId && type === "tv") {
-      router.push(`/animation/episodes?id=${tmdbId}&type=${type}&season=${season}`);
+    if (router.canGoBack()) {
+      router.back();
+    } else if (tmdbId && type === "tv") {
+      router.replace(`/animation/episodes?id=${tmdbId}&type=${type}&season=${season}` as any);
     } else if (tmdbId) {
-      router.push(`/animation/movie/${tmdbId}`);
+      router.replace(`/animation/${type}/${tmdbId}` as any);
     } else {
-      router.canGoBack() ? router.back() : router.replace("/(tabs)/animations");
+      router.replace("/(tabs)/animations" as any);
     }
   }, [screen, tmdbId, type, season, router, progressKey]);
 
@@ -338,37 +340,62 @@ export default function AnimationWatchScreen() {
   if (screen === "loading") {
     return (
       <View style={[w.container]}>
+        {/* Blurred backdrop */}
         {posterUrl ? (
-          <Image source={{ uri: posterUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.12 }]} blurRadius={18} resizeMode="cover" />
+          <Image source={{ uri: posterUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.18 }]} blurRadius={22} resizeMode="cover" />
         ) : null}
-        <LinearGradient colors={["rgba(9,9,11,0.9)", "rgba(9,9,11,0.6)", "rgba(9,9,11,0.95)"]} style={StyleSheet.absoluteFill} />
-        <Pressable onPress={handleBack} style={[w.topBackBtn, { top: topPad + 4 }]}>
-          <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.6)" />
-        </Pressable>
-        <View style={w.loadingContent}>
-          <Text style={w.prayerText}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
-          {posterUrl ? (
-            <View style={w.posterWrap}>
-              <View style={w.posterGlow} />
-              <Image source={{ uri: posterUrl }} style={w.posterImg} resizeMode="cover" />
-            </View>
-          ) : (
-            <View style={[w.posterImg, w.posterPlaceholder]}>
-              <Ionicons name="film" size={36} color="rgba(139,92,246,0.4)" />
-            </View>
-          )}
-          <View style={{ alignItems: "center", gap: 8 }}>
-            {titleStr ? <Text style={w.loadTitle} numberOfLines={2}>{titleStr}</Text> : null}
-            <View style={w.epBadge}>
-              <Text style={w.epBadgeText}>
+        <LinearGradient colors={["rgba(9,9,11,0.88)", "rgba(9,9,11,0.55)", "rgba(9,9,11,0.92)"]} style={StyleSheet.absoluteFill} />
+
+        {/* Top bar */}
+        <View style={[w.loadTopBar, { paddingTop: topPad + 4 }]}>
+          <Pressable onPress={handleBack} style={w.loadBackBtn}>
+            <Ionicons name="arrow-back" size={18} color="rgba(255,255,255,0.75)" />
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            {titleStr ? <Text style={w.loadTopTitle} numberOfLines={1}>{titleStr}</Text> : null}
+            {type !== "movie" && (
+              <Text style={w.loadTopSub}>الموسم {season} · الحلقة {ep}</Text>
+            )}
+          </View>
+        </View>
+
+        {/* Center card */}
+        <View style={w.loadCard}>
+          {/* Poster */}
+          <View style={w.loadPosterWrap}>
+            {posterUrl ? (
+              <>
+                <View style={w.loadPosterGlow} />
+                <Image source={{ uri: posterUrl }} style={w.loadPosterImg} resizeMode="cover" />
+              </>
+            ) : (
+              <View style={[w.loadPosterImg, w.loadPosterPlaceholder]}>
+                <Ionicons name={type === "movie" ? "film" : "tv"} size={40} color="rgba(139,92,246,0.35)" />
+              </View>
+            )}
+          </View>
+
+          {/* Title + badge */}
+          <View style={{ alignItems: "center", gap: 8, width: "100%" }}>
+            {titleStr ? (
+              <Text style={w.loadCardTitle} numberOfLines={2}>{titleStr}</Text>
+            ) : null}
+            <View style={w.loadEpBadge}>
+              <Ionicons name={type === "movie" ? "film" : "tv"} size={10} color="#a78bfa" />
+              <Text style={w.loadEpBadgeText}>
                 {type === "movie" ? "فيلم" : `الموسم ${season} • الحلقة ${ep}`}
               </Text>
             </View>
           </View>
-          <View style={{ alignItems: "center", gap: 12 }}>
+
+          {/* Spinner + hint */}
+          <View style={{ alignItems: "center", gap: 10 }}>
             <SpinRing />
-            <Text style={w.loadHint}>⏳ جاري البحث عن المصادر، قد يستغرق ذلك بضع ثوانٍ.</Text>
+            <Text style={w.loadHintNew}>جاري البحث عن أفضل المصادر…</Text>
           </View>
+
+          {/* Prayer text */}
+          <Text style={w.loadPrayerText}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
         </View>
       </View>
     );
@@ -594,17 +621,21 @@ const w = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#07070d" },
   video: { flex: 1 },
 
-  /* Loading screen */
-  loadingContent: { flex: 1, alignItems: "center", justifyContent: "center", gap: 24, paddingHorizontal: 32 },
-  prayerText: { fontSize: 11, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center" },
-  posterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
-  posterGlow: { position: "absolute", width: 120, height: 120, borderRadius: 60, backgroundColor: "rgba(109,40,217,0.35)", transform: [{ scale: 1.4 }] },
-  posterImg: { width: 110, height: 155, borderRadius: 14, borderWidth: 2, borderColor: "rgba(139,92,246,0.35)" },
-  posterPlaceholder: { backgroundColor: "rgba(30,10,60,0.9)", alignItems: "center", justifyContent: "center" },
-  loadTitle: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center" },
-  epBadge: { backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(139,92,246,0.3)", paddingHorizontal: 14, paddingVertical: 5 },
-  epBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  loadHint: { fontSize: 11, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 18 },
+  /* Loading screen — redesigned */
+  loadTopBar: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingBottom: 10, zIndex: 10 },
+  loadBackBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
+  loadTopTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.88)" },
+  loadTopSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
+  loadCard: { flex: 1, alignItems: "center", justifyContent: "center", gap: 22, paddingHorizontal: 28, paddingBottom: 40 },
+  loadPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
+  loadPosterGlow: { position: "absolute", width: 130, height: 130, borderRadius: 65, backgroundColor: "rgba(109,40,217,0.30)", transform: [{ scale: 1.5 }] },
+  loadPosterImg: { width: 120, height: 170, borderRadius: 16, borderWidth: 2, borderColor: "rgba(139,92,246,0.4)" },
+  loadPosterPlaceholder: { backgroundColor: "rgba(20,10,50,0.9)", alignItems: "center", justifyContent: "center" },
+  loadCardTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 24 },
+  loadEpBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 14, paddingVertical: 6 },
+  loadEpBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  loadHintNew: { fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  loadPrayerText: { fontSize: 10, color: "rgba(255,255,255,0.18)", fontFamily: "Cairo_400Regular", textAlign: "center" },
   topBackBtn: { position: "absolute", left: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
   commentsBtn: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },
   commentsBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },

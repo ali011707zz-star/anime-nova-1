@@ -439,12 +439,12 @@ function EmptyState({ icon, title, desc, onBrowse, colors }: {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 10, flexDirection: "row", alignItems: "center", gap: 8 },
+  header: { paddingHorizontal: 16, paddingBottom: 4, flexDirection: "row", alignItems: "center", gap: 8 },
   title: { fontSize: 24, fontFamily: "Cairo_800ExtraBold" },
   countBadge: { borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 },
   countText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
 
-  tabsRow: { paddingHorizontal: 16, gap: 8, marginBottom: 12, alignItems: "center" },
+  tabsRow: { paddingHorizontal: 16, gap: 8, marginBottom: 8, alignItems: "center" },
   tabBtn: {
     flexDirection: "row", alignItems: "center", gap: 5,
     paddingHorizontal: 13, paddingVertical: 8,
@@ -499,7 +499,7 @@ const s = StyleSheet.create({
   charName: { fontSize: 10, fontFamily: "Cairo_600SemiBold", textAlign: "center", lineHeight: 13 },
   charAnime: { fontSize: 8, fontFamily: "Cairo_400Regular", textAlign: "center" },
 
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, paddingHorizontal: 32 },
+  empty: { alignItems: "center", gap: 14, paddingHorizontal: 32, paddingTop: 40 },
   emptyIconWrap: { width: 80, height: 80, borderRadius: 40, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   emptyTitle: { fontSize: 17, fontFamily: "Cairo_700Bold", textAlign: "center" },
   emptyDesc: { fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20 },

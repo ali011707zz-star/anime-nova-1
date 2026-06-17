@@ -526,10 +526,12 @@ export default function WatchScreen() {
           onPress={() => epNum > 1 && goEp(epNum - 1)}
           style={[d.epNavBtn, epNum <= 1 && { opacity: 0.25 }]}
         >
-          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.65)" />
+          <Ionicons name="chevron-forward" size={13} color="rgba(255,255,255,0.55)" />
+          <Text style={d.epNavText}>السابقة</Text>
         </Pressable>
         <Pressable onPress={() => goEp(epNum + 1)} style={d.epNavBtn}>
-          <Ionicons name="chevron-back" size={18} color="rgba(196,181,253,0.9)" />
+          <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
+          <Ionicons name="chevron-back" size={13} color="rgba(196,181,253,0.9)" />
         </Pressable>
         {loading
           ? <ActivityIndicator color="#8B5CF6" size="small" style={{ marginLeft: 4 }} />
@@ -639,7 +641,8 @@ const d = StyleSheet.create({
   headerTitle: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   headerSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
   headerRefreshBtn: { width: 34, height: 34, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", alignItems: "center", justifyContent: "center" },
-  epNavBtn: { width: 34, height: 34, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", alignItems: "center", justifyContent: "center" },
+  epNavBtn: { flexDirection: "row", alignItems: "center", gap: 3, height: 34, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", paddingHorizontal: 10, justifyContent: "center" },
+  epNavText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.65)" },
 
   /* Picker content */
   pickerScrollContent: { padding: 16, paddingBottom: 100, gap: 14 },
