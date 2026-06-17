@@ -7556,6 +7556,83 @@ router.get("/anime/subtitles", async (req, res) => {
   res.json({ anilistId, ep, tracks });
 });
 
+// ════════════════════════════════════════════════════════════════════
+//  whisper-transcribe  POST /api/anime/whisper-transcribe
+//  Transcribes audio from a video URL via the local Whisper service
+//  then translates non-Arabic cues to Arabic (reuses translateBatchFree).
+// ════════════════════════════════════════════════════════════════════
+
+const _whisperSubCache = new Map<string, { cues: any[]; lang: string; lang_ar: string; ts: number }>();
+const WHISPER_CACHE_TTL = 7 * 24 * 60 * 60_000; // 7 days
+const WHISPER_SVC_URL   = `http://localhost:${process.env.WHISPER_PORT || 9000}`;
+
+router.post("/anime/whisper-transcribe", async (req, res) => {
+  const { url, duration = 120 } = req.body as { url?: string; duration?: number };
+  if (!url) { res.status(400).json({ error: "url required" }); return; }
+
+  const cacheKey = `w:${url.slice(0, 200)}:${duration}`;
+  const hit = _whisperSubCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < WHISPER_CACHE_TTL) {
+    res.json({ language: hit.lang, language_ar: hit.lang_ar, cues: hit.cues, cached: true });
+    return;
+  }
+
+  try {
+    const svcRes = await fetch(`${WHISPER_SVC_URL}/transcribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, duration }),
+      signal: AbortSignal.timeout(200_000),
+    });
+    if (!svcRes.ok) {
+      const err = await svcRes.json().catch(() => ({}));
+      res.status(svcRes.status).json({ error: (err as any).error || "Whisper service error" });
+      return;
+    }
+    const data = await svcRes.json() as {
+      language: string; language_ar?: string;
+      language_probability?: number; cues: Array<{ start: number; end: number; text: string }>;
+    };
+
+    let { language, language_ar, cues = [] } = data;
+
+    /* Translate non-Arabic cues to Arabic using the existing translateBatchFree helper */
+    if (language && language !== "ar" && cues.length > 0) {
+      const texts      = cues.map(c => c.text);
+      const translated = await translateBatchFree(texts, language, "ar");
+      cues = cues.map((c, i) => ({ ...c, text: translated[i] || c.text }));
+    }
+
+    _whisperSubCache.set(cacheKey, {
+      cues, lang: language, lang_ar: language_ar || language, ts: Date.now()
+    });
+    res.json({ language, language_ar: language_ar || language, cues });
+  } catch (e: any) {
+    const isDown = e?.cause?.code === "ECONNREFUSED" || e?.message?.includes("fetch failed");
+    res.status(isDown ? 503 : 502).json({
+      error: isDown
+        ? "خدمة الترجمة الصوتية غير متاحة — تأكد من تشغيل Whisper Service"
+        : e.message || "Whisper error",
+    });
+  }
+});
+
+router.get("/anime/whisper-detect", async (req, res) => {
+  const url = String(req.query.url || "");
+  if (!url) { res.status(400).json({ error: "url required" }); return; }
+  try {
+    const r = await fetch(`${WHISPER_SVC_URL}/detect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(70_000),
+    });
+    res.json(await r.json());
+  } catch (e: any) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 router.get("/anime/animewitcher-catalog", async (req, res) => {
   try {
     const typeFilter = String(req.query.type || "all");

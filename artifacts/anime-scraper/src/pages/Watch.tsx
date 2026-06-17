@@ -1430,6 +1430,9 @@ function EpisodePlayer({
   const [showOffsetControls, setShowOffsetControls] = useState(false);
   const [showSubPanel, setShowSubPanel] = useState(false);
   const [subSettings,  setSubSettings] = useState<SubSettings>(loadSubSettings);
+  /* ── Whisper audio transcription state ── */
+  const [whisperStatus, setWhisperStatus] = useState<"idle"|"loading"|"ready"|"error">("idle");
+  const [whisperLang,   setWhisperLang]   = useState<string>("");
   const [isLandscape,  setIsLandscape] = useState(() => typeof window !== "undefined" && window.innerWidth > window.innerHeight);
   /* ── Multi-track subtitle system ── */
   const [subTracks,    setSubTracks]   = useState<SubTrack[]>([]);
@@ -1881,12 +1884,58 @@ function EpisodePlayer({
     if (!ttsDub) { window.speechSynthesis.cancel(); ttsLastCueRef.current = ""; }
   }, [ttsDub]);
 
+  /* ── Whisper audio transcription — send raw video URL to API for transcription ── */
+  const triggerWhisperTranscription = useCallback(async () => {
+    if (whisperStatus === "loading") return;
+    const rawUrl = servers[currentServer] || "";
+    if (!rawUrl) return;
+    setWhisperStatus("loading");
+    setWhisperLang("");
+    try {
+      const r = await fetch("/api/anime/whisper-transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: rawUrl, duration: 120 }),
+        signal: AbortSignal.timeout(200_000),
+      });
+      if (!r.ok) throw new Error(`${r.status}`);
+      const d = await r.json() as { language?: string; language_ar?: string; cues?: Array<{ start: number; end: number; text: string }> };
+      if (!d.cues?.length) throw new Error("no cues");
+      const cues: SubCue[] = d.cues.map(c => ({ start: c.start, end: c.end, text: c.text }));
+      const cacheKey = `whisper-${rawUrl.slice(0,100)}`;
+      setCachedCues(cacheKey, cues);
+      setSubCues(cues);
+      setSubLang("ara");
+      setSubState("ready");
+      setSubStatus("ready");
+      setWhisperStatus("ready");
+      setWhisperLang(d.language_ar || d.language || "");
+      setSubChoice("ar-auto");
+    } catch {
+      setWhisperStatus("error");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whisperStatus, servers, currentServer]);
+
+  /* ── Save current playback position to localStorage before switching server ──
+     Ensures the newly-created RiftPlayer reads the correct resumeTime on mount. */
+  const savePositionBeforeSwitch = useCallback(() => {
+    const t = lastTimeRef.current;
+    if (t > 10) {
+      try { localStorage.setItem(progressKey, String(Math.floor(t))); } catch {}
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progressKey]);
+
   const lastSwitchRef = useRef(0);
   const tryNextServer = useCallback(() => {
     /* Throttle: ignore if last switch was < 400ms ago */
     const now = Date.now();
     if (now - lastSwitchRef.current < 400) return;
     lastSwitchRef.current = now;
+
+    /* Persist current position so the next server resumes from the same point */
+    savePositionBeforeSwitch();
 
     if (currentServer + 1 < servers.length) {
       setCurrentServer(currentServer + 1);
@@ -2049,7 +2098,7 @@ function EpisodePlayer({
           return (
             <button
               key={i}
-              onClick={() => { setCurrentServer(i); setRealQuality(null); }}
+              onClick={() => { savePositionBeforeSwitch(); setCurrentServer(i); setRealQuality(null); }}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] whitespace-nowrap transition-all active:scale-90 shrink-0"
               style={{
                 background: isActive ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.08)",
@@ -2088,7 +2137,7 @@ function EpisodePlayer({
         {currentUrl && (
           <>
             <RiftPlayer
-              key={`hls-${currentUrl}-${currentServer}`}
+              key={`rift-${currentUrl}`}
               src={currentUrl}
               title={title}
               epTitle={epTitle}
@@ -2264,6 +2313,36 @@ function EpisodePlayer({
                     <span className="text-[10px] font-['Cairo'] text-white/18">اختر لغة الترجمة من الأعلى</span>
                   </div>
                 )}
+              </div>
+
+              {/* ── Whisper Audio Transcription ── */}
+              <div className="px-4 pb-3 pt-1 border-t border-white/[0.05]">
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[14px]">🎙</span>
+                    <div>
+                      <p className="text-[11px] font-black font-['Cairo'] text-white/55">ترجمة صوتية</p>
+                      <p className="text-[8.5px] font-['Cairo'] text-white/22">
+                        {whisperStatus === "ready" && whisperLang ? `تم · لغة المصدر: ${whisperLang}` : "يكتشف اللغة ويترجم تلقائياً"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={triggerWhisperTranscription}
+                    disabled={whisperStatus === "loading"}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] transition-all active:scale-90 disabled:opacity-50"
+                    style={{
+                      background: whisperStatus === "ready" ? "rgba(52,211,153,0.18)" : whisperStatus === "error" ? "rgba(239,68,68,0.15)" : "rgba(139,92,246,0.22)",
+                      border: whisperStatus === "ready" ? "1px solid rgba(52,211,153,0.35)" : whisperStatus === "error" ? "1px solid rgba(239,68,68,0.30)" : "1px solid rgba(139,92,246,0.42)",
+                      color: whisperStatus === "ready" ? "rgba(110,231,183,0.90)" : whisperStatus === "error" ? "rgba(252,165,165,0.85)" : "rgba(196,181,253,0.90)",
+                    }}>
+                    {whisperStatus === "loading" ? (
+                      <motion.span className="w-3 h-3 rounded-full border border-violet-300/40 border-t-violet-300"
+                        animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
+                    ) : null}
+                    {whisperStatus === "ready" ? "✓ جاهز" : whisperStatus === "error" ? "خطأ · إعادة" : whisperStatus === "loading" ? "…" : "تشغيل"}
+                  </button>
+                </div>
               </div>
 
               {/* ── TTS Dub toggle ── */}
