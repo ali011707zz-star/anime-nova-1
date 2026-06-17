@@ -5,7 +5,6 @@
  * سحب شريط + إيماءات + تخطي + سرعة + وضع عرض
  */
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
@@ -1091,114 +1090,12 @@ export function RiftPlayer({
           pointerEvents="box-none"
         >
           {/* ════ TOP BAR ════ */}
-          <LinearGradient
-            colors={["rgba(0,0,0,0.92)", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.10)", "transparent"]}
-            style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 8 }]}
-          >
-            {/* ── LEFT: back arrow ── */}
+          <View style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 8 }]}>
+            {/* ── زر الرجوع فقط ── */}
             <Pressable onPress={onBack} style={s.backBtn} hitSlop={12}>
               <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.80)" />
             </Pressable>
-
-            {/* ── CENTER: title + episode ── */}
-            <View style={s.titleWrap}>
-              {title && (
-                <Text style={s.titleText} numberOfLines={1}>{title}</Text>
-              )}
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                {episode != null && (
-                  <View style={s.epBadge}>
-                    <Text style={s.epBadgeText}>الحلقة {episode}</Text>
-                  </View>
-                )}
-                <View style={[s.qualityPill, { borderColor: QUALITY_COLOR[currentSrc.quality] || "#fff" }]}>
-                  <Text style={[s.qualityText, { color: QUALITY_COLOR[currentSrc.quality] || "#fff" }]}>
-                    {Q_SHORT[currentSrc.quality] || "HD"}
-                  </Text>
-                </View>
-                {sources.length > 1 && (
-                  <Text style={s.serverCountText}>
-                    سيرفر {srcIdx + 1}/{sources.length}
-                  </Text>
-                )}
-              </View>
-            </View>
-
-          </LinearGradient>
-
-          {/* ════ BOTTOM SECTION ════ */}
-          <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.45)", "rgba(0,0,0,0.90)"]}
-            style={[s.bottomBar, { paddingBottom: Platform.OS === "web" ? 14 : insets.bottom + 12 }]}
-          >
-            {/* Time row */}
-            <View style={s.timeRow}>
-              <Text style={s.timeText}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, { opacity: 0.45 }]}>{fmtTime(duration)}</Text>
-            </View>
-
-            {/* Progress bar */}
-            <View
-              ref={barRef}
-              style={[s.progressWrap, isDragging && s.progressWrapDragging]}
-              onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
-              {...seekBarPan.panHandlers}
-            >
-              <View style={s.progressBg} />
-              {/* Buffer bar — مثل مشغل الويب */}
-              {bufferedPct > 0 && (
-                <View style={[s.bufferBar, { width: `${bufferedPct * 100}%` as any }]} />
-              )}
-              {/* Skip intro marker */}
-              {markerPctIntro && (
-                <View style={[s.skipMarker, {
-                  left: `${markerPctIntro.start}%` as any,
-                  width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
-                }]} />
-              )}
-              {/* Skip outro marker */}
-              {markerPctOutro && (
-                <View style={[s.skipMarker, {
-                  left: `${markerPctOutro.start}%` as any,
-                  width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
-                }]} />
-              )}
-              {/* OP/ED Tick marks — علامات مضيئة عند حدود الـ segments (مثل مشغل الويب) */}
-              {markerPctIntro && (
-                <>
-                  <View style={[s.skipTick, { left: `${markerPctIntro.start}%` as any }]} />
-                  <View style={[s.skipTick, { left: `${Math.min(markerPctIntro.end, 99.5)}%` as any }]} />
-                </>
-              )}
-              {markerPctOutro && (
-                <>
-                  <View style={[s.skipTick, { left: `${markerPctOutro.start}%` as any }]} />
-                  <View style={[s.skipTick, { left: `${Math.min(markerPctOutro.end, 99.5)}%` as any }]} />
-                </>
-              )}
-              {/* Progress fill (purple → violet gradient) */}
-              <LinearGradient
-                colors={["#7C3AED", "#8B5CF6", "#a78bfa"]}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                style={[s.progressFill, { width: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }]}
-              />
-              {/* Thumb */}
-              <View style={[
-                s.thumb,
-                { left: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any },
-                isDragging && s.thumbDragging,
-              ]} />
-              {/* Drag time tooltip */}
-              {isDragging && (
-                <View style={[s.dragTooltip, {
-                  left: `${Math.max(4, Math.min(88, (isDragging ? dragPct : progress) * 100 - 6))}%` as any,
-                }]}>
-                  <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
-                </View>
-              )}
-            </View>
-
-          </LinearGradient>
+          </View>
         </Animated.View>
       )}
 
@@ -1333,7 +1230,7 @@ const s = StyleSheet.create({
   halfRight: { position: "absolute", right: 0, top: 0, width: "50%", height: "100%" },
 
   /* Top bar */
-  topBar: { paddingHorizontal: 12, paddingBottom: 24, flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  topBar: { paddingHorizontal: 12, paddingBottom: 12, flexDirection: "row", alignItems: "flex-start" },
   backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.50)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center", marginTop: 2 },
   titleWrap: { flex: 1, gap: 4 },
   titleText: { color: "#fff", fontSize: 15, fontFamily: "Cairo_700Bold" },
