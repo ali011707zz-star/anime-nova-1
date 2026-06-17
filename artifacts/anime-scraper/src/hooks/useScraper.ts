@@ -1,12 +1,9 @@
 /**
  * useScraper Hook
  * Hook مخصص للتعامل مع سحب روابط الفيديو من المواقع العربية
- * محسّن بـ Caching و Resilience (Retry + Fallback)
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { getEpisodesWithCache } from '../utils/episodeService';
-import { withRetry, withFallback } from '../utils/resilience';
 
 export interface EpisodeData {
   episode: number;
@@ -42,18 +39,11 @@ export const useScraper = (animeId: string, episodeNum: number) => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
 
     try {
-      // محاولة جلب من الخدمة المحسّنة مع Caching و Retry و Fallback
-      const fetchWithFallback = withFallback(
-        [
-          () => getEpisodesWithCache(animeId),
-          () => fetch(`/api/anime/${animeId}/episodes`).then(r => r.json()),
-        ],
-        'Failed to fetch episodes'
-      );
+      // استدعاء API الخاص بك
+      const response = await fetch(`/api/anime/${animeId}/episodes`);
+      if (!response.ok) throw new Error('Failed to fetch episodes');
 
-      const fetchWithRetry = withRetry(fetchWithFallback, 3, 1000);
-      const data: EpisodeData[] = await fetchWithRetry();
-
+      const data: EpisodeData[] = await response.json();
       const current = data.find((ep) => ep.episode === episodeNum) || data[0];
 
       setState((prev) => ({
@@ -63,7 +53,6 @@ export const useScraper = (animeId: string, episodeNum: number) => {
         loading: false,
       }));
     } catch (error: any) {
-      console.error('[useScraper] Error:', error);
       setState((prev) => ({
         ...prev,
         error: error.message || 'حدث خطأ في سحب البيانات',
