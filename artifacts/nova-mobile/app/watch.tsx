@@ -233,8 +233,8 @@ function resolveUrl(url: string | undefined, base: string): string {
 
 /* ═══════════════════════════════════════ MAIN ═══ */
 export default function WatchScreen() {
-  const { anime, ep, title, english, format } = useLocalSearchParams<{
-    anime: string; ep: string; title: string; english: string; format?: string;
+  const { anime, ep, title, english, format, etitle } = useLocalSearchParams<{
+    anime: string; ep: string; title: string; english: string; format?: string; etitle?: string;
   }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -431,6 +431,7 @@ export default function WatchScreen() {
         initialSourceIndex={Math.max(0, startIdx)}
         title={displayTitle}
         episode={epNum}
+        episodeTitle={etitle ? decodeURIComponent(etitle) : undefined}
         anilistId={anime ? Number(anime) : undefined}
         initialPosition={resumeTime}
         skipIntro={playingSrc?.skipIntro}

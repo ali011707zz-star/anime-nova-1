@@ -138,18 +138,19 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
 /* ══════════════════════════════════════════════════════════════ */
 export default function AnimationWatchScreen() {
   const params = useLocalSearchParams<{
-    id: string; type: string; ep: string; season: string; title: string; poster: string;
+    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "ios" ? insets.top : 16;
 
-  const tmdbId   = params.id     || "";
-  const type     = params.type   || "movie";
-  const ep       = parseInt(params.ep     || "1", 10) || 1;
-  const season   = parseInt(params.season || "1", 10) || 1;
-  const titleStr = decodeURIComponent(params.title  || "");
+  const tmdbId    = params.id     || "";
+  const type      = params.type   || "movie";
+  const ep        = parseInt(params.ep     || "1", 10) || 1;
+  const season    = parseInt(params.season || "1", 10) || 1;
+  const titleStr  = decodeURIComponent(params.title  || "");
   const posterUrl = params.poster ? decodeURIComponent(params.poster) : "";
+  const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
 
   const [screen, setScreen]       = useState<Screen>("loading");
   const [sources, setSources]     = useState<AnimSrc[]>([]);
@@ -410,6 +411,7 @@ export default function AnimationWatchScreen() {
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
+        episodeTitle={epTitle}
         initialPosition={resumeTime}
         onBack={() => setScreen("picker")}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}

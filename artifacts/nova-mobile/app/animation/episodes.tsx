@@ -85,10 +85,11 @@ export default function AnimationEpisodesScreen() {
     ? (detail.original_title || detail.original_name || detail.title || detail.name || "الحلقات")
     : "الحلقات";
 
-  const goWatch = useCallback((ep: number) => {
+  const goWatch = useCallback((ep: number, epName?: string) => {
     const t = encodeURIComponent(title);
     const poster = encodeURIComponent(detail?.poster_path ? `${IMG_W}${detail.poster_path}` : "");
-    router.push(`/animation/watch?id=${id}&type=${type}&ep=${ep}&season=${selSeason}&title=${t}&poster=${poster}`);
+    const et = epName ? `&etitle=${encodeURIComponent(epName)}` : "";
+    router.push(`/animation/watch?id=${id}&type=${type}&ep=${ep}&season=${selSeason}&title=${t}&poster=${poster}${et}`);
   }, [id, type, selSeason, title, detail, router]);
 
   const renderEpisode = ({ item, index }: { item: Episode; index: number }) => {
@@ -100,7 +101,7 @@ export default function AnimationEpisodesScreen() {
     return (
       <Pressable
         style={[s.epCard, watched && s.epCardWatched]}
-        onPress={() => goWatch(item.episode_number)}
+        onPress={() => goWatch(item.episode_number, item.name)}
       >
         {/* Thumbnail */}
         <View style={s.epThumb}>

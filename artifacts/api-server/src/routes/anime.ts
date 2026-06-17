@@ -7468,6 +7468,94 @@ async function fetchAWCatalog(): Promise<any[]> {
   } catch { return []; }
 }
 
+/* ─── Multi-source subtitle search ──────────────────────────────────────────
+ * Sources tried in priority order:
+ *   1. jimaku.cc  — Japanese fan subtitles keyed by AniList ID (public API, no auth)
+ *   2. animetosho — Subtitle search by AniList ID (public API)
+ * Returns array of tracks with proxy-text URLs (CORS-safe).
+ */
+router.get("/anime/subtitles", async (req, res) => {
+  const anilistId = parseInt(String(req.query.anilistId || "0"), 10);
+  const ep        = parseInt(String(req.query.ep || "1"), 10);
+
+  interface SubTrack { url: string; label: string; lang: string; source: string; }
+  const tracks: SubTrack[] = [];
+
+  // ── 1. jimaku.cc ────────────────────────────────────────────────────────
+  if (anilistId) {
+    try {
+      const entriesRes = await fetch(
+        `https://jimaku.cc/api/entries?anilist_id=${anilistId}`,
+        { headers: { "User-Agent": "NovaApp/1.0", "Accept": "application/json" },
+          signal: AbortSignal.timeout(6000) }
+      );
+      if (entriesRes.ok) {
+        const entries: any[] = (await entriesRes.json().catch(() => []));
+        for (const entry of entries.slice(0, 4)) {
+          try {
+            const filesRes = await fetch(
+              `https://jimaku.cc/api/entries/${entry.id}/files?episode=${ep}`,
+              { headers: { "User-Agent": "NovaApp/1.0", "Accept": "application/json" },
+                signal: AbortSignal.timeout(4000) }
+            );
+            if (filesRes.ok) {
+              const files: any[] = (await filesRes.json().catch(() => []));
+              for (const file of files.slice(0, 6)) {
+                const name = String(file.name || "");
+                const url  = String(file.url || "");
+                if (!url) continue;
+                const ext  = name.split(".").pop()?.toLowerCase() || "";
+                if (!["vtt","srt","ass","ssa"].includes(ext)) continue;
+                tracks.push({
+                  url    : `/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
+                  label  : `${ext.toUpperCase()} • ${entry.english_name || entry.japanese_name || "jimaku"} (Jimaku)`,
+                  lang   : "ja",
+                  source : "jimaku",
+                });
+              }
+            }
+          } catch {}
+          if (tracks.length >= 4) break;
+        }
+      }
+    } catch {}
+  }
+
+  // ── 2. Animetosho — subtitle search by AniList ID ───────────────────────
+  if (anilistId && tracks.length === 0) {
+    try {
+      const atRes = await fetch(
+        `https://animetosho.org/api?lang=2&anilist_id=${anilistId}&only_subtitles=1&page=1&per_page=5&format=json`,
+        { headers: { "User-Agent": "NovaApp/1.0", "Accept": "application/json" },
+          signal: AbortSignal.timeout(5000) }
+      );
+      if (atRes.ok) {
+        const atData: any = (await atRes.json().catch(() => ({})));
+        const items: any[] = Array.isArray(atData) ? atData : (atData?.entries || []);
+        for (const item of items.slice(0, 3)) {
+          for (const file of (item.files || []).slice(0, 3)) {
+            const name = String(file.name || "");
+            const url  = String(file.direct_url || file.url || "");
+            if (!url) continue;
+            const ext  = name.split(".").pop()?.toLowerCase() || "";
+            if (!["vtt","srt","ass"].includes(ext)) continue;
+            tracks.push({
+              url    : `/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
+              label  : `${ext.toUpperCase()} • ${name.slice(0, 35)} (Animetosho)`,
+              lang   : "en",
+              source : "animetosho",
+            });
+            if (tracks.length >= 4) break;
+          }
+          if (tracks.length >= 4) break;
+        }
+      }
+    } catch {}
+  }
+
+  res.json({ anilistId, ep, tracks });
+});
+
 router.get("/anime/animewitcher-catalog", async (req, res) => {
   try {
     const typeFilter = String(req.query.type || "all");
