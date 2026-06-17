@@ -2750,52 +2750,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
       // LordFlix: محذوف — Cloudflare browser-challenge يمنع استخراج البيانات
 
-      // ── VixSrc (vixsrc.to) — TMDB-native HLS، بدون Cloudflare، token-based ──
-      scrapeAnimCached("vixsrc", async () => {
-        if (!tmdbId) return;
-        try {
-          send("status", { msg: "VixSrc: جاري الاستخراج…" });
-          const VIXSRC_BASE = "https://vixsrc.to";
-          const VIXSRC_HDRS = {
-            "User-Agent": UA,
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": VIXSRC_BASE,
-            "Origin": VIXSRC_BASE,
-          };
-          // Step 1: API → { src: "/embed/..." }
-          const apiUrl = type === "tv"
-            ? `${VIXSRC_BASE}/api/tv/${tmdbId}/${season}/${epNum}`
-            : `${VIXSRC_BASE}/api/movie/${tmdbId}`;
-          const apiR = await fetch(apiUrl, { headers: VIXSRC_HDRS, signal: AbortSignal.timeout(10_000) });
-          if (!apiR.ok) return;
-          const apiData: any = await apiR.json();
-          if (!apiData?.src) return;
-
-          // Step 2: Fetch embed page
-          const embedR = await fetch(`${VIXSRC_BASE}${apiData.src}`, {
-            headers: { ...VIXSRC_HDRS, Accept: "text/html,application/xhtml+xml,*/*" },
-            signal: AbortSignal.timeout(10_000),
-          });
-          if (!embedR.ok) return;
-          const html = await embedR.text();
-
-          // Step 3: Extract token + expires + playlist URL
-          const token    = html.match(/token["']\s*:\s*["']([^"']+)/)?.[1];
-          const expires  = html.match(/expires["']\s*:\s*["']([^"']+)/)?.[1];
-          const playlist = html.match(/url\s*:\s*["']([^"']+)/)?.[1];
-          if (!token || !expires || !playlist) return;
-          if (parseInt(expires, 10) * 1000 - 60_000 < Date.now()) return;
-
-          // Step 4: Build master HLS URL + probe
-          const sep = playlist.includes("?") ? "&" : "?";
-          const masterUrl = `${playlist}${sep}token=${token}&expires=${expires}&h=1`;
-          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(masterUrl)}&ref=${encodeURIComponent(VIXSRC_BASE + "/")}`;
-          const vixOk = await probeHlsProxy(proxied);
-          if (!vixOk) return;
-          sendSource(proxied, "VixSrc · HLS", masterUrl, proxied);
-        } catch { /* silent */ }
-      }),
+      // VixSrc (vixsrc.to) — محذوف: Next.js SPA، الـ API يعيد 404 من السيرفر (client-side only)
 
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
       scrapeAnimCached("animephoenix", async () => {
