@@ -1153,8 +1153,49 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     } catch { /* ignore */ }
   }
 
+  // ── Kitsunekko Mirror (GitHub) — ترجمة يابانية → عربي تلقائي ──
+  // يبحث في أرشيف kitsunekko-mirror عن ملف SRT مطابق للعنوان والحلقة
+  const kitsunekkoItems: Track[] = [];
+  const kQuery = (title || "").replace(/[^\w\s]/g, " ").trim();
+  if (kQuery) {
+    try {
+      const ghUrl = `https://api.github.com/search/code?q=${encodeURIComponent(kQuery)}+repo:Ajatt-Tools/kitsunekko-mirror+in:path&per_page=15`;
+      const ghR = await fetch(ghUrl, {
+        headers: { "User-Agent": UA, "Accept": "application/vnd.github+json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (ghR.ok) {
+        const ghData = await ghR.json() as any;
+        const items: any[] = ghData.items || [];
+        const epPad = String(ep).padStart(2, "0");
+        const epPatterns = [
+          new RegExp(`[-_\\s]0*${ep}[\\s._\\[\\(]`),
+          new RegExp(`E${epPad}`),
+          new RegExp(`episode[_\\s-]?0*${ep}\\b`, "i"),
+        ];
+        const picked = type === "movie"
+          ? items.find((item: any) => /\.(srt|ass|vtt)$/i.test(item.name || "") && !/\[ch[st]\]|[\u4e00-\u9fff]/.test(item.name || ""))
+          : items.find((item: any) => {
+              const name: string = item.name || "";
+              if (!/\.(srt|ass|vtt)$/i.test(name)) return false;
+              if (/\[ch[st]\]|[\u4e00-\u9fff]/.test(name)) return false;
+              return epPatterns.some(p => p.test(name));
+            });
+        if (picked) {
+          const rawUrl = `https://raw.githubusercontent.com/Ajatt-Tools/kitsunekko-mirror/main/${picked.path}`;
+          kitsunekkoItems.push({
+            id: "ar-kitsunekko",
+            lang: "ar-auto",
+            label: "عربي مُترجم · Kitsunekko",
+            url: `/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=ja&to=ar`,
+          });
+        }
+      }
+    } catch { /* silent — GitHub rate limit or network */ }
+  }
+
   // ── Merge, sort Arabic-first, deduplicate by URL ──
-  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems];
+  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems, ...kitsunekkoItems];
   all.sort((a, b) => (a.lang === "ar" && b.lang !== "ar" ? -1 : a.lang !== "ar" && b.lang === "ar" ? 1 : 0));
   const seen = new Set<string>();
   const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
@@ -2708,6 +2749,53 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       }),
 
       // LordFlix: محذوف — Cloudflare browser-challenge يمنع استخراج البيانات
+
+      // ── VixSrc (vixsrc.to) — TMDB-native HLS، بدون Cloudflare، token-based ──
+      scrapeAnimCached("vixsrc", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "VixSrc: جاري الاستخراج…" });
+          const VIXSRC_BASE = "https://vixsrc.to";
+          const VIXSRC_HDRS = {
+            "User-Agent": UA,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": VIXSRC_BASE,
+            "Origin": VIXSRC_BASE,
+          };
+          // Step 1: API → { src: "/embed/..." }
+          const apiUrl = type === "tv"
+            ? `${VIXSRC_BASE}/api/tv/${tmdbId}/${season}/${epNum}`
+            : `${VIXSRC_BASE}/api/movie/${tmdbId}`;
+          const apiR = await fetch(apiUrl, { headers: VIXSRC_HDRS, signal: AbortSignal.timeout(10_000) });
+          if (!apiR.ok) return;
+          const apiData: any = await apiR.json();
+          if (!apiData?.src) return;
+
+          // Step 2: Fetch embed page
+          const embedR = await fetch(`${VIXSRC_BASE}${apiData.src}`, {
+            headers: { ...VIXSRC_HDRS, Accept: "text/html,application/xhtml+xml,*/*" },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!embedR.ok) return;
+          const html = await embedR.text();
+
+          // Step 3: Extract token + expires + playlist URL
+          const token    = html.match(/token["']\s*:\s*["']([^"']+)/)?.[1];
+          const expires  = html.match(/expires["']\s*:\s*["']([^"']+)/)?.[1];
+          const playlist = html.match(/url\s*:\s*["']([^"']+)/)?.[1];
+          if (!token || !expires || !playlist) return;
+          if (parseInt(expires, 10) * 1000 - 60_000 < Date.now()) return;
+
+          // Step 4: Build master HLS URL + probe
+          const sep = playlist.includes("?") ? "&" : "?";
+          const masterUrl = `${playlist}${sep}token=${token}&expires=${expires}&h=1`;
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(masterUrl)}&ref=${encodeURIComponent(VIXSRC_BASE + "/")}`;
+          const vixOk = await probeHlsProxy(proxied);
+          if (!vixOk) return;
+          sendSource(proxied, "VixSrc · HLS", masterUrl, proxied);
+        } catch { /* silent */ }
+      }),
 
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
       scrapeAnimCached("animephoenix", async () => {

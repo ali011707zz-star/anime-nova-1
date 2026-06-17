@@ -56,7 +56,8 @@ function getSrcQuality(src: AnimSrc): Quality {
   if (lbl.includes("1080") || lbl.includes("fhd") || lbl.includes("4k")) return "1080p FHD";
   if (lbl.startsWith("vyla") || lbl.startsWith("starcima") || lbl.startsWith("videasy") ||
       lbl.startsWith("vidlink") || lbl.startsWith("aflaam") || lbl.startsWith("arabseed") ||
-      lbl.startsWith("seepanel") || lbl.startsWith("lordflix") || lbl.startsWith("topcinem")) return "1080p FHD";
+      lbl.startsWith("seepanel") || lbl.startsWith("lordflix") || lbl.startsWith("topcinem") ||
+      lbl.startsWith("vixsrc")) return "1080p FHD";
 
   if (url.includes("hls-proxy")) return "720p HD";
   if (url.includes(".mp4") || url.includes("video-proxy")) return "720p HD";
