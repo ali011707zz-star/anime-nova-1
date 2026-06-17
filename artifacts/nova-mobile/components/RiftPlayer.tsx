@@ -330,7 +330,6 @@ export function RiftPlayer({
   const [activeCue, setActiveCue]     = useState<SubCue | null>(null);
 
   /* ─── Skip notification ─── */
-  const [skipNotif, setSkipNotif]     = useState(false);
   const skipNotifFired                = useRef(false);
 
   /* ─── Anime Rift features ─── */
@@ -679,15 +678,11 @@ export function RiftPlayer({
     });
   }, []);
 
-  /* ─── Skip notification (shows once when skip data arrives) ─── */
+  /* ─── Skip notification (mark fired when skip data arrives) ─── */
   useEffect(() => {
     if ((skipIntro || skipOutro) && !skipNotifFired.current) {
       skipNotifFired.current = true;
-      setSkipNotif(true);
-      const t = setTimeout(() => setSkipNotif(false), 3500);
-      return () => clearTimeout(t);
     }
-    return undefined;
   }, [skipIntro, skipOutro]);
 
   /* ─── Sleep timer countdown ─── */
@@ -949,10 +944,10 @@ export function RiftPlayer({
     try { player.volume = Math.min(1, volume); } catch {}
   }, [volume, player]);
 
-  const markerPctIntro = duration > 0 && skipIntro
+  const markerPctIntro = duration > 0 && skipIntro && position < skipIntro.end
     ? { start: (skipIntro.start / duration) * 100, end: (skipIntro.end / duration) * 100 }
     : null;
-  const markerPctOutro = duration > 0 && skipOutro
+  const markerPctOutro = duration > 0 && skipOutro && position < skipOutro.end
     ? { start: (skipOutro.start / duration) * 100, end: (skipOutro.end / duration) * 100 }
     : null;
 
@@ -1142,13 +1137,6 @@ export function RiftPlayer({
         </View>
       )}
 
-      {/* ── Skip Notification ── */}
-      {skipNotif && (
-        <View style={s.skipNotif} pointerEvents="none">
-          <Ionicons name="play-skip-forward" size={12} color="#fde047" />
-          <Text style={s.skipNotifText}>توقيتات التخطي متاحة</Text>
-        </View>
-      )}
 
       {/* ── Lock screen indicator ── */}
       {isLocked && (
@@ -1692,8 +1680,6 @@ const s = StyleSheet.create({
   skipBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold" },
 
   /* Skip notification */
-  skipNotif: { position: "absolute", top: 60, right: 14, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.72)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(250,204,21,0.40)", zIndex: 35 },
-  skipNotifText: { color: "#fde047", fontSize: 11, fontFamily: "Cairo_700Bold" },
 
   /* Lock */
   lockIndicator: { position: "absolute", right: 14, top: "48%", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 20, padding: 8, borderWidth: 1, borderColor: "rgba(251,191,36,0.30)", zIndex: 25 },
@@ -2004,7 +1990,7 @@ const s = StyleSheet.create({
   progressWrap: { height: 34, justifyContent: "center", position: "relative", marginHorizontal: 2 },
   progressWrapDragging: { height: 48 },
   progressBg: { position: "absolute", left: 0, right: 0, height: 6, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 3 },
-  skipMarker: { position: "absolute", height: 8, backgroundColor: "rgba(250,204,21,0.85)", borderRadius: 4, top: "50%", marginTop: -4, zIndex: 2 },
+  skipMarker: { position: "absolute", height: 4, backgroundColor: "rgba(250,204,21,0.80)", borderRadius: 2, top: "50%", marginTop: -2, zIndex: 2 },
   progressFill: { position: "absolute", left: 0, height: 6, backgroundColor: "#8B5CF6", borderRadius: 3, top: "50%", marginTop: -3, zIndex: 3 },
   thumb: { position: "absolute", top: "50%", width: 18, height: 18, borderRadius: 9, backgroundColor: "#fff", marginLeft: -9, marginTop: -9, shadowColor: "#8B5CF6", shadowOpacity: 0.5, shadowRadius: 6, elevation: 4, zIndex: 4 },
   thumbDragging: { width: 26, height: 26, borderRadius: 13, marginLeft: -13, marginTop: -13, backgroundColor: "#c4b5fd", shadowColor: "#8B5CF6", shadowOpacity: 1, shadowRadius: 14, elevation: 8 },
