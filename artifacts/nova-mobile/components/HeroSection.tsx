@@ -10,7 +10,7 @@ import {
 import { useColors } from "@/hooks/useColors";
 
 const { width: W } = Dimensions.get("window");
-const HERO_H = 420;
+const HERO_H = 290;
 
 type Props = { items: AnilistMedia[] };
 
@@ -126,17 +126,17 @@ export function HeroSection({ items }: Props) {
 }
 
 const styles = StyleSheet.create({
-  genreRow: { flexDirection: "row", gap: 6, marginBottom: 8, flexWrap: "wrap" },
-  genreBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 },
-  genreText: { fontSize: 10, fontWeight: "600" },
-  heroTitle: { color: "#fff", fontSize: 22, fontWeight: "800", marginBottom: 8, textAlign: "left" },
-  infoRow: { flexDirection: "row", gap: 12, marginBottom: 16, flexWrap: "wrap" },
-  infoItem: { flexDirection: "row", alignItems: "center", gap: 4 },
-  infoText: { color: "rgba(255,255,255,0.7)", fontSize: 12 },
-  btnRow: { flexDirection: "row", gap: 10 },
-  watchBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 },
-  detailBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1 },
-  watchBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  dots: { position: "absolute", bottom: 12, left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 4 },
-  dot: { height: 6, borderRadius: 3 },
+  genreRow: { flexDirection: "row", gap: 5, marginBottom: 6, flexWrap: "wrap" },
+  genreBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 7, paddingVertical: 2 },
+  genreText: { fontSize: 9, fontWeight: "600" },
+  heroTitle: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 6, textAlign: "left", fontFamily: "Cairo_800ExtraBold" },
+  infoRow: { flexDirection: "row", gap: 10, marginBottom: 12, flexWrap: "wrap" },
+  infoItem: { flexDirection: "row", alignItems: "center", gap: 3 },
+  infoText: { color: "rgba(255,255,255,0.7)", fontSize: 11 },
+  btnRow: { flexDirection: "row", gap: 8 },
+  watchBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  detailBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  watchBtnText: { color: "#fff", fontWeight: "700", fontSize: 13, fontFamily: "Cairo_700Bold" },
+  dots: { position: "absolute", bottom: 10, left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 4 },
+  dot: { height: 5, borderRadius: 2.5 },
 });
