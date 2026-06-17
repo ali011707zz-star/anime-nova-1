@@ -56,6 +56,45 @@ function getInitialBandwidthEstimate(): number {
   return 3_000_000; // 3Mbps safe default
 }
 
+/**
+ * Network-adaptive HLS buffer configuration.
+ * Technique: smaller buffers on slow connections = faster initial fill, fewer stalls.
+ * Mobile gets reduced back-buffer to save RAM.
+ * Uses navigator.connection (Network Information API — Chrome / Android WebView).
+ * Falls back to conservative defaults on Safari / Firefox (no connection API).
+ */
+function getHlsBufferConfig() {
+  const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  try {
+    const conn   = (navigator as any).connection;
+    const dl     = conn?.downlink     ?? 10;   // Mbps, default 10
+    const eff    = conn?.effectiveType ?? "4g";
+    const slow   = dl < 1   || eff === "2g"  || eff === "slow-2g";
+    const medium = !slow && (dl < 3.5 || eff === "3g");
+    return {
+      maxBufferLength:       slow ? 12  : medium ? 25  : 60,
+      maxMaxBufferLength:    slow ? 60  : medium ? 120 : 300,
+      backBufferLength:      isMobile ? (slow ? 8  : 15)  : 60,
+      maxBufferSize:         (isMobile ? 60 : 160) * 1024 * 1024,
+      maxStarvationDelay:    slow ? 15  : 8,
+      maxLoadingDelay:       slow ? 15  : 8,
+      fragLoadingMaxRetry:   slow ? 6   : 4,
+      fragLoadingRetryDelay: slow ? 1500 : 800,
+      nudgeMaxRetry:         slow ? 30  : 20,
+    };
+  } catch {
+    return {
+      maxBufferLength: isMobile ? 25 : 60,
+      maxMaxBufferLength: isMobile ? 120 : 300,
+      backBufferLength: isMobile ? 15 : 60,
+      maxBufferSize: (isMobile ? 60 : 160) * 1024 * 1024,
+      maxStarvationDelay: 8, maxLoadingDelay: 8,
+      fragLoadingMaxRetry: 4, fragLoadingRetryDelay: 800,
+      nudgeMaxRetry: 20,
+    };
+  }
+}
+
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 function FlipScreenIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
@@ -424,6 +463,8 @@ export default function RiftPlayer({
     }
 
     if (Hls.isSupported()) {
+      /* ── Network-adaptive buffer config — computed fresh on every source load ── */
+      const bufCfg = getHlsBufferConfig();
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -431,41 +472,33 @@ export default function RiftPlayer({
            autoStartLoad:false → hls.startLoad(position) in MANIFEST_PARSED
            eliminates the double-seek that causes the initial black flash. */
         autoStartLoad: false,
-        /* ── Buffer: بداية سريعة ثم تخزين مسبق كافٍ للاستقرار ── */
-        maxBufferLength: 60,          // تخزين 1 دقيقة — يقلل وقت التوقف
-        maxMaxBufferLength: 300,      // 5 دقائق حد أقصى حين السرعة كافية
-        backBufferLength: 60,         // يحتفظ بـ 60ث سابقة للرجوع السلس
-        maxBufferSize: 160 * 1024 * 1024, // 160MB حد للذاكرة
-        maxBufferHole: 1.5,           // يتحمل فجوة 1.5ث قبل التوقف
+        /* ── Network-adaptive buffer (slow/medium/fast × mobile/desktop) ── */
+        ...bufCfg,
+        maxBufferHole: 1.5,
         maxFragLookUpTolerance: 0.6,
         startFragPrefetch: true,
         progressive: true,
-        /* ── يبدأ بأقل جودة (0) للتشغيل الفوري ثم يرفع تلقائياً ── */
-        startLevel: 0,
+        /* ── startLevel:-1 → HLS.js picks best level for current bandwidth
+           (faster cold-start than forcing level 0 then ABR upswitch) ── */
+        startLevel: -1,
         /* ── Vidstack: seed ABR with real network speed (navigator.connection) ── */
         abrEwmaDefaultEstimate: getInitialBandwidthEstimate(),
+        abrEwmaFastLive: 3,
         abrBandWidthFactor: 0.92,
         abrBandWidthUpFactor: 0.82,
         testBandwidth: false,
-        capLevelToPlayerSize: true,   // لا ترفع الجودة أعلى من دقة الشاشة
+        capLevelToPlayerSize: true,
         /* ── Vidstack: interruptSwitch:false — waits for current fragment to finish
            before switching quality → eliminates micro-stalls during ABR switches ── */
         // @ts-ignore — property exists in hls.js ≥1.4 but not yet in older typedefs
         interruptSwitch: false,
-        /* ── إعادة المحاولة: صبر أطول يمنع الانقطاع بسبب CDN بطيء ── */
-        fragLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 800,
         fragLoadingMaxRetryTimeout: 12000,
         manifestLoadingMaxRetry: 4,
         manifestLoadingRetryDelay: 1000,
         levelLoadingMaxRetry: 4,
         levelLoadingRetryDelay: 1000,
-        /* ── مراقبة buffer stall: تسمح بوقت استرداد أطول ── */
         highBufferWatchdogPeriod: 5,
         nudgeOffset: 0.5,
-        nudgeMaxRetry: 20,
-        maxStarvationDelay: 8,
-        maxLoadingDelay: 8,
         enableCEA708Captions: false,
         renderTextTracksNatively: false,
         xhrSetup: (xhr: XMLHttpRequest) => {

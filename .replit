@@ -34,6 +34,10 @@ args = "CF Proxy"
 task = "workflow.run"
 args = "Nova Mobile"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Whisper Service"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -81,6 +85,18 @@ outputType = "console"
 task = "shell.exec"
 args = "pnpm install && EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN PORT=8099 BASE_PATH=/nova-mobile/ pnpm --filter @workspace/nova-mobile run dev"
 waitForPort = 8099
+
+[[workflows.workflow]]
+name = "Whisper Service"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "WHISPER_PORT=9000 WHISPER_MODEL=small python3.11 scripts/whisper_service.py"
+waitForPort = 9000
 
 [agent]
 stack = "FLASK_VANILLA_JS"
@@ -134,6 +150,10 @@ externalPort = 3002
 [[ports]]
 localPort = 24968
 externalPort = 3000
+
+[[ports]]
+localPort = 9000
+externalPort = 9000
 
 [nix]
 channel = "stable-25_05"
