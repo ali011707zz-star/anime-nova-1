@@ -341,8 +341,8 @@ export default function LibraryScreen() {
           <FlatList
             data={filteredFavs}
             keyExtractor={f => f.id.toString()}
-            numColumns={3}
-            columnWrapperStyle={{ gap: 10 }}
+            numColumns={4}
+            columnWrapperStyle={{ gap: 8 }}
             contentContainerStyle={[s.favGrid, { paddingBottom: insets.bottom + 100 }]}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => (

@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Alert, Linking, Modal, Platform, Pressable, ScrollView,
-  StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
+  Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -273,6 +273,385 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
   );
 }
 
+/* ══════════════════════ AUTH TYPES ══════════════════════ */
+type AuthFlow = "login" | "signup" | "verify";
+interface MobileUser { email: string; displayName: string; id: string }
+const AUTH_KEY = "nova-mobile-user";
+
+/* ── Auth Sheet ── */
+function AuthSheet({ open, onClose, onLogin }: {
+  open: boolean; onClose: () => void; onLogin: (u: MobileUser) => void;
+}) {
+  const [flow, setFlow] = useState<AuthFlow>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); }
+  }, [open]);
+
+  const base = getBaseUrl();
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) { setError("يرجى تعبئة جميع الحقول"); return; }
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/signin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+        credentials: "include",
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "بيانات غير صحيحة"); }
+      else {
+        const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || email.split("@")[0], id: d.id || "" };
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+        onLogin(u); onClose();
+      }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const handleSendCode = async () => {
+    if (!email.trim()) { setError("أدخل بريدك الإلكتروني أولاً"); return; }
+    if (password.length < 6) { setError("كلمة المرور 6 أحرف على الأقل"); return; }
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/send-verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), type: "signup" }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ"); }
+      else { setFlow("verify"); if (d.devCode) setCode(String(d.devCode)); }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const handleSignup = async () => {
+    if (code.length < 6) { setError("أدخل كود التحقق المكوّن من 6 أرقام"); return; }
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password, displayName: name.trim() || undefined, verifyCode: code }),
+        credentials: "include",
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ في إنشاء الحساب"); }
+      else {
+        const u: MobileUser = { email: d.email || email, displayName: d.displayName || d.username || name || email.split("@")[0], id: d.id || "" };
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u));
+        onLogin(u); onClose();
+      }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  if (!open) return null;
+  const isLogin = flow === "login";
+  const isVerify = flow === "verify";
+
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={ts.overlay} onPress={onClose} />
+      <View style={[ts.bottomSheet, { paddingBottom: 0 }]}>
+        <View style={[ts.sheetAccentBar, { backgroundColor: "#7C3AED" }]} />
+        <View style={ts.sheetHandle} />
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 20, paddingBottom: 48 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+            <Pressable onPress={onClose} style={ts.reportCloseBtn}>
+              <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+            </Pressable>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(124,58,237,0.25)", borderWidth: 1, borderColor: "rgba(139,92,246,0.40)", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name={isVerify ? "shield-checkmark" : "sparkles"} size={16} color="#c4b5fd" />
+              </View>
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={{ fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>Anime NOVA</Text>
+                <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" }}>
+                  {isVerify ? "تأكيد البريد الإلكتروني" : isLogin ? "مرحباً بعودتك" : "أنشئ حسابك مجاناً"}
+                </Text>
+              </View>
+            </View>
+            <View style={{ width: 36 }} />
+          </View>
+
+          {/* Tabs */}
+          {!isVerify && (
+            <View style={{ flexDirection: "row", gap: 4, padding: 4, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 22 }}>
+              {(["login", "signup"] as const).map(t => (
+                <Pressable
+                  key={t}
+                  onPress={() => { setFlow(t); setError(""); }}
+                  style={[
+                    { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: "center" },
+                    flow === t && { backgroundColor: "rgba(124,58,237,0.5)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
+                  ]}
+                >
+                  <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: flow === t ? "#fff" : "rgba(255,255,255,0.35)" }}>
+                    {t === "login" ? "تسجيل الدخول" : "حساب جديد"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          {/* Error */}
+          {!!error && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 16 }}>
+              <Ionicons name="alert-circle" size={14} color="#f87171" />
+              <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: "#fca5a5", flex: 1, textAlign: "right" }}>{error}</Text>
+            </View>
+          )}
+
+          {/* ── Verify ── */}
+          {isVerify ? (
+            <>
+              <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", textAlign: "right", marginBottom: 20, lineHeight: 22 }}>
+                أُرسل كود تحقق إلى {email}،{"\n"}أدخل الكود المكوّن من 6 أرقام.
+              </Text>
+              <Text style={ts.authFieldLabel}>كود التحقق</Text>
+              <TextInput
+                value={code}
+                onChangeText={v => { setCode(v.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+                placeholder="• • • • • •"
+                placeholderTextColor="rgba(255,255,255,0.2)"
+                keyboardType="numeric"
+                maxLength={6}
+                style={[ts.authCodeInput, code.length === 6 && { borderColor: "rgba(139,92,246,0.50)" }]}
+              />
+              <Pressable
+                onPress={handleSignup}
+                disabled={loading || code.length < 6}
+                style={[ts.authSubmitBtn, code.length < 6 && { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.06)" }]}
+              >
+                {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <>
+                    <Ionicons name="shield-checkmark" size={16} color="#fff" />
+                    <Text style={ts.authSubmitText}>تأكيد وإنشاء الحساب</Text>
+                  </>
+                )}
+              </Pressable>
+              <Pressable onPress={() => setFlow("signup")} style={{ alignItems: "center", paddingVertical: 12 }}>
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" }}>رجوع</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              {/* Email */}
+              <Text style={ts.authFieldLabel}>البريد الإلكتروني</Text>
+              <View style={ts.authFieldWrap}>
+                <Ionicons name="mail" size={16} color="rgba(255,255,255,0.25)" />
+                <TextInput
+                  value={email}
+                  onChangeText={v => { setEmail(v); setError(""); }}
+                  placeholder="أدخل بريدك الإلكتروني"
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  style={ts.authFieldInput}
+                />
+              </View>
+
+              {/* Password */}
+              <Text style={ts.authFieldLabel}>كلمة المرور</Text>
+              <View style={ts.authFieldWrap}>
+                <Pressable onPress={() => setShowPass(p => !p)}>
+                  <Ionicons name={showPass ? "eye" : "eye-off"} size={16} color="rgba(255,255,255,0.25)" />
+                </Pressable>
+                <TextInput
+                  value={password}
+                  onChangeText={v => { setPassword(v); setError(""); }}
+                  placeholder="أدخل كلمة المرور"
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  secureTextEntry={!showPass}
+                  style={ts.authFieldInput}
+                />
+              </View>
+
+              {/* Name (signup only) */}
+              {!isLogin && (
+                <>
+                  <Text style={ts.authFieldLabel}>الاسم (اختياري)</Text>
+                  <View style={ts.authFieldWrap}>
+                    <Ionicons name="person" size={16} color="rgba(255,255,255,0.25)" />
+                    <TextInput
+                      value={name}
+                      onChangeText={v => { setName(v); setError(""); }}
+                      placeholder="ما اسمك؟ (اختياري)"
+                      placeholderTextColor="rgba(255,255,255,0.2)"
+                      style={ts.authFieldInput}
+                    />
+                  </View>
+                </>
+              )}
+
+              <Pressable onPress={isLogin ? handleLogin : handleSendCode} disabled={loading} style={ts.authSubmitBtn}>
+                {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <>
+                    <Ionicons name={isLogin ? "log-in" : "mail"} size={16} color="#fff" />
+                    <Text style={ts.authSubmitText}>{isLogin ? "تسجيل الدخول" : "إرسال كود التحقق"}</Text>
+                  </>
+                )}
+              </Pressable>
+            </>
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/* ══════════════════════ PREMIUM ══════════════════════ */
+const TG_OWNER_ID = "5477879129";
+const FEATURES = [
+  { icon: "🚫", label: "مشاهدة بدون إعلانات",         desc: "استمتع بالمشاهدة دون أي انقطاع" },
+  { icon: "🎬", label: "جودة أعلى للمشاهدة",            desc: "1080p وأفضل الجودات المتاحة" },
+  { icon: "⚡", label: "سرعة تحميل أفضل",               desc: "أولوية في تحميل السيرفرات" },
+  { icon: "⏭️", label: "تخطي المقدمة والنهاية",          desc: "وفّر وقتك مع كل حلقة" },
+  { icon: "🌟", label: "تشغيل السيرفرات المميزة",        desc: "وصول حصري لأفضل مصادر البث" },
+  { icon: "🔤", label: "تحسين تجربة الترجمة",            desc: "ترجمة احترافية ومتعددة اللغات" },
+  { icon: "❤️", label: "دعم التطبيق وتحديثات أسرع",     desc: "ساعد في استمرار التطبيق مجاناً للجميع" },
+];
+
+function PremiumSheet({ open, onClose, user }: {
+  open: boolean; onClose: () => void; user: MobileUser | null;
+}) {
+  const [sent, setSent] = useState(false);
+
+  const handleSubscribe = async () => {
+    const msg = user
+      ? `مرحبًا، أريد الاشتراك في Nova Premium.\nالاسم: ${user.displayName}\nالبريد: ${user.email}\nالمعرّف: ${user.id}`
+      : "مرحبًا، أريد الاشتراك في Nova Premium.";
+    try { await Share.share({ message: msg }); } catch {}
+    setTimeout(() => {
+      Linking.openURL(`tg://user?id=${TG_OWNER_ID}`).catch(() =>
+        Linking.openURL(`https://t.me/${TG_OWNER_ID}`)
+      );
+    }, 400);
+    setSent(true);
+    setTimeout(() => setSent(false), 4000);
+  };
+
+  if (!open) return null;
+
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={ts.overlay} onPress={onClose} />
+      <View style={[ts.bottomSheet, { maxHeight: "92%", paddingBottom: 0 }]}>
+        <View style={[ts.sheetAccentBar, { backgroundColor: "#f59e0b" }]} />
+        <View style={ts.sheetHandle} />
+        {/* Header */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12 }}>
+          <Pressable onPress={onClose} style={ts.reportCloseBtn}>
+            <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+          </Pressable>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ width: 32, height: 32, borderRadius: 12, backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1, borderColor: "rgba(251,191,36,0.30)", alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="ribbon" size={16} color="#fbbf24" />
+            </View>
+            <Text style={{ fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" }}>Nova Premium</Text>
+          </View>
+          <View style={{ backgroundColor: "rgba(251,191,36,0.15)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: "rgba(251,191,36,0.28)" }}>
+            <Text style={{ fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "#fbbf24" }}>⭐ حصري</Text>
+          </View>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 44 }}>
+          {/* Hero */}
+          <View style={ts.premiumHeroCard}>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 12 }}>
+              <View style={{ backgroundColor: "rgba(251,191,36,0.15)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(251,191,36,0.30)" }}>
+                <Text style={{ fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fde68a" }}>Premium Subscription ⭐</Text>
+              </View>
+              <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: "rgba(251,191,36,0.20)", borderWidth: 1, borderColor: "rgba(251,191,36,0.35)", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="ribbon" size={22} color="#fbbf24" />
+              </View>
+            </View>
+            <Text style={{ fontSize: 20, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d", marginBottom: 6 }}>Nova Premium</Text>
+            <Text style={{ fontSize: 12, color: "rgba(253,224,71,0.60)", fontFamily: "Cairo_400Regular", lineHeight: 20, marginBottom: 14 }}>
+              احصل على تجربة مشاهدة أفضل بدون قيود مع مزايا حصرية للمشتركين.
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {["بدون إعلانات", "دعم التطبيق", "مميزات حصرية", "جودة أعلى"].map(tag => (
+                <View key={tag} style={{ backgroundColor: "rgba(251,191,36,0.12)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(251,191,36,0.20)" }}>
+                  <Text style={{ fontSize: 9.5, fontFamily: "Cairo_800ExtraBold", color: "rgba(253,224,71,0.70)" }}>{tag}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* Features */}
+          <View style={ts.premiumFeaturesCard}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Ionicons name="sparkles" size={14} color="#fbbf24" />
+              <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)" }}>المميزات الحصرية</Text>
+            </View>
+            {FEATURES.map((f, i) => (
+              <View key={f.label} style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 12, borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.04)" }}>
+                <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(251,191,36,0.10)", borderWidth: 1, borderColor: "rgba(251,191,36,0.16)", alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 17 }}>{f.icon}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)", textAlign: "right" }}>{f.label}</Text>
+                  <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.30)", textAlign: "right", marginTop: 2, fontFamily: "Cairo_400Regular" }}>{f.desc}</Text>
+                </View>
+                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1, borderColor: "rgba(251,191,36,0.30)", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="checkmark" size={11} color="#fbbf24" />
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* How it works */}
+          <View style={{ borderRadius: 20, padding: 16, backgroundColor: "rgba(255,255,255,0.03)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 20 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Ionicons name="flash" size={14} color="#a78bfa" />
+              <Text style={{ fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.45)", letterSpacing: 1.2 }}>كيف يعمل الاشتراك</Text>
+            </View>
+            {[
+              { step: "١", text: "اضغط زر «اشترك الآن» أدناه" },
+              { step: "٢", text: "يفتح تيليجرام مع فريق الدعم" },
+              { step: "٣", text: "أرسل رسالة طلب الاشتراك" },
+              { step: "٤", text: "سيُفعَّل اشتراكك خلال ٢٤ ساعة" },
+            ].map(s => (
+              <View key={s.step} style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.18)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)", alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" }}>{s.step}</Text>
+                </View>
+                <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontFamily: "Cairo_400Regular" }}>{s.text}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Subscribe Button */}
+          <Pressable onPress={handleSubscribe} style={ts.subscribeBtn}>
+            <Ionicons name="paper-plane" size={18} color={sent ? "#34d399" : "#fbbf24"} />
+            <Text style={[ts.subscribeBtnText, sent && { color: "#34d399" }]}>
+              {sent ? "✅ تم · افتح تيليجرام وأرسل الطلب" : "اشترك الآن عبر تيليجرام"}
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 /* ══════════════════════ MAIN ══════════════════════ */
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -283,6 +662,19 @@ export default function SettingsScreen() {
   const { toast, show: showToast } = useToast();
   const [notifs, setNotifs] = useState(true);
   const [showReport, setShowReport] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [showPremium, setShowPremium] = useState(false);
+  const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(AUTH_KEY).then(v => { if (v) { try { setCurrentUser(JSON.parse(v)); } catch {} } });
+  }, []);
+
+  const handleLogout = () => {
+    AsyncStorage.removeItem(AUTH_KEY);
+    setCurrentUser(null);
+    showToast("تم تسجيل الخروج");
+  };
   const [confirm, setConfirm] = useState<{
     open: boolean; title: string; desc?: string; confirmLabel?: string;
     danger?: boolean; onConfirm: () => void;
@@ -387,22 +779,37 @@ export default function SettingsScreen() {
 
         {/* ── Profile / Login card ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
-          <Pressable
-            onPress={() => showToast("تسجيل الدخول قريباً في التطبيق")}
-            style={ts.profileCard}
-          >
-            <View style={ts.profileAvatar}>
-              <Ionicons name="person" size={24} color="rgba(255,255,255,0.3)" />
+          {currentUser ? (
+            <View style={ts.profileCard}>
+              <View style={[ts.profileAvatar, { backgroundColor: "rgba(124,58,237,0.20)", borderColor: "rgba(139,92,246,0.40)" }]}>
+                <Text style={{ fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" }}>
+                  {currentUser.displayName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <View style={{ flex: 1, alignItems: "flex-end" }}>
+                <Text style={ts.profileLoginTitle}>{currentUser.displayName}</Text>
+                <Text style={ts.profileLoginSub}>{currentUser.email}</Text>
+              </View>
+              <Pressable onPress={handleLogout} style={[ts.profileLoginBtn, { backgroundColor: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.25)" }]}>
+                <Ionicons name="log-out" size={14} color="#f87171" />
+                <Text style={[ts.profileLoginBtnText, { color: "#f87171" }]}>خروج</Text>
+              </Pressable>
             </View>
-            <View style={{ flex: 1, alignItems: "flex-end" }}>
-              <Text style={ts.profileLoginTitle}>تسجيل الدخول</Text>
-              <Text style={ts.profileLoginSub}>احفظ قائمتك ومتابعتك عبر الأجهزة</Text>
-            </View>
-            <View style={ts.profileLoginBtn}>
-              <Ionicons name="sparkles" size={14} color="#c4b5fd" />
-              <Text style={ts.profileLoginBtnText}>دخول</Text>
-            </View>
-          </Pressable>
+          ) : (
+            <Pressable onPress={() => setShowAuth(true)} style={ts.profileCard}>
+              <View style={ts.profileAvatar}>
+                <Ionicons name="person" size={24} color="rgba(255,255,255,0.3)" />
+              </View>
+              <View style={{ flex: 1, alignItems: "flex-end" }}>
+                <Text style={ts.profileLoginTitle}>تسجيل الدخول</Text>
+                <Text style={ts.profileLoginSub}>احفظ قائمتك ومتابعتك عبر الأجهزة</Text>
+              </View>
+              <View style={ts.profileLoginBtn}>
+                <Ionicons name="sparkles" size={14} color="#c4b5fd" />
+                <Text style={ts.profileLoginBtnText}>دخول</Text>
+              </View>
+            </Pressable>
+          )}
         </View>
 
         {/* ── 4-stat grid ── */}
@@ -425,7 +832,7 @@ export default function SettingsScreen() {
 
         {/* ── Nova Premium banner ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
-          <Pressable style={ts.premiumCard}>
+          <Pressable style={ts.premiumCard} onPress={() => setShowPremium(true)}>
             {/* Glow */}
             <View style={ts.premiumGlow} />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -640,6 +1047,20 @@ export default function SettingsScreen() {
 
       {/* Report Sheet */}
       <ReportSheet open={showReport} onClose={() => setShowReport(false)} />
+
+      {/* Auth Sheet */}
+      <AuthSheet
+        open={showAuth}
+        onClose={() => setShowAuth(false)}
+        onLogin={u => { setCurrentUser(u); showToast(`مرحباً ${u.displayName}! 🎉`); }}
+      />
+
+      {/* Premium Sheet */}
+      <PremiumSheet
+        open={showPremium}
+        onClose={() => setShowPremium(false)}
+        user={currentUser}
+      />
     </View>
   );
 }
@@ -779,4 +1200,18 @@ const ts = StyleSheet.create({
   footerLogo: { flexDirection: "row", alignItems: "center" },
   footerLogoText: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.80)", letterSpacing: 2 },
   footerSub: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.20)" },
+
+  /* Auth Sheet */
+  authFieldLabel: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.35)", marginBottom: 8, textAlign: "right", letterSpacing: 0.8 },
+  authFieldWrap: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)", borderRadius: 18, paddingHorizontal: 16, paddingVertical: 4, marginBottom: 14, gap: 10 },
+  authFieldInput: { flex: 1, paddingVertical: 12, fontSize: 13.5, fontFamily: "Cairo_400Regular", color: "#fff", textAlign: "right" },
+  authCodeInput: { backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)", borderRadius: 18, paddingHorizontal: 20, paddingVertical: 14, fontSize: 24, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "center", letterSpacing: 16, marginBottom: 20 },
+  authSubmitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, borderRadius: 20, backgroundColor: "#7C3AED", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)", marginTop: 4, marginBottom: 12 },
+  authSubmitText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+
+  /* Premium Sheet */
+  premiumHeroCard: { borderRadius: 24, padding: 20, backgroundColor: "rgba(251,191,36,0.08)", borderWidth: 1.5, borderColor: "rgba(251,191,36,0.28)", marginBottom: 16 },
+  premiumFeaturesCard: { borderRadius: 20, overflow: "hidden", backgroundColor: "rgba(17,17,22,0.95)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 16, padding: 16 },
+  subscribeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 18, borderRadius: 22, backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1.5, borderColor: "rgba(251,191,36,0.40)" },
+  subscribeBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fcd34d" },
 });
