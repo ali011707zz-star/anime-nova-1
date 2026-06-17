@@ -140,6 +140,10 @@ localPort = 8100
 externalPort = 5000
 
 [[ports]]
+localPort = 9000
+externalPort = 9000
+
+[[ports]]
 localPort = 23209
 externalPort = 4200
 
@@ -150,10 +154,6 @@ externalPort = 3002
 [[ports]]
 localPort = 24968
 externalPort = 3000
-
-[[ports]]
-localPort = 9000
-externalPort = 9000
 
 [nix]
 channel = "stable-25_05"
