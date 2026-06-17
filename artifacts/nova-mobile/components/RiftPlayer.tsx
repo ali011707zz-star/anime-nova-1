@@ -560,6 +560,7 @@ export function RiftPlayer({
         const cues = parseVTT(text);
         setLoadedCues(cues);
         if (cues.length > 0) {
+          if (!cancelled) setSubLoading(false); // hide badge immediately once cues are ready
           setSubOn(true);
           /* ── 2. Save to cache if this was a translation ── */
           if (cacheKey && isTranslated) {
@@ -1551,11 +1552,15 @@ export function RiftPlayer({
                   <Ionicons name="play-back" size={24} color="#fff" />
                   <Text style={s.centerSeekLabel}>10</Text>
                 </Pressable>
-                <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                  {buffering && !error
-                    ? <ActivityIndicator size={32} color="#fff" />
-                    : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />}
-                </Pressable>
+                {/* PulseRing نبض فقط حول زر المنتصف عند الإيقاف */}
+                <View style={{ alignItems: "center", justifyContent: "center" }}>
+                  {!isPlaying && !buffering && <PulseRing />}
+                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                    {buffering && !error
+                      ? <ActivityIndicator size={32} color="#fff" />
+                      : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />}
+                  </Pressable>
+                </View>
                 <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
                   <Ionicons name="play-forward" size={24} color="#fff" />
                   <Text style={s.centerSeekLabel}>10</Text>
@@ -1564,11 +1569,15 @@ export function RiftPlayer({
             ) : (
               /* وضع أفقي: التشغيل فقط في المنتصف */
               <View style={s.centerLandscapeWrap}>
-                <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                  {buffering && !error
-                    ? <ActivityIndicator size={32} color="#fff" />
-                    : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />}
-                </Pressable>
+                {/* PulseRing نبض فقط حول زر المنتصف عند الإيقاف */}
+                <View style={{ alignItems: "center", justifyContent: "center" }}>
+                  {!isPlaying && !buffering && <PulseRing />}
+                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                    {buffering && !error
+                      ? <ActivityIndicator size={32} color="#fff" />
+                      : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />}
+                  </Pressable>
+                </View>
               </View>
             )}
           </View>
