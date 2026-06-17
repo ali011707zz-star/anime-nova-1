@@ -261,6 +261,7 @@ export default function WatchScreen() {
   const [playingSrc, setPlayingSrc] = useState<Src | null>(null);
   const [cover, setCover]         = useState("");
   const [resumeTime, setResumeTime] = useState(0);
+  const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
 
   const abortRef    = useRef<AbortController | null>(null);
   const lastTimeRef = useRef(0);
@@ -287,6 +288,25 @@ export default function WatchScreen() {
     }, 35000);
     return () => clearTimeout(timeout);
   }, [anime, ep]);
+
+  /* ── Subtitle tracks — fetch in background for sources without subtitleUrl ── */
+  useEffect(() => {
+    if (!anime || !ep) return;
+    const base = getBaseUrl();
+    const controller = new AbortController();
+    fetch(
+      `${base}/api/anime/subtitle-tracks?anilistId=${encodeURIComponent(anime)}&ep=${ep}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&season=1`,
+      { signal: controller.signal }
+    )
+      .then(r => r.json())
+      .then((data: any) => {
+        const tracks: any[] = data?.tracks || [];
+        const arTrack = tracks.find((t: any) => t.lang === "ar" || t.lang === "ar-auto");
+        if (arTrack?.url) setGlobalSubUrl(resolveUrl(arTrack.url, base));
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [anime, ep]); // eslint-disable-line
 
   /* ── SSE fetch ── */
   const fetchSources = useCallback(async () => {
@@ -430,9 +450,11 @@ export default function WatchScreen() {
         return def?.name || getCdnDisplayName(s.directUrl || s.url || "");
       })(),
       quality: getSrcQualityTier(s),
-      subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : undefined,
+      subtitleUrl: s.subtitleUrl
+        ? resolveUrl(s.subtitleUrl, base)
+        : globalSubUrl,
     })).filter(s => s.url);
-  }, [directSrcs]);
+  }, [directSrcs, globalSubUrl]);
 
 
 

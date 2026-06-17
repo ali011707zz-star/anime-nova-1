@@ -110,21 +110,27 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
   const qs = QUALITY_STYLE[q];
   const label = src.label || `مصدر ${idx + 1}`;
   const isEmbed = isEmbedSrc(src);
+  /* "StarCima · الثريا" → tag="StarCima", cdn="الثريا" */
+  const parts = label.split(/\s*·\s*/);
+  const tag = (parts[0] || label).slice(0, 12).trim();
+  const cdn = parts.slice(1).join(" · ").trim();
+  const hasSub = !!src.subtitleUrl;
+
   return (
     <Pressable onPress={() => onPlay(src)} style={w.srcRow}>
       <View style={[w.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-        <Ionicons name={isEmbed ? "tv" : "desktop"} size={14} color={qs.text} />
+        <Ionicons name={isEmbed ? "tv" : "play-circle"} size={14} color={qs.text} />
       </View>
-      <View style={{ flex: 1 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Text style={w.srcNum}>مصدر {idx + 1}</Text>
-          <View style={w.srcTag}><Text style={w.srcTagText}>{getLabelShort(label)}</Text></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <Text style={w.srcNum}>سيرفر {idx + 1}</Text>
+          <View style={w.srcTag}><Text style={w.srcTagText}>{tag}</Text></View>
+          {hasSub && <View style={w.srcSubBadge}><Text style={w.srcSubText}>ترجمة</Text></View>}
         </View>
-        <Text style={w.srcLabel} numberOfLines={1}>{label}</Text>
+        {cdn ? <Text style={w.srcCdn} numberOfLines={1}>{cdn}</Text> : null}
       </View>
       <View style={w.srcRight}>
         <View style={[w.srcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-          <View style={[w.srcDot, { backgroundColor: qs.dot }]} />
           <Text style={[w.srcQText, { color: qs.text }]}>{Q_SHORT[q]}</Text>
         </View>
         <View style={w.srcPlayBtn}>
@@ -158,6 +164,7 @@ export default function AnimationWatchScreen() {
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
   const [resumeTime, setResumeTime] = useState(0);
+  const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
 
   const abortRef    = useRef<AbortController | null>(null);
   const lastSaveTs  = useRef(0);
@@ -172,6 +179,25 @@ export default function AnimationWatchScreen() {
       if (v) setResumeTime(parseFloat(v) || 0);
     });
   }, [progressKey]);
+
+  /* ── Subtitle tracks — fetch in background for sources without subtitleUrl ── */
+  useEffect(() => {
+    if (!tmdbId) return;
+    const base = getBaseUrl();
+    const controller = new AbortController();
+    fetch(
+      `${base}/api/animation/subtitle-tracks?tmdbId=${encodeURIComponent(tmdbId)}&type=${type}&ep=${ep}&season=${season}&title=${encodeURIComponent(titleStr)}`,
+      { signal: controller.signal }
+    )
+      .then(r => r.json())
+      .then((data: any) => {
+        const tracks: any[] = data?.tracks || [];
+        const arTrack = tracks.find((t: any) => t.lang === "ar" || t.lang === "ar-auto");
+        if (arTrack?.url) setGlobalSubUrl(arTrack.url);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [tmdbId, type, ep, season]); // eslint-disable-line
 
   /* ── Save progress ── */
   const handleTimeUpdate = useCallback((t: number) => {
@@ -318,9 +344,11 @@ export default function AnimationWatchScreen() {
       url: getPlayUrl(s),
       label: s.label || "مصدر",
       quality: getSrcQuality(s),
-      subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : undefined,
+      subtitleUrl: s.subtitleUrl
+        ? resolveUrl(s.subtitleUrl, base)
+        : globalSubUrl,
     })).filter(s => s.url);
-  }, [directSrcs]);
+  }, [directSrcs, globalSubUrl]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
@@ -717,10 +745,11 @@ const w = StyleSheet.create({
   srcNum: { fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.92)" },
   srcTag: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
   srcTagText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.82)", fontVariant: ["tabular-nums"] },
-  srcLabel: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)", marginTop: 2 },
-  srcRight: { alignItems: "flex-end", gap: 6 },
-  srcQBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, borderWidth: 1 },
-  srcDot: { width: 4, height: 4, borderRadius: 2 },
+  srcCdn: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.32)", marginTop: 2 },
+  srcSubBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: "rgba(34,197,94,0.12)", borderWidth: 1, borderColor: "rgba(34,197,94,0.28)" },
+  srcSubText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.9)" },
+  srcRight: { flexDirection: "row", alignItems: "center", gap: 7 },
+  srcQBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, borderWidth: 1 },
   srcQText: { fontSize: 9, fontFamily: "Cairo_700Bold" },
   srcPlayBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(109,40,217,0.88)", borderRadius: 10, paddingHorizontal: 11, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
   srcPlayText: { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
