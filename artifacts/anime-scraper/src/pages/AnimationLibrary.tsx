@@ -4,7 +4,9 @@ import { Link, useLocation } from "wouter";
 import { Search, Film, Star, ChevronDown, Loader2, SlidersHorizontal, X, Calendar, Flame, Award } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const IMG = "https://image.tmdb.org/t/p/w342";
+const IMG      = "https://image.tmdb.org/t/p/w342";
+const TMDB_KEY  = "8265bd1679663a7ea12ac168da84d2e8";
+const TMDB_BASE = "https://api.themoviedb.org/3";
 
 type MediaType = "movie" | "tv";
 
@@ -100,10 +102,15 @@ export default function AnimationLibrary() {
       abortRef.current = ctrl;
 
       const gParam = g === 0 ? "16" : `${g}`;
-      const r = await fetch(
-        `/api/animation/browse?type=${t}&genre=${gParam}&sort=${encodeURIComponent(s)}&year=${y}&page=${p}`,
-        { signal: ctrl.signal }
-      );
+      const endpoint = t === "tv" ? "/discover/tv" : "/discover/movie";
+      const sortKey  = t === "tv" && s === "primary_release_date.desc" ? "first_air_date.desc"
+                     : t === "tv" && s === "primary_release_date.asc"  ? "first_air_date.asc"
+                     : s;
+      const yearParam = y
+        ? (t === "tv" ? `&first_air_date_year=${y}` : `&primary_release_year=${y}`)
+        : "";
+      const url = `${TMDB_BASE}${endpoint}?api_key=${TMDB_KEY}&language=ar&with_genres=${gParam}&with_origin_country=JP&sort_by=${encodeURIComponent(sortKey)}&page=${p}${yearParam}`;
+      const r = await fetch(url, { signal: ctrl.signal });
       if (genRef.current !== gen) return;
       const data = await r.json();
       if (genRef.current !== gen) return;
