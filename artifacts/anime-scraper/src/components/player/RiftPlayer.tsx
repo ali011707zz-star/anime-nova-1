@@ -488,6 +488,12 @@ export default function RiftPlayer({
         abrBandWidthUpFactor: 0.82,
         testBandwidth: false,
         capLevelToPlayerSize: true,
+        /* Use real measured segment bitrate for ABR quality decisions (more accurate) */
+        // @ts-ignore
+        abrMaxWithRealBitrate: true,
+        /* Drop quality level if device FPS falls — prevents stutter on low-end devices */
+        // @ts-ignore
+        capLevelOnFPSDrop: true,
         /* ── Vidstack: interruptSwitch:false — waits for current fragment to finish
            before switching quality → eliminates micro-stalls during ABR switches ── */
         // @ts-ignore — property exists in hls.js ≥1.4 but not yet in older typedefs

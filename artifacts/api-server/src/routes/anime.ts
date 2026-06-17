@@ -7244,7 +7244,9 @@ router.get("/anime/hls-proxy", async (req, res) => {
   }
 
   try {
-    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(18000), redirect: "follow" });
+    /* 12s timeout — manifests are small text files; CDN should respond fast.
+       If it takes > 12s the CDN is down/overloaded — fail fast so client can try next source. */
+    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
     const ct = r.headers.get("content-type") || "";
     const body = await r.text();

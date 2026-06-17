@@ -239,21 +239,43 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
 
     const video = videoRef.current;
     if (currentSource.type === 'hls' && Hls.isSupported()) {
+      const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+      let bwEstimate = 3_000_000;
+      try {
+        const conn = (navigator as any).connection;
+        if (conn?.downlink && conn.downlink > 0) bwEstimate = Math.min(conn.downlink * 1_000_000, 20_000_000);
+      } catch {}
       const hls = new Hls({
         enableWorker: true,
-        maxBufferLength: 20,
-        maxMaxBufferLength: 40,
-        backBufferLength: 10,
-        maxBufferSize: 50 * 1024 * 1024,
+        lowLatencyMode: false,
+        maxBufferLength:    isMobile ? 30 : 60,
+        maxMaxBufferLength: isMobile ? 120 : 300,
+        backBufferLength:   isMobile ? 15 : 60,
+        maxBufferSize: (isMobile ? 60 : 160) * 1024 * 1024,
         startFragPrefetch: true,
         progressive: true,
-        startLevel: 0,
-        abrEwmaDefaultEstimate: 8_000_000,
+        /* startLevel:-1 → HLS.js picks best level automatically for current bandwidth */
+        startLevel: -1,
+        abrEwmaDefaultEstimate: bwEstimate,
+        abrEwmaFastLive: 3,
+        abrBandWidthFactor: 0.92,
+        abrBandWidthUpFactor: 0.82,
+        /* Use real measured segment bitrate for ABR decisions — more accurate */
+        // @ts-ignore
+        abrMaxWithRealBitrate: true,
+        /* Reduce quality if device FPS drops — avoids stutter on low-end devices */
+        capLevelToPlayerSize: true,
         testBandwidth: false,
-        fragLoadingRetryDelay: 100,
-        maxStarvationDelay: 4,
-        maxLoadingDelay: 4,
+        fragLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 800,
+        maxStarvationDelay: 8,
+        maxLoadingDelay: 8,
+        nudgeMaxRetry: 20,
+        maxBufferHole: 1.5,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 1000,
         enableCEA708Captions: false,
+        xhrSetup: (xhr: XMLHttpRequest) => { xhr.timeout = 25000; },
       });
       hlsRef.current = hls;
       hls.loadSource(currentSource.url);
