@@ -500,28 +500,59 @@ export function RiftPlayer({
   }, [effectiveCues, subOn, player]);
 
   /* ─── VTT loading when source changes ─── */
+  /* Caches parsed Arabic cues in AsyncStorage (key: sub-ar-{anilistId}-{episode})
+     so switching servers for the same episode skips re-translation entirely.      */
   useEffect(() => {
     const url = currentSrc?.subtitleUrl;
     if (!url) { setLoadedCues([]); return; }
-    // Auto-sync: reset timing offset on every new subtitle URL so X-TIMESTAMP-MAP takes over
     setSubOffset(0);
     subOffsetRef.current = 0;
     let cancelled = false;
-    setSubLoading(true);
-    setLoadedCues([]);
-    fetch(url, { headers: { "Accept": "text/vtt,text/plain,*/*" } })
-      .then(r => r.text())
-      .then(text => {
-        if (!cancelled) {
-          const cues = parseVTT(text);
-          setLoadedCues(cues);
-          if (cues.length > 0) setSubOn(true);
+
+    const cacheKey = anilistId && episode ? `sub-ar-${anilistId}-${episode}` : null;
+    const isTranslated = url.includes("translate-vtt") || url.includes("proxy-text");
+
+    (async () => {
+      /* ── 1. Check AsyncStorage cache first (translated subs only) ── */
+      if (cacheKey && isTranslated) {
+        try {
+          const cached = await AsyncStorage.getItem(cacheKey);
+          if (cached && !cancelled) {
+            const cues: SubCue[] = JSON.parse(cached);
+            if (cues.length > 0) {
+              setLoadedCues(cues);
+              setSubOn(true);
+              return; // served from cache — no network call needed
+            }
+          }
+        } catch {}
+      }
+
+      if (cancelled) return;
+      setSubLoading(true);
+      setLoadedCues([]);
+      try {
+        const r = await fetch(url, { headers: { "Accept": "text/vtt,text/plain,*/*" } });
+        const text = await r.text();
+        if (cancelled) return;
+        const cues = parseVTT(text);
+        setLoadedCues(cues);
+        if (cues.length > 0) {
+          setSubOn(true);
+          /* ── 2. Save to cache if this was a translation ── */
+          if (cacheKey && isTranslated) {
+            AsyncStorage.setItem(cacheKey, JSON.stringify(cues)).catch(() => {});
+          }
         }
-      })
-      .catch(() => { if (!cancelled) setLoadedCues([]); })
-      .finally(() => { if (!cancelled) setSubLoading(false); });
+      } catch {
+        if (!cancelled) setLoadedCues([]);
+      } finally {
+        if (!cancelled) setSubLoading(false);
+      }
+    })();
+
     return () => { cancelled = true; };
-  }, [currentSrc?.subtitleUrl]);
+  }, [currentSrc?.subtitleUrl, anilistId, episode]); // eslint-disable-line
 
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
@@ -1012,8 +1043,8 @@ export function RiftPlayer({
         </View>
       )}
 
-      {/* ── Subtitle loading indicator ── */}
-      {subLoading && (
+      {/* ── Subtitle loading indicator — hide once cues are available or subs embedded ── */}
+      {subLoading && !effectiveCues.length && (
         <View style={s.subLoadingPill} pointerEvents="none">
           <Ionicons name="logo-closed-captioning" size={12} color="rgba(167,139,250,0.70)" />
           <Text style={s.subLoadingText}>جاري تحميل الترجمة…</Text>

@@ -309,13 +309,15 @@ export default function AnimationWatchScreen() {
   }), [directSrcs]);
 
   /* Build RiftPlayer sources from directSrcs */
-  const riftSources = useMemo((): PlayerSource[] =>
-    directSrcs.map(s => ({
+  const riftSources = useMemo((): PlayerSource[] => {
+    const base = getBaseUrl();
+    return directSrcs.map(s => ({
       url: getPlayUrl(s),
       label: s.label || "مصدر",
       quality: getSrcQuality(s),
-    })).filter(s => s.url),
-  [directSrcs]);
+      subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : undefined,
+    })).filter(s => s.url);
+  }, [directSrcs]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
@@ -681,7 +683,7 @@ const w = StyleSheet.create({
 
   /* ── Info card ── */
   infoCard: { flexDirection: "row", alignItems: "flex-start", gap: 14, backgroundColor: "rgba(15,12,28,0.80)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.14)", padding: 14 },
-  infoPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
+  infoPosterWrap: { width: 72, height: 102, position: "relative", alignItems: "center", justifyContent: "center" },
   infoPosterGlow: { position: "absolute", width: 80, height: 110, borderRadius: 20, backgroundColor: "rgba(109,40,217,0.28)" },
   infoPoster: { width: 72, height: 102, borderRadius: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
   infoPosterPlaceholder: { backgroundColor: "rgba(139,92,246,0.08)", alignItems: "center", justifyContent: "center" },
