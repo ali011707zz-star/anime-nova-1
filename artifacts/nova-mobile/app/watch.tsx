@@ -431,6 +431,7 @@ export default function WatchScreen() {
         initialSourceIndex={Math.max(0, startIdx)}
         title={displayTitle}
         episode={epNum}
+        anilistId={anime ? Number(anime) : undefined}
         initialPosition={resumeTime}
         skipIntro={playingSrc?.skipIntro}
         skipOutro={playingSrc?.skipOutro}
