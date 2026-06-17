@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
 import { secureStreamFetch } from "@/utils/secureApi";
+import * as ScreenOrientation from "expo-screen-orientation";
 
 const { width: W, height: H } = Dimensions.get("window");
 
@@ -158,9 +159,8 @@ export default function AnimationWatchScreen() {
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
   const [resumeTime, setResumeTime] = useState(0);
 
-  const abortRef         = useRef<AbortController | null>(null);
-  const autoSelectedRef  = useRef(false);
-  const lastSaveTs       = useRef(0);
+  const abortRef    = useRef<AbortController | null>(null);
+  const lastSaveTs  = useRef(0);
   const lastTimeRef      = useRef(0);
   const seenKeys         = useRef(new Set<string>());
 
@@ -197,7 +197,6 @@ export default function AnimationWatchScreen() {
     setLoading(true);
     setSources([]);
     setScreen("loading");
-    autoSelectedRef.current = false;
     seenKeys.current.clear();
 
     abortRef.current?.abort();
@@ -245,13 +244,7 @@ export default function AnimationWatchScreen() {
 
               setSources(prev => {
                 const next = [...prev, src];
-                if (!autoSelectedRef.current && (isDirectPlayable(src) || isEmbedSrc(src))) {
-                  autoSelectedRef.current = true;
-                  setTimeout(() => {
-                    setPlayingSrc(src);
-                    setScreen(isDirectPlayable(src) ? "native" : "embed");
-                  }, 0);
-                }
+                /* always show picker first — user picks manually */
                 if (next.length === 1) {
                   setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 }
@@ -279,6 +272,16 @@ export default function AnimationWatchScreen() {
     fetchSources();
     return () => abortRef.current?.abort();
   }, [fetchSources]);
+
+  /* ── Portrait lock on picker/loading; unlock for embed ── */
+  useEffect(() => {
+    if (screen === "loading" || screen === "picker") {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    } else if (screen === "embed") {
+      ScreenOrientation.unlockAsync().catch(() => {});
+    }
+    // "native" orientation is handled by RiftPlayer itself
+  }, [screen]);
 
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {

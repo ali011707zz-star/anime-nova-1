@@ -13,6 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
 import { secureStreamFetch } from "@/utils/secureApi";
+import * as ScreenOrientation from "expo-screen-orientation";
 
 const { width: W } = Dimensions.get("window");
 
@@ -247,9 +248,8 @@ export default function WatchScreen() {
   const [cover, setCover]         = useState("");
   const [resumeTime, setResumeTime] = useState(0);
 
-  const abortRef        = useRef<AbortController | null>(null);
-  const autoSelectedRef = useRef(false);
-  const lastTimeRef     = useRef(0);
+  const abortRef    = useRef<AbortController | null>(null);
+  const lastTimeRef = useRef(0);
 
   const epNum      = parseInt(ep || "1");
   const titleStr   = decodeURIComponent(title || "");
@@ -278,7 +278,6 @@ export default function WatchScreen() {
   const fetchSources = useCallback(async () => {
     if (!anime || !ep) return;
     setLoading(true); setSources([]); setScreen("loading");
-    autoSelectedRef.current = false;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     const base = getBaseUrl();
@@ -324,11 +323,7 @@ export default function WatchScreen() {
                 const key = src.directUrl || src.url;
                 if (prev.find(s => (s.directUrl || s.url) === key)) return prev;
                 const next = [...prev, src];
-                if (!autoSelectedRef.current && shouldShowSrc(src)) {
-                  autoSelectedRef.current = true;
-                  setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
-                }
-                /* iFrame / embed sources are never auto-selected — user picks manually */
+                /* always show picker first — user picks manually */
                 if (next.length === 1) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 return next;
               });
@@ -356,6 +351,16 @@ export default function WatchScreen() {
   }, [anime, ep, titleStr, englishStr, format]);
 
   useEffect(() => { fetchSources(); return () => abortRef.current?.abort(); }, [fetchSources]);
+
+  /* ── Portrait lock on picker/loading; unlock for embed so user can rotate freely ── */
+  useEffect(() => {
+    if (screen === "loading" || screen === "picker") {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    } else if (screen === "embed") {
+      ScreenOrientation.unlockAsync().catch(() => {});
+    }
+    // "native" orientation is handled by RiftPlayer itself
+  }, [screen]);
 
   /* History */
   useEffect(() => {
