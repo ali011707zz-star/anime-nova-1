@@ -345,7 +345,10 @@ export function RiftPlayer({
   const [isPortrait, setIsPortrait]       = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showFitMenu, setShowFitMenu]     = useState(false);
+  const [showSubPanel, setShowSubPanel]   = useState(false);
+  const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
   const prevVolRef                        = useRef(1);
+  const subPanelX                         = useRef(new Animated.Value(400)).current;
 
   /* ─── Animated values ─── */
   const controlsOpacity   = useRef(new Animated.Value(1)).current;
@@ -574,6 +577,16 @@ export function RiftPlayer({
       else { player.volume = Math.min(1, prevVolRef.current || 1); }
     } catch {}
   }, [isMuted, player]);
+
+  /* ─── Subtitle panel slide animation ─── */
+  useEffect(() => {
+    Animated.timing(subPanelX, {
+      toValue: showSubPanel ? 0 : 400,
+      duration: 300,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [showSubPanel]);
 
   /* ─── Load seek duration preference (Anime Rift: manageTheInternalPlayerSeekDuration) ─── */
   useEffect(() => {
@@ -1128,6 +1141,140 @@ export function RiftPlayer({
       {/* ════════════════════════════════════════
           CONTROLS OVERLAY
       ════════════════════════════════════════ */}
+      {/* ════════════════════════════════════════
+          SUBTITLE SIDE PANEL
+      ════════════════════════════════════════ */}
+      {showSubPanel && (
+        <Pressable
+          style={[StyleSheet.absoluteFill, { zIndex: 50 }]}
+          onPress={() => setShowSubPanel(false)}
+        >
+          <Animated.View
+            style={[
+              s.subPanel,
+              isPortrait ? s.subPanelPortrait : s.subPanelLandscape,
+              { transform: [{ translateX: subPanelX }] },
+            ]}
+          >
+            <Pressable onPress={() => {}} style={{ flex: 1 }}>
+              {/* ─ Header ─ */}
+              <View style={s.subPanelHeader}>
+                <Text style={s.subPanelTitle}>الترجمات</Text>
+                <Pressable onPress={() => setShowSubPanel(false)} style={s.subPanelClose} hitSlop={12}>
+                  <Ionicons name="close" size={18} color="rgba(255,255,255,0.75)" />
+                </Pressable>
+              </View>
+              <View style={s.subPanelDivider} />
+
+              {loadedCues.length === 0 && !subLoading ? (
+                /* ─ No subtitles state ─ */
+                <View style={s.subEmptyWrap}>
+                  <View style={s.subEmptyIcon}>
+                    <Text style={s.subEmptyCCText}>CC</Text>
+                  </View>
+                  <Text style={s.subEmptyText}>لا توجد ترجمات متاحة</Text>
+                </View>
+              ) : (
+                <View style={s.subPanelBody}>
+
+                  {/* ─ Toggle on/off ─ */}
+                  <View style={s.subRow}>
+                    <View style={s.subRowLeft}>
+                      <Ionicons name="eye-outline" size={16} color="rgba(255,255,255,0.65)" />
+                      <Text style={s.subRowLabel}>تفعيل الترجمة</Text>
+                    </View>
+                    <Pressable
+                      onPress={() => setSubOn(v => !v)}
+                      style={[s.subToggle, subOn && s.subToggleOn]}
+                    >
+                      <View style={[s.subToggleThumb, subOn && s.subToggleThumbOn]} />
+                    </Pressable>
+                  </View>
+
+                  {/* ─ Language ─ */}
+                  <Text style={s.subSectionLabel}>اللغة</Text>
+                  <View style={s.subChipRow}>
+                    {([
+                      { v: "ar" as const, label: "العربية",  icon: "🇸🇦" },
+                      { v: "en" as const, label: "English",  icon: "🇬🇧" },
+                    ]).map(({ v, label, icon }) => (
+                      <Pressable
+                        key={v}
+                        onPress={() => setSubLang(v)}
+                        style={[s.subChip, subLang === v && s.subChipActive]}
+                      >
+                        <Text style={s.subChipEmoji}>{icon}</Text>
+                        <Text style={[s.subChipText, subLang === v && s.subChipTextActive]}>{label}</Text>
+                        {subLang === v && <Ionicons name="checkmark-circle" size={13} color="#c4b5fd" />}
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* ─ Font Size ─ */}
+                  <Text style={s.subSectionLabel}>حجم الخط</Text>
+                  <View style={s.subChipRow}>
+                    {FONT_SIZES.map(({ sz, label, name }) => (
+                      <Pressable
+                        key={sz}
+                        onPress={() => updateSubSettings({ fontSize: sz })}
+                        style={[s.subSizeChip, subSettings.fontSize === sz && s.subChipActive]}
+                      >
+                        <Text style={[s.subSizeLabel, { fontSize: sz * 0.65 }, subSettings.fontSize === sz && s.subChipTextActive]}>{label}</Text>
+                        <Text style={[s.subSizeNameText, subSettings.fontSize === sz && s.subChipTextActive]}>{name}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* ─ Color ─ */}
+                  <Text style={s.subSectionLabel}>لون النص</Text>
+                  <View style={s.subColorRow}>
+                    {SUB_COLORS.map(({ v, label }) => (
+                      <Pressable
+                        key={v}
+                        onPress={() => updateSubSettings({ color: v })}
+                        style={[s.subColorDot, { backgroundColor: v }, subSettings.color === v && s.subColorDotActive]}
+                      >
+                        {subSettings.color === v && <Ionicons name="checkmark" size={11} color="#000" />}
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* ─ Position ─ */}
+                  <Text style={s.subSectionLabel}>موضع الترجمة</Text>
+                  <View style={s.subChipRow}>
+                    {SUB_POSITIONS.map(({ v, label, icon }) => (
+                      <Pressable
+                        key={v}
+                        onPress={() => updateSubSettings({ position: v })}
+                        style={[s.subChip, subSettings.position === v && s.subChipActive]}
+                      >
+                        <Text style={s.subPosIcon}>{icon}</Text>
+                        <Text style={[s.subChipText, subSettings.position === v && s.subChipTextActive]}>{label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* ─ Bold ─ */}
+                  <View style={[s.subRow, { marginTop: 8 }]}>
+                    <View style={s.subRowLeft}>
+                      <Text style={{ color: "rgba(255,255,255,0.65)", fontSize: 14, fontWeight: "900" }}>B</Text>
+                      <Text style={s.subRowLabel}>خط عريض</Text>
+                    </View>
+                    <Pressable
+                      onPress={() => updateSubSettings({ bold: !subSettings.bold })}
+                      style={[s.subToggle, subSettings.bold && s.subToggleOn]}
+                    >
+                      <View style={[s.subToggleThumb, subSettings.bold && s.subToggleThumbOn]} />
+                    </Pressable>
+                  </View>
+
+                </View>
+              )}
+            </Pressable>
+          </Animated.View>
+        </Pressable>
+      )}
+
       {showControls && !error && !isEnded && !isLocked && (
         <Animated.View
           style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10, flexDirection: "column" }]}
@@ -1143,10 +1290,17 @@ export function RiftPlayer({
               <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.90)" />
             </Pressable>
 
-            {/* أزرار اليمين: لقطة + تدوير + إغلاق */}
+            {/* أزرار اليمين: لقطة + ترجمة + تدوير + إغلاق */}
             <View style={s.topRightRow}>
               <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
                 <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
+              </Pressable>
+              <Pressable
+                onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
+                style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
+                hitSlop={10}
+              >
+                <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
               </Pressable>
               <Pressable onPress={flipScreen} style={[s.topIconBtn, isFlipped && s.topIconBtnActive]} hitSlop={10}>
                 <Ionicons name="phone-landscape-outline" size={18} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
@@ -1189,6 +1343,24 @@ export function RiftPlayer({
             colors={["transparent", "rgba(0,0,0,0.60)", "rgba(0,0,0,0.96)"]}
             style={[s.bottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
           >
+            {/* ── أزرار تخطي المقدمة / النهاية ── */}
+            {(inIntroRange || inOutroRange) && (
+              <View style={s.skipBtnRow}>
+                {inIntroRange && (
+                  <Pressable onPress={doSkipIntro} style={s.skipPillIntro} hitSlop={8}>
+                    <Ionicons name="play-forward" size={13} color="#92400e" />
+                    <Text style={s.skipPillIntroText}>تخطي المقدمة</Text>
+                  </Pressable>
+                )}
+                {inOutroRange && (
+                  <Pressable onPress={doSkipOutro} style={s.skipPillOutro} hitSlop={8}>
+                    <Ionicons name="play-forward" size={13} color="#4c1d95" />
+                    <Text style={s.skipPillOutroText}>تخطي النهاية</Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+
             {/* الوقت */}
             <View style={s.timeRow}>
               <Text style={s.timeText}>{fmtTime(position)}</Text>
@@ -1432,6 +1604,110 @@ const s = StyleSheet.create({
   /* Gesture halves */
   halfLeft:  { position: "absolute", left: 0, top: 0, width: "50%", height: "100%" },
   halfRight: { position: "absolute", right: 0, top: 0, width: "50%", height: "100%" },
+
+  /* ── Skip intro/outro pill buttons ── */
+  skipBtnRow: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginBottom: 4, paddingRight: 2 },
+  skipPillIntro: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: "rgba(251,191,36,0.90)", borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 7,
+    shadowColor: "#fbbf24", shadowOpacity: 0.40, shadowRadius: 8, elevation: 6,
+  },
+  skipPillIntroText: { color: "#92400e", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  skipPillOutro: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: "rgba(139,92,246,0.88)", borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 7,
+    shadowColor: "#8B5CF6", shadowOpacity: 0.40, shadowRadius: 8, elevation: 6,
+  },
+  skipPillOutroText: { color: "#f3f0ff", fontSize: 12, fontFamily: "Cairo_700Bold" },
+
+  /* ── CC button in top bar ── */
+  topCCBtn: { minWidth: 38 },
+  topCCBtnActive: { backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)" },
+  topCCText: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.5 },
+  topCCTextActive: { color: "#c4b5fd" },
+
+  /* ── Subtitle side panel ── */
+  subPanel: {
+    position: "absolute", top: 0, bottom: 0, right: 0,
+    backgroundColor: "rgba(5,3,18,0.97)",
+    borderLeftWidth: 1, borderLeftColor: "rgba(139,92,246,0.20)",
+    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 24, elevation: 30,
+  },
+  subPanelPortrait:  { width: "100%" },
+  subPanelLandscape: { width: "38%" },
+
+  subPanelHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 20, paddingTop: 22, paddingBottom: 14,
+  },
+  subPanelTitle: { color: "#fff", fontSize: 18, fontFamily: "Cairo_700Bold" },
+  subPanelClose: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center", justifyContent: "center",
+  },
+  subPanelDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginHorizontal: 16, marginBottom: 10 },
+
+  subEmptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14 },
+  subEmptyIcon: {
+    width: 80, height: 80, borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center", justifyContent: "center",
+  },
+  subEmptyCCText: { color: "rgba(255,255,255,0.35)", fontSize: 22, fontFamily: "Cairo_700Bold", letterSpacing: 2 },
+  subEmptyText: { color: "rgba(255,255,255,0.35)", fontSize: 14, fontFamily: "Cairo_400Regular" },
+
+  subPanelBody: { paddingHorizontal: 16, paddingTop: 6, gap: 4 },
+
+  subSectionLabel: { color: "rgba(255,255,255,0.40)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.8, marginTop: 12, marginBottom: 4, textTransform: "uppercase" },
+
+  /* Toggle row */
+  subRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
+  subRowLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  subRowLabel: { color: "rgba(255,255,255,0.75)", fontSize: 14, fontFamily: "Cairo_600SemiBold" },
+  subToggle: {
+    width: 46, height: 26, borderRadius: 13,
+    backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
+    justifyContent: "center", paddingHorizontal: 2,
+  },
+  subToggleOn: { backgroundColor: "rgba(139,92,246,0.80)", borderColor: "rgba(167,139,250,0.60)" },
+  subToggleThumb: { width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.50)" },
+  subToggleThumbOn: { backgroundColor: "#fff", alignSelf: "flex-end" },
+
+  /* Chip rows */
+  subChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  subChip: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+  },
+  subChipActive: { backgroundColor: "rgba(139,92,246,0.22)", borderColor: "rgba(167,139,250,0.50)" },
+  subChipText: { color: "rgba(255,255,255,0.65)", fontSize: 12, fontFamily: "Cairo_600SemiBold" },
+  subChipTextActive: { color: "#c4b5fd" },
+  subChipEmoji: { fontSize: 14 },
+  subPosIcon: { fontSize: 12, color: "rgba(255,255,255,0.70)" },
+
+  /* Font size chips */
+  subSizeChip: {
+    alignItems: "center", gap: 3,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    minWidth: 52,
+  },
+  subSizeLabel: { fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.80)" },
+  subSizeNameText: { color: "rgba(255,255,255,0.45)", fontSize: 9, fontFamily: "Cairo_400Regular" },
+
+  /* Color dots */
+  subColorRow: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
+  subColorDot: {
+    width: 32, height: 32, borderRadius: 16,
+    borderWidth: 2, borderColor: "rgba(255,255,255,0.20)",
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 4, elevation: 3,
+  },
+  subColorDotActive: { borderColor: "#fff", borderWidth: 2.5 },
 
   /* ── Top bar ── */
   topBar: {
