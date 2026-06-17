@@ -941,10 +941,10 @@ export function RiftPlayer({
         </View>
       )}
 
-      {/* ── Buffering spinner ── */}
+      {/* ── Buffering spinner — positioned over the bottom play button ── */}
       {buffering && !error && (
         <View style={s.spinnerWrap} pointerEvents="none">
-          <SpinRing />
+          <SpinRing size={42} />
         </View>
       )}
 
@@ -1146,14 +1146,14 @@ export function RiftPlayer({
       ════════════════════════════════════════ */}
       {showSubPanel && (
         <Pressable
-          style={[StyleSheet.absoluteFill, { zIndex: 50 }]}
+          style={[StyleSheet.absoluteFill, s.subPanelBackdrop]}
           onPress={() => setShowSubPanel(false)}
         >
           <Animated.View
             style={[
               s.subPanel,
               isPortrait ? s.subPanelPortrait : s.subPanelLandscape,
-              { transform: [{ translateX: subPanelX }] },
+              { transform: [{ translateY: subPanelX }] },
             ]}
           >
             <Pressable onPress={() => {}} style={{ flex: 1 }}>
@@ -1285,10 +1285,24 @@ export function RiftPlayer({
             colors={["rgba(0,0,0,0.82)", "transparent"]}
             style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
           >
-            {/* ← زر الرجوع */}
-            <Pressable onPress={handleBack} style={s.backBtn} hitSlop={12}>
-              <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.90)" />
-            </Pressable>
+            {/* معلومات الأنمي — يسار */}
+            <View style={s.topInfoWrap}>
+              {title ? (
+                <Text style={s.topInfoTitle} numberOfLines={1}>{title}</Text>
+              ) : null}
+              <View style={s.topInfoRow}>
+                {episode != null && (
+                  <View style={s.topEpBadge}>
+                    <Text style={s.topEpText}>ح {episode}</Text>
+                  </View>
+                )}
+                {currentSrc?.quality ? (
+                  <View style={s.topQualityBadge}>
+                    <Text style={s.topQualityText}>{currentSrc.quality}</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
 
             {/* أزرار اليمين: لقطة + ترجمة + تدوير + إغلاق */}
             <View style={s.topRightRow}>
@@ -1302,11 +1316,16 @@ export function RiftPlayer({
               >
                 <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
               </Pressable>
-              <Pressable onPress={flipScreen} style={[s.topIconBtn, isFlipped && s.topIconBtnActive]} hitSlop={10}>
-                <Ionicons name="phone-landscape-outline" size={18} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
+              {/* زر تدوير الشاشة — تصميم محسّن */}
+              <Pressable onPress={flipScreen} style={[s.topRotateBtn, isFlipped && s.topRotateBtnActive]} hitSlop={10}>
+                <Ionicons name="phone-landscape-outline" size={15} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
+                <Text style={[s.topRotateLabel, isFlipped && s.topRotateLabelActive]}>
+                  {isFlipped ? "عمودي" : "أفقي"}
+                </Text>
               </Pressable>
+              {/* زر الإغلاق فقط (بدون سهم رجوع) */}
               <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
-                <Ionicons name="close" size={18} color="rgba(239,68,68,0.90)" />
+                <Ionicons name="close" size={20} color="rgba(239,68,68,0.90)" />
               </Pressable>
             </View>
           </LinearGradient>
@@ -1538,8 +1557,8 @@ const s = StyleSheet.create({
   root:  { flex: 1, backgroundColor: "#000", position: "relative" },
   video: { width: "100%", height: "100%" },
 
-  /* Spinner / Error */
-  spinnerWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", zIndex: 3 },
+  /* Spinner — sits over the bottom play button, not screen centre */
+  spinnerWrap: { position: "absolute", bottom: 32, left: 0, right: 0, alignItems: "center", justifyContent: "center", zIndex: 3 },
   errorWrap:   { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 14, zIndex: 20, backgroundColor: "rgba(0,0,0,0.92)" },
   errorIconBox: { width: 68, height: 68, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", alignItems: "center", justifyContent: "center" },
   errorTitle:  { color: "rgba(255,255,255,0.85)", fontSize: 15, fontFamily: "Cairo_700Bold" },
@@ -1628,15 +1647,22 @@ const s = StyleSheet.create({
   topCCText: { color: "rgba(255,255,255,0.80)", fontSize: 11, fontFamily: "Cairo_700Bold", letterSpacing: 0.5 },
   topCCTextActive: { color: "#c4b5fd" },
 
-  /* ── Subtitle side panel ── */
-  subPanel: {
-    position: "absolute", top: 0, bottom: 0, right: 0,
-    backgroundColor: "rgba(5,3,18,0.97)",
-    borderLeftWidth: 1, borderLeftColor: "rgba(139,92,246,0.20)",
-    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 24, elevation: 30,
+  /* ── Subtitle centre modal ── */
+  subPanelBackdrop: {
+    backgroundColor: "rgba(0,0,0,0.60)",
+    zIndex: 50,
+    alignItems: "center", justifyContent: "center",
   },
-  subPanelPortrait:  { width: "100%" },
-  subPanelLandscape: { width: "38%" },
+  subPanel: {
+    backgroundColor: "rgba(8,5,22,0.98)",
+    borderRadius: 22,
+    borderWidth: 1, borderColor: "rgba(139,92,246,0.30)",
+    shadowColor: "#000", shadowOpacity: 0.8, shadowRadius: 28, elevation: 30,
+    maxHeight: "85%",
+    overflow: "hidden",
+  },
+  subPanelPortrait:  { width: "92%" },
+  subPanelLandscape: { width: "58%", maxWidth: 480 },
 
   subPanelHeader: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
@@ -1714,10 +1740,30 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingBottom: 18,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
-  backBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: "rgba(0,0,0,0.45)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
-    alignItems: "center", justifyContent: "center",
+  /* معلومات الأنمي في الجهة اليسرى */
+  topInfoWrap: {
+    flex: 1, gap: 4, marginRight: 8,
+  },
+  topInfoTitle: {
+    color: "rgba(255,255,255,0.90)", fontSize: 13, fontFamily: "Cairo_700Bold",
+    textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 6, textShadowOffset: { width: 0, height: 1 },
+  },
+  topInfoRow: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+  },
+  topEpBadge: {
+    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8,
+    backgroundColor: "rgba(139,92,246,0.25)", borderWidth: 1, borderColor: "rgba(167,139,250,0.40)",
+  },
+  topEpText: {
+    color: "rgba(221,214,254,0.95)", fontSize: 10, fontFamily: "Cairo_700Bold",
+  },
+  topQualityBadge: {
+    paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8,
+    backgroundColor: "rgba(251,191,36,0.15)", borderWidth: 1, borderColor: "rgba(251,191,36,0.35)",
+  },
+  topQualityText: {
+    color: "rgba(253,224,71,0.90)", fontSize: 10, fontFamily: "Cairo_700Bold",
   },
   topRightRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   topIconBtn: {
@@ -1726,9 +1772,22 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   topIconBtnActive: { backgroundColor: "rgba(139,92,246,0.30)", borderColor: "rgba(167,139,250,0.55)" },
+  /* زر تدوير الشاشة — pill يجمع أيقونة + نص */
+  topRotateBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+  },
+  topRotateBtnActive: {
+    backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)",
+  },
+  topRotateLabel: {
+    color: "rgba(255,255,255,0.80)", fontSize: 10, fontFamily: "Cairo_700Bold",
+  },
+  topRotateLabelActive: { color: "#c4b5fd" },
   topCloseBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: "rgba(239,68,68,0.12)", borderWidth: 1, borderColor: "rgba(239,68,68,0.28)",
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1.5, borderColor: "rgba(239,68,68,0.40)",
     alignItems: "center", justifyContent: "center",
   },
 
