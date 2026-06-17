@@ -28,6 +28,7 @@ const NAV_MAIN: NavItem[] = [
   { icon: "search",          label: "البحث",                 route: "/(tabs)/search",      color: "#6366f1" },
   { icon: "grid",            label: "تصفح الأنمي",           route: "/(tabs)/browse",      color: "#3b82f6" },
   { icon: "film",            label: "الأنيميشن والأفلام",    route: "/(tabs)/animations",  color: "#06b6d4" },
+  { icon: "newspaper",       label: "أخبار الأنمي",          route: "/(tabs)/news",        color: "#f59e0b" },
   { icon: "calendar",        label: "جدول البث الأسبوعي",    route: "/schedule",           color: "#10b981" },
 ];
 
