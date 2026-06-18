@@ -4153,7 +4153,7 @@ async function getAnimeWitcherSources(
       const hits = searchData.hits || [];
       if (!hits.length) continue;
 
-      const sorted = hits.map(h => ({ ...h, score: titleSimilarity(q, h.name) }))
+      const sorted = hits.map(h => ({ ...h, score: Math.max(similarity(q, h.name), asciiSimilarity(q, h.name)) }))
         .sort((a, b) => b.score - a.score);
       const best = sorted[0];
       if (best && best.score >= 0.35) { animeId = best.id; break; }
@@ -4180,7 +4180,7 @@ async function getAnimeWitcherSources(
     );
     if (!srvR.ok) return [];
     const srvData = await srvR.json() as {
-      servers?: Array<{ name: string; url: string; proxy_url: string; quality: string; lang: string; playable: boolean }>;
+      servers?: Array<{ name: string; url: string; proxy_url: string; quality: string; lang: string; playable: boolean; browser: boolean }>;
     };
     const servers = (srvData.servers || []).filter(s => s.playable && s.url);
     if (!servers.length) return [];
@@ -4194,14 +4194,17 @@ async function getAnimeWitcherSources(
       const srvName = srv.name.toUpperCase();
 
       if (srvName === "PD") {
-        // Pixeldrain: url = https://pixeldrain.com/api/file/{id}?download
+        // Pixeldrain: CORS * + Accept-Ranges → يعمل مباشرة عبر video-proxy
         const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(srv.url)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
         sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
 
       } else if (srvName === "MF") {
-        // MediaFire: url = download CDN مباشر (download2xxx.mediafire.com)
-        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(srv.url)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`;
-        sources.push({ name: `AnimeWitcher · ${qLabel} · MF`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+        // MediaFire CDN URLs مربوطة بـ IP الـ HF Space → نمررها عبر proxy_url الخاص به
+        const mfProxied = srv.proxy_url
+          ? `${AW_HF_BASE}${srv.proxy_url.startsWith("/") ? srv.proxy_url : "/" + srv.proxy_url}`
+          : srv.url;
+        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(mfProxied)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`;
+        sources.push({ name: `AnimeWitcher · ${qLabel} · MF`, url: mfProxied, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
 
       } else if (srvName === "ST") {
         try {
