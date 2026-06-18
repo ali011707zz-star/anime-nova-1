@@ -157,6 +157,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U" },
   // ── ماي سيما / وي سيما ───────────────────────────────────────────
   { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC" },
+  // ── توب سيما (topcinemaa.com — DooPlay) ───────────────────────
+  { site: "topcinemaa",   name: "توب سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "TC" },
   // ── 1080p مباشر (Anime-Phoenix) ───────────────────────────────────
   { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH" },
   // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────

@@ -669,7 +669,9 @@ async function extractVideoDeep(
           url.includes("bigwarp.io") || url.includes("forafile.com") ||
           url.includes("anafast.com") || url.includes("listeamed.net") ||
           url.includes("fastvip.space") || url.includes("streamup.ws") ||
-          url.includes("mxdrop.to")) {
+          url.includes("mxdrop.to") || url.includes("vidtube.one") ||
+          url.includes("mp4plus.cyou") || url.includes("vidoba.cyou") ||
+          url.includes("vidspeed.cyou") || url.includes("anafast.cyou")) {
         const v = parseStreamwish(html); if (v) return v;
       }
       if (url.includes("share4max.com/iframe/") || url.includes("megamax.me/iframe/")) {
@@ -3413,7 +3415,170 @@ async function getMyCimaSources(
   if (!pageHtml || isCloudflareBlock(pageHtml)) return cache([]);
   if (!pageHtml.includes("data-watch")) return cache([]);
 
-  const sources = parseMyCimaDataWatch(pageHtml, "mycima");
+  let sources = parseMyCimaDataWatch(pageHtml, "mycima");
+
+  // ── Fallback: mycami.skin → albaplayer embeds (when data-watch empty) ──
+  if (!sources.length && postUrl) {
+    try {
+      const skinUrl = postUrl.replace(/^https?:\/\/[^/]+/, "https://mycami.skin");
+      const skinHtml = await cfProxyGet(skinUrl, "https://mycami.skin/", 10000);
+      if (skinHtml && !isCloudflareBlock(skinHtml)) {
+        const albaM = skinHtml.match(/https:\/\/w\.aflamy\.pro\/albaplayer\/[^\s"'<>]+/);
+        if (albaM) {
+          const albaHtml = await cfProxyGet(albaM[0], "https://mycami.skin/", 8000);
+          if (albaHtml) {
+            const albaSeen = new Set<string>();
+            for (const em of albaHtml.matchAll(
+              /https?:\/\/(?:mp4plus|anafast|vidoba|vidspeed)[^\s"'<>]+/gi
+            )) {
+              if (!albaSeen.has(em[0])) {
+                albaSeen.add(em[0]);
+                const n = em[0].includes("mp4plus") ? "MP4Plus"
+                  : em[0].includes("anafast") ? "AnaFast"
+                  : em[0].includes("vidoba") ? "Vidoba" : "VidSpeed";
+                sources.push({
+                  name: `ماي سيما · ${n}`,
+                  url: em[0], quality: "HD", qualityRank: 9, site: "mycima",
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  return cache(sources);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  TopCinemaa scraper (web.topcinemaa.com — WordPress custom theme)
+//  أنمي + أفلام + مسلسلات عربية مترجمة — HLS/MP4 عبر vidtube وغيره
+//  Flow: /?s={title}+الحلقة+{ep} → episode URL (Arabic slug) → ?embedScreen=true → iframe
+// ════════════════════════════════════════════════════════════════════
+const TC_BASE = "https://web.topcinemaa.com";
+const tcSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+// الحلقة (الحلقة) URL-encoded lowercase
+const TC_EP_AR_ENC = "%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9";
+
+/** Extract episode number from a web.topcinemaa.com URL slug (Arabic-encoded) */
+function tcParseEpNum(url: string): number | null {
+  // Decode URL then look for "الحلقة-{N}" pattern
+  try {
+    const decoded = decodeURIComponent(url);
+    const m = decoded.match(/الحلقة[\s-]+(\d+)/i);
+    if (m) return parseInt(m[1], 10);
+  } catch {}
+  // Fallback: look for encoded form الحلقة-{N}
+  const m2 = url.match(new RegExp(`${TC_EP_AR_ENC}-0*(\\d+)-`, "i"));
+  if (m2) return parseInt(m2[1], 10);
+  return null;
+}
+
+async function getTopCimaaSources(
+  title: string, english: string | null, ep: number, isMovie = false,
+): Promise<UnifiedSource[]> {
+  const ck = `topcinemaa:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${isMovie}`;
+  const hit = tcSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+  const cache = (s: UnifiedSource[]) => { tcSrcCache.set(ck, { sources: s, ts: Date.now() }); return s; };
+
+  // ── 1. Search with English title → get any episode URL to learn slug pattern ──
+  // web.topcinemaa.com: search returns episode posts ordered newest-first
+  // Strategy: grab any episode URL from search results, extract slug prefix/suffix,
+  // then CONSTRUCT the specific episode URL by substituting the episode number.
+  const q = english || title;
+  const searchHtml = await cfProxyGet(
+    `${TC_BASE}/?s=${encodeURIComponent(q)}`,
+    `${TC_BASE}/`, 10000,
+  );
+  if (!searchHtml || isCloudflareBlock(searchHtml)) return cache([]);
+
+  // Collect all episode/content links from results
+  const TC_SKIP_RE = /wp-content|wp-includes|\/page\/|\/category\/|\/tag\/|\/movies\/|\/netflix|\/recent\/|\/top-rating|\/full-packs\//i;
+  const allLinks = [...searchHtml.matchAll(
+    /href="(https?:\/\/web\.topcinemaa\.com\/[^"]{10,})"/gi,
+  )].map(m => m[1]).filter(u => !TC_SKIP_RE.test(u));
+
+  let epUrl: string | null = null;
+
+  if (isMovie) {
+    // Movies: pick best-similarity link
+    let bestScore = 0;
+    for (const u of allLinks) {
+      const slug = decodeURIComponent(u.split("/").filter(Boolean).pop() || "");
+      const sim = titleSimilarity(q, slug.replace(/-/g, " "));
+      if (sim > bestScore) { bestScore = sim; epUrl = u; }
+    }
+  } else {
+    // ── Direct match: any link with الحلقة-{ep} already in results ──
+    for (const u of allLinks) {
+      if (tcParseEpNum(u) === ep) { epUrl = u; break; }
+    }
+
+    // ── Construct URL: grab any episode link → replace its number with {ep} ──
+    if (!epUrl && allLinks.length > 0) {
+      for (const sampleUrl of allLinks.slice(0, 5)) {
+        const foundNum = tcParseEpNum(sampleUrl);
+        if (foundNum === null) continue;
+
+        // URL has percent-encoded Arabic. Replace the encoded episode number segment.
+        // Pattern in URL: %d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-{N}-  (الحلقة-N-)
+        const encEp  = `${TC_EP_AR_ENC}-${foundNum}-`;
+        const encNew = `${TC_EP_AR_ENC}-${ep}-`;
+        if (sampleUrl.toLowerCase().includes(encEp.toLowerCase())) {
+          const candidate = sampleUrl.toLowerCase().replace(
+            encEp.toLowerCase(), encNew,
+          );
+          // Restore original casing for the non-replaced part
+          epUrl = sampleUrl.slice(0, sampleUrl.toLowerCase().indexOf(encEp.toLowerCase()))
+            + encNew
+            + sampleUrl.slice(sampleUrl.toLowerCase().indexOf(encEp.toLowerCase()) + encEp.length);
+          break;
+        }
+        // Fallback: try replacing the plain number in the URL string
+        const numStr = String(foundNum);
+        const numIdx = sampleUrl.lastIndexOf(`-${numStr}-`);
+        if (numIdx !== -1) {
+          epUrl = sampleUrl.slice(0, numIdx + 1) + ep + sampleUrl.slice(numIdx + 1 + numStr.length);
+          break;
+        }
+      }
+    }
+  }
+
+  if (!epUrl) return cache([]);
+
+  // ── 2. Fetch ?embedScreen=true → extract iframes ──
+  const embedUrl = `${epUrl.replace(/\/+$/, "")}/?embedScreen=true`;
+  const embedHtml = await cfProxyGet(embedUrl, `${TC_BASE}/`, 12000);
+  if (!embedHtml || isCloudflareBlock(embedHtml)) return cache([]);
+
+  const sources: UnifiedSource[] = [];
+  const seenTc = new Set<string>();
+  for (const m of embedHtml.matchAll(
+    /<iframe[^>]+src=["'](https?:\/\/[^"']{10,})["']/gi,
+  )) {
+    const url = m[1];
+    if (seenTc.has(url)) continue;
+    seenTc.add(url);
+    const label = url.includes("vidtube")  ? "VidTube"
+      : url.includes("mp4plus")   ? "MP4Plus"
+      : url.includes("vidspeed")  ? "VidSpeed"
+      : url.includes("anafast")   ? "AnaFast"
+      : url.includes("vidoba")    ? "Vidoba"
+      : url.includes("filemoon")  ? "FileMoon"
+      : "سيرفر";
+    sources.push({
+      name: `توب سيما · ${label}`,
+      url,
+      quality: "HD",
+      qualityRank: 7,
+      site: "topcinemaa",
+    });
+  }
+
   return cache(sources);
 }
 
@@ -6346,6 +6511,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
       scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep)),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
+      scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
@@ -6470,6 +6636,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  25000, [])); break;
       case "mycima":       await runExtract(await race(getMyCimaSources(title, english, ep, isMovie), 30000, [])); break;
+      case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
