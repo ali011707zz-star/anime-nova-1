@@ -1160,6 +1160,7 @@ async function getShahiidSources(
 interface UnifiedSource {
   name: string; url: string; quality: string; qualityRank: number; site: string;
   directUrl?: string; directType?: "hls" | "mp4";
+  corsOk?: boolean;     // CDN يدعم CORS * + Range → تشغيل مباشر في المتصفح بدون proxy
   isEmbed?: boolean;
   subtitleUrl?: string;
   hasBuiltinSub?: boolean;
@@ -3748,20 +3749,19 @@ async function getKawaiiAnimeSources(
 
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
-      // video.kawaii-anime.com CDN: CORS * + no auth → تشغيل مباشر في المتصفح دون hls-proxy
-      // (hls-proxy يجعل كل segment يمر عبر السيرفر = بطء شديد)
-      // MP4: لا امتداد في الرابط → نمرره عبر video-proxy حتى لا يُحمَّل iframe
-      const directUrl = isHls
-        ? src.url   // raw CDN URL — hls.js يشغّله مباشرة
-        : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
+      // video.kawaii-anime.com CDN: CORS * + Accept-Ranges + no auth
+      // → يشغّل مباشرة في المتصفح / React Native بدون أي proxy
+      // (video-proxy/hls-proxy كان يُمرّر المحتوى عبر سيرفرنا = بطء شديد)
+      const directUrl = src.url;   // raw CDN URL دائماً
       return {
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 3,          // أولوية منخفضة — صوت ياباني مترجم
+        qualityRank: 3,
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",
+        corsOk: true,   // CORS * مؤكد — لا proxy في المتصفح
         subtitleUrl,
         skipIntro,
         skipOutro,
@@ -4194,9 +4194,8 @@ async function getAnimeWitcherSources(
       const srvName = srv.name.toUpperCase();
 
       if (srvName === "PD") {
-        // Pixeldrain: CORS * + Accept-Ranges → يعمل مباشرة عبر video-proxy
-        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(srv.url)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
-        sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+        // Pixeldrain: CORS * + Accept-Ranges → تشغيل مباشر في المتصفح بدون video-proxy
+        sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl: srv.url, directType: "mp4", corsOk: true });
 
       } else if (srvName === "MF") {
         // MediaFire CDN URLs مربوطة بـ IP الـ HF Space → نمررها عبر proxy_url الخاص به

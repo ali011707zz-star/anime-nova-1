@@ -430,6 +430,23 @@ export default function RiftPlayer({
       return;
     }
 
+    // CDNs with CORS * + Accept-Ranges → play DIRECTLY in browser (no proxy round-trip)
+    // video.kawaii-anime.com: confirmed CORS * + Range support
+    // pixeldrain.com/api/file/: confirmed CORS * + Accept-Ranges
+    const CORS_DIRECT_CDN = ["video.kawaii-anime.com", "pixeldrain.com/api/file/"];
+    const isCorsDirectCdn = CORS_DIRECT_CDN.some(h => src.includes(h));
+    if (isCorsDirectCdn) {
+      v.src = src; v.load();
+      let done = false;
+      const cleanup = () => { done = true; clearTimeout(t); v.removeEventListener("loadedmetadata", onMd); v.removeEventListener("error", onEd); };
+      const onMd = () => { if (done) return; cleanup(); setLoading(false); v.play().catch(() => {}); showControls(); };
+      const onEd = () => { if (done) return; cleanup(); fireOnFail(); };
+      const t = setTimeout(() => { if (done) return; v.src = ""; onEd(); }, 25000);
+      v.addEventListener("loadedmetadata", onMd, { once: true });
+      v.addEventListener("error", onEd, { once: true });
+      return;
+    }
+
     const isDirect = src.includes("streamtape.com") || src.includes("sendvid.com")
       || src.includes("videos2.sendvid.com") || src.includes("video-proxy?")
       || src.includes("workers.dev")
