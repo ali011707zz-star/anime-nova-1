@@ -352,6 +352,7 @@ export function RiftPlayer({
   const [showFitMenu, setShowFitMenu]     = useState(false);
   const [showSubPanel, setShowSubPanel]   = useState(false);
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
+  const [autoPlayEnabled, setAutoPlayEnabled] = useState(true);
   const prevVolRef                        = useRef(1);
   const subPanelX                         = useRef(new Animated.Value(400)).current;
   /* ─── Whisper audio transcription ─── */
@@ -417,13 +418,24 @@ export function RiftPlayer({
     } catch {}
   });
 
-  /* ─── Load SubSettings + subOffset from storage ─── */
+  /* ─── Load SubSettings + subOffset + autoPlay pref from storage ─── */
   useEffect(() => {
     AsyncStorage.getItem("sub-settings-v1").then(raw => {
       if (raw) { try { setSubSettings(JSON.parse(raw)); } catch {} }
     }).catch(() => {});
+    AsyncStorage.getItem("pref-autoplay").then(v => {
+      if (v === "false") setAutoPlayEnabled(false);
+    }).catch(() => {});
     /* sub-offset intentionally NOT restored from storage — resets to 0 on each session
        so X-TIMESTAMP-MAP auto-sync is always fresh without manual intervention */
+  }, []);
+
+  const toggleAutoPlay = useCallback(() => {
+    setAutoPlayEnabled(v => {
+      const next = !v;
+      AsyncStorage.setItem("pref-autoplay", String(next)).catch(() => {});
+      return next;
+    });
   }, []);
 
   /* Keep ref in sync with state so the rAF closure always sees latest offset */
@@ -774,7 +786,7 @@ export function RiftPlayer({
 
   /* ─── Auto-play countdown when episode ends ─── */
   useEffect(() => {
-    if (!isEnded || !autoPlayNext || !onNextEpisode || (episode ?? 0) >= totalEps) {
+    if (!isEnded || !(autoPlayNext && autoPlayEnabled) || !onNextEpisode || (episode ?? 0) >= totalEps) {
       setAutoCountdown(0);
       return;
     }
@@ -786,7 +798,7 @@ export function RiftPlayer({
       });
     }, 1000);
     return () => clearInterval(tick);
-  }, [isEnded, autoPlayNext]); // eslint-disable-line
+  }, [isEnded, autoPlayNext, autoPlayEnabled]); // eslint-disable-line
 
   /* ─── Controls show/hide ─── */
   const schedHide = useCallback(() => {
@@ -1269,6 +1281,15 @@ export function RiftPlayer({
           <Text style={s.endSubLabel}>انتهت الحلقة</Text>
           {title && <Text style={s.endTitle}>{title}</Text>}
           {episode != null && <Text style={s.endEpText}>الحلقة {episode}</Text>}
+
+          {/* شريط عداد التشغيل التلقائي */}
+          {autoCountdown > 0 && onNextEpisode && autoPlayEnabled && (
+            <View style={s.autoPlayBar}>
+              <View style={[s.autoPlayBarFill, { width: `${(autoCountdown / 5) * 100}%` as any }]} />
+              <Text style={s.autoPlayBarText}>التشغيل التلقائي خلال {autoCountdown}s</Text>
+            </View>
+          )}
+
           <View style={s.endBtnRow}>
             <Pressable
               onPress={() => { seek(0); setIsEnded(false); try { player.play(); } catch {} }}
@@ -1286,6 +1307,13 @@ export function RiftPlayer({
               </Pressable>
             )}
           </View>
+
+          {/* إلغاء التشغيل التلقائي */}
+          {autoCountdown > 0 && (
+            <Pressable onPress={() => setAutoCountdown(0)} style={s.autoPlayCancelBtn}>
+              <Text style={s.autoPlayCancelText}>إلغاء</Text>
+            </Pressable>
+          )}
         </View>
       )}
 
@@ -1703,11 +1731,16 @@ export function RiftPlayer({
                 )}
               </View>
 
-              {/* يمين: كتم + سرعة */}
+              {/* يمين: كتم + تشغيل تلقائي + سرعة */}
               <View style={[s.bottomSide, { justifyContent: "flex-end" }]}>
                 <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
                   <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
                 </Pressable>
+                {onNextEpisode && (
+                  <Pressable onPress={() => { toggleAutoPlay(); fadeIn(); }} style={[s.ctrlIconBtn, autoPlayEnabled && s.ctrlIconBtnActive]} hitSlop={10}>
+                    <Ionicons name="play-skip-forward" size={16} color={autoPlayEnabled ? "#c4b5fd" : "rgba(255,255,255,0.40)"} />
+                  </Pressable>
+                )}
                 <View>
                   {showSpeedMenu && (
                     <View style={s.speedDropdown}>
@@ -1856,6 +1889,11 @@ const s = StyleSheet.create({
   endReplayBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)" },
   endNextBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(139,92,246,0.90)", borderWidth: 1, borderColor: "rgba(167,139,250,0.55)" },
   endBtnLabel: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold" },
+  autoPlayBar: { width: 220, height: 28, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.10)", overflow: "hidden", justifyContent: "center", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
+  autoPlayBarFill: { position: "absolute", left: 0, top: 0, bottom: 0, backgroundColor: "rgba(139,92,246,0.60)", borderRadius: 14 },
+  autoPlayBarText: { color: "#c4b5fd", fontSize: 11, fontFamily: "Cairo_700Bold", textAlign: "center", zIndex: 1 },
+  autoPlayCancelBtn: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.08)" },
+  autoPlayCancelText: { color: "rgba(255,255,255,0.50)", fontSize: 12, fontFamily: "Cairo_400Regular" },
 
   /* Gesture halves */
   halfLeft:  { position: "absolute", left: 0, top: 0, width: "50%", height: "100%" },
