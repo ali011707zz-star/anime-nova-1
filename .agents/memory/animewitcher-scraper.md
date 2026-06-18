@@ -1,39 +1,40 @@
 ---
-name: AnimeWitcher v1.4.4 APK Analysis
-description: Full findings from APK reverse engineering — Firestore locked, BunnyCDN found, scraper disabled
+name: AnimeWitcher HF Space API
+description: New AnimeWitcher API on Hugging Face Space — working as of June 2026; bug fix notes
 ---
 
 ## Status (June 2026)
-**Firestore is COMPLETELY LOCKED** as of v1.4.4. No public read, no anonymous auth, no registered-user access. The existing scraper returns 0 sources.
+**HF Space API is LIVE** at `https://1we323-witcher.hf.space`
 
-## Firebase Credentials (found but useless — Firestore locked)
-- Project ID: `animewitcher-1c66d`
-- API Key: `AIzaSyAcbWRwfFNnCpoydDXlEALWnM_TYVcJOMU`
-- App ID: `1:861470152250:android:bd3e0dd41508f61b094703`
-- Anonymous auth: DISABLED (ADMIN_ONLY_OPERATION)
-- Registered user auth: works but Firestore rules deny ALL reads (PERMISSION_DENIED)
-- RTDB: not used (404)
+## Endpoints
+- `GET /api/search?q={title}` → `{ hits: [{id, name, type}] }`
+- `GET /api/episodes?id={animeId}` → `{ episodes: [{id, name, num}] }`
+- `GET /api/servers_resolved?anime={animeId}&ep={epId}` → `{ servers: [{name, url, proxy_url, quality, lang, playable, browser}] }`
 
-## New Infrastructure Found in v1.4.4
-- **BunnyCDN Stream**: `bunny_server` (library_id) + `bunny_video_id` stored per server in Firestore
-  - Embed URL would be: `https://iframe.mediadelivery.net/embed/{bunny_server}/{bunny_video_id}`
-  - Both IDs are in locked Firestore → cannot use
-- **Algolia Search**: `ALGOLIA_APPLICATION_ID` + `ALGOLIA_API_KEY` constants exist; credentials stored in Firestore at `Settings/servers/servers` → cannot access
-- **vidtube.one**: XVideoSharing embed platform; video IDs from Firestore → cannot use
+## Server Types Confirmed Working
+| Type | Method | Notes |
+|------|--------|-------|
+| PD (Pixeldrain) | video-proxy direct | CORS *, Accept-Ranges, browser:true but works server-side |
+| MF (MediaFire) | HF Space proxy_url | CDN URL ip-tied to HF Space server → must route via `AW_HF_BASE + srv.proxy_url` not raw srv.url |
+| ST (Streamtape) | parseStreamtape | standard extraction |
+| VT (VidTube) | extractVideoDeep | standard extraction |
 
-## Firestore Collection Structure (from DEX analysis)
-- Top-level: `MAIN_COLLECTION` constant (OLD code used `anime_list` — might have changed)
-- Per-anime subcollections: `/episodes`, `/servers`, `/servers2`
-- Config: `Settings/servers/servers` (search service config)
-- User collections: `/continue_watching`, `/episodes_watched`, `/user_anime`, `/fav_characters`
-- Social: `/comments`, `/reviews`, `/ratings`, `/replies`
+## Critical Bug Fixed
+`titleSimilarity(q, h.name)` was called but never defined → ReferenceError caught by outer try/catch → returned [] for all anime.
+**Fix:** Replace with `Math.max(similarity(q, h.name), asciiSimilarity(q, h.name))`
 
-## Server Model (ServerWords)
-Fields: `Link`, `bunny_server`, `bunny_video_id`, `name`, `quality`, `visible`
-Quality values: `240p`, `360p`, `480p`, `720p`, `1080p`
-Server types found: `PD` (Pixeldrain), `ST` (Streamtape), `VT` (VidTube), `MF` (MediaFire), BunnyCDN
+## MF Proxy Pattern
+```ts
+const mfProxied = srv.proxy_url
+  ? `${AW_HF_BASE}${srv.proxy_url.startsWith("/") ? srv.proxy_url : "/" + srv.proxy_url}`
+  : srv.url;
+const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(mfProxied)}&ref=...`;
+```
+HF Space proxy accepts GET+Range, returns 206 with CORS *, HEAD returns 405 (GET only).
 
-## Why Disabled
-Firestore rules updated in v1.4.4 deny all external reads. Without valid admin Firebase credentials or Algolia credentials (stored in locked Firestore), there is no way to access anime or episode data.
+## Coverage
+Firestore (original app) is locked as of v1.4.4 — HF Space is the replacement API with 1000+ anime.
+Works for RECENT/popular anime. Old/classic anime may not be in their DB.
 
-**How to apply:** Keep `getAnimeWitcherSources` code but remove from `Promise.allSettled` parallel scrapers and from SSE route switch case.
+**Why:** Old Firebase credentials from APK analysis are useless (Firestore rules deny all external reads). HF Space is a public scraper API they deployed separately.
+**How to apply:** Use `getAnimeWitcherSources` with the HF Space base URL; never attempt Firestore directly.
