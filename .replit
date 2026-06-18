@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "python-3.11", "web"]
+modules = ["python-3.11", "web", "nodejs-22"]
 
 [deployment]
 router = "application"
@@ -47,7 +47,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/anime-scraper run dev"
+args = "PORT=5000 BASE_PATH=/ artifacts/anime-scraper/node_modules/.bin/vite --config artifacts/anime-scraper/vite.config.ts --host 0.0.0.0"
 waitForPort = 5000
 
 [[workflows.workflow]]
@@ -59,7 +59,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd artifacts/api-server && pnpm run build && cd ../.. && PORT=8080 node --enable-source-maps artifacts/api-server/dist/index.mjs"
+args = "cd artifacts/api-server && node build.mjs && cd ../.. && PORT=8080 node --enable-source-maps artifacts/api-server/dist/index.mjs"
 waitForPort = 8080
 
 [[workflows.workflow]]
@@ -114,18 +114,6 @@ externalPort = 3003
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 8000
-externalPort = 8000
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
-
-[[ports]]
-localPort = 8081
-externalPort = 8081
 
 [[ports]]
 localPort = 8082
