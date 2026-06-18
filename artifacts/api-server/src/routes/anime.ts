@@ -5668,8 +5668,32 @@ async function fetchAnimeTmdbId(english: string | null, romaji: string): Promise
   return null;
 }
 
+// ── Helper: kawaii subtitle للمصادر الأخرى (عربي مباشر أو إنجليزي→عربي) ──
+async function getKawaiiSubForSource(anilistId: number | undefined, ep: number): Promise<string | undefined> {
+  if (!anilistId) return undefined;
+  try {
+    const r = await fetch(`${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`, {
+      headers: { ...BASE_HDRS, Accept: "application/json", Referer: KAWAII_BASE + "/" },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return undefined;
+    const data = await r.json() as { subtitles?: Array<{ url: string; lang?: string }> };
+    const subs = data.subtitles ?? [];
+    // الأولوية: عربي مباشر → إنجليزي مترجم
+    const arSub = subs.find(s => (s.lang || "").toLowerCase().includes("arabic") || (s.lang || "").toLowerCase() === "ar");
+    if (arSub?.url) {
+      // عربي مباشر — مرّره عبر proxy-text لتجاوز CORS
+      return `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}`;
+    }
+    const enSub = subs.find(s => (s.lang || "").toLowerCase().includes("english") || (s.lang || "").toLowerCase() === "en");
+    if (!enSub?.url) return undefined;
+    const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(enSub.url)}`;
+    return `/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;
+  } catch { return undefined; }
+}
+
 // ── Videasy anime sources (api.videasy.to, TMDB-native multi-quality HLS) ──
-async function getVideasyAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+async function getVideasyAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
   const tmdbId = await fetchAnimeTmdbId(english, title);
   if (!tmdbId) return [];
   const sources: UnifiedSource[] = [];
@@ -5707,13 +5731,16 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
       }
       if (!dec || dec.status !== 200 || !dec.result?.sources) return;
 
-      const araSub = (dec.result.subtitles ?? []).find((s: any) => s.lang === "ara" || s.lang === "ar");
+      // kawaii subtitle (EN→AR) يُفضَّل على CDN Videasy — الجودة أفضل
+      const kawaiiSub = await getKawaiiSubForSource(anilistId, ep);
+      const araSub    = (dec.result.subtitles ?? []).find((s: any) => s.lang === "ara" || s.lang === "ar");
+      const fallbackSub = araSub?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araSub.url)}&from=ar&to=ar` : undefined;
+      const chosenSub = kawaiiSub || fallbackSub;
       for (const src of (dec.result.sources ?? [])) {
         if (!src?.url) continue;
         const q = src.quality || "HD";
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
-        const subUrl = araSub?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araSub.url)}&from=ar&to=ar` : undefined;
-        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 19, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) });
+        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 19, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(chosenSub ? { subtitleUrl: chosenSub } : {}) });
       }
     } catch { /* silent per server */ }
   }));
@@ -5721,7 +5748,7 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
 }
 
 // ── VidLink via enc-dec.app (TMDB-native, auth-token IP-tied → hls-proxy) ──
-async function getVidLinkAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+async function getVidLinkAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
   const tmdbId = await fetchAnimeTmdbId(english, title);
   if (!tmdbId) return [];
   try {
@@ -5746,8 +5773,11 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
     const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
     const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
-    const subUrl = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
-    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 18, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(subUrl ? { subtitleUrl: subUrl } : {}) }];
+    // kawaii subtitle (EN→AR) يُفضَّل على caption VidLink — الجودة أفضل
+    const kawaiiSub  = await getKawaiiSubForSource(anilistId, ep);
+    const fallbackSub = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
+    const chosenSub  = kawaiiSub || fallbackSub;
+    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 18, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(chosenSub ? { subtitleUrl: chosenSub } : {}) }];
   } catch (err) { console.error("[vidlink_anim] error:", err); return []; }
 }
 
@@ -6022,8 +6052,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
       // scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
-      scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep),  false),
-      scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep),  false),
+      scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep, anilistId),  false),
+      scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep, anilistId),  false),
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
       scrapeCached("vyla_anim",     () => getVylaAnimeSources(title, english, ep),     false),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
@@ -7469,47 +7499,49 @@ router.get("/anime/seg-proxy", async (req, res) => {
 //  ANIMEWITCHER CATALOG — قائمة أنمي ويتشر المتاحة (مع AniList IDs)
 // ══════════════════════════════════════════════════════════════════
 const AW_CATALOG_CACHE: { ts: number; items: any[] } = { ts: 0, items: [] };
-const AW_CATALOG_TTL = 15 * 60_000; // 15 دقيقة
+const AW_CATALOG_TTL  = 60 * 60_000; // 1 ساعة
+let   awCatalogBuilding = false;
+
+// يبني الكتالوج من HF Space عبر بحث أحرف a-z + كلمات يابانية شائعة
+async function buildAWCatalog(): Promise<void> {
+  if (awCatalogBuilding) return;
+  awCatalogBuilding = true;
+  try {
+    const seen = new Map<string, any>();
+    const queries = [
+      ..."abcdefghijklmnopqrstuvwxyz".split(""),
+      "no", "wo", "wa", "ga", "de", "ni", "mo", "to", "ka",
+      "shin", "dai", "ima", "ore", "hana", "kimi", "sekai", "ova", "movie",
+    ];
+    for (const q of queries) {
+      try {
+        const r = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
+          headers: BASE_HDRS, signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) continue;
+        const data = await r.json() as { hits?: Array<{ id: string; name: string; type?: string; poster?: string }> };
+        for (const h of data.hits ?? []) {
+          if (!seen.has(h.id)) {
+            seen.set(h.id, { id: h.id, name: h.name, type: h.type || "", poster: h.poster || "" });
+          }
+        }
+      } catch { /* تخطّى الاستعلام الفاشل */ }
+      await new Promise(res => setTimeout(res, 120)); // تأخير خفيف لتجنب rate-limit
+    }
+    if (seen.size > 0) {
+      AW_CATALOG_CACHE.items = Array.from(seen.values());
+      AW_CATALOG_CACHE.ts    = Date.now();
+    }
+  } finally { awCatalogBuilding = false; }
+}
 
 async function fetchAWCatalog(): Promise<any[]> {
   if (Date.now() - AW_CATALOG_CACHE.ts < AW_CATALOG_TTL && AW_CATALOG_CACHE.items.length) {
     return AW_CATALOG_CACHE.items;
   }
-  try {
-    // قراءة عامة بدون مصادقة (Firestore public read) — جلب الكتالوج كاملاً بدون حد للصفحات
-    const all: any[] = [];
-    let pageToken: string | undefined;
-    do {
-      const url = `${AW_FS_BASE}/anime_list?pageSize=300${pageToken ? `&pageToken=${pageToken}` : ""}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-      if (!r.ok) break;
-      const data: any = await r.json();
-      (data.documents || []).forEach((doc: any) => {
-        const f  = doc.fields || {};
-        const id = doc.name?.split("/").pop() || "";
-        const al = f.aniList_id?.stringValue || "";
-        if (!al || al === "undefined") return;
-        // poster: قد يكون mapValue أو stringValue مباشرة
-        const poster =
-          f.poster?.mapValue?.fields?.large?.stringValue ||
-          f.poster?.mapValue?.fields?.medium?.stringValue ||
-          f.poster_uri?.stringValue ||
-          f.poster?.stringValue || "";
-        all.push({
-          name   : id.trim(),
-          anilist: al,
-          type   : f.type?.stringValue || "",
-          poster,
-          arLink : f.ar_link?.stringValue || "",
-        });
-      });
-      pageToken = data.nextPageToken || undefined;
-    } while (pageToken);
-
-    AW_CATALOG_CACHE.ts = Date.now();
-    AW_CATALOG_CACHE.items = all;
-    return all;
-  } catch { return []; }
+  // ابدأ البناء في الخلفية وأرجع ما هو متاح الآن
+  buildAWCatalog().catch(() => {});
+  return AW_CATALOG_CACHE.items;
 }
 
 /* ─── Multi-source subtitle search ──────────────────────────────────────────
@@ -7702,5 +7734,8 @@ router.get("/anime/animewitcher-catalog", async (req, res) => {
     res.status(500).json({ error: e?.message });
   }
 });
+
+// ── بناء كتالوج AnimeWitcher في الخلفية عند إقلاع السيرفر ──
+buildAWCatalog().catch(() => {});
 
 export default router;
