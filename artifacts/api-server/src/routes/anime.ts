@@ -667,7 +667,9 @@ async function extractVideoDeep(
           url.includes("uqload.is") || url.includes("uqload.co") ||
           url.includes("voe.sx") || url.includes("vidoza.net") ||
           url.includes("bigwarp.io") || url.includes("forafile.com") ||
-          url.includes("anafast.com") || url.includes("listeamed.net")) {
+          url.includes("anafast.com") || url.includes("listeamed.net") ||
+          url.includes("fastvip.space") || url.includes("streamup.ws") ||
+          url.includes("mxdrop.to")) {
         const v = parseStreamwish(html); if (v) return v;
       }
       if (url.includes("share4max.com/iframe/") || url.includes("megamax.me/iframe/")) {
@@ -3130,14 +3132,14 @@ const A4UP2_BASE = "https://w1.anime4up.rest";
 const a4up2SeriesCache = new Map<string, { url: string | null; ts: number }>();
 const a4up2SrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function a4up2Fetch(url: string): Promise<string> {
+async function a4up2Fetch(url: string, timeoutMs = 7000): Promise<string> {
   // anime4up returns HTTP 404 for valid episode pages (WP quirk) → must not check r.ok
   try {
     const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
     proxyUrl.searchParams.set("url", url);
     proxyUrl.searchParams.set("ref", `${A4UP2_BASE}/`);
-    proxyUrl.searchParams.set("timeout", "16");
-    const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(20000) });
+    proxyUrl.searchParams.set("timeout", String(Math.floor(timeoutMs / 1000)));
+    const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(timeoutMs + 1500) });
     const cfBlocked = r.headers.get("x-cf-blocked") === "1";
     if (cfBlocked) return "";
     return await r.text();          // accept 404 — content is still valid
@@ -3216,22 +3218,24 @@ async function getAnime4up2Sources(
     return srcs.length ? srcs : null;
   }
 
-  // ── FAST PATH: try direct URL construction first (1 request, no series page needed) ──
-  // anime4up has two episode URL formats:
-  //   OLD: /episode/{english-slug}-الحلقة-{N}/          (e.g. one-piece-الحلقة-1127)
-  //   NEW: /episode/انمي-{ar-slug}-{en-slug}-الحلقة-{N}-مترجمة/
-  // We try several variants in parallel first — if any hit, return immediately.
+  // ── START SEARCH IMMEDIATELY (runs in parallel with fast path) ──
+  // This avoids the 7s fast-path wait before search can begin.
+  const searchPromise = searchAnime4up2(title, english);
+
+  // ── FAST PATH: try direct URL construction (old format slug-الحلقة-N) ──
+  // Old format still works for most anime on w1.anime4up.rest.
+  // Each request has a 7s timeout (previously 20s), so parallel runs cost at most 7s.
   const fastCandidates: string[] = [];
+  const seenSlugs = new Set<string>();
   for (const q of [english, title].filter(Boolean) as string[]) {
     const slug = toSlug(q as string);
-    if (!slug) continue;
-    // Old format (most common for single-word titles)
+    if (!slug || seenSlugs.has(slug)) continue;
+    seenSlugs.add(slug);
     fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr)}/`);
     fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجمة")}/`);
-    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجم")}/`);
   }
 
-  // Try fast candidates in parallel
+  // Try fast candidates in parallel (7s timeout each)
   if (fastCandidates.length > 0) {
     const fastResults = await Promise.allSettled(
       fastCandidates.map(url => fetchEpSources(url))
@@ -3244,8 +3248,8 @@ async function getAnime4up2Sources(
     }
   }
 
-  // ── SLOW PATH: search → series page → find episode ──
-  const seriesUrl = await searchAnime4up2(title, english);
+  // ── SLOW PATH: use already-running search → series page → find episode ──
+  const seriesUrl = await searchPromise;
   if (!seriesUrl) {
     a4up2SrcCache.set(ck, { sources: [], ts: Date.now() });
     return [];
@@ -3375,7 +3379,7 @@ async function getMyCimaSources(
   for (const term of searchTerms) {
     const apiUrl = `${MYCIMA_BASE}/wp-json/wp/v2/posts?search=${term}&per_page=8&_fields=id,link,title`;
     try {
-      const resp = await cfProxyGet(apiUrl, undefined, 8000);
+      const resp = await cfProxyGet(apiUrl, undefined, 14000);
       if (!resp) continue;
       let posts: Array<{ id: number; link: string; title: { rendered: string } }> = [];
       try { posts = JSON.parse(resp); } catch { continue; }
@@ -3405,7 +3409,7 @@ async function getMyCimaSources(
   if (!postUrl) return cache([]);
 
   // ── Fetch the post page and extract data-watch servers ──
-  const pageHtml = await cfProxyGet(postUrl, undefined, 10000);
+  const pageHtml = await cfProxyGet(postUrl, undefined, 12000);
   if (!pageHtml || isCloudflareBlock(pageHtml)) return cache([]);
   if (!pageHtml.includes("data-watch")) return cache([]);
 
@@ -6464,7 +6468,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  SCRAPER_MS, [])); break;
+      case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  25000, [])); break;
       case "mycima":       await runExtract(await race(getMyCimaSources(title, english, ep, isMovie), 30000, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
