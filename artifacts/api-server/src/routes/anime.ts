@@ -4123,111 +4123,112 @@ async function getAnimePaheSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  ANIMEWITCHER (Firebase Firestore) — مصدر ياباني + عربي
-//  يستخدم قاعدة بيانات Firebase Firestore خاصة بتطبيق AnimeWitcher
-//  البنية: anime_list/{name}/episodes/{001}/servers/{id}
-//  يستعلم بـ aniList_id (string) ← يُعيد روابط Streamtape + Pixeldrain
-//  الوصول: قراءة عامة بدون مصادقة (Firestore rules تسمح بـ public read)
+//  ANIMEWITCHER — API جديد على Hugging Face Space (يوليو 2025)
+//  Base: https://1we323-witcher.hf.space
+//  Flow:
+//    1. GET /api/search?q={title}  → [{id, name, poster, type}]
+//    2. GET /api/episodes?id={id}  → [{id, name, num}]
+//    3. GET /api/servers_resolved?anime={id}&ep={epId}
+//         → [{name, url, proxy_url, quality, lang, playable}]
+//  المزايا: روابط مباشرة جاهزة، حقل playable يُصفّي الميتة،
+//           بحث بالاسم (لا حاجة لـ AniList ID)، 1000+ أنمي
 // ════════════════════════════════════════════════════════════════════
-const AW_FS_BASE = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
+const AW_HF_BASE = "https://1we323-witcher.hf.space";
 
 async function getAnimeWitcherSources(
-  _title: string, _english: string | null, ep: number, anilistId?: number,
+  title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
-  if (!anilistId) return [];
   try {
-    // 1. ابحث عن الأنمي بالـ AniList ID (مخزّن كـ string) — الوصول العام بدون auth
-    const queryR = await fetch(`${AW_FS_BASE}:runQuery`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        structuredQuery: {
-          from: [{ collectionId: "anime_list" }],
-          where: { fieldFilter: { field: { fieldPath: "aniList_id" }, op: "EQUAL", value: { stringValue: String(anilistId) } } },
-          limit: 1,
-        }
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!queryR.ok) return [];
-    const queryData = await queryR.json() as Array<{ document?: { name: string } }>;
-    const docPath = queryData?.[0]?.document?.name;
-    if (!docPath) return [];
-    const animeName = docPath.split("/").pop();
-    if (!animeName) return [];
+    // 1. بحث بالعنوان — نحاول romaji أولاً ثم english
+    const queries = [title, english].filter(Boolean) as string[];
+    let animeId: string | null = null;
 
-    // 2. احصل على الـ servers للحلقة (3 أرقام مع صفر بادئ)
-    const epPadded = String(ep).padStart(3, "0");
-    const encName  = encodeURIComponent(animeName);
-    const srvR = await fetch(`${AW_FS_BASE}/anime_list/${encName}/episodes/${epPadded}/servers?pageSize=20`, {
-      signal: AbortSignal.timeout(10000),
+    for (const q of queries) {
+      const searchR = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
+        headers: BASE_HDRS,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!searchR.ok) continue;
+      const searchData = await searchR.json() as { hits?: Array<{ id: string; name: string; type?: string }> };
+      const hits = searchData.hits || [];
+      if (!hits.length) continue;
+
+      const sorted = hits.map(h => ({ ...h, score: titleSimilarity(q, h.name) }))
+        .sort((a, b) => b.score - a.score);
+      const best = sorted[0];
+      if (best && best.score >= 0.35) { animeId = best.id; break; }
+    }
+    if (!animeId) return [];
+
+    // 2. احصل على قائمة الحلقات واستخرج معرف الحلقة المطلوبة
+    const epsR = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(animeId)}`, {
+      headers: BASE_HDRS,
+      signal: AbortSignal.timeout(8000),
     });
+    if (!epsR.ok) return [];
+    const epsData = await epsR.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
+    const episodes = epsData.episodes || [];
+
+    const epObj = episodes.find(e => Math.round(e.num) === ep)
+      || episodes.find(e => Math.abs(e.num - ep) < 0.6);
+    if (!epObj) return [];
+
+    // 3. احصل على الـ servers المحلولة
+    const srvR = await fetch(
+      `${AW_HF_BASE}/api/servers_resolved?anime=${encodeURIComponent(animeId)}&ep=${encodeURIComponent(epObj.id)}`,
+      { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) },
+    );
     if (!srvR.ok) return [];
-    const srvData = await srvR.json() as { documents?: Array<{ fields?: Record<string, { stringValue?: string; booleanValue?: boolean }> }> };
-    if (!srvData.documents?.length) return [];
+    const srvData = await srvR.json() as {
+      servers?: Array<{ name: string; url: string; proxy_url: string; quality: string; lang: string; playable: boolean }>;
+    };
+    const servers = (srvData.servers || []).filter(s => s.playable && s.url);
+    if (!servers.length) return [];
 
     const sources: UnifiedSource[] = [];
 
-    await Promise.allSettled(srvData.documents.map(async (doc) => {
-      const f       = doc.fields || {};
-      const srvName = f.name?.stringValue || "";
-      const quality = f.quality?.stringValue || "720p";
-      const link    = f.link?.stringValue || "";
-      const visible = f.visible?.booleanValue !== false;
-      if (!link || !visible || !srvName) return;
-
-      const qRank = quality === "1080p" ? 22 : quality === "720p" ? 21 : 20;
-      const qLabel = quality === "1080p" ? "FHD 1080p" : quality === "720p" ? "HD 720p" : quality;
+    for (const srv of servers) {
+      const q = srv.quality || "720p";
+      const qRank = q === "1080p" ? 22 : q === "720p" ? 21 : q === "480p" ? 10 : 5;
+      const qLabel = q === "1080p" ? "FHD 1080p" : q === "720p" ? "HD 720p" : q;
+      const srvName = srv.name.toUpperCase();
 
       if (srvName === "PD") {
-        // Pixeldrain: https://pixeldrain.com/u/{id} → API مباشر
-        const pdId = link.split("/").pop();
-        if (!pdId || pdId.length < 4) return;
-        const apiUrl = `https://pixeldrain.com/api/file/${pdId}`;
-        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(apiUrl)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
-        sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: link, quality, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+        // Pixeldrain: url = https://pixeldrain.com/api/file/{id}?download
+        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(srv.url)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
+        sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+
+      } else if (srvName === "MF") {
+        // MediaFire: url = download CDN مباشر (download2xxx.mediafire.com)
+        const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(srv.url)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`;
+        sources.push({ name: `AnimeWitcher · ${qLabel} · MF`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
 
       } else if (srvName === "ST") {
-        // Streamtape: احصل على الصفحة وحلّل رابط الفيديو المباشر
         try {
-          const stHtml = await fetch(link, {
+          const stHtml = await fetch(srv.url, {
             headers: { ...BASE_HDRS, Referer: "https://streamtape.com/" },
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(8000),
           }).then(r => r.ok ? r.text() : "").catch(() => "");
           const stResult = parseStreamtape(stHtml);
           if (stResult) {
             const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(stResult.url)}&ref=${encodeURIComponent("https://streamtape.com/")}`;
-            sources.push({ name: `AnimeWitcher · ${qLabel} · ST`, url: link, quality, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
+            sources.push({ name: `AnimeWitcher · ${qLabel} · ST`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
           }
         } catch {}
 
       } else if (srvName === "VT") {
-        // VidTube: استخراج الرابط المباشر عبر extractVideoDeep
         try {
-          const vtRef = link.includes("vidtube") ? "https://vidtube.xyz/" : link;
-          const vtResult = await extractVideoDeep(link, vtRef);
+          const vtResult = await extractVideoDeep(srv.url, srv.url);
           if (vtResult) {
             const directUrl = vtResult.type === "hls"
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`
-              : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(link)}`;
-            sources.push({ name: `AnimeWitcher · ${qLabel} · VT`, url: link, quality, qualityRank: qRank, site: "animewitcher", directUrl, directType: vtResult.type });
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(srv.url)}`
+              : `/api/anime/video-proxy?url=${encodeURIComponent(vtResult.url)}&ref=${encodeURIComponent(srv.url)}`;
+            sources.push({ name: `AnimeWitcher · ${qLabel} · VT`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl, directType: vtResult.type });
           }
-        } catch { /* skip VT on error */ }
-
-      } else if (srvName === "MF") {
-        // MediaFire: استخراج رابط التحميل المباشر عبر extractMediafireDirect
-        try {
-          const mfDirect = await extractMediafireDirect(link);
-          if (mfDirect) {
-            const directUrl = `/api/anime/video-proxy?url=${encodeURIComponent(mfDirect)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`;
-            sources.push({ name: `AnimeWitcher · ${qLabel} · MF`, url: link, quality, qualityRank: qRank, site: "animewitcher", directUrl, directType: "mp4" });
-          }
-        } catch { /* skip MF on error */ }
-
-      } else if (srvName === "KF") {
-        // KrakenFiles: Cloudflare 502 من Replit → يُتخطى تلقائياً
+        } catch {}
       }
-    }));
+      // KF (KrakenFiles): دائماً playable=false من الـ API → لا يصل هنا
+    }
 
     return sources;
   } catch { return []; }
