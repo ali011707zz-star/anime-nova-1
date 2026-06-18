@@ -2809,6 +2809,35 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
+      scrapeAnimCached("topcinemaa_anim", async () => {
+        const q = enTitlePrefetched || title;
+        if (!q) return;
+        try {
+          send("status", { msg: "توب سيما: جاري البحث…" });
+          const ep      = type === "movie" ? 1 : epNum;
+          const isMovie = type === "movie" ? "true" : "false";
+          const PORT    = process.env["PORT"] || "8080";
+          const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=topcinemaa`
+            + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMovie}`;
+          const r = await fetch(fsUrl, {
+            headers: { "x-internal": "1" },
+            signal: AbortSignal.timeout(25_000),
+          });
+          if (!r.ok) return;
+          const { sources } = await r.json() as {
+            sources?: Array<{ directUrl?: string; url?: string; name?: string; qualityRank?: number }>;
+          };
+          for (const src of sources || []) {
+            const u = src.directUrl || src.url;
+            if (!u) continue;
+            const proxied = u.startsWith("/api/") ? u
+              : u.includes(".m3u8") ? wrapHls(u, "https://web.topcinemaa.com/")
+              : wrapMp4(u, "https://web.topcinemaa.com/");
+            sendSource(proxied, src.name || "توب سيما · عربي مترجم", proxied, proxied);
+          }
+        } catch { /* silent */ }
+      }),
+
     ]);
 
     clearTimeout(forceClose);
