@@ -225,7 +225,6 @@ export default function Home() {
   const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
   const [animationTv, setAnimationTv] = useState<any[]>([]);
-  const [newsItems, setNewsItems] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>(_cachedTodayEps || []);
   const [todayChecking, setTodayChecking] = useState(false);
@@ -246,10 +245,6 @@ export default function Home() {
       .then(r => r.json())
       .then(d => setAnimationTv((d.results || []).slice(0, 10)))
       .catch(() => {});
-    fetch("https://graphql.anilist.co", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: `query { Page(perPage: 8) { media(type: ANIME, sort: TRENDING_DESC, status: RELEASING, countryOfOrigin: "JP", isAdult: false) { id title { romaji } coverImage { large } bannerImage averageScore nextAiringEpisode { episode airingAt } genres popularity } } }` }),
-    }).then(r => r.json()).then(d => setNewsItems(d.data?.Page?.media || [])).catch(() => {});
   }, []);
 
   /* Load Spring 2026 seasonal anime */
@@ -1248,87 +1243,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── الأخبار ── */}
-      {newsItems.length > 0 && !selectedGenre && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
-                style={{ background: "linear-gradient(135deg,#f43f5e,#e11d48)" }}>
-                <span className="text-white text-[14px] leading-none">📰</span>
-              </div>
-              <div>
-                <h2 className="text-[14px] font-black font-['Cairo'] text-white leading-none">الأخبار</h2>
-                <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">آخر أخبار الأنمي وأحدث الإصدارات</p>
-              </div>
-            </div>
-            <Link href="/news">
-              <button className="text-[10px] text-rose-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-rose-500/8 px-2.5 py-1 rounded-xl border border-rose-500/15">
-                الكل <ChevronLeft className="w-3 h-3" />
-              </button>
-            </Link>
-          </div>
-          <div className="space-y-2.5 px-4">
-            {newsItems.slice(0, 6).map((item: any, i: number) => {
-              const nextEp = item.nextAiringEpisode;
-              const timeLeft = nextEp ? nextEp.airingAt - Math.floor(Date.now() / 1000) : 0;
-              const hoursLeft = Math.floor(timeLeft / 3600);
-              const daysLeft = Math.floor(timeLeft / 86400);
-              const timeStr = timeLeft <= 0 ? "بث مؤخراً" : daysLeft > 0 ? `بعد ${daysLeft} يوم` : `بعد ${hoursLeft} ساعة`;
-              return (
-                <Link key={item.id} href={`/anime/${item.id}`}>
-                  <motion.div
-                    initial={{ opacity: 0, x: 16 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    whileTap={{ scale: 0.97 }}
-                    className="flex items-center gap-3 p-3 rounded-2xl cursor-pointer"
-                    style={{ background: "rgba(244,63,94,0.05)", border: "1px solid rgba(244,63,94,0.12)" }}
-                  >
-                    <div className="relative shrink-0 w-14 h-[76px] rounded-xl overflow-hidden">
-                      <img src={item.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md"
-                          style={{ background: "rgba(244,63,94,0.18)", color: "#fb7185", border: "1px solid rgba(244,63,94,0.25)" }}>
-                          يُبث الآن
-                        </span>
-                        {(item.genres || []).slice(0, 1).map((g: string) => (
-                          <span key={g} className="text-[7px] font-bold text-white/30 bg-white/5 px-1.5 py-0.5 rounded-md">{g}</span>
-                        ))}
-                      </div>
-                      <p className="text-[12px] font-black text-white line-clamp-1 font-['Cairo'] leading-snug">{item.title?.romaji}</p>
-                      {nextEp && (
-                        <p className="text-[10px] text-white/50 font-['Cairo'] mt-0.5">
-                          الحلقة {nextEp.episode} · <span className="text-rose-400/80 font-black">{timeStr}</span>
-                        </p>
-                      )}
-                      {item.averageScore > 0 && (
-                        <div className="flex items-center gap-1 mt-1.5">
-                          <Star className="w-2.5 h-2.5 text-yellow-400 fill-yellow-400" />
-                          <span className="text-[9px] text-yellow-400 font-black">{(item.averageScore / 10).toFixed(1)}</span>
-                          <span className="text-[8px] text-white/20 font-['Cairo']">· {(item.popularity || 0).toLocaleString()} مشاهد</span>
-                        </div>
-                      )}
-                    </div>
-                    <ChevronLeft className="w-4 h-4 text-white/20 shrink-0" />
-                  </motion.div>
-                </Link>
-              );
-            })}
-          </div>
-          <div className="px-4 mt-3">
-            <Link href="/news">
-              <button className="w-full py-3 rounded-2xl text-[12px] font-black font-['Cairo'] flex items-center justify-center gap-2"
-                style={{ background: "rgba(244,63,94,0.08)", border: "1px solid rgba(244,63,94,0.18)", color: "#fb7185" }}>
-                <span>📰</span> عرض كل الأخبار
-              </button>
-            </Link>
-          </div>
-        </div>
-      )}
 
       {/* ── Popular grid ── */}
       <div className="mt-6 px-4">
