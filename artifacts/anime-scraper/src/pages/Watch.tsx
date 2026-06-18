@@ -155,6 +155,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS" },
   // ── عربي مترجم (w1.anime4up.rest) ───────────────────────────────
   { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U" },
+  // ── ماي سيما / وي سيما ───────────────────────────────────────────
+  { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC" },
   // ── 1080p مباشر (Anime-Phoenix) ───────────────────────────────────
   { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH" },
   // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────

@@ -60,6 +60,12 @@ export async function createApp(): Promise<Express> {
       req.socket.remoteAddress ||
       "unknown";
 
+    // السماح للطلبات الداخلية (من نفس السيرفر) بدون توكن
+    const isInternal =
+      req.headers["x-internal"] === "1" &&
+      (ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1");
+    if (isInternal) return next();
+
     // Rate limit: 120 طلب/دقيقة لكل IP
     if (!checkRateLimit(`src:${ip}`, 120, 60_000)) {
       res.status(429).json({ error: "Too many requests. Please slow down." });
