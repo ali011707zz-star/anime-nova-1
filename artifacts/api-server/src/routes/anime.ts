@@ -3120,6 +3120,191 @@ async function getAnime4upSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  Anime4up NEW (w1.anime4up.rest) — Arabic dubbed/subbed scraper
+//  Confirmed working via CF proxy (200). 13 servers per episode.
+//  Episode structure: <li data-watch="URL"><a>Name</a></li>
+//  Series page: shows latest 48 eps. Search: /?search_param=animes&s=
+// ════════════════════════════════════════════════════════════════════
+
+const A4UP2_BASE = "https://w1.anime4up.rest";
+const a4up2SeriesCache = new Map<string, { url: string | null; ts: number }>();
+const a4up2SrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function a4up2Fetch(url: string): Promise<string> {
+  // anime4up returns HTTP 404 for valid episode pages (WP quirk) → must not check r.ok
+  try {
+    const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
+    proxyUrl.searchParams.set("url", url);
+    proxyUrl.searchParams.set("ref", `${A4UP2_BASE}/`);
+    proxyUrl.searchParams.set("timeout", "16");
+    const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(20000) });
+    const cfBlocked = r.headers.get("x-cf-blocked") === "1";
+    if (cfBlocked) return "";
+    return await r.text();          // accept 404 — content is still valid
+  } catch { return ""; }
+}
+
+async function searchAnime4up2(title: string, english: string | null): Promise<string | null> {
+  const ck = `a4up2:${(title + "|" + (english ?? "")).toLowerCase()}`;
+  const hit = a4up2SeriesCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
+
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const html = await a4up2Fetch(`${A4UP2_BASE}/?search_param=animes&s=${encodeURIComponent(q as string)}`);
+    if (!html || isCloudflareBlock(html)) continue;
+
+    const candidates: Array<{ url: string; score: number }> = [];
+    // Confirmed structure: <a href="URL" class="overlay" aria-label="Title">
+    const cardRe = /<a\s+href="(https?:\/\/w1\.anime4up\.rest\/anime\/[^"]+)"\s+class="overlay"[^>]+aria-label="([^"]+)"/gi;
+    for (const m of html.matchAll(cardRe)) {
+      const url   = m[1];
+      const rawTitle = m[2].trim();
+      if (!rawTitle) continue;
+      const score = Math.max(
+        similarity(rawTitle, title),
+        english ? similarity(rawTitle, english) : 0,
+        asciiSimilarity(rawTitle, title),
+        english ? asciiSimilarity(rawTitle, english) : 0,
+      );
+      if (score > 0.28) candidates.push({ url, score });
+    }
+
+    if (candidates.length) {
+      candidates.sort((a, b) => b.score - a.score);
+      const best = candidates[0].url;
+      a4up2SeriesCache.set(ck, { url: best, ts: Date.now() });
+      return best;
+    }
+  }
+
+  a4up2SeriesCache.set(ck, { url: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnime4up2Sources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `a4up2:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}`;
+  const hit = a4up2SrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  const epStr = String(ep);
+
+  // Parse <li data-watch="URL"><a>Label</a></li> from episode page HTML
+  function parseDataWatch(html: string): UnifiedSource[] {
+    const sources: UnifiedSource[] = [];
+    const seenUrls = new Set<string>();
+    for (const m of html.matchAll(/<li[^>]*\sdata-watch=["'](https?:\/\/[^"']{5,})["'][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/gi)) {
+      const url = m[1].trim();
+      if (seenUrls.has(url)) continue;
+      seenUrls.add(url);
+      const label = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      sources.push({
+        name: `أنمي فور أب · ${label || "سيرفر"}`,
+        url, quality: "HD", qualityRank: 10, site: "anime4up2",
+      });
+    }
+    return sources;
+  }
+
+  // Fetch episode page and return its servers
+  async function fetchEpSources(epUrl: string): Promise<UnifiedSource[] | null> {
+    const html = await a4up2Fetch(epUrl);
+    if (!html || isCloudflareBlock(html)) return null;
+    if (!html.includes("data-watch")) return null;
+    const srcs = parseDataWatch(html);
+    return srcs.length ? srcs : null;
+  }
+
+  // ── FAST PATH: try direct URL construction first (1 request, no series page needed) ──
+  // anime4up has two episode URL formats:
+  //   OLD: /episode/{english-slug}-الحلقة-{N}/          (e.g. one-piece-الحلقة-1127)
+  //   NEW: /episode/انمي-{ar-slug}-{en-slug}-الحلقة-{N}-مترجمة/
+  // We try several variants in parallel first — if any hit, return immediately.
+  const fastCandidates: string[] = [];
+  for (const q of [english, title].filter(Boolean) as string[]) {
+    const slug = toSlug(q as string);
+    if (!slug) continue;
+    // Old format (most common for single-word titles)
+    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr)}/`);
+    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجمة")}/`);
+    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجم")}/`);
+  }
+
+  // Try fast candidates in parallel
+  if (fastCandidates.length > 0) {
+    const fastResults = await Promise.allSettled(
+      fastCandidates.map(url => fetchEpSources(url))
+    );
+    for (const r of fastResults) {
+      if (r.status === "fulfilled" && r.value && r.value.length) {
+        a4up2SrcCache.set(ck, { sources: r.value, ts: Date.now() });
+        return r.value;
+      }
+    }
+  }
+
+  // ── SLOW PATH: search → series page → find episode ──
+  const seriesUrl = await searchAnime4up2(title, english);
+  if (!seriesUrl) {
+    a4up2SrcCache.set(ck, { sources: [], ts: Date.now() });
+    return [];
+  }
+
+  const srHtml = await a4up2Fetch(seriesUrl);
+  if (!srHtml || isCloudflareBlock(srHtml)) {
+    a4up2SrcCache.set(ck, { sources: [], ts: Date.now() });
+    return [];
+  }
+
+  const epLinks: string[] = [];
+  for (const m of srHtml.matchAll(/href=["'](https?:\/\/w1\.anime4up\.rest\/episode\/[^"']+)["']/g)) {
+    if (!m[1].includes("/page/") && !epLinks.includes(m[1])) epLinks.push(m[1]);
+  }
+
+  // Find episode by number in decoded URL
+  for (const link of epLinks) {
+    try {
+      const decoded = decodeURIComponent(link);
+      if (new RegExp(`الحلقة-${epStr}[/-]`).test(decoded) ||
+          decoded.endsWith(`الحلقة-${epStr}/`) ||
+          decoded.endsWith(`الحلقة-${epStr}`)) {
+        const sources = await fetchEpSources(link);
+        if (sources && sources.length) {
+          a4up2SrcCache.set(ck, { sources, ts: Date.now() });
+          return sources;
+        }
+      }
+    } catch {}
+  }
+
+  // Construct URL from prefix pattern found in series page
+  if (epLinks.length > 0) {
+    for (const link of epLinks.slice(0, 2)) {
+      try {
+        const decoded = decodeURIComponent(link.replace(A4UP2_BASE + "/episode/", "").replace(/\/$/, ""));
+        const prefixM = decoded.match(/^([\s\S]+?)الحلقة-\d+/);
+        if (!prefixM) continue;
+        const prefix = prefixM[1];
+        for (const suffix of ["-مترجمة", "-مترجم", ""]) {
+          const candidate = `${A4UP2_BASE}/episode/${encodeURIComponent(prefix + "الحلقة-" + epStr + suffix)}/`;
+          const sources = await fetchEpSources(candidate);
+          if (sources && sources.length) {
+            a4up2SrcCache.set(ck, { sources, ts: Date.now() });
+            return sources;
+          }
+        }
+        break;
+      } catch {}
+    }
+  }
+
+  a4up2SrcCache.set(ck, { sources: [], ts: Date.now() });
+  return [];
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Animeify.net scraper (ani-cli-arabic API → FileMoon HLS + MediaFire MP4 + Mega embed)
 // ════════════════════════════════════════════════════════════════════
 let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
@@ -6046,6 +6231,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
       scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep, isMovie)),
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
+      scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
@@ -6167,6 +6353,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
+      case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
