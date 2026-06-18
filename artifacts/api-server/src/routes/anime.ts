@@ -3305,6 +3305,115 @@ async function getAnime4up2Sources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  MyCima / WeCima scraper (mycima.gives — WP-JSON + data-watch)
+//  ماي سيما: أنمي مترجم + أفلام + كرتون مدبلج
+//  Approach: WP-JSON search → episode post → data-watch servers → extractVideoDeep
+// ════════════════════════════════════════════════════════════════════
+const MYCIMA_BASE = "https://mycima.gives";
+
+const mycimaSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+/** Decode MyCima's custom player wrappers (mycima-my.com?mycimafsd=BASE64, mycima.cx/?wplvp=BASE64) */
+function decodeMyCimaWrap(url: string): string {
+  try {
+    const u = new URL(url);
+    const b64 = u.searchParams.get("mycimafsd") ?? u.searchParams.get("wplvp");
+    if (b64) {
+      const decoded = Buffer.from(b64, "base64").toString("utf-8");
+      if (decoded.startsWith("http")) return decoded;
+    }
+  } catch {}
+  return url;
+}
+
+/** Extract data-watch servers from a MyCima episode/movie page */
+function parseMyCimaDataWatch(html: string, siteName: string): UnifiedSource[] {
+  const sources: UnifiedSource[] = [];
+  const seen = new Set<string>();
+  for (const m of html.matchAll(/<li[^>]*\sdata-watch=["'](https?:\/\/[^"']{5,})["'][^>]*>([\s\S]*?)<\/li>/gi)) {
+    let url = m[1].trim();
+    const labelRaw = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    // Decode MyCima custom player wrappers
+    url = decodeMyCimaWrap(url);
+    if (seen.has(url)) continue;
+    seen.add(url);
+    sources.push({
+      name: `ماي سيما · ${labelRaw || "سيرفر"}`,
+      url, quality: "HD", qualityRank: 10, site: siteName,
+    });
+  }
+  return sources;
+}
+
+async function getMyCimaSources(
+  title: string, english: string | null, ep: number, isMovie = false,
+): Promise<UnifiedSource[]> {
+  const ck = `mycima:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${isMovie}`;
+  const hit = mycimaSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  const cache = (s: UnifiedSource[]) => { mycimaSrcCache.set(ck, { sources: s, ts: Date.now() }); return s; };
+
+  // ── Search WP-JSON for episode/movie post ──
+  // NOTE: cfProxyGet double-encodes URLs (searchParams.set + Flask decode once).
+  // Pass + for spaces (not %20) — %20 becomes %2520 through double-encode chain.
+  // Use ASCII-only search terms to avoid Arabic triple-encoding issues.
+  const epStr = String(ep);
+  const toWpSearch = (s: string) => s.replace(/\s+/g, "+").replace(/[^\x20-\x7E+]/g, "").replace(/\s/g, "+");
+
+  const searchTerms: string[] = [];
+  if (!isMovie) {
+    // Search by English title + episode number (no Arabic — avoids encoding issues)
+    if (english) searchTerms.push(toWpSearch(`${english} ${epStr}`));
+    searchTerms.push(toWpSearch(`${title} ${epStr}`));
+  } else {
+    if (english) searchTerms.push(toWpSearch(english));
+    searchTerms.push(toWpSearch(title));
+  }
+
+  let postUrl: string | null = null;
+  for (const term of searchTerms) {
+    const apiUrl = `${MYCIMA_BASE}/wp-json/wp/v2/posts?search=${term}&per_page=8&_fields=id,link,title`;
+    try {
+      const resp = await cfProxyGet(apiUrl, undefined, 8000);
+      if (!resp) continue;
+      let posts: Array<{ id: number; link: string; title: { rendered: string } }> = [];
+      try { posts = JSON.parse(resp); } catch { continue; }
+      if (!Array.isArray(posts) || posts.length === 0) continue;
+
+      for (const post of posts) {
+        const pTitle = post.title?.rendered ?? "";
+        const pTitleAscii = pTitle.replace(/[^\x20-\x7E]/g, " ").toLowerCase();
+        if (!isMovie) {
+          // Match episode number in post title
+          if (new RegExp(`الحلقة[-\\s]*${epStr}(?:[^\\d]|$)`).test(pTitle)) {
+            postUrl = post.link; break;
+          }
+        } else {
+          // For movies: check if ALL significant words from the search title appear in the post title
+          const queryWords = (english || title).toLowerCase()
+            .replace(/[^\x20-\x7E]/g, " ").split(/\s+/).filter(w => w.length >= 3);
+          const allMatch = queryWords.length > 0 && queryWords.every(w => pTitleAscii.includes(w));
+          const sim = titleSimilarity(english || title, pTitle);
+          if (allMatch || sim >= 0.38) { postUrl = post.link; break; }
+        }
+      }
+      if (postUrl) break;
+    } catch {}
+  }
+
+  if (!postUrl) return cache([]);
+
+  // ── Fetch the post page and extract data-watch servers ──
+  const pageHtml = await cfProxyGet(postUrl, undefined, 10000);
+  if (!pageHtml || isCloudflareBlock(pageHtml)) return cache([]);
+  if (!pageHtml.includes("data-watch")) return cache([]);
+
+  const sources = parseMyCimaDataWatch(pageHtml, "mycima");
+  return cache(sources);
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  Animeify.net scraper (ani-cli-arabic API → FileMoon HLS + MediaFire MP4 + Mega embed)
 // ════════════════════════════════════════════════════════════════════
 let _animeifyCreds: { base: string; token: string; ts: number } | null = null;
@@ -6232,6 +6341,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep, isMovie)),
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
       scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep)),
+      scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
@@ -6288,7 +6398,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   const ep        = parseInt((req.query.ep    as string) || "1");
   const anilistId = parseInt((req.query.anime as string) || "0") || undefined;
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
-  const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
+  const isMovieParam = (req.query.isMovie as string) === "true";
+  const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
@@ -6354,6 +6465,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  SCRAPER_MS, [])); break;
+      case "mycima":       await runExtract(await race(getMyCimaSources(title, english, ep, isMovie), 30000, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;

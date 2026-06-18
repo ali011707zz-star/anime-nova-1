@@ -2753,6 +2753,36 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // VixSrc (vixsrc.to) — محذوف: Next.js SPA، الـ API يعيد 404 من السيرفر (client-side only)
 
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
+      // ── MyCima / WeCima — أفلام وكرتون مترجم ──────────────────────────────
+      scrapeAnimCached("mycima_anim", async () => {
+        const q = enTitlePrefetched || title;
+        if (!q) return;
+        try {
+          send("status", { msg: "ماي سيما: جاري البحث…" });
+          const PORT    = process.env["PORT"] || "8080";
+          const ep      = type === "movie" ? 1 : epNum;
+          const isMovie = type === "movie" ? "true" : "false";
+          const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=mycima`
+            + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMovie}`;
+          const r = await fetch(fsUrl, {
+            headers: { "x-internal": "1" },
+            signal: AbortSignal.timeout(25_000),
+          });
+          if (!r.ok) return;
+          const { sources } = await r.json() as {
+            sources?: Array<{ directUrl?: string; url?: string; name?: string }>;
+          };
+          for (const src of sources || []) {
+            const u = src.directUrl || src.url;
+            if (!u) continue;
+            const proxied = u.startsWith("/api/") ? u
+              : u.includes(".m3u8") ? wrapHls(u, "https://mycima.gives/")
+              : u;
+            sendSource(proxied, src.name || "ماي سيما", proxied, proxied);
+          }
+        } catch { /* silent */ }
+      }),
+
       scrapeAnimCached("animephoenix", async () => {
         // AnimePhoenix هو موقع مسلسلات أنمي مدبلج فقط — لا يحتوي أفلام
         if (type === "movie") return;

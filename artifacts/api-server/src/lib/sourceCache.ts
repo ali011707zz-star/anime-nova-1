@@ -32,6 +32,8 @@ export const SITE_TTL: Record<string, number> = {
   animelek:      3 * 3_600_000,
   toonstream:  1.5 * 3_600_000,
   starcima:      6 * 3_600_000,
+  mycima:        4 * 3_600_000,
+  mycima_anim:   4 * 3_600_000,
   aflaam:       24 * 3_600_000,
   stardima:     12 * 3_600_000,
   vyla:          4 * 3_600_000,
