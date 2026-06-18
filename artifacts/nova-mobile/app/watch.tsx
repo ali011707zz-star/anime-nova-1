@@ -25,6 +25,7 @@ interface Src {
   url?: string; directUrl?: string; qualityRank?: number;
   label?: string; server?: string; quality?: string;
   site?: string; isEmbed?: boolean; subtitleUrl?: string;
+  corsOk?: boolean;     // CDN يدعم CORS * → تشغيل مباشر
   name?: string;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };

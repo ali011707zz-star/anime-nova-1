@@ -125,6 +125,7 @@ const QUALITY_LABELS: Quality[] = ["1080p FHD", "720p HD", "360p SD"];
 interface FetchedSrc {
   url: string; directUrl?: string; qualityRank?: number;
   name?: string; site?: string; isEmbed?: boolean;
+  corsOk?: boolean;     // CDN يدعم CORS * → تشغيل مباشر بدون proxy
   subtitleUrl?: string;
   hasBuiltinSub?: boolean;
 }
@@ -300,6 +301,13 @@ function getServerInfo(url: string, idx: number): ServerInfo {
   }
   if (url.includes("mp4upload.com")) {
     return { label: "MP4Upload", sublabel: "مباشر", isHls: true, isDirect: true };
+  }
+  // CORS * CDNs — تشغيل مباشر في المتصفح بدون proxy
+  if (url.includes("video.kawaii-anime.com")) {
+    return { label: "كواي CDN", sublabel: "مباشر · 1080p", isHls: false, isDirect: true };
+  }
+  if (url.includes("pixeldrain.com/api/file/")) {
+    return { label: "Pixeldrain CDN", sublabel: "مباشر · بدون proxy", isHls: false, isDirect: true };
   }
   if (url.includes("/video-proxy?")) {
     return { label: "مباشر", sublabel: "عربي · مباشر", isHls: true, isDirect: true };
