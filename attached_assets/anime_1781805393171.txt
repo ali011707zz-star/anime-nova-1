@@ -1,0 +1,135 @@
+async function extractDirectTopCinemaa(urlStr: string) {
+const watchUrl = urlStr.endsWith("/watch/") ? urlStr : ${urlStr.replace(//$/, "")}/watch/;
+const targetUrl = watchUrl.replace("topcinemaa.com", "web.topcinemaa.com");
+
+const res = await fetch(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+const html = await res.text();
+const doc = new DOMParser().parseFromString(html, "text/html");
+if (!doc) throw new Error("Failed to parse HTML");
+
+const iframes = Array.from(doc.querySelectorAll("iframe")).map(f => f.getAttribute("src")).filter(Boolean);
+const servers = iframes.map(src => {
+const name = src!.includes("vidtube") ? "VidTube" : src!.includes("mp4plus") ? "MP4Plus" : "Direct Server";
+return { name: ${name} (Direct), url: src!, type: "direct" };
+});
+
+return { success: true, source: "TopCinemaa (Direct)", servers };
+}
+
+async function extractDirectMyCima(urlStr: string) {
+const targetUrl = urlStr.replace(/(mycima.gives|wecima.cx|mycima.movie)/, "mycami.skin");
+const res = await fetch(targetUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+const html = await res.text();
+
+const albaplayerMatch = html.match(/https://w.aflamy.pro/albaplayer/[^\s"']+/);
+if (albaplayerMatch) {
+const albaRes = await fetch(albaplayerMatch[0], {
+headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://mycami.skin/" }
+});
+const albaHtml = await albaRes.text();
+
+// ??????? ??????? ??????? ???????? ??? VidSpeed ?? AnaFast ?????? ???  
+const iframeMatches = albaHtml.match(/https:\/\/(?:mp4plus|anafast|vidoba|vidspeed)\.cyou\/embed-[^\s"']+/g) || [];  
+const servers = [...new Set(iframeMatches)].map(u => {  
+  const name = u.includes("mp4plus") ? "MP4Plus" : u.includes("anafast") ? "AnaFast" : u.includes("vidoba") ? "Vidoba" : "VidSpeed";  
+  return { name: ${name} (Direct), url: u, type: "direct" };  
+});  
+  
+return { success: true, source: "MyCima (Direct)", playerUrl: albaplayerMatch[0], servers };
+
+}
+throw new Error("No player found on MyCima page");
+}
+
+async function extractDirectAnimedar(urlStr: string) {
+const res = await fetch(urlStr, { headers: { "User-Agent": "Mozilla/5.0" } });
+const html = await res.text();
+const doc = new DOMParser().parseFromString(html, "text/html");
+if (!doc) throw new Error("Failed to parse HTML");
+
+const listItems = doc.querySelectorAll("li[data][type]");
+const servers: any[] = [];
+for (const li of Array.from(listItems)) {
+const type = li.getAttribute("type") || "";
+const data = li.getAttribute("data") || "";
+const quality = li.getAttribute("quality-data") || "HD";
+const name = li.textContent?.trim() || type.toUpperCase();
+
+// ??? ??????? ???????? ?? 4shared ? ????????? ??????  
+if (type === "4shared") {  
+  servers.push({ name: ${name} (${quality}), url: https://www.4shared.com/web/embed/file/${data}, type: "direct" });  
+} else if (type === "mega") {  
+  servers.push({ name: ${name} (${quality}), url: https://mega.nz/embed#!${data}, type: "direct" });  
+}
+
+}
+return { success: true, source: "Animedar (Direct)", servers };
+}
+
+async function extractDirectShahiid(urlStr: string) {
+const res = await fetch(urlStr, { headers: { "User-Agent": "Mozilla/5.0" } });
+const html = await res.text();
+const doc = new DOMParser().parseFromString(html, "text/html");
+if (!doc) throw new Error("Failed to parse HTML");
+
+const buttons = doc.querySelectorAll(".movies-servers a.buttosn");
+const servers: any[] = [];
+for (const btn of Array.from(buttons)) {
+const name = btn.textContent?.trim() || "";
+const frameServer = btn.getAttribute("data-frameserver") || "";
+if (name.includes("Okru") && frameServer) {
+try {
+const okRes = await fetch(https://ok.ru/videoembed/${frameServer});
+const okHtml = await okRes.text();
+const okDoc = new DOMParser().parseFromString(okHtml, "text/html");
+const el = okDoc?.querySelector("[data-options]");
+const options = JSON.parse(el?.getAttribute("data-options") || "{}");
+const metadata = JSON.parse(options.flashvars?.metadata || "{}");
+(metadata.videos || []).forEach((vid: any) => {
+servers.push({ name: OkRu (${vid.name}), url: vid.url, type: "direct" });
+});
+} catch (_) {}
+}
+}
+return { success: true, source: "Shahiid Anime (Direct)", servers };
+}
+
+async function extractDirectKawaiiAnime(urlStr: string) {
+const matchId = urlStr.match(//watch/(\d+)/);
+const matchEp = urlStr.match(/[?&]num=(\d+)/);
+if (matchId && matchEp) {
+const directUrl = https://video.kawaii-anime.com/video/${matchId[1]}-ep${matchEp[1]}?v=1;
+return { success: true, source: "Kawaii Anime", url: directUrl, type: "direct" };
+}
+throw new Error("Invalid Kawaii Anime URL structure");
+}
+
+async function extractDirectAnimePhoenix(urlStr: string) {
+const res = await fetch(urlStr, {
+headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+});
+const html = await res.text();
+const doc = new DOMParser().parseFromString(html, "text/html");
+if (!doc) throw new Error("Failed to parse HTML");
+
+const servers: any[] = [];
+const elements = doc.querySelectorAll(".FJ-Server-Link.server-link");
+for (const el of elements) {
+const dataServer = el.getAttribute("data-server");
+if (dataServer) {
+try {
+const parsed = JSON.parse(decodeURIComponent(atob(dataServer)));
+// ???? ?????? ???? ??????? ???????? ???
+if (parsed.link && (parsed.type === "direct" || parsed.link.includes("workers.dev") || parsed.link.includes("drive"))) {
+servers.push({
+name: parsed.name || el.textContent?.trim() || "Direct Server",
+url: parsed.link,
+type: "direct"
+});
+}
+} catch (_) {}
+}
+}
+return { success: true, source: "Anime Phoenix (Direct Links)", servers };
+}
+
