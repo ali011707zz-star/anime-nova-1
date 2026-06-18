@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-pnpm install --frozen-lockfile
+pnpm install --no-frozen-lockfile
 
 # Run database migrations
 psql "$DATABASE_URL" -f supabase/migrations/001_all_tables.sql 2>/dev/null || true
