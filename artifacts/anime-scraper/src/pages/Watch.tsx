@@ -2876,21 +2876,17 @@ export default function WatchPage() {
     }
   }
 
-  /* ── Auto-fetch all sites on mount ── */
+  /* ── Auto-fetch: SSE sources-stream يشغّل كل المصادر بالتوازي في اتصال واحد ── */
   useEffect(() => {
     if (autoFetchedRef.current) return;
     if (!titleParam) return;
     autoFetchedRef.current = true;
-    let alive = true;
-    const ctrl = new AbortController();
-    const tids: ReturnType<typeof setTimeout>[] = [];
 
-    /* ── Quick-resume: inject last played source immediately (if recent) ── */
+    /* ── Quick-resume: حقن آخر مصدر فوراً إذا كان المستخدم يتابع من حيث توقف ── */
     if (animeId) {
       const savedProgress = parseFloat(localStorage.getItem(`wp-${animeId}-${ep}`) || "0");
       if (savedProgress > 30) {
         const lastSrc = loadLastSrc(animeId, ep);
-        /* Skip embed URLs (mega/vidmoly) — they cause iframe flicker then native-player takeover */
         if (lastSrc && !isIframeUrl(lastSrc.url)) {
           const resumeSrc: FetchedSrc = {
             url: lastSrc.url,
@@ -2905,50 +2901,61 @@ export default function WatchPage() {
       }
     }
 
-    SCRAPER_DEFS.forEach((def, i) => {
-      const tid = setTimeout(() => {
-        if (!alive) return;
-        (async () => {
-          if (!alive) return;
-          if (inFlightRef.current.has(def.site)) return;
-          inFlightRef.current.add(def.site);
-          if (alive) setSlotStatus(prev => ({ ...prev, [def.site]: "fetching" }));
-          try {
-            const params = new URLSearchParams({
-              site:    def.site,
-              title:   titleParam,
-              english: englishParam || "",
-              ep:      String(ep),
-              anime:   String(animeId || 0),
-              format:  anime?.format || sp.get("format") || "",
-            });
-            const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: ctrl.signal, headers: { "X-App-Token": await getAppToken() } });
-            const data = await r.json() as { sources?: FetchedSrc[] };
-            const srcs: FetchedSrc[] = data.sources || [];
-            if (!alive) return;
-            if (srcs.length > 0) {
-              setSlotSources(prev => ({ ...prev, [def.site]: srcs }));
-              setSlotStatus(prev => ({ ...prev, [def.site]: "ready" }));
-            } else {
-              setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
-            }
-          } catch {
-            if (alive) {
-              setSlotStatus(prev => ({ ...prev, [def.site]: "failed" }));
-            }
-          } finally {
-            inFlightRef.current.delete(def.site);
-          }
-        })();
-      }, i * 50);
-      tids.push(tid);
+    /* ── ضع كل المصادر في حالة "fetching" فوراً ── */
+    setSlotStatus(prev => {
+      const next = { ...prev };
+      SCRAPER_DEFS.forEach(d => { next[d.site] = "fetching"; });
+      return next;
     });
 
-    return () => {
-      alive = false;
-      tids.forEach(clearTimeout);
-      ctrl.abort();
+    /* ── تجميع المصادر لكل موقع ── */
+    const accumulated: Record<string, FetchedSrc[]> = {};
+
+    const markAllDone = () => {
+      setSlotStatus(prev => {
+        const next = { ...prev };
+        SCRAPER_DEFS.forEach(d => {
+          if (next[d.site] === "fetching") next[d.site] = "failed";
+        });
+        return next;
+      });
     };
+
+    const params = new URLSearchParams({
+      title:   titleParam,
+      english: englishParam || "",
+      ep:      String(ep),
+      anime:   String(animeId || 0),
+      format:  sp.get("format") || "",
+    });
+
+    /* ── اتصال SSE واحد — كل المصادر تأتي منه تلقائياً ── */
+    const evtSrc = new EventSource(`/api/anime/sources-stream?${params}`);
+
+    evtSrc.onmessage = (e: MessageEvent) => {
+      const raw: string = e.data;
+      if (raw === "[DONE]") {
+        evtSrc.close();
+        markAllDone();
+        return;
+      }
+      try {
+        const src = JSON.parse(raw) as FetchedSrc;
+        if (!src.site) return;
+        const site = src.site;
+        if (!accumulated[site]) accumulated[site] = [];
+        accumulated[site].push(src);
+        setSlotSources(prev => ({ ...prev, [site]: accumulated[site] }));
+        setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+      } catch {}
+    };
+
+    evtSrc.onerror = () => {
+      evtSrc.close();
+      markAllDone();
+    };
+
+    return () => { evtSrc.close(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
