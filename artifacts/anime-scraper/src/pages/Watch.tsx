@@ -1351,7 +1351,7 @@ function EpisodePlayer({
   title, epTitle, cover, ep, totalEps, animeTitle, animeId,
   userId,
   initialServer, downloadUrl, subtitleUrl, subtitleSite, skipTimes,
-  onBack, onNextEp, onPrevEp, onChangeQuality, onTierExhausted,
+  onBack, onNextEp, onPrevEp, onEpisodeSelect, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
   title: string; epTitle?: string; cover: string; ep: number; totalEps: number; animeTitle: string;
@@ -1359,6 +1359,7 @@ function EpisodePlayer({
   userId?: string | null;
   initialServer?: number; downloadUrl?: string; subtitleUrl?: string; subtitleSite?: string; skipTimes?: SkipTimes;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
+  onEpisodeSelect?: (ep: number) => void;
   onChangeQuality: (q: Quality) => void;
   onTierExhausted?: () => void;
 }) {
@@ -2170,6 +2171,7 @@ function EpisodePlayer({
               onBack={onBack}
               onPrevEp={onPrevEp}
               onNextEp={onNextEp}
+              onEpisodeSelect={onEpisodeSelect}
               onRealQuality={handleRealQuality}
               onTimeUpdate={handleHlsTime}
               onFail={tryNextServer}
@@ -3235,6 +3237,7 @@ export default function WatchPage() {
           onBack={handleBack}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
           onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
+          onEpisodeSelect={n => { handleBack(); setTimeout(() => goEp(n), 80); }}
           onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
           userId={userId}
           onTierExhausted={() => { setShowPicker(true); setPhase("picker"); }}
