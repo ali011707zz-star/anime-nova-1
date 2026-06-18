@@ -47,7 +47,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=5000 BASE_PATH=/ artifacts/anime-scraper/node_modules/.bin/vite --config artifacts/anime-scraper/vite.config.ts --host 0.0.0.0"
+args = "PORT=5000 node --enable-source-maps artifacts/api-server/dist/index.mjs"
 waitForPort = 5000
 
 [[workflows.workflow]]
@@ -71,7 +71,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pip install flask curl_cffi -q && CF_PROXY_PORT=8000 python3.11 scripts/cf_proxy.py"
+args = "CF_PROXY_PORT=8000 python3.11 scripts/cf_proxy.py"
 waitForPort = 8000
 
 [[workflows.workflow]]
@@ -116,10 +116,6 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 8082
-externalPort = 3001
-
-[[ports]]
 localPort = 8099
 externalPort = 8099
 
@@ -146,6 +142,10 @@ externalPort = 3000
 [[ports]]
 localPort = 8080
 externalPort = 8080
+
+[[ports]]
+localPort = 8000
+externalPort = 8000
 
 [nix]
 channel = "stable-25_05"
