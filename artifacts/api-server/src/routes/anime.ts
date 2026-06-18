@@ -3771,6 +3771,44 @@ async function getKawaiiAnimeSources(
 }
 
 
+// ── GET /api/anime/kawaii-meta ──────────────────────────────────────
+// Returns Arabic subtitle URL + intro/outro skip times from kawaii.
+// Used by the frontend to enrich ALL sources (not just kawaii) so that
+// every source benefits from Arabic subtitles and skip-intro buttons.
+// ────────────────────────────────────────────────────────────────────
+router.get("/anime/kawaii-meta", async (req: Request, res: Response) => {
+  const anilistId = parseInt(req.query.anilistId as string || "0");
+  const ep        = parseInt(req.query.ep        as string || "1");
+  const empty = { arabicSubUrl: null, englishSubUrl: null, intro: null, outro: null };
+  if (!anilistId) return res.json(empty);
+  try {
+    const r = await fetch(`${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`, {
+      headers: { ...BASE_HDRS, Accept: "application/json", Referer: KAWAII_BASE + "/" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return res.json(empty);
+    const data = await r.json() as {
+      subtitles?: Array<{ url: string; lang?: string; label?: string }>;
+      intro?: { start: number; end: number };
+      outro?: { start: number; end: number };
+    };
+    const findSub = (tag: string) => data.subtitles?.find(s =>
+      (s.lang || s.label || "").toLowerCase().includes(tag)
+    );
+    const arEntry = findSub("arabic") || findSub("arab") || findSub("ar");
+    const enEntry = findSub("english") || findSub("en");
+    return res.json({
+      arabicSubUrl:  arEntry?.url || null,
+      englishSubUrl: enEntry?.url || null,
+      intro: data.intro  || null,
+      outro: data.outro  || null,
+    });
+  } catch {
+    return res.json(empty);
+  }
+});
+
+
 // ════════════════════════════════════════════════════════════════════
 //  ANIKOTO (via megaplay.buzz) — صوت ياباني + ترجمة إنجليزية → عربية
 //  يستخدم AniList ID مباشرة، لا حاجة للبحث عن slug

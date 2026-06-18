@@ -2594,6 +2594,7 @@ export default function WatchPage() {
   const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
   const [playerSubUrl, setPlayerSubUrl] = useState<string | undefined>(undefined);
   const [playerSrcSite, setPlayerSrcSite] = useState<string>("");
+  const [kawaiiSubUrl, setKawaiiSubUrl] = useState<string | undefined>(undefined);
 
   const autoFetchedRef    = useRef(false);
   const autoPlayedRef     = useRef(false);
@@ -2673,6 +2674,36 @@ export default function WatchPage() {
     if (animeId && titleParam) saveHistory(animeId, titleParam, coverParam, ep, 0, userId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  /* ── Fetch kawaii-meta: Arabic subtitle + intro/outro skip times ── */
+  useEffect(() => {
+    if (!animeId) return;
+    setKawaiiSubUrl(undefined);
+    const ctrl = new AbortController();
+    fetch(`/api/anime/kawaii-meta?anilistId=${animeId}&ep=${ep}`, { signal: ctrl.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: any) => {
+        if (!data) return;
+        // Subtitle: prefer Arabic, fallback to English → translate via server
+        const subUrl: string | undefined = data.arabicSubUrl
+          ? data.arabicSubUrl
+          : (data.englishSubUrl
+              ? `/api/anime/translate-vtt?url=${encodeURIComponent(data.englishSubUrl)}&from=en&to=ar`
+              : undefined);
+        if (subUrl) setKawaiiSubUrl(subUrl);
+        // Skip times: only fill gaps not already covered by aniskip/baha
+        if (data.intro || data.outro) {
+          setSkipTimes(prev => {
+            const next: SkipTimes = { ...prev };
+            if (!prev.op && data.intro) next.op = data.intro;
+            if (!prev.ed && data.outro) next.ed = data.outro;
+            return next;
+          });
+        }
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [animeId, ep]);
 
   /* Fetch AniList metadata + skip timestamps (aniskip + baha-skip) */
   useEffect(() => {
@@ -3190,7 +3221,7 @@ export default function WatchPage() {
           animeId={animeId}
           cover={cover} ep={ep} totalEps={totalEps}
           downloadUrl={playerDlUrl}
-          subtitleUrl={playerSubUrl}
+          subtitleUrl={playerSubUrl || kawaiiSubUrl}
           subtitleSite={playerSrcSite}
           skipTimes={skipTimes}
           onBack={handleBack}
