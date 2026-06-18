@@ -289,20 +289,37 @@ export default function WatchScreen() {
     return () => clearTimeout(timeout);
   }, [anime, ep]);
 
-  /* ── Subtitle tracks — fetch in background for sources without subtitleUrl ── */
+  /* ── kawaii-meta: Arabic subtitle + intro/outro skip times for ALL sources ── */
+  const [kawaiiSkip, setKawaiiSkip] = useState<{
+    intro?: { start: number; end: number };
+    outro?: { start: number; end: number };
+  } | null>(null);
+
   useEffect(() => {
     if (!anime || !ep) return;
+    const anilistId = parseInt(anime);
+    if (!anilistId) return;
     const base = getBaseUrl();
     const controller = new AbortController();
+    setKawaiiSkip(null);
     fetch(
-      `${base}/api/anime/subtitle-tracks?anilistId=${encodeURIComponent(anime)}&ep=${ep}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&season=1`,
+      `${base}/api/anime/kawaii-meta?anilistId=${anilistId}&ep=${ep}`,
       { signal: controller.signal }
     )
-      .then(r => r.json())
+      .then(r => r.ok ? r.json() : null)
       .then((data: any) => {
-        const tracks: any[] = data?.tracks || [];
-        const arTrack = tracks.find((t: any) => t.lang === "ar" || t.lang === "ar-auto");
-        if (arTrack?.url) setGlobalSubUrl(resolveUrl(arTrack.url, base));
+        if (!data) return;
+        // Arabic subtitle fallback for all sources
+        const subUrl: string | undefined = data.arabicSubUrl
+          ? resolveUrl(data.arabicSubUrl, base)
+          : (data.englishSubUrl
+              ? `${base}/api/anime/translate-vtt?url=${encodeURIComponent(data.englishSubUrl)}&from=en&to=ar`
+              : undefined);
+        if (subUrl) setGlobalSubUrl(subUrl);
+        // Skip times for all sources
+        if (data.intro || data.outro) {
+          setKawaiiSkip({ intro: data.intro || undefined, outro: data.outro || undefined });
+        }
       })
       .catch(() => {});
     return () => controller.abort();
@@ -473,8 +490,8 @@ export default function WatchScreen() {
         episodeTitle={etitle ? decodeURIComponent(etitle) : undefined}
         anilistId={anime ? Number(anime) : undefined}
         initialPosition={resumeTime}
-        skipIntro={playingSrc?.skipIntro}
-        skipOutro={playingSrc?.skipOutro}
+        skipIntro={playingSrc?.skipIntro || kawaiiSkip?.intro}
+        skipOutro={playingSrc?.skipOutro || kawaiiSkip?.outro}
         onBack={() => { saveProgress(); setScreen("picker"); }}
         onNextEpisode={() => goEp(epNum + 1)}
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
