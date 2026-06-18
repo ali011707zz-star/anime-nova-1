@@ -5938,9 +5938,14 @@ router.get("/anime/sources-stream", async (req, res) => {
     res.write(`data: ${JSON.stringify(toSend)}\n\n`);
   }
 
+  // ── Hard deadline: أغلق الاتصال بعد 28 ثانية مهما كان ──
+  const forceClose = setTimeout(() => {
+    if (!closed) { closed = true; res.write("data: [DONE]\n\n"); res.end(); }
+  }, 28_000);
+
   try {
-    const SCRAPER_MS = 12000;
-    const EXTRACT_MS = 15000;
+    const SCRAPER_MS = 7000;   // كان 12000 — تقليل وقت انتظار كل مصدر
+    const EXTRACT_MS = 7000;   // كان 15000 — تقليل وقت الاستخراج العميق
     const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
@@ -5949,9 +5954,11 @@ router.get("/anime/sources-stream", async (req, res) => {
     async function probeOwnProxy(s: UnifiedSource): Promise<boolean> {
       const cu = s.directUrl || s.url;
       if (!cu.startsWith("/api/")) return true; // روابط خارجية: نثق بها
+      // المصادر عبر hls-proxy / seg-proxy / video-proxy لا تحتاج probe — السيرفر يعالجها
+      if (cu.includes("/hls-proxy") || cu.includes("/seg-proxy") || cu.includes("/video-proxy")) return true;
       const localUrl = `http://127.0.0.1:${PORT_NUM}${cu}`;
       try {
-        const pr = await fetch(localUrl, { signal: AbortSignal.timeout(6_000) });
+        const pr = await fetch(localUrl, { signal: AbortSignal.timeout(3_000) }); // كان 6_000
         return pr.ok; // 200 أو 206
       } catch { return false; }
     }
@@ -6077,7 +6084,8 @@ router.get("/anime/sources-stream", async (req, res) => {
   }
 
   clearInterval(keepalive);
-  if (!closed) { res.write("data: [DONE]\n\n"); res.end(); }
+  clearTimeout(forceClose);
+  if (!closed) { closed = true; res.write("data: [DONE]\n\n"); res.end(); }
 });
 
 
