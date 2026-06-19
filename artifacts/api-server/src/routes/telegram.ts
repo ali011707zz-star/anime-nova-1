@@ -5,7 +5,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
-import { sbInsert } from "../lib/supabaseClient.js";
+import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 
 const router = Router();
 
@@ -96,6 +96,184 @@ export async function notifyNewEpisode(
 
 async function getAdminChatId(): Promise<string | null> {
   return process.env.TELEGRAM_CHAT_ID || null;
+}
+
+/* ── AniList airing schedule query ────────────────────────────────────── */
+
+const AIRING_QUERY = `
+query($greater: Int, $lesser: Int) {
+  Page(perPage: 50) {
+    airingSchedules(
+      airingAt_greater: $greater
+      airingAt_lesser: $lesser
+      sort: [TIME_DESC]
+    ) {
+      id
+      airingAt
+      episode
+      media {
+        id
+        type
+        isAdult
+        title { romaji english native }
+        coverImage { extraLarge large }
+        genres
+        status
+        siteUrl
+      }
+    }
+  }
+}`;
+
+async function fetchAiringSchedules(fromTs: number, toTs: number): Promise<any[]> {
+  try {
+    const res = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        query: AIRING_QUERY,
+        variables: { greater: fromTs, lesser: toTs },
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const data = await res.json() as any;
+    return data?.data?.Page?.airingSchedules ?? [];
+  } catch (e: any) {
+    console.warn("[scheduler] fetchAiringSchedules error:", e.message);
+    return [];
+  }
+}
+
+/* ── تحقق من DB هل أُرسل هذا التنبيه من قبل ──────────────────────────── */
+
+async function wasNotified(anilistId: number, ep: number): Promise<boolean> {
+  const key = `tg_notify:${anilistId}:${ep}`;
+  if (notifiedEpisodes.has(key)) return true;
+  try {
+    const rows = await sbSelect("app_config", "*", { key });
+    return Array.isArray(rows) && rows.length > 0;
+  } catch { return false; }
+}
+
+async function markNotified(anilistId: number, ep: number): Promise<void> {
+  const key = `tg_notify:${anilistId}:${ep}`;
+  notifiedEpisodes.add(key);
+  try {
+    await sbInsert("app_config", { key, value: String(Date.now()) });
+  } catch { /* silent — in-memory Set is enough */ }
+}
+
+/* ── بناء رسالة الإشعار ────────────────────────────────────────────────── */
+
+function buildCaption(media: any, ep: number): string {
+  const title  = media.title?.english || media.title?.romaji || media.title?.native || "أنمي";
+  const domain = process.env.APP_DOMAIN
+    || process.env.REPLIT_DEV_DOMAIN
+    || "animenova.replit.app";
+  const watchUrl = `https://${domain}/watch?anime=${media.id}&ep=${ep}&title=${encodeURIComponent(media.title?.romaji || title)}`;
+  const genres = (media.genres || []).slice(0, 3).join(" • ");
+
+  return (
+    `🎌 <b>حلقة جديدة!</b>\n\n` +
+    `🎬 <b>${title}</b>\n` +
+    `📺 <b>الحلقة:</b> ${ep}\n` +
+    (genres ? `🏷 ${genres}\n` : "") +
+    `\n<a href="${watchUrl}">▶️ شاهد الآن على Anime NOVA</a>`
+  );
+}
+
+/* ── حالة الـ scheduler ──────────────────────────────────────────────── */
+
+let schedulerRunning  = false;
+let schedulerLastRun  = 0;
+let schedulerNextRun  = 0;
+let schedulerSentToday = 0;
+let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+
+const INTERVAL_MS = 30 * 60 * 1000; // كل 30 دقيقة
+
+/* ── الدورة الواحدة ────────────────────────────────────────────────────── */
+
+async function runSchedulerCycle(): Promise<void> {
+  if (!TOKEN() || !process.env.TELEGRAM_CHANNEL_ID) return;
+
+  const now  = Math.floor(Date.now() / 1000);
+  const from = schedulerLastRun > 0
+    ? schedulerLastRun
+    : now - INTERVAL_MS / 1000; // أول مرة: آخر 30 دقيقة
+
+  schedulerLastRun = now;
+  schedulerNextRun = now + INTERVAL_MS / 1000;
+
+  console.log(`[scheduler] 🔍 فحص AiringSchedules من ${new Date(from * 1000).toISOString()} → الآن`);
+
+  const schedules = await fetchAiringSchedules(from - 60, now + 60); // ±60 ثانية هامش
+
+  let sent = 0;
+  for (const item of schedules) {
+    const media = item.media;
+    if (!media) continue;
+    if (media.type !== "ANIME") continue;
+    if (media.isAdult) continue;
+
+    const anilistId = media.id as number;
+    const ep        = item.episode as number;
+
+    if (await wasNotified(anilistId, ep)) continue;
+
+    const poster  = media.coverImage?.extraLarge || media.coverImage?.large || null;
+    const caption = buildCaption(media, ep);
+
+    if (poster) {
+      await sendChannelPhoto(poster, caption);
+    } else {
+      await sendMessage(process.env.TELEGRAM_CHANNEL_ID!, caption);
+    }
+
+    await markNotified(anilistId, ep);
+    sent++;
+    schedulerSentToday++;
+
+    const title = media.title?.english || media.title?.romaji || "أنمي";
+    console.log(`[scheduler] ✅ أُرسل → ${title} ح${ep}`);
+
+    // تأخير بسيط بين الرسائل لتجنب flood limit
+    if (sent < schedules.length) {
+      await new Promise(r => setTimeout(r, 1_500));
+    }
+  }
+
+  if (sent === 0) {
+    console.log("[scheduler] 📭 لا حلقات جديدة في هذه الدورة");
+  } else {
+    console.log(`[scheduler] 📨 أُرسلت ${sent} إشعارات`);
+  }
+}
+
+/* ── تشغيل الـ scheduler ───────────────────────────────────────────────── */
+
+export function startEpisodeScheduler(): void {
+  if (schedulerRunning) return;
+  schedulerRunning = true;
+
+  if (!TOKEN()) {
+    console.warn("[scheduler] ⚠️ TELEGRAM_BOT_TOKEN غير موجود — الـ scheduler لن يعمل");
+    return;
+  }
+  if (!process.env.TELEGRAM_CHANNEL_ID) {
+    console.warn("[scheduler] ⚠️ TELEGRAM_CHANNEL_ID غير موجود — الـ scheduler لن يعمل");
+    return;
+  }
+
+  console.log(`[scheduler] 🚀 بدأ — يفحص كل ${INTERVAL_MS / 60_000} دقيقة`);
+
+  // أول فحص بعد 10 ثوانٍ من البدء
+  setTimeout(() => {
+    runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
+    schedulerTimer = setInterval(() => {
+      runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
+    }, INTERVAL_MS);
+  }, 10_000);
 }
 
 /* ── تسجيل الـ webhook ────────────────────────────────────────────────── */
@@ -321,6 +499,29 @@ router.post("/api/telegram/notify-test", async (_req: Request, res: Response) =>
   }
 
   res.json({ ok: true, channelId, hasPoster: !!poster, caption });
+});
+
+/* ── Scheduler status & manual trigger ───────────────────────────────── */
+
+router.get("/api/telegram/scheduler", (_req: Request, res: Response) => {
+  res.json({
+    running:    schedulerRunning,
+    intervalMin: INTERVAL_MS / 60_000,
+    lastRun:    schedulerLastRun ? new Date(schedulerLastRun * 1000).toISOString() : null,
+    nextRun:    schedulerNextRun ? new Date(schedulerNextRun * 1000).toISOString() : null,
+    sentToday:  schedulerSentToday,
+    tokenOk:    !!TOKEN(),
+    channelOk:  !!process.env.TELEGRAM_CHANNEL_ID,
+  });
+});
+
+router.post("/api/telegram/scheduler/run-now", async (_req: Request, res: Response) => {
+  if (!TOKEN() || !process.env.TELEGRAM_CHANNEL_ID) {
+    res.status(400).json({ ok: false, error: "token أو channel غير مضبوط" });
+    return;
+  }
+  res.json({ ok: true, message: "تشغيل الدورة يدوياً..." });
+  runSchedulerCycle().catch(e => console.warn("[scheduler] manual run error:", e.message));
 });
 
 export default router;

@@ -1,7 +1,7 @@
 import { createApp } from "./app";
 import { logger } from "./lib/logger";
 import { initEmailService } from "./auth/emailService";
-import { registerTelegramWebhook } from "./routes/telegram.js";
+import { registerTelegramWebhook, startEpisodeScheduler } from "./routes/telegram.js";
 
 const rawPort = process.env["PORT"];
 
@@ -35,4 +35,7 @@ app.listen(port, (err) => {
   if (domain) {
     registerTelegramWebhook(domain).catch(() => {});
   }
+
+  // تشغيل scheduler الحلقات الجديدة
+  startEpisodeScheduler();
 });
