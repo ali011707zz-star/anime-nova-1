@@ -134,7 +134,7 @@ interface FetchedSrc {
 const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en" }[] = [
   // ── عربي مدبلج / مترجم ────────────────────────────────────────────
   { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH" },
-  { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "AL" },
+  { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "EK" },
   { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD" },
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK" },
   { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS" },
@@ -162,6 +162,10 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "topcinemaa",   name: "توب سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "TC" },
   // ── 1080p مباشر (Anime-Phoenix) ───────────────────────────────────
   { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH" },
+  // ── مصادر عربية إضافية ────────────────────────────────────────────
+  { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم · HLS",         tag: "AT" },
+  { site: "animex",       name: "أنمي إكس",     desc: "ياباني مترجم · HLS",       tag: "AX" },
+  { site: "anikuro",      name: "AniKuro",       desc: "ياباني مترجم · HLS",       tag: "KR" },
   // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────
   { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS · صوت ياباني",  tag: "SC" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────

@@ -48,6 +48,7 @@ type Props = {
   onBack: () => void;
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
+  onEpisodeSelect?: (ep: number) => void;
   onProgress?: (pos: number, dur: number) => void;
   initialPosition?: number;
   skipIntro?: { start: number; end: number };
@@ -254,6 +255,7 @@ export function RiftPlayer({
   onBack,
   onNextEpisode,
   onPrevEpisode,
+  onEpisodeSelect,
   onProgress,
   initialPosition,
   skipIntro: skipIntroProp,
@@ -351,6 +353,8 @@ export function RiftPlayer({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showFitMenu, setShowFitMenu]     = useState(false);
   const [showSubPanel, setShowSubPanel]   = useState(false);
+  const [showEpList,   setShowEpList]     = useState(false);
+  const [epPage,       setEpPage]         = useState(() => Math.max(0, Math.floor(((episode ?? 1) - 1) / 50)));
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(true);
   const prevVolRef                        = useRef(1);
@@ -1523,6 +1527,81 @@ export function RiftPlayer({
         </Pressable>
       )}
 
+      {/* ════════ EPISODE LIST PANEL ════════ */}
+      {showEpList && onEpisodeSelect && (
+        <Pressable
+          style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.60)", zIndex: 55 }]}
+          onPress={() => setShowEpList(false)}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={s.epListPanel}
+          >
+            {(() => {
+              const EP_PAGE_SIZE = 50;
+              const maxEps = totalEps < 900 ? totalEps : 500;
+              const totalPages = Math.ceil(maxEps / EP_PAGE_SIZE);
+              const curPage = Math.max(0, Math.min(epPage, totalPages - 1));
+              const startEp = curPage * EP_PAGE_SIZE + 1;
+              const endEp = Math.min((curPage + 1) * EP_PAGE_SIZE, maxEps);
+              const pageEps = Array.from({ length: endEp - startEp + 1 }, (_, i) => startEp + i);
+              return (
+                <>
+                  {/* Header */}
+                  <View style={s.epListHeader}>
+                    <View style={s.epListTitleRow}>
+                      <Ionicons name="list" size={16} color="#c4b5fd" />
+                      <Text style={s.epListTitle}>الحلقات</Text>
+                      <View style={s.epListBadge}>
+                        <Text style={s.epListBadgeText}>{totalEps < 900 ? totalEps : "؟"}</Text>
+                      </View>
+                    </View>
+                    <Pressable onPress={() => setShowEpList(false)} hitSlop={12}>
+                      <Ionicons name="close" size={20} color="rgba(255,255,255,0.50)" />
+                    </Pressable>
+                  </View>
+                  {/* Page nav */}
+                  {totalPages > 1 && (
+                    <View style={s.epListPageNav}>
+                      <Pressable
+                        onPress={() => setEpPage(p => Math.max(0, p - 1))}
+                        disabled={curPage <= 0}
+                        style={[s.epListPageBtn, curPage <= 0 && s.epListPageBtnDisabled]}
+                      >
+                        <Text style={[s.epListPageBtnText, curPage <= 0 && s.epListPageBtnTextDisabled]}>‹ السابق</Text>
+                      </Pressable>
+                      <Text style={s.epListPageRange}>{startEp}–{endEp}</Text>
+                      <Pressable
+                        onPress={() => setEpPage(p => Math.min(totalPages - 1, p + 1))}
+                        disabled={curPage >= totalPages - 1}
+                        style={[s.epListPageBtn, curPage >= totalPages - 1 && s.epListPageBtnDisabled]}
+                      >
+                        <Text style={[s.epListPageBtnText, curPage >= totalPages - 1 && s.epListPageBtnTextDisabled]}>التالي ›</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                  {/* Grid */}
+                  <ScrollView contentContainerStyle={s.epListGrid} showsVerticalScrollIndicator={false}>
+                    {pageEps.map(n => {
+                      const isCurr = n === episode;
+                      return (
+                        <Pressable
+                          key={n}
+                          onPress={() => { setShowEpList(false); onEpisodeSelect!(n); }}
+                          style={[s.epListItem, isCurr && s.epListItemActive]}
+                        >
+                          <Text style={[s.epListItemText, isCurr && s.epListItemTextActive]}>{n}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </>
+              );
+            })()}
+          </Pressable>
+        </Pressable>
+      )}
+
       {showControls && !error && !isEnded && !isLocked && (
         <Animated.View
           style={[StyleSheet.absoluteFill, { opacity: controlsOpacity, zIndex: 10, flexDirection: "column" }]}
@@ -1681,8 +1760,17 @@ export function RiftPlayer({
             {/* ── صف أزرار التحكم السفلي ── */}
             <View style={s.bottomCtrlRow}>
 
-              {/* يسار: قفل + ملء شاشة */}
+              {/* يسار: قائمة الحلقات + قفل + ملء شاشة */}
               <View style={s.bottomSide}>
+                {onEpisodeSelect && (
+                  <Pressable
+                    onPress={() => { setShowEpList(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
+                    style={[s.ctrlIconBtn, showEpList && s.ctrlIconBtnActive]}
+                    hitSlop={10}
+                  >
+                    <Ionicons name="list-outline" size={16} color={showEpList ? "#c4b5fd" : "rgba(255,255,255,0.80)"} />
+                  </Pressable>
+                )}
                 <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
                   <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
                 </Pressable>
@@ -2336,6 +2424,75 @@ const s = StyleSheet.create({
     shadowRadius: 4,
     elevation: 6,
   },
+
+  /* ══════ Episode List Panel ══════ */
+  epListPanel: {
+    position: "absolute",
+    top: 0, bottom: 0, left: 0,
+    width: "72%",
+    backgroundColor: "rgba(5,5,18,0.97)",
+    borderRightWidth: 1.5, borderRightColor: "rgba(139,92,246,0.22)",
+    flexDirection: "column",
+    zIndex: 56,
+  },
+  epListHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.07)",
+  },
+  epListTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  epListTitle: { color: "#fff", fontSize: 15, fontFamily: "Cairo_700Bold" },
+  epListBadge: {
+    backgroundColor: "rgba(139,92,246,0.20)",
+    borderRadius: 8, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)",
+    paddingHorizontal: 7, paddingVertical: 2,
+  },
+  epListBadgeText: { color: "#c4b5fd", fontSize: 11, fontFamily: "Cairo_700Bold" },
+  epListPageNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  epListPageBtn: {
+    backgroundColor: "rgba(139,92,246,0.18)",
+    borderRadius: 10, borderWidth: 1, borderColor: "rgba(139,92,246,0.35)",
+    paddingHorizontal: 10, paddingVertical: 5,
+  },
+  epListPageBtnDisabled: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderColor: "rgba(255,255,255,0.07)",
+    opacity: 0.35,
+  },
+  epListPageBtnText: { color: "#c4b5fd", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  epListPageBtnTextDisabled: { color: "rgba(255,255,255,0.25)" },
+  epListPageRange: { color: "rgba(255,255,255,0.40)", fontSize: 11, fontFamily: "Cairo_400Regular" },
+  epListGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    padding: 10,
+    gap: 6,
+  },
+  epListItem: {
+    width: "22%",
+    aspectRatio: 1,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+    alignItems: "center", justifyContent: "center",
+  },
+  epListItemActive: {
+    backgroundColor: "rgba(139,92,246,0.88)",
+    borderColor: "rgba(167,139,250,0.70)",
+  },
+  epListItemText: { color: "rgba(255,255,255,0.72)", fontSize: 13, fontFamily: "Cairo_700Bold" },
+  epListItemTextActive: { color: "#fff" },
 
   /* ══════ Sleep timer sheet (web player port) ══════ */
   sleepBadge: {

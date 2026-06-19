@@ -462,6 +462,8 @@ export default function WatchScreen() {
     if (t > 10) await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
   }, [progressKey]);
 
+  const totalEpsCount = 999;
+
   /* Navigate episode */
   function goEp(n: number, auto = false) {
     saveProgress();
@@ -504,8 +506,10 @@ export default function WatchScreen() {
         skipIntro={playingSrc?.skipIntro || kawaiiSkip?.intro}
         skipOutro={playingSrc?.skipOutro || kawaiiSkip?.outro}
         onBack={() => { saveProgress(); setScreen("picker"); }}
+        totalEps={totalEpsCount}
         onNextEpisode={() => goEp(epNum + 1, true)}
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
+        onEpisodeSelect={(n) => goEp(n)}
         onProgress={(pos, dur) => {
           lastTimeRef.current = pos;
           if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => {});
