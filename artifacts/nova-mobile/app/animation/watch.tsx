@@ -145,7 +145,7 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
 /* ══════════════════════════════════════════════════════════════ */
 export default function AnimationWatchScreen() {
   const params = useLocalSearchParams<{
-    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string;
+    id: string; type: string; ep: string; season: string; title: string; poster: string; etitle?: string; autoplay?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -158,6 +158,7 @@ export default function AnimationWatchScreen() {
   const titleStr  = decodeURIComponent(params.title  || "");
   const posterUrl = params.poster ? decodeURIComponent(params.poster) : "";
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
+  const autoplay  = params.autoplay === "1";
 
   const [screen, setScreen]       = useState<Screen>("loading");
   const [sources, setSources]     = useState<AnimSrc[]>([]);
@@ -166,10 +167,11 @@ export default function AnimationWatchScreen() {
   const [resumeTime, setResumeTime] = useState(0);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
 
-  const abortRef    = useRef<AbortController | null>(null);
-  const lastSaveTs  = useRef(0);
+  const abortRef         = useRef<AbortController | null>(null);
+  const lastSaveTs       = useRef(0);
   const lastTimeRef      = useRef(0);
   const seenKeys         = useRef(new Set<string>());
+  const autoPlayFiredRef = useRef(false);
 
   const progressKey = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
 
@@ -270,8 +272,15 @@ export default function AnimationWatchScreen() {
 
               setSources(prev => {
                 const next = [...prev, src];
-                /* always show picker first — user picks manually */
-                if (next.length === 1) {
+                const isGoodSrc = isDirectPlayable(src);
+                /* auto-play first good source when autoplay=1 */
+                if (autoplay && isGoodSrc && !autoPlayFiredRef.current) {
+                  autoPlayFiredRef.current = true;
+                  setTimeout(() => {
+                    setPlayingSrc(src);
+                    setScreen("native");
+                  }, 0);
+                } else if (next.length === 1) {
                   setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 }
                 return next;
@@ -449,7 +458,7 @@ export default function AnimationWatchScreen() {
         onNextEpisode={type === "tv" ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);
-          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}`);
+          router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep + 1}&season=${season}&title=${t}&poster=${p}&autoplay=1`);
         } : undefined}
         onPrevEpisode={type === "tv" && ep > 1 ? () => {
           const t = encodeURIComponent(titleStr);

@@ -248,8 +248,8 @@ function resolveUrl(url: string | undefined, base: string): string {
 
 /* ═══════════════════════════════════════ MAIN ═══ */
 export default function WatchScreen() {
-  const { anime, ep, title, english, format, etitle } = useLocalSearchParams<{
-    anime: string; ep: string; title: string; english: string; format?: string; etitle?: string;
+  const { anime, ep, title, english, format, etitle, autoplay } = useLocalSearchParams<{
+    anime: string; ep: string; title: string; english: string; format?: string; etitle?: string; autoplay?: string;
   }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -264,8 +264,9 @@ export default function WatchScreen() {
   const [resumeTime, setResumeTime] = useState(0);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
 
-  const abortRef    = useRef<AbortController | null>(null);
-  const lastTimeRef = useRef(0);
+  const abortRef         = useRef<AbortController | null>(null);
+  const lastTimeRef      = useRef(0);
+  const autoPlayFiredRef = useRef(false);
 
   const epNum      = parseInt(ep || "1");
   const titleStr   = decodeURIComponent(title || "");
@@ -375,8 +376,17 @@ export default function WatchScreen() {
                 const key = src.directUrl || src.url;
                 if (prev.find(s => (s.directUrl || s.url) === key)) return prev;
                 const next = [...prev, src];
-                /* always show picker first — user picks manually */
-                if (next.length === 1) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+                const isGoodSrc = !!(src.directUrl || src.url) && !src.isEmbed;
+                /* auto-play first good source when autoplay=1 */
+                if (autoplay === "1" && isGoodSrc && !autoPlayFiredRef.current) {
+                  autoPlayFiredRef.current = true;
+                  setTimeout(() => {
+                    setPlayingSrc(src);
+                    setScreen("native");
+                  }, 0);
+                } else if (next.length === 1) {
+                  setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+                }
                 return next;
               });
             } else if (evType === "done") {
@@ -453,9 +463,9 @@ export default function WatchScreen() {
   }, [progressKey]);
 
   /* Navigate episode */
-  function goEp(n: number) {
+  function goEp(n: number, auto = false) {
     saveProgress();
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}`);
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${auto ? "&autoplay=1" : ""}`);
   }
 
   /* Build RiftPlayer sources from directSrcs */
@@ -494,7 +504,7 @@ export default function WatchScreen() {
         skipIntro={playingSrc?.skipIntro || kawaiiSkip?.intro}
         skipOutro={playingSrc?.skipOutro || kawaiiSkip?.outro}
         onBack={() => { saveProgress(); setScreen("picker"); }}
-        onNextEpisode={() => goEp(epNum + 1)}
+        onNextEpisode={() => goEp(epNum + 1, true)}
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
         onProgress={(pos, dur) => {
           lastTimeRef.current = pos;

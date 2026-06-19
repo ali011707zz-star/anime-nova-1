@@ -246,7 +246,6 @@ export default function RiftPlayer({
   const [loading,         setLoading]         = useState(true);
   const [buffering,       setBuffering]       = useState(false);
   const [error,           setError]           = useState<string | null>(null);
-  const [skipNotif,       setSkipNotif]       = useState(false);
   const skipNotifFired   = useRef(false);
   const [playing,         setPlaying]         = useState(false);
   const [currentTime,     setCurrentTime]     = useState(0);
@@ -677,15 +676,11 @@ export default function RiftPlayer({
     return () => clearInterval(tick);
   }, [isEnded, autoPlay]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── إشعار لمرة واحدة عند تحميل توقيتات التخطي ── */
+  /* ── mark skip data loaded (no notification) ── */
   useEffect(() => {
     if ((skipIntro || skipOutro) && !skipNotifFired.current) {
       skipNotifFired.current = true;
-      setSkipNotif(true);
-      const t = setTimeout(() => setSkipNotif(false), 3500);
-      return () => clearTimeout(t);
     }
-    return undefined;
   }, [skipIntro, skipOutro]);
 
   /* ── keyboard shortcuts (video.js inspired) — ? shows overlay, space/arrows etc ── */
@@ -1182,22 +1177,6 @@ export default function RiftPlayer({
         </AnimatePresence>
 
 
-        {/* ── Skip ready notification (appears briefly when skip data loads) ── */}
-        <AnimatePresence>
-          {skipNotif && (
-            <motion.div
-              key="skip-notif"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-              className="absolute top-14 right-4 z-50 flex items-center gap-1.5 px-3 py-1.5 rounded-xl pointer-events-none font-['Cairo'] text-[11px] font-bold"
-              style={{ background: "rgba(0,0,0,0.72)", border: "1px solid rgba(250,204,21,0.4)", color: "#fde047", backdropFilter: "blur(8px)" }}>
-              <span>⏭</span>
-              <span>توقيتات التخطي متاحة</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         {/* ── long press 2× ── */}
         <AnimatePresence>
@@ -1609,95 +1588,27 @@ export default function RiftPlayer({
                           transition: (seekDrag.current || touchScrubbing.current) ? "none" : "width 0.12s, box-shadow 0.18s",
                         }} />
                     </div>
-                    {/* ── Skip markers — outside overflow-hidden so they're always visible ── */}
-                    {effectiveSkipIntro && duration > 0 && (
+                    {/* ── Skip markers — small ticks that disappear once section is passed ── */}
+                    {effectiveSkipIntro && duration > 0 && currentTime < effectiveSkipIntro.end && (
                       <>
-                        {/* Intro colored segment (full bar height — very visible) */}
-                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{
-                          left: `${(effectiveSkipIntro.start / duration) * 100}%`,
-                          width: `${Math.max(0.8, (effectiveSkipIntro.end - effectiveSkipIntro.start) / duration * 100)}%`,
-                          height: prgHover ? 10 : 6,
-                          background: "rgba(250,204,21,0.85)",
-                          borderRadius: 3,
-                          zIndex: 9,
-                        }} />
-                        {/* Intro start tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipIntro.start / duration) * 100}%`,
-                          width: 3, height: prgHover ? 22 : 16,
-                          background: "#facc15",
-                          boxShadow: "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
+                          width: 2, height: prgHover ? 14 : 10,
+                          background: "rgba(167,139,250,0.80)",
+                          boxShadow: "0 0 4px rgba(167,139,250,0.60)",
                           zIndex: 11,
                         }} />
-                        {/* Intro end tick */}
-                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(effectiveSkipIntro.end / duration) * 100}%`,
-                          width: 3, height: prgHover ? 22 : 16,
-                          background: "#facc15",
-                          boxShadow: "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
-                          zIndex: 11,
-                        }} />
-                        {/* Intro label above segment */}
-                        {prgHover && (
-                          <div className="absolute pointer-events-none" style={{
-                            left: `${(effectiveSkipIntro.start / duration) * 100}%`,
-                            bottom: 18,
-                            background: "rgba(161,130,0,0.90)",
-                            color: "#fff",
-                            fontSize: 9,
-                            fontWeight: 900,
-                            fontFamily: "Cairo, sans-serif",
-                            padding: "2px 5px",
-                            borderRadius: 5,
-                            whiteSpace: "nowrap",
-                            zIndex: 20,
-                          }}>OP</div>
-                        )}
                       </>
                     )}
-                    {effectiveSkipOutro && duration > 0 && (
+                    {effectiveSkipOutro && duration > 0 && currentTime < effectiveSkipOutro.end && (
                       <>
-                        {/* Outro colored segment (full bar height — very visible) */}
-                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none" style={{
-                          left: `${(effectiveSkipOutro.start / duration) * 100}%`,
-                          width: `${Math.max(0.8, (effectiveSkipOutro.end - effectiveSkipOutro.start) / duration * 100)}%`,
-                          height: prgHover ? 10 : 6,
-                          background: "rgba(250,204,21,0.85)",
-                          borderRadius: 3,
-                          zIndex: 9,
-                        }} />
-                        {/* Outro start tick */}
                         <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
                           left: `${(effectiveSkipOutro.start / duration) * 100}%`,
-                          width: 3, height: prgHover ? 22 : 16,
-                          background: "#facc15",
-                          boxShadow: "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
+                          width: 2, height: prgHover ? 14 : 10,
+                          background: "rgba(167,139,250,0.80)",
+                          boxShadow: "0 0 4px rgba(167,139,250,0.60)",
                           zIndex: 11,
                         }} />
-                        {/* Outro end tick */}
-                        <div className="absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-sm" style={{
-                          left: `${(effectiveSkipOutro.end / duration) * 100}%`,
-                          width: 3, height: prgHover ? 22 : 16,
-                          background: "#facc15",
-                          boxShadow: "0 0 6px rgba(250,204,21,1), 0 0 14px rgba(250,204,21,0.6)",
-                          zIndex: 11,
-                        }} />
-                        {/* Outro label above segment */}
-                        {prgHover && (
-                          <div className="absolute pointer-events-none" style={{
-                            left: `${(effectiveSkipOutro.start / duration) * 100}%`,
-                            bottom: 18,
-                            background: "rgba(161,130,0,0.90)",
-                            color: "#fff",
-                            fontSize: 9,
-                            fontWeight: 900,
-                            fontFamily: "Cairo, sans-serif",
-                            padding: "2px 5px",
-                            borderRadius: 5,
-                            whiteSpace: "nowrap",
-                            zIndex: 20,
-                          }}>ED</div>
-                        )}
                       </>
                     )}
                     {/* Thumb */}
