@@ -1181,86 +1181,6 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ── Skip Intro / Outro buttons — appear floating when controls are hidden ── */}
-        <AnimatePresence>
-          {!!effectiveSkipIntro && !isLocked && !isEnded && !error && !showCtrl && (
-            <motion.button
-              key="skip-intro-btn"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{
-                opacity: inIntroRange ? 1 : 0.90,
-                y: 0,
-                scale: inIntroRange ? 1.04 : 1,
-              }}
-              exit={{ opacity: 0, y: 10 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-              onPointerDown={e => { e.stopPropagation(); doSkipIntro(); }}
-              className="absolute flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black font-['Cairo'] pointer-events-auto"
-              style={{
-                zIndex: 35,
-                bottom: showCtrl ? 110 : 24,
-                right: 16,
-                fontSize: 13,
-                background: inIntroRange
-                  ? "rgba(250,204,21,0.95)"
-                  : "rgba(12,10,2,0.82)",
-                border: inIntroRange
-                  ? "1.5px solid rgba(253,224,71,0.85)"
-                  : "1.5px solid rgba(250,204,21,0.55)",
-                color: inIntroRange ? "#110d00" : "rgba(253,224,71,0.95)",
-                boxShadow: inIntroRange
-                  ? "0 0 24px rgba(250,204,21,0.60), 0 4px 16px rgba(0,0,0,0.70)"
-                  : "0 2px 12px rgba(0,0,0,0.65)",
-                backdropFilter: "blur(14px) saturate(160%)",
-                touchAction: "manipulation",
-                transition: "background 0.2s, border 0.2s, color 0.2s, box-shadow 0.2s, bottom 0.25s ease",
-              }}>
-              <ChevronDown className="w-3.5 h-3.5 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
-              تخطي المقدمة
-            </motion.button>
-          )}
-        </AnimatePresence>
-
-        <AnimatePresence>
-          {!!effectiveSkipOutro && !isLocked && !isEnded && !error && !showCtrl && (
-            <motion.button
-              key="skip-outro-btn"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{
-                opacity: inOutroRange ? 1 : 0.90,
-                y: 0,
-                scale: inOutroRange ? 1.04 : 1,
-              }}
-              exit={{ opacity: 0, y: 10 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-              onPointerDown={e => { e.stopPropagation(); doSkipOutro(); }}
-              className="absolute flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black font-['Cairo'] pointer-events-auto"
-              style={{
-                zIndex: 35,
-                bottom: showCtrl
-                  ? (effectiveSkipIntro ? 158 : 110)
-                  : (effectiveSkipIntro ? 72 : 24),
-                right: 16,
-                fontSize: 13,
-                background: inOutroRange
-                  ? "rgba(167,139,250,0.95)"
-                  : "rgba(8,6,20,0.82)",
-                border: inOutroRange
-                  ? "1.5px solid rgba(196,181,253,0.85)"
-                  : "1.5px solid rgba(167,139,250,0.55)",
-                color: inOutroRange ? "#fff" : "rgba(196,181,253,0.95)",
-                boxShadow: inOutroRange
-                  ? "0 0 24px rgba(139,92,246,0.55), 0 4px 16px rgba(0,0,0,0.70)"
-                  : "0 2px 12px rgba(0,0,0,0.65)",
-                backdropFilter: "blur(14px) saturate(160%)",
-                touchAction: "manipulation",
-                transition: "background 0.2s, border 0.2s, color 0.2s, box-shadow 0.2s, bottom 0.25s ease",
-              }}>
-              <ChevronDown className="w-3.5 h-3.5 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
-              تخطي النهاية
-            </motion.button>
-          )}
-        </AnimatePresence>
 
         {/* ── Skip ready notification (appears briefly when skip data loads) ── */}
         <AnimatePresence>
@@ -1595,45 +1515,59 @@ export default function RiftPlayer({
                 onTouchStart={e => e.stopPropagation()}
                 onTouchEnd={e => e.stopPropagation()}
               >
-                {/* ── Progress bar ── */}
-                <div className="px-5 pt-1 pb-1">
-                  {/* Time row: current-time LEFT · skip button CENTER · total-time RIGHT */}
-                  <div className="flex items-center mb-1 px-0.5" dir="ltr">
-                    <span className="text-white/70 text-[12px] font-bold font-mono shrink-0">{fmtTime(currentTime)}</span>
-                    {/* ── Skip button — centred between the two times ── */}
-                    <div className="flex-1 flex justify-center">
-                      {hasSkipData && (
-                        <motion.button
-                          key={activeSkipLabel ?? "skip-ctrl"}
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ duration: 0.15 }}
-                          onPointerDown={e => {
-                            e.stopPropagation();
-                            if (activeSkipAction) activeSkipAction();
-                            else if (effectiveSkipIntro) doSkipIntro();
-                            else if (effectiveSkipOutro) doSkipOutro();
-                          }}
-                          className="flex items-center gap-1.5 px-3 py-1 rounded-xl font-black font-['Cairo'] active:scale-90 transition-transform"
-                          style={activeSkipLabel ? {
-                            background: "rgba(250,204,21,0.88)",
+                {/* ── Skip intro/outro — APK style: row above progress bar, only when in range ── */}
+                <AnimatePresence>
+                  {(inIntroRange || inOutroRange) && !isLocked && (
+                    <motion.div
+                      key="skip-row"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                      transition={{ duration: 0.18, ease: [0.22,1,0.36,1] }}
+                      className="flex justify-end gap-2 px-5 pb-2 pointer-events-auto"
+                      dir="ltr"
+                    >
+                      {inIntroRange && (
+                        <button
+                          onPointerDown={e => { e.stopPropagation(); doSkipIntro(); }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-2xl font-black font-['Cairo'] active:scale-90 transition-transform"
+                          style={{
+                            fontSize: 12,
+                            background: "rgba(251,191,36,0.92)",
                             border: "1px solid rgba(253,224,71,0.70)",
-                            color: "#1a1200",
-                            boxShadow: "0 0 14px rgba(250,204,21,0.55)",
-                            fontSize: 11,
-                            touchAction: "manipulation",
-                          } : {
-                            background: "rgba(250,204,21,0.10)",
-                            border: "1px solid rgba(250,204,21,0.22)",
-                            color: "rgba(253,224,71,0.60)",
-                            fontSize: 11,
+                            color: "#1a0f00",
+                            boxShadow: "0 2px 16px rgba(251,191,36,0.35)",
                             touchAction: "manipulation",
                           }}>
-                          <ChevronDown className="w-3 h-3 rotate-[-90deg] shrink-0" strokeWidth={2.5} />
-                          <span>{activeSkipLabel ?? (effectiveSkipIntro ? "تخطي المقدمة" : "تخطي النهاية")}</span>
-                        </motion.button>
+                          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M3 3.5v9l5.5-4.5L3 3.5zm6 0v9l5.5-4.5L9 3.5z"/></svg>
+                          تخطي المقدمة
+                        </button>
                       )}
-                    </div>
+                      {inOutroRange && (
+                        <button
+                          onPointerDown={e => { e.stopPropagation(); doSkipOutro(); }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-2xl font-black font-['Cairo'] active:scale-90 transition-transform"
+                          style={{
+                            fontSize: 12,
+                            background: "rgba(139,92,246,0.92)",
+                            border: "1px solid rgba(167,139,250,0.65)",
+                            color: "#fff",
+                            boxShadow: "0 2px 16px rgba(139,92,246,0.35)",
+                            touchAction: "manipulation",
+                          }}>
+                          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M3 3.5v9l5.5-4.5L3 3.5zm6 0v9l5.5-4.5L9 3.5z"/></svg>
+                          تخطي النهاية
+                        </button>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* ── Progress bar ── */}
+                <div className="px-5 pt-1 pb-1">
+                  {/* Time row: current-time LEFT · total-time RIGHT */}
+                  <div className="flex items-center justify-between mb-1 px-0.5" dir="ltr">
+                    <span className="text-white/70 text-[12px] font-bold font-mono shrink-0">{fmtTime(currentTime)}</span>
                     <span className="text-white/45 text-[12px] font-bold font-mono shrink-0">{fmtTime(duration)}</span>
                   </div>
                   {/* 36px touch target — visual bar centered inside */}
