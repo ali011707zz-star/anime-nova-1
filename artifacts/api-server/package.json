@@ -13,6 +13,7 @@
     "@types/nodemailer": "^8.0.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
+    "aniwatch": "^2.27.9",
     "cheerio": "^1.2.0",
     "connect-pg-simple": "^10.0.0",
     "cookie-parser": "^1.4.7",

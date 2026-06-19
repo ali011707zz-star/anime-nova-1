@@ -11,6 +11,7 @@ import {
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
+import { HiAnime } from "aniwatch";
 
 const router = Router();
 
@@ -4350,6 +4351,99 @@ async function getAniKotoSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  HIANIME (via aniwatch npm + hianime.ad) — صوت ياباني فقط (sub)
+//  بدون ترجمة إنجليزية مدمجة — الترجمات VTT منفصلة للمشغل الداخلي
+//  Flow: search → getAnimeEpisodes → getEpisodeSources("hd-1","sub")
+// ════════════════════════════════════════════════════════════════════
+const _hianimeScraper = new HiAnime.Scraper();
+const hianimeTitleCache = new Map<string, { animeId: string | null; ts: number }>();
+const HIANIME_TITLE_TTL = 6 * 3_600_000;
+const HIANIME_REF = "https://hianime.ad/";
+
+async function getHiAnimeSources(
+  title: string, english: string | null, ep: number, _anilistId?: number,
+): Promise<UnifiedSource[]> {
+  try {
+    // 1. البحث عن الأنمي — نحاول english أولاً ثم romaji
+    const queries = [english, title].filter(Boolean) as string[];
+    let animeId: string | null = null;
+
+    const cacheKey = `${title}|${english || ""}`.toLowerCase();
+    const cachedTitle = hianimeTitleCache.get(cacheKey);
+    if (cachedTitle && Date.now() - cachedTitle.ts < HIANIME_TITLE_TTL) {
+      animeId = cachedTitle.animeId;
+    } else {
+      for (const q of queries) {
+        const searchResult = await _hianimeScraper.search(q, 1).catch(() => null) as any;
+        if (!searchResult?.animes?.length) continue;
+
+        let bestId: string | null = null, bestScore = 0;
+        for (const anime of (searchResult.animes as any[]).slice(0, 10)) {
+          const sc = Math.max(
+            similarity((anime.name  || "").toLowerCase(), (english || title).toLowerCase()),
+            similarity((anime.name  || "").toLowerCase(), title.toLowerCase()),
+            similarity((anime.jname || "").toLowerCase(), title.toLowerCase()),
+          );
+          if (sc > bestScore) { bestScore = sc; bestId = anime.id; }
+        }
+        if (bestScore >= 0.35 && bestId) { animeId = bestId; break; }
+      }
+      hianimeTitleCache.set(cacheKey, { animeId, ts: Date.now() });
+    }
+
+    if (!animeId) return [];
+
+    // 2. جلب قائمة الحلقات
+    const epsResult = await _hianimeScraper.getAnimeEpisodes(animeId).catch(() => null) as any;
+    if (!epsResult?.episodes?.length) return [];
+
+    // 3. إيجاد الحلقة المطلوبة برقمها
+    const targetEp = (epsResult.episodes as any[]).find((e: any) => e.number === ep);
+    if (!targetEp?.id) return [];
+
+    // 4. جلب المصادر — sub فقط = صوت ياباني بالكامل
+    const srcsResult = await _hianimeScraper.getEpisodeSources(targetEp.id, "hd-1", "sub").catch(() => null) as any;
+    if (!srcsResult?.sources?.length) return [];
+
+    // 5. اختيار track الترجمة (منفصلة VTT — ليست مدمجة في الفيديو)
+    const tracks: Array<{ file: string; kind?: string; label?: string }> = srcsResult.tracks || [];
+    const subTrack =
+      tracks.find(t => t.kind !== "thumbnails" && /(arabic|arab|\bar\b)/i.test(t.label  || "")) ||
+      tracks.find(t => t.kind !== "thumbnails" && /(english|eng)/i.test(t.label         || "")) ||
+      tracks.find(t => t.kind !== "thumbnails");
+
+    const subtitleUrl = subTrack?.file
+      ? `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(HIANIME_REF)}`
+      : undefined;
+    const subLang = subTrack
+      ? (/(arabic|arab|\bar\b)/i.test(subTrack.label || "") ? "عربي" : "إنجليزي")
+      : "";
+
+    const sources: UnifiedSource[] = [];
+    for (const src of (srcsResult.sources as any[])) {
+      if (!src.url || !src.isM3U8) continue;
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(HIANIME_REF)}`;
+      const q = (src.quality as string | undefined) || "auto";
+      sources.push({
+        name: `HiAnime · ${q} · ياباني${subLang ? " · " + subLang : ""}`,
+        url: src.url,
+        quality: q,
+        qualityRank: q.includes("1080") ? 19 : q.includes("720") ? 18 : q.includes("480") ? 17 : 16,
+        site: "hianime",
+        directUrl: proxied,
+        directType: "hls",
+        subtitleUrl,
+      });
+    }
+    return sources;
+  } catch (e: any) {
+    console.error("[HiAnime]", e?.message ?? e);
+    return [];
+  }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  ANINEKO (anineko.to) — صوت ياباني + ترجمة إنجليزية → عربية
 //  Multi-quality HLS (360p / 720p / 1080p) عبر vibeplayer.site
 // ════════════════════════════════════════════════════════════════════
@@ -6514,6 +6608,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
+      scrapeCached("hianime",      () => getHiAnimeSources(title, english, ep, anilistId),      false),
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
@@ -6638,6 +6733,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
