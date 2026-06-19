@@ -11,8 +11,6 @@ import {
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
-import { HiAnime } from "aniwatch";
-
 const router = Router();
 
 const BROWSER_UA =
@@ -204,6 +202,60 @@ async function cfProxyGet(
 
   // Fallback to regular cfGet
   return cfGet(url, referer ? { Referer: referer } : {});
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  denoProxyGet — جلب HTML عبر Deno Deploy proxy (IP مختلف عن Replit)
+//  يُستخدم فقط لسحب روابط الحلقات من مواقع تحجب IP Replit تحديداً.
+//  يُفعَّل عبر env vars: DENO_PROXY_URL + DENO_PROXY_SECRET (اختياري)
+//  لا يُستخدم للمصادقة أو التخزين أو أي شيء آخر — scraping فقط.
+// ════════════════════════════════════════════════════════════════════
+const DENO_PROXY_URL    = (process.env.DENO_PROXY_URL    || "").replace(/\/$/, "");
+const DENO_PROXY_SECRET = process.env.DENO_PROXY_SECRET  || "";
+let _denoProxyAlive: boolean | null = null;
+let _denoProxyCheckedAt = 0;
+
+async function denoProxyGet(
+  url: string,
+  referer?: string,
+  extraHeaders: Record<string, string> = {},
+  timeoutMs = 20000,
+): Promise<string | null> {
+  if (!DENO_PROXY_URL) return null;
+
+  // Health-check الـ proxy مرة كل 120 ثانية
+  const now = Date.now();
+  if (_denoProxyAlive === null || now - _denoProxyCheckedAt > 120_000) {
+    try {
+      const h = await fetch(`${DENO_PROXY_URL}/health`, {
+        headers: DENO_PROXY_SECRET ? { "X-Proxy-Key": DENO_PROXY_SECRET } : {},
+        signal: AbortSignal.timeout(5000),
+      });
+      _denoProxyAlive = h.ok;
+    } catch { _denoProxyAlive = false; }
+    _denoProxyCheckedAt = now;
+  }
+  if (!_denoProxyAlive) return null;
+
+  try {
+    const proxyUrl = new URL(DENO_PROXY_URL);
+    proxyUrl.searchParams.set("url", url);
+    if (referer) proxyUrl.searchParams.set("ref", referer);
+    if (Object.keys(extraHeaders).length) {
+      proxyUrl.searchParams.set("headers", JSON.stringify(extraHeaders));
+    }
+
+    const reqHeaders: Record<string, string> = {};
+    if (DENO_PROXY_SECRET) reqHeaders["X-Proxy-Key"] = DENO_PROXY_SECRET;
+
+    const r = await fetch(proxyUrl.toString(), {
+      headers: reqHeaders,
+      signal: AbortSignal.timeout(timeoutMs + 3000),
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    return text.length > 50 ? text : null;
+  } catch { _denoProxyAlive = false; return null; }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -4351,95 +4403,159 @@ async function getAniKotoSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  HIANIME (via aniwatch npm + hianime.ad) — صوت ياباني فقط (sub)
-//  بدون ترجمة إنجليزية مدمجة — الترجمات VTT منفصلة للمشغل الداخلي
-//  Flow: search → getAnimeEpisodes → getEpisodeSources("hd-1","sub")
+//  HIANIME (hianime.ad) — صوت ياباني + ترجمة إنجليزية VTT → عربية
+//  بنية HTML مطابقة لـ AniNeko — vibeplayer.site / bibiemb.xyz HLS
+//  Flow: /filter?keyword → slug → /watch/{slug}/ep-{N} → data-video
 // ════════════════════════════════════════════════════════════════════
-const _hianimeScraper = new HiAnime.Scraper();
-const hianimeTitleCache = new Map<string, { animeId: string | null; ts: number }>();
-const HIANIME_TITLE_TTL = 6 * 3_600_000;
-const HIANIME_REF = "https://hianime.ad/";
+const HIANIME_BASE = "https://hianime.ad";
+const HIANIME_REF  = "https://hianime.ad/";
+const hianimeTitleCache = new Map<string, { slug: string | null; ts: number }>();
+const HIANIME_TTL = 6 * 3_600_000;
+
+async function searchHiAnime(q: string): Promise<Array<{ slug: string }>> {
+  const html = await fetch(
+    `${HIANIME_BASE}/filter?keyword=${encodeURIComponent(q)}`,
+    { headers: { ...BASE_HDRS, Referer: HIANIME_REF }, signal: AbortSignal.timeout(10000) },
+  ).then(r => r.ok ? r.text() : "").catch(() => "");
+
+  const results: Array<{ slug: string }> = [];
+  const seen = new Set<string>();
+  for (const m of html.matchAll(/href=["']\/anime\/([^"'?#]+)["']/gi)) {
+    const slug = m[1];
+    if (!seen.has(slug)) { seen.add(slug); results.push({ slug }); }
+  }
+  return results;
+}
+
+async function findHiAnimeSlug(title: string, english: string | null): Promise<string | null> {
+  const ck = `${title}|${english || ""}`.toLowerCase();
+  const cached = hianimeTitleCache.get(ck);
+  if (cached && Date.now() - cached.ts < HIANIME_TTL) return cached.slug;
+
+  const queries = [...new Set([english, title].filter(Boolean) as string[])];
+  for (const q of queries) {
+    const results = await searchHiAnime(q);
+    if (!results.length) continue;
+
+    let bestSlug: string | null = null, bestSc = 0;
+    for (const r of results) {
+      const slugTitle = r.slug.replace(/-/g, " ");
+      const sc = Math.max(
+        similarity(slugTitle, title.toLowerCase()),
+        english ? similarity(slugTitle, english.toLowerCase()) : 0,
+        asciiSimilarity(r.slug, title),
+        english ? asciiSimilarity(r.slug, english) : 0,
+      );
+      if (sc > bestSc) { bestSc = sc; bestSlug = r.slug; }
+    }
+    if (bestSlug && bestSc >= 0.30) {
+      hianimeTitleCache.set(ck, { slug: bestSlug, ts: Date.now() });
+      return bestSlug;
+    }
+  }
+  hianimeTitleCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
 
 async function getHiAnimeSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
-    // 1. البحث عن الأنمي — نحاول english أولاً ثم romaji
-    const queries = [english, title].filter(Boolean) as string[];
-    let animeId: string | null = null;
+    const slug = await findHiAnimeSlug(title, english);
+    if (!slug) return [];
 
-    const cacheKey = `${title}|${english || ""}`.toLowerCase();
-    const cachedTitle = hianimeTitleCache.get(cacheKey);
-    if (cachedTitle && Date.now() - cachedTitle.ts < HIANIME_TITLE_TTL) {
-      animeId = cachedTitle.animeId;
-    } else {
-      for (const q of queries) {
-        const searchResult = await _hianimeScraper.search(q, 1).catch(() => null) as any;
-        if (!searchResult?.animes?.length) continue;
+    // صفحة الحلقة — /watch/{slug}/ep-{N}
+    const epHtml = await fetch(`${HIANIME_BASE}/watch/${slug}/ep-${ep}`, {
+      headers: { ...BASE_HDRS, Referer: `${HIANIME_BASE}/anime/${slug}` },
+      signal: AbortSignal.timeout(15000),
+    }).then(r => r.ok ? r.text() : "").catch(() => "");
+    if (!epHtml || epHtml.length < 1000) return [];
 
-        let bestId: string | null = null, bestScore = 0;
-        for (const anime of (searchResult.animes as any[]).slice(0, 10)) {
-          const sc = Math.max(
-            similarity((anime.name  || "").toLowerCase(), (english || title).toLowerCase()),
-            similarity((anime.name  || "").toLowerCase(), title.toLowerCase()),
-            similarity((anime.jname || "").toLowerCase(), title.toLowerCase()),
-          );
-          if (sc > bestScore) { bestScore = sc; bestId = anime.id; }
+    // استخرج data-video — HSUB (مع ?sub= VTT) مفضّل على SUB (بدون ترجمة)
+    const serverEntries: Array<{ embedUrl: string; rawSubUrl: string | null }> = [];
+    for (const m of epHtml.matchAll(/data-video=["']([^"']+)["']/gi)) {
+      const rawVal = m[1].replace(/&amp;/g, "&").replace(/&#34;/g, '"');
+      let embedUrl = rawVal;
+      let rawSubUrl: string | null = null;
+      try {
+        const parsed = new URL(rawVal);
+        const subParam =
+          parsed.searchParams.get("sub") ||
+          parsed.searchParams.get("caption_1") ||
+          parsed.searchParams.get("c1_file");
+        if (subParam?.startsWith("http")) {
+          rawSubUrl = subParam;
+          ["sub", "caption_1", "sub_1", "c1_file", "c1_label"].forEach(p => parsed.searchParams.delete(p));
+          embedUrl = parsed.toString();
         }
-        if (bestScore >= 0.35 && bestId) { animeId = bestId; break; }
-      }
-      hianimeTitleCache.set(cacheKey, { animeId, ts: Date.now() });
+      } catch {}
+      serverEntries.push({ embedUrl, rawSubUrl });
     }
+    if (!serverEntries.length) return [];
 
-    if (!animeId) return [];
-
-    // 2. جلب قائمة الحلقات
-    const epsResult = await _hianimeScraper.getAnimeEpisodes(animeId).catch(() => null) as any;
-    if (!epsResult?.episodes?.length) return [];
-
-    // 3. إيجاد الحلقة المطلوبة برقمها
-    const targetEp = (epsResult.episodes as any[]).find((e: any) => e.number === ep);
-    if (!targetEp?.id) return [];
-
-    // 4. جلب المصادر — sub فقط = صوت ياباني بالكامل
-    const srcsResult = await _hianimeScraper.getEpisodeSources(targetEp.id, "hd-1", "sub").catch(() => null) as any;
-    if (!srcsResult?.sources?.length) return [];
-
-    // 5. اختيار track الترجمة (منفصلة VTT — ليست مدمجة في الفيديو)
-    const tracks: Array<{ file: string; kind?: string; label?: string }> = srcsResult.tracks || [];
-    const subTrack =
-      tracks.find(t => t.kind !== "thumbnails" && /(arabic|arab|\bar\b)/i.test(t.label  || "")) ||
-      tracks.find(t => t.kind !== "thumbnails" && /(english|eng)/i.test(t.label         || "")) ||
-      tracks.find(t => t.kind !== "thumbnails");
-
-    const subtitleUrl = subTrack?.file
-      ? `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(HIANIME_REF)}`
-      : undefined;
-    const subLang = subTrack
-      ? (/(arabic|arab|\bar\b)/i.test(subTrack.label || "") ? "عربي" : "إنجليزي")
-      : "";
+    // فضّل HSUB (لها rawSubUrl) ثم fallback للباقي
+    const hsub = serverEntries.filter(e => e.rawSubUrl);
+    const toProcess = (hsub.length ? hsub : serverEntries).slice(0, 3);
 
     const sources: UnifiedSource[] = [];
-    for (const src of (srcsResult.sources as any[])) {
-      if (!src.url || !src.isM3U8) continue;
-      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(HIANIME_REF)}`;
-      const q = (src.quality as string | undefined) || "auto";
+    for (const { embedUrl, rawSubUrl } of toProcess) {
+      let m3u8Url: string | null = null;
+      let referer = HIANIME_REF;
+
+      // vibeplayer.site — اشتقاق مباشر بدون HTTP request إضافي
+      const vibeToken = embedUrl.match(/vibeplayer\.site\/([a-zA-Z0-9]{10,})/i)?.[1];
+      if (vibeToken) {
+        m3u8Url = `https://vibeplayer.site/public/stream/${vibeToken}/master.m3u8`;
+        referer  = `https://vibeplayer.site/${vibeToken}`;
+      } else if (embedUrl.includes("bibiemb.xyz")) {
+        // bibiemb.xyz — اشتق الـ m3u8 من صفحة الـ embed
+        const bibiPath = embedUrl.match(/bibiemb\.xyz\/([^/?#]+)/i)?.[1];
+        if (bibiPath) {
+          const bibiHtml = await fetch(`https://bibiemb.xyz/${bibiPath}`, {
+            headers: { ...BASE_HDRS, Referer: HIANIME_REF },
+            signal: AbortSignal.timeout(8000),
+          }).then(r => r.ok ? r.text() : "").catch(() => "");
+          const mm = bibiHtml.match(/["'](https?:\/\/[^"'<> ]+\.m3u8[^"'<> ]*)["']/);
+          if (mm) { m3u8Url = mm[1]; referer = `https://bibiemb.xyz/${bibiPath}`; }
+        }
+      } else {
+        // خوادم أخرى (OtakuHG / OtakuVid / PlayMogo) — استخرج HLS من embed page
+        try { referer = new URL(embedUrl).origin + "/"; } catch {}
+        m3u8Url = await extractAninekoHls(embedUrl, slug);
+      }
+
+      if (!m3u8Url) continue;
+
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
+
+      // الترجمة الإنجليزية → العربية عبر translate-vtt
+      let subtitleUrl: string | undefined;
+      if (rawSubUrl) {
+        const proxySubUrl = `/api/anime/proxy-text?url=${encodeURIComponent(rawSubUrl)}&ref=${encodeURIComponent(HIANIME_REF)}`;
+        subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxySubUrl)}&from=en&to=ar`;
+      }
+
+      const hostLabel = embedUrl.includes("bibi")     ? "BibiEmb"
+                      : embedUrl.includes("otakuhg")  ? "OtakuHG"
+                      : embedUrl.includes("otakuvid") ? "OtakuVid"
+                      : embedUrl.includes("playmogo") ? "PlayMogo"
+                      : "VibePlayer";
+
       sources.push({
-        name: `HiAnime · ${q} · ياباني${subLang ? " · " + subLang : ""}`,
-        url: src.url,
-        quality: q,
-        qualityRank: q.includes("1080") ? 19 : q.includes("720") ? 18 : q.includes("480") ? 17 : 16,
+        name: `HiAnime · ${hostLabel} · ياباني${rawSubUrl ? " · مترجم" : ""}`,
+        url: m3u8Url,
+        quality: "1080p",
+        qualityRank: 9,
         site: "hianime",
         directUrl: proxied,
         directType: "hls",
         subtitleUrl,
       });
+
+      if (sources.length >= 2) break;
     }
     return sources;
-  } catch (e: any) {
-    console.error("[HiAnime]", e?.message ?? e);
-    return [];
-  }
+  } catch { return []; }
 }
 
 
