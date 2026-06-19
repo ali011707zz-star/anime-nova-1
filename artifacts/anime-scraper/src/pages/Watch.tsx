@@ -2239,24 +2239,15 @@ function EpisodePlayer({
               backdropFilter: "blur(40px)",
               WebkitBackdropFilter: "blur(40px)",
               border: "1px solid rgba(139,92,246,0.22)",
-              boxShadow: isLandscape
-                ? "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)"
-                : "0 12px 48px rgba(0,0,0,0.80), inset 0 0 0 0.5px rgba(255,255,255,0.07)",
-              borderRadius: isLandscape ? "20px 0 0 20px" : "20px",
+              boxShadow: "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)",
+              borderRadius: "20px 0 0 20px",
               overflowY: "auto",
-              maxHeight: isLandscape ? "100dvh" : "72dvh",
-              width: isLandscape ? "290px" : "min(370px, 100%)",
+              height: "100%",
+              width: "290px",
             }}>
 
-              {/* ── مقبض السحب (فوق العنوان للوضع العمودي) ── */}
-              {!isLandscape && (
-                <div className="flex justify-center pt-2 pb-1">
-                  <div className="w-9 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }} />
-                </div>
-              )}
-
               {/* ── Header ── */}
-              <div className={`flex items-center justify-between border-b border-white/[0.06] ${isLandscape ? "px-4 pt-5 pb-3" : "px-4 pt-2 pb-3"}`}>
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 pt-5 pb-3">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-2xl flex items-center justify-center"
                     style={{ background: "linear-gradient(135deg,rgba(139,92,246,0.55),rgba(109,40,217,0.40))", border: "1px solid rgba(139,92,246,0.45)", boxShadow: "0 0 12px rgba(139,92,246,0.25)" }}>
@@ -2272,7 +2263,7 @@ function EpisodePlayer({
               </div>
 
               {/* ── 4 Language Tabs ── */}
-              <div className={`grid gap-2.5 p-4 ${isLandscape ? "grid-cols-2" : "grid-cols-4"}`}>
+              <div className="grid grid-cols-2 gap-2.5 p-4">
                 {subOpts.map(opt => {
                   const active = subChoice === opt.id && (opt.id === "off" ? subStatus === "off" : subStatus !== "off");
                   const isOff  = opt.id === "off";
@@ -2606,21 +2597,21 @@ function EpisodePlayer({
 
           return (
             <motion.div key="subpanel"
-              initial={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: -20, scale: 0.97 }}
-              animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0, scale: 1 }}
-              exit={isLandscape ? { opacity: 0, x: 48 } : { opacity: 0, y: -20, scale: 0.97 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-              drag={!isLandscape ? "y" : false}
-              dragConstraints={{ top: 0, bottom: 400 }}
-              dragElastic={{ top: 0, bottom: 0.22 }}
-              onDragEnd={(_: any, info: any) => { if (!isLandscape && info.offset.y > 65) setShowSubPanel(false); }}
+              initial={{ opacity: 0, x: 60 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 60 }}
+              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
               className="fixed z-[400]"
-              style={isLandscape
-                ? { top: 0, bottom: 0, right: 0, width: "280px", paddingTop: "max(12px, env(safe-area-inset-top))", paddingBottom: "max(12px, env(safe-area-inset-bottom))" }
-                : { top: 0, insetInlineEnd: 0, insetInlineStart: 0, paddingTop: "max(10px, env(safe-area-inset-top))", paddingInline: "10px", display: "flex", justifyContent: "center" }
-              }
+              style={{
+                top: 0,
+                bottom: 0,
+                right: 0,
+                width: "290px",
+                paddingTop: "max(0px, env(safe-area-inset-top))",
+                paddingBottom: "max(0px, env(safe-area-inset-bottom))",
+              }}
             >
-              <div className="fixed inset-0 z-[-1]" onClick={() => setShowSubPanel(false)} />
+              <div className="fixed inset-0 z-[-1]" style={{ background: "rgba(0,0,0,0.45)" }} onClick={() => setShowSubPanel(false)} />
               {panelContent}
             </motion.div>
           );
