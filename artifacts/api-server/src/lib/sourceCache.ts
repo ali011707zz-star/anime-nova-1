@@ -25,6 +25,7 @@ export const SITE_TTL: Record<string, number> = {
   ristoanime:    5 * 3_600_000,
   anikoto:       5 * 3_600_000,
   anineko:       5 * 3_600_000,
+  hianime:       5 * 3_600_000,
   animewitcher:  5 * 3_600_000,
   animeday:      4 * 3_600_000,
   arabseed:      4 * 3_600_000,
