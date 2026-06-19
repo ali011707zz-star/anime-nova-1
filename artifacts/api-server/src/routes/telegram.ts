@@ -150,7 +150,7 @@ async function wasNotified(anilistId: number, ep: number): Promise<boolean> {
   const key = `tg_notify:${anilistId}:${ep}`;
   if (notifiedEpisodes.has(key)) return true;
   try {
-    const rows = await sbSelect("app_config", "*", { key });
+    const rows = await sbSelect("app_config", { key: `eq.${key}` });
     return Array.isArray(rows) && rows.length > 0;
   } catch { return false; }
 }
