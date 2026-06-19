@@ -4403,6 +4403,176 @@ async function getAniKotoSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMEX (animex.one + pp.animex.one) — صوت ياباني مترجم
+//  AniList ID → slug via SvelteKit __data.json → pp.animex.one REST API
+//  Providers: mimi → yuki → miku → neko → mochi
+//  CDN: vibeplayer.site (HTTP 200 من Replit)
+// ════════════════════════════════════════════════════════════════════
+const ANIMEX_BASE     = "https://animex.one";
+const ANIMEX_PP_BASE  = "https://pp.animex.one/rest/api";
+const ANIMEX_SUB_PROVIDERS = ["mimi", "yuki", "miku", "neko", "mochi"];
+const animexSlugCache  = new Map<number, { slug: string; ts: number }>();
+const ANIMEX_SLUG_TTL  = 30 * 60_000;
+
+// استخراج slug من بيانات SvelteKit devalue بدون hydration كامل
+// data[0] = {anime: N, ...} → data[N] = {slug: M, ...} → data[M] = "slug-string"
+function extractAnimexSlugFromDevalue(arr: unknown[]): string | null {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+
+  // الجذر عند index 0
+  const root = arr[0];
+  if (!root || typeof root !== "object" || Array.isArray(root)) return null;
+
+  const animeRef = (root as Record<string, number>).anime;
+  if (typeof animeRef !== "number" || animeRef < 0 || animeRef >= arr.length) return null;
+
+  const animeObj = arr[animeRef];
+  if (!animeObj || typeof animeObj !== "object" || Array.isArray(animeObj)) return null;
+
+  const slugRef = (animeObj as Record<string, number>).slug;
+  if (typeof slugRef !== "number" || slugRef < 0 || slugRef >= arr.length) return null;
+
+  const slug = arr[slugRef];
+  return typeof slug === "string" && slug ? slug : null;
+}
+
+async function resolveAnimexSlug(anilistId: number): Promise<string | null> {
+  const cached = animexSlugCache.get(anilistId);
+  if (cached && Date.now() - cached.ts < ANIMEX_SLUG_TTL) return cached.slug;
+
+  const data = await fetch(`${ANIMEX_BASE}/watch/${anilistId}/__data.json`, {
+    headers: { ...BASE_HDRS, Accept: "application/json" },
+    signal: AbortSignal.timeout(8000),
+  }).then(r => r.ok ? r.json() : null).catch(() => null) as { nodes?: Array<{ type?: string; data?: unknown[] }> } | null;
+
+  if (!data?.nodes) return null;
+  for (const node of data.nodes) {
+    if (node?.type !== "data" || !Array.isArray(node.data)) continue;
+    const slug = extractAnimexSlugFromDevalue(node.data);
+    if (slug) {
+      animexSlugCache.set(anilistId, { slug, ts: Date.now() });
+      return slug;
+    }
+  }
+  return null;
+}
+
+async function getAnimexSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) { console.error("[animex] no anilistId"); return []; }
+  try {
+    const slug = await resolveAnimexSlug(anilistId);
+    console.error(`[animex] slug=${slug} anilistId=${anilistId} ep=${ep}`);
+    if (!slug) return [];
+
+    const hdrs = {
+      ...BASE_HDRS,
+      Referer: `${ANIMEX_BASE}/`,
+      Origin: ANIMEX_BASE,
+      Accept: "application/json, text/plain, */*",
+    };
+
+    for (const providerId of ANIMEX_SUB_PROVIDERS) {
+      const payload = await fetch(
+        `${ANIMEX_PP_BASE}/sources?id=${encodeURIComponent(slug)}&epNum=${ep}&type=sub&providerId=${providerId}`,
+        { headers: hdrs, signal: AbortSignal.timeout(5000) },
+      ).then(r => r.ok ? r.json() : null).catch(() => null) as {
+        sources?: Array<{ url?: string }> | string;
+        headers?: Record<string, string>;
+      } | null;
+
+      let m3u8: string | null = null;
+      if (typeof payload?.sources === "string") {
+        m3u8 = payload.sources;
+      } else if (Array.isArray(payload?.sources) && payload.sources.length) {
+        m3u8 = payload.sources.find((s: any) => s?.url)?.url || null;
+      }
+      if (!m3u8 || !m3u8.startsWith("http")) continue;
+
+      const ref = payload?.headers?.Referer || payload?.headers?.referer || `${ANIMEX_BASE}/`;
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(ref)}`;
+
+      return [{
+        name: `AnimEx · ${providerId} · ياباني مترجم`,
+        url:  m3u8,
+        quality: "1080p",
+        qualityRank: 10,
+        site: "animex",
+        directUrl: proxied,
+        directType: "hls",
+      }];
+    }
+    return [];
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIKURO (anikuro.ru) — صوت ياباني مترجم
+//  AniList ID مباشرة → /api/v1/sources/senshi/{id}:{ep}
+//  Senshi provider: ninstream.com عبر proxy.anikuro.ru (HTTP 200 من Replit)
+//  M3U8 يحتوي أسماء segments مطلقة عبر anikuro.ru → hls-proxy مطلوب
+// ════════════════════════════════════════════════════════════════════
+const ANIKURO_BASE = "https://anikuro.ru";
+
+async function getAnikuroSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) { console.error("[anikuro] no anilistId"); return []; }
+  try {
+    const watchRef = `${ANIKURO_BASE}/watch/${anilistId}:${ep}`;
+    const data = await fetch(
+      `${ANIKURO_BASE}/api/v1/sources/senshi/${anilistId}:${ep}`,
+      {
+        headers: {
+          ...BASE_HDRS,
+          Referer:  watchRef,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(8000),
+      },
+    ).then(r => r.ok ? r.json() : null).catch(() => null) as {
+      ok?: boolean;
+      data?: {
+        raw?: { sub?: { default?: string; sources?: Array<{ url?: string }> } };
+        normalized?: Array<{ variant: string; sources?: Array<{ url?: string }> }>;
+      };
+    } | null;
+
+    if (!data?.ok) return [];
+
+    // اختر المصدر: raw.sub.default أولاً (senshi proxy path) ثم normalized
+    const rawSub = data?.data?.raw?.sub;
+    const normalized = data?.data?.normalized?.find(n => n.variant === "sub");
+
+    const toAbsUrl = (u: string | undefined | null) =>
+      u ? (u.startsWith("http") ? u : `${ANIKURO_BASE}${u.startsWith("/") ? "" : "/"}${u}`) : null;
+
+    let m3u8: string | null =
+      toAbsUrl(rawSub?.default) ||
+      toAbsUrl(rawSub?.sources?.[0]?.url) ||
+      toAbsUrl(normalized?.sources?.[0]?.url);
+
+    if (!m3u8) return [];
+
+    // CORS: anikuro.ru يرسل allow-credentials بدلاً من * → hls-proxy إلزامي
+    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(ANIKURO_BASE + "/")}`;
+
+    return [{
+      name: "Anikuro · Senshi · ياباني مترجم",
+      url:  m3u8,
+      quality: "1080p",
+      qualityRank: 10,
+      site: "anikuro",
+      directUrl: proxied,
+      directType: "hls",
+    }];
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  HIANIME (hianime.ad) — صوت ياباني + ترجمة إنجليزية VTT → عربية
 //  بنية HTML مطابقة لـ AniNeko — vibeplayer.site / bibiemb.xyz HLS
 //  Flow: /filter?keyword → slug → /watch/{slug}/ep-{N} → data-video
@@ -6725,6 +6895,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
+      scrapeCached("animex",       () => getAnimexSources(title, english, ep, anilistId),       false, 18000),
+      scrapeCached("anikuro",      () => getAnikuroSources(title, english, ep, anilistId),      false, 14000),
       scrapeCached("hianime",      () => getHiAnimeSources(title, english, ep, anilistId),      false, 22000),
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
@@ -6832,7 +7004,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // scrapers that use probe-only (no deep extraction)
-  const probeOnly = new Set(["animeify","kawaii","anikoto","animewitcher","anineko","mitanime"]);
+  const probeOnly = new Set(["animeify","kawaii","anikoto","animex","anikuro","animewitcher","anineko","mitanime"]);
 
   try {
     switch (site) {
@@ -6850,6 +7022,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animex":      (await race(getAnimexSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anikuro":     (await race(getAnikuroSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
