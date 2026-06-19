@@ -1,67 +1,51 @@
 /**
- * supabaseCacheClient.ts — PostgreSQL cache client (migrated from Supabase REST to direct pg)
- * Uses the same DATABASE_URL as the rest of the app.
- * Maintains the same API surface so sourceCache.ts needs no changes.
+ * supabaseCacheClient.ts — Supabase REST cache client
+ * Migrated from direct pg to Supabase REST API.
+ * Direct db.supabase.co connections are DNS-blocked on Replit.
  */
 
-import pg from "pg";
+const SB_URL = () => (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+const SB_KEY = () => process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-const { Pool } = pg;
+export const isCacheDbReady = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-let pool: pg.Pool | null = null;
-
-function getPool(): pg.Pool {
-  if (!pool) {
-    pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  }
-  return pool;
+function hdrs(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    apikey:         SB_KEY(),
+    Authorization:  `Bearer ${SB_KEY()}`,
+    "Content-Type": "application/json",
+    ...extra,
+  };
 }
 
-export const isCacheDbReady = !!process.env.DATABASE_URL;
-
-function parseFilter(
-  filter: Record<string, string>,
-  startIdx = 1
-): { clause: string; values: any[] } {
-  const conditions: string[] = [];
-  const values: any[] = [];
-  let idx = startIdx;
-  const skipKeys = new Set(["order", "limit", "offset", "select"]);
-
-  for (const [col, raw] of Object.entries(filter)) {
-    if (skipKeys.has(col)) continue;
-    const dotIdx = raw.indexOf(".");
-    if (dotIdx === -1) continue;
-    const op = raw.slice(0, dotIdx);
-    const val = raw.slice(dotIdx + 1);
-    switch (op) {
-      case "eq":
-        if (val === "null") conditions.push(`"${col}" IS NULL`);
-        else { conditions.push(`"${col}" = $${idx++}`); values.push(val); }
-        break;
-      case "lt": conditions.push(`"${col}" < $${idx++}`); values.push(val); break;
-      case "lte": conditions.push(`"${col}" <= $${idx++}`); values.push(val); break;
-      case "gt": conditions.push(`"${col}" > $${idx++}`); values.push(val); break;
-      case "gte": conditions.push(`"${col}" >= $${idx++}`); values.push(val); break;
-    }
+function toQS(params: Record<string, string>, limit?: number): string {
+  const parts: string[] = ["select=*"];
+  for (const [k, v] of Object.entries(params)) {
+    if (k === "select") { parts[0] = `select=${v}`; continue; }
+    parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
   }
-  return { clause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "", values };
+  if (limit) parts.push(`limit=${limit}`);
+  return parts.join("&");
+}
+
+function url(table: string, qs = ""): string {
+  return `${SB_URL()}/rest/v1/${table}${qs ? "?" + qs : ""}`;
 }
 
 /** SELECT rows from a cache table */
 export async function cacheSelect<T = any>(
   table: string,
   params: Record<string, string> = {},
-  opts: { limit?: number } = {}
+  opts: { limit?: number } = {},
 ): Promise<T[]> {
   if (!isCacheDbReady) return [];
   try {
-    const db = getPool();
-    const { clause, values } = parseFilter(params);
-    const limitClause = opts.limit ? `LIMIT ${opts.limit}` : "";
-    const sql = `SELECT * FROM "${table}" ${clause} ${limitClause}`.trim();
-    const result = await db.query(sql, values);
-    return result.rows as T[];
+    const res = await fetch(url(table, toQS(params, opts.limit)), {
+      headers: hdrs(),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return [];
+    return (await res.json()) as T[];
   } catch { return []; }
 }
 
@@ -69,63 +53,58 @@ export async function cacheSelect<T = any>(
 export async function cacheUpsert<T = any>(
   table: string,
   row: Record<string, any>,
-  onConflict?: string
+  onConflict?: string,
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const db = getPool();
-    const cols = Object.keys(row);
-    const vals = Object.values(row);
-    const placeholders = vals.map((_, i) => `$${i + 1}`).join(", ");
-    const colNames = cols.map((c) => `"${c}"`).join(", ");
-
-    let conflictClause = "DO NOTHING";
-    if (onConflict) {
-      const conflictCols = onConflict.split(",").map((c) => `"${c.trim()}"`).join(", ");
-      const updateCols = cols
-        .filter((c) => !onConflict.split(",").map((x) => x.trim()).includes(c))
-        .map((c) => `"${c}" = EXCLUDED."${c}"`);
-      conflictClause = updateCols.length
-        ? `(${conflictCols}) DO UPDATE SET ${updateCols.join(", ")}`
-        : `(${conflictCols}) DO NOTHING`;
-    }
-
-    const sql = `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) ON CONFLICT ${conflictClause} RETURNING *`;
-    const result = await db.query(sql, vals);
-    return (result.rows[0] as T) ?? null;
+    const prefer = onConflict
+      ? "resolution=merge-duplicates,return=representation"
+      : "resolution=ignore-duplicates,return=representation";
+    const qs = onConflict ? `on_conflict=${encodeURIComponent(onConflict)}` : "";
+    const res = await fetch(url(table, qs), {
+      method: "POST",
+      headers: hdrs({ Prefer: prefer }),
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (Array.isArray(data) ? data[0] : data) as T ?? null;
   } catch { return null; }
 }
 
 /** INSERT single row in cache table */
 export async function cacheInsert<T = any>(
   table: string,
-  row: Record<string, any>
+  row: Record<string, any>,
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const db = getPool();
-    const cols = Object.keys(row);
-    const vals = Object.values(row);
-    const placeholders = vals.map((_, i) => `$${i + 1}`).join(", ");
-    const colNames = cols.map((c) => `"${c}"`).join(", ");
-    const sql = `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) RETURNING *`;
-    const result = await db.query(sql, vals);
-    return (result.rows[0] as T) ?? null;
+    const res = await fetch(url(table), {
+      method: "POST",
+      headers: hdrs({ Prefer: "return=representation" }),
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (Array.isArray(data) ? data[0] : data) as T ?? null;
   } catch { return null; }
 }
 
 /** DELETE rows from cache table */
 export async function cacheDelete(
   table: string,
-  filter: Record<string, string>
+  filter: Record<string, string>,
 ): Promise<boolean> {
   if (!isCacheDbReady) return false;
   try {
-    const db = getPool();
-    const { clause, values } = parseFilter(filter);
-    const sql = `DELETE FROM "${table}" ${clause}`;
-    await db.query(sql, values);
-    return true;
+    const res = await fetch(url(table, toQS(filter)), {
+      method: "DELETE",
+      headers: hdrs(),
+      signal: AbortSignal.timeout(8_000),
+    });
+    return res.ok;
   } catch { return false; }
 }
 
@@ -133,23 +112,24 @@ export async function cacheDelete(
 export async function cachePatch<T = any>(
   table: string,
   filter: Record<string, string>,
-  data: Record<string, any>
+  data: Record<string, any>,
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const db = getPool();
-    const dataKeys = Object.keys(data);
-    const dataVals = Object.values(data);
-    const setClauses = dataKeys.map((k, i) => `"${k}" = $${i + 1}`).join(", ");
-    const { clause, values: filterVals } = parseFilter(filter, dataKeys.length + 1);
-    const sql = `UPDATE "${table}" SET ${setClauses} ${clause} RETURNING *`;
-    const result = await db.query(sql, [...dataVals, ...filterVals]);
-    return (result.rows[0] as T) ?? null;
+    const res = await fetch(url(table, toQS(filter)), {
+      method: "PATCH",
+      headers: hdrs({ Prefer: "return=representation" }),
+      body: JSON.stringify(data),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    const result = await res.json();
+    return (Array.isArray(result) ? result[0] : result) as T ?? null;
   } catch { return null; }
 }
 
 if (isCacheDbReady) {
-  console.log("[cacheClient] ✅ PostgreSQL جاهز للكاش المشترك (L2 cache)");
+  console.log("[cacheClient] ✅ Supabase REST جاهز للكاش المشترك (L2 cache)");
 } else {
-  console.warn("[cacheClient] ⚠️ DATABASE_URL غير موجود — الكاش L2 معطّل (L1 ذاكرة فقط)");
+  console.warn("[cacheClient] ⚠️ SUPABASE_URL/KEY غير موجود — الكاش L2 معطّل");
 }
