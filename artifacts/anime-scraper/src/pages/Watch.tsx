@@ -2230,6 +2230,9 @@ function EpisodePlayer({
             { id: "en"      as SubChoice, label: "إنجليزي",  icon: "En", available: hasEn,           color: "rgba(147,197,253,0.85)" },
           ];
 
+          const [expandedSection, setExpandedSection] = React.useState<string|null>(null);
+          const toggleSection = (s: string) => setExpandedSection(v => v === s ? null : s);
+
           const panelContent = (
             <div style={{
               background: "rgba(7,5,20,0.97)",
@@ -2241,33 +2244,35 @@ function EpisodePlayer({
                 : "0 12px 48px rgba(0,0,0,0.80), inset 0 0 0 0.5px rgba(255,255,255,0.07)",
               borderRadius: isLandscape ? "20px 0 0 20px" : "20px",
               overflowY: "auto",
-              maxHeight: isLandscape ? "100dvh" : "48dvh",
-              width: isLandscape ? "280px" : "min(360px, 100%)",
+              maxHeight: isLandscape ? "100dvh" : "72dvh",
+              width: isLandscape ? "290px" : "min(370px, 100%)",
             }}>
+
+              {/* ── مقبض السحب (فوق العنوان للوضع العمودي) ── */}
+              {!isLandscape && (
+                <div className="flex justify-center pt-2 pb-1">
+                  <div className="w-9 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.18)" }} />
+                </div>
+              )}
 
               {/* ── Header ── */}
               <div className={`flex items-center justify-between border-b border-white/[0.06] ${isLandscape ? "px-4 pt-5 pb-3" : "px-4 pt-2 pb-3"}`}>
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-xl flex items-center justify-center"
-                    style={{ background: "linear-gradient(135deg,rgba(139,92,246,0.35),rgba(109,40,217,0.25))", border: "1px solid rgba(139,92,246,0.35)" }}>
-                    <span className="text-violet-300 text-[13px] font-black" style={{ fontFamily: "Cairo, sans-serif" }}>ت</span>
+                  <div className="w-8 h-8 rounded-2xl flex items-center justify-center"
+                    style={{ background: "linear-gradient(135deg,rgba(139,92,246,0.55),rgba(109,40,217,0.40))", border: "1px solid rgba(139,92,246,0.45)", boxShadow: "0 0 12px rgba(139,92,246,0.25)" }}>
+                    <span className="text-violet-200 text-[15px] font-black" style={{ fontFamily: "Cairo, sans-serif" }}>ت</span>
                   </div>
-                  <h3 className="text-[14px] font-black text-white" style={{ fontFamily: "Cairo, sans-serif" }}>الترجمة</h3>
-                  {subTracks.length > 0 && (
-                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-md" style={{ fontFamily: "Cairo, sans-serif", background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.25)", color: "rgba(196,181,253,0.60)" }}>
-                      {subTracks.length} مصادر
-                    </span>
-                  )}
+                  <h3 className="text-[15px] font-black text-white" style={{ fontFamily: "Cairo, sans-serif" }}>الترجمة</h3>
                 </div>
                 <button onClick={() => setShowSubPanel(false)}
-                  className="w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                  className="w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform"
                   style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.10)" }}>
-                  <X className="w-3.5 h-3.5 text-white/45" />
+                  <X className="w-4 h-4 text-white/50" />
                 </button>
               </div>
 
-              {/* ── 4 Language Option Buttons ── */}
-              <div className={`grid gap-2 p-4 ${isLandscape ? "grid-cols-2" : "grid-cols-4"}`}>
+              {/* ── 4 Language Tabs ── */}
+              <div className={`grid gap-2.5 p-4 ${isLandscape ? "grid-cols-2" : "grid-cols-4"}`}>
                 {subOpts.map(opt => {
                   const active = subChoice === opt.id && (opt.id === "off" ? subStatus === "off" : subStatus !== "off");
                   const isOff  = opt.id === "off";
@@ -2275,22 +2280,30 @@ function EpisodePlayer({
                     <button key={opt.id}
                       onClick={() => opt.available && changeSubChoice(opt.id)}
                       disabled={!opt.available}
-                      className="flex flex-col items-center gap-1.5 rounded-2xl transition-all active:scale-95 disabled:opacity-20"
+                      className="flex flex-col items-center gap-2 pt-3 pb-2.5 rounded-2xl transition-all active:scale-90 disabled:opacity-25"
                       style={{
-                        padding: isLandscape ? "12px 8px" : "14px 6px",
                         background: active
-                          ? isOff ? "rgba(239,68,68,0.15)" : "rgba(139,92,246,0.18)"
-                          : "rgba(255,255,255,0.04)",
+                          ? isOff ? "rgba(239,68,68,0.14)" : "rgba(139,92,246,0.20)"
+                          : "rgba(255,255,255,0.05)",
                         border: active
-                          ? isOff ? "1px solid rgba(239,68,68,0.40)" : "1px solid rgba(139,92,246,0.42)"
-                          : "1px solid rgba(255,255,255,0.07)",
-                        boxShadow: active ? `0 0 20px ${isOff ? "rgba(239,68,68,0.10)" : "rgba(139,92,246,0.14)"} inset` : "none",
+                          ? isOff ? "1px solid rgba(239,68,68,0.45)" : "1px solid rgba(139,92,246,0.50)"
+                          : "1px solid rgba(255,255,255,0.08)",
                       }}>
-                      <span className="text-[15px] leading-none font-black select-none"
-                        style={{ color: active ? (isOff ? "rgba(252,165,165,0.90)" : opt.color) : "rgba(255,255,255,0.28)", fontFamily: "Cairo, sans-serif" }}>
-                        {opt.icon}
-                      </span>
-                      <span className="text-[9.5px] font-black leading-none" style={{ fontFamily: "Cairo, sans-serif", color: active ? (isOff ? "rgba(252,165,165,0.85)" : "rgba(196,181,253,0.90)") : "rgba(255,255,255,0.40)" }}>
+                      {/* Circle icon */}
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{
+                        background: active
+                          ? isOff ? "rgba(239,68,68,0.22)" : "rgba(139,92,246,0.28)"
+                          : "rgba(255,255,255,0.07)",
+                        border: active
+                          ? isOff ? "1px solid rgba(239,68,68,0.50)" : "1px solid rgba(139,92,246,0.55)"
+                          : "1px solid rgba(255,255,255,0.10)",
+                      }}>
+                        <span className="text-[17px] leading-none font-black select-none"
+                          style={{ color: active ? (isOff ? "rgba(252,165,165,0.95)" : opt.color) : "rgba(255,255,255,0.32)", fontFamily: "Cairo, sans-serif" }}>
+                          {opt.icon}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-black leading-none" style={{ fontFamily: "Cairo, sans-serif", color: active ? (isOff ? "rgba(252,165,165,0.90)" : "rgba(196,181,253,0.95)") : "rgba(255,255,255,0.42)" }}>
                         {opt.label}
                       </span>
                     </button>
@@ -2298,48 +2311,52 @@ function EpisodePlayer({
                 })}
               </div>
 
-              {/* ── Status pill ── */}
+              {/* ── Status card ── */}
               <div className="px-4 pb-3">
                 {(subStatus === "loading" || subStatus === "translating" || subStatus === "discovering") && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "rgba(139,92,246,0.10)", border: "1px solid rgba(139,92,246,0.18)" }}>
-                    <motion.div className="w-3 h-3 rounded-full border-2 border-violet-400/25 border-t-violet-400/75 shrink-0"
+                  <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl" style={{ background: "rgba(139,92,246,0.10)", border: "1px solid rgba(139,92,246,0.20)" }}>
+                    <motion.div className="w-3.5 h-3.5 rounded-full border-2 border-violet-400/25 border-t-violet-400/75 shrink-0"
                       animate={{ rotate: 360 }} transition={{ duration: 0.85, repeat: Infinity, ease: "linear" }} />
-                    <span className="text-[10px] font-['Cairo'] text-white/50">
+                    <span className="text-[11px] font-bold font-['Cairo']" style={{ color: "rgba(196,181,253,0.75)" }}>
                       {subStatus === "translating" ? "جاري الترجمة…" : subStatus === "loading" ? "جاري التحميل…" : "يبحث عن الترجمة…"}
                     </span>
                   </div>
                 )}
                 {subStatus === "ready" && (
-                  <div className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: "rgba(52,211,153,0.09)", border: "1px solid rgba(52,211,153,0.20)" }}>
-                    <span className="text-[10px] font-['Cairo']" style={{ color: "rgba(110,231,183,0.80)" }}>✓ جاهز · {subCues.length} سطر</span>
-                    <span className="text-[9px] font-['Cairo'] text-white/20">{subLang === "ara" || subLang === "ar" ? "عربي" : "إنجليزي"}</span>
+                  <div className="flex items-center justify-between px-4 py-2.5 rounded-2xl" style={{ background: "rgba(52,211,153,0.09)", border: "1px solid rgba(52,211,153,0.22)" }}>
+                    <span className="text-[11px] font-bold font-['Cairo']" style={{ color: "rgba(110,231,183,0.85)" }}>
+                      {subLang === "ara" || subLang === "ar" ? "عربي" : "إنجليزي"} · جاهز {subCues.length} سطر ✓
+                    </span>
+                    <div className="w-2 h-2 rounded-full" style={{ background: "rgba(52,211,153,0.85)", boxShadow: "0 0 6px rgba(52,211,153,0.60)" }} />
                   </div>
                 )}
                 {subStatus === "failed" && (
-                  <div className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)" }}>
-                    <span className="text-[10px] font-['Cairo'] text-white/35">لا توجد ترجمة لهذا المحتوى</span>
+                  <div className="flex items-center justify-between px-4 py-2.5 rounded-2xl" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.20)" }}>
+                    <span className="text-[11px] font-['Cairo'] text-white/40">لا توجد ترجمة لهذا المحتوى</span>
                     <button onClick={() => { setSubTracks([]); fetchSubtitles(); }}
-                      className="text-[9px] font-bold font-['Cairo'] px-2 py-1 rounded-lg active:scale-90 transition-transform"
-                      style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.32)", color: "rgba(196,181,253,0.80)" }}>
+                      className="text-[10px] font-bold font-['Cairo'] px-2.5 py-1.5 rounded-xl active:scale-90 transition-transform"
+                      style={{ background: "rgba(139,92,246,0.20)", border: "1px solid rgba(139,92,246,0.35)", color: "rgba(196,181,253,0.85)" }}>
                       إعادة
                     </button>
                   </div>
                 )}
                 {subStatus === "off" && (
-                  <div className="px-3 py-2 rounded-xl text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                    <span className="text-[10px] font-['Cairo'] text-white/18">اختر لغة الترجمة من الأعلى</span>
+                  <div className="px-4 py-2.5 rounded-2xl text-center" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <span className="text-[10px] font-['Cairo'] text-white/22">اختر لغة الترجمة من الأعلى</span>
                   </div>
                 )}
               </div>
 
-              {/* ── Whisper Audio Transcription ── */}
-              <div className="px-4 pb-3 pt-1 border-t border-white/[0.05]">
-                <div className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[14px]">🎙</span>
+              {/* ── ترجمة صوتية ── */}
+              <div className="px-4 pb-1 border-t border-white/[0.05]">
+                <div className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
+                      <span className="text-[15px]">🎙</span>
+                    </div>
                     <div>
-                      <p className="text-[11px] font-black font-['Cairo'] text-white/55">ترجمة صوتية</p>
-                      <p className="text-[8.5px] font-['Cairo'] text-white/22">
+                      <p className="text-[12px] font-black font-['Cairo'] text-white/70">ترجمة صوتية</p>
+                      <p className="text-[9px] font-['Cairo'] text-white/28">
                         {whisperStatus === "ready" && whisperLang ? `تم · لغة المصدر: ${whisperLang}` : "يكتشف اللغة ويترجم تلقائياً"}
                       </p>
                     </div>
@@ -2347,11 +2364,11 @@ function EpisodePlayer({
                   <button
                     onClick={triggerWhisperTranscription}
                     disabled={whisperStatus === "loading"}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] transition-all active:scale-90 disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] transition-all active:scale-90 disabled:opacity-50"
                     style={{
-                      background: whisperStatus === "ready" ? "rgba(52,211,153,0.18)" : whisperStatus === "error" ? "rgba(239,68,68,0.15)" : "rgba(139,92,246,0.22)",
-                      border: whisperStatus === "ready" ? "1px solid rgba(52,211,153,0.35)" : whisperStatus === "error" ? "1px solid rgba(239,68,68,0.30)" : "1px solid rgba(139,92,246,0.42)",
-                      color: whisperStatus === "ready" ? "rgba(110,231,183,0.90)" : whisperStatus === "error" ? "rgba(252,165,165,0.85)" : "rgba(196,181,253,0.90)",
+                      background: whisperStatus === "ready" ? "rgba(52,211,153,0.18)" : whisperStatus === "error" ? "rgba(239,68,68,0.15)" : "rgba(139,92,246,0.25)",
+                      border: whisperStatus === "ready" ? "1px solid rgba(52,211,153,0.38)" : whisperStatus === "error" ? "1px solid rgba(239,68,68,0.32)" : "1px solid rgba(139,92,246,0.48)",
+                      color: whisperStatus === "ready" ? "rgba(110,231,183,0.95)" : whisperStatus === "error" ? "rgba(252,165,165,0.90)" : "rgba(196,181,253,0.95)",
                     }}>
                     {whisperStatus === "loading" ? (
                       <motion.span className="w-3 h-3 rounded-full border border-violet-300/40 border-t-violet-300"
@@ -2362,186 +2379,228 @@ function EpisodePlayer({
                 </div>
               </div>
 
-              {/* ── TTS Dub toggle ── */}
-              {subStatus === "ready" && (
-                <div className="px-4 pb-3 pt-1 border-t border-white/[0.05]">
-                  <div className="flex items-center justify-between py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[14px]">🔊</span>
-                      <div>
-                        <p className="text-[11px] font-black font-['Cairo'] text-white/55">دبلجة صوتية</p>
-                        <p className="text-[8.5px] font-['Cairo'] text-white/22">تجريبي · يقرأ الترجمة عربياً</p>
-                      </div>
+              {/* ── دبلجة صوتية ── */}
+              <div className="px-4 pb-1 border-t border-white/[0.05]">
+                <div className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.20)" }}>
+                      <span className="text-[15px]">🔊</span>
                     </div>
-                    <button onClick={() => setTtsDub(d => !d)}
-                      className="relative w-10 h-[22px] rounded-full transition-all active:scale-90"
-                      style={{ background: ttsDub ? "rgba(139,92,246,0.70)" : "rgba(255,255,255,0.09)", border: ttsDub ? "1px solid rgba(139,92,246,0.70)" : "1px solid rgba(255,255,255,0.12)" }}>
-                      <motion.div className="absolute top-0.5 w-[18px] h-[18px] rounded-full"
-                        style={{ background: ttsDub ? "#c4b5fd" : "rgba(255,255,255,0.42)" }}
-                        animate={{ left: ttsDub ? "auto" : "2px", right: ttsDub ? "2px" : "auto" }}
-                        transition={{ duration: 0.18 }} />
-                    </button>
+                    <div>
+                      <p className="text-[12px] font-black font-['Cairo'] text-white/70">دبلجة صوتية</p>
+                      <p className="text-[9px] font-['Cairo'] text-white/28">تجريبي · يقرأ الترجمة عربياً</p>
+                    </div>
                   </div>
+                  <button onClick={() => setTtsDub(d => !d)}
+                    className="relative w-11 h-6 rounded-full transition-all active:scale-90 shrink-0"
+                    style={{ background: ttsDub ? "rgba(139,92,246,0.75)" : "rgba(255,255,255,0.10)", border: ttsDub ? "1px solid rgba(139,92,246,0.75)" : "1px solid rgba(255,255,255,0.14)" }}>
+                    <motion.div className="absolute top-[3px] w-[18px] h-[18px] rounded-full"
+                      style={{ background: ttsDub ? "#c4b5fd" : "rgba(255,255,255,0.50)" }}
+                      animate={{ left: ttsDub ? "auto" : "3px", right: ttsDub ? "3px" : "auto" }}
+                      transition={{ duration: 0.18 }} />
+                  </button>
                 </div>
-              )}
+              </div>
 
-              {/* ── Settings ── */}
-              {subStatus === "ready" && (
-                <div className="px-4 pb-4 pt-2 border-t border-white/[0.05] flex flex-col gap-3">
+              {/* ── إعدادات divider ── */}
+              <div className="flex items-center gap-2 px-4 py-2 border-t border-white/[0.05]">
+                <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
+                <span className="text-[10px] font-black font-['Cairo'] tracking-widest" style={{ color: "rgba(255,255,255,0.20)" }}>إعدادات</span>
+                <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
+              </div>
 
-                  {/* Font size */}
-                  <div>
-                    <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>حجم الخط</p>
-                    <div className="flex gap-1.5">
-                      {([13, 16, 20, 24] as number[]).map(sz => (
-                        <button key={sz} onClick={() => setSubSettings(s => ({ ...s, fontSize: sz }))}
-                          className="flex-1 py-2 rounded-xl font-bold font-['Cairo'] transition-all active:scale-90"
-                          style={{
-                            fontSize: sz > 18 ? sz * 0.62 : sz * 0.72,
-                            background: subSettings.fontSize === sz ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
-                            border: subSettings.fontSize === sz ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
-                            color: subSettings.fontSize === sz ? "#c4b5fd" : "rgba(255,255,255,0.35)",
-                          }}>
-                          {sz === 13 ? "أ" : sz === 16 ? "أ" : sz === 20 ? "أ" : "أ"}
-                        </button>
-                      ))}
+              {/* ── حجم الخط (دائماً مرئي) ── */}
+              <div className="px-4 py-3">
+                <p className="text-[9px] font-bold font-['Cairo'] mb-2.5" style={{ color: "rgba(255,255,255,0.28)" }}>حجم الخط</p>
+                <div className="flex gap-2">
+                  {([
+                    { sz: 13, label: "أ", name: "صغير" },
+                    { sz: 16, label: "أ", name: "متوسط" },
+                    { sz: 20, label: "أ", name: "كبير" },
+                    { sz: 24, label: "أ", name: "كبير جداً" },
+                  ] as { sz: number; label: string; name: string }[]).map(({ sz, name }) => (
+                    <button key={sz} onClick={() => setSubSettings(s => ({ ...s, fontSize: sz }))}
+                      className="flex-1 flex flex-col items-center py-2.5 rounded-2xl font-bold font-['Cairo'] transition-all active:scale-90"
+                      style={{
+                        background: subSettings.fontSize === sz ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
+                        border: subSettings.fontSize === sz ? "1px solid rgba(139,92,246,0.50)" : "1px solid rgba(255,255,255,0.08)",
+                      }}>
+                      <span style={{
+                        fontSize: sz > 18 ? sz * 0.72 : sz * 0.82,
+                        color: subSettings.fontSize === sz ? "#c4b5fd" : "rgba(255,255,255,0.40)",
+                        lineHeight: 1.1,
+                      }}>أ</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Expandable sections ── */}
+
+              {/* عام */}
+              <div className="border-t border-white/[0.05]">
+                <button onClick={() => toggleSection("general")}
+                  className="flex items-center justify-between w-full px-4 py-3 active:bg-white/[0.03] transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.20)" }}>
+                      <span className="text-[12px]">⚙️</span>
                     </div>
+                    <span className="text-[12px] font-black font-['Cairo'] text-white/70">عام</span>
                   </div>
-
-                  {/* Color swatches */}
-                  <div>
-                    <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>لون النص</p>
-                    <div className="flex gap-2">
-                      {([
-                        { v: "#ffffff" }, { v: "#fde047" }, { v: "#67e8f9" }, { v: "#86efac" }, { v: "#fca5a5" },
-                      ] as { v: string }[]).map(({ v }) => (
-                        <button key={v} onClick={() => setSubSettings(s => ({ ...s, color: v }))}
-                          className="flex-1 h-8 rounded-xl transition-all active:scale-90 relative"
-                          style={{ background: v, opacity: subSettings.color === v ? 1 : 0.35, boxShadow: subSettings.color === v ? `0 0 10px ${v}80` : "none", border: subSettings.color === v ? "2px solid rgba(255,255,255,0.60)" : "1.5px solid rgba(255,255,255,0.10)" }}>
-                          {subSettings.color === v && (
-                            <span className="absolute inset-0 flex items-center justify-center text-[10px]" style={{ color: "#000", opacity: 0.6 }}>✓</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="flex items-center gap-2">
+                    {subStatus === "ready" && <div className="w-1.5 h-1.5 rounded-full" style={{ background: "rgba(52,211,153,0.80)" }} />}
+                    <span className="text-[10px] text-white/25">{expandedSection === "general" ? "▲" : "▼"}</span>
                   </div>
-
-                  {/* Background opacity + bold */}
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>خلفية</p>
-                      <div className="flex gap-1.5">
-                        {([{ v: 0.82, label: "●" }, { v: 0.45, label: "◐" }, { v: 0, label: "○" }] as { v: number; label: string }[]).map(({ v, label }) => (
-                          <button key={v} onClick={() => setSubSettings(s => ({ ...s, bgOpacity: v }))}
-                            className="flex-1 py-2 rounded-xl text-[14px] transition-all active:scale-90"
+                </button>
+                {expandedSection === "general" && (
+                  <div className="px-4 pb-3">
+                    <p className="text-[9px] font-['Cairo'] text-white/30 mb-2">مصادر الترجمة المكتشفة</p>
+                    {subTracks.length === 0 ? (
+                      <span className="text-[10px] font-['Cairo'] text-white/20">لا توجد مصادر مكتشفة</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {subTracks.map(t => (
+                          <span key={t.id} className="text-[9px] px-2 py-1 rounded-xl font-['Cairo'] font-bold"
                             style={{
-                              background: subSettings.bgOpacity === v ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
-                              border: subSettings.bgOpacity === v ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
-                              color: subSettings.bgOpacity === v ? "#c4b5fd" : "rgba(255,255,255,0.28)",
+                              background: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.09)" : "rgba(147,197,253,0.09)",
+                              border: t.lang === "ar" || t.lang === "ar-auto" ? "1px solid rgba(110,231,183,0.22)" : "1px solid rgba(147,197,253,0.22)",
+                              color: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.70)" : "rgba(147,197,253,0.70)",
                             }}>
-                            {label}
+                            {t.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* المظهر */}
+              <div className="border-t border-white/[0.05]">
+                <button onClick={() => toggleSection("appearance")}
+                  className="flex items-center justify-between w-full px-4 py-3 active:bg-white/[0.03] transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.20)" }}>
+                      <span className="text-[12px]">🎨</span>
+                    </div>
+                    <div>
+                      <span className="text-[12px] font-black font-['Cairo'] text-white/70">المظهر</span>
+                      <span className="text-[9px] font-['Cairo'] text-white/25 mr-2">كبير · أبيض</span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-white/25">{expandedSection === "appearance" ? "▲" : "▼"}</span>
+                </button>
+                {expandedSection === "appearance" && (
+                  <div className="px-4 pb-4 flex flex-col gap-3">
+                    {/* Color */}
+                    <div>
+                      <p className="text-[9px] font-bold font-['Cairo'] mb-2" style={{ color: "rgba(255,255,255,0.28)" }}>لون النص</p>
+                      <div className="flex gap-2">
+                        {([{ v: "#ffffff" }, { v: "#fde047" }, { v: "#67e8f9" }, { v: "#86efac" }, { v: "#fca5a5" }] as { v: string }[]).map(({ v }) => (
+                          <button key={v} onClick={() => setSubSettings(s => ({ ...s, color: v }))}
+                            className="flex-1 h-8 rounded-xl transition-all active:scale-90 relative"
+                            style={{ background: v, opacity: subSettings.color === v ? 1 : 0.32, boxShadow: subSettings.color === v ? `0 0 10px ${v}70` : "none", border: subSettings.color === v ? "2px solid rgba(255,255,255,0.65)" : "1.5px solid rgba(255,255,255,0.10)" }}>
+                            {subSettings.color === v && <span className="absolute inset-0 flex items-center justify-center text-[10px]" style={{ color: "#000", opacity: 0.65 }}>✓</span>}
                           </button>
                         ))}
                       </div>
                     </div>
-                    <div className="shrink-0">
-                      <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>وزن</p>
-                      <button onClick={() => setSubSettings(s => ({ ...s, bold: !s.bold }))}
-                        className="h-[38px] px-3 rounded-xl text-[11px] transition-all active:scale-90"
-                        style={{
-                          fontWeight: subSettings.bold ? 800 : 400,
-                          background: subSettings.bold ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
-                          border: subSettings.bold ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
-                          color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.30)",
-                          fontFamily: "Cairo, sans-serif",
-                        }}>
-                        {subSettings.bold ? "ع" : "ع"}
-                      </button>
+                    {/* Background + Bold */}
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <p className="text-[9px] font-bold font-['Cairo'] mb-2" style={{ color: "rgba(255,255,255,0.28)" }}>خلفية</p>
+                        <div className="flex gap-1.5">
+                          {([{ v: 0.82, label: "●" }, { v: 0.45, label: "◐" }, { v: 0, label: "○" }] as { v: number; label: string }[]).map(({ v, label }) => (
+                            <button key={v} onClick={() => setSubSettings(s => ({ ...s, bgOpacity: v }))}
+                              className="flex-1 py-2 rounded-xl text-[14px] transition-all active:scale-90"
+                              style={{ background: subSettings.bgOpacity === v ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)", border: subSettings.bgOpacity === v ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)", color: subSettings.bgOpacity === v ? "#c4b5fd" : "rgba(255,255,255,0.28)" }}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        <p className="text-[9px] font-bold font-['Cairo'] mb-2" style={{ color: "rgba(255,255,255,0.28)" }}>خط عريض</p>
+                        <button onClick={() => setSubSettings(s => ({ ...s, bold: !s.bold }))}
+                          className="h-[38px] px-3 rounded-xl text-[12px] transition-all active:scale-90 font-black"
+                          style={{ fontWeight: subSettings.bold ? 800 : 400, background: subSettings.bold ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)", border: subSettings.bold ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)", color: subSettings.bold ? "#c4b5fd" : "rgba(255,255,255,0.30)", fontFamily: "Cairo, sans-serif" }}>
+                          {subSettings.bold ? "ع" : "ع"}
+                        </button>
+                      </div>
                     </div>
                   </div>
+                )}
+              </div>
 
-                  {/* Position */}
-                  <div>
-                    <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em] mb-2" style={{ color: "rgba(255,255,255,0.18)" }}>موضع</p>
+              {/* الموضع */}
+              <div className="border-t border-white/[0.05]">
+                <button onClick={() => toggleSection("position")}
+                  className="flex items-center justify-between w-full px-4 py-3 active:bg-white/[0.03] transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "rgba(147,197,253,0.12)", border: "1px solid rgba(147,197,253,0.20)" }}>
+                      <span className="text-[12px]">📍</span>
+                    </div>
+                    <div>
+                      <span className="text-[12px] font-black font-['Cairo'] text-white/70">الموضع</span>
+                      <span className="text-[9px] font-['Cairo'] text-white/25 mr-2">{subSettings.position === "top" ? "أعلى" : subSettings.position === "center" ? "وسط" : "أسفل"}</span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-white/25">{expandedSection === "position" ? "▲" : "▼"}</span>
+                </button>
+                {expandedSection === "position" && (
+                  <div className="px-4 pb-3">
                     <div className="flex gap-1.5">
                       {([{ v: "top", label: "↑ أعلى" }, { v: "center", label: "⬛ وسط" }, { v: "bottom", label: "↓ أسفل" }] as { v: "top"|"center"|"bottom"; label: string }[]).map(({ v, label }) => (
                         <button key={v} onClick={() => setSubSettings(s => ({ ...s, position: v }))}
-                          className="flex-1 py-2 rounded-xl text-[10px] font-bold font-['Cairo'] transition-all active:scale-90"
-                          style={{
-                            background: subSettings.position === v ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)",
-                            border: subSettings.position === v ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
-                            color: subSettings.position === v ? "#c4b5fd" : "rgba(255,255,255,0.35)",
-                          }}>
+                          className="flex-1 py-2.5 rounded-xl text-[10px] font-bold font-['Cairo'] transition-all active:scale-90"
+                          style={{ background: subSettings.position === v ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.05)", border: subSettings.position === v ? "1px solid rgba(139,92,246,0.45)" : "1px solid rgba(255,255,255,0.08)", color: subSettings.position === v ? "#c4b5fd" : "rgba(255,255,255,0.35)" }}>
                           {label}
                         </button>
                       ))}
                     </div>
                   </div>
+                )}
+              </div>
 
-                  {/* Timing offset — auto-synced via X-TIMESTAMP-MAP; manual fine-tune hidden by default */}
-                  <div>
-                    <button
-                      onClick={() => setShowOffsetControls(v => !v)}
-                      className="flex items-center gap-1.5 w-full text-right"
-                    >
-                      <p className="text-[9px] font-bold font-['Cairo'] uppercase tracking-[0.08em]" style={{ color: "rgba(255,255,255,0.18)" }}>
-                        ضبط يدوي للتوقيت
-                        {subOffset !== 0 && <span className="mr-1.5 text-violet-300/60 normal-case">{subOffset > 0 ? "+" : ""}{subOffset.toFixed(1)}s</span>}
-                      </p>
-                      <span className="text-[8px] mr-auto" style={{ color: "rgba(255,255,255,0.15)" }}>
-                        {showOffsetControls ? "▲" : "▼"}
-                      </span>
-                    </button>
-                    <p className="text-[8px] font-['Cairo'] mt-0.5 mb-1.5" style={{ color: "rgba(255,255,255,0.12)" }}>
-                      التزامن تلقائي — الضبط اليدوي للحالات الاستثنائية فقط
-                    </p>
-                    {showOffsetControls && (
-                      <div className="flex gap-1.5 mt-1.5">
-                        {([-2, -0.5, 0.5, 2] as number[]).map(d => (
-                          <button key={d} onClick={() => adjustOffset(d)}
-                            className="flex-1 py-2 rounded-xl text-white/40 text-[10px] font-bold active:scale-90 transition-transform"
-                            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", fontFamily: "monospace" }}>
-                            {d > 0 ? "+" : ""}{d}s
-                          </button>
-                        ))}
-                        {subOffset !== 0 && (
-                          <button onClick={() => setSubOffset(0)}
-                            className="px-2.5 py-2 rounded-xl text-[10px] active:scale-90 transition-transform"
-                            style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(252,165,165,0.70)", fontFamily: "Cairo, sans-serif" }}>
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    )}
+              {/* السلوك (ضبط التوقيت) */}
+              <div className="border-t border-white/[0.05]">
+                <button onClick={() => toggleSection("behavior")}
+                  className="flex items-center justify-between w-full px-4 py-3 active:bg-white/[0.03] transition-colors">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.18)" }}>
+                      <span className="text-[12px]">⚡</span>
+                    </div>
+                    <div>
+                      <span className="text-[12px] font-black font-['Cairo'] text-white/70">السلوك</span>
+                      {subOffset !== 0 && <span className="text-[9px] font-['Cairo'] text-violet-300/60 mr-2">{subOffset > 0 ? "+" : ""}{subOffset.toFixed(1)}s</span>}
+                    </div>
                   </div>
-                </div>
-              )}
-
-              {/* ── Available track chips ── */}
-              {subTracks.length > 0 && (
-                <div className="px-4 pb-4 pt-2 border-t border-white/[0.05]">
-                  <p className="text-[8px] font-bold font-['Cairo'] uppercase tracking-[0.10em] mb-2" style={{ color: "rgba(255,255,255,0.14)" }}>المصادر المكتشفة</p>
-                  <div className="flex flex-wrap gap-1">
-                    {subTracks.map(t => (
-                      <span key={t.id} className="text-[8.5px] px-2 py-0.5 rounded-lg font-['Cairo'] font-bold"
-                        style={{
-                          background: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.09)" : "rgba(147,197,253,0.09)",
-                          border: t.lang === "ar" || t.lang === "ar-auto" ? "1px solid rgba(110,231,183,0.22)" : "1px solid rgba(147,197,253,0.22)",
-                          color: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.65)" : "rgba(147,197,253,0.65)",
-                        }}>
-                        {t.label}
-                      </span>
-                    ))}
+                  <span className="text-[10px] text-white/25">{expandedSection === "behavior" ? "▲" : "▼"}</span>
+                </button>
+                {expandedSection === "behavior" && (
+                  <div className="px-4 pb-4">
+                    <p className="text-[9px] font-['Cairo'] text-white/28 mb-3">ضبط يدوي للتوقيت — التزامن تلقائي افتراضياً</p>
+                    <div className="flex gap-1.5">
+                      {([-2, -0.5, 0.5, 2] as number[]).map(d => (
+                        <button key={d} onClick={() => adjustOffset(d)}
+                          className="flex-1 py-2 rounded-xl text-white/40 text-[10px] font-bold active:scale-90 transition-transform"
+                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", fontFamily: "monospace" }}>
+                          {d > 0 ? "+" : ""}{d}s
+                        </button>
+                      ))}
+                      {subOffset !== 0 && (
+                        <button onClick={() => setSubOffset(0)}
+                          className="px-2.5 py-2 rounded-xl text-[10px] active:scale-90 transition-transform"
+                          style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)", color: "rgba(252,165,165,0.75)", fontFamily: "Cairo, sans-serif" }}>
+                          ✕
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* مقبض السحب للأسفل لإغلاق اللوحة (وضع عمودي) */}
-              {!isLandscape && (
-                <div className="flex justify-center pt-1 pb-3">
-                  <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.14)" }} />
-                </div>
-              )}
+              <div className="pb-2" />
             </div>
           );
 
