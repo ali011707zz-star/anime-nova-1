@@ -44,7 +44,8 @@
 - [AnimeDar data-attr regex bug](animedar-data-attr.md) — `\bdata=` matches `quality-data=` (word boundary on `-`); must use `(?:^|\s)data=` to match only the standalone data attribute
 - [AnimeDar MEGA truncated scheme](animedar-mega-scheme.md) — some AnimeDar episodes store mega data as `:/mega.nz/embed#!...` (https stripped to colon+1-slash); fix: `"https://" + d.slice(2)`; other episodes use standard `fileId#key` format
 - [AnimeDar colon-slug](animedar-colon-slug.md) — "Re:Zero" → toSlug → `re-zero-...` but AnimeDar uses `rezero-...`; add colonJoined variant: `toSlug(q.replace(/[：:]/g, ""))` to slug candidates
-- [Anime-Phoenix x265 MKV](animephoenix-codec.md) — all files are x265/HEVC MKV; plays on Windows/Mac with HEVC decoder and Safari; Linux Chrome (Replit preview) cannot decode → shows error; video-proxy must set Accept-Ranges:bytes always
+- [Anime-Phoenix x265 MKV](animephoenix-codec.md) — all files x265/HEVC MKV; line 1869 was SKIPPING all .mkv → always 0 sources (FIXED Jun2026); HxH+Bleach confirmed 5 sources; Naruto/OP/DBZ not in their library
+- [animation.ts scrapeAnimCached race fix](animation-cache-race-fix.md) — shared _captureKey caused concurrent scrapers to corrupt each other's cache; fixed with AsyncLocalStorage — each scraper.run() gets isolated capture array; video-proxy must set Accept-Ranges:bytes always
 - [Shahiid seasons/?serie= AJAX](shahiid-serie-ajax.md) — ?serie= pages load seasons via JS only (misha_loadmore returns 0, paged= also fails); only works for anime with direct /seasons/{slug}/ URLs
 - [mega.nz embed ordering in extractAndCollect](mega-embed-ordering.md) — mega.nz/embed MUST be checked BEFORE DEAD_FILE_HOSTS (mega.nz is in that list); same for vidmoly
 - [asciiSimilarity for mixed Arabic-English slugs](ascii-similarity.md) — slugs like "انمي-ون-بيس-one-piece-hg" score=0 with similarity(); asciiSimilarity() strips non-ASCII first; used in AnimeTime, RistoAnime
