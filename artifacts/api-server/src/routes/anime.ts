@@ -6651,6 +6651,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       site: string,
       scrape: () => Promise<UnifiedSource[]>,
       useExtract = true,
+      timeoutMs = SCRAPER_MS,
     ) {
       if (!title || closed) return;
       const cKey = makeSourceCacheKey(site, title, ep);
@@ -6664,7 +6665,7 @@ router.get("/anime/sources-stream", async (req, res) => {
         if (hit.stale || shouldRefreshCache(hit.expiresAt)) {
           setImmediate(async () => {
             try {
-              const srcs = await race(scrape(), SCRAPER_MS, []);
+              const srcs = await race(scrape(), timeoutMs, []);
               if (!srcs.length) return;
               if (useExtract) {
                 const buf: UnifiedSource[] = [];
@@ -6688,7 +6689,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       }
 
       // ❌ لا يوجد cache → اكشط
-      const srcs = await race(scrape(), SCRAPER_MS, []);
+      const srcs = await race(scrape(), timeoutMs, []);
       if (!srcs.length) return;
 
       if (useExtract) {
@@ -6724,7 +6725,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
-      scrapeCached("hianime",      () => getHiAnimeSources(title, english, ep, anilistId),      false),
+      scrapeCached("hianime",      () => getHiAnimeSources(title, english, ep, anilistId),      false, 22000),
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
