@@ -166,6 +166,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم · HLS",         tag: "AT" },
   { site: "animex",       name: "أنمي إكس",     desc: "ياباني مترجم · HLS",       tag: "AX" },
   { site: "anikuro",      name: "AniKuro",       desc: "ياباني مترجم · HLS",       tag: "KR" },
+  { site: "anivault",     name: "AniVault",      desc: "ياباني مترجم · senshi/miruro/AH", tag: "AV" },
   // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────
   { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS · صوت ياباني",  tag: "SC" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
