@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   makeAnimCacheKey,
   getFromSourceCache,
@@ -1552,9 +1553,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // Anime-Day GitHub Arabic subtitle for this show (if known)
   const adSub = getAnimeDaySubtitleUrl(title, season, epNum);
 
-  // ── كاش capture: عند تفعيله يُسجّل المصادر المُرسَلة ──
-  let _captureKey: string | null = null;
-  const _capturedSources = new Map<string, any[]>();
+  // ── كاش capture: AsyncLocalStorage لتجنب race condition في الاستدعاءات المتزامنة ──
+  const captureStorage = new AsyncLocalStorage<any[]>();
 
   // Send a source; directUrl = already-extracted stream URL, proxyUrl = proxied version
   const sendSource = (url: string, label: string, directUrl?: string, proxyUrl?: string, extra2?: Record<string, any>) => {
@@ -1563,12 +1563,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     sourceCount++;
     const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}) };
     send("source", { url, label, directUrl, proxyUrl, ...extra });
-    // capture for caching
-    if (_captureKey) {
-      const arr = _capturedSources.get(_captureKey) ?? [];
-      arr.push({ url, label, directUrl, proxyUrl, ...extra });
-      _capturedSources.set(_captureKey, arr);
-    }
+    // capture for caching — isolated per async context (no race condition)
+    const captureArr = captureStorage.getStore();
+    if (captureArr) captureArr.push({ url, label, directUrl, proxyUrl, ...extra });
   };
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
@@ -1588,28 +1585,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       if (hit.stale || shouldRefreshCache(hit.expiresAt)) {
         setImmediate(async () => {
           try {
-            const oldCapture = _captureKey;
-            _captureKey = cKey + ":bg";
-            _capturedSources.set(_captureKey, []);
-            // تشغيل الكاشط بصمت (sendSource لا يُرسل لأن الاستجابة قد أُغلقت)
-            await scrape();
-            const bg = _capturedSources.get(_captureKey + "") ?? [];
-            _capturedSources.delete(_captureKey + "");
-            _captureKey = oldCapture;
-            if (bg.length) await setSourceCache(cKey, site, bg);
+            const bgArr: any[] = [];
+            await captureStorage.run(bgArr, () => scrape());
+            if (bgArr.length) await setSourceCache(cKey, site, bgArr);
           } catch { /* silent */ }
         });
       }
       return;
     }
 
-    // ❌ لا يوجد كاش → اكشط مع التسجيل
-    _captureKey = cKey;
-    _capturedSources.set(cKey, []);
-    await scrape();
-    _captureKey = null;
-    const captured = _capturedSources.get(cKey) ?? [];
-    _capturedSources.delete(cKey);
+    // ❌ لا يوجد كاش → اكشط مع التسجيل في context معزول
+    const captured: any[] = [];
+    await captureStorage.run(captured, () => scrape());
     if (captured.length) await setSourceCache(cKey, site, captured);
   }
 
@@ -2794,7 +2781,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const PORT = process.env["PORT"] || "8080";
           const fsUrl = `http://localhost:${PORT}/api/anime/fetch-source?site=animephoenix`
             + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${epN}`;
-          const r = await fetch(fsUrl, { signal: AbortSignal.timeout(20_000) });
+          const r = await fetch(fsUrl, {
+            headers: { "x-internal": "1" },
+            signal: AbortSignal.timeout(20_000),
+          });
           if (!r.ok) return;
           const { sources } = await r.json() as {
             sources?: Array<{ directUrl?: string; quality?: string }>;

@@ -1863,19 +1863,16 @@ async function getAnimePhoenixSources(
   let idx = 0;
   for (const v of videos.slice(0, 6)) {
     const lower = v.url.toLowerCase();
-    // MKV files on anime-phoenix.com are x265/HEVC — browsers cannot decode them
-    // (only Safari on Apple Silicon partially supports HEVC; Chrome/Firefox never do).
-    // Skip MKV to prevent guaranteed black-screen playback.
-    if (lower.endsWith(".mkv") || lower.includes(".mkv?")) continue;
+    const isMkv = lower.endsWith(".mkv") || lower.includes(".mkv?");
     const isHls = lower.includes(".m3u8");
     const proxied = isHls
       ? `/api/anime/hls-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(APH_BASE + "/")}`
       : `/api/anime/video-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(APH_BASE + "/")}`;
     sources.push({
-      name: v.label || `Phoenix ${idx + 1}`,
+      name: v.label ? `Phoenix · ${v.label}` : isMkv ? `Phoenix · MKV 1080p` : `Phoenix ${idx + 1}`,
       url: proxied,
       directUrl: proxied,
-      directType: isHls ? ("hls" as const) : ("mp4" as const),
+      directType: isHls ? ("hls" as const) : isMkv ? ("mp4" as const) : ("mp4" as const),
       quality: "1080p",
       qualityRank: 13,
       site: "animephoenix",
