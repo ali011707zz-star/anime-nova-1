@@ -4654,8 +4654,10 @@ async function getAnimeWitcherSources(
       const srvName = srv.name.toUpperCase();
 
       if (srvName === "PD") {
-        // Pixeldrain: CORS * + Accept-Ranges → تشغيل مباشر في المتصفح بدون video-proxy
-        sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl: srv.url, directType: "mp4", corsOk: true });
+        // Pixeldrain: free accounts block hotlinking from browser (hotlink_detected).
+        // Route through video-proxy with Referer:pixeldrain.com so request appears internal.
+        const pdProxied = `/api/anime/video-proxy?url=${encodeURIComponent(srv.url)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
+        sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl: pdProxied, directType: "mp4" });
 
       } else if (srvName === "MF") {
         // MediaFire CDN URLs مربوطة بـ IP الـ HF Space → نمررها عبر proxy_url الخاص به
