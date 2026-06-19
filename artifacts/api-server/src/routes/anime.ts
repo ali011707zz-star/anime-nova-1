@@ -4996,7 +4996,7 @@ async function getAnimeWitcherSources(
       const sorted = hits.map(h => ({ ...h, score: Math.max(similarity(q, h.name), asciiSimilarity(q, h.name)) }))
         .sort((a, b) => b.score - a.score);
       const best = sorted[0];
-      if (best && best.score >= 0.35) { animeId = best.id; break; }
+      if (best && best.score >= 0.45) { animeId = best.id; break; }
     }
     if (!animeId) return [];
 
@@ -6212,7 +6212,7 @@ async function getSeepanelSources(
     const seen = new Set<number>();
     // Map: posterId → score
     const candidates: Array<{ poster: SeepanelPoster; score: number }> = [];
-    const spMin = isMovie ? 0.55 : 0.35;
+    const spMin = isMovie ? 0.58 : 0.50;
 
     for (const q of queries) {
       const posters = await seepanelSearch(q);
@@ -6236,8 +6236,10 @@ async function getSeepanelSources(
               asciiSimilarity(spTitle, title),
               eLow ? asciiSimilarity(spTitle, english!) : 0,
               // Substring bonus: if the search title appears inside the SeePanal title
-              // (e.g. "one piece" inside "Anime One Piece Egghead Saga Arc") → 0.55
-              (spLow.includes(tLow) || (eLow && spLow.includes(eLow))) ? 0.55 : 0,
+              // AND the title is long enough (≥5 chars) to avoid false matches.
+              // Caps at 0.52 so it never beats a real similarity match.
+              (tLow.length >= 5 && spLow.includes(tLow)) ? 0.52 :
+              (eLow && eLow.length >= 5 && spLow.includes(eLow)) ? 0.52 : 0,
             );
         if (score >= spMin) candidates.push({ poster: p, score });
       }

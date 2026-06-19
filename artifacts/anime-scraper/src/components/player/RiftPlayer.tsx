@@ -265,6 +265,7 @@ export default function RiftPlayer({
   const [showViewMode,    setShowViewMode]    = useState(false);
   const [showSubMenu,     setShowSubMenu]      = useState(false);
   const [showEpList,      setShowEpList]       = useState(false);
+  const [epPage,          setEpPage]           = useState(() => Math.max(0, Math.floor((ep - 1) / 50)));
   const [openSubSection,  setOpenSubSection]   = useState<string | null>(null);
   const [prgHover,        setPrgHover]        = useState(false);
   const [feedback,        setFeedback]        = useState<GF | null>(null);
@@ -2393,6 +2394,15 @@ export default function RiftPlayer({
                 onClick={e => e.stopPropagation()}
               >
                 {/* Header */}
+                {(() => {
+                  const EP_PAGE_SIZE = 50;
+                  const maxEps = totalEps < 900 ? totalEps : 500;
+                  const totalPages = Math.ceil(maxEps / EP_PAGE_SIZE);
+                  const currentPage = Math.max(0, Math.min(epPage, totalPages - 1));
+                  const startEp = currentPage * EP_PAGE_SIZE + 1;
+                  const endEp = Math.min((currentPage + 1) * EP_PAGE_SIZE, maxEps);
+                  const pageEps = Array.from({ length: endEp - startEp + 1 }, (_, i) => startEp + i);
+                  return (<>
                 <div className="flex items-center justify-between px-4 py-3.5 shrink-0"
                   style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
                   <div className="flex items-center gap-2">
@@ -2415,11 +2425,45 @@ export default function RiftPlayer({
                   </button>
                 </div>
 
+                {/* Page navigation */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between px-3 py-2 shrink-0"
+                    style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                    <button
+                      disabled={currentPage <= 0}
+                      onPointerDown={e => { e.stopPropagation(); setEpPage(p => Math.max(0, p - 1)); }}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold font-['Cairo'] transition-all active:scale-95"
+                      style={{
+                        background: currentPage > 0 ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
+                        border: `1px solid ${currentPage > 0 ? "rgba(139,92,246,0.35)" : "rgba(255,255,255,0.06)"}`,
+                        color: currentPage > 0 ? "#c4b5fd" : "rgba(255,255,255,0.20)",
+                        opacity: currentPage <= 0 ? 0.4 : 1,
+                      }}>
+                      ‹ السابق
+                    </button>
+                    <span className="text-[10px] font-['Cairo'] font-bold" style={{ color: "rgba(255,255,255,0.40)" }}>
+                      {startEp}–{endEp}
+                    </span>
+                    <button
+                      disabled={currentPage >= totalPages - 1}
+                      onPointerDown={e => { e.stopPropagation(); setEpPage(p => Math.min(totalPages - 1, p + 1)); }}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold font-['Cairo'] transition-all active:scale-95"
+                      style={{
+                        background: currentPage < totalPages - 1 ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
+                        border: `1px solid ${currentPage < totalPages - 1 ? "rgba(139,92,246,0.35)" : "rgba(255,255,255,0.06)"}`,
+                        color: currentPage < totalPages - 1 ? "#c4b5fd" : "rgba(255,255,255,0.20)",
+                        opacity: currentPage >= totalPages - 1 ? 0.4 : 1,
+                      }}>
+                      التالي ›
+                    </button>
+                  </div>
+                )}
+
                 {/* Episode grid — scrollable */}
                 <div className="flex-1 overflow-y-auto p-3"
                   style={{ scrollbarWidth: "none" }}>
                   <div className="grid grid-cols-4 gap-1.5">
-                    {Array.from({ length: Math.min(totalEps < 900 ? totalEps : 500, 500) }, (_, i) => i + 1).map(n => {
+                    {pageEps.map(n => {
                       const isCurrent = n === ep;
                       return (
                         <button
@@ -2441,6 +2485,8 @@ export default function RiftPlayer({
                     })}
                   </div>
                 </div>
+                  </>);
+                })()}
               </motion.div>
             </>
           )}
