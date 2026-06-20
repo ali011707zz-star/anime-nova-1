@@ -544,8 +544,15 @@ export function RiftPlayer({
      2. Network fetch
   */
   useEffect(() => {
-    const url = currentSrc?.subtitleUrl;
-    if (!url) { setLoadedCues([]); return; }
+    const rawUrl = currentSrc?.subtitleUrl;
+    if (!rawUrl) { setLoadedCues([]); return; }
+
+    /* ── Auto-translate English subs → Arabic for non-Arabic sources ── */
+    const base = getBaseUrl();
+    const alreadyTranslated = rawUrl.includes("translate-vtt") || rawUrl.includes("proxy-text");
+    const url = (!currentSrc?.isArabic && base && !alreadyTranslated)
+      ? `${base}/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=en&to=ar`
+      : rawUrl;
 
     /* ── 0. In-memory URL cache — instant when same URL (server switch) ── */
     const urlHit = urlCueCacheRef.current.get(url);
