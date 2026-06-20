@@ -27,6 +27,7 @@ export type PlayerSource = {
   label: string;
   quality: "1080p FHD" | "720p HD" | "360p SD";
   subtitleUrl?: string;
+  isArabic?: boolean;
 };
 
 export interface SubCue { start: number; end: number; text: string }
@@ -710,6 +711,7 @@ export function RiftPlayer({
   /* ─── Auto-fetch subtitles from multi-source API (jimaku.cc → animetosho) ─── */
   useEffect(() => {
     if (!anilistId || !episode) return;
+    if (currentSrc?.isArabic) return;
     if (currentSrc?.subtitleUrl || subCues?.length) return;
     let cancelled = false;
     setAutoSubSource(null);
