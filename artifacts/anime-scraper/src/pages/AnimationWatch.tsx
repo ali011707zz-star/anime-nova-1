@@ -1420,6 +1420,7 @@ function getAnimTag(label: string): string {
   if (l.startsWith("lordflix"))   return "LF";
   if (l.startsWith("starcima"))   return "SC";
   if (l.startsWith("stardima"))   return "SD";
+  if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "MG";
   if (l.startsWith("aflaam"))     return "AF";
   if (l.startsWith("arabseed"))   return "AS";
   if (l.startsWith("ezvidapi"))   return "EZ";
