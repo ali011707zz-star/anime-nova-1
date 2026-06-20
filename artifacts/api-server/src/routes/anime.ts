@@ -3912,6 +3912,55 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       }
     }
 
+    // ── SFLink (Strwish) → HLS مباشر ──
+    const sfLink = String(epData.SFLink || "").trim();
+    if (sfLink) {
+      const strwishUrl = sfLink.startsWith("http") ? sfLink : `https://strwish.com/e/${sfLink}`;
+      try {
+        const extracted = await extractVideoDeep(strwishUrl, strwishUrl);
+        if (extracted?.url) {
+          const proxyUrl = extracted.url.includes(".m3u8")
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(strwishUrl)}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(strwishUrl)}`;
+          sources.push({
+            name: "ستريم ويش · HD",
+            url: strwishUrl,
+            quality: "HD",
+            qualityRank: 27,
+            site: "animeify",
+            directUrl: proxyUrl,
+            directType: extracted.url.includes(".m3u8") ? "hls" : "mp4",
+          });
+        }
+      } catch {}
+    }
+
+    // ── GDLink (Google Drive) → MP4 مباشر ──
+    const gdLink = String(epData.GDLink || "").trim();
+    if (gdLink) {
+      try {
+        let gdId = gdLink;
+        if (gdLink.startsWith("http")) {
+          gdId = new URL(gdLink).searchParams.get("id") ||
+                 gdLink.match(/\/d\/([^/?#]+)/)?.[1] ||
+                 gdLink;
+        }
+        if (gdId) {
+          const gdDownload = `https://drive.google.com/uc?export=download&confirm=t&id=${gdId}`;
+          const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(gdDownload)}&ref=https://drive.google.com/`;
+          sources.push({
+            name: "جوجل درايف · HD",
+            url: gdDownload,
+            quality: "HD",
+            qualityRank: 26,
+            site: "animeify",
+            directUrl: proxyUrl,
+            directType: "mp4",
+          });
+        }
+      } catch {}
+    }
+
     // ── OKLink (OK.ru) — جودة متوسطة لكن مستقرة ──
     const okLink = String(epData.OKLink || "").trim();
     if (okLink) {
@@ -7088,7 +7137,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
-      scrapeCached("animex",       () => getAnimexSources(title, english, ep, anilistId),       false, 18000),
       scrapeCached("anikuro",      () => getAnikuroSources(title, english, ep, anilistId),      false, 14000),
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
       scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId),     false, 20000),
@@ -7199,7 +7247,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // scrapers that use probe-only (no deep extraction)
-  const probeOnly = new Set(["animeify","kawaii","anikoto","animex","anikuro","animewitcher","anineko","mitanime"]);
+  const probeOnly = new Set(["animeify","kawaii","anikoto","animewitcher","anineko","mitanime"]);
 
   try {
     switch (site) {
@@ -7218,7 +7266,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animex":      (await race(getAnimexSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikuro":     (await race(getAnikuroSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       // anivault: محذوف
       case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
