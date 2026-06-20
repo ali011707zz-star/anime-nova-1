@@ -670,6 +670,9 @@ function wrapMp4(url: string, ref: string): string {
   return `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
 }
 
+// Hexa cooldown — enc-dec.app returns "Next retry: N minutes" on 500; don't hammer it
+let _hexaFailUntil = 0;
+
 // Probe a proxied HLS/MP4 URL through our own server before sending to client.
 // Returns true = accessible (200/206), false = dead (skip source).
 // Timeout 5s — fast enough to not block the 30s deadline significantly.
@@ -2829,10 +2832,43 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
+      // ── Animeify (animeify.net) — عربي مترجم · MediaFire/SendVid/Mega ─────────
+      scrapeAnimCached("animeify_anim", async () => {
+        const q = enTitlePrefetched || title;
+        if (!q) return;
+        try {
+          send("status", { msg: "أنمي فاي: جاري البحث…" });
+          const ep     = type === "movie" ? 1 : epNum;
+          const isMov  = type === "movie" ? "true" : "false";
+          const PORT   = process.env["PORT"] || "8080";
+          const fsUrl  = `http://localhost:${PORT}/api/anime/fetch-source?site=animeify`
+            + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMov}`;
+          const r = await fetch(fsUrl, {
+            headers: { "x-internal": "1" },
+            signal: AbortSignal.timeout(35_000),
+          });
+          if (!r.ok) return;
+          const { sources } = await r.json() as {
+            sources?: Array<{ directUrl?: string; url?: string; name?: string; directType?: string }>;
+          };
+          for (const src of sources || []) {
+            const u = src.directUrl || src.url;
+            if (!u) continue;
+            const proxied = u.startsWith("/api/") ? u
+              : src.directType === "hls" ? wrapHls(u, "https://animeify.net/")
+              : wrapMp4(u, "https://animeify.net/");
+            sendSource(proxied, src.name || "أنمي فاي · عربي مترجم", proxied, proxied);
+          }
+        } catch { /* silent */ }
+      }),
+
       // ── Hexa (hexa.su / flixer.su) — TMDB-native HLS متعدد السيرفرات ──────────
-      // CDN: pjd.cfw69.workers.dev — CORS * — يعمل من Replit مباشرة
+      // CDN: nxt.cfw69.workers.dev — CORS * — يعمل من Replit مباشرة
+      // cooldown: enc-dec.app/api/enc-hexa يعيد 500 مع "Next retry: N minutes"
+      //           → نتجنب الـ hammering بحفظ _hexaFailUntil
       scrapeAnimCached("hexa", async () => {
         if (!tmdbId) return;
+        if (Date.now() < _hexaFailUntil) return; // cooldown active — enc-dec.app مشغول
         try {
           send("status", { msg: "Hexa: جاري الاستخراج…" });
           const HEXA_UA  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
@@ -2852,9 +2888,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             headers: hexaHdrs,
             signal : AbortSignal.timeout(8_000),
           });
-          if (!encR.ok) return;
-          const encData = await encR.json() as { status?: number; result?: { token?: string } };
-          if (encData.status !== 200 || !encData.result?.token) return;
+          // Parse body even on HTTP error (contains retry hint)
+          const encData = await encR.json().catch(() => ({})) as {
+            status?: number; result?: { token?: string }; hint?: string;
+          };
+          if (!encR.ok || encData.status !== 200 || !encData.result?.token) {
+            // Apply cooldown: parse "Next retry: N minutes" hint
+            const hint = encData.hint || "";
+            const retryMin = parseInt(hint.match(/(\d+)\s*min/i)?.[1] || "20");
+            _hexaFailUntil = Date.now() + retryMin * 60_000;
+            return;
+          }
           hexaHdrs["X-Cap-Token"] = encData.result.token;
 
           // Step 2: Fetch encrypted stream data from Hexa TMDB API
