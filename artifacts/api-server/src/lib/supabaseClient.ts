@@ -1,37 +1,71 @@
 /**
- * supabaseClient.ts — Supabase REST API client
- * Uses fetch() to SUPABASE_URL/rest/v1 — direct pg connection is blocked on Replit.
- * Maintains the same API surface (sbSelect/sbInsert/sbUpsert/sbPatch/sbDelete).
+ * supabaseClient.ts — Direct PostgreSQL client (Replit native DB)
+ * Replaces the old Supabase REST API proxy. Same API surface preserved:
+ * sbSelect / sbInsert / sbUpsert / sbPatch / sbDelete
  */
 
-const SB_URL  = () => (process.env.SUPABASE_URL  || "").replace(/\/$/, "");
-const SB_KEY  = () =>  process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+import pg from "pg";
 
-function headers(extra: Record<string, string> = {}): Record<string, string> {
-  return {
-    apikey:          SB_KEY(),
-    Authorization:   `Bearer ${SB_KEY()}`,
-    "Content-Type":  "application/json",
-    ...extra,
-  };
-}
+const { Pool } = pg;
 
-/** Convert a filter object to Supabase REST query-string params */
-function toQS(
-  params: Record<string, string>,
-  limit?: number,
-): string {
-  const parts: string[] = ["select=*"];
-  for (const [k, v] of Object.entries(params)) {
-    if (k === "select") { parts[0] = `select=${v}`; continue; }
-    parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
+let _pool: pg.Pool | null = null;
+
+function getPool(): pg.Pool {
+  if (!_pool) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL is not set");
+    }
+    _pool = new Pool({ connectionString: process.env.DATABASE_URL });
   }
-  if (limit) parts.push(`limit=${limit}`);
-  return parts.join("&");
+  return _pool;
 }
 
-function restUrl(table: string, qs = ""): string {
-  return `${SB_URL()}/rest/v1/${table}${qs ? "?" + qs : ""}`;
+/** Convert a Supabase-style filter object to SQL WHERE clause + values */
+function parseFilters(
+  params: Record<string, string>,
+  startIdx = 1,
+): { where: string; values: any[] } {
+  const clauses: string[] = [];
+  const values: any[] = [];
+  let idx = startIdx;
+
+  for (const [col, expr] of Object.entries(params)) {
+    if (col === "select" || col === "order") continue;
+    // expr format: "eq.value", "lt.value", "gt.value", "neq.value"
+    const dot = expr.indexOf(".");
+    if (dot === -1) continue;
+    const op = expr.slice(0, dot);
+    const val = expr.slice(dot + 1);
+
+    let sqlOp: string;
+    switch (op) {
+      case "eq":  sqlOp = "=";  break;
+      case "neq": sqlOp = "<>"; break;
+      case "lt":  sqlOp = "<";  break;
+      case "lte": sqlOp = "<="; break;
+      case "gt":  sqlOp = ">";  break;
+      case "gte": sqlOp = ">="; break;
+      default:    sqlOp = "=";  break;
+    }
+
+    clauses.push(`"${col}" ${sqlOp} $${idx}`);
+    values.push(val);
+    idx++;
+  }
+
+  const where = clauses.length ? "WHERE " + clauses.join(" AND ") : "";
+  return { where, values };
+}
+
+/** Parse order param like "watched_at.desc" → ORDER BY "watched_at" DESC */
+function parseOrder(params: Record<string, string>): string {
+  const orderVal = params["order"];
+  if (!orderVal) return "";
+  const parts = orderVal.split(".");
+  if (parts.length < 2) return "";
+  const col = parts[0];
+  const dir = parts[1].toUpperCase() === "DESC" ? "DESC" : "ASC";
+  return `ORDER BY "${col}" ${dir}`;
 }
 
 /** SELECT rows from a table */
@@ -40,21 +74,16 @@ export async function sbSelect<T = any>(
   params: Record<string, string> = {},
   opts: { limit?: number } = {},
 ): Promise<T[]> {
-  if (!SB_URL() || !SB_KEY()) return [];
   try {
-    const qs  = toQS(params, opts.limit);
-    const res = await fetch(restUrl(table, qs), {
-      headers: headers(),
-      signal:  AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.error(`[sb] sbSelect "${table}" ${res.status}:`, err.slice(0, 200));
-      return [];
-    }
-    return (await res.json()) as T[];
+    const pool = getPool();
+    const { where, values } = parseFilters(params);
+    const order = parseOrder(params);
+    const limitClause = opts.limit ? `LIMIT ${opts.limit}` : "";
+    const sql = `SELECT * FROM "${table}" ${where} ${order} ${limitClause}`.trim();
+    const res = await pool.query(sql, values);
+    return res.rows as T[];
   } catch (e: any) {
-    console.error(`[sb] sbSelect "${table}" error:`, e.message);
+    console.error(`[db] sbSelect "${table}" error:`, e.message);
     return [];
   }
 }
@@ -64,54 +93,48 @@ export async function sbInsert<T = any>(
   table: string,
   row: Record<string, any>,
 ): Promise<T | null> {
-  if (!SB_URL() || !SB_KEY()) return null;
   try {
-    const res = await fetch(restUrl(table), {
-      method:  "POST",
-      headers: headers({ Prefer: "return=representation" }),
-      body:    JSON.stringify(row),
-      signal:  AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.error(`[sb] sbInsert "${table}" ${res.status}:`, err.slice(0, 200));
-      return null;
-    }
-    const data = await res.json();
-    return (Array.isArray(data) ? data[0] : data) as T ?? null;
+    const pool = getPool();
+    const cols = Object.keys(row);
+    const vals = Object.values(row);
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
+    const colNames = cols.map(c => `"${c}"`).join(", ");
+    const sql = `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) RETURNING *`;
+    const res = await pool.query(sql, vals);
+    return (res.rows[0] ?? null) as T | null;
   } catch (e: any) {
-    console.error(`[sb] sbInsert "${table}" error:`, e.message);
+    console.error(`[db] sbInsert "${table}" error:`, e.message);
     return null;
   }
 }
 
-/** UPSERT — INSERT with conflict resolution */
+/** UPSERT — INSERT ON CONFLICT DO UPDATE */
 export async function sbUpsert<T = any>(
   table: string,
   row: Record<string, any>,
   onConflict?: string,
 ): Promise<T | null> {
-  if (!SB_URL() || !SB_KEY()) return null;
   try {
-    const prefer = onConflict
-      ? `resolution=merge-duplicates,return=representation`
-      : `resolution=ignore-duplicates,return=representation`;
-    const qs = onConflict ? `on_conflict=${encodeURIComponent(onConflict)}` : "";
-    const res = await fetch(restUrl(table, qs), {
-      method:  "POST",
-      headers: headers({ Prefer: prefer }),
-      body:    JSON.stringify(row),
-      signal:  AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.error(`[sb] sbUpsert "${table}" ${res.status}:`, err.slice(0, 200));
-      return null;
+    const pool = getPool();
+    const cols = Object.keys(row);
+    const vals = Object.values(row);
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
+    const colNames = cols.map(c => `"${c}"`).join(", ");
+
+    let conflictClause = "DO NOTHING";
+    if (onConflict) {
+      const updateCols = cols.filter(c => c !== onConflict);
+      if (updateCols.length > 0) {
+        const updates = updateCols.map(c => `"${c}" = EXCLUDED."${c}"`).join(", ");
+        conflictClause = `DO UPDATE SET ${updates}`;
+      }
     }
-    const data = await res.json();
-    return (Array.isArray(data) ? data[0] : data) as T ?? null;
+
+    const sql = `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) ON CONFLICT ${onConflict ? `("${onConflict}")` : ""} ${conflictClause} RETURNING *`;
+    const res = await pool.query(sql, vals);
+    return (res.rows[0] ?? null) as T | null;
   } catch (e: any) {
-    console.error(`[sb] sbUpsert "${table}" error:`, e.message);
+    console.error(`[db] sbUpsert "${table}" error:`, e.message);
     return null;
   }
 }
@@ -122,24 +145,20 @@ export async function sbPatch<T = any>(
   filter: Record<string, string>,
   data: Record<string, any>,
 ): Promise<T | null> {
-  if (!SB_URL() || !SB_KEY()) return null;
   try {
-    const qs  = toQS(filter);
-    const res = await fetch(restUrl(table, qs), {
-      method:  "PATCH",
-      headers: headers({ Prefer: "return=representation" }),
-      body:    JSON.stringify(data),
-      signal:  AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.error(`[sb] sbPatch "${table}" ${res.status}:`, err.slice(0, 200));
-      return null;
-    }
-    const result = await res.json();
-    return (Array.isArray(result) ? result[0] : result) as T ?? null;
+    const pool = getPool();
+    const cols = Object.keys(data);
+    const vals = Object.values(data);
+    const setClauses = cols.map((c, i) => `"${c}" = $${i + 1}`).join(", ");
+
+    const { where, values: filterVals } = parseFilters(filter, vals.length + 1);
+    const allVals = [...vals, ...filterVals];
+
+    const sql = `UPDATE "${table}" SET ${setClauses} ${where} RETURNING *`;
+    const res = await pool.query(sql, allVals);
+    return (res.rows[0] ?? null) as T | null;
   } catch (e: any) {
-    console.error(`[sb] sbPatch "${table}" error:`, e.message);
+    console.error(`[db] sbPatch "${table}" error:`, e.message);
     return null;
   }
 }
@@ -149,36 +168,30 @@ export async function sbDelete(
   table: string,
   filter: Record<string, string>,
 ): Promise<boolean> {
-  if (!SB_URL() || !SB_KEY()) return false;
   try {
-    const qs  = toQS(filter);
-    const res = await fetch(restUrl(table, qs), {
-      method:  "DELETE",
-      headers: headers(),
-      signal:  AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.error(`[sb] sbDelete "${table}" ${res.status}:`, err.slice(0, 200));
+    const pool = getPool();
+    const { where, values } = parseFilters(filter);
+    if (!where) {
+      console.warn(`[db] sbDelete "${table}" called with no filters — skipping`);
       return false;
     }
+    const sql = `DELETE FROM "${table}" ${where}`;
+    await pool.query(sql, values);
     return true;
   } catch (e: any) {
-    console.error(`[sb] sbDelete "${table}" error:`, e.message);
+    console.error(`[db] sbDelete "${table}" error:`, e.message);
     return false;
   }
 }
 
-/** Quick connectivity check — returns true if Supabase REST is reachable */
+/** Compatibility: always ready since we have a real DB */
+export const isSupabaseReady = true;
+
+/** Check DB connectivity */
 export async function checkSupabase(): Promise<boolean> {
-  if (!SB_URL() || !SB_KEY()) return false;
   try {
-    const res = await fetch(`${SB_URL()}/rest/v1/app_config?limit=1`, {
-      headers: headers(),
-      signal:  AbortSignal.timeout(8_000),
-    });
-    return res.ok;
+    const pool = getPool();
+    await pool.query("SELECT 1");
+    return true;
   } catch { return false; }
 }
-
-export const isSupabaseReady = true;
