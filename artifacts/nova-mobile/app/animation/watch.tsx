@@ -279,8 +279,8 @@ export default function AnimationWatchScreen() {
               setSources(prev => {
                 const next = [...prev, src];
                 const isGoodSrc = isDirectPlayable(src);
-                /* auto-play first good source when autoplay=1 */
-                if (autoplay && isGoodSrc && !autoPlayFiredRef.current) {
+                /* auto-play first good source automatically */
+                if (isGoodSrc && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
                   setTimeout(() => {
                     setPlayingSrc(src);
@@ -383,8 +383,6 @@ export default function AnimationWatchScreen() {
     }
     if (router.canGoBack()) {
       router.back();
-    } else if (tmdbId && type === "tv") {
-      router.replace(`/animation/episodes?id=${tmdbId}&type=${type}&season=${season}` as any);
     } else if (tmdbId) {
       router.replace(`/animation/${type}/${tmdbId}` as any);
     } else {

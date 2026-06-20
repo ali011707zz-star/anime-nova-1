@@ -377,7 +377,7 @@ export default function AnimeDetailScreen() {
         {/* ── Watch button ── */}
         <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16 }}>
           <Pressable
-            onPress={() => router.push(`/episodes/${id}?title=${encodeURIComponent(anime.title?.romaji || "")}&english=${encodeURIComponent(anime.title?.english || "")}`)}
+            onPress={() => router.push(`/watch?anime=${id}&ep=1&title=${encodeURIComponent(anime.title?.romaji || "")}&english=${encodeURIComponent(anime.title?.english || "")}`)}
             style={d.watchBtn}
           >
             <View style={d.watchBtnIcon}>

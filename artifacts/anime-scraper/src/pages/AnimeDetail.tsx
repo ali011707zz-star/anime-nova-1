@@ -495,7 +495,7 @@ export default function AnimeDetail() {
       <div className="px-4 mt-5">
         <motion.button
           whileTap={{ scale: 0.97 }}
-          onClick={() => navigate(`/episodes/${params.id}`)}
+          onClick={() => navigate(`/watch?anime=${params.id}&ep=1&title=${encodeURIComponent(anime?.title?.romaji ?? "")}&english=${encodeURIComponent(anime?.title?.english ?? "")}`)}
           className="w-full h-[52px] rounded-2xl font-black flex items-center justify-center gap-3 text-[15px] font-['Cairo'] text-white"
           style={{
             background: "linear-gradient(135deg,#8B5CF6 0%,#6D28D9 60%,#5B21B6 100%)",

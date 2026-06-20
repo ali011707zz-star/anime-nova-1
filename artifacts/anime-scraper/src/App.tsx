@@ -50,7 +50,6 @@ function AnimationWatchWrapper() {
 }
 const Home               = lazy(() => import("@/pages/Home"));
 const AnimeDetail        = lazy(() => import("@/pages/AnimeDetail"));
-const EpisodeList        = lazy(() => import("@/pages/EpisodeList"));
 const Watch              = lazy(() => import("@/pages/Watch"));
 const WatchById          = lazy(() => import("@/pages/WatchById"));
 const Search             = lazy(() => import("@/pages/Search"));
@@ -63,7 +62,6 @@ const Profile            = lazy(() => import("@/pages/Profile"));
 const NotFound           = lazy(() => import("@/pages/not-found"));
 const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
 const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
-const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
@@ -152,7 +150,6 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
               <Switch>
                 <Route path="/"                        component={Home} />
                 <Route path="/anime/:id"               component={AnimeDetail} />
-                <Route path="/episodes/:id"            component={EpisodeList} />
                 <Route path="/watch/:id"               component={WatchById} />
                 <Route path="/watch"                   component={WatchWrapper} />
                 <Route path="/search"                  component={Search} />
@@ -167,7 +164,6 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/auth"                    component={AuthPage} />
                 <Route path="/animations"              component={AnimationLibrary} />
                 <Route path="/animation/watch"                    component={AnimationWatchWrapper} />
-                <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
                 <Route path="/animation/:type/:id"             component={AnimationDetail} />
                 <Route path="/comments"                component={CommentsPage} />
                 <Route path="/subscription"            component={Subscription} />

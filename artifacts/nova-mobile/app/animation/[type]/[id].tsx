@@ -244,7 +244,7 @@ export default function AnimationDetailScreen() {
       <View style={s.watchBtnWrap}>
         <Pressable
           style={s.watchBtn}
-          onPress={() => router.push((isTV ? getEpisodesUrl() : getWatchUrl()) as any)}
+          onPress={() => router.push(getWatchUrl() as any)}
         >
           <LinearGradient
             colors={["#8B5CF6", "#6D28D9", "#5B21B6"]}
@@ -271,12 +271,6 @@ export default function AnimationDetailScreen() {
           />
           <Text style={[s.actionLabel, saved && { color: "#8B5CF6" }]}>قائمتي</Text>
         </Pressable>
-        {isTV && (
-          <Pressable onPress={() => router.push(getEpisodesUrl() as any)} style={s.actionBtn}>
-            <Ionicons name="list" size={20} color="rgba(255,255,255,0.45)" />
-            <Text style={s.actionLabel}>الحلقات</Text>
-          </Pressable>
-        )}
         <Pressable
           onPress={() => router.push(`/comments?tmdbId=${id}&title=${encodeURIComponent(title)}` as any)}
           style={s.actionBtn}

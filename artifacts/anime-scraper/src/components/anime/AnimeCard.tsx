@@ -12,7 +12,7 @@ type AniListAnime = {
 
 export default function AnimeCard({ anime }: { anime: AniListAnime }) {
   return (
-    <Link href={`/episodes/${anime.id}`}>
+    <Link href={`/watch?anime=${anime.id}&ep=1&title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english ?? "")}`}>
       <motion.div whileTap={{ scale: 0.93 }} className="group cursor-pointer">
         <div className="relative aspect-[2/3] w-full rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
           {anime.coverImage?.large ? (

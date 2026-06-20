@@ -2897,8 +2897,8 @@ export default function WatchPage() {
       setShowPicker(true);
       setPhase("picker");
     } else {
-      /* From picker → go back to episodes page */
-      navigate(animeId ? `/episodes/${animeId}` : "/");
+      /* From picker → go back to anime detail page */
+      navigate(animeId ? `/anime/${animeId}` : "/");
     }
   }
 
@@ -3215,7 +3215,7 @@ export default function WatchPage() {
         )}
         {/* Back button */}
         <button
-          onClick={() => navigate(animeId ? `/episodes/${animeId}` : "/")}
+          onClick={() => navigate(animeId ? `/anime/${animeId}` : "/")}
           className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
           style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}
         >

@@ -93,7 +93,7 @@ export function HeroSection({ items }: Props) {
                 <View style={styles.btnRow}>
                   <Pressable
                     style={[styles.watchBtn, { backgroundColor: colors.primary }]}
-                    onPress={() => router.push(`/episodes/${anime.id}?title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}&ep=1`)}
+                    onPress={() => router.push(`/watch?anime=${anime.id}&ep=1&title=${encodeURIComponent(anime.title.romaji)}&english=${encodeURIComponent(anime.title.english || "")}`)}
                   >
                     <Ionicons name="play" size={16} color="#fff" />
                     <Text style={styles.watchBtnText}>مشاهدة</Text>
