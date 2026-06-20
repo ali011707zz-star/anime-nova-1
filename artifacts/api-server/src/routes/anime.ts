@@ -4620,68 +4620,7 @@ async function getAnimexSources(
 }
 
 
-// ════════════════════════════════════════════════════════════════════
-//  ANIKURO (anikuro.ru) — صوت ياباني مترجم
-//  AniList ID مباشرة → /api/v1/sources/senshi/{id}:{ep}
-//  Senshi provider: ninstream.com عبر proxy.anikuro.ru (HTTP 200 من Replit)
-//  M3U8 يحتوي أسماء segments مطلقة عبر anikuro.ru → hls-proxy مطلوب
-// ════════════════════════════════════════════════════════════════════
-const ANIKURO_BASE = "https://anikuro.ru";
-
-async function getAnikuroSources(
-  _title: string, _english: string | null, ep: number, anilistId?: number,
-): Promise<UnifiedSource[]> {
-  if (!anilistId) { console.error("[anikuro] no anilistId"); return []; }
-  try {
-    const watchRef = `${ANIKURO_BASE}/watch/${anilistId}:${ep}`;
-    const data = await fetch(
-      `${ANIKURO_BASE}/api/v1/sources/senshi/${anilistId}:${ep}`,
-      {
-        headers: {
-          ...BASE_HDRS,
-          Referer:  watchRef,
-          Accept: "application/json",
-        },
-        signal: AbortSignal.timeout(8000),
-      },
-    ).then(r => r.ok ? r.json() : null).catch(() => null) as {
-      ok?: boolean;
-      data?: {
-        raw?: { sub?: { default?: string; sources?: Array<{ url?: string }> } };
-        normalized?: Array<{ variant: string; sources?: Array<{ url?: string }> }>;
-      };
-    } | null;
-
-    if (!data?.ok) return [];
-
-    // اختر المصدر: raw.sub.default أولاً (senshi proxy path) ثم normalized
-    const rawSub = data?.data?.raw?.sub;
-    const normalized = data?.data?.normalized?.find(n => n.variant === "sub");
-
-    const toAbsUrl = (u: string | undefined | null) =>
-      u ? (u.startsWith("http") ? u : `${ANIKURO_BASE}${u.startsWith("/") ? "" : "/"}${u}`) : null;
-
-    let m3u8: string | null =
-      toAbsUrl(rawSub?.default) ||
-      toAbsUrl(rawSub?.sources?.[0]?.url) ||
-      toAbsUrl(normalized?.sources?.[0]?.url);
-
-    if (!m3u8) return [];
-
-    // CORS: anikuro.ru يرسل allow-credentials بدلاً من * → hls-proxy إلزامي
-    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(ANIKURO_BASE + "/")}`;
-
-    return [{
-      name: "Anikuro · Senshi · ياباني مترجم",
-      url:  m3u8,
-      quality: "1080p",
-      qualityRank: 10,
-      site: "anikuro",
-      directUrl: proxied,
-      directType: "hls",
-    }];
-  } catch { return []; }
-}
+// anikuro: محذوف — موقع anikuro.ru تم إيقافه
 
 
 // ════════════════════════════════════════════════════════════════════
@@ -7137,7 +7076,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
-      scrapeCached("anikuro",      () => getAnikuroSources(title, english, ep, anilistId),      false, 14000),
+      // anikuro: محذوف
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
       scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId),     false, 20000),
       scrapeCached("hianime",      () => getHiAnimeSources(title, english, ep, anilistId),      false, 22000),
@@ -7266,7 +7205,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "anikuro":     (await race(getAnikuroSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      // anikuro: محذوف
       // anivault: محذوف
       case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;

@@ -157,7 +157,6 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
-  { site: "anikuro",      name: "AniKuro",       desc: "ياباني مترجم · HLS",       tag: "KR" },
   // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────
   { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS · صوت ياباني",  tag: "SC" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
@@ -752,6 +751,7 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
   const site      = SITE_SHORT[src.site || ""] || src.site || "";
   const isEmbed   = !!src.isEmbed;
   const def       = SCRAPER_DEFS.find(d => d.site === src.site);
+  if (!def && src.site !== "_resume") return null;
   const tag       = def?.tag || "??";
   const isEngAudio = def?.audioLang === "en";
   const q         = getSrcQualityTier(src);
@@ -3053,8 +3053,9 @@ export default function WatchPage() {
         if (!srvMap[tier].includes(u)) srvMap[tier].push(u);
       }
       setPlayerDlUrl(undefined);
-      // hasBuiltinSub: ترجمة مدمجة في الـ stream (مثل kawaii) — لا تُضاف ترجمة خارجية لتجنب التداخل
-      setPlayerSubUrl(firstSrc.hasBuiltinSub ? undefined : (firstSrc.subtitleUrl || undefined));
+      // hasBuiltinSub أو مصادر عربية: لا ترجمة خارجية
+      const firstSkipSub = firstSrc.hasBuiltinSub || ARABIC_SITES.has(firstSrc.site || "");
+      setPlayerSubUrl(firstSkipSub ? undefined : (firstSrc.subtitleUrl || undefined));
       setPlayerSrcSite(firstSrc.site || "");
       setPlayerServers(srvMap);
       setQuality(clickedTier);
@@ -3162,8 +3163,8 @@ export default function WatchPage() {
 
     /* Store download URL + subtitle URL for player */
     setPlayerDlUrl(getDownloadUrl(src) || undefined);
-    // hasBuiltinSub أو seepanel: ترجمة مدمجة في الـ stream — لا تُشغّل ترجمة خارجية لتجنب التداخل
-    const skipExternalSub = src.hasBuiltinSub || src.site === "seepanel";
+    // hasBuiltinSub أو seepanel أو مصادر عربية: ترجمة مدمجة/غير مطلوبة — لا تُشغّل ترجمة خارجية
+    const skipExternalSub = src.hasBuiltinSub || src.site === "seepanel" || ARABIC_SITES.has(src.site || "");
     setPlayerSubUrl(skipExternalSub ? undefined : (src.subtitleUrl || undefined));
     setPlayerSrcSite(src.site || "");
     setPlayerServers(servers);
