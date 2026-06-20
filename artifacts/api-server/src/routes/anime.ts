@@ -6649,14 +6649,33 @@ const animeTmdbCache = new Map<string, { id: number | null; ts: number }>();
 const ANIME_TMDB_TTL = 6 * 60 * 60 * 1000;
 const TMDB_KEY_ANIME = "8265bd1679663a7ea12ac168da84d2e8";
 
-async function fetchAnimeTmdbId(english: string | null, romaji: string): Promise<number | null> {
+async function fetchAnimeTmdbId(english: string | null, romaji: string, anilistId?: number): Promise<number | null> {
   const query = (english || romaji || "").trim();
   if (!query) return null;
-  const cKey = query.toLowerCase();
+  const cKey = anilistId ? `anilist:${anilistId}` : query.toLowerCase();
   const hit = animeTmdbCache.get(cKey);
   if (hit && Date.now() - hit.ts < ANIME_TMDB_TTL) return hit.id;
 
-  // Try English title first, then romaji
+  // ── 1. animeapi.my.id — AniList ID → TMDB (أسرع وأدق من بحث TMDB) ──
+  if (anilistId) {
+    try {
+      const r = await fetch(`https://animeapi.my.id/anilist/${anilistId}`, {
+        headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
+        signal: AbortSignal.timeout(6_000),
+      });
+      if (r.ok) {
+        const data = await r.json() as { themoviedb?: number; themoviedb_type?: string };
+        if (data.themoviedb && (data.themoviedb_type === "tv" || data.themoviedb_type === "series")) {
+          animeTmdbCache.set(cKey, { id: data.themoviedb, ts: Date.now() });
+          // Cache also by title for reuse in other scrapers without anilistId
+          if (query) animeTmdbCache.set(query.toLowerCase(), { id: data.themoviedb, ts: Date.now() });
+          return data.themoviedb;
+        }
+      }
+    } catch { /* fall through to TMDB search */ }
+  }
+
+  // ── 2. TMDB search (fallback) ──
   const attempts = [english, romaji].filter((v): v is string => !!v && v.trim().length > 0);
   for (const q of attempts) {
     try {
@@ -6667,7 +6686,6 @@ async function fetchAnimeTmdbId(english: string | null, romaji: string): Promise
       if (!r.ok) continue;
       const data = await r.json() as { results?: Array<{ id: number; name: string; original_name?: string }> };
       if (!data.results?.length) continue;
-      // Score each result — don't blindly take results[0] as TMDB order isn't always right
       const qLow = q.toLowerCase();
       let bestId: number | null = null, bestSc = 0;
       for (const res of data.results.slice(0, 8)) {
@@ -6679,7 +6697,6 @@ async function fetchAnimeTmdbId(english: string | null, romaji: string): Promise
         );
         if (sc > bestSc) { bestSc = sc; bestId = res.id; }
       }
-      // Require at least 0.35 similarity to avoid mapping wrong show
       if (bestId && bestSc >= 0.35) {
         animeTmdbCache.set(cKey, { id: bestId, ts: Date.now() });
         return bestId;
@@ -6716,7 +6733,7 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
 
 // ── Videasy anime sources (api.videasy.to, TMDB-native multi-quality HLS) ──
 async function getVideasyAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
-  const tmdbId = await fetchAnimeTmdbId(english, title);
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
   const sources: UnifiedSource[] = [];
   const encTitle = encodeURIComponent(encodeURIComponent(english || title));
@@ -6771,7 +6788,7 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
 
 // ── VidLink via enc-dec.app (TMDB-native, auth-token IP-tied → hls-proxy) ──
 async function getVidLinkAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
-  const tmdbId = await fetchAnimeTmdbId(english, title);
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
   try {
     const encR = await fetch(`https://enc-dec.app/api/enc-vidlink?text=${tmdbId}`,
@@ -6806,8 +6823,8 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
 // LordFlix (snowhouse.lordflix.club) — محذوف: يعيد JS browser-challenge (Cloudflare) بدل البيانات
 
 // ── Vyla SSE (missourimonster-vyla.hf.space, TMDB TV with season=1) ──
-async function getVylaAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
-  const tmdbId = await fetchAnimeTmdbId(english, title);
+async function getVylaAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
   const VYLA_BASE = "https://missourimonster-vyla.hf.space";
   const sources: UnifiedSource[] = [];
@@ -6857,8 +6874,8 @@ async function getVylaAnimeSources(title: string, english: string | null, ep: nu
 }
 
 // ── StarCima vidzee (TMDB-native, direct HLS CDN) ──
-async function getStarCimaAnimeSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
-  const tmdbId = await fetchAnimeTmdbId(english, title);
+async function getStarCimaAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
   const SC_BASE = "https://starcima.com";
   const SC_VIDZEE = `${SC_BASE}/api/vidzee`;
@@ -7092,7 +7109,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep, anilistId),  false),
       scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep, anilistId),  false),
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
-      scrapeCached("vyla_anim",     () => getVylaAnimeSources(title, english, ep),     false),
+      scrapeCached("vyla_anim",     () => getVylaAnimeSources(title, english, ep, anilistId),  false),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
