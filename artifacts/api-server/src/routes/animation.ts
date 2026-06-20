@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomBytes } from "node:crypto";
 import {
   makeAnimCacheKey,
   getFromSourceCache,
@@ -2824,6 +2825,70 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               : u.includes(".m3u8") ? wrapHls(u, "https://web.topcinemaa.com/")
               : wrapMp4(u, "https://web.topcinemaa.com/");
             sendSource(proxied, src.name || "توب سيما · عربي مترجم", proxied, proxied);
+          }
+        } catch { /* silent */ }
+      }),
+
+      // ── Hexa (hexa.su / flixer.su) — TMDB-native HLS متعدد السيرفرات ──────────
+      // CDN: pjd.cfw69.workers.dev — CORS * — يعمل من Replit مباشرة
+      scrapeAnimCached("hexa", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "Hexa: جاري الاستخراج…" });
+          const HEXA_UA  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
+          const HEXA_REF = "https://hexa.su/";
+          // Generate random 32-byte hex key (included in decrypt request)
+          const hexaKey  = randomBytes(32).toString("hex");
+          const hexaHdrs: Record<string, string> = {
+            "User-Agent"          : HEXA_UA,
+            "Referer"             : HEXA_REF,
+            "Accept"              : "text/plain",
+            "X-Fingerprint-Lite"  : "e9136c41504646444",
+            "X-Api-Key"           : hexaKey,
+          };
+
+          // Step 1: Get challenge token from enc-dec.app
+          const encR = await fetch("https://enc-dec.app/api/enc-hexa", {
+            headers: hexaHdrs,
+            signal : AbortSignal.timeout(8_000),
+          });
+          if (!encR.ok) return;
+          const encData = await encR.json() as { status?: number; result?: { token?: string } };
+          if (encData.status !== 200 || !encData.result?.token) return;
+          hexaHdrs["X-Cap-Token"] = encData.result.token;
+
+          // Step 2: Fetch encrypted stream data from Hexa TMDB API
+          const hexaUrl = type === "movie"
+            ? `https://theemoviedb.hexa.su/api/tmdb/movie/${tmdbId}/images`
+            : `https://theemoviedb.hexa.su/api/tmdb/tv/${tmdbId}/season/${season}/episode/${epNum}/images`;
+          const dataR = await fetch(hexaUrl, {
+            headers: hexaHdrs,
+            signal : AbortSignal.timeout(12_000),
+          });
+          if (!dataR.ok) return;
+          const encrypted = await dataR.text();
+          if (!encrypted || encrypted.length < 20) return;
+
+          // Step 3: Decrypt via enc-dec.app (requires key in body)
+          const decR = await fetch("https://enc-dec.app/api/dec-hexa", {
+            method : "POST",
+            headers: { "Content-Type": "application/json" },
+            body   : JSON.stringify({ text: encrypted, key: hexaKey }),
+            signal : AbortSignal.timeout(10_000),
+          });
+          if (!decR.ok) return;
+          const decData = await decR.json() as { status?: number; result?: { sources?: Array<{ server: string; url: string }> } };
+          if (decData.status !== 200 || !decData.result?.sources?.length) return;
+
+          // Step 4: Send each server's HLS stream through hls-proxy (handles relative segments)
+          for (const src of decData.result.sources) {
+            if (!src?.url || !src.url.includes(".m3u8")) continue;
+            // CDN pjd.cfw69.workers.dev: CORS * + accessible from Replit
+            // hls-proxy needed to resolve relative segment paths correctly
+            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(HEXA_REF)}`;
+            const probeOk = await probeHlsProxy(proxied);
+            if (!probeOk) continue;
+            sendSource(proxied, `Hexa · ${src.server}`, proxied, proxied);
           }
         } catch { /* silent */ }
       }),
