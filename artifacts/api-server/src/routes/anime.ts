@@ -3725,25 +3725,33 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
     for (const q of queries) {
       for (const type of ["SERIES", "MOVIE"]) {
-        try {
-          const body = new URLSearchParams({
-            UserId: "0", Language: "English", FilterType: "SEARCH",
-            FilterData: q, Type: type, From: "0",
-          });
-          const r = await animeifyPost(base, token, "anime/load_anime_list_v2.php", body);
-          if (!r) continue;
-          const data = await r.json() as any[];
-          if (!Array.isArray(data)) continue;
-          for (const item of data) {
-            const enTitle = String(item.EN_Title || "");
-            const s = Math.max(
-              similarity(q, enTitle),
-              similarity(title, enTitle),
-              english ? similarity(english, enTitle) : 0,
-            );
-            if (s > best.score) best = { score: s, item: { ...item, _type: type } };
-          }
-        } catch {}
+        for (const lang of ["English", "Arabic"]) {
+          try {
+            const body = new URLSearchParams({
+              UserId: "0", Language: lang, FilterType: "SEARCH",
+              FilterData: q, Type: type, From: "0",
+            });
+            const r = await animeifyPost(base, token, "anime/load_anime_list_v2.php", body);
+            if (!r) continue;
+            const data = await r.json() as any[];
+            if (!Array.isArray(data)) continue;
+            for (const item of data) {
+              const enTitle  = String(item.EN_Title  || "");
+              const arTitle  = String(item.AR_Title  || "");
+              const synonyms = String(item.Synonyms  || "");
+              const tags     = String(item.Tags      || "");
+              const s = Math.max(
+                enTitle   ? similarity(q, enTitle)   : 0,
+                enTitle   ? similarity(title, enTitle)   : 0,
+                english && enTitle ? similarity(english, enTitle) : 0,
+                arTitle   ? similarity(q, arTitle)   : 0,
+                synonyms  ? similarity(q, synonyms)  : 0,
+                tags      ? similarity(q, tags)      : 0,
+              );
+              if (s > best.score) best = { score: s, item: { ...item, _type: type } };
+            }
+          } catch {}
+        }
       }
     }
 

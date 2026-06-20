@@ -264,7 +264,7 @@ export default function AnimationDetail() {
 
       {/* ── Watch Button ── */}
       <div className="px-4 mt-5">
-        <Link href={type === "tv" ? episodesUrl() : watchUrl()}>
+        <Link href={watchUrl()}>
           <motion.button
             whileTap={{ scale: 0.97 }}
             className="w-full h-[52px] rounded-2xl font-black flex items-center justify-center gap-3 text-[15px] font-['Cairo'] text-white"

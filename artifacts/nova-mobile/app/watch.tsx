@@ -167,7 +167,7 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
           <View style={d.ldPosterWrap}>
             <View style={d.ldGlowOuter} />
             <View style={d.ldGlow} />
-            <Image source={{ uri: cover }} style={d.ldPoster} resizeMode="cover" />
+            <Image source={{ uri: cover }} style={d.ldPoster} resizeMode="contain" />
           </View>
         ) : (
           <View style={d.ldPosterWrap}>
@@ -387,8 +387,8 @@ export default function WatchScreen() {
                 if (prev.find(s => (s.directUrl || s.url) === key)) return prev;
                 const next = [...prev, src];
                 const isGoodSrc = !!(src.directUrl || src.url) && !src.isEmbed;
-                /* auto-play first good source when autoplay=1 */
-                if (autoplay === "1" && isGoodSrc && !autoPlayFiredRef.current) {
+                /* auto-play first good source automatically */
+                if (isGoodSrc && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
                   setTimeout(() => {
                     setPlayingSrc(src);
@@ -735,9 +735,9 @@ const d = StyleSheet.create({
   ldContent: { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },
   ldPrayer: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center" },
   ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
-  ldGlowOuter: { position: "absolute", width: 280, height: 360, borderRadius: 48, backgroundColor: "rgba(109,40,217,0.12)", shadowColor: "#6D28D9", shadowOpacity: 0.70, shadowRadius: 60, elevation: 0 },
-  ldGlow: { position: "absolute", width: 240, height: 318, borderRadius: 34, backgroundColor: "rgba(139,92,246,0.32)", shadowColor: "#7C3AED", shadowOpacity: 0.75, shadowRadius: 48, elevation: 28 },
-  ldPoster: { width: 176, height: 248, borderRadius: 20, borderWidth: 1.5, borderColor: "rgba(167,139,250,0.45)", shadowColor: "#6D28D9", shadowOpacity: 0.70, shadowRadius: 20, elevation: 14 },
+  ldGlowOuter: { position: "absolute", width: 220, height: 290, borderRadius: 36, backgroundColor: "rgba(109,40,217,0.05)", shadowColor: "#6D28D9", shadowOpacity: 0.22, shadowRadius: 24, elevation: 0 },
+  ldGlow: { position: "absolute", width: 190, height: 260, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.10)", shadowColor: "#7C3AED", shadowOpacity: 0.25, shadowRadius: 18, elevation: 8 },
+  ldPoster: { width: 176, height: 248, borderRadius: 20, borderWidth: 1.5, borderColor: "rgba(167,139,250,0.35)", shadowColor: "#6D28D9", shadowOpacity: 0.35, shadowRadius: 12, elevation: 8 },
   ldTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 26 },
   ldEpBadge: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: "rgba(124,58,237,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
   ldEpText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.9)" },

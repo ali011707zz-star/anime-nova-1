@@ -573,7 +573,7 @@ export default function Library() {
                     <motion.div key={anime.id} className="relative"
                       initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: i * 0.04 }}>
-                      <Link href={`/episodes/${anime.id}`}>
+                      <Link href={`/watch?anime=${anime.id}&ep=1&title=${encodeURIComponent(anime.title?.romaji ?? "")}&english=${encodeURIComponent(anime.title?.english ?? "")}`}>
                         <div className="group cursor-pointer">
                           {/* Image */}
                           <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
