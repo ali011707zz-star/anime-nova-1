@@ -386,7 +386,7 @@ export default function AnimeDetailScreen() {
             <Text style={d.watchBtnText}>الحلقة الأولى</Text>
           </Pressable>
           <Pressable
-            onPress={() => router.push(`/episodes/${id}` as any)}
+            onPress={() => router.push({ pathname: "/episodes/[id]", params: { id } } as any)}
             style={d.epListBtn}
           >
             <Ionicons name="list" size={16} color="#c4b5fd" />

@@ -354,8 +354,6 @@ export function RiftPlayer({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showFitMenu, setShowFitMenu]     = useState(false);
   const [showSubPanel, setShowSubPanel]   = useState(false);
-  const [showEpList,   setShowEpList]     = useState(false);
-  const [epPage,       setEpPage]         = useState(() => Math.max(0, Math.floor(((episode ?? 1) - 1) / 50)));
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(true);
   const prevVolRef                        = useRef(1);
@@ -1529,80 +1527,6 @@ export function RiftPlayer({
         </Pressable>
       )}
 
-      {/* ════════ EPISODE LIST PANEL ════════ */}
-      {showEpList && onEpisodeSelect && (
-        <Pressable
-          style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.60)", zIndex: 55 }]}
-          onPress={() => setShowEpList(false)}
-        >
-          <Pressable
-            onPress={() => {}}
-            style={s.epListPanel}
-          >
-            {(() => {
-              const EP_PAGE_SIZE = 50;
-              const maxEps = totalEps < 900 ? totalEps : 500;
-              const totalPages = Math.ceil(maxEps / EP_PAGE_SIZE);
-              const curPage = Math.max(0, Math.min(epPage, totalPages - 1));
-              const startEp = curPage * EP_PAGE_SIZE + 1;
-              const endEp = Math.min((curPage + 1) * EP_PAGE_SIZE, maxEps);
-              const pageEps = Array.from({ length: endEp - startEp + 1 }, (_, i) => startEp + i);
-              return (
-                <>
-                  {/* Header */}
-                  <View style={s.epListHeader}>
-                    <View style={s.epListTitleRow}>
-                      <Ionicons name="list" size={16} color="#c4b5fd" />
-                      <Text style={s.epListTitle}>الحلقات</Text>
-                      <View style={s.epListBadge}>
-                        <Text style={s.epListBadgeText}>{totalEps < 900 ? totalEps : "؟"}</Text>
-                      </View>
-                    </View>
-                    <Pressable onPress={() => setShowEpList(false)} hitSlop={12}>
-                      <Ionicons name="close" size={20} color="rgba(255,255,255,0.50)" />
-                    </Pressable>
-                  </View>
-                  {/* Page nav */}
-                  {totalPages > 1 && (
-                    <View style={s.epListPageNav}>
-                      <Pressable
-                        onPress={() => setEpPage(p => Math.max(0, p - 1))}
-                        disabled={curPage <= 0}
-                        style={[s.epListPageBtn, curPage <= 0 && s.epListPageBtnDisabled]}
-                      >
-                        <Text style={[s.epListPageBtnText, curPage <= 0 && s.epListPageBtnTextDisabled]}>‹ السابق</Text>
-                      </Pressable>
-                      <Text style={s.epListPageRange}>{startEp}–{endEp}</Text>
-                      <Pressable
-                        onPress={() => setEpPage(p => Math.min(totalPages - 1, p + 1))}
-                        disabled={curPage >= totalPages - 1}
-                        style={[s.epListPageBtn, curPage >= totalPages - 1 && s.epListPageBtnDisabled]}
-                      >
-                        <Text style={[s.epListPageBtnText, curPage >= totalPages - 1 && s.epListPageBtnTextDisabled]}>التالي ›</Text>
-                      </Pressable>
-                    </View>
-                  )}
-                  {/* Grid */}
-                  <ScrollView contentContainerStyle={s.epListGrid} showsVerticalScrollIndicator={false}>
-                    {pageEps.map(n => {
-                      const isCurr = n === episode;
-                      return (
-                        <Pressable
-                          key={n}
-                          onPress={() => { setShowEpList(false); onEpisodeSelect!(n); }}
-                          style={[s.epListItem, isCurr && s.epListItemActive]}
-                        >
-                          <Text style={[s.epListItemText, isCurr && s.epListItemTextActive]}>{n}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                </>
-              );
-            })()}
-          </Pressable>
-        </Pressable>
-      )}
 
       {showControls && !error && !isEnded && !isLocked && (
         <Animated.View
@@ -1762,17 +1686,8 @@ export function RiftPlayer({
             {/* ── صف أزرار التحكم السفلي ── */}
             <View style={s.bottomCtrlRow}>
 
-              {/* يسار: قائمة الحلقات + قفل + ملء شاشة */}
+              {/* يسار: قفل + ملء شاشة */}
               <View style={s.bottomSide}>
-                {onEpisodeSelect && (
-                  <Pressable
-                    onPress={() => { setShowEpList(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
-                    style={[s.ctrlIconBtn, showEpList && s.ctrlIconBtnActive]}
-                    hitSlop={10}
-                  >
-                    <Ionicons name="list-outline" size={16} color={showEpList ? "#c4b5fd" : "rgba(255,255,255,0.80)"} />
-                  </Pressable>
-                )}
                 <Pressable onPress={() => setIsLocked(true)} style={s.ctrlIconBtn} hitSlop={10}>
                   <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.80)" />
                 </Pressable>
@@ -1826,11 +1741,6 @@ export function RiftPlayer({
                 <Pressable onPress={() => { setIsMuted(v => !v); fadeIn(); }} style={[s.ctrlIconBtn, isMuted && s.ctrlIconBtnMuted]} hitSlop={10}>
                   <Ionicons name={isMuted ? "volume-mute-outline" : "volume-high-outline"} size={16} color={isMuted ? "#fca5a5" : "rgba(255,255,255,0.80)"} />
                 </Pressable>
-                {onNextEpisode && (
-                  <Pressable onPress={() => { toggleAutoPlay(); fadeIn(); }} style={[s.ctrlIconBtn, autoPlayEnabled && s.ctrlIconBtnActive]} hitSlop={10}>
-                    <Ionicons name="play-skip-forward" size={16} color={autoPlayEnabled ? "#c4b5fd" : "rgba(255,255,255,0.40)"} />
-                  </Pressable>
-                )}
                 <View>
                   {showSpeedMenu && (
                     <View style={s.speedDropdown}>
