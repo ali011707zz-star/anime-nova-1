@@ -1,5 +1,6 @@
-- [Hexa animation source](hexa-source.md) — hexa.su TMDB-native HLS via enc-dec.app; CDN nxt.cfw69.workers.dev CORS *; key+token auth; integrated in animation.ts scrapeAnimCached("hexa")
-- [EncDecEndpoints research 2026-06](encdec-research-2026-06.md) — Hexa=works; AnimeKai CDN=blocked(502); VidFast/VidCore=stream 404; VidSync=browser token; anicli-api=Russian only
+- [Hexa animation source](hexa-source.md) — hexa.su TMDB-native HLS via enc-dec.app; CDN nxt.cfw69.workers.dev CORS *; _hexaFailUntil cooldown parses "Next retry: N minutes" hint on 500
+- [AnimeKai DB scraper](animekai-scraper.md) — enc-dec.app/db/kai/find?anilist_id → megaup mirrors + media paths → dec-mega; megaup BLOCKS Replit IPs (timeout); needs DENO_PROXY_URL=Render server to work
+- [EncDecEndpoints research 2026-06](encdec-research-2026-06.md) — Hexa=works(cooldown fixed); AnimeKai megaup CDN=blocked(timeout from Replit+CF proxy); anicli-api=Russian only
 - [AniVault scraper](anivault-scraper.md) — senshi/miruro/animeheaven via Railway API; CDN blocks Replit → double-proxy through hlsProxyUrl; single Japanese audio track confirmed
 - [Nova Mobile animation pages](nova-mobile-animation.md) — 3 new pages: animation/[type]/[id].tsx (detail), animation/episodes.tsx (season tabs), animation/watch.tsx (SSE+VideoView); fix animations.tsx nav to detail page; /api/config route at /config (prefix /api added by app.use)
 - [Security system (token auth + URL encryption)](security-system.md) — AES-256 URL encryption + HMAC 5-min tokens; APP_SECRET env var; token endpoint POST /api/auth/anon-token

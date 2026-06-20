@@ -5035,6 +5035,125 @@ async function getAnimePaheSources(
 
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIMEKAI — via enc-dec.app DB (anilist_id → megaup mirror + media path)
+//  Flow: /db/kai/find?anilist_id=X → episodes[s][e].sources[type][server]
+//        → cfProxyGet/denoProxyGet → /media/ URL → dec-mega → video URL
+//  Note: megaup CDN blocks Replit IPs — requires DENO_PROXY_URL (Render server)
+// ════════════════════════════════════════════════════════════════════
+const kaiDbCache = new Map<number, { data: any; ts: number }>();
+const KAI_DB_TTL = 24 * 3_600_000;
+
+async function getAnimeKaiEntry(anilistId: number): Promise<any | null> {
+  const cached = kaiDbCache.get(anilistId);
+  if (cached && Date.now() - cached.ts < KAI_DB_TTL) return cached.data;
+  try {
+    const r = await fetch(`https://enc-dec.app/db/kai/find?anilist_id=${anilistId}`, {
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!r.ok) return null;
+    const entries = await r.json() as any[];
+    if (!entries?.length) return null;
+    kaiDbCache.set(anilistId, { data: entries[0], ts: Date.now() });
+    return entries[0];
+  } catch { return null; }
+}
+
+async function getAnimeKaiSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+  try {
+    const entry = await getAnimeKaiEntry(anilistId);
+    if (!entry) return [];
+
+    const mirrors: string[] = (entry?.info?.mirrors?.megaup ?? []) as string[];
+    if (!mirrors.length) return [];
+
+    const episodes: Record<string, Record<string, any>> = entry?.episodes ?? {};
+    const epStr = String(ep);
+
+    // البحث في كل مواسم DB عن الحلقة المطلوبة
+    let mediaPaths: string[] = [];
+    let srcType = "sub";
+    for (const seasonEps of Object.values(episodes)) {
+      if (!seasonEps[epStr]?.sources) continue;
+      const sources = seasonEps[epStr].sources as Record<string, Record<string, string>>;
+      // فضّل softsub (لها ترجمة) ثم sub ثم أي نوع آخر
+      srcType = sources["softsub"] ? "softsub" : sources["sub"] ? "sub" : Object.keys(sources)[0] ?? "sub";
+      const servers = sources[srcType] ?? {};
+      mediaPaths = Object.values(servers).filter((p): p is string => typeof p === "string" && p.startsWith("media/"));
+      if (mediaPaths.length) break;
+    }
+    if (!mediaPaths.length) return [];
+
+    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
+    const sources: UnifiedSource[] = [];
+
+    for (const mirror of mirrors.slice(0, 2)) {
+      for (const mediaPath of mediaPaths.slice(0, 2)) {
+        const mediaUrl = `${mirror}${mediaPath}`;
+        // Try CF proxy → Deno proxy (Render server) → direct
+        let text: string | null = null;
+        text ??= await cfProxyGet(mediaUrl, mirror, 10_000);
+        text ??= await denoProxyGet(mediaUrl, mirror);
+        if (!text) {
+          // last resort: direct fetch (may work from Render-hosted server)
+          try {
+            const r = await fetch(mediaUrl, {
+              headers: { "User-Agent": UA, Referer: mirror },
+              signal: AbortSignal.timeout(8_000),
+            });
+            if (r.ok) text = await r.text();
+          } catch {}
+        }
+        if (!text) continue;
+
+        let encrypted: string | null = null;
+        try { encrypted = JSON.parse(text)?.result || null; } catch {}
+        if (!encrypted) continue;
+
+        const decR = await fetch("https://enc-dec.app/api/dec-mega", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: encrypted, agent: UA }),
+          signal: AbortSignal.timeout(8_000),
+        }).catch(() => null);
+        if (!decR?.ok) continue;
+        const dec = await decR.json() as any;
+        if (dec?.status !== 200) continue;
+
+        const result = dec?.result;
+        // result can be string URL or object with url/stream field
+        const videoUrl: string | null =
+          typeof result === "string" ? result
+          : result?.url || result?.stream || result?.hls || null;
+        if (!videoUrl) continue;
+
+        const isHls = videoUrl.includes(".m3u8");
+        const proxyUrl = isHls
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(mirror)}`
+          : `/api/anime/video-proxy?url=${encodeURIComponent(videoUrl)}&ref=${encodeURIComponent(mirror)}`;
+
+        const typeLabel = srcType === "softsub" ? "ياباني + ترجمة" : srcType === "dub" ? "مدبلج" : "ياباني مترجم";
+        sources.push({
+          name: `AnimeKai · ${typeLabel}`,
+          url: videoUrl,
+          quality: "1080p",
+          qualityRank: 10,
+          site: "animekai",
+          directUrl: proxyUrl,
+          directType: isHls ? "hls" : "mp4",
+        });
+        break;
+      }
+      if (sources.length >= 2) break;
+    }
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
 //  ANIMEWITCHER — API جديد على Hugging Face Space (يوليو 2025)
 //  Base: https://1we323-witcher.hf.space
 //  Flow:
@@ -6972,6 +7091,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animex",       () => getAnimexSources(title, english, ep, anilistId),       false, 18000),
       scrapeCached("anikuro",      () => getAnikuroSources(title, english, ep, anilistId),      false, 14000),
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
+      scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId),     false, 20000),
       scrapeCached("hianime",      () => getHiAnimeSources(title, english, ep, anilistId),      false, 22000),
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
@@ -7097,6 +7217,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animex":      (await race(getAnimexSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikuro":     (await race(getAnikuroSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
       // anivault: محذوف
