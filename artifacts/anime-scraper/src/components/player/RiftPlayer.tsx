@@ -264,8 +264,6 @@ export default function RiftPlayer({
   const [showSpeed,       setShowSpeed]       = useState(false);
   const [showViewMode,    setShowViewMode]    = useState(false);
   const [showSubMenu,     setShowSubMenu]      = useState(false);
-  const [showEpList,      setShowEpList]       = useState(false);
-  const [epPage,          setEpPage]           = useState(() => Math.max(0, Math.floor((ep - 1) / 50)));
   const [openSubSection,  setOpenSubSection]   = useState<string | null>(null);
   const [prgHover,        setPrgHover]        = useState(false);
   const [feedback,        setFeedback]        = useState<GF | null>(null);
@@ -1385,23 +1383,6 @@ export default function RiftPlayer({
 
                   {/* RIGHT: action buttons */}
                   <div className="flex items-center gap-2 shrink-0">
-                    {/* Episode list sidebar button */}
-                    {onEpisodeSelect && totalEps > 1 && (
-                      <button
-                        onClick={() => { setShowEpList(m => !m); setShowSubMenu(false); }}
-                        className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150"
-                        style={showEpList
-                          ? { background: "rgba(139,92,246,0.45)", border: "1px solid rgba(139,92,246,0.70)" }
-                          : { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }
-                        }
-                        title="قائمة الحلقات"
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={showEpList ? "#c4b5fd" : "rgba(255,255,255,0.65)"} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-                          <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-                        </svg>
-                      </button>
-                    )}
                     {/* Subtitle / CC button — opens inline settings menu */}
                     {onSubtitleClick && (
                       <button
@@ -2358,139 +2339,6 @@ export default function RiftPlayer({
         </div>
       )}
 
-        {/* ════════════════════════════════════════
-            EPISODE LIST SIDE PANEL
-        ════════════════════════════════════════ */}
-        <AnimatePresence>
-          {showEpList && onEpisodeSelect && totalEps > 1 && !error && !isLocked && (
-            <>
-              {/* Backdrop */}
-              <motion.div
-                key="eplist-backdrop"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.22 }}
-                className="absolute inset-0 z-40"
-                style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
-                onClick={() => setShowEpList(false)}
-              />
-              {/* Panel slides from left */}
-              <motion.div
-                key="eplist-panel"
-                initial={{ x: "-100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "-100%" }}
-                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-                className="absolute top-0 bottom-0 left-0 z-50 flex flex-col pointer-events-auto"
-                dir="rtl"
-                style={{
-                  width: "min(260px, 72vw)",
-                  background: "rgba(5,5,18,0.97)",
-                  backdropFilter: "blur(44px) saturate(220%)",
-                  borderRight: "1.5px solid rgba(139,92,246,0.22)",
-                  boxShadow: "8px 0 32px rgba(0,0,0,0.70)",
-                }}
-                onClick={e => e.stopPropagation()}
-              >
-                {/* Header */}
-                {(() => {
-                  const EP_PAGE_SIZE = 50;
-                  const maxEps = totalEps < 900 ? totalEps : 500;
-                  const totalPages = Math.ceil(maxEps / EP_PAGE_SIZE);
-                  const currentPage = Math.max(0, Math.min(epPage, totalPages - 1));
-                  const startEp = currentPage * EP_PAGE_SIZE + 1;
-                  const endEp = Math.min((currentPage + 1) * EP_PAGE_SIZE, maxEps);
-                  const pageEps = Array.from({ length: endEp - startEp + 1 }, (_, i) => startEp + i);
-                  return (<>
-                <div className="flex items-center justify-between px-4 py-3.5 shrink-0"
-                  style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-xl flex items-center justify-center"
-                      style={{ background: "rgba(139,92,246,0.28)", border: "1px solid rgba(139,92,246,0.40)" }}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-                        <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-                      </svg>
-                    </div>
-                    <span className="text-white/90 text-[14px] font-black font-['Cairo']">الحلقات</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-md font-['Cairo'] font-bold"
-                      style={{ background: "rgba(139,92,246,0.20)", color: "#c4b5fd", border: "1px solid rgba(139,92,246,0.30)" }}>
-                      {totalEps < 900 ? totalEps : "؟"}
-                    </span>
-                  </div>
-                  <button onClick={() => setShowEpList(false)}
-                    className="w-7 h-7 rounded-full flex items-center justify-center active:bg-white/10">
-                    <X className="w-4 h-4 text-white/40" />
-                  </button>
-                </div>
-
-                {/* Page navigation */}
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between px-3 py-2 shrink-0"
-                    style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                    <button
-                      disabled={currentPage <= 0}
-                      onPointerDown={e => { e.stopPropagation(); setEpPage(p => Math.max(0, p - 1)); }}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold font-['Cairo'] transition-all active:scale-95"
-                      style={{
-                        background: currentPage > 0 ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
-                        border: `1px solid ${currentPage > 0 ? "rgba(139,92,246,0.35)" : "rgba(255,255,255,0.06)"}`,
-                        color: currentPage > 0 ? "#c4b5fd" : "rgba(255,255,255,0.20)",
-                        opacity: currentPage <= 0 ? 0.4 : 1,
-                      }}>
-                      ‹ السابق
-                    </button>
-                    <span className="text-[10px] font-['Cairo'] font-bold" style={{ color: "rgba(255,255,255,0.40)" }}>
-                      {startEp}–{endEp}
-                    </span>
-                    <button
-                      disabled={currentPage >= totalPages - 1}
-                      onPointerDown={e => { e.stopPropagation(); setEpPage(p => Math.min(totalPages - 1, p + 1)); }}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold font-['Cairo'] transition-all active:scale-95"
-                      style={{
-                        background: currentPage < totalPages - 1 ? "rgba(139,92,246,0.18)" : "rgba(255,255,255,0.04)",
-                        border: `1px solid ${currentPage < totalPages - 1 ? "rgba(139,92,246,0.35)" : "rgba(255,255,255,0.06)"}`,
-                        color: currentPage < totalPages - 1 ? "#c4b5fd" : "rgba(255,255,255,0.20)",
-                        opacity: currentPage >= totalPages - 1 ? 0.4 : 1,
-                      }}>
-                      التالي ›
-                    </button>
-                  </div>
-                )}
-
-                {/* Episode grid — scrollable */}
-                <div className="flex-1 overflow-y-auto p-3"
-                  style={{ scrollbarWidth: "none" }}>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {pageEps.map(n => {
-                      const isCurrent = n === ep;
-                      return (
-                        <button
-                          key={n}
-                          onPointerDown={e => { e.stopPropagation(); setShowEpList(false); onEpisodeSelect(n); }}
-                          className="flex items-center justify-center rounded-xl font-black font-['Cairo'] active:scale-90 transition-all"
-                          style={{
-                            height: 40,
-                            fontSize: 13,
-                            background: isCurrent ? "rgba(139,92,246,0.88)" : "rgba(255,255,255,0.06)",
-                            border: isCurrent ? "1.5px solid rgba(167,139,250,0.70)" : "1px solid rgba(255,255,255,0.08)",
-                            color: isCurrent ? "#fff" : "rgba(255,255,255,0.72)",
-                            boxShadow: isCurrent ? "0 0 14px rgba(139,92,246,0.45)" : "none",
-                          }}
-                        >
-                          {n}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                  </>);
-                })()}
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
 
     </div>
   );

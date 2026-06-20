@@ -302,7 +302,7 @@ export default function WatchScreen() {
     const timeout = setTimeout(() => {
       setScreen(s => s === "loading" ? "picker" : s);
       setLoading(false);
-    }, 35000);
+    }, 12000);
     return () => clearTimeout(timeout);
   }, [anime, ep]);
 
@@ -363,6 +363,7 @@ export default function WatchScreen() {
         return;
       }
       const reader   = response.body.getReader();
+      setScreen(s => s === "loading" ? "picker" : s);
       const decoder  = new TextDecoder();
       let buffer     = "";
       let currentEvent = "";
