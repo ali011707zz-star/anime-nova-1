@@ -12,7 +12,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { secureStreamFetch } from "@/utils/secureApi";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 const { width: W } = Dimensions.get("window");
@@ -346,7 +345,11 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     const url  = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}&anime=${anime || ""}&format=${encodeURIComponent(format || "")}`;
     try {
-      const response = await secureStreamFetch(url, { signal: abortRef.current.signal });
+      const { fetch: expoFetch } = await import("expo/fetch");
+      const response = await expoFetch(url, {
+        signal: abortRef.current.signal,
+        headers: { Accept: "text/event-stream" },
+      }) as unknown as Response;
       if (!response.body) {
         setLoading(false);
         setScreen("picker");
