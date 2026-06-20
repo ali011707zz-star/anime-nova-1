@@ -17,7 +17,6 @@ import { validateAnonToken, checkRateLimit } from "./lib/security.js";
 // ── المسارات التي تتطلب توكن صالح ──
 const PROTECTED_PATHS = [
   "/api/anime/fetch-source",
-  "/api/animation/sources-stream",
 ];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
