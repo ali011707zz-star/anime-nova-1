@@ -131,14 +131,22 @@ interface FetchedSrc {
 }
 
 /* ── All known scrapers — shown immediately in picker ── */
-const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en" }[] = [
-  // ── عربي مدبلج / مترجم ────────────────────────────────────────────
-  { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH" },
-  { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "EK" },
-  { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD" },
-  { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK" },
-  { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS" },
-  { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "MG" },
+const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en"; isArabic?: true }[] = [
+  // ── عربي مدبلج / مترجم (صوت عربي أصلي مدمج — لا ترجمة خارجية) ──────────
+  { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH", isArabic: true },
+  { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "EK", isArabic: true },
+  { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD", isArabic: true },
+  { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK", isArabic: true },
+  { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS", isArabic: true },
+  { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
+  { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY", isArabic: true },
+  { site: "seepanel",     name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",   tag: "SP", isArabic: true },
+  { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS", isArabic: true },
+  { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U", isArabic: true },
+  { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC", isArabic: true },
+  { site: "topcinemaa",   name: "توب سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "TC", isArabic: true },
+  { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH", isArabic: true },
+  { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم · HLS",         tag: "AT", isArabic: true },
   // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
@@ -148,25 +156,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
-  // ── عربي مدبلج (AniméDay APK) ─────────────────────────────────────
-  { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY" },
-  // ── عربي مدبلج (SeeDrama APK) ─────────────────────────────────────
-  { site: "seepanel",     name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",   tag: "SP" },
-  // ── عربي مدبلج / مترجم (ArabSeed m.asd.ink) ─────────────────────
-  { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS" },
-  // ── عربي مترجم (w1.anime4up.rest) ───────────────────────────────
-  { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U" },
-  // ── ماي سيما / وي سيما ───────────────────────────────────────────
-  { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC" },
-  // ── توب سيما (topcinemaa.com — DooPlay) ───────────────────────
-  { site: "topcinemaa",   name: "توب سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "TC" },
-  // ── 1080p مباشر (Anime-Phoenix) ───────────────────────────────────
-  { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH" },
-  // ── مصادر عربية إضافية ────────────────────────────────────────────
-  { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم · HLS",         tag: "AT" },
   { site: "animex",       name: "أنمي إكس",     desc: "ياباني مترجم · HLS",       tag: "AX" },
   { site: "anikuro",      name: "AniKuro",       desc: "ياباني مترجم · HLS",       tag: "KR" },
-  { site: "anivault",     name: "AniVault",      desc: "ياباني مترجم · senshi/miruro/AH", tag: "AV" },
   // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────
   { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS · صوت ياباني",  tag: "SC" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
@@ -175,6 +166,9 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "lordflix_anim", name: "LordFlix",      desc: "TMDB · HLS · ترجمة عربية", tag: "LF", audioLang: "en" },
   { site: "vyla_anim",     name: "Vyla",          desc: "TMDB · HLS · ترجمة عربية", tag: "VY", audioLang: "en" },
 ];
+
+/** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
+const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.site));
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
 
@@ -780,6 +774,7 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
             <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">سيرفر {idx + 1}</p>
             <span className="text-[11px] font-black px-2 py-0.5 rounded-md tracking-wide"
+              dir="ltr"
               style={{ color: "rgba(255,255,255,0.80)", background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.18)", fontFamily: "monospace" }}>
               {tag}
             </span>
@@ -1362,7 +1357,7 @@ function EpisodePlayer({
   servers, quality, allServers,
   title, epTitle, cover, ep, totalEps, animeTitle, animeId,
   userId,
-  initialServer, downloadUrl, subtitleUrl, subtitleSite, skipTimes,
+  initialServer, downloadUrl, subtitleUrl, subtitleSite, skipTimes, hideSubtitle,
   onBack, onNextEp, onPrevEp, onEpisodeSelect, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
@@ -1370,6 +1365,7 @@ function EpisodePlayer({
   animeId: number;
   userId?: string | null;
   initialServer?: number; downloadUrl?: string; subtitleUrl?: string; subtitleSite?: string; skipTimes?: SkipTimes;
+  hideSubtitle?: boolean;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onEpisodeSelect?: (ep: number) => void;
   onChangeQuality: (q: Quality) => void;
@@ -2057,7 +2053,8 @@ function EpisodePlayer({
         </div>
       </div>
 
-      {/* Subtitle */}
+      {/* Subtitle — مخفي للمصادر العربية (صوت عربي مدمج) */}
+      {!hideSubtitle && (
       <button
         onClick={fetchSubtitles}
         className="flex items-center gap-1 px-2.5 py-2 rounded-xl transition-all active:scale-90 shrink-0"
@@ -2071,6 +2068,7 @@ function EpisodePlayer({
         }}>
         <Subtitles className={`w-3.5 h-3.5 ${subState === "loading" ? "animate-pulse" : ""}`} />
       </button>
+      )}
 
       {/* Quality picker */}
       {!allQualityIdentical && (
@@ -2223,7 +2221,7 @@ function EpisodePlayer({
       </AnimatePresence>
 
       <AnimatePresence>
-        {showSubPanel && (() => {
+        {!hideSubtitle && showSubPanel && (() => {
           const hasAr   = subTracks.some(t => t.lang === "ar");
           const hasAuto = subTracks.some(t => t.lang === "ar-auto") || subTracks.some(t => t.lang === "en");
           const hasEn   = subTracks.some(t => t.lang === "en");
@@ -3302,6 +3300,7 @@ export default function WatchPage() {
           downloadUrl={playerDlUrl}
           subtitleUrl={playerSubUrl || kawaiiSubUrl}
           subtitleSite={playerSrcSite}
+          hideSubtitle={ARABIC_SITES.has(playerSrcSite)}
           skipTimes={skipTimes}
           onBack={handleBack}
           onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
