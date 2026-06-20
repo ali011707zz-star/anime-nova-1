@@ -56,7 +56,6 @@ const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isE
   { site: "animepahe",     tag: "AP", name: "AnimePahe",     desc: "ياباني مترجم · HLS نظيف" },
   { site: "anineko",       tag: "AN", name: "AniNeko",       desc: "ياباني مترجم · HLS" },
   { site: "mitanime",      tag: "MT", name: "ميتا أنمي",    desc: "ياباني مترجم" },
-  { site: "anikuro",       tag: "KR", name: "AniKuro",       desc: "ياباني مترجم · HLS" },
   { site: "starcima_anim", tag: "SC", name: "StarCima",      desc: "TMDB · HLS" },
   { site: "videasy_anim",  tag: "VE", name: "Videasy",       desc: "TMDB · ترجمة عربية",     isEn: true },
   { site: "vidlink_anim",  tag: "VL", name: "VidLink",       desc: "TMDB · ترجمة عربية",     isEn: true },
@@ -196,6 +195,7 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
 function SourceRow({ src, globalIdx, onPlay }: { src: Src; globalIdx: number; onPlay: (s: Src) => void }) {
   const url = src.directUrl || src.url || "";
   const def = SCRAPER_DEFS.find(d => d.site === src.site);
+  if (!def && src.site !== "_resume") return null;
   const tag = def?.tag || "??";
   const cdn = getCdnDisplayName(url);
   const q   = getSrcQualityTier(src);
@@ -246,8 +246,8 @@ function resolveUrl(url: string | undefined, base: string): string {
 
 /* ═══════════════════════════════════════ MAIN ═══ */
 export default function WatchScreen() {
-  const { anime, ep, title, english, format, etitle, autoplay } = useLocalSearchParams<{
-    anime: string; ep: string; title: string; english: string; format?: string; etitle?: string; autoplay?: string;
+  const { anime, ep, title, english, format, etitle, autoplay, totalEps: totalEpsParam } = useLocalSearchParams<{
+    anime: string; ep: string; title: string; english: string; format?: string; etitle?: string; autoplay?: string; totalEps?: string;
   }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -261,6 +261,7 @@ export default function WatchScreen() {
   const [cover, setCover]         = useState("");
   const [resumeTime, setResumeTime] = useState(0);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
+  const [anilistTotalEps, setAnilistTotalEps] = useState<number | null>(null);
 
   const abortRef         = useRef<AbortController | null>(null);
   const lastTimeRef      = useRef(0);
@@ -272,12 +273,22 @@ export default function WatchScreen() {
   const displayTitle = englishStr || titleStr;
   const progressKey  = `wp-${anime}-${epNum}`;
 
-  /* Load cover + resume */
+  /* Load cover + resume + AniList episode count */
   useEffect(() => {
     if (!anime) return;
     const id = parseInt(anime);
     setCover(`https://img.anili.st/media/${id}`);
     AsyncStorage.getItem(progressKey).then(v => { if (v) setResumeTime(parseFloat(v) || 0); });
+    // Fetch real episode count from AniList
+    fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "query($id:Int){Media(id:$id){episodes}}", variables: { id } }),
+      signal: AbortSignal.timeout(8000),
+    }).then(r => r.ok ? r.json() : null).then(data => {
+      const count = data?.data?.Media?.episodes;
+      if (count && count > 0) setAnilistTotalEps(count);
+    }).catch(() => {});
   }, [anime, progressKey]);
 
   /* ── 35-second timeout fallback — prevents stuck loading screen ── */
@@ -461,7 +472,7 @@ export default function WatchScreen() {
     if (t > 10) await AsyncStorage.setItem(progressKey, String(Math.floor(t)));
   }, [progressKey]);
 
-  const totalEpsCount = 999;
+  const totalEpsCount = anilistTotalEps || (totalEpsParam ? parseInt(totalEpsParam) || undefined : undefined);
 
   /* Navigate episode */
   function goEp(n: number, auto = false) {
