@@ -374,16 +374,23 @@ export default function AnimeDetailScreen() {
           </View>
         ) : null}
 
-        {/* ── Watch button ── */}
-        <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16 }}>
+        {/* ── Watch buttons ── */}
+        <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16, flexDirection: "row", gap: 10 }}>
           <Pressable
-            onPress={() => router.push(`/watch?anime=${id}&ep=1&title=${encodeURIComponent(anime.title?.romaji || "")}&english=${encodeURIComponent(anime.title?.english || "")}`)}
-            style={d.watchBtn}
+            onPress={() => router.push(`/watch?anime=${id}&ep=1&title=${encodeURIComponent(anime.title?.romaji || "")}&english=${encodeURIComponent(anime.title?.english || "")}&totalEps=${anime.episodes || 0}`)}
+            style={[d.watchBtn, { flex: 1 }]}
           >
             <View style={d.watchBtnIcon}>
               <Ionicons name="play" size={16} color="#fff" />
             </View>
-            <Text style={d.watchBtnText}>مشاهدة الأنمي</Text>
+            <Text style={d.watchBtnText}>الحلقة الأولى</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push(`/episodes/${id}` as any)}
+            style={d.epListBtn}
+          >
+            <Ionicons name="list" size={16} color="#c4b5fd" />
+            <Text style={d.epListBtnText}>قائمة الحلقات</Text>
           </Pressable>
         </View>
 
@@ -746,6 +753,8 @@ const d = StyleSheet.create({
   },
   countdownText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa", flex: 1 },
   watchBtn: { height: 52, borderRadius: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: "#7C3AED" },
+  epListBtn: { height: 52, borderRadius: 18, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "rgba(139,92,246,0.15)", borderWidth: 1.5, borderColor: "rgba(139,92,246,0.40)", paddingHorizontal: 18 },
+  epListBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
   watchBtnIcon: { width: 32, height: 32, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, alignItems: "center", justifyContent: "center" },
   watchBtnText: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   warnBox: { margin: 16, borderRadius: 16, backgroundColor: "rgba(239,68,68,0.1)", borderWidth: 1, borderColor: "rgba(239,68,68,0.35)", overflow: "hidden" },
