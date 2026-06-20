@@ -43,11 +43,14 @@ const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isE
   { site: "seepanel",      tag: "SP", name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",  isArabic: true },
   { site: "arabseed",      tag: "AS", name: "عرب سيد",       desc: "عربي مدبلج/مترجم · MP4", isArabic: true },
   { site: "anime4up2",     tag: "4U", name: "أنمي فور أب",  desc: "عربي مترجم · HLS/ميغا",  isArabic: true },
+  { site: "anime4up",      tag: "4U", name: "أنمي فور أب",  desc: "عربي مترجم · HLS",        isArabic: true },
   { site: "mycima",        tag: "MC", name: "ماي سيما",      desc: "عربي مترجم · HLS",       isArabic: true },
   { site: "topcinemaa",    tag: "TC", name: "توب سيما",      desc: "عربي مترجم · HLS",       isArabic: true },
   { site: "animephoenix",  tag: "PH", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",      isArabic: true },
   { site: "animetime",     tag: "AT", name: "أنمي تايم",    desc: "عربي مترجم · HLS",       isArabic: true },
   { site: "animewitcher",  tag: "AW", name: "AnimeWitcher",  desc: "PD/ST · مباشر",          isArabic: true },
+  { site: "witanime",      tag: "WT", name: "ويتانيمي",     desc: "عربي مترجم · HLS",       isArabic: true },
+  { site: "anime3rb",      tag: "3R", name: "أنمي عرب",     desc: "عربي مترجم",             isArabic: true },
   { site: "kawaii",        tag: "KW", name: "كواي أنمي",    desc: "1080p · مباشر" },
   { site: "anikoto",       tag: "AK", name: "AniKoto",       desc: "ياباني مترجم · 1080p" },
   { site: "animekai",      tag: "KI", name: "AnimeKai",      desc: "ياباني مترجم · مباشر" },
@@ -55,6 +58,10 @@ const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isE
   { site: "animepahe",     tag: "AP", name: "AnimePahe",     desc: "ياباني مترجم · HLS نظيف" },
   { site: "anineko",       tag: "AN", name: "AniNeko",       desc: "ياباني مترجم · HLS" },
   { site: "mitanime",      tag: "MT", name: "ميتا أنمي",    desc: "ياباني مترجم" },
+  { site: "animex",        tag: "HE", name: "AnimeX",        desc: "ياباني مترجم · HLS" },
+  { site: "animegg",       tag: "GG", name: "AnimeGG",       desc: "ياباني · MP4 مباشر" },
+  { site: "toonstream",    tag: "TS", name: "ToonStream",    desc: "كرتون · HLS",             isArabic: true },
+  { site: "reanime",       tag: "RE", name: "ReAnime",       desc: "ياباني مترجم · HLS" },
   { site: "starcima_anim", tag: "SC", name: "StarCima",      desc: "TMDB · HLS" },
   { site: "videasy_anim",  tag: "VE", name: "Videasy",       desc: "TMDB · ترجمة عربية",     isEn: true },
   { site: "vidlink_anim",  tag: "VL", name: "VidLink",       desc: "TMDB · ترجمة عربية",     isEn: true },
@@ -194,7 +201,7 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
 function SourceRow({ src, globalIdx, onPlay }: { src: Src; globalIdx: number; onPlay: (s: Src) => void }) {
   const url = src.directUrl || src.url || "";
   const def = SCRAPER_DEFS.find(d => d.site === src.site);
-  if (!def && src.site !== "_resume") return null;
+  if (!def && src.site !== "_resume" && !url) return null;
   const tag = def?.tag || "??";
   const cdn = getCdnDisplayName(url);
   const q   = getSrcQualityTier(src);
@@ -489,10 +496,12 @@ export default function WatchScreen() {
     return directSrcs.map(s => {
       const def = SCRAPER_DEFS.find(d => d.site === s.site);
       const isArabicSrc = def?.isArabic === true;
+      const rawUrl = s.directUrl || s.url || "";
       return {
-        url: s.directUrl || s.url || "",
-        label: def?.name || getCdnDisplayName(s.directUrl || s.url || ""),
+        url: resolveUrl(rawUrl, base),
+        label: def?.name || getCdnDisplayName(rawUrl),
         quality: getSrcQualityTier(s),
+        isArabic: isArabicSrc,
         subtitleUrl: isArabicSrc ? undefined : (s.subtitleUrl
           ? resolveUrl(s.subtitleUrl, base)
           : globalSubUrl),
