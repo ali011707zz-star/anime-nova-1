@@ -166,25 +166,16 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
         <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
         {cover ? (
           <View style={d.ldPosterWrap}>
+            <View style={d.ldGlowOuter} />
             <View style={d.ldGlow} />
             <Image source={{ uri: cover }} style={d.ldPoster} resizeMode="cover" />
-            <LinearGradient colors={["transparent", "rgba(0,0,0,0.55)"]} style={d.ldPosterFade} />
-            <View style={d.ldPlayOverlay}>
-              <View style={d.ldPlayBtn}>
-                <Ionicons name="play" size={28} color="#fff" style={{ marginLeft: 4 }} />
-              </View>
-            </View>
           </View>
         ) : (
           <View style={d.ldPosterWrap}>
+            <View style={d.ldGlowOuter} />
             <View style={d.ldGlow} />
             <View style={[d.ldPoster, { backgroundColor: "rgba(30,10,60,0.9)", alignItems: "center", justifyContent: "center" }]}>
               <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(139,92,246,0.3)" }} />
-            </View>
-            <View style={d.ldPlayOverlay}>
-              <View style={d.ldPlayBtn}>
-                <Ionicons name="play" size={28} color="#fff" style={{ marginLeft: 4 }} />
-              </View>
             </View>
           </View>
         )}
@@ -733,11 +724,9 @@ const d = StyleSheet.create({
   ldContent: { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },
   ldPrayer: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center" },
   ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
-  ldGlow: { position: "absolute", width: 245, height: 315, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.28)", shadowColor: "#7C3AED", shadowOpacity: 0.55, shadowRadius: 40, elevation: 20 },
-  ldPoster: { width: 176, height: 248, borderRadius: 20, borderWidth: 1.5, borderColor: "rgba(139,92,246,0.35)", shadowColor: "#000", shadowOpacity: 0.60, shadowRadius: 20, elevation: 12 },
-  ldPosterFade: { position: "absolute", bottom: 0, left: 0, right: 0, height: 80, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
-  ldPlayOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
-  ldPlayBtn: { width: 62, height: 62, borderRadius: 31, backgroundColor: "rgba(109,40,217,0.82)", borderWidth: 2, borderColor: "rgba(167,139,250,0.45)", alignItems: "center", justifyContent: "center", shadowColor: "#6D28D9", shadowOpacity: 0.60, shadowRadius: 22, elevation: 14 },
+  ldGlowOuter: { position: "absolute", width: 280, height: 360, borderRadius: 48, backgroundColor: "rgba(109,40,217,0.12)", shadowColor: "#6D28D9", shadowOpacity: 0.70, shadowRadius: 60, elevation: 0 },
+  ldGlow: { position: "absolute", width: 240, height: 318, borderRadius: 34, backgroundColor: "rgba(139,92,246,0.32)", shadowColor: "#7C3AED", shadowOpacity: 0.75, shadowRadius: 48, elevation: 28 },
+  ldPoster: { width: 176, height: 248, borderRadius: 20, borderWidth: 1.5, borderColor: "rgba(167,139,250,0.45)", shadowColor: "#6D28D9", shadowOpacity: 0.70, shadowRadius: 20, elevation: 14 },
   ldTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 26 },
   ldEpBadge: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: "rgba(124,58,237,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
   ldEpText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.9)" },
