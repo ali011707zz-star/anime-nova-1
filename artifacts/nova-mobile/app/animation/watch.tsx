@@ -222,6 +222,7 @@ export default function AnimationWatchScreen() {
   /* ── SSE fetch ── */
   const fetchSources = useCallback(async () => {
     if (!tmdbId) return;
+    autoPlayFiredRef.current = false;
     setLoading(true);
     setSources([]);
     setScreen("loading");
