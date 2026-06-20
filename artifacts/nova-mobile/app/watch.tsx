@@ -33,28 +33,35 @@ interface Src {
 
 
 /* ── Scraper definitions ── */
-const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isEn?: boolean }[] = [
-  { site: "shahiid",      tag: "SH", name: "شاهيد أنمي",  desc: "عربي مدبلج / مترجم" },
-  { site: "animelek",     tag: "AL", name: "أنمي ليك",    desc: "عربي مدبلج / مترجم" },
-  { site: "animedar",     tag: "AD", name: "أنمي دار",    desc: "عربي مترجم"          },
-  { site: "okanime",      tag: "OK", name: "أوك أنمي",    desc: "عربي مترجم"          },
-  { site: "ristoanime",   tag: "RS", name: "ريستو أنمي",  desc: "عربي مترجم"          },
-  { site: "animeify",     tag: "MG", name: "أنمي فاي",    desc: "عربي · ميغا"         },
-  { site: "kawaii",       tag: "KW", name: "كواي أنمي",   desc: "1080p · مباشر"       },
-  { site: "anikoto",      tag: "AK", name: "AniKoto",      desc: "ياباني مترجم · 1080p" },
-  { site: "animepahe",    tag: "AP", name: "AnimePahe",    desc: "ياباني مترجم · HLS نظيف" },
-  { site: "animewitcher", tag: "AW", name: "AnimeWitcher", desc: "PD/ST · مباشر"       },
-  { site: "anineko",      tag: "AN", name: "AniNeko",      desc: "ياباني مترجم · HLS"  },
-  { site: "mitanime",     tag: "MT", name: "ميتا أنمي",   desc: "ياباني مترجم"        },
-  { site: "animeday",     tag: "DY", name: "أنمي داي",    desc: "عربي مدبلج · HLS مباشر" },
-  { site: "seepanel",     tag: "SP", name: "سي بانيل",    desc: "عربي مدبلج · HLS نظيف"  },
-  { site: "arabseed",     tag: "AS", name: "عرب سيد",      desc: "عربي مدبلج/مترجم · MP4" },
-  { site: "animephoenix", tag: "PH", name: "فينكس أنمي",  desc: "1080p · MKV مباشر"   },
-  // starcima_anim: محذوف من الأنمي — يرسل صوتاً هندياً
-  { site: "videasy_anim", tag: "VE", name: "Videasy",      desc: "TMDB · ترجمة عربية", isEn: true },
-  { site: "vidlink_anim", tag: "VL", name: "VidLink",      desc: "TMDB · ترجمة عربية", isEn: true },
-  { site: "lordflix_anim",tag: "LF", name: "LordFlix",     desc: "TMDB · ترجمة عربية", isEn: true },
-  { site: "vyla_anim",    tag: "VY", name: "Vyla",         desc: "TMDB · HLS · ترجمة", isEn: true },
+const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isEn?: boolean; isArabic?: boolean }[] = [
+  { site: "shahiid",       tag: "SH", name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",     isArabic: true },
+  { site: "animelek",      tag: "AL", name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",     isArabic: true },
+  { site: "animedar",      tag: "AD", name: "أنمي دار",     desc: "عربي مترجم",              isArabic: true },
+  { site: "okanime",       tag: "OK", name: "أوك أنمي",     desc: "عربي مترجم",              isArabic: true },
+  { site: "ristoanime",    tag: "RS", name: "ريستو أنمي",   desc: "عربي مترجم",              isArabic: true },
+  { site: "animeify",      tag: "MG", name: "أنمي فاي",     desc: "عربي · ميغا",             isArabic: true },
+  { site: "animeday",      tag: "DY", name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر", isArabic: true },
+  { site: "seepanel",      tag: "SP", name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",  isArabic: true },
+  { site: "arabseed",      tag: "AS", name: "عرب سيد",       desc: "عربي مدبلج/مترجم · MP4", isArabic: true },
+  { site: "anime4up2",     tag: "4U", name: "أنمي فور أب",  desc: "عربي مترجم · HLS/ميغا",  isArabic: true },
+  { site: "mycima",        tag: "MC", name: "ماي سيما",      desc: "عربي مترجم · HLS",       isArabic: true },
+  { site: "topcinemaa",    tag: "TC", name: "توب سيما",      desc: "عربي مترجم · HLS",       isArabic: true },
+  { site: "animephoenix",  tag: "PH", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",      isArabic: true },
+  { site: "animetime",     tag: "AT", name: "أنمي تايم",    desc: "عربي مترجم · HLS",       isArabic: true },
+  { site: "animewitcher",  tag: "AW", name: "AnimeWitcher",  desc: "PD/ST · مباشر",          isArabic: true },
+  { site: "kawaii",        tag: "KW", name: "كواي أنمي",    desc: "1080p · مباشر" },
+  { site: "anikoto",       tag: "AK", name: "AniKoto",       desc: "ياباني مترجم · 1080p" },
+  { site: "animekai",      tag: "KI", name: "AnimeKai",      desc: "ياباني مترجم · مباشر" },
+  { site: "hianime",       tag: "HI", name: "HiAnime",       desc: "ياباني مترجم · HLS نظيف" },
+  { site: "animepahe",     tag: "AP", name: "AnimePahe",     desc: "ياباني مترجم · HLS نظيف" },
+  { site: "anineko",       tag: "AN", name: "AniNeko",       desc: "ياباني مترجم · HLS" },
+  { site: "mitanime",      tag: "MT", name: "ميتا أنمي",    desc: "ياباني مترجم" },
+  { site: "anikuro",       tag: "KR", name: "AniKuro",       desc: "ياباني مترجم · HLS" },
+  { site: "starcima_anim", tag: "SC", name: "StarCima",      desc: "TMDB · HLS" },
+  { site: "videasy_anim",  tag: "VE", name: "Videasy",       desc: "TMDB · ترجمة عربية",     isEn: true },
+  { site: "vidlink_anim",  tag: "VL", name: "VidLink",       desc: "TMDB · ترجمة عربية",     isEn: true },
+  { site: "lordflix_anim", tag: "LF", name: "LordFlix",      desc: "TMDB · ترجمة عربية",     isEn: true },
+  { site: "vyla_anim",     tag: "VY", name: "Vyla",          desc: "TMDB · HLS · ترجمة",     isEn: true },
 ];
 
 
@@ -330,6 +337,7 @@ export default function WatchScreen() {
   /* ── SSE fetch ── */
   const fetchSources = useCallback(async () => {
     if (!anime || !ep) return;
+    autoPlayFiredRef.current = false;
     setLoading(true); setSources([]); setScreen("loading");
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -473,17 +481,18 @@ export default function WatchScreen() {
   /* Build RiftPlayer sources from directSrcs */
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
-    return directSrcs.map(s => ({
-      url: s.directUrl || s.url || "",
-      label: (() => {
-        const def = SCRAPER_DEFS.find(d => d.site === s.site);
-        return def?.name || getCdnDisplayName(s.directUrl || s.url || "");
-      })(),
-      quality: getSrcQualityTier(s),
-      subtitleUrl: s.subtitleUrl
-        ? resolveUrl(s.subtitleUrl, base)
-        : globalSubUrl,
-    })).filter(s => s.url);
+    return directSrcs.map(s => {
+      const def = SCRAPER_DEFS.find(d => d.site === s.site);
+      const isArabicSrc = def?.isArabic === true;
+      return {
+        url: s.directUrl || s.url || "",
+        label: def?.name || getCdnDisplayName(s.directUrl || s.url || ""),
+        quality: getSrcQualityTier(s),
+        subtitleUrl: isArabicSrc ? undefined : (s.subtitleUrl
+          ? resolveUrl(s.subtitleUrl, base)
+          : globalSubUrl),
+      };
+    }).filter(s => s.url);
   }, [directSrcs, globalSubUrl]);
 
 
