@@ -19,7 +19,10 @@ if (Number.isNaN(port) || port <= 0) {
 
 const app = await createApp();
 
-app.listen(port, "::", (err) => {
+// AlwaysData sets IP env var (IPv6) → use "::" ; everywhere else use "0.0.0.0"
+const host = process.env["IP"] ? "::" : "0.0.0.0";
+
+app.listen(port, host, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
