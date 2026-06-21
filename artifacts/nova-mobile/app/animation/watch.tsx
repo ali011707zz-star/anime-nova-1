@@ -347,12 +347,12 @@ export default function AnimationWatchScreen() {
     return () => abortRef.current?.abort();
   }, [fetchSources]);
 
-  /* ── 15-second timeout — prevents stuck loading screen ── */
+  /* ── 30-second timeout — prevents stuck loading screen ── */
   useEffect(() => {
     const timeout = setTimeout(() => {
       setScreen(s => s === "loading" ? "picker" : s);
       setLoading(false);
-    }, 15000);
+    }, 30000);
     return () => clearTimeout(timeout);
   }, [tmdbId, ep, season]);
 
