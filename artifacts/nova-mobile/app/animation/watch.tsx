@@ -88,6 +88,26 @@ function getLabelShort(label: string): string {
   return label?.split(" ")[0] || "مصدر";
 }
 
+/* ── Poster image with error fallback ── */
+function AnimPosterImg({ uri, type }: { uri: string; type: string }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return (
+      <View style={[w2.loadPosterImg, { backgroundColor: "rgba(18,10,40,0.95)", alignItems: "center", justifyContent: "center" }]}>
+        <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" }}>
+          <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(139,92,246,0.40)" }} />
+        </View>
+      </View>
+    );
+  }
+  return (
+    <Image source={{ uri }} style={w2.loadPosterImg} resizeMode="cover" onError={() => setErr(true)} />
+  );
+}
+const w2 = StyleSheet.create({
+  loadPosterImg: { width: 176, height: 248, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
+});
+
 /* ── Spinning loader ── */
 function SpinRing() {
   const rot = useRef(new Animated.Value(0)).current;
@@ -419,38 +439,52 @@ export default function AnimationWatchScreen() {
       <View style={[w.container]}>
         {/* Blurred backdrop */}
         {posterUrl ? (
-          <Image source={{ uri: posterUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.18 }]} blurRadius={22} resizeMode="cover" />
+          <Image source={{ uri: posterUrl }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]}
+            blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" />
         ) : null}
-        <LinearGradient colors={["rgba(9,9,11,0.88)", "rgba(9,9,11,0.55)", "rgba(9,9,11,0.92)"]} style={StyleSheet.absoluteFill} />
+        <LinearGradient
+          colors={["rgba(7,7,13,0.90)", "rgba(12,8,24,0.60)", "rgba(7,7,13,0.95)"]}
+          style={StyleSheet.absoluteFill} />
 
-        {/* Back button — absolute on right */}
+        {/* Back button */}
         <Pressable onPress={handleBack} style={[w.loadBackBtn, { top: topPad + 4 }]}>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.65)" />
         </Pressable>
 
-        {/* Center card */}
+        {/* Center content */}
         <View style={w.loadCard}>
-          {/* Prayer text — at TOP like web design */}
           <Text style={w.loadPrayerText}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
 
-          {/* Poster */}
+          {/* Poster with radial glow */}
           <View style={w.loadPosterWrap}>
-            <View style={w.loadPosterGlowOuter} />
-            <View style={w.loadPosterGlow} />
+            {/* Outer circular glow */}
+            <View style={{
+              position: "absolute", width: 260, height: 260, borderRadius: 130,
+              backgroundColor: "rgba(109,40,217,0.18)",
+              shadowColor: "#7C3AED", shadowOpacity: 0.75, shadowRadius: 60,
+              shadowOffset: { width: 0, height: 0 },
+            }} />
+            {/* Inner glow */}
+            <View style={{
+              position: "absolute", width: 180, height: 180, borderRadius: 90,
+              backgroundColor: "rgba(139,92,246,0.22)",
+              shadowColor: "#8B5CF6", shadowOpacity: 0.60, shadowRadius: 40,
+              shadowOffset: { width: 0, height: 0 },
+            }} />
             {posterUrl ? (
-              <Image source={{ uri: posterUrl }} style={w.loadPosterImg} resizeMode="cover" />
+              <AnimPosterImg uri={posterUrl} type={type} />
             ) : (
               <View style={[w.loadPosterImg, w.loadPosterPlaceholder]}>
-                <Ionicons name={type === "movie" ? "film" : "tv"} size={40} color="rgba(139,92,246,0.35)" />
+                <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" }}>
+                  <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(139,92,246,0.40)" }} />
+                </View>
               </View>
             )}
           </View>
 
           {/* Title + badge */}
           <View style={{ alignItems: "center", gap: 8, width: "100%" }}>
-            {titleStr ? (
-              <Text style={w.loadCardTitle} numberOfLines={2}>{titleStr}</Text>
-            ) : null}
+            {titleStr ? <Text style={w.loadCardTitle} numberOfLines={2}>{titleStr}</Text> : null}
             <View style={w.loadEpBadge}>
               <Ionicons name={type === "movie" ? "film" : "tv"} size={10} color="#a78bfa" />
               <Text style={w.loadEpBadgeText}>
@@ -459,10 +493,10 @@ export default function AnimationWatchScreen() {
             </View>
           </View>
 
-          {/* Spinner + hint */}
+          {/* Spinner */}
           <View style={{ alignItems: "center", gap: 10 }}>
             <SpinRing />
-            <Text style={w.loadHintNew}>⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</Text>
+            <Text style={w.loadHintNew}>⏳ جاري البحث في المصادر…</Text>
           </View>
         </View>
       </View>
@@ -722,11 +756,9 @@ const w = StyleSheet.create({
   loadTopTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.88)" },
   loadTopSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
   loadCard: { flex: 1, alignItems: "center", justifyContent: "center", gap: 22, paddingHorizontal: 28, paddingBottom: 40 },
-  loadPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
-  loadPosterGlowOuter: { position: "absolute", width: 280, height: 360, borderRadius: 48, backgroundColor: "rgba(109,40,217,0.12)", shadowColor: "#6D28D9", shadowOpacity: 0.70, shadowRadius: 60, elevation: 0 },
-  loadPosterGlow: { position: "absolute", width: 240, height: 318, borderRadius: 34, backgroundColor: "rgba(139,92,246,0.32)", shadowColor: "#7C3AED", shadowOpacity: 0.75, shadowRadius: 48, elevation: 28 },
-  loadPosterImg: { width: 176, height: 248, borderRadius: 20, borderWidth: 1.5, borderColor: "rgba(167,139,250,0.45)", shadowColor: "#6D28D9", shadowOpacity: 0.70, shadowRadius: 20, elevation: 14 },
-  loadPosterPlaceholder: { backgroundColor: "rgba(20,10,50,0.9)", alignItems: "center", justifyContent: "center" },
+  loadPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 248 },
+  loadPosterImg: { width: 176, height: 248, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
+  loadPosterPlaceholder: { backgroundColor: "rgba(18,10,40,0.95)", alignItems: "center", justifyContent: "center" },
   loadCardTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 24 },
   loadEpBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 14, paddingVertical: 6 },
   loadEpBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
