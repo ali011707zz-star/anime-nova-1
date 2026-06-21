@@ -32,8 +32,10 @@ function mapRow(r: any, liked: boolean) {
 ───────────────────────────────────────── */
 router.get("/comments", async (req: Request, res: Response) => {
   try {
-    const animeId = req.query.animeId ? Number(req.query.animeId) : null;
-    const tmdbId  = req.query.tmdbId  ? String(req.query.tmdbId)  : null;
+    const rawAnimeId = req.query.animeId;
+    const animeId = (rawAnimeId && rawAnimeId !== "null") ? Number(rawAnimeId) : null;
+    const rawTmdbId = req.query.tmdbId;
+    const tmdbId  = (rawTmdbId && rawTmdbId !== "null") ? String(rawTmdbId) : null;
     const ep      = req.query.ep !== undefined ? Number(req.query.ep) : null;
     const limit   = Math.min(Number(req.query.limit) || 100, 200);
     const offset  = Number(req.query.offset) || 0;
@@ -166,8 +168,10 @@ router.post("/comments/:id/like", async (req: Request, res: Response) => {
 ───────────────────────────────────────── */
 router.get("/comments/count", async (req: Request, res: Response) => {
   try {
-    const animeId = req.query.animeId ? Number(req.query.animeId) : null;
-    const tmdbId  = req.query.tmdbId  ? String(req.query.tmdbId)  : null;
+    const rawAnimeId2 = req.query.animeId;
+    const animeId = (rawAnimeId2 && rawAnimeId2 !== "null") ? Number(rawAnimeId2) : null;
+    const rawTmdbId2 = req.query.tmdbId;
+    const tmdbId  = (rawTmdbId2 && rawTmdbId2 !== "null") ? String(rawTmdbId2) : null;
     if (!animeId && !tmdbId) return res.status(400).json({ error: "animeId أو tmdbId مطلوب" });
 
     const filter: Record<string, string> = {};
