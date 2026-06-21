@@ -4397,7 +4397,7 @@ async function getKawaiiAnimeSources(
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: src.url,
         quality: src.quality || "1080p",
-        qualityRank: 3,
+        qualityRank: 20,
         site: "kawaii",
         directUrl,
         directType: isHls ? "hls" : "mp4",

@@ -325,8 +325,8 @@ export default function AnimationWatch() {
     const animephoenix = okSources.find(s => s.label?.startsWith("AnimePhoenix"));
     const witcher      = okSources.find(s => s.label?.includes("AnimeWitcher"));
     // Tier-1 (trusted direct/proxied HLS): auto-play immediately
-    // Priority: StarCima (الثريا) > Videasy > Vyla > VidLink > EzVidAPI > aflaam > …
-    const tier1 = starcima ?? videasy ?? vyla ?? vidlink ?? ezv ?? aflaam ?? seepanel ?? animephoenix ?? witcher;
+    // Priority: Videasy > StarCima (الثريا) > Vyla > VidLink > EzVidAPI > aflaam > …
+    const tier1 = videasy ?? starcima ?? vyla ?? vidlink ?? ezv ?? aflaam ?? seepanel ?? animephoenix ?? witcher;
     if (tier1) {
       if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
       autoPlayAttemptsRef.current += 1;
