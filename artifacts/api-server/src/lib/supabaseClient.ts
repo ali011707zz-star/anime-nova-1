@@ -1,67 +1,124 @@
 /**
- * supabaseClient.ts — Supabase REST API client
- * يعمل على أي خادم (AlwaysData, Koyeb, Replit) بدون قيود DNS
- * يحتاج فقط: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+ * supabaseClient.ts — PostgreSQL direct client (Replit migration)
+ * Replaces the Supabase REST API with direct pg queries using DATABASE_URL.
+ * Drop-in replacement: same exported functions (sbSelect, sbInsert, sbUpsert, sbPatch, sbDelete).
  */
 
-const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+import pg from "pg";
 
-export const isSupabaseReady = !!(SUPABASE_URL && SUPABASE_KEY);
+const { Pool } = pg;
 
-if (isSupabaseReady) {
-  console.log("[db] ✅ Supabase REST جاهز —", SUPABASE_URL.slice(0, 40));
-} else {
-  const missing: string[] = [];
-  if (!SUPABASE_URL) missing.push("SUPABASE_URL");
-  if (!SUPABASE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
-  console.warn(`[db] ⚠️ متغيرات ناقصة: ${missing.join(", ")} — قاعدة البيانات معطّلة`);
+let _pool: InstanceType<typeof Pool> | null = null;
+
+function getPool(): InstanceType<typeof Pool> {
+  if (!_pool) {
+    const connStr = process.env.DATABASE_URL;
+    if (!connStr) {
+      console.warn("[db] ⚠️ DATABASE_URL not set — database disabled");
+      return null as any;
+    }
+    _pool = new Pool({
+      connectionString: connStr,
+      ssl: connStr.includes("localhost") || connStr.includes("127.0.0.1")
+        ? false
+        : { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30_000,
+    });
+    _pool.on("error", (err) => {
+      console.error("[db] Pool error:", err.message);
+    });
+    console.log("[db] ✅ PostgreSQL direct connection ready");
+  }
+  return _pool;
 }
 
-function baseHeaders(extra: Record<string, string> = {}): Record<string, string> {
+export const isSupabaseReady = !!process.env.DATABASE_URL;
+
+// ── Helper: parse Supabase-style filter values ─────────────────────────────
+// e.g. "eq.123" → { op: "=", val: "123" }
+//      "lt.1234567890" → { op: "<", val: "1234567890" }
+//      "is.null" → { op: "IS", val: null }
+function parseFilter(v: string): { op: string; val: any } {
+  const dot = v.indexOf(".");
+  if (dot === -1) return { op: "=", val: v };
+  const prefix = v.slice(0, dot);
+  const rest   = v.slice(dot + 1);
+
+  switch (prefix) {
+    case "eq":  return { op: "=",    val: rest };
+    case "neq": return { op: "!=",   val: rest };
+    case "lt":  return { op: "<",    val: rest };
+    case "lte": return { op: "<=",   val: rest };
+    case "gt":  return { op: ">",    val: rest };
+    case "gte": return { op: ">=",   val: rest };
+    case "is":  return { op: "IS",   val: rest === "null" ? null : rest };
+    case "in":  return { op: "IN",   val: rest.replace(/[()]/g, "").split(",") };
+    default:    return { op: "=",    val: rest };
+  }
+}
+
+// ── Build WHERE clause from Supabase-style params ─────────────────────────
+function buildWhere(
+  params: Record<string, string>,
+  startIdx = 1,
+): { clause: string; values: any[] } {
+  const skip = new Set(["order", "limit", "offset", "select"]);
+  const conditions: string[] = [];
+  const values: any[] = [];
+  let idx = startIdx;
+
+  for (const [col, rawVal] of Object.entries(params)) {
+    if (skip.has(col)) continue;
+    const { op, val } = parseFilter(rawVal);
+    if (op === "IS") {
+      conditions.push(`"${col}" IS ${val === null ? "NULL" : `'${val}'`}`);
+    } else if (op === "IN" && Array.isArray(val)) {
+      const placeholders = val.map(() => `$${idx++}`).join(", ");
+      conditions.push(`"${col}" IN (${placeholders})`);
+      values.push(...val);
+    } else {
+      conditions.push(`"${col}" ${op} $${idx++}`);
+      values.push(val);
+    }
+  }
+
   return {
-    "apikey": SUPABASE_KEY,
-    "Authorization": `Bearer ${SUPABASE_KEY}`,
-    "Content-Type": "application/json",
-    "Prefer": "return=representation",
-    ...extra,
+    clause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
+    values,
   };
 }
 
-function buildUrl(
-  table: string,
-  params: Record<string, string> = {},
-  opts: { limit?: number; select?: string } = {},
-): string {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
-  url.searchParams.set("select", opts.select || "*");
-  for (const [k, v] of Object.entries(params)) {
-    if (k === "select") continue;
-    url.searchParams.set(k, v);
-  }
-  if (opts.limit) url.searchParams.set("limit", String(opts.limit));
-  return url.toString();
+// ── Build ORDER BY from Supabase-style "col.dir" param ────────────────────
+function buildOrder(params: Record<string, string>): string {
+  if (!params.order) return "";
+  const parts = params.order.split(",").map((p) => {
+    const [col, dir] = p.trim().split(".");
+    return `"${col}" ${dir?.toUpperCase() === "DESC" ? "DESC" : "ASC"}`;
+  });
+  return `ORDER BY ${parts.join(", ")}`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Public API — mirrors supabaseClient.ts signatures
+// ═══════════════════════════════════════════════════════════════════════════
 
 /** SELECT rows from a table */
 export async function sbSelect<T = any>(
   table: string,
   params: Record<string, string> = {},
-  opts: { limit?: number } = {},
+  opts: { limit?: number; select?: string } = {},
 ): Promise<T[]> {
-  if (!isSupabaseReady) return [];
+  const pool = getPool();
+  if (!pool) return [];
   try {
-    const url = buildUrl(table, params, opts);
-    const res = await fetch(url, {
-      headers: baseHeaders(),
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.status.toString());
-      console.error(`[db] sbSelect "${table}" HTTP ${res.status}:`, err.slice(0, 120));
-      return [];
-    }
-    return await res.json() as T[];
+    const { clause, values } = buildWhere(params);
+    const order = buildOrder(params);
+    const limit = opts.limit ? `LIMIT ${opts.limit}` : "";
+    const cols  = opts.select || "*";
+    const sql   = `SELECT ${cols} FROM "${table}" ${clause} ${order} ${limit}`.trim();
+    const result = await pool.query(sql, values);
+    return result.rows as T[];
   } catch (e: any) {
     console.error(`[db] sbSelect "${table}" error:`, e.message);
     return [];
@@ -73,21 +130,16 @@ export async function sbInsert<T = any>(
   table: string,
   row: Record<string, any>,
 ): Promise<T | null> {
-  if (!isSupabaseReady) return null;
+  const pool = getPool();
+  if (!pool) return null;
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-      method: "POST",
-      headers: baseHeaders(),
-      body: JSON.stringify(row),
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.status.toString());
-      console.error(`[db] sbInsert "${table}" HTTP ${res.status}:`, err.slice(0, 120));
-      return null;
-    }
-    const data = await res.json();
-    return (Array.isArray(data) ? data[0] : data) as T | null;
+    const cols   = Object.keys(row);
+    const vals   = Object.values(row);
+    const places = cols.map((_, i) => `$${i + 1}`).join(", ");
+    const colStr = cols.map((c) => `"${c}"`).join(", ");
+    const sql    = `INSERT INTO "${table}" (${colStr}) VALUES (${places}) RETURNING *`;
+    const result = await pool.query(sql, vals);
+    return (result.rows[0] ?? null) as T | null;
   } catch (e: any) {
     console.error(`[db] sbInsert "${table}" error:`, e.message);
     return null;
@@ -100,20 +152,32 @@ export async function sbUpsert<T = any>(
   row: Record<string, any>,
   onConflict?: string,
 ): Promise<T | null> {
-  if (!isSupabaseReady) return null;
+  const pool = getPool();
+  if (!pool) return null;
   try {
-    const urlStr = onConflict
-      ? `${SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`
-      : `${SUPABASE_URL}/rest/v1/${table}`;
-    const res = await fetch(urlStr, {
-      method: "POST",
-      headers: baseHeaders({ "Prefer": "resolution=merge-duplicates,return=representation" }),
-      body: JSON.stringify(row),
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return (Array.isArray(data) ? data[0] : data) as T | null;
+    const cols   = Object.keys(row);
+    const vals   = Object.values(row);
+    const places = cols.map((_, i) => `$${i + 1}`).join(", ");
+    const colStr = cols.map((c) => `"${c}"`).join(", ");
+
+    let conflictClause = "DO NOTHING";
+    if (onConflict) {
+      const conflictCols = onConflict.split(",").map((c) => `"${c.trim()}"`).join(", ");
+      const updateCols   = cols
+        .filter((c) => !onConflict.split(",").map((x) => x.trim()).includes(c))
+        .map((c) => `"${c}" = EXCLUDED."${c}"`)
+        .join(", ");
+      conflictClause = updateCols
+        ? `DO UPDATE SET ${updateCols}`
+        : "DO NOTHING";
+      const sql    = `INSERT INTO "${table}" (${colStr}) VALUES (${places}) ON CONFLICT (${conflictCols}) ${conflictClause} RETURNING *`;
+      const result = await pool.query(sql, vals);
+      return (result.rows[0] ?? null) as T | null;
+    }
+
+    const sql    = `INSERT INTO "${table}" (${colStr}) VALUES (${places}) ON CONFLICT ${conflictClause} RETURNING *`;
+    const result = await pool.query(sql, vals);
+    return (result.rows[0] ?? null) as T | null;
   } catch (e: any) {
     console.error(`[db] sbUpsert "${table}" error:`, e.message);
     return null;
@@ -126,18 +190,17 @@ export async function sbPatch<T = any>(
   filter: Record<string, string>,
   data: Record<string, any>,
 ): Promise<T | null> {
-  if (!isSupabaseReady) return null;
+  const pool = getPool();
+  if (!pool) return null;
   try {
-    const url = buildUrl(table, filter);
-    const res = await fetch(url, {
-      method: "PATCH",
-      headers: baseHeaders(),
-      body: JSON.stringify(data),
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return null;
-    const result = await res.json();
-    return (Array.isArray(result) ? result[0] : result) as T | null;
+    const dataCols = Object.keys(data);
+    const dataVals = Object.values(data);
+    const setStr   = dataCols.map((c, i) => `"${c}" = $${i + 1}`).join(", ");
+
+    const { clause, values } = buildWhere(filter, dataCols.length + 1);
+    const sql    = `UPDATE "${table}" SET ${setStr} ${clause} RETURNING *`;
+    const result = await pool.query(sql, [...dataVals, ...values]);
+    return (result.rows[0] ?? null) as T | null;
   } catch (e: any) {
     console.error(`[db] sbPatch "${table}" error:`, e.message);
     return null;
@@ -149,29 +212,25 @@ export async function sbDelete(
   table: string,
   filter: Record<string, string>,
 ): Promise<boolean> {
-  if (!isSupabaseReady) return false;
+  const pool = getPool();
+  if (!pool) return false;
   try {
-    const url = buildUrl(table, filter);
-    const res = await fetch(url, {
-      method: "DELETE",
-      headers: baseHeaders(),
-      signal: AbortSignal.timeout(8_000),
-    });
-    return res.ok;
+    const { clause, values } = buildWhere(filter);
+    const sql = `DELETE FROM "${table}" ${clause}`;
+    await pool.query(sql, values);
+    return true;
   } catch (e: any) {
     console.error(`[db] sbDelete "${table}" error:`, e.message);
     return false;
   }
 }
 
-/** Check Supabase connectivity */
+/** Check database connectivity */
 export async function checkSupabase(): Promise<boolean> {
-  if (!isSupabaseReady) return false;
+  const pool = getPool();
+  if (!pool) return false;
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/app_config?limit=1&select=key`,
-      { headers: baseHeaders(), signal: AbortSignal.timeout(5_000) },
-    );
-    return res.ok;
+    await pool.query("SELECT 1");
+    return true;
   } catch { return false; }
 }
