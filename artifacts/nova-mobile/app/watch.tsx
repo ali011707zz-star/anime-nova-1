@@ -159,48 +159,87 @@ function SpinRing() {
   );
 }
 
+/* ── Poster glow — circular radial-style like web app ── */
+function PosterGlow() {
+  return (
+    <>
+      <View style={{
+        position: "absolute", width: 260, height: 260, borderRadius: 130,
+        backgroundColor: "rgba(109,40,217,0.18)",
+        shadowColor: "#7C3AED", shadowOpacity: 0.75, shadowRadius: 60,
+        shadowOffset: { width: 0, height: 0 },
+      }} />
+      <View style={{
+        position: "absolute", width: 180, height: 180, borderRadius: 90,
+        backgroundColor: "rgba(139,92,246,0.22)",
+        shadowColor: "#8B5CF6", shadowOpacity: 0.60, shadowRadius: 40,
+        shadowOffset: { width: 0, height: 0 },
+      }} />
+    </>
+  );
+}
+
 /* ── Loading screen ── */
 function LoadingScreen({ cover, title, ep, onBack, foundCount }: { cover?: string; title: string; ep: number; onBack: () => void; foundCount?: number }) {
   const insets = useSafeAreaInsets();
+  const [imgErr, setImgErr] = useState(false);
+  const showImg = !!cover && !imgErr;
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
-      {cover ? <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.15 }]} blurRadius={Platform.OS === "ios" ? 24 : 8} resizeMode="cover" /> : null}
-      <LinearGradient colors={["rgba(7,7,13,0.85)", "rgba(7,7,13,0.5)", "rgba(7,7,13,0.92)"]} style={StyleSheet.absoluteFill} />
+      {/* Blurred backdrop */}
+      {showImg ? (
+        <Image source={{ uri: cover }} style={[StyleSheet.absoluteFill, { opacity: 0.13 }]}
+          blurRadius={Platform.OS === "ios" ? 28 : 10} resizeMode="cover" />
+      ) : null}
+      <LinearGradient
+        colors={["rgba(7,7,13,0.90)", "rgba(12,8,24,0.60)", "rgba(7,7,13,0.95)"]}
+        style={StyleSheet.absoluteFill} />
+
+      {/* Back */}
       <Pressable onPress={onBack} style={[d.ldBackBtn, { top: (Platform.OS === "ios" ? insets.top : 16) + 4 }]}>
-        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.6)" />
+        <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.65)" />
       </Pressable>
+
       <View style={d.ldContent}>
         <Text style={d.ldPrayer}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
-        {cover ? (
-          <View style={d.ldPosterWrap}>
-            <View style={d.ldGlowOuter} />
-            <View style={d.ldGlow} />
-            <Image source={{ uri: cover }} style={d.ldPoster} resizeMode="contain" />
-          </View>
-        ) : (
-          <View style={d.ldPosterWrap}>
-            <View style={d.ldGlowOuter} />
-            <View style={d.ldGlow} />
-            <View style={[d.ldPoster, { backgroundColor: "rgba(30,10,60,0.9)", alignItems: "center", justifyContent: "center" }]}>
-              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(139,92,246,0.3)" }} />
+
+        {/* Poster */}
+        <View style={d.ldPosterWrap}>
+          <PosterGlow />
+          {showImg ? (
+            <Image
+              source={{ uri: cover }}
+              style={d.ldPoster}
+              resizeMode="cover"
+              onError={() => setImgErr(true)}
+            />
+          ) : (
+            <View style={[d.ldPoster, d.ldPosterFallback]}>
+              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" }}>
+                <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(139,92,246,0.40)" }} />
+              </View>
             </View>
-          </View>
-        )}
+          )}
+        </View>
+
+        {/* Title + badge */}
         <View style={{ alignItems: "center", gap: 8 }}>
           {title ? <Text style={d.ldTitle} numberOfLines={2}>{title}</Text> : null}
           <View style={d.ldEpBadge}><Text style={d.ldEpText}>الحلقة {ep}</Text></View>
         </View>
+
+        {/* Spinner + status */}
         <View style={{ alignItems: "center", gap: 12 }}>
           <SpinRing />
           {(foundCount ?? 0) > 0 ? (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(34,197,94,0.25)" }}>
+            <View style={d.ldFoundBadge}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#22c55e" }} />
-              <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.9)" }}>
+              <Text style={d.ldFoundText}>
                 وجدنا {foundCount} {foundCount === 1 ? "مصدر" : "مصادر"}، جاري التشغيل…
               </Text>
             </View>
           ) : (
-            <Text style={d.ldHint}>⏳ جاري البحث في المصادر… شكراً لصبرك.</Text>
+            <Text style={d.ldHint}>⏳ جاري البحث في المصادر…</Text>
           )}
         </View>
       </View>
@@ -804,10 +843,11 @@ const d = StyleSheet.create({
   ldBackBtn: { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", zIndex: 10 },
   ldContent: { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },
   ldPrayer: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center" },
-  ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center" },
-  ldGlowOuter: { position: "absolute", width: 220, height: 290, borderRadius: 36, backgroundColor: "rgba(109,40,217,0.05)", shadowColor: "#6D28D9", shadowOpacity: 0.22, shadowRadius: 24, elevation: 0 },
-  ldGlow: { position: "absolute", width: 190, height: 260, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.10)", shadowColor: "#7C3AED", shadowOpacity: 0.25, shadowRadius: 18, elevation: 8 },
-  ldPoster: { width: 176, height: 248, borderRadius: 20, borderWidth: 1.5, borderColor: "rgba(167,139,250,0.35)", shadowColor: "#6D28D9", shadowOpacity: 0.35, shadowRadius: 12, elevation: 8 },
+  ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 248 },
+  ldPoster: { width: 176, height: 248, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
+  ldPosterFallback: { backgroundColor: "rgba(18,10,40,0.95)", alignItems: "center", justifyContent: "center" },
+  ldFoundBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(34,197,94,0.25)" },
+  ldFoundText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.9)" },
   ldTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 26 },
   ldEpBadge: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: "rgba(124,58,237,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
   ldEpText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.9)" },
