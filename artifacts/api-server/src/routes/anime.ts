@@ -3719,43 +3719,50 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
     if (!creds) return [];
     let { base, token } = creds;
 
-    // Search with both titles; pick best match across SERIES + MOVIE
+    // Search with both titles; pick best match across SERIES + MOVIE — بالتوازي لسرعة أكبر
     const queries = [...new Set([english, title].filter(Boolean) as string[])];
     let best: { score: number; item: any } = { score: 0, item: null };
 
-    for (const q of queries) {
-      for (const type of ["SERIES", "MOVIE"]) {
-        for (const lang of ["English", "Arabic"]) {
-          try {
-            const body = new URLSearchParams({
-              UserId: "0", Language: lang, FilterType: "SEARCH",
-              FilterData: q, Type: type, From: "0",
-            });
-            const r = await animeifyPost(base, token, "anime/load_anime_list_v2.php", body);
-            if (!r) continue;
-            const data = await r.json() as any[];
-            if (!Array.isArray(data)) continue;
-            for (const item of data) {
-              const enTitle  = String(item.EN_Title  || "");
-              const arTitle  = String(item.AR_Title  || "");
-              const synonyms = String(item.Synonyms  || "");
-              const tags     = String(item.Tags      || "");
-              const s = Math.max(
-                enTitle   ? similarity(q, enTitle)   : 0,
-                enTitle   ? similarity(title, enTitle)   : 0,
-                english && enTitle ? similarity(english, enTitle) : 0,
-                arTitle   ? similarity(q, arTitle)   : 0,
-                synonyms  ? similarity(q, synonyms)  : 0,
-                tags      ? similarity(q, tags)      : 0,
-              );
-              if (s > best.score) best = { score: s, item: { ...item, _type: type } };
-            }
-          } catch {}
-        }
+    const searchCombinations = queries.flatMap(q =>
+      (["SERIES", "MOVIE"] as const).flatMap(type =>
+        (["English", "Arabic"] as const).map(lang => ({ q, type, lang }))
+      )
+    );
+
+    const searchResults = await Promise.allSettled(
+      searchCombinations.map(async ({ q, type, lang }) => {
+        const body = new URLSearchParams({
+          UserId: "0", Language: lang, FilterType: "SEARCH",
+          FilterData: q, Type: type, From: "0",
+        });
+        const r = await animeifyPost(base, token, "anime/load_anime_list_v2.php", body);
+        if (!r) return [];
+        const data = await r.json() as any[];
+        if (!Array.isArray(data)) return [];
+        return data.map(item => ({ item, type, q }));
+      })
+    );
+
+    for (const searchRes of searchResults) {
+      if (searchRes.status !== "fulfilled") continue;
+      for (const { item, type, q } of searchRes.value) {
+        const enTitle  = String(item.EN_Title  || "");
+        const arTitle  = String(item.AR_Title  || "");
+        const synonyms = String(item.Synonyms  || "");
+        const tags     = String(item.Tags      || "");
+        const s = Math.max(
+          enTitle   ? similarity(q, enTitle)   : 0,
+          enTitle   ? similarity(title, enTitle)   : 0,
+          english && enTitle ? similarity(english, enTitle) : 0,
+          arTitle   ? similarity(q, arTitle)   : 0,
+          synonyms  ? similarity(q, synonyms)  : 0,
+          tags      ? similarity(q, tags)      : 0,
+        );
+        if (s > best.score) best = { score: s, item: { ...item, _type: type } };
       }
     }
 
-    if (!best.item || best.score < 0.35) return [];
+    if (!best.item || best.score < 0.30) return [];
 
     const animeId: string = String(best.item.AnimeId);
     const animeType: string = best.item._type || "SERIES";
@@ -7091,7 +7098,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie)),
       scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
-      scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false),
+      scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
       scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep, isMovie)),
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),

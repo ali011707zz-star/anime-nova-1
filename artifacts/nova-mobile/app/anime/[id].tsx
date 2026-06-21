@@ -375,15 +375,22 @@ export default function AnimeDetailScreen() {
         ) : null}
 
         {/* ── Watch buttons ── */}
-        <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16 }}>
+        <View style={{ paddingHorizontal: 16, marginTop: nextEp && countdown && countdown > 0 ? 8 : 16, flexDirection: "row", gap: 10 }}>
           <Pressable
             onPress={() => router.push(`/watch?anime=${id}&ep=1&title=${encodeURIComponent(anime.title?.romaji || "")}&english=${encodeURIComponent(anime.title?.english || "")}&totalEps=${anime.episodes || 0}`)}
-            style={d.watchBtn}
+            style={[d.watchBtn, { flex: 1 }]}
           >
             <View style={d.watchBtnIcon}>
               <Ionicons name="play" size={16} color="#fff" />
             </View>
             <Text style={d.watchBtnText}>مشاهدة الآن</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push({ pathname: "/episodes/[id]", params: { id } } as any)}
+            style={d.epListBtn}
+          >
+            <Ionicons name="list" size={16} color="#c4b5fd" />
+            <Text style={d.epListBtnText}>الحلقات</Text>
           </Pressable>
         </View>
 

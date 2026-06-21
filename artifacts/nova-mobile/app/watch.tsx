@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import WebView from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { fetch as expoFetch } from "expo/fetch";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -342,6 +343,9 @@ export default function WatchScreen() {
     return () => controller.abort();
   }, [anime, ep]); // eslint-disable-line
 
+  /* ── Source cache key ── */
+  const srcCacheKey = anime && ep ? `last-src-${anime}-${ep}` : null;
+
   /* ── SSE fetch ── */
   const fetchSources = useCallback(async () => {
     if (!anime || !ep) return;
@@ -350,16 +354,38 @@ export default function WatchScreen() {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     const base = getBaseUrl();
-    const url  = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}&anime=${anime || ""}&format=${encodeURIComponent(format || "")}`;
+
+    /* ── Try cached source first for instant auto-play on repeat views ── */
+    if (srcCacheKey) {
+      try {
+        const raw = await AsyncStorage.getItem(srcCacheKey);
+        if (raw) {
+          const { src: cachedSrc, ts } = JSON.parse(raw) as { src: Src; ts: number };
+          /* Use cached URL if less than 4 minutes old (tokens expire at 5 min) */
+          if (Date.now() - ts < 4 * 60_000 && (cachedSrc.directUrl || cachedSrc.url)) {
+            const resolved: Src = {
+              ...cachedSrc,
+              directUrl: resolveUrl(cachedSrc.directUrl, base),
+              url: resolveUrl(cachedSrc.url, base),
+            };
+            autoPlayFiredRef.current = true;
+            setSources([resolved]);
+            setPlayingSrc(resolved);
+            setScreen("native");
+          }
+        }
+      } catch {}
+    }
+
+    const url = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}&anime=${anime || ""}&format=${encodeURIComponent(format || "")}`;
     try {
-      const { fetch: expoFetch } = await import("expo/fetch");
       const response = await expoFetch(url, {
         signal: abortRef.current.signal,
         headers: { Accept: "text/event-stream" },
       }) as unknown as Response;
       if (!response.body) {
         setLoading(false);
-        setScreen("picker");
+        setScreen(s => s === "loading" ? "picker" : s);
         return;
       }
       const reader   = response.body.getReader();
@@ -398,9 +424,11 @@ export default function WatchScreen() {
                 if (prev.find(s => (s.directUrl || s.url) === key)) return prev;
                 const next = [...prev, src];
                 const isGoodSrc = !!(src.directUrl || src.url) && !src.isEmbed;
-                /* auto-play first good source automatically */
+                /* auto-play first good source — skip if already auto-playing from cache */
                 if (isGoodSrc && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
+                  /* save to cache for instant resume on re-open */
+                  if (srcCacheKey) AsyncStorage.setItem(srcCacheKey, JSON.stringify({ src: data, ts: Date.now() })).catch(() => {});
                   setTimeout(() => {
                     setPlayingSrc(src);
                     setScreen("native");
@@ -431,7 +459,7 @@ export default function WatchScreen() {
         return prev;
       });
     }
-  }, [anime, ep, titleStr, englishStr, format]);
+  }, [anime, ep, titleStr, englishStr, format, srcCacheKey]);
 
   useEffect(() => { fetchSources(); return () => abortRef.current?.abort(); }, [fetchSources]);
 
