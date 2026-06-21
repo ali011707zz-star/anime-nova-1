@@ -3170,6 +3170,7 @@ export default function WatchPage() {
     // hasBuiltinSub أو seepanel أو مصادر عربية: ترجمة مدمجة/غير مطلوبة — لا تُشغّل ترجمة خارجية
     const skipExternalSub = src.hasBuiltinSub || src.site === "seepanel" || ARABIC_SITES.has(src.site || "");
     setPlayerSubUrl(skipExternalSub ? undefined : (src.subtitleUrl || undefined));
+    if (skipExternalSub) { setSubCues([]); setSubLang(null); setSubState("idle"); setSubStatus("off"); }
     setPlayerSrcSite(src.site || "");
     setPlayerServers(servers);
     setQuality(clickedTier);
