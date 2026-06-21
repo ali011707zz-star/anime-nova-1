@@ -160,7 +160,7 @@ function SpinRing() {
 }
 
 /* ── Loading screen ── */
-function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: string; ep: number; onBack: () => void }) {
+function LoadingScreen({ cover, title, ep, onBack, foundCount }: { cover?: string; title: string; ep: number; onBack: () => void; foundCount?: number }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={{ flex: 1, backgroundColor: "#07070d" }}>
@@ -192,7 +192,16 @@ function LoadingScreen({ cover, title, ep, onBack }: { cover?: string; title: st
         </View>
         <View style={{ alignItems: "center", gap: 12 }}>
           <SpinRing />
-          <Text style={d.ldHint}>⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</Text>
+          {(foundCount ?? 0) > 0 ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(34,197,94,0.25)" }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#22c55e" }} />
+              <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.9)" }}>
+                وجدنا {foundCount} {foundCount === 1 ? "مصدر" : "مصادر"}، جاري التشغيل…
+              </Text>
+            </View>
+          ) : (
+            <Text style={d.ldHint}>⏳ جاري البحث في المصادر… شكراً لصبرك.</Text>
+          )}
         </View>
       </View>
     </View>
@@ -273,6 +282,7 @@ export default function WatchScreen() {
   const [resumeTime, setResumeTime] = useState(0);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
   const [anilistTotalEps, setAnilistTotalEps] = useState<number | null>(null);
+  const [foundCount, setFoundCount] = useState(0);
 
   const abortRef         = useRef<AbortController | null>(null);
   const lastTimeRef      = useRef(0);
@@ -302,12 +312,12 @@ export default function WatchScreen() {
     }).catch(() => {});
   }, [anime, progressKey]);
 
-  /* ── 35-second timeout fallback — prevents stuck loading screen ── */
+  /* ── 25-second timeout fallback — prevents stuck loading screen ── */
   useEffect(() => {
     const timeout = setTimeout(() => {
       setScreen(s => s === "loading" ? "picker" : s);
       setLoading(false);
-    }, 12000);
+    }, 25000);
     return () => clearTimeout(timeout);
   }, [anime, ep]);
 
@@ -354,7 +364,7 @@ export default function WatchScreen() {
   const fetchSources = useCallback(async () => {
     if (!anime || !ep) return;
     autoPlayFiredRef.current = false;
-    setLoading(true); setSources([]); setScreen("loading");
+    setLoading(true); setSources([]); setScreen("loading"); setFoundCount(0);
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     const base = getBaseUrl();
@@ -393,7 +403,7 @@ export default function WatchScreen() {
         return;
       }
       const reader   = response.body.getReader();
-      setScreen(s => s === "loading" ? "picker" : s);
+      // NOTE: do NOT switch to picker here — stay on loading until first source or DONE
       const decoder  = new TextDecoder();
       let buffer     = "";
       let currentEvent = "";
@@ -411,7 +421,11 @@ export default function WatchScreen() {
           const dataStr = line.slice(6);
           if (dataStr === "[DONE]") {
             setLoading(false);
-            setSources(prev => { if (prev.length === 0) setTimeout(() => setScreen("picker"), 0); return prev; });
+            setSources(prev => {
+              /* no good sources found → show picker with empty state */
+              setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+              return prev;
+            });
             continue;
           }
           try {
@@ -430,23 +444,29 @@ export default function WatchScreen() {
                 const isGoodSrc = !!(src.directUrl || src.url) && !src.isEmbed;
                 /* on web, expo-video has no HLS support — only auto-play mp4 */
                 const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
-                /* auto-play first good source — skip if already auto-playing from cache */
+                /* auto-play first good source — stay on loading screen until it fires */
                 if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
                   /* save to cache for instant resume on re-open */
                   if (srcCacheKey) AsyncStorage.setItem(srcCacheKey, JSON.stringify({ src: data, ts: Date.now() })).catch(() => {});
                   setTimeout(() => {
                     setPlayingSrc(src);
-                    setScreen("native");
+                    setScreen("native"); // loading → player directly (no picker flash)
                   }, 0);
-                } else if (next.length === 1) {
+                } else if (!autoPlayFiredRef.current && next.length >= 3) {
+                  /* only embed/web-incompatible sources so far — show picker after 3 */
                   setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 }
+                /* update live counter on loading screen */
+                setFoundCount(next.filter(s => !s.isEmbed).length);
                 return next;
               });
             } else if (evType === "done") {
               setLoading(false);
-              setSources(prev => { if (prev.length === 0) setTimeout(() => setScreen("picker"), 0); return prev; });
+              setSources(prev => {
+                setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+                return prev;
+              });
             } else if (evType === "error") {
               setLoading(false);
             }
@@ -550,7 +570,7 @@ export default function WatchScreen() {
 
 
   /* ══ LOADING ══ */
-  if (screen === "loading") return <LoadingScreen cover={cover} title={displayTitle} ep={epNum} onBack={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} />;
+  if (screen === "loading") return <LoadingScreen cover={cover} title={displayTitle} ep={epNum} onBack={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")} foundCount={foundCount} />;
 
   /* ══ RIFT PLAYER ══ */
   if (screen === "native" && riftSources.length > 0) {
