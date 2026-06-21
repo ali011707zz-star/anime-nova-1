@@ -159,22 +159,14 @@ function SpinRing() {
   );
 }
 
-/* ── Poster glow — circular radial-style like web app ── */
+/* ── Poster glow — multi-ring radial style (cross-platform) ── */
 function PosterGlow() {
   return (
     <>
-      <View style={{
-        position: "absolute", width: 260, height: 260, borderRadius: 130,
-        backgroundColor: "rgba(109,40,217,0.18)",
-        shadowColor: "#7C3AED", shadowOpacity: 0.75, shadowRadius: 60,
-        shadowOffset: { width: 0, height: 0 },
-      }} />
-      <View style={{
-        position: "absolute", width: 180, height: 180, borderRadius: 90,
-        backgroundColor: "rgba(139,92,246,0.22)",
-        shadowColor: "#8B5CF6", shadowOpacity: 0.60, shadowRadius: 40,
-        shadowOffset: { width: 0, height: 0 },
-      }} />
+      <View style={{ position: "absolute", width: 310, height: 310, borderRadius: 155, backgroundColor: "rgba(88,28,220,0.09)" }} />
+      <View style={{ position: "absolute", width: 260, height: 260, borderRadius: 130, backgroundColor: "rgba(109,40,217,0.15)" }} />
+      <View style={{ position: "absolute", width: 210, height: 210, borderRadius: 105, backgroundColor: "rgba(124,58,237,0.20)" }} />
+      <View style={{ position: "absolute", width: 190, height: 190, borderRadius: 95,  backgroundColor: "rgba(139,92,246,0.14)" }} />
     </>
   );
 }
@@ -206,20 +198,20 @@ function LoadingScreen({ cover, title, ep, onBack, foundCount }: { cover?: strin
         {/* Poster */}
         <View style={d.ldPosterWrap}>
           <PosterGlow />
-          {showImg ? (
+          {/* Fallback always rendered behind; image overlaid on top */}
+          <View style={[d.ldPoster, d.ldPosterFallback]}>
+            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" }}>
+              <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(139,92,246,0.40)" }} />
+            </View>
+          </View>
+          {cover ? (
             <Image
               source={{ uri: cover }}
-              style={d.ldPoster}
+              style={[d.ldPoster, { position: "absolute" }]}
               resizeMode="cover"
               onError={() => setImgErr(true)}
             />
-          ) : (
-            <View style={[d.ldPoster, d.ldPosterFallback]}>
-              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" }}>
-                <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(139,92,246,0.40)" }} />
-              </View>
-            </View>
-          )}
+          ) : null}
         </View>
 
         {/* Title + badge */}
@@ -239,7 +231,7 @@ function LoadingScreen({ cover, title, ep, onBack, foundCount }: { cover?: strin
               </Text>
             </View>
           ) : (
-            <Text style={d.ldHint}>⏳ جاري البحث في المصادر…</Text>
+            <Text style={d.ldHint}>⏳ جاري تجهيز الحلقة…</Text>
           )}
         </View>
       </View>
@@ -843,7 +835,7 @@ const d = StyleSheet.create({
   ldBackBtn: { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", zIndex: 10 },
   ldContent: { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },
   ldPrayer: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center" },
-  ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 248 },
+  ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 248, overflow: "visible" },
   ldPoster: { width: 176, height: 248, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
   ldPosterFallback: { backgroundColor: "rgba(18,10,40,0.95)", alignItems: "center", justifyContent: "center" },
   ldFoundBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(34,197,94,0.25)" },

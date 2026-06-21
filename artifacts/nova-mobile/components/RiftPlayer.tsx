@@ -615,7 +615,7 @@ export function RiftPlayer({
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; setSubLoading(false); };
   }, [currentSrc?.subtitleUrl, anilistId, episode]); // eslint-disable-line
 
   /* ─── Screen orientation lock to landscape ─── */
@@ -715,7 +715,7 @@ export function RiftPlayer({
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [anilistId, episode]); // eslint-disable-line
+  }, [anilistId, episode]);
 
   /* ─── Auto-fetch subtitles from multi-source API (jimaku.cc → animetosho) ─── */
   useEffect(() => {
@@ -754,7 +754,7 @@ export function RiftPlayer({
       } catch {}
       finally { if (!cancelled) setSubLoading(false); }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; setSubLoading(false); };
   }, [anilistId, episode]); // eslint-disable-line
 
   /* ─── Subtitle panel slide animation ─── */
@@ -799,21 +799,10 @@ export function RiftPlayer({
     return () => clearInterval(tick);
   }, [sleepTimer]); // eslint-disable-line
 
-  /* ─── Auto-play countdown when episode ends ─── */
+  /* ─── Auto-play countdown — DISABLED: user must press next manually ─── */
   useEffect(() => {
-    if (!isEnded || !(autoPlayNext && autoPlayEnabled) || !onNextEpisode || (episode ?? 0) >= totalEps) {
-      setAutoCountdown(0);
-      return;
-    }
-    setAutoCountdown(5);
-    const tick = setInterval(() => {
-      setAutoCountdown(c => {
-        if (c <= 1) { clearInterval(tick); onNextEpisode!(); return 0; }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(tick);
-  }, [isEnded, autoPlayNext, autoPlayEnabled]); // eslint-disable-line
+    setAutoCountdown(0);
+  }, [isEnded]);
 
   /* ─── Controls show/hide ─── */
   const schedHide = useCallback(() => {
