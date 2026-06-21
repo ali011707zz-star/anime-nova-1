@@ -478,7 +478,7 @@ export function RiftPlayer({
   /* ─── Auto-advance on error ─── */
   useEffect(() => {
     if (!error || sources.length <= 1) return;
-    const t = setTimeout(() => switchSource((srcIdx + 1) % sources.length), 4000);
+    const t = setTimeout(() => switchSource((srcIdx + 1) % sources.length), 1500);
     return () => clearTimeout(t);
   }, [error, srcIdx, sources.length]); // eslint-disable-line
 

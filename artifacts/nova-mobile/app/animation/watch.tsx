@@ -11,7 +11,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { secureStreamFetch } from "@/utils/secureApi";
+import { fetch as expoFetch } from "expo/fetch";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -235,7 +235,10 @@ export default function AnimationWatchScreen() {
     const url = `${base}/api/animation/sources-stream?title=${encodeURIComponent(titleStr)}&type=${type}&id=${tmdbId}&ep=${ep}&season=${season}`;
 
     try {
-      const response = await secureStreamFetch(url, { signal: abortRef.current.signal });
+      const response = await expoFetch(url, {
+        signal: abortRef.current.signal,
+        headers: { Accept: "text/event-stream" },
+      }) as unknown as Response;
       if (!response.ok) {
         setLoading(false);
         setScreen(s => s === "loading" ? "picker" : s);
