@@ -2242,11 +2242,14 @@ function EpisodePlayer({
               backdropFilter: "blur(40px)",
               WebkitBackdropFilter: "blur(40px)",
               border: "1px solid rgba(139,92,246,0.22)",
-              boxShadow: "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)",
-              borderRadius: "20px 0 0 20px",
+              boxShadow: isLandscape
+                ? "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)"
+                : "0 12px 48px rgba(0,0,0,0.80), inset 0 0 0 0.5px rgba(255,255,255,0.07)",
+              borderRadius: isLandscape ? "20px 0 0 20px" : "20px",
               overflowY: "auto",
-              height: "100%",
-              width: "290px",
+              height: isLandscape ? "100%" : undefined,
+              maxHeight: isLandscape ? "100dvh" : "70dvh",
+              width: isLandscape ? "290px" : "min(360px, calc(100vw - 20px))",
             }}>
 
               {/* ── Header ── */}
@@ -2600,18 +2603,19 @@ function EpisodePlayer({
 
           return (
             <motion.div key="subpanel"
-              initial={{ opacity: 0, x: 60 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 60 }}
+              initial={isLandscape ? { opacity: 0, x: 60 } : { opacity: 0, y: -20, scale: 0.97 }}
+              animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0, scale: 1 }}
+              exit={isLandscape ? { opacity: 0, x: 60 } : { opacity: 0, y: -20, scale: 0.97 }}
               transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-              className="fixed z-[400]"
-              style={{
-                top: 0,
-                bottom: 0,
-                right: 0,
-                width: "290px",
+              className={isLandscape ? "fixed inset-y-0 right-0 z-[400] flex items-stretch" : "fixed inset-x-0 top-0 z-[400]"}
+              style={isLandscape ? {
                 paddingTop: "max(0px, env(safe-area-inset-top))",
                 paddingBottom: "max(0px, env(safe-area-inset-bottom))",
+              } : {
+                paddingTop: "max(10px, env(safe-area-inset-top))",
+                paddingInline: "10px",
+                display: "flex",
+                justifyContent: "center",
               }}
             >
               <div className="fixed inset-0 z-[-1]" style={{ background: "rgba(0,0,0,0.45)" }} onClick={() => setShowSubPanel(false)} />

@@ -527,7 +527,7 @@ export default function Home() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, delay: 0.13 }}
                   >
-                    <Link href={`/watch?anime=${hero.id}&ep=1&title=${encodeURIComponent(hero.title?.romaji ?? "")}&english=${encodeURIComponent(hero.title?.english ?? "")}`}>
+                    <Link href={`/episodes/${hero.id}`}>
                       <motion.button
                         whileTap={{ scale: 0.93 }}
                         whileHover={{ scale: 1.03 }}
