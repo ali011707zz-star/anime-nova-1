@@ -149,7 +149,7 @@ export default function AnimationWatchScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const topPad = Platform.OS === "ios" ? insets.top : 16;
+  const topPad = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
   const tmdbId    = params.id     || "";
   const type      = params.type   || "movie";
@@ -323,6 +323,15 @@ export default function AnimationWatchScreen() {
     fetchSources();
     return () => abortRef.current?.abort();
   }, [fetchSources]);
+
+  /* ── 15-second timeout — prevents stuck loading screen ── */
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setScreen(s => s === "loading" ? "picker" : s);
+      setLoading(false);
+    }, 15000);
+    return () => clearTimeout(timeout);
+  }, [tmdbId, ep, season]);
 
   /* ── Portrait lock on picker/loading; unlock for embed ── */
   useEffect(() => {

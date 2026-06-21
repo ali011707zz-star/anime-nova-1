@@ -259,13 +259,16 @@ export default function WatchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { addToHistory } = useApp();
-  const topPad = Platform.OS === "ios" ? insets.top : 16;
+  const topPad = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
   const [screen, setScreen]       = useState<Screen>("loading");
   const [sources, setSources]     = useState<Src[]>([]);
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<Src | null>(null);
-  const [cover, setCover]         = useState("");
+  const [cover, setCover]         = useState(() => {
+    const id = parseInt(anime || "0");
+    return id ? `https://img.anili.st/media/${id}` : "";
+  });
   const [resumeTime, setResumeTime] = useState(0);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
   const [anilistTotalEps, setAnilistTotalEps] = useState<number | null>(null);

@@ -68,6 +68,7 @@ const AuthPage           = lazy(() => import("@/pages/Auth"));
 const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
 const CommentsPage       = lazy(() => import("@/pages/Comments"));
 const Subscription       = lazy(() => import("@/pages/Subscription"));
+const EpisodeList        = lazy(() => import("@/pages/EpisodeList"));
 
 function PageLoader() {
   return (
@@ -167,6 +168,7 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/animation/:type/:id"             component={AnimationDetail} />
                 <Route path="/comments"                component={CommentsPage} />
                 <Route path="/subscription"            component={Subscription} />
+                <Route path="/episodes/:id"            component={EpisodeList} />
                 <Route                                 component={NotFound} />
               </Switch>
             </motion.div>

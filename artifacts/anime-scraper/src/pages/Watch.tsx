@@ -2691,7 +2691,7 @@ export default function WatchPage() {
       return h.find(e => e.id === animeId)?.cover || "";
     } catch { return ""; }
   }, [anime, animeId]);
-  const cover = anime?.coverImage?.extraLarge || anime?.coverImage?.large || coverParam || coverFromHistory;
+  const cover = anime?.coverImage?.extraLarge || anime?.coverImage?.large || coverParam || coverFromHistory || (animeId ? `https://img.anili.st/media/${animeId}` : "");
 
   /* Episode title from AniList streamingEpisodes */
   const epTitle: string = (() => {
