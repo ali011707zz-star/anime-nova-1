@@ -1870,6 +1870,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
             // ── arabic-sources: many embed servers (streamwish, filemoon …) ─
             (async () => {
+              if (!tmdbId || tmdbId === "0") return; // بدون TMDB ID لا فائدة من الاستعلام
               try {
                 const sp = new URLSearchParams({
                   title : title,

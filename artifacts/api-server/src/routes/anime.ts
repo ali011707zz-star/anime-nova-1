@@ -7112,7 +7112,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
       scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep, isMovie)),
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
-      scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep)),
+      // anime4up2: محظور بواسطة Cloudflare (HTTP 403 حتى عبر CF proxy) — معطَّل
+      // scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep)),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────

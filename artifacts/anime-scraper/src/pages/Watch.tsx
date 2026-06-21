@@ -1445,7 +1445,8 @@ function EpisodePlayer({
   const [subLang,      setSubLang]     = useState<string | null>(null);
   const [subOffset,    setSubOffset]   = useState(0);
   const [showOffsetControls, setShowOffsetControls] = useState(false);
-  const [showSubPanel, setShowSubPanel] = useState(false);
+  const [showSubPanel,     setShowSubPanel]     = useState(false);
+  const [expandedSection,  setExpandedSection]  = useState<string|null>(null);
   const [subSettings,  setSubSettings] = useState<SubSettings>(loadSubSettings);
   /* ── Whisper audio transcription state ── */
   const [whisperStatus, setWhisperStatus] = useState<"idle"|"loading"|"ready"|"error">("idle");
@@ -2233,7 +2234,6 @@ function EpisodePlayer({
             { id: "en"      as SubChoice, label: "إنجليزي",  icon: "En", available: hasEn,           color: "rgba(147,197,253,0.85)" },
           ];
 
-          const [expandedSection, setExpandedSection] = React.useState<string|null>(null);
           const toggleSection = (s: string) => setExpandedSection(v => v === s ? null : s);
 
           const panelContent = (
