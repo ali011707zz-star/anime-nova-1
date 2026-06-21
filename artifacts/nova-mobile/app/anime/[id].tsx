@@ -385,13 +385,6 @@ export default function AnimeDetailScreen() {
             </View>
             <Text style={d.watchBtnText}>مشاهدة الآن</Text>
           </Pressable>
-          <Pressable
-            onPress={() => router.push({ pathname: "/episodes/[id]", params: { id } } as any)}
-            style={d.epListBtn}
-          >
-            <Ionicons name="list" size={16} color="#c4b5fd" />
-            <Text style={d.epListBtnText}>الحلقات</Text>
-          </Pressable>
         </View>
 
         {/* ── Age rating warning ── */}
