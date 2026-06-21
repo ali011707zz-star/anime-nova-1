@@ -476,8 +476,12 @@ export function RiftPlayer({
   }, [player]);
 
   /* ─── Auto-advance on error ─── */
+  const consecutiveErrorsRef = useRef(0);
   useEffect(() => {
-    if (!error || sources.length <= 1) return;
+    if (!error) { consecutiveErrorsRef.current = 0; return; }
+    if (sources.length <= 1) return;
+    consecutiveErrorsRef.current += 1;
+    if (consecutiveErrorsRef.current > sources.length) return; // all tried, stop cycling
     const t = setTimeout(() => switchSource((srcIdx + 1) % sources.length), 1500);
     return () => clearTimeout(t);
   }, [error, srcIdx, sources.length]); // eslint-disable-line

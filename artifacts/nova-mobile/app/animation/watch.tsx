@@ -29,6 +29,7 @@ interface AnimSrc {
   status?: string;
   tier?: string;
   isEmbed?: boolean;
+  directType?: string;  // "hls" | "mp4" — used to filter on web
 }
 
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string; label: string }> = {
@@ -76,7 +77,7 @@ function isDirectPlayable(src: AnimSrc): boolean {
 function isEmbedSrc(src: AnimSrc): boolean {
   if (!src.isEmbed) return false;
   const url = (src.proxyUrl || src.directUrl || src.url || "").toLowerCase();
-  return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
+  return !!url;
 }
 
 function getPlayUrl(src: AnimSrc): string {
@@ -282,8 +283,10 @@ export default function AnimationWatchScreen() {
               setSources(prev => {
                 const next = [...prev, src];
                 const isGoodSrc = isDirectPlayable(src);
+                /* on web, expo-video has no HLS support — only auto-play mp4 */
+                const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
                 /* auto-play first good source automatically */
-                if (isGoodSrc && !autoPlayFiredRef.current) {
+                if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
                   setTimeout(() => {
                     setPlayingSrc(src);
@@ -346,7 +349,12 @@ export default function AnimationWatchScreen() {
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
-    setScreen(isDirectPlayable(src) ? "native" : "embed");
+    /* On web: HLS not supported by expo-video → route to embed screen */
+    if (Platform.OS === "web" && src.directType === "hls") {
+      setScreen("embed");
+    } else {
+      setScreen(isDirectPlayable(src) ? "native" : "embed");
+    }
   }, []);
 
   /* ── Group sources by quality ── */
@@ -374,7 +382,10 @@ export default function AnimationWatchScreen() {
   /* Build RiftPlayer sources from directSrcs */
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
-    return directSrcs.map(s => ({
+    const srcs = Platform.OS === "web"
+      ? directSrcs.filter(s => s.directType !== "hls")
+      : directSrcs;
+    return srcs.map(s => ({
       url: getPlayUrl(s),
       label: s.label || "مصدر",
       quality: getSrcQuality(s),
@@ -497,14 +508,22 @@ export default function AnimationWatchScreen() {
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
           </View>
-          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>هذا المصدر يحتاج التطبيق الأصلي</Text>
-          <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>مصدر الإطار لا يدعم تشغيل الويب مباشرةً</Text>
-          <Pressable
-            onPress={() => Linking.openURL(embedUrl)}
-            style={{ backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)", marginTop: 4 }}
-          >
-            <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold", fontSize: 14 }}>فتح في المتصفح</Text>
-          </Pressable>
+          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
+            {playingSrc?.directType === "hls" ? "بث HLS يحتاج التطبيق الأصلي" : "هذا المصدر يحتاج التطبيق الأصلي"}
+          </Text>
+          <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
+            {playingSrc?.directType === "hls"
+              ? "بروتوكول HLS غير مدعوم في متصفح الويب — حمّل التطبيق للمشاهدة"
+              : "مصدر الإطار لا يدعم تشغيل الويب مباشرةً"}
+          </Text>
+          {playingSrc?.isEmbed && (
+            <Pressable
+              onPress={() => Linking.openURL(embedUrl)}
+              style={{ backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)", marginTop: 4 }}
+            >
+              <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold", fontSize: 14 }}>فتح في المتصفح</Text>
+            </Pressable>
+          )}
           <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
             <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
           </Pressable>
