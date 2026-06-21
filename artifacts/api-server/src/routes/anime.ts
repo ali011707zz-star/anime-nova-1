@@ -156,9 +156,33 @@ async function cfGet(url: string, extraHdrs: Record<string, string> = {}): Promi
       signal: AbortSignal.timeout(12000),
       redirect: "follow",
     });
-    if (!r.ok) return null;
-    const html = await r.text();
-    return isCloudflareBlock(html) ? null : html;
+    if (r.ok) {
+      const html = await r.text();
+      return isCloudflareBlock(html) ? null : html;
+    }
+    /* ── nomore403 bypass: retry with IP-spoofing / path-override headers ── */
+    if (r.status === 403 || r.status === 401) {
+      const bypassHdrs: Record<string, string>[] = [
+        { "X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1" },
+        { "X-Originating-IP": "127.0.0.1", "X-Remote-IP": "127.0.0.1", "X-Client-IP": "127.0.0.1" },
+        { "X-Original-URL": "/", "X-Rewrite-URL": "/" },
+        { "X-Custom-IP-Authorization": "127.0.0.1" },
+      ];
+      for (const bh of bypassHdrs) {
+        try {
+          const r2 = await fetch(url, {
+            headers: { ...BASE_HDRS, ...CF_BROWSER_HDRS, ...extraHdrs, ...bh },
+            signal: AbortSignal.timeout(10000),
+            redirect: "follow",
+          });
+          if (r2.ok) {
+            const html2 = await r2.text();
+            if (!isCloudflareBlock(html2)) return html2;
+          }
+        } catch { /* try next */ }
+      }
+    }
+    return null;
   } catch { return null; }
 }
 
