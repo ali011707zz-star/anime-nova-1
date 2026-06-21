@@ -1,51 +1,41 @@
 /**
- * supabaseCacheClient.ts — Direct PostgreSQL cache client (Replit native DB)
- * Replaces the old Supabase REST cache proxy. Same API surface preserved.
+ * supabaseCacheClient.ts — Supabase REST API cache client
+ * يعمل على أي خادم بدون قيود DNS
+ * يحتاج فقط: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
  */
 
-import pg from "pg";
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-const { Pool } = pg;
+export const isCacheDbReady = !!(SUPABASE_URL && SUPABASE_KEY);
 
-let _pool: pg.Pool | null = null;
-
-function getPool(): pg.Pool {
-  if (!_pool) {
-    if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
-    _pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  }
-  return _pool;
+if (isCacheDbReady) {
+  console.log("[cacheClient] ✅ Supabase REST جاهز للكاش المشترك");
+} else {
+  const missing: string[] = [];
+  if (!SUPABASE_URL) missing.push("SUPABASE_URL");
+  if (!SUPABASE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  console.warn(`[cacheClient] ⚠️ متغيرات ناقصة: ${missing.join(", ")} — الكاش L2 معطّل`);
 }
 
-export const isCacheDbReady = !!process.env.DATABASE_URL;
+function headers(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    "apikey": SUPABASE_KEY,
+    "Authorization": `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+    "Prefer": "return=representation",
+    ...extra,
+  };
+}
 
-/** Parse Supabase-style filter params → SQL WHERE + values */
-function parseFilters(
-  params: Record<string, string>,
-  startIdx = 1,
-): { where: string; values: any[] } {
-  const clauses: string[] = [];
-  const values: any[] = [];
-  let idx = startIdx;
-  for (const [col, expr] of Object.entries(params)) {
-    const dot = expr.indexOf(".");
-    if (dot === -1) continue;
-    const op  = expr.slice(0, dot);
-    const val = expr.slice(dot + 1);
-    let sqlOp: string;
-    switch (op) {
-      case "eq":  sqlOp = "=";  break;
-      case "lt":  sqlOp = "<";  break;
-      case "lte": sqlOp = "<="; break;
-      case "gt":  sqlOp = ">";  break;
-      case "gte": sqlOp = ">="; break;
-      default:    sqlOp = "=";  break;
-    }
-    clauses.push(`"${col}" ${sqlOp} $${idx}`);
-    values.push(val);
-    idx++;
+function buildUrl(table: string, params: Record<string, string> = {}, opts: { limit?: number } = {}): string {
+  const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
+  url.searchParams.set("select", "*");
+  for (const [k, v] of Object.entries(params)) {
+    url.searchParams.set(k, v);
   }
-  return { where: clauses.length ? "WHERE " + clauses.join(" AND ") : "", values };
+  if (opts.limit) url.searchParams.set("limit", String(opts.limit));
+  return url.toString();
 }
 
 /** SELECT rows from a cache table */
@@ -56,11 +46,13 @@ export async function cacheSelect<T = any>(
 ): Promise<T[]> {
   if (!isCacheDbReady) return [];
   try {
-    const pool = getPool();
-    const { where, values } = parseFilters(params);
-    const limitClause = opts.limit ? `LIMIT ${opts.limit}` : "";
-    const res = await pool.query(`SELECT * FROM "${table}" ${where} ${limitClause}`.trim(), values);
-    return res.rows as T[];
+    const url = buildUrl(table, params, opts);
+    const res = await fetch(url, {
+      headers: headers(),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return [];
+    return await res.json() as T[];
   } catch { return []; }
 }
 
@@ -72,22 +64,18 @@ export async function cacheUpsert<T = any>(
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const pool = getPool();
-    const cols = Object.keys(row);
-    const vals = Object.values(row);
-    const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
-    const colNames = cols.map(c => `"${c}"`).join(", ");
-    let conflictClause = "DO NOTHING";
-    if (onConflict) {
-      const updateCols = cols.filter(c => c !== onConflict);
-      if (updateCols.length > 0) {
-        conflictClause = `DO UPDATE SET ${updateCols.map(c => `"${c}" = EXCLUDED."${c}"`).join(", ")}`;
-      }
-    }
-    const conflict = onConflict ? `("${onConflict}")` : "";
-    const sql = `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) ON CONFLICT ${conflict} ${conflictClause} RETURNING *`;
-    const res = await pool.query(sql, vals);
-    return (res.rows[0] ?? null) as T | null;
+    const urlStr = onConflict
+      ? `${SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`
+      : `${SUPABASE_URL}/rest/v1/${table}`;
+    const res = await fetch(urlStr, {
+      method: "POST",
+      headers: headers({ "Prefer": "resolution=merge-duplicates,return=representation" }),
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (Array.isArray(data) ? data[0] : data) as T | null;
   } catch { return null; }
 }
 
@@ -98,14 +86,15 @@ export async function cacheInsert<T = any>(
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const pool = getPool();
-    const cols = Object.keys(row);
-    const vals = Object.values(row);
-    const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
-    const colNames = cols.map(c => `"${c}"`).join(", ");
-    const sql = `INSERT INTO "${table}" (${colNames}) VALUES (${placeholders}) RETURNING *`;
-    const res = await pool.query(sql, vals);
-    return (res.rows[0] ?? null) as T | null;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (Array.isArray(data) ? data[0] : data) as T | null;
   } catch { return null; }
 }
 
@@ -116,11 +105,13 @@ export async function cacheDelete(
 ): Promise<boolean> {
   if (!isCacheDbReady) return false;
   try {
-    const pool = getPool();
-    const { where, values } = parseFilters(filter);
-    if (!where) return false;
-    await pool.query(`DELETE FROM "${table}" ${where}`, values);
-    return true;
+    const url = buildUrl(table, filter);
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: headers(),
+      signal: AbortSignal.timeout(8_000),
+    });
+    return res.ok;
   } catch { return false; }
 }
 
@@ -132,19 +123,15 @@ export async function cachePatch<T = any>(
 ): Promise<T | null> {
   if (!isCacheDbReady) return null;
   try {
-    const pool = getPool();
-    const cols = Object.keys(data);
-    const vals = Object.values(data);
-    const setClauses = cols.map((c, i) => `"${c}" = $${i + 1}`).join(", ");
-    const { where, values: filterVals } = parseFilters(filter, vals.length + 1);
-    const sql = `UPDATE "${table}" SET ${setClauses} ${where} RETURNING *`;
-    const res = await pool.query(sql, [...vals, ...filterVals]);
-    return (res.rows[0] ?? null) as T | null;
+    const url = buildUrl(table, filter);
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(data),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    const result = await res.json();
+    return (Array.isArray(result) ? result[0] : result) as T | null;
   } catch { return null; }
-}
-
-if (isCacheDbReady) {
-  console.log("[cacheClient] ✅ PostgreSQL (Replit DB) جاهز للكاش");
-} else {
-  console.warn("[cacheClient] ⚠️ DATABASE_URL غير موجود — الكاش معطّل");
 }
