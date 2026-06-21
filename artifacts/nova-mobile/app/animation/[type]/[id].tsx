@@ -244,7 +244,7 @@ export default function AnimationDetailScreen() {
       <View style={s.watchBtnWrap}>
         <Pressable
           style={s.watchBtn}
-          onPress={() => router.push(getWatchUrl() as any)}
+          onPress={() => router.push((isTV ? getEpisodesUrl() : getWatchUrl()) as any)}
         >
           <LinearGradient
             colors={["#8B5CF6", "#6D28D9", "#5B21B6"]}
@@ -252,10 +252,10 @@ export default function AnimationDetailScreen() {
             style={s.watchBtnGrad}
           >
             <View style={s.watchBtnIconWrap}>
-              <Ionicons name="play" size={16} color="#fff" />
+              <Ionicons name={isTV ? "list" : "play"} size={16} color="#fff" />
             </View>
             <Text style={s.watchBtnText}>
-              {isTV ? "مشاهدة المسلسل" : "مشاهدة الفيلم"}
+              {isTV ? "الحلقات والأجزاء" : "مشاهدة الفيلم"}
             </Text>
           </LinearGradient>
         </Pressable>

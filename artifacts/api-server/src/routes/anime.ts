@@ -4413,19 +4413,20 @@ async function getKawaiiAnimeSources(
 
     return data.sources.map((src) => {
       const isHls = src.isM3U8 === true || src.type === "hls";
-      // video.kawaii-anime.com CDN: CORS * + Accept-Ranges + no auth
-      // → يشغّل مباشرة في المتصفح / React Native بدون أي proxy
-      // (video-proxy/hls-proxy كان يُمرّر المحتوى عبر سيرفرنا = بطء شديد)
-      const directUrl = src.url;   // raw CDN URL دائماً
+      // video.kawaii-anime.com CDN يحتاج Referer header في بعض البيئات (React Native)
+      // → نمرر عبر proxy لضمان الـ headers الصحيحة على كل المنصات
+      const proxyRoute = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`
+        : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(KAWAII_BASE + "/")}`;
       return {
         name: `كواي أنمي · ${src.quality || "1080p"}${subLangLabel ? ` · ${subLangLabel}` : ""}`,
         url: src.url,
         quality: src.quality || "1080p",
         qualityRank: 20,
         site: "kawaii",
-        directUrl,
+        directUrl: proxyRoute,
         directType: isHls ? "hls" : "mp4",
-        corsOk: true,   // CORS * مؤكد — لا proxy في المتصفح
+        corsOk: false,
         subtitleUrl,
         skipIntro,
         skipOutro,
