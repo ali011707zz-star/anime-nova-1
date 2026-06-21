@@ -6472,15 +6472,17 @@ async function getSeepanelSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  ARABSEED (m.asd.ink) — Arabic dubbed/subbed anime (مدبلج/مترجم)
-//  WordPress site — mirror of m.arabseed.show
-//  Search:  GET /wp-json/wp/v2/posts?search={title}+الحلقة+{ep}&per_page=10
-//           → episode posts with "الحلقة N" in title (exact URL per ep)
-//  Servers: POST /get__quality__servers/ → server list HTML
-//           POST /get__watch__server/    → embed URL per server index
-//  Server 0: m.reviewrate.net → <source src> direct MP4 via video-proxy
+//  ARABSEED (arabseed.ink / a.asd.ink) — Arabic dubbed/subbed anime (مدبلج/مترجم)
+//  WordPress site — REST API on arabseed.ink, episode pages on a.asd.ink
+//  Search:  GET arabseed.ink/wp-json/wp/v2/posts?search={title}+الحلقة+{ep}&per_page=10
+//           → episode posts with "الحلقة N" in title (exact URL per ep on a.asd.ink)
+//  Servers: POST a.asd.ink/get__quality__servers/ → server list HTML
+//           POST a.asd.ink/get__watch__server/    → embed URL per server index
+//  NOTE: arabseed.ink accessible directly from VPS (no CF proxy needed)
+//        m.asd.ink was CF-blocked from Replit; arabseed.ink is the replacement
 // ════════════════════════════════════════════════════════════════════
-const ARABSEED_BASE = "https://m.asd.ink";
+const ARABSEED_BASE   = "https://arabseed.ink";
+const ARABSEED_EP_BASE = "https://a.asd.ink";
 const ARABSEED_HDRS: Record<string, string> = {
   ...BASE_HDRS,
   "Referer": `${ARABSEED_BASE}/`,
@@ -6553,7 +6555,12 @@ async function getArabSeedSources(
     if (!epUrl) return [];
 
     // Fetch episode page → extract psot_id and csrf_token
-    const epHtml = await cfGet(epUrl, { ...ARABSEED_HDRS, "Referer": `${ARABSEED_BASE}/` });
+    // Episode pages are on a.asd.ink — fetch directly (no CF proxy needed from VPS)
+    const epHtml = await fetch(epUrl, {
+      headers: { ...ARABSEED_HDRS, "Referer": `${ARABSEED_BASE}/` },
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
+    }).then(r => r.ok ? r.text() : null).catch(() => null);
     if (!epHtml) return [];
 
     // psot_id: object__info = {'psot_id': '12345'} or psot_id: "12345"
@@ -6566,18 +6573,21 @@ async function getArabSeedSources(
     if (!csrfMatch) return [];
     const csrf = csrfMatch[1];
 
+    // AJAX endpoints are on a.asd.ink (same domain as episode pages)
+    const epBase = new URL(epUrl).origin; // https://a.asd.ink
     const ajaxHdrs: Record<string, string> = {
       ...ARABSEED_HDRS,
       "Content-Type": "application/x-www-form-urlencoded",
       "X-Requested-With": "XMLHttpRequest",
       "Referer": epUrl,
+      "Origin": epBase,
     };
 
     // POST /get__quality__servers/ → {html: serverButtonsHtml, server: firstEmbedUrl}
     let serverIndices: number[] = [];
     let firstEmbedUrl = "";
     try {
-      const qRes = await fetch(`${ARABSEED_BASE}/get__quality__servers/`, {
+      const qRes = await fetch(`${epBase}/get__quality__servers/`, {
         method: "POST",
         headers: ajaxHdrs,
         body: new URLSearchParams({ post_id: psotId, quality: "1080", csrf_token: csrf }).toString(),
@@ -6601,7 +6611,7 @@ async function getArabSeedSources(
     await Promise.allSettled(serverIndices.slice(0, 5).map(async (serverIdx) => {
       try {
         // POST /get__watch__server/ → {type, server: embedUrl}
-        const sRes = await fetch(`${ARABSEED_BASE}/get__watch__server/`, {
+        const sRes = await fetch(`${epBase}/get__watch__server/`, {
           method: "POST",
           headers: ajaxHdrs,
           body: new URLSearchParams({
