@@ -27,6 +27,7 @@ interface Src {
   site?: string; isEmbed?: boolean; subtitleUrl?: string;
   corsOk?: boolean;     // CDN يدعم CORS * → تشغيل مباشر
   name?: string;
+  directType?: string;  // "hls" | "mp4" — used to filter on web
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
 }
@@ -427,8 +428,10 @@ export default function WatchScreen() {
                 if (prev.find(s => (s.directUrl || s.url) === key)) return prev;
                 const next = [...prev, src];
                 const isGoodSrc = !!(src.directUrl || src.url) && !src.isEmbed;
+                /* on web, expo-video has no HLS support — only auto-play mp4 */
+                const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
                 /* auto-play first good source — skip if already auto-playing from cache */
-                if (isGoodSrc && !autoPlayFiredRef.current) {
+                if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
                   /* save to cache for instant resume on re-open */
                   if (srcCacheKey) AsyncStorage.setItem(srcCacheKey, JSON.stringify({ src: data, ts: Date.now() })).catch(() => {});
@@ -525,7 +528,10 @@ export default function WatchScreen() {
   /* Build RiftPlayer sources from directSrcs */
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
-    return directSrcs.map(s => {
+    const srcs = Platform.OS === "web"
+      ? directSrcs.filter(s => s.directType !== "hls")
+      : directSrcs;
+    return srcs.map(s => {
       const def = SCRAPER_DEFS.find(d => d.site === s.site);
       const isArabicSrc = def?.isArabic === true;
       const rawUrl = s.directUrl || s.url || "";
