@@ -540,8 +540,8 @@ function PremiumSheet({ open, onClose, user }: {
       : "مرحبًا، أريد الاشتراك في Nova Premium.";
     try { await Share.share({ message: msg }); } catch {}
     setTimeout(() => {
-      Linking.openURL(`tg://user?id=${TG_OWNER_ID}`).catch(() =>
-        Linking.openURL(`https://t.me/${TG_OWNER_ID}`)
+      Linking.openURL("https://t.me/Anime_NOVA_0").catch(() =>
+        Linking.openURL(`tg://resolve?domain=Anime_NOVA_0`)
       );
     }, 400);
     setSent(true);
@@ -760,19 +760,19 @@ export default function SettingsScreen() {
 
       {/* Sticky Header */}
       <View style={[ts.header, { paddingTop: topPad }]}>
-        <Pressable onPress={() => router.back()} style={ts.headerBackBtn}>
-          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.5)" />
-        </Pressable>
+        <View style={ts.headerBadge}>
+          <View style={ts.headerDot} />
+          <Text style={ts.headerBadgeText}>ANIME NOVA · v2.4</Text>
+        </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
           <View style={ts.headerIconWrap}>
             <Ionicons name="settings" size={16} color="#c4b5fd" />
           </View>
           <Text style={ts.headerTitle}>الإعدادات</Text>
         </View>
-        <View style={ts.headerBadge}>
-          <View style={ts.headerDot} />
-          <Text style={ts.headerBadgeText}>ANIME NOVA · v2.4</Text>
-        </View>
+        <Pressable onPress={() => router.back()} style={ts.headerBackBtn}>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.5)" />
+        </Pressable>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>

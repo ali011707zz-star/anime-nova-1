@@ -38,7 +38,7 @@ const NAV_LIBRARY: NavItem[] = [
 ];
 
 const NAV_OTHER: NavItem[] = [
-  { icon: "megaphone",       label: "التحديثات",             route: "/settings",           color: "#a78bfa", badge: "جديد" },
+  { icon: "megaphone",       label: "التحديثات",             route: "/(tabs)/news",        color: "#a78bfa", badge: "جديد" },
   { icon: "settings",        label: "الإعدادات",             route: "/settings",           color: "#64748b" },
 ];
 
