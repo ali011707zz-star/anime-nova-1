@@ -17,7 +17,7 @@ export const SITE_TTL: Record<string, number> = {
   animephoenix: 36 * 3_600_000,
   animedar:     24 * 3_600_000,
   kawaii:       24 * 3_600_000,
-  animeify:      8 * 3_600_000,
+  animeify:      45 * 60_000,    // MediaFire CDN URLs expire ~1h → 45min TTL
   mitanime:      8 * 3_600_000,
   seepanel:      8 * 3_600_000,
   okanime:       5 * 3_600_000,
@@ -26,7 +26,7 @@ export const SITE_TTL: Record<string, number> = {
   anikoto:       5 * 3_600_000,
   anineko:       5 * 3_600_000,
   hianime:       5 * 3_600_000,
-  animewitcher:  5 * 3_600_000,
+  animewitcher:  45 * 60_000,    // Streamtape/VTube URLs expire fast → 45min TTL
   animeday:      4 * 3_600_000,
   arabseed:      4 * 3_600_000,
   shahiid:       3 * 3_600_000,
