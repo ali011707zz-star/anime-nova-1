@@ -1391,7 +1391,7 @@ export function RiftPlayer({
                       <Ionicons name="mic-outline" size={15} color={whisperStatus === "error" ? "#fca5a5" : "#c4b5fd"} />
                     )}
                     <Text style={[s.whisperBtnText, whisperStatus === "error" && { color: "#fca5a5" }]}>
-                      {whisperStatus === "idle"    ? "ترجمة صوتية (Whisper)" :
+                      {whisperStatus === "idle"    ? "ترجمة صوتية" :
                        whisperStatus === "loading" ? "جاري التحليل الصوتي..." :
                        whisperStatus === "error"   ? "فشل — أعد المحاولة"    :
                        "إعادة الترجمة الصوتية"}
@@ -1513,7 +1513,7 @@ export function RiftPlayer({
                       whisperStatus === "error" && { color: "#fca5a5" },
                       whisperStatus === "ready" && { color: "#86efac" },
                     ]}>
-                      {whisperStatus === "idle"    ? "ترجمة صوتية (Whisper)" :
+                      {whisperStatus === "idle"    ? "ترجمة صوتية" :
                        whisperStatus === "loading" ? "جاري التحليل الصوتي..." :
                        whisperStatus === "error"   ? "فشل — أعد المحاولة"    :
                        `✓ ${whisperLang ? `لغة: ${whisperLang}` : "ترجمة جاهزة"}`}

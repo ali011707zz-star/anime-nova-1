@@ -484,8 +484,8 @@ export default function WatchScreen() {
                     setPlayingSrc(src);
                     setScreen("native"); // loading → player directly (no picker flash)
                   }, 0);
-                } else if (!autoPlayFiredRef.current && next.length >= 3) {
-                  /* only embed/web-incompatible sources so far — show picker after 3 */
+                } else if (!autoPlayFiredRef.current && next.length >= 1) {
+                  /* show picker immediately after first source so user doesn't wait */
                   setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 }
                 /* update live counter on loading screen */

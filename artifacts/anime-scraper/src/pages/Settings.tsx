@@ -517,6 +517,8 @@ export default function Settings() {
 
       <ToastContainer />
 
+      <div className="max-w-[500px] mx-auto">
+
       {/* ── Header ── */}
       <div className="sticky top-0 z-20 backdrop-blur-xl px-4 py-3.5 flex items-center gap-3"
         style={{ background: "rgba(9,9,11,0.92)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
@@ -944,6 +946,8 @@ export default function Settings() {
           />
         )}
       </AnimatePresence>
+
+      </div>{/* max-w wrapper */}
     </main>
   );
 }
