@@ -2,7 +2,7 @@
 set -e
 
 APP_PORT="${PORT:-5000}"
-CF_PORT=8001
+CF_PORT=18001
 
 export CF_PROXY_PORT=$CF_PORT
 
