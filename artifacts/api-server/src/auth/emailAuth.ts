@@ -100,6 +100,8 @@ function userPayload(u: any) {
     profileImageUrl: u.profile_image_custom ?? u.profileImageCustom ?? u.profile_image_url ?? u.profileImageUrl,
     authType:        "email" as const,
     createdAt:       u.created_at ?? u.createdAt,
+    plan:            u.plan ?? "free",
+    expiresAt:       u.expires_at ?? null,
   };
 }
 
@@ -137,10 +139,7 @@ export function registerEmailAuthRoutes(app: Express): void {
       if (!result.ok)
         return res.status(500).json({ error: "فشل إرسال البريد، حاول مرة أخرى" });
 
-      const resp: Record<string, any> = { sent: true };
-      if (result.previewUrl) resp.previewUrl = result.previewUrl;
-      if (!process.env.SMTP_USER) resp.devCode = code;
-      return res.json(resp);
+      return res.json({ sent: true });
     } catch (err) {
       console.error("[send-verify-code]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
@@ -405,6 +404,16 @@ export async function getEmailUser(req: Request): Promise<any | null> {
     const rows = await sbSelect("users", { id: `eq.${userId}` }, { limit: 1 });
     if (!rows.length) return null;
     const u = rows[0];
+
+    // تحقق من انتهاء صلاحية الاشتراك تلقائياً
+    let plan: string = u.plan ?? "free";
+    if (plan === "premium" && u.expires_at && new Date(u.expires_at) < new Date()) {
+      try {
+        await sbPatch("users", { id: `eq.${u.id}` }, { plan: "free", expires_at: null });
+      } catch { /* silent */ }
+      plan = "free";
+    }
+
     return {
       id:              u.id,
       email:           u.email,
@@ -414,6 +423,8 @@ export async function getEmailUser(req: Request): Promise<any | null> {
       profileImageUrl: u.profile_image_custom || u.profile_image_url,
       authType:        "email" as const,
       createdAt:       u.created_at,
+      plan,
+      expiresAt:       plan === "free" ? null : u.expires_at ?? null,
     };
   } catch { return null; }
 }
