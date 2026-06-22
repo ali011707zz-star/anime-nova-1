@@ -1632,13 +1632,8 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
   // ── Step 1: Search first (accurate — avoids slug hitting wrong OVA/movie page) ──
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const r = await fetch(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, {
-        headers: ADAR_HDRS,
-        signal: AbortSignal.timeout(10000),
-        redirect: "follow",
-      });
-      if (!r.ok) continue;
-      const html = await r.text();
+      const html = await cfProxyGet(`${ADAR_BASE}/?s=${encodeURIComponent(q)}`, "https://animedar.net/", 10000);
+      if (!html) continue;
       if (isCloudflareBlock(html)) continue;
 
       let best: string | null = null;
@@ -1698,19 +1693,11 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
   }
   for (const slug of [...new Set(slugCandidates)]) {
     try {
-      const r = await fetch(`${ADAR_BASE}/${slug}/`, {
-        headers: ADAR_HDRS,
-        signal: AbortSignal.timeout(7000),
-        redirect: "follow",
-      });
-      if (r.ok) {
-        const html = await r.text();
-        if (!isCloudflareBlock(html) && html.includes("ul-server-position")) {
-          // Use the final URL (after any redirects) to get the canonical series URL
-          const finalUrl = (r.url || `${ADAR_BASE}/${slug}/`).replace(/\/?$/, "/");
-          adarSlugCache.set(ck, { url: finalUrl, ts: Date.now() });
-          return finalUrl;
-        }
+      const html = await cfProxyGet(`${ADAR_BASE}/${slug}/`, "https://animedar.net/", 7000);
+      if (html && !isCloudflareBlock(html) && html.includes("ul-server-position")) {
+        const finalUrl = `${ADAR_BASE}/${slug}/`;
+        adarSlugCache.set(ck, { url: finalUrl, ts: Date.now() });
+        return finalUrl;
       }
     } catch {}
   }
@@ -1730,14 +1717,8 @@ async function getAnimadarSources(
     const seriesUrl = await searchAnimedar(title, english, isMovie);
     if (!seriesUrl) return [];
 
-    const r = await fetch(seriesUrl, {
-      headers: ADAR_HDRS,
-      signal: AbortSignal.timeout(14000),
-      redirect: "follow",
-    });
-    if (!r.ok) return [];
-    const html = await r.text();
-    if (isCloudflareBlock(html)) return [];
+    const html = await cfProxyGet(seriesUrl, "https://animedar.net/", 14000);
+    if (!html || isCloudflareBlock(html)) return [];
 
     const allEpisodes = parseAnimadarServers(html);
     if (!allEpisodes.length) return [];
@@ -2828,10 +2809,10 @@ async function getAnimeTimeSources(
 //  Episode page: ul#watch li[data-watch="IFRAME_URL"]
 // ════════════════════════════════════════════════════════════════════
 
-const RISTO_BASE = "https://ristoanime.co";
+const RISTO_BASE = "https://ristoanime.me";
 const RISTO_AJAX = `${RISTO_BASE}/wp-content/themes/TopAnime/Ajaxt`;
-const RISTO_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ristoanime.co/" };
-const RISTOANIME_DISABLED = true; // AJAX endpoint is behind CF JS challenge — cannot bypass from datacenter IPs
+const RISTO_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ristoanime.me/" };
+const RISTOANIME_DISABLED = false; // re-enabled: cfProxyPost bypasses CF JS challenge
 
 const ristoSeriesCache = new Map<string, { url: string | null; ts: number }>();
 const ristoSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
@@ -2843,22 +2824,17 @@ async function searchRistoAnime(title: string, english: string | null): Promise<
 
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const r = await fetch(`${RISTO_AJAX}/Searching.php`, {
-        method: "POST",
-        body: `search=${encodeURIComponent(q as string)}`,
-        headers: {
-          ...RISTO_HDRS,
-          "Content-Type": "application/x-www-form-urlencoded",
-          "X-Requested-With": "XMLHttpRequest",
-        },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!r.ok) continue;
-      const html = await r.text();
-      if (isCloudflareBlock(html) || html.length < 50) continue;
+      const html = await cfProxyPost(
+        `${RISTO_AJAX}/Searching.php`,
+        `search=${encodeURIComponent(q as string)}`,
+        "application/x-www-form-urlencoded",
+        `${RISTO_BASE}/`,
+        8000,
+      );
+      if (!html || isCloudflareBlock(html) || html.length < 50) continue;
 
       const seriesUrls: Array<{ url: string; score: number }> = [];
-      for (const m of html.matchAll(/href="(https:\/\/ristoanime\.co\/series\/[^"]+)"/g)) {
+      for (const m of html.matchAll(/href="(https?:\/\/ristoanime\.me\/series\/[^"]+)"/g)) {
         const u = m[1];
         const slug = decodeURIComponent(u.replace(RISTO_BASE + "/series/", "").replace(/\/$/, "")).toLowerCase();
         // Use both regular + ASCII-only similarity to handle mixed Arabic-English slugs
@@ -2896,13 +2872,9 @@ async function getRistoAnimeSources(
     const seriesUrl = await searchRistoAnime(title, english);
     if (!seriesUrl) return [];
 
-    // Fetch series page → get post_id and session cookies
-    const sR = await fetch(seriesUrl, {
-      headers: RISTO_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow",
-    });
-    if (!sR.ok) return [];
-    const seriesHtml = await sR.text();
-    if (isCloudflareBlock(seriesHtml)) return [];
+    // Fetch series page → get post_id and season IDs (via CF proxy to bypass Turnstile)
+    const seriesHtml = await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000);
+    if (!seriesHtml || isCloudflareBlock(seriesHtml)) return [];
 
     const postIdM = seriesHtml.match(/post_id:\s*'(\d+)'/);
     if (!postIdM) return [];
@@ -2936,9 +2908,9 @@ async function getRistoAnimeSources(
       }
       if (!epsHtml || isCloudflareBlock(epsHtml) || epsHtml.length < 50) continue;
 
-      // Episode links are at root domain (e.g. https://ristoanime.co/انمي-dandadan-الحلقة-1-...)
+      // Episode links are at root domain (e.g. https://ristoanime.me/انمي-dandadan-الحلقة-1-...)
       const epLinks: string[] = [];
-      for (const m of epsHtml.matchAll(/href="(https?:\/\/ristoanime\.co\/[^"]+)"/g)) {
+      for (const m of epsHtml.matchAll(/href="(https?:\/\/ristoanime\.me\/[^"]+)"/g)) {
         const u = m[1];
         // Skip WP system paths, series pages, feed/tag/category
         if (/\/(series|category|tag|wp-admin|wp-content|wp-json|feed|page)\//i.test(u)) continue;
@@ -2968,14 +2940,8 @@ async function getRistoAnimeSources(
 
     // Fetch episode page with ?watch=1 → server list is only in this variant
     const watchEpUrl = epUrl + (epUrl.includes("?") ? "&" : "?") + "watch=1";
-    const epR = await fetch(watchEpUrl, {
-      headers: { ...RISTO_HDRS, Referer: seriesUrl },
-      signal: AbortSignal.timeout(10000),
-      redirect: "follow",
-    });
-    if (!epR.ok) return [];
-    const epHtml = await epR.text();
-    if (isCloudflareBlock(epHtml)) return [];
+    const epHtml = await cfProxyGet(watchEpUrl, seriesUrl, 10000);
+    if (!epHtml || isCloudflareBlock(epHtml)) return [];
 
     const watchUrls: string[] = [];
     for (const m of epHtml.matchAll(/data-watch=["']([^"']+)["']/g)) {
@@ -7137,8 +7103,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
       scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep, isMovie)),
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
-      // anime4up2: محظور بواسطة Cloudflare (HTTP 403 حتى عبر CF proxy) — معطَّل
-      // scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep)),
+      scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep)),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
