@@ -2659,6 +2659,8 @@ export default function WatchPage() {
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
   // showPicker: false on first load (shows loading screen), true when user returns from player
   const [showPicker,   setShowPicker]   = useState(false);
+  // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
+  const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
@@ -2909,6 +2911,17 @@ export default function WatchPage() {
       /* From picker → go back to anime detail page */
       navigate(animeId ? `/anime/${animeId}` : "/");
     }
+  }
+
+  /* ── When all servers in a tier are exhausted: show brief toast then return to picker ── */
+  function handleTierExhausted() {
+    document.querySelectorAll<HTMLVideoElement>("video, audio").forEach(v => {
+      try { v.pause(); v.src = ""; } catch {}
+    });
+    setFailedSrcToast(true);
+    setShowPicker(true);
+    setPhase("picker");
+    setTimeout(() => setFailedSrcToast(false), 3500);
   }
 
   /* ── Track in-flight fetches to prevent duplicate calls ── */
@@ -3208,6 +3221,33 @@ export default function WatchPage() {
               onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
               onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
             />
+            {/* ── Failed source toast notification ── */}
+            <AnimatePresence>
+              {failedSrcToast && (
+                <motion.div
+                  key="failed-toast"
+                  initial={{ opacity: 0, y: -20, scale: 0.92 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -16, scale: 0.95 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                  className="fixed top-4 left-1/2 z-[9999] -translate-x-1/2 px-4 py-3 rounded-2xl flex items-center gap-2.5 font-['Cairo']"
+                  style={{
+                    background: "rgba(239,68,68,0.15)",
+                    border: "1px solid rgba(239,68,68,0.35)",
+                    backdropFilter: "blur(20px)",
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+                    maxWidth: "calc(100vw - 32px)",
+                  }}
+                  dir="rtl"
+                >
+                  <span className="text-base shrink-0">⚠️</span>
+                  <div>
+                    <p className="text-red-300 font-black text-[12px] leading-tight">السيرفر لم يستجب</p>
+                    <p className="text-white/45 text-[10px] leading-tight mt-0.5">جرّب مصدراً آخر من القائمة</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         </AnimatePresence>
       );
@@ -3319,7 +3359,7 @@ export default function WatchPage() {
           onEpisodeSelect={n => { handleBack(); setTimeout(() => goEp(n), 80); }}
           onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
           userId={userId}
-          onTierExhausted={() => { setShowPicker(true); setPhase("picker"); }}
+          onTierExhausted={handleTierExhausted}
         />
       </motion.div>
     </AnimatePresence>

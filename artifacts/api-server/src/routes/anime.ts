@@ -7010,12 +7010,33 @@ router.get("/anime/sources-stream", async (req, res) => {
     async function probeOwnProxy(s: UnifiedSource): Promise<boolean> {
       const cu = s.directUrl || s.url;
       if (!cu.startsWith("/api/")) return true; // روابط خارجية: نثق بها
-      // المصادر عبر hls-proxy / seg-proxy / video-proxy لا تحتاج probe — السيرفر يعالجها
-      if (cu.includes("/hls-proxy") || cu.includes("/seg-proxy") || cu.includes("/video-proxy")) return true;
+      // hls-proxy/seg-proxy: لا نختبرها (مانيفيست HLS معقد) — نثق بها
+      if (cu.includes("/hls-proxy") || cu.includes("/seg-proxy")) return true;
+      // video-proxy: اختبر رابط الهدف الفعلي بـ HEAD request (يكشف روابط MediaFire/Streamtape المنتهية)
+      if (cu.includes("/video-proxy")) {
+        try {
+          const params = new URL("http://x" + cu).searchParams;
+          let targetUrl = params.get("url") || "";
+          const ref = params.get("ref") || "";
+          if (!targetUrl) return false;
+          if (isEncrypted(targetUrl)) targetUrl = decryptParam(targetUrl);
+          if (!targetUrl.startsWith("http")) return false;
+          const headRes = await fetch(targetUrl, {
+            method: "HEAD",
+            headers: {
+              Referer: ref && isEncrypted(ref) ? decryptParam(ref) : (ref || ""),
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            redirect: "follow",
+            signal: AbortSignal.timeout(4_000),
+          });
+          return headRes.ok; // 200-299 = صالح
+        } catch { return false; }
+      }
       const localUrl = `http://127.0.0.1:${PORT_NUM}${cu}`;
       try {
-        const pr = await fetch(localUrl, { signal: AbortSignal.timeout(3_000) }); // كان 6_000
-        return pr.ok; // 200 أو 206
+        const pr = await fetch(localUrl, { signal: AbortSignal.timeout(3_000) });
+        return pr.ok;
       } catch { return false; }
     }
 
