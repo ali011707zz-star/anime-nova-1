@@ -3,7 +3,7 @@ modules = ["python-3.11", "web", "postgresql-16", "nodejs-22"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+run = ["bash", "scripts/start-prod.sh"]
 build = ["sh", "-c", "pnpm install && pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/anime-scraper run build"]
 
 [deployment.postBuild]
@@ -98,14 +98,6 @@ externalPort = 3003
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 8000
-externalPort = 8000
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
 
 [[ports]]
 localPort = 8081

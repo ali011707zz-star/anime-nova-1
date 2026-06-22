@@ -104,19 +104,24 @@ function saveHistory(id: number, title: string, cover: string, ep: number, total
   if (localStorage.getItem("pref-automark") === "false") return;
   try {
     const h: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
+    const existing = h.find((x: any) => x.id === id);
+    const finalCover = cover || existing?.cover || "";
+    const finalTitle = title || existing?.title || "";
+    const finalTotalEps = totalEps || existing?.totalEps || 0;
     localStorage.setItem("watch-history", JSON.stringify(
-      [{ id, title, cover, ep, date: new Date().toISOString(), totalEps },
-       ...h.filter(x => !(x.id === id && x.ep === ep))].slice(0, 60)
+      [{ id, title: finalTitle, cover: finalCover, ep, date: new Date().toISOString(), totalEps: finalTotalEps },
+       ...h.filter((x: any) => !(x.id === id && x.ep === ep))].slice(0, 60)
     ));
+    const syncCover = finalCover;
+    const syncTitle = finalTitle;
+    if (userId) {
+      fetch("/api/user/history", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ animeId: id, animeTitle: syncTitle, animeCover: syncCover, animeType: "anime", episodeNumber: ep }),
+      }).catch(() => {});
+    }
   } catch {}
-  /* Server sync */
-  if (userId) {
-    fetch("/api/user/history", {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ animeId: id, animeTitle: title, animeCover: cover, animeType: "anime", episodeNumber: ep }),
-    }).catch(() => {});
-  }
 }
 
 const QUALITY_LABELS: Quality[] = ["1080p FHD", "720p HD", "360p SD"];
@@ -1309,8 +1314,8 @@ function MegaEmbedPlayer({
         key={src}
         src={src}
         className="absolute inset-0 w-full h-full border-0 bg-black"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
-        allow="fullscreen; autoplay"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-downloads"
+        allow="fullscreen; autoplay; picture-in-picture"
         title={`${title} - الحلقة ${ep}`}
       />
 
