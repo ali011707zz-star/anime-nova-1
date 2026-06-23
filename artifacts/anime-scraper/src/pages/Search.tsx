@@ -1,8 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search as SearchIcon, X, Loader2, SlidersHorizontal, ChevronDown } from 'lucide-react';
-import { Link } from 'wouter';
+import { Search as SearchIcon, X, Loader2, SlidersHorizontal, ChevronDown, Camera, Upload, ExternalLink } from 'lucide-react';
+import { Link, useLocation } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Star } from 'lucide-react';
+
+/* ── trace.moe result type ── */
+interface TraceResult {
+  anilistId: number;
+  malId?: number;
+  title: string;
+  titleEn: string;
+  titleNative: string;
+  coverImage?: string;
+  episode: number | string | null;
+  from: number;
+  to: number;
+  similarity: number;
+  previewImage?: string | null;
+}
 
 /* ── Types ── */
 interface AnimeResult {
@@ -192,7 +207,14 @@ function FilterPill({ label, active, onClick }: { label: string; active: boolean
   );
 }
 
+function fmtTime(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export default function Search() {
+  const [,navigate]      = useLocation();
   const [query,       setQuery]      = useState('');
   const [results,     setResults]    = useState<AnimeResult[]>([]);
   const [loading,     setLoading]    = useState(false);
@@ -206,6 +228,15 @@ export default function Search() {
   const [history,     setHistory]    = useState<string[]>(
     () => JSON.parse(localStorage.getItem('searchHistory') || '[]')
   );
+
+  /* ── trace.moe state ── */
+  const [showTrace,     setShowTrace]    = useState(false);
+  const [traceUrl,      setTraceUrl]     = useState('');
+  const [traceLoading,  setTraceLoading] = useState(false);
+  const [traceResults,  setTraceResults] = useState<TraceResult[]>([]);
+  const [traceError,    setTraceError]   = useState('');
+  const traceFileRef = useRef<HTMLInputElement>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
 
   const activeFilterCount = [format, status, genre, season].filter(Boolean).length;
@@ -246,6 +277,58 @@ export default function Search() {
     setSeason('');
   }
 
+  /* ── trace.moe handlers ── */
+  async function runTraceSearch(urlOrFile: string | File) {
+    setTraceLoading(true);
+    setTraceResults([]);
+    setTraceError('');
+    try {
+      let resp: Response;
+      if (typeof urlOrFile === 'string') {
+        resp = await fetch(`/api/anime/trace-search?url=${encodeURIComponent(urlOrFile)}`);
+      } else {
+        const fd = new FormData();
+        fd.append('image', urlOrFile);
+        resp = await fetch('/api/anime/trace-search', { method: 'POST', body: fd });
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({})) as { error?: string };
+        setTraceError(err.error || `خطأ ${resp.status}`);
+        return;
+      }
+      const data = await resp.json() as { results: TraceResult[] };
+      if (!data.results?.length) {
+        setTraceError('لم يُعثر على نتائج. جرّب صورة أوضح من مشهد الأنمي.');
+      } else {
+        setTraceResults(data.results);
+      }
+    } catch (e: any) {
+      setTraceError('تعذّر الاتصال بـ trace.moe. تحقق من اتصالك.');
+    } finally {
+      setTraceLoading(false);
+    }
+  }
+
+  function handleTraceUrl(e: React.FormEvent) {
+    e.preventDefault();
+    if (!traceUrl.trim()) return;
+    runTraceSearch(traceUrl.trim());
+  }
+
+  function handleTraceFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    runTraceSearch(f);
+    e.target.value = '';
+  }
+
+  function openTrace() {
+    setShowTrace(true);
+    setTraceResults([]);
+    setTraceError('');
+    setTraceUrl('');
+  }
+
   const activeSeason = SEASON_OPTIONS.find(s => s.value === season);
 
   return (
@@ -267,14 +350,24 @@ export default function Search() {
               className="flex-1 bg-transparent text-white py-3.5 outline-none text-[14px] font-bold font-['Cairo'] placeholder:text-white/25"
               autoFocus
             />
-            {query && (
+            {query ? (
               <button onClick={() => { setQuery(''); inputRef.current?.focus(); }}
                 className="text-white/30 hover:text-white/70 transition-colors active:scale-90">
                 <X className="w-4 h-4" />
               </button>
+            ) : (
+              <button
+                onClick={openTrace}
+                title="ابحث بالصورة (trace.moe)"
+                className="text-white/30 hover:text-violet-400 transition-colors active:scale-90 p-1">
+                <Camera className="w-4.5 h-4.5" />
+              </button>
             )}
           </div>
         </div>
+
+        {/* hidden file input for trace.moe */}
+        <input ref={traceFileRef} type="file" accept="image/*" className="hidden" onChange={handleTraceFile} />
 
         {/* Filter toggle row */}
         <div className="flex items-center gap-2 px-4 pb-2.5">
@@ -458,6 +551,144 @@ export default function Search() {
           )}
         </div>
       )}
+
+      {/* ══ trace.moe modal ══ */}
+      <AnimatePresence>
+        {showTrace && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={e => { if (e.target === e.currentTarget) setShowTrace(false); }}>
+            <motion.div
+              className="bg-[#111116] border border-white/10 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-lg max-h-[90vh] overflow-y-auto"
+              initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}>
+
+              {/* header */}
+              <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-violet-500/20 flex items-center justify-center">
+                    <Camera className="w-4 h-4 text-violet-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-black font-['Cairo'] text-white">البحث بالصورة</h2>
+                    <p className="text-[10px] text-white/35 font-['Cairo']">اعثر على الأنمي من لقطة شاشة</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowTrace(false)}
+                  className="text-white/30 hover:text-white/60 transition-colors active:scale-90">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="px-5 pb-5 space-y-3">
+                {/* URL input */}
+                <form onSubmit={handleTraceUrl} className="flex gap-2">
+                  <input
+                    type="url"
+                    value={traceUrl}
+                    onChange={e => setTraceUrl(e.target.value)}
+                    placeholder="الصق رابط الصورة هنا..."
+                    className="flex-1 bg-[#18181B] border border-white/[0.07] rounded-xl px-3 py-2.5 text-[13px] text-white font-['Cairo'] outline-none focus:border-violet-500/50 placeholder:text-white/25"
+                    dir="ltr"
+                  />
+                  <button type="submit" disabled={!traceUrl.trim() || traceLoading}
+                    className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl text-[12px] font-black font-['Cairo'] transition-all active:scale-95">
+                    بحث
+                  </button>
+                </form>
+
+                {/* OR divider */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-white/[0.06]" />
+                  <span className="text-[10px] text-white/25 font-['Cairo']">أو</span>
+                  <div className="flex-1 h-px bg-white/[0.06]" />
+                </div>
+
+                {/* Upload button */}
+                <button
+                  onClick={() => traceFileRef.current?.click()}
+                  disabled={traceLoading}
+                  className="w-full flex items-center justify-center gap-2 bg-[#18181B] hover:bg-[#222226] border border-dashed border-white/10 hover:border-violet-500/30 rounded-xl py-3.5 text-[13px] font-black font-['Cairo'] text-white/50 hover:text-violet-300 transition-all active:scale-95 disabled:opacity-40">
+                  <Upload className="w-4 h-4" />
+                  رفع صورة من الجهاز
+                </button>
+
+                {/* Loading */}
+                {traceLoading && (
+                  <div className="flex items-center justify-center gap-2 py-4">
+                    <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />
+                    <span className="text-[12px] text-white/40 font-['Cairo']">جارٍ البحث في trace.moe...</span>
+                  </div>
+                )}
+
+                {/* Error */}
+                {traceError && !traceLoading && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-[12px] text-red-400 font-['Cairo'] text-center">
+                    {traceError}
+                  </div>
+                )}
+
+                {/* Results */}
+                {traceResults.length > 0 && !traceLoading && (
+                  <div className="space-y-2.5">
+                    <p className="text-[10px] text-white/30 font-black font-['Cairo']">
+                      {traceResults.length} نتيجة — انقر للمشاهدة
+                    </p>
+                    {traceResults.map((r, i) => (
+                      <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.05 }}
+                        className="flex gap-3 bg-[#18181B] rounded-xl p-3 border border-white/[0.06] cursor-pointer hover:border-violet-500/30 transition-all active:scale-[0.98]"
+                        onClick={() => {
+                          setShowTrace(false);
+                          navigate(`/anime/${r.anilistId}?title=${encodeURIComponent(r.title)}&english=${encodeURIComponent(r.titleEn)}`);
+                        }}>
+                        {/* Thumbnail */}
+                        <div className="w-14 h-20 rounded-lg overflow-hidden shrink-0 bg-[#222226]">
+                          {r.previewImage ? (
+                            <img src={r.previewImage} alt="" className="w-full h-full object-cover" />
+                          ) : r.coverImage ? (
+                            <img src={r.coverImage} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Camera className="w-5 h-5 text-white/10" />
+                            </div>
+                          )}
+                        </div>
+                        {/* Info */}
+                        <div className="flex-1 min-w-0 flex flex-col justify-between">
+                          <div>
+                            <p className="text-[13px] font-black font-['Cairo'] text-white leading-tight line-clamp-2 mb-0.5">
+                              {r.title}
+                            </p>
+                            {r.titleEn && r.titleEn !== r.title && (
+                              <p className="text-[10px] text-white/35 font-['Cairo'] leading-tight line-clamp-1">{r.titleEn}</p>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                            {r.episode != null && (
+                              <span className="text-[10px] bg-violet-500/15 text-violet-300 px-2 py-0.5 rounded-lg font-black font-['Cairo']">
+                                حلقة {r.episode}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-white/30 font-['Cairo']">
+                              {fmtTime(r.from)} – {fmtTime(r.to)}
+                            </span>
+                            <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded-lg font-black font-['Cairo']">
+                              {r.similarity}% تطابق
+                            </span>
+                          </div>
+                        </div>
+                        <ExternalLink className="w-3.5 h-3.5 text-white/20 mt-0.5 shrink-0" />
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </main>
   );

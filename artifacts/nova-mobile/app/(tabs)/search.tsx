@@ -2,12 +2,38 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, Pressable, TextInput, FlatList, Image,
   ScrollView, ActivityIndicator, StyleSheet, Platform,
-  KeyboardAvoidingView,
+  KeyboardAvoidingView, Modal, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
+
+/* ── trace.moe result type ── */
+interface TraceResult {
+  anilistId: number;
+  malId?: number;
+  title: string;
+  titleEn: string;
+  titleNative: string;
+  coverImage?: string;
+  episode: number | string | null;
+  from: number;
+  to: number;
+  similarity: number;
+  previewImage?: string | null;
+}
+
+function fmtTime(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
+  ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
+  : "http://localhost:8080/api";
 
 /* ── Types ── */
 interface AnimeResult {
@@ -152,6 +178,13 @@ export default function SearchScreen() {
   const [showGenres, setShowGenres]   = useState(false);
   const [history, setHistory]     = useState<string[]>([]);
 
+  /* ── trace.moe state ── */
+  const [showTrace,    setShowTrace]    = useState(false);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceResults, setTraceResults] = useState<TraceResult[]>([]);
+  const [traceError,   setTraceError]   = useState("");
+  const [traceUrl,     setTraceUrl]     = useState("");
+
   const inputRef = useRef<TextInput>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -201,8 +234,67 @@ export default function SearchScreen() {
 
   function clearFilters() { setFormat(""); setStatus(""); setGenre(""); setSeason(""); }
   const activeSeason = SEASON_OPTIONS.find(opt => opt.value === season);
-
   const showEmpty = !query && !format && !status && !genre && !season;
+
+  /* ── trace.moe handlers ── */
+  async function runTraceSearch(imageUri: string, mimeType?: string) {
+    setTraceLoading(true);
+    setTraceResults([]);
+    setTraceError("");
+    try {
+      const isUrl = imageUri.startsWith("http");
+      let resp: Response;
+      if (isUrl) {
+        resp = await fetch(`${API_BASE}/anime/trace-search?url=${encodeURIComponent(imageUri)}`);
+      } else {
+        const fd = new FormData();
+        fd.append("image", { uri: imageUri, name: "image.jpg", type: mimeType || "image/jpeg" } as any);
+        resp = await fetch(`${API_BASE}/anime/trace-search`, { method: "POST", body: fd });
+      }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({})) as { error?: string };
+        setTraceError(err.error || `خطأ ${resp.status}`);
+        return;
+      }
+      const data = await resp.json() as { results: TraceResult[] };
+      if (!data.results?.length) {
+        setTraceError("لم يُعثر على نتائج. جرّب صورة أوضح من مشهد الأنمي.");
+      } else {
+        setTraceResults(data.results);
+      }
+    } catch (e: any) {
+      setTraceError("تعذّر الاتصال. تحقق من اتصالك بالإنترنت.");
+    } finally {
+      setTraceLoading(false);
+    }
+  }
+
+  async function pickImageForTrace() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("إذن مطلوب", "يرجى السماح بالوصول إلى الصور.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setShowTrace(true);
+      setTraceResults([]);
+      setTraceError("");
+      setTraceUrl("");
+      runTraceSearch(asset.uri, asset.mimeType || "image/jpeg");
+    }
+  }
+
+  function openTrace() {
+    setShowTrace(true);
+    setTraceResults([]);
+    setTraceError("");
+    setTraceUrl("");
+  }
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -226,7 +318,12 @@ export default function SearchScreen() {
               <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
                 <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.35)" />
               </Pressable>
-            ) : null}
+            ) : (
+              <Pressable onPress={pickImageForTrace} hitSlop={8}
+                style={{ padding: 2 }}>
+                <Ionicons name="camera-outline" size={20} color="rgba(196,181,253,0.6)" />
+              </Pressable>
+            )}
           </View>
 
           {/* Filter toggle + sort pills */}
@@ -397,9 +494,146 @@ export default function SearchScreen() {
           </View>
         )}
       </View>
+
+      {/* ══ trace.moe modal ══ */}
+      <Modal visible={showTrace} animationType="slide" transparent presentationStyle="overFullScreen"
+        onRequestClose={() => setShowTrace(false)}>
+        <Pressable style={sm.overlay} onPress={() => setShowTrace(false)}>
+          <Pressable style={sm.sheet} onPress={e => e.stopPropagation()}>
+
+            {/* header */}
+            <View style={sm.header}>
+              <View style={sm.iconBox}>
+                <Ionicons name="camera-outline" size={18} color="#c4b5fd" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={sm.title}>البحث بالصورة</Text>
+                <Text style={sm.sub}>اعثر على الأنمي من لقطة شاشة</Text>
+              </View>
+              <Pressable onPress={() => setShowTrace(false)} hitSlop={10}>
+                <Ionicons name="close" size={20} color="rgba(255,255,255,0.35)" />
+              </Pressable>
+            </View>
+
+            {/* URL input */}
+            <View style={sm.urlRow}>
+              <TextInput
+                value={traceUrl}
+                onChangeText={setTraceUrl}
+                placeholder="الصق رابط الصورة..."
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                style={sm.urlInput}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+              <Pressable
+                onPress={() => traceUrl.trim() && runTraceSearch(traceUrl.trim())}
+                disabled={!traceUrl.trim() || traceLoading}
+                style={[sm.searchBtn, (!traceUrl.trim() || traceLoading) && { opacity: 0.4 }]}>
+                <Text style={sm.searchBtnText}>بحث</Text>
+              </Pressable>
+            </View>
+
+            {/* divider */}
+            <View style={sm.divider}>
+              <View style={sm.divLine} />
+              <Text style={sm.divText}>أو</Text>
+              <View style={sm.divLine} />
+            </View>
+
+            {/* Pick image */}
+            <Pressable onPress={pickImageForTrace} disabled={traceLoading}
+              style={[sm.uploadBtn, traceLoading && { opacity: 0.4 }]}>
+              <Ionicons name="image-outline" size={16} color="rgba(196,181,253,0.7)" />
+              <Text style={sm.uploadBtnText}>اختر صورة من الجهاز</Text>
+            </Pressable>
+
+            {/* Loading */}
+            {traceLoading && (
+              <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                <ActivityIndicator color="#8B5CF6" size="large" />
+                <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", marginTop: 8 }}>
+                  جارٍ البحث...
+                </Text>
+              </View>
+            )}
+
+            {/* Error */}
+            {!!traceError && !traceLoading && (
+              <View style={sm.errorBox}>
+                <Text style={sm.errorText}>{traceError}</Text>
+              </View>
+            )}
+
+            {/* Results */}
+            {traceResults.length > 0 && !traceLoading && (
+              <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+                <Text style={sm.resTitle}>{traceResults.length} نتيجة — انقر للمشاهدة</Text>
+                {traceResults.map((r, i) => (
+                  <Pressable key={i} style={sm.resCard}
+                    onPress={() => {
+                      setShowTrace(false);
+                      router.push(`/anime/${r.anilistId}?title=${encodeURIComponent(r.title)}&english=${encodeURIComponent(r.titleEn)}`);
+                    }}>
+                    <View style={sm.resThumb}>
+                      {r.previewImage || r.coverImage ? (
+                        <Image source={{ uri: (r.previewImage || r.coverImage)! }} style={sm.resImg} />
+                      ) : (
+                        <Ionicons name="film-outline" size={20} color="rgba(255,255,255,0.15)" />
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={sm.resName} numberOfLines={2}>{r.title}</Text>
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                        {r.episode != null && (
+                          <View style={sm.badge}><Text style={sm.badgeText}>حلقة {r.episode}</Text></View>
+                        )}
+                        <Text style={sm.timeTxt}>{fmtTime(r.from)} – {fmtTime(r.to)}</Text>
+                        <View style={[sm.badge, { backgroundColor: "rgba(16,185,129,0.15)" }]}>
+                          <Text style={[sm.badgeText, { color: "#6EE7B7" }]}>{r.similarity}%</Text>
+                        </View>
+                      </View>
+                    </View>
+                    <Ionicons name="chevron-back" size={14} color="rgba(255,255,255,0.2)" />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
     </KeyboardAvoidingView>
   );
 }
+
+const sm = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
+  sheet: { backgroundColor: "#111116", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 40, borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  header: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
+  iconBox: { width: 34, height: 34, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" },
+  title: { fontSize: 14, fontFamily: "Cairo_700Bold", color: "#fff" },
+  sub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)" },
+  urlRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  urlInput: { flex: 1, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, color: "#fff", fontFamily: "Cairo_400Regular", textAlign: "left" },
+  searchBtn: { backgroundColor: "#7C3AED", borderRadius: 12, paddingHorizontal: 14, justifyContent: "center" },
+  searchBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff" },
+  divider: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
+  divLine: { flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.06)" },
+  divText: { fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_400Regular" },
+  uploadBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 12, paddingVertical: 14, borderWidth: 1, borderStyle: "dashed", borderColor: "rgba(139,92,246,0.25)", marginBottom: 12 },
+  uploadBtnText: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.7)" },
+  errorBox: { backgroundColor: "rgba(239,68,68,0.1)", borderRadius: 12, padding: 12, marginBottom: 8 },
+  errorText: { fontSize: 12, fontFamily: "Cairo_400Regular", color: "#FCA5A5", textAlign: "center" },
+  resTitle: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.3)", marginBottom: 8 },
+  resCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#18181B", borderRadius: 12, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  resThumb: { width: 48, height: 68, borderRadius: 8, overflow: "hidden", backgroundColor: "#222226", alignItems: "center", justifyContent: "center" },
+  resImg: { width: "100%", height: "100%" },
+  resName: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#fff", lineHeight: 16 },
+  badge: { backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  badgeText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  timeTxt: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", alignSelf: "center" },
+});
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0A0A0F" },
