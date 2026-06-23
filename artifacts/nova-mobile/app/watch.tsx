@@ -434,7 +434,8 @@ export default function WatchScreen() {
         return;
       }
       const reader   = response.body.getReader();
-      // NOTE: do NOT switch to picker here — stay on loading until first source or DONE
+      // Switch to picker immediately when SSE connects — sources stream in live, auto-play on first direct
+      setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
       const decoder  = new TextDecoder();
       let buffer     = "";
       let currentEvent = "";

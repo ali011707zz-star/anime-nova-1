@@ -264,7 +264,7 @@ export default function AnimationDetail() {
 
       {/* ── Watch Button ── */}
       <div className="px-4 mt-5">
-        <Link href={watchUrl()}>
+        <Link href={type === "tv" ? episodesUrl() : watchUrl()}>
           <motion.button
             whileTap={{ scale: 0.97 }}
             className="w-full h-[52px] rounded-2xl font-black flex items-center justify-center gap-3 text-[15px] font-['Cairo'] text-white"
@@ -274,9 +274,13 @@ export default function AnimationDetail() {
             }}
           >
             <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-              <Play className="w-4 h-4 fill-white text-white" />
+              {type === "tv" ? (
+                <svg className="w-4 h-4 text-white fill-white" viewBox="0 0 24 24"><path d="M4 6h16v10H4V6zm0 12h16v2H4v-2zM2 4h20v16H2V4zm2 2v12h16V6H4z"/></svg>
+              ) : (
+                <Play className="w-4 h-4 fill-white text-white" />
+              )}
             </div>
-            {type === "tv" ? "مشاهدة المسلسل" : "مشاهدة الفيلم"}
+            {type === "tv" ? "الحلقات والمواسم" : "مشاهدة الفيلم"}
           </motion.button>
         </Link>
       </div>
