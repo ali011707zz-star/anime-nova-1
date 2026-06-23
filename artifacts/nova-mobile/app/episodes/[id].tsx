@@ -72,14 +72,8 @@ function EpisodeRow({
         ) : (
           <View style={[ep_s.thumb, ep_s.thumbFallback]} />
         )}
-        <View style={ep_s.thumbOverlay} />
         <Text style={ep_s.durText}>{dur}</Text>
         {watched && <View style={ep_s.watchedBorder} />}
-        <View style={ep_s.playOverlay}>
-          <View style={ep_s.playBtn}>
-            <Ionicons name="play" size={10} color="#fff" />
-          </View>
-        </View>
       </View>
 
       {/* Info */}
@@ -395,11 +389,8 @@ const ep_s = StyleSheet.create({
   thumbWrap: { width: 86, height: 49, borderRadius: 10, overflow: "hidden", backgroundColor: "#1C1C22", position: "relative" },
   thumb: { width: "100%", height: "100%" },
   thumbFallback: { backgroundColor: "rgba(139,92,246,0.1)" },
-  thumbOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.3)" },
   durText: { position: "absolute", bottom: 4, left: 4, fontSize: 7, color: "#fff", backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1, fontWeight: "900" },
   watchedBorder: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderWidth: 2, borderColor: "rgba(139,92,246,0.4)", borderRadius: 10 },
-  playOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
-  playBtn: { width: 22, height: 22, backgroundColor: "rgba(139,92,246,0.9)", borderRadius: 11, alignItems: "center", justifyContent: "center" },
   info: { flex: 1 },
   epNum: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
   commentBtn: {

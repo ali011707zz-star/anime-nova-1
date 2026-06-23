@@ -336,7 +336,7 @@ function AuthSheet({ open, onClose, onLogin }: {
   };
 
   const handleSignup = async () => {
-    if (code.length < 4) { setError("أدخل كود التحقق المكوّن من 4 أرقام"); return; }
+    if (code.length < 6) { setError("أدخل كود التحقق المكوّن من 6 أرقام"); return; }
     setLoading(true); setError("");
     try {
       const r = await fetch(`${base}/api/auth/signup`, {
@@ -428,17 +428,17 @@ function AuthSheet({ open, onClose, onLogin }: {
               <Text style={ts.authFieldLabel}>كود التحقق</Text>
               <TextInput
                 value={code}
-                onChangeText={v => { setCode(v.replace(/\D/g, "").slice(0, 4)); setError(""); }}
-                placeholder="• • • •"
+                onChangeText={v => { setCode(v.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+                placeholder="• • • • • •"
                 placeholderTextColor="rgba(255,255,255,0.2)"
                 keyboardType="numeric"
-                maxLength={4}
-                style={[ts.authCodeInput, code.length === 4 && { borderColor: "rgba(139,92,246,0.50)" }]}
+                maxLength={6}
+                style={[ts.authCodeInput, code.length === 6 && { borderColor: "rgba(139,92,246,0.50)" }]}
               />
               <Pressable
                 onPress={handleSignup}
-                disabled={loading || code.length < 4}
-                style={[ts.authSubmitBtn, code.length < 4 && { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.06)" }]}
+                disabled={loading || code.length < 6}
+                style={[ts.authSubmitBtn, code.length < 6 && { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.06)" }]}
               >
                 {loading ? <ActivityIndicator color="#fff" size="small" /> : (
                   <>

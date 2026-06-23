@@ -1379,29 +1379,9 @@ export function RiftPlayer({
                     <Text style={s.subEmptyCCText}>CC</Text>
                   </View>
                   <Text style={s.subEmptyText}>لا توجد ترجمات متاحة</Text>
-                  {/* ── Whisper transcription button ── */}
-                  <Pressable
-                    onPress={triggerWhisper}
-                    disabled={whisperStatus === "loading"}
-                    style={[s.whisperBtn, whisperStatus === "loading" && s.whisperBtnLoading]}
-                  >
-                    {whisperStatus === "loading" ? (
-                      <ActivityIndicator size="small" color="#c4b5fd" />
-                    ) : (
-                      <Ionicons name="mic-outline" size={15} color={whisperStatus === "error" ? "#fca5a5" : "#c4b5fd"} />
-                    )}
-                    <Text style={[s.whisperBtnText, whisperStatus === "error" && { color: "#fca5a5" }]}>
-                      {whisperStatus === "idle"    ? "ترجمة صوتية" :
-                       whisperStatus === "loading" ? "جاري التحليل الصوتي..." :
-                       whisperStatus === "error"   ? "فشل — أعد المحاولة"    :
-                       "إعادة الترجمة الصوتية"}
-                    </Text>
-                  </Pressable>
-                  {whisperStatus === "error" && (
-                    <Text style={{ color: "rgba(252,165,165,0.7)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "center", marginTop: 4 }}>
-                      تأكد من تشغيل خدمة Whisper
-                    </Text>
-                  )}
+                  <Text style={{ color: "rgba(148,163,184,0.6)", fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", marginTop: 8, lineHeight: 18 }}>
+                    قد تتوفر الترجمة مع بعض المصادر الأخرى
+                  </Text>
                 </View>
               ) : (
                 <View style={s.subPanelBody}>

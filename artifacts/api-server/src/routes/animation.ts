@@ -475,7 +475,7 @@ async function tcScrapePlayer(url: string): Promise<string[]> {
 
 /** Detect Japanese/Chinese/Korean characters — filter out untranslated titles */
 function hasCJK(text: string): boolean {
-  return /[\u3040-\u30ff\u4e00-\u9fff\u3400-\u4dbf\uff00-\uffef]/.test(text);
+  return /[\u3040-\u30ff\u4e00-\u9fff\u3400-\u4dbf\uff00-\uffef\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]/.test(text);
 }
 
 router.get("/animation/browse", async (req: Request, res: Response) => {
@@ -489,7 +489,7 @@ router.get("/animation/browse", async (req: Request, res: Response) => {
     const gp     = genre === "all" || genre === "0"
                    ? "16"
                    : genre === "16" ? "16" : `16,${genre}`;
-    const tvExtra = type === "tv" ? "&without_keywords=210024" : "";
+    const tvExtra = type === "tv" ? "&without_keywords=210024&certification_country=US&certification.lte=TV-PG&without_genres=10749" : "&certification_country=US&certification.lte=PG-13&without_genres=10749";
     const yearParam = year
       ? (type === "tv" ? `&first_air_date_year=${year}` : `&primary_release_year=${year}`)
       : "";
