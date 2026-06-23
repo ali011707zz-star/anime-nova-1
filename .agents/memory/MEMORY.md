@@ -1,3 +1,4 @@
+- [trace.moe + ARM server integration](tracemoe-arm-integration.md) — GET/POST /api/anime/trace-search (proxy to api.trace.moe free API); GET /api/anime/arm-ids?anilistId= (arm.haglund.dev all-IDs); ARM fallback added to fetchAnimeTmdbId step 1.5; camera icon in Search.tsx + mobile search.tsx with expo-image-picker; both tested live
 - [Hexa animation source](hexa-source.md) — hexa.su TMDB-native HLS via enc-dec.app; CDN nxt.cfw69.workers.dev CORS *; _hexaFailUntil cooldown parses "Next retry: N minutes" hint on 500
 - [AnimeKai DB scraper](animekai-scraper.md) — enc-dec.app/db/kai/find?anilist_id → megaup mirrors + media paths → dec-mega; megaup BLOCKS Replit IPs (timeout); needs DENO_PROXY_URL=Render server to work
 - [EncDecEndpoints research 2026-06](encdec-research-2026-06.md) — Hexa=works(cooldown fixed); AnimeKai megaup CDN=blocked(timeout from Replit+CF proxy); anicli-api=Russian only

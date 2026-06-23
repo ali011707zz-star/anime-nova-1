@@ -6691,6 +6691,24 @@ async function fetchAnimeTmdbId(english: string | null, romaji: string, anilistI
     } catch { /* fall through to TMDB search */ }
   }
 
+  // ── 1.5. arm.haglund.dev — AniList → {TMDB, MAL, AniDB, ...} كل المعرفات دفعة واحدة ──
+  if (anilistId) {
+    try {
+      const r = await fetch(`https://arm.haglund.dev/api/v2/ids?source=anilist&id=${anilistId}`, {
+        headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (r.ok) {
+        const armData = await r.json() as { themoviedb?: number | null; myanimelist?: number | null };
+        if (armData.themoviedb) {
+          animeTmdbCache.set(cKey, { id: armData.themoviedb, ts: Date.now() });
+          if (query) animeTmdbCache.set(query.toLowerCase(), { id: armData.themoviedb, ts: Date.now() });
+          return armData.themoviedb;
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
   // ── 2. TMDB search (fallback) ──
   const attempts = [english, romaji].filter((v): v is string => !!v && v.trim().length > 0);
   for (const q of attempts) {
@@ -7742,6 +7760,143 @@ router.get("/anime/translate", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  trace.moe — بحث الأنمي بالصورة / لقطة الشاشة
+// ════════════════════════════════════════════════════════════════════
+//  GET  /api/anime/trace-search?url={imageUrl}
+//  POST /api/anime/trace-search  (multipart field: image)
+//  Returns: [{ anilistId, title, episode, from, to, similarity, previewImage }]
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/trace-search", async (req, res) => {
+  const imageUrl = String(req.query.url || "").trim();
+  if (!imageUrl) { res.status(400).json({ error: "url param required" }); return; }
+  try {
+    const r = await fetch(
+      `https://api.trace.moe/search?anilistInfo=1&url=${encodeURIComponent(imageUrl)}`,
+      { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(18_000) }
+    );
+    if (!r.ok) { res.status(r.status).json({ error: `trace.moe: ${r.status}` }); return; }
+    const data = await r.json() as {
+      result?: Array<{
+        anilist: number | { id: number; idMal?: number; title?: { romaji?: string; english?: string; native?: string }; coverImage?: { large?: string }; isAdult?: boolean };
+        episode?: number | string | null;
+        from: number;
+        to: number;
+        similarity: number;
+        image?: string;
+        video?: string;
+      }>;
+    };
+    const results = (data.result || [])
+      .filter(r => r.similarity >= 0.80)
+      .filter(r => {
+        const al = r.anilist;
+        return typeof al === "object" ? !al.isAdult : true;
+      })
+      .slice(0, 5)
+      .map(r => {
+        const al = r.anilist;
+        const anilistId = typeof al === "number" ? al : al.id;
+        const info     = typeof al === "object" ? al : null;
+        return {
+          anilistId,
+          malId:      info?.idMal,
+          title:      info?.title?.romaji || info?.title?.english || `AniList #${anilistId}`,
+          titleEn:    info?.title?.english || "",
+          titleNative:info?.title?.native  || "",
+          coverImage: info?.coverImage?.large,
+          episode:    r.episode ?? null,
+          from:       Math.round(r.from),
+          to:         Math.round(r.to),
+          similarity: Math.round(r.similarity * 100),
+          previewImage: r.image || null,
+        };
+      });
+    res.json({ results });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// POST (multipart image upload → trace.moe)
+router.post("/anime/trace-search", async (req, res) => {
+  try {
+    const chunks: Buffer[] = [];
+    req.on("data", c => chunks.push(c));
+    await new Promise(resolve => req.on("end", resolve));
+    const body = Buffer.concat(chunks);
+    const ct   = req.headers["content-type"] || "application/octet-stream";
+    const r = await fetch("https://api.trace.moe/search?anilistInfo=1", {
+      method: "POST",
+      headers: { "User-Agent": BROWSER_UA, "Content-Type": ct },
+      body,
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) { res.status(r.status).json({ error: `trace.moe: ${r.status}` }); return; }
+    const data = await r.json() as {
+      result?: Array<{
+        anilist: number | { id: number; idMal?: number; title?: { romaji?: string; english?: string; native?: string }; coverImage?: { large?: string }; isAdult?: boolean };
+        episode?: number | string | null;
+        from: number;
+        to: number;
+        similarity: number;
+        image?: string;
+      }>;
+    };
+    const results = (data.result || [])
+      .filter(r => r.similarity >= 0.80)
+      .filter(r => {
+        const al = r.anilist;
+        return typeof al === "object" ? !al.isAdult : true;
+      })
+      .slice(0, 5)
+      .map(r => {
+        const al = r.anilist;
+        const anilistId = typeof al === "number" ? al : al.id;
+        const info     = typeof al === "object" ? al : null;
+        return {
+          anilistId,
+          malId:      info?.idMal,
+          title:      info?.title?.romaji || info?.title?.english || `AniList #${anilistId}`,
+          titleEn:    info?.title?.english || "",
+          titleNative:info?.title?.native  || "",
+          coverImage: info?.coverImage?.large,
+          episode:    r.episode ?? null,
+          from:       Math.round(r.from),
+          to:         Math.round(r.to),
+          similarity: Math.round(r.similarity * 100),
+          previewImage: r.image || null,
+        };
+      });
+    res.json({ results });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  arm-ids  GET /api/anime/arm-ids?anilistId={id}
+//  يجلب جميع معرفات الأنمي (MAL, TMDB, AniDB, ...) من arm.haglund.dev
+// ════════════════════════════════════════════════════════════════════
+const armIdsCache = new Map<number, { data: Record<string, unknown>; ts: number }>();
+router.get("/anime/arm-ids", async (req, res) => {
+  const anilistId = parseInt(String(req.query.anilistId || ""), 10);
+  if (!anilistId) { res.status(400).json({ error: "anilistId required" }); return; }
+  const hit = armIdsCache.get(anilistId);
+  if (hit && Date.now() - hit.ts < 3_600_000) { res.json(hit.data); return; }
+  try {
+    const r = await fetch(`https://arm.haglund.dev/api/v2/ids?source=anilist&id=${anilistId}`, {
+      headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!r.ok) { res.status(r.status).json({ error: `arm: ${r.status}` }); return; }
+    const data = await r.json() as Record<string, unknown>;
+    armIdsCache.set(anilistId, { data, ts: Date.now() });
+    res.json(data);
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 //  aniskip-proxy  GET /api/anime/aniskip?malId=&ep=
 // ════════════════════════════════════════════════════════════════════
 //  AniList GraphQL proxy (avoids CORS issues from browser)
