@@ -234,6 +234,7 @@ export default function RiftPlayer({
   const moved        = useRef(false);
   const seekThrottle = useRef<number>(0);
   const tapTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoFsTriggered = useRef(false);
   const G_THRESH     = 18;
 
   /* ── Web Audio API: GainNode + DynamicsCompressor ── */
@@ -381,7 +382,18 @@ export default function RiftPlayer({
     }
   }
 
-  function toggleRotation() {
+  async function toggleRotation() {
+    if (document.fullscreenElement) {
+      try {
+        const current = (screen.orientation as any)?.type ?? "";
+        if (current.startsWith("landscape")) {
+          await (screen.orientation as any).lock("portrait");
+        } else {
+          await (screen.orientation as any).lock("landscape");
+        }
+      } catch {}
+      return;
+    }
     manualRotateRef.current = true;
     setIsPortrait(p => !p);
   }
@@ -417,6 +429,7 @@ export default function RiftPlayer({
     setLoading(true); setBuffering(false); setError(null); setCurrentTime(0); setDuration(0); setPlaying(false); setIsEnded(false);
     failFired.current = false;
     resumedRef.current = false;
+    autoFsTriggered.current = false;
     if (failTimer.current) { clearTimeout(failTimer.current); failTimer.current = null; }
 
     let m3u8 = src;
@@ -620,7 +633,14 @@ export default function RiftPlayer({
 
   useEffect(() => {
     const v = videoRef.current; if (!v) return;
-    const onPlay  = () => setPlaying(true);
+    const onPlay  = () => {
+      setPlaying(true);
+      if (!autoFsTriggered.current && !document.fullscreenElement) {
+        autoFsTriggered.current = true;
+        containerRef.current?.requestFullscreen?.().catch(() => {});
+        try { (screen.orientation as any).lock("landscape"); } catch {}
+      }
+    };
     const onPause = () => setPlaying(false);
     const onTime  = () => {
       setCurrentTime(v.currentTime);
@@ -1662,6 +1682,15 @@ export default function RiftPlayer({
                       </AnimatePresence>
                     </div>
 
+                    {/* Mute — نقلناه لليسار بجانب السرعة */}
+                    <button onClick={toggleMute}
+                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
+                      style={{ background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.14)" }}>
+                      {muted || volume === 0
+                        ? <VolumeX className="w-[16px] h-[16px] text-white/55" />
+                        : <Volume2 className="w-[16px] h-[16px] text-white/55" />}
+                    </button>
+
                   </div>
 
                   {/* Center: +10ث · play/pause · -10ث  (RTL: تقدم على اليسار، رجوع على اليمين) */}
@@ -1692,7 +1721,7 @@ export default function RiftPlayer({
                     </button>
                   </div>
 
-                  {/* Right: view-mode · volume · lock */}
+                  {/* Right: view-mode · lock */}
                   <div className="flex items-center gap-2 flex-1 justify-end">
 
                     {/* ── View Mode Button ── */}
@@ -1711,13 +1740,6 @@ export default function RiftPlayer({
                         : <Maximize2  className="w-[16px] h-[16px] text-white/65" />}
                     </button>
 
-                    <button onClick={toggleMute}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
-                      style={{ background: "rgba(20,20,40,0.65)", border: "1px solid rgba(255,255,255,0.14)" }}>
-                      {muted || volume === 0
-                        ? <VolumeX className="w-[16px] h-[16px] text-white/55" />
-                        : <Volume2 className="w-[16px] h-[16px] text-white/55" />}
-                    </button>
                     <button onClick={() => { setIsLocked(true); setShowUnlockBtn(false); }}
                       className="w-9 h-9 flex items-center justify-center rounded-xl active:scale-90 transition-all duration-150"
                       style={{ background: "rgba(251,191,36,0.11)", border: "1px solid rgba(251,191,36,0.26)" }}>
