@@ -75,7 +75,7 @@ interface SubSettings {
   bold: boolean;
   position: "top" | "center" | "bottom";  // subtitle placement
 }
-const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 24, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
 function loadSubSettings(): SubSettings {
   try {
     const raw = localStorage.getItem("sub-settings-v1");
@@ -3062,7 +3062,16 @@ export default function WatchPage() {
     }
     if (allSrcs.length > 0) {
       autoPlayedRef.current = true;
-      allSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+      /* أولوية التشغيل التلقائي: AF → AW → KW → PH → باقي المصادر */
+      const SITE_AUTO_PRI: Record<string, number> = {
+        animeify: 4, animewitcher: 3, kawaii: 2, animephoenix: 1,
+      };
+      allSrcs.sort((a, b) => {
+        const pa = SITE_AUTO_PRI[a.site || ""] ?? 0;
+        const pb = SITE_AUTO_PRI[b.site || ""] ?? 0;
+        if (pa !== pb) return pb - pa;
+        return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
+      });
       const firstSrc   = allSrcs[0];
       const clickedUrl = firstSrc.directUrl || firstSrc.url;
       const clickedTier = getSrcQualityTier(firstSrc);
