@@ -7965,6 +7965,49 @@ router.get("/anime/ep-title", async (req, res) => {
   } catch { res.json({ title: "" }); }
 });
 
+// ════════════════════════════════════════════════════════════════════
+//  AniZip — GET /api/anime/anizip?anilistId=&ep=
+//  يجلب بيانات الحلقة من api.anizip.moe ويعيد intro/outro skip times
+// ════════════════════════════════════════════════════════════════════
+const anizipCache = new Map<string, { data: any; ts: number }>();
+const ANIZIP_TTL  = 6 * 3_600_000;
+
+router.get("/anime/anizip", async (req, res) => {
+  const anilistId = parseInt(String(req.query.anilistId || "0"), 10);
+  const ep        = parseInt(String(req.query.ep        || "1"), 10);
+  if (!anilistId || isNaN(ep)) { res.json({ found: false }); return; }
+
+  const ck = `anizip:${anilistId}`;
+  const cached = anizipCache.get(ck);
+  let mapping: any = null;
+
+  if (cached && Date.now() - cached.ts < ANIZIP_TTL) {
+    mapping = cached.data;
+  } else {
+    try {
+      const r = await fetch(
+        `https://api.anizip.moe/mappings?anilist_id=${anilistId}`,
+        { headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" }, signal: AbortSignal.timeout(8_000) }
+      );
+      if (!r.ok) { res.json({ found: false }); return; }
+      mapping = await r.json();
+      anizipCache.set(ck, { data: mapping, ts: Date.now() });
+    } catch { res.json({ found: false }); return; }
+  }
+
+  const episodes: Record<string, any> = mapping?.episodes ?? {};
+  const epData = episodes[String(ep)];
+  if (!epData) { res.json({ found: false }); return; }
+
+  const intro  = epData.intro  ? { start: Number(epData.intro.start),  end: Number(epData.intro.end)  } : null;
+  const outro  = epData.outro  ? { start: Number(epData.outro.start),  end: Number(epData.outro.end)  } : null;
+  const title  = epData.title?.["en"] || epData.title?.["x-jat"] || epData.title?.["ja"] || null;
+  const image  = epData.image || null;
+  const length = epData.length || null;
+
+  res.json({ found: true, ep, intro, outro, title, image, length });
+});
+
 router.get("/anime/aniskip", async (req, res) => {
   const malId = String(req.query.malId || "");
   const ep    = String(req.query.ep    || "");
