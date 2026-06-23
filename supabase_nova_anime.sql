@@ -112,6 +112,13 @@ CREATE TABLE IF NOT EXISTS source_cache (
 CREATE INDEX IF NOT EXISTS idx_source_cache_expires ON source_cache(expires_at);
 CREATE INDEX IF NOT EXISTS idx_source_cache_site    ON source_cache(site);
 
+CREATE TABLE IF NOT EXISTS subtitle_cache (
+  cache_key  TEXT PRIMARY KEY,
+  cues       JSONB NOT NULL DEFAULT '[]',
+  fetched_at BIGINT NOT NULL,
+  expires_at BIGINT NOT NULL
+);
+
 -- تعطيل RLS لكل الجداول (الوصول عبر service_role key فقط)
 ALTER TABLE users          DISABLE ROW LEVEL SECURITY;
 ALTER TABLE comments       DISABLE ROW LEVEL SECURITY;
@@ -120,4 +127,5 @@ ALTER TABLE watch_history  DISABLE ROW LEVEL SECURITY;
 ALTER TABLE favorites      DISABLE ROW LEVEL SECURITY;
 ALTER TABLE watch_progress         DISABLE ROW LEVEL SECURITY;
 ALTER TABLE source_cache           DISABLE ROW LEVEL SECURITY;
+ALTER TABLE subtitle_cache         DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_verifications  DISABLE ROW LEVEL SECURITY;
