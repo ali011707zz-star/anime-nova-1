@@ -91,7 +91,17 @@ CREATE TABLE IF NOT EXISTS watch_progress (
   UNIQUE(user_id, anime_id, episode_number, season_number)
 );
 
--- 7. جدول كاش المصادر
+-- 7. جدول رموز التحقق المعلقة
+CREATE TABLE IF NOT EXISTS pending_verifications (
+  email       TEXT PRIMARY KEY,
+  code        TEXT NOT NULL,
+  type        TEXT NOT NULL DEFAULT 'signup',
+  expires_at  TIMESTAMPTZ NOT NULL,
+  attempts    INT NOT NULL DEFAULT 0,
+  sent_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 8. جدول كاش المصادر
 CREATE TABLE IF NOT EXISTS source_cache (
   cache_key  TEXT PRIMARY KEY,
   site       TEXT NOT NULL,
@@ -108,5 +118,6 @@ ALTER TABLE comments       DISABLE ROW LEVEL SECURITY;
 ALTER TABLE comment_likes  DISABLE ROW LEVEL SECURITY;
 ALTER TABLE watch_history  DISABLE ROW LEVEL SECURITY;
 ALTER TABLE favorites      DISABLE ROW LEVEL SECURITY;
-ALTER TABLE watch_progress DISABLE ROW LEVEL SECURITY;
-ALTER TABLE source_cache   DISABLE ROW LEVEL SECURITY;
+ALTER TABLE watch_progress         DISABLE ROW LEVEL SECURITY;
+ALTER TABLE source_cache           DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pending_verifications  DISABLE ROW LEVEL SECURITY;
