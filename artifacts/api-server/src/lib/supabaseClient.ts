@@ -23,10 +23,18 @@ function getPool(): InstanceType<typeof Pool> {
         ? false
         : { rejectUnauthorized: false },
       max: 10,
-      idleTimeoutMillis: 30_000,
+      idleTimeoutMillis: 60_000,
+      connectionTimeoutMillis: 10_000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
     });
     _pool.on("error", (err) => {
       console.error("[db] Pool error:", err.message);
+      // Reset pool on fatal errors so it reconnects on next request
+      if ((err as any).code === "ECONNRESET" || (err as any).code === "ETIMEDOUT") {
+        console.warn("[db] Resetting pool after connection error...");
+        _pool = null;
+      }
     });
     console.log("[db] ✅ PostgreSQL direct connection ready");
   }
