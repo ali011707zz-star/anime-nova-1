@@ -3,8 +3,8 @@ modules = ["python-3.11", "web", "postgresql-16", "nodejs-22"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
-build = ["sh", "-c", "pnpm install && pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/anime-scraper run build"]
+run = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
+build = ["sh", "-c", "pnpm install && pnpm --filter @workspace/anime-scraper run build && pnpm --filter @workspace/api-server run build"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
