@@ -133,6 +133,8 @@ interface FetchedSrc {
   corsOk?: boolean;     // CDN يدعم CORS * → تشغيل مباشر بدون proxy
   subtitleUrl?: string;
   hasBuiltinSub?: boolean;
+  skipIntro?: { start: number; end: number };
+  skipOutro?: { start: number; end: number };
 }
 
 /* ── All known scrapers — shown immediately in picker ── */
@@ -162,6 +164,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
+  { site: "reanime",      name: "Reanime",        desc: "ياباني مترجم · FlixCloud", tag: "RE" },
   // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────
   { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS · صوت ياباني",  tag: "SC" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
@@ -2889,6 +2892,20 @@ export default function WatchPage() {
               })
               .catch(() => {});
           }
+
+          // AniZip — بيانات الحلقات من anizip.moe (تُكمل ما فات aniskip/baha)
+          fetch(`/api/anime/anizip?anilistId=${animeId}&ep=${ep}`, {
+            signal: AbortSignal.timeout(10000),
+          })
+            .then(r => r.ok ? r.json() : null)
+            .then((data: any) => {
+              if (!data?.found) return;
+              const st: SkipTimes = {};
+              if (data.intro) st.op = data.intro;
+              if (data.outro) st.ed = data.outro;
+              if (st.op || st.ed) mergeSkip(st);
+            })
+            .catch(() => {});
         }
       })
       .catch(() => {});
@@ -3029,6 +3046,15 @@ export default function WatchPage() {
         accumulated[site].push(src);
         setSlotSources(prev => ({ ...prev, [site]: accumulated[site] }));
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+        // ── ربط skipIntro/skipOutro من المصدر مع skipTimes ──
+        if (src.skipIntro || src.skipOutro) {
+          setSkipTimes(prev => {
+            const next: SkipTimes = { ...prev };
+            if (!prev.op && src.skipIntro) next.op = src.skipIntro;
+            if (!prev.ed && src.skipOutro) next.ed = src.skipOutro;
+            return next;
+          });
+        }
       } catch {}
     };
 
