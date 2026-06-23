@@ -101,11 +101,11 @@ function AnimPosterImg({ uri, type }: { uri: string; type: string }) {
     );
   }
   return (
-    <Image source={{ uri }} style={w2.loadPosterImg} resizeMode="cover" onError={() => setErr(true)} />
+    <Image source={{ uri }} style={w2.loadPosterImg} resizeMode="contain" onError={() => setErr(true)} />
   );
 }
 const w2 = StyleSheet.create({
-  loadPosterImg: { width: 176, height: 248, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
+  loadPosterImg: { width: 176, height: 264, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
 });
 
 /* ── Spinning loader ── */
@@ -512,18 +512,25 @@ export default function AnimationWatchScreen() {
 
           {/* Poster with radial glow */}
           <View style={w.loadPosterWrap}>
-            {/* Outer circular glow */}
+            {/* Outer ellipse — matches web radial-gradient ellipse */}
             <View style={{
-              position: "absolute", width: 260, height: 260, borderRadius: 130,
-              backgroundColor: "rgba(109,40,217,0.18)",
-              shadowColor: "#7C3AED", shadowOpacity: 0.75, shadowRadius: 60,
+              position: "absolute", width: 260, height: 320, borderRadius: 130,
+              backgroundColor: "rgba(109,40,217,0.08)",
+              shadowColor: "#7C3AED", shadowOpacity: 0.85, shadowRadius: 72,
               shadowOffset: { width: 0, height: 0 },
             }} />
-            {/* Inner glow */}
+            {/* Mid ellipse */}
             <View style={{
-              position: "absolute", width: 180, height: 180, borderRadius: 90,
-              backgroundColor: "rgba(139,92,246,0.22)",
-              shadowColor: "#8B5CF6", shadowOpacity: 0.60, shadowRadius: 40,
+              position: "absolute", width: 210, height: 270, borderRadius: 105,
+              backgroundColor: "rgba(124,58,237,0.13)",
+              shadowColor: "#8B5CF6", shadowOpacity: 0.55, shadowRadius: 44,
+              shadowOffset: { width: 0, height: 0 },
+            }} />
+            {/* Inner ellipse */}
+            <View style={{
+              position: "absolute", width: 180, height: 220, borderRadius: 90,
+              backgroundColor: "rgba(139,92,246,0.18)",
+              shadowColor: "#a78bfa", shadowOpacity: 0.45, shadowRadius: 28,
               shadowOffset: { width: 0, height: 0 },
             }} />
             {posterUrl ? (
@@ -551,7 +558,7 @@ export default function AnimationWatchScreen() {
           {/* Spinner */}
           <View style={{ alignItems: "center", gap: 10 }}>
             <SpinRing />
-            <Text style={w.loadHintNew}>⏳ جاري البحث في المصادر…</Text>
+            <Text style={w.loadHintNew}>⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</Text>
           </View>
         </View>
       </View>
@@ -811,13 +818,13 @@ const w = StyleSheet.create({
   loadTopTitle: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.88)" },
   loadTopSub: { fontSize: 10, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular" },
   loadCard: { flex: 1, alignItems: "center", justifyContent: "center", gap: 22, paddingHorizontal: 28, paddingBottom: 40 },
-  loadPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 248 },
-  loadPosterImg: { width: 176, height: 248, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
+  loadPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 264, overflow: "visible" },
+  loadPosterImg: { width: 176, height: 264, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
   loadPosterPlaceholder: { backgroundColor: "rgba(18,10,40,0.95)", alignItems: "center", justifyContent: "center" },
   loadCardTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 24 },
   loadEpBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 14, paddingVertical: 6 },
   loadEpBadgeText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
-  loadHintNew: { fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+  loadHintNew: { fontSize: 13, color: "rgba(255,255,255,0.75)", fontFamily: "Cairo_700Bold", textAlign: "center", lineHeight: 22, paddingHorizontal: 16 },
   loadPrayerText: { fontSize: 13, color: "rgba(255,255,255,0.85)", fontFamily: "Cairo_800ExtraBold", textAlign: "center" },
   topBackBtn: { position: "absolute", left: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
   commentsBtn: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },

@@ -159,14 +159,28 @@ function SpinRing() {
   );
 }
 
-/* ── Poster glow — multi-ring radial style (cross-platform) ── */
+/* ── Poster glow — elliptical radial style matching web (cross-platform) ── */
 function PosterGlow() {
   return (
     <>
-      <View style={{ position: "absolute", width: 310, height: 310, borderRadius: 155, backgroundColor: "rgba(88,28,220,0.09)" }} />
-      <View style={{ position: "absolute", width: 260, height: 260, borderRadius: 130, backgroundColor: "rgba(109,40,217,0.15)" }} />
-      <View style={{ position: "absolute", width: 210, height: 210, borderRadius: 105, backgroundColor: "rgba(124,58,237,0.20)" }} />
-      <View style={{ position: "absolute", width: 190, height: 190, borderRadius: 95,  backgroundColor: "rgba(139,92,246,0.14)" }} />
+      {/* Outer ellipse — matches web radial-gradient ellipse 68% stop */}
+      <View style={{
+        position: "absolute", width: 260, height: 320, borderRadius: 130,
+        backgroundColor: "rgba(109,40,217,0.08)",
+        shadowColor: "#7C3AED", shadowOpacity: 0.85, shadowRadius: 72, shadowOffset: { width: 0, height: 0 },
+      }} />
+      {/* Mid ellipse */}
+      <View style={{
+        position: "absolute", width: 210, height: 270, borderRadius: 105,
+        backgroundColor: "rgba(124,58,237,0.13)",
+        shadowColor: "#8B5CF6", shadowOpacity: 0.55, shadowRadius: 44, shadowOffset: { width: 0, height: 0 },
+      }} />
+      {/* Inner ellipse — closest to web 22% opacity center */}
+      <View style={{
+        position: "absolute", width: 180, height: 220, borderRadius: 90,
+        backgroundColor: "rgba(139,92,246,0.18)",
+        shadowColor: "#a78bfa", shadowOpacity: 0.45, shadowRadius: 28, shadowOffset: { width: 0, height: 0 },
+      }} />
     </>
   );
 }
@@ -208,7 +222,7 @@ function LoadingScreen({ cover, title, ep, onBack, foundCount }: { cover?: strin
             <Image
               source={{ uri: cover }}
               style={[d.ldPoster, { position: "absolute" }]}
-              resizeMode="cover"
+              resizeMode="contain"
               onError={() => setImgErr(true)}
             />
           ) : null}
@@ -231,7 +245,7 @@ function LoadingScreen({ cover, title, ep, onBack, foundCount }: { cover?: strin
               </Text>
             </View>
           ) : (
-            <Text style={d.ldHint}>⏳ جاري تجهيز الحلقة…</Text>
+            <Text style={d.ldHint}>⏳ جاري تجهيز الحلقة، قد يستغرق ذلك بضع ثوانٍ. شكراً لصبرك.</Text>
           )}
         </View>
       </View>
@@ -881,15 +895,15 @@ const d = StyleSheet.create({
   ldBackBtn: { position: "absolute", right: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", zIndex: 10 },
   ldContent: { flex: 1, alignItems: "center", justifyContent: "center", gap: 20, paddingHorizontal: 24 },
   ldPrayer: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.85)", textAlign: "center" },
-  ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 248, overflow: "visible" },
-  ldPoster: { width: 176, height: 248, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
+  ldPosterWrap: { position: "relative", alignItems: "center", justifyContent: "center", width: 176, height: 264, overflow: "visible" },
+  ldPoster: { width: 176, height: 264, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", shadowColor: "#000", shadowOpacity: 0.90, shadowRadius: 36, shadowOffset: { width: 0, height: 16 }, elevation: 20 },
   ldPosterFallback: { backgroundColor: "rgba(18,10,40,0.95)", alignItems: "center", justifyContent: "center" },
   ldFoundBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(34,197,94,0.25)" },
   ldFoundText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(134,239,172,0.9)" },
   ldTitle: { fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#fff", textAlign: "center", lineHeight: 26 },
   ldEpBadge: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: "rgba(124,58,237,0.22)", borderWidth: 1, borderColor: "rgba(139,92,246,0.3)" },
   ldEpText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.9)" },
-  ldHint: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)", textAlign: "center", lineHeight: 22, paddingHorizontal: 8 },
+  ldHint: { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)", textAlign: "center", lineHeight: 22, paddingHorizontal: 16 },
 
   /* Native player overlays */
   playerTopGrad: { position: "absolute", top: 0, left: 0, right: 0, paddingBottom: 48, zIndex: 10 },
