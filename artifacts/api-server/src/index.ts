@@ -33,12 +33,23 @@ app.listen(port, host, (err) => {
   // فحص SMTP فور بدء الخادم
   initEmailService().catch(() => {});
 
-  // تسجيل Telegram webhook
-  const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(",")[0];
-  if (domain) {
-    registerTelegramWebhook(domain).catch(() => {});
-  }
+  // تسجيل Telegram webhook + scheduler
+  // TELEGRAM_SCHEDULER_ENABLED=false → يُعطَّل على هذا الخادم (يعمل من خادم خارجي مثل Orkestr)
+  const schedulerEnabled = process.env.TELEGRAM_SCHEDULER_ENABLED !== "false";
 
-  // تشغيل scheduler الحلقات الجديدة
-  startEpisodeScheduler();
+  if (schedulerEnabled) {
+    const domain =
+      process.env.APP_DOMAIN ||
+      process.env.REPLIT_DEV_DOMAIN ||
+      process.env.REPLIT_DOMAINS?.split(",")[0] ||
+      null;
+    if (domain) {
+      registerTelegramWebhook(domain).catch(() => {});
+    } else {
+      console.warn("[telegram] ⚠️ لم يُعثر على domain — webhook لن يُسجَّل تلقائياً");
+    }
+    startEpisodeScheduler();
+  } else {
+    console.log("[telegram] ℹ️ TELEGRAM_SCHEDULER_ENABLED=false — الـ scheduler معطَّل على هذا الخادم");
+  }
 });
