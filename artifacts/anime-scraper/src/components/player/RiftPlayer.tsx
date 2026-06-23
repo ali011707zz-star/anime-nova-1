@@ -2298,17 +2298,13 @@ export default function RiftPlayer({
                   margin: i === 0 ? 0 : "2px 0 0",
                   wordBreak: "break-word",
                   overflowWrap: "break-word",
-                  /* Vidstack-style: crisp text-stroke outline instead of blurry shadow */
-                  WebkitTextStroke: "1px rgba(0,0,0,0.85)",
+                  /* ظل ناعم أنيق — بدون دوائر سوداء حول الحروف */
+                  WebkitTextStroke: "0px transparent",
                   textShadow: subSettings.bgOpacity === 0 ? [
-                    "-1px -1px 0 rgba(0,0,0,0.80)",
-                    "1px  -1px 0 rgba(0,0,0,0.80)",
-                    "1px   1px 0 rgba(0,0,0,0.80)",
-                    "-1px  1px 0 rgba(0,0,0,0.80)",
-                    "0px   0px 8px rgba(0,0,0,0.70)",
-                    "0px   3px 14px rgba(0,0,0,0.55)",
+                    "0px 1px 4px rgba(0,0,0,0.98)",
+                    "0px 2px 10px rgba(0,0,0,0.92)",
+                    "0px 0px 22px rgba(0,0,0,0.75)",
                   ].join(", ") : "none",
-                  paintOrder: "stroke fill" as any,
                 }}
               >
                 {line || "\u00A0"}
