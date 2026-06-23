@@ -283,6 +283,51 @@ async function denoProxyGet(
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  Orkestr external relay — يجلب المواقع المحجوبة من Replit
+//  يستخدم anime-nova.orkestr.run (IP أوروبي) كـ relay عبر proxy-text
+// ════════════════════════════════════════════════════════════════════
+const ORKESTR_BASE = "https://anime-nova.orkestr.run";
+let _orkestAlive: boolean | null = null;
+let _orkestCheckedAt = 0;
+const ORKESTR_HEALTH_TTL = 90_000; // 90ث
+
+async function orkestGet(
+  url: string,
+  referer?: string,
+  timeoutMs = 25000,
+): Promise<string | null> {
+  // Health check مُؤقَّت
+  const now = Date.now();
+  if (_orkestAlive === null || now - _orkestCheckedAt > ORKESTR_HEALTH_TTL) {
+    try {
+      const h = await fetch(
+        `${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`,
+        { signal: AbortSignal.timeout(12_000) },
+      );
+      _orkestAlive = h.ok;
+    } catch { _orkestAlive = false; }
+    _orkestCheckedAt = Date.now();
+  }
+  if (!_orkestAlive) return null;
+
+  try {
+    const ep = new URL(`${ORKESTR_BASE}/api/anime/proxy-text`);
+    ep.searchParams.set("url", url);
+    if (referer) ep.searchParams.set("ref", referer);
+    const r = await fetch(ep.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) return null;
+    const text = await r.text();
+    return text.length > 50 ? text : null;
+  } catch { return null; }
+}
+
+// Wake-up ping عند إقلاع السيرفر (غير مُعيق — يستيقظ الخادم الخارجي مسبقاً)
+fetch(`${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`, {
+  signal: AbortSignal.timeout(15_000),
+}).then(r => { _orkestAlive = r.ok; _orkestCheckedAt = Date.now(); })
+  .catch(() => { _orkestAlive = false; _orkestCheckedAt = Date.now(); });
+
+// ════════════════════════════════════════════════════════════════════
 //  UTILITIES
 // ════════════════════════════════════════════════════════════════════
 
@@ -4804,10 +4849,8 @@ const aninekoSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const ANINEKO_SLUG_TTL = 12 * 3_600_000;
 
 async function searchAnineko(query: string): Promise<Array<{ slug: string; title: string }>> {
-  const html = await fetch(`${ANINEKO_BASE}/browser?keyword=${encodeURIComponent(query)}`, {
-    headers: { ...BASE_HDRS, Referer: `${ANINEKO_BASE}/` },
-    signal: AbortSignal.timeout(10000),
-  }).then(r => r.ok ? r.text() : "").catch(() => "");
+  const searchUrl = `${ANINEKO_BASE}/browser?keyword=${encodeURIComponent(query)}`;
+  const html = await orkestGet(searchUrl, `${ANINEKO_BASE}/`, 20000) ?? "";
 
   const results: Array<{ slug: string; title: string }> = [];
   for (const m of html.matchAll(/<a\b[^>]*class=["'][^"']*nv-anime-thumb[^"']*["'][^>]*>[\s\S]*?<\/a>/gi)) {
@@ -4852,10 +4895,7 @@ async function findAninekoSlug(title: string, english: string | null): Promise<s
 }
 
 async function extractAninekoHls(embedUrl: string, seriesSlug: string): Promise<string | null> {
-  const html = await fetch(embedUrl, {
-    headers: { ...BASE_HDRS, Referer: `${ANINEKO_BASE}/watch/${seriesSlug}` },
-    signal: AbortSignal.timeout(10000),
-  }).then(r => r.ok ? r.text() : "").catch(() => "");
+  const html = await orkestGet(embedUrl, `${ANINEKO_BASE}/watch/${seriesSlug}`, 18000) ?? "";
 
   const patterns = [
     /const\s+src\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
@@ -4870,7 +4910,7 @@ async function extractAninekoHls(embedUrl: string, seriesSlug: string): Promise<
   return null;
 }
 
-const ANINEKO_DISABLED = true; // anineko.to returns HTTP 403 on all pages from datacenter IPs
+const ANINEKO_DISABLED = false; // مُعاد تفعيله عبر Orkestr external relay (IP أوروبي)
 
 async function getAninekoSources(
   title: string, english: string | null, ep: number,
@@ -4880,11 +4920,8 @@ async function getAninekoSources(
     const slug = await findAninekoSlug(title, english);
     if (!slug) return [];
 
-    // صفحة الحلقة
-    const epHtml = await fetch(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, {
-      headers: { ...BASE_HDRS, Referer: `${ANINEKO_BASE}/watch/${slug}` },
-      signal: AbortSignal.timeout(12000),
-    }).then(r => r.ok ? r.text() : "").catch(() => "");
+    // صفحة الحلقة — عبر Orkestr relay (IP أوروبي لتجاوز حجب Replit)
+    const epHtml = await orkestGet(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, `${ANINEKO_BASE}/watch/${slug}`, 20000) ?? "";
     if (!epHtml) return [];
 
     // استهدف الـ panel الخاص بـ sub مباشرة (class lang-group + data-id="sub")
