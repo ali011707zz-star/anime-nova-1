@@ -1,17 +1,29 @@
 #!/bin/bash
-APP_PORT="${PORT:-5000}"
-CF_PORT=18001
-echo "[start] Starting CF Proxy on internal port $CF_PORT..."
-python3 scripts/cf_proxy.py &
-CF_PID=$!
+  APP_PORT="${PORT:-5000}"
 
-sleep 2
+  echo "[start] Starting API Server on port $APP_PORT..."
+  PORT="$APP_PORT" CF_PROXY_PORT=8000 node --enable-source-maps artifacts/api-server/dist/index.mjs &
+  NODE_PID=$!
 
-if kill -0 "$CF_PID" 2>/dev/null; then
-  echo "[start] CF Proxy running (PID $CF_PID)"
-else
-  echo "[start] CF Proxy failed — scraping continues without it"
-fi
+  echo "[start] Waiting for Node.js to bind to port $APP_PORT..."
+  for i in $(seq 1 30); do
+    if (echo >/dev/tcp/127.0.0.1/$APP_PORT) 2>/dev/null; then
+      echo "[start] Node.js ready after ${i}s"
+      break
+    fi
+    sleep 1
+  done
 
-echo "[start] Starting API Server on port $APP_PORT..."
-exec PORT="$APP_PORT" node --enable-source-maps artifacts/api-server/dist/index.mjs
+  echo "[start] Starting CF Proxy on internal port 8000..."
+  CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py &
+  CF_PID=$!
+
+  sleep 1
+  if kill -0 "$CF_PID" 2>/dev/null; then
+    echo "[start] CF Proxy running (PID $CF_PID)"
+  else
+    echo "[start] CF Proxy failed — scraping continues without it"
+  fi
+
+  wait $NODE_PID
+  
