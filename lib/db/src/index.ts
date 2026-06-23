@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 
   const { Pool } = pg;
 
+<<<<<<< HEAD
   let pool: pg.Pool;
   let db: ReturnType<typeof drizzle<typeof schema>>;
 
@@ -19,3 +20,19 @@ import { drizzle } from "drizzle-orm/node-postgres";
   export { pool, db };
   export * from "./schema";
   
+=======
+let pool: pg.Pool;
+let db: ReturnType<typeof drizzle<typeof schema>>;
+
+if (!process.env.DATABASE_URL) {
+  console.warn("[db] ⚠️ DATABASE_URL not set — database disabled (auth/sessions unavailable)");
+  pool = null as any;
+  db = null as any;
+} else {
+  pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  db = drizzle(pool, { schema });
+}
+
+export { pool, db };
+export * from "./schema";
+>>>>>>> e91275c (Update startup sequence to ensure API server is ready before proxy)
