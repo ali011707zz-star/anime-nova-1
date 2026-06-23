@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 
-const EMAIL_USER = process.env.EMAIL_USER || "";
-const EMAIL_PASS = process.env.EMAIL_PASS || "";
+const EMAIL_USER = process.env.SMTP_USER || process.env.EMAIL_USER || "";
+const EMAIL_PASS = process.env.SMTP_PASS || process.env.EMAIL_PASS || "";
 
 function createGmailTransport() {
   if (!EMAIL_USER || !EMAIL_PASS) return null;
