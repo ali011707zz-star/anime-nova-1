@@ -365,26 +365,69 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     const controller = new AbortController();
     setKawaiiSkip(null);
-    fetch(
-      `${base}/api/anime/kawaii-meta?anilistId=${anilistId}&ep=${ep}`,
-      { signal: controller.signal }
-    )
-      .then(r => r.ok ? r.json() : null)
-      .then((data: any) => {
-        if (!data) return;
-        // Arabic subtitle fallback for all sources
-        const subUrl: string | undefined = data.arabicSubUrl
-          ? resolveUrl(data.arabicSubUrl, base)
-          : (data.englishSubUrl
-              ? `${base}/api/anime/translate-vtt?url=${encodeURIComponent(data.englishSubUrl)}&from=en&to=ar`
-              : undefined);
-        if (subUrl) setGlobalSubUrl(subUrl);
-        // Skip times for all sources
-        if (data.intro || data.outro) {
-          setKawaiiSkip({ intro: data.intro || undefined, outro: data.outro || undefined });
+    setGlobalSubUrl(undefined);
+
+    (async () => {
+      try {
+        // ── 1. kawaii-meta: Arabic subtitle + skip times ──
+        const kawaiiRes = await fetch(
+          `${base}/api/anime/kawaii-meta?anilistId=${anilistId}&ep=${ep}`,
+          { signal: controller.signal }
+        );
+        const data: any = kawaiiRes.ok ? await kawaiiRes.json() : null;
+
+        if (data) {
+          const subUrl: string | undefined = data.arabicSubUrl
+            ? resolveUrl(data.arabicSubUrl, base)
+            : (data.englishSubUrl
+                ? `${base}/api/anime/translate-vtt?url=${encodeURIComponent(data.englishSubUrl)}&from=en&to=ar`
+                : undefined);
+          if (subUrl) setGlobalSubUrl(subUrl);
+          if (data.intro || data.outro) {
+            setKawaiiSkip({ intro: data.intro || undefined, outro: data.outro || undefined });
+          }
+          // إذا وجدنا ترجمة من kawaii → لا داعي للبحث في مصادر أخرى
+          if (subUrl) return;
         }
-      })
-      .catch(() => {});
+
+        // ── 2. Fallback: subtitle-tracks (wyzie.ru + SubDL + HiAnime) ──
+        if (controller.signal.aborted) return;
+        const params = new URLSearchParams({
+          anilistId: String(anilistId),
+          ep: String(ep),
+          title: titleStr,
+          english: englishStr,
+        });
+        const tracksRes = await fetch(
+          `${base}/api/anime/subtitle-tracks?${params}`,
+          { signal: controller.signal }
+        );
+        if (!tracksRes.ok) return;
+        const tracksData: any = await tracksRes.json();
+        const tracks: any[] = tracksData?.tracks || [];
+
+        // ترتيب الأولوية: عربي أصلي → مترجم من إنجليزي → إنجليزي فقط
+        const arTrack = tracks.find((t: any) =>
+          t.lang === "ar" || t.label?.includes("عرب") || t.label?.toLowerCase().includes("arabic")
+        );
+        const enTrack = tracks.find((t: any) =>
+          t.lang === "en" || t.label?.toLowerCase().includes("english")
+        );
+
+        if (arTrack?.url) {
+          setGlobalSubUrl(resolveUrl(arTrack.url, base));
+        } else if (enTrack?.url) {
+          // ترجمة إنجليزي → عربي تلقائياً
+          const proxyUrl = `${base}/api/anime/proxy-text?url=${encodeURIComponent(enTrack.url)}`;
+          setGlobalSubUrl(
+            `${base}/api/anime/translate-vtt?url=${encodeURIComponent(proxyUrl)}&from=en&to=ar`
+          );
+        }
+      } catch (e: any) {
+        if (e?.name !== "AbortError") { /* silent */ }
+      }
+    })();
+
     return () => controller.abort();
   }, [anime, ep]); // eslint-disable-line
 
@@ -683,6 +726,10 @@ export default function WatchScreen() {
   let globalIdx = 0;
 
   function handlePlaySrc(src: Src) {
+    /* ── حفظ المصدر المختار في الكاش حتى يُستخدم في المرة القادمة ── */
+    if (srcCacheKey) {
+      AsyncStorage.setItem(srcCacheKey, JSON.stringify({ src, ts: Date.now() })).catch(() => {});
+    }
     setPlayingSrc(src);
     const url = src.directUrl || src.url || "";
     if (src.isEmbed || (!src.directUrl && !url.match(/\.(m3u8|mp4|mkv|webm)/i) && url.startsWith("https://"))) {
