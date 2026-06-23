@@ -2226,7 +2226,7 @@ export default function RiftPlayer({
                             <button
                               onPointerDown={e => {
                                 e.stopPropagation();
-                                onSubSettingsChange({ fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" });
+                                onSubSettingsChange({ fontSize: 16, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" });
                               }}
                               className="w-full py-2.5 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95"
                               style={{

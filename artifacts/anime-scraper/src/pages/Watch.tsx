@@ -75,7 +75,7 @@ interface SubSettings {
   bold: boolean;
   position: "top" | "center" | "bottom";  // subtitle placement
 }
-const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 20, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
+const DEFAULT_SUB_SETTINGS: SubSettings = { fontSize: 16, color: "#ffffff", bgOpacity: 0, bold: true, position: "bottom" };
 function loadSubSettings(): SubSettings {
   try {
     const raw = localStorage.getItem("sub-settings-v1");
@@ -3113,6 +3113,7 @@ export default function WatchPage() {
       // hasBuiltinSub أو مصادر عربية: لا ترجمة خارجية
       const firstSkipSub = firstSrc.hasBuiltinSub || ARABIC_SITES.has(firstSrc.site || "");
       setPlayerSubUrl(firstSkipSub ? undefined : (firstSrc.subtitleUrl || undefined));
+      if (firstSkipSub) setKawaiiSubUrl(undefined);
       setPlayerSrcSite(firstSrc.site || "");
       setPlayerServers(srvMap);
       setQuality(clickedTier);
@@ -3223,6 +3224,8 @@ export default function WatchPage() {
     // hasBuiltinSub أو seepanel أو مصادر عربية: ترجمة مدمجة/غير مطلوبة — لا تُشغّل ترجمة خارجية
     const skipExternalSub = src.hasBuiltinSub || src.site === "seepanel" || ARABIC_SITES.has(src.site || "");
     setPlayerSubUrl(skipExternalSub ? undefined : (src.subtitleUrl || undefined));
+    // مصادر عربية: امسح kawaiiSubUrl أيضاً لمنع تداخل الترجمة
+    if (skipExternalSub) setKawaiiSubUrl(undefined);
     // subtitle state resets automatically when EpisodePlayer remounts with new key
     setPlayerSrcSite(src.site || "");
     setPlayerServers(servers);

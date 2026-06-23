@@ -7156,10 +7156,10 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
-      scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep)),
+      scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep, isMovie)),
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
-      scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep)),
+      scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep),   true, 22000),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
