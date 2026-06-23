@@ -7231,11 +7231,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
     ]);
 
-    // ── تنبيه القناة بالحلقة الجديدة (مرة واحدة لكل حلقة لكل process) ──
-    if (anilistId && !isMovie && globalSeen.size > 0) {
-      notifyNewEpisode(anilistId, english || title, ep).catch(() => {});
-    }
-
   } catch (e: any) {
     console.error("sources-stream error:", e?.message ?? e);
   }
