@@ -200,7 +200,7 @@ async function runSchedulerCycle(): Promise<void> {
   const now  = Math.floor(Date.now() / 1000);
   const from = schedulerLastRun > 0
     ? schedulerLastRun
-    : now - 24 * 3600; // أول مرة: آخر 24 ساعة كاملة (حلقات اليوم)
+    : now - (INTERVAL_MS / 1000) - 60; // أول مرة: نفس فترة الـ interval فقط (30 دقيقة)
 
   schedulerLastRun = now;
   schedulerNextRun = now + INTERVAL_MS / 1000;
