@@ -349,7 +349,7 @@ export default function AnimeDetail() {
           <div className="absolute inset-0 bg-gradient-to-b from-[#09090B]/90 via-[#09090B]/60 to-[#09090B]" />
         </div>
       )}
-      <button onClick={() => { const prev = sessionStorage.getItem("nova-prev-path"); const safe = prev && prev !== window.location.pathname && !prev.startsWith("/episodes/") && !prev.startsWith("/anime/"); navigate(safe ? prev : "/"); }}
+      <button onClick={() => { const prev = sessionStorage.getItem("nova-prev-path"); const safe = prev && prev !== window.location.pathname && !prev.startsWith("/episodes/") && !prev.startsWith("/anime/") && !prev.startsWith("/watch"); navigate(safe ? prev : "/"); }}
         className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
         style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
         <ChevronRight className="w-5 h-5 text-white/60" />
@@ -430,7 +430,7 @@ export default function AnimeDetail() {
         <div className="absolute inset-0" style={{
           background: "linear-gradient(to bottom,rgba(9,9,11,.3) 0%,rgba(9,9,11,.55) 50%,rgba(9,9,11,1) 100%)"
         }} />
-        <button onClick={() => { const prev = sessionStorage.getItem("nova-prev-path"); const safe = prev && prev !== window.location.pathname && !prev.startsWith("/episodes/") && !prev.startsWith("/anime/"); navigate(safe ? prev : "/"); }}
+        <button onClick={() => { const prev = sessionStorage.getItem("nova-prev-path"); const safe = prev && prev !== window.location.pathname && !prev.startsWith("/episodes/") && !prev.startsWith("/anime/") && !prev.startsWith("/watch"); navigate(safe ? prev : "/"); }}
           className="absolute top-5 right-4 w-9 h-9 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/15 z-10 active:scale-90">
           <ChevronRight className="w-4 h-4 text-white" />
         </button>
