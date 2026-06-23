@@ -7297,10 +7297,9 @@ router.get("/anime/fetch-source", async (req, res) => {
 const _arabicCheckCache = new Map<string, { time: number; ok: boolean }>();
 const ARABIC_CACHE_TTL = 12 * 3600 * 1000; // 12h
 
-router.get("/anime/check-arabic", (req, res) => {
-  // We have multiple active Arabic sources (animelek, animedar, seepanel, anime4up, etc.)
-  // Always report all titles as available — actual source availability is determined at stream time
-  // Handle both t=x&t=y and t[]=x&t[]=y patterns (Express 5 may store brackets literally)
+router.get("/anime/check-arabic", async (req, res) => {
+  // فحص حقيقي لتوفر الأنمي في المصادر العربية (animelek.top)
+  // Handle both t=x&t=y and t[]=x&t[]=y patterns
   const q = req.query as Record<string, unknown>;
   const raw = q["t"] ?? q["t[]"];
   const titles: string[] = Array.isArray(raw)
@@ -7308,7 +7307,24 @@ router.get("/anime/check-arabic", (req, res) => {
     : typeof raw === "string" && raw
     ? [raw]
     : [];
-  res.json({ available: titles });
+
+  if (!titles.length) { res.json({ available: [] }); return; }
+
+  // فحص موازي لجميع العناوين مع cache مضمن في searchAnimelek
+  const available: string[] = [];
+  await Promise.allSettled(
+    titles.map(async (title) => {
+      try {
+        const slug = await Promise.race([
+          searchAnimelek(title, null),
+          new Promise<null>(r => setTimeout(() => r(null), 4_000)),
+        ]);
+        if (slug) available.push(title);
+      } catch { /* silent */ }
+    })
+  );
+
+  res.json({ available });
 });
 
 // ════════════════════════════════════════════════════════════════════

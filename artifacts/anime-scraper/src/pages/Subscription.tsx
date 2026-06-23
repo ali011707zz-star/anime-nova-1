@@ -7,8 +7,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
-/* ── Telegram contact ID ── */
-const TG_OWNER_ID = "5477879129";
+/* ── Telegram username ── */
+const TG_USERNAME = "L_X_00";
 
 /* ── Feature list ── */
 const FEATURES = [
@@ -72,7 +72,7 @@ export default function Subscription() {
     }
 
     setTimeout(() => {
-      window.open(`tg://user?id=${TG_OWNER_ID}`, "_blank");
+      window.open(`https://t.me/${TG_USERNAME}`, "_blank");
       setOpening(false);
     }, 400);
   }

@@ -221,6 +221,26 @@ async function runSchedulerCycle(): Promise<void> {
 
     if (await wasNotified(anilistId, ep)) continue;
 
+    // فحص توفر المصادر العربية قبل الإرسال
+    const titleToCheck = media.title?.romaji || media.title?.english || "";
+    if (titleToCheck) {
+      try {
+        const PORT = process.env["PORT"] || "8080";
+        const checkRes = await fetch(
+          `http://localhost:${PORT}/api/anime/check-arabic?t=${encodeURIComponent(titleToCheck)}`,
+          { headers: { "x-internal": "1" }, signal: AbortSignal.timeout(6_000) }
+        );
+        const { available } = await checkRes.json() as { available: string[] };
+        if (!available.length) {
+          console.log(`[scheduler] ⏭ تخطي (لا مصادر عربية): ${titleToCheck} ح${ep}`);
+          continue;
+        }
+      } catch {
+        console.log(`[scheduler] ⏭ تخطي (فشل فحص المصادر): ${titleToCheck} ح${ep}`);
+        continue;
+      }
+    }
+
     const poster  = media.coverImage?.extraLarge || media.coverImage?.large || null;
     const caption = buildCaption(media, ep);
 

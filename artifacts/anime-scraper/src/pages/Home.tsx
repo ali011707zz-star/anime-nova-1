@@ -283,38 +283,36 @@ export default function Home() {
       .then(r => r.json())
       .then(async d => {
         const ECCHI_BLOCKED = new Set(["Ecchi", "Hentai"]);
+        const now = Math.floor(Date.now() / 1000);
+        // فقط الحلقات التي بثّت فعلاً (ليس المستقبلية)
         const arr = (d.data?.Page?.airingSchedules || [])
           .filter((s: any) => {
             if (!s.media?.id || s.media?.isAdult) return false;
+            if (s.airingAt > now) return false; // استثنِ الحلقات المستقبلية
             const genres: string[] = s.media?.genres || [];
             return !genres.some((g: string) => ECCHI_BLOCKED.has(g));
           });
         if (!arr.length) { setTodayEps([]); setTodayChecking(false); return; }
-        // التحقق من توفر المصادر العربية
+        // فحص حقيقي لتوفر المصادر العربية عبر animelek
         const titles = arr.map((s: any) => s.media?.title?.romaji || s.media?.title?.english || "").filter(Boolean);
         try {
           const params = new URLSearchParams();
           titles.forEach((t: string) => params.append("t", t));
-          const checkRes = await fetch(`/api/anime/check-arabic?${params}`, { signal: AbortSignal.timeout(8000) });
+          const checkRes = await fetch(`/api/anime/check-arabic?${params}`, { signal: AbortSignal.timeout(20_000) });
           const { available } = await checkRes.json() as { available: string[] };
           const availSet = new Set(available.map((t: string) => t.toLowerCase().trim()));
+          // صارم: فقط الحلقات المتوفرة في المصادر العربية — بدون fallback
           const filtered = arr.filter((s: any) => {
             const romaji  = (s.media?.title?.romaji  || "").toLowerCase().trim();
             const english = (s.media?.title?.english || "").toLowerCase().trim();
             return availSet.has(romaji) || availSet.has(english);
           });
-          // إذا لم يُرجع التحقق شيئاً — استخدم الأنمي الأكثر شعبية
-          const finalList = filtered.length >= 3 ? filtered
-            : arr.sort((a: any, b: any) => (b.media?.popularity ?? 0) - (a.media?.popularity ?? 0)).slice(0, 15);
-          _cachedTodayEps = finalList;
-          setTodayEps(finalList);
+          _cachedTodayEps = filtered;
+          setTodayEps(filtered);
         } catch {
-          // عند فشل التحقق: أظهر الأنمي بحسب الشعبية (حد أدنى 500)
-          const byPop = arr.filter((s: any) => (s.media?.popularity ?? 0) >= 500);
-          const fallback = byPop.length >= 3 ? byPop
-            : arr.sort((a: any, b: any) => (b.media?.popularity ?? 0) - (a.media?.popularity ?? 0)).slice(0, 15);
-          _cachedTodayEps = fallback;
-          setTodayEps(fallback);
+          // عند فشل الفحص: لا تعرض شيئاً (أفضل من عرض حلقات بدون مصادر عربية)
+          _cachedTodayEps = [];
+          setTodayEps([]);
         }
         setTodayChecking(false);
       })
