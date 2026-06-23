@@ -111,6 +111,7 @@ interface Source {
   subtitleUrl?: string;
   status?: "loading" | "ok" | "fail";
   tier?: QualityTier;
+  isEmbed?: boolean;
   _retriedDirect?: boolean; // true after first retry with raw directUrl
 }
 
@@ -517,7 +518,20 @@ export default function AnimationWatch() {
       es.addEventListener("source", (e) => {
         if (!alive) return;
         const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; subtitleUrl?: string; isEmbed?: boolean };
-        if (src.isEmbed) return;
+
+        // Embed sources (e.g. Mega.nz) — أضفها مباشرة كـ isEmbed بدون proxy wrapping
+        if (src.isEmbed) {
+          const embedKey = src.url;
+          if (seenUrls.current.has(embedKey)) return;
+          seenUrls.current.add(embedKey);
+          const embedSrc: Source = {
+            url: src.url, label: src.label,
+            subtitleUrl: src.subtitleUrl, status: "ok", isEmbed: true,
+          };
+          sourceCountRef.current += 1;
+          setSources(prev => [...prev, embedSrc]);
+          return;
+        }
 
         const key = src.directUrl || src.url;
         if (seenUrls.current.has(key)) return;
@@ -891,6 +905,39 @@ export default function AnimationWatch() {
 
   /* ────────────────────────── PLAYER ─────────────────────────────────────── */
   if (step === "playing" && selSrc) {
+
+    // Embed sources (e.g. Mega.nz) — تشغيل داخل iframe محمي
+    if (selSrc.isEmbed) {
+      return (
+        <div className="fixed inset-0 bg-black overflow-hidden" dir="rtl">
+          <iframe
+            key={selSrc.url}
+            src={selSrc.url}
+            className="absolute inset-0 w-full h-full border-0"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-downloads"
+            allow="fullscreen; autoplay; picture-in-picture"
+            title={displayTitle}
+          />
+          {/* شريط أعلوي للرجوع */}
+          <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 px-4 pointer-events-auto"
+            style={{
+              paddingTop: "max(14px, env(safe-area-inset-top))",
+              paddingBottom: 10,
+              background: "linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 100%)",
+            }}>
+            <button
+              onClick={() => setStep("sources")}
+              className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+              style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.15)" }}>
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+            <p className="text-white text-[13px] font-black font-['Cairo'] truncate">{displayTitle}</p>
+          </div>
+        </div>
+      );
+    }
 
     const { url, isHls } = getSourceInfo(selSrc);
     return (
@@ -1421,6 +1468,7 @@ function getAnimTag(label: string): string {
   if (l.startsWith("starcima"))   return "SC";
   if (l.startsWith("stardima"))   return "SD";
   if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "MG";
+  if (l.includes("ميغا") || l.startsWith("mega"))     return "MG";
   if (l.startsWith("aflaam"))     return "AF";
   if (l.startsWith("arabseed"))   return "AS";
   if (l.startsWith("ezvidapi"))   return "EZ";

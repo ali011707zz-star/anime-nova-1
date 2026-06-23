@@ -2850,11 +2850,16 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           });
           if (!r.ok) return;
           const { sources } = await r.json() as {
-            sources?: Array<{ directUrl?: string; url?: string; name?: string; directType?: string }>;
+            sources?: Array<{ directUrl?: string; url?: string; name?: string; directType?: string; isEmbed?: boolean }>;
           };
           for (const src of sources || []) {
             const u = src.directUrl || src.url;
             if (!u) continue;
+            // Embed sources (e.g. Mega.nz) — لا تُلفّ في proxy، أرسلها كـ isEmbed
+            if (src.isEmbed) {
+              sendSource(u, src.name || "أنمي فاي · ميغا", u, undefined, { isEmbed: true });
+              continue;
+            }
             const proxied = u.startsWith("/api/") ? u
               : src.directType === "hls" ? wrapHls(u, "https://animeify.net/")
               : wrapMp4(u, "https://animeify.net/");
