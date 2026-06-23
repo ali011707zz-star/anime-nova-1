@@ -216,7 +216,14 @@ export default function AnimationWatchScreen() {
       .then((data: any) => {
         const tracks: any[] = data?.tracks || [];
         const arTrack = tracks.find((t: any) => t.lang === "ar" || t.lang === "ar-auto");
-        if (arTrack?.url) setGlobalSubUrl(arTrack.url);
+        if (arTrack?.url) {
+          const b = getBaseUrl();
+          /* Proxy through server to avoid CORS + prevent RiftPlayer from
+             double-wrapping Arabic VTT in translate-vtt (alreadyTranslated check) */
+          setGlobalSubUrl(b
+            ? `${b}/api/anime/proxy-text?url=${encodeURIComponent(arTrack.url)}&ref=https://cache.vdrk.site/`
+            : arTrack.url);
+        }
       })
       .catch(() => {});
     return () => controller.abort();

@@ -200,7 +200,7 @@ async function runSchedulerCycle(): Promise<void> {
   const now  = Math.floor(Date.now() / 1000);
   const from = schedulerLastRun > 0
     ? schedulerLastRun
-    : now - INTERVAL_MS / 1000; // أول مرة: آخر 30 دقيقة
+    : now - 24 * 3600; // أول مرة: آخر 24 ساعة كاملة (حلقات اليوم)
 
   schedulerLastRun = now;
   schedulerNextRun = now + INTERVAL_MS / 1000;
@@ -329,6 +329,7 @@ export async function registerTelegramWebhook(domain: string) {
       commands: [
         { command: "start",   description: "ابدأ هنا" },
         { command: "help",    description: "المساعدة" },
+        { command: "today",   description: "حلقات اليوم 📅" },
         { command: "report",  description: "إبلاغ عن مشكلة" },
         { command: "chatid",  description: "احصل على Chat ID الخاص بك" },
       ]
@@ -372,6 +373,38 @@ async function handleUpdate(update: any) {
       `💡 اقتراحات؟ أرسلها مباشرة!\n` +
       `🔧 مشاكل تقنية؟ اوصف المشكلة وسنتواصل معك`
     );
+    return;
+  }
+
+  /* /today — حلقات اليوم */
+  if (text === "/today" || text === "/اليوم") {
+    await sendMessage(chatId, `⏳ <b>جاري جلب حلقات اليوم...</b>`);
+    const now   = Math.floor(Date.now() / 1000);
+    const since = now - 24 * 3600;
+    const schedules = await fetchAiringSchedules(since, now + 3600);
+    const items = schedules.filter((item: any) =>
+      item.media?.type === "ANIME" && !item.media?.isAdult
+    );
+    if (items.length === 0) {
+      await sendMessage(chatId, `📭 لا توجد حلقات عُرضت اليوم`);
+    } else {
+      const domain = process.env.APP_DOMAIN || process.env.REPLIT_DEV_DOMAIN || "animenova.replit.app";
+      const lines = items.map((item: any) => {
+        const m = item.media;
+        const title = m?.title?.english || m?.title?.romaji || "أنمي";
+        const ep    = item.episode;
+        const url   = `https://${domain}/watch?anime=${m?.id}&ep=${ep}&title=${encodeURIComponent(m?.title?.romaji || title)}`;
+        return `🎌 <b>${title}</b> · ح${ep}\n<a href="${url}">▶️ شاهد الآن</a>`;
+      });
+      // إرسال على شكل مجموعات (10 لكل رسالة)
+      const CHUNK = 10;
+      await sendMessage(chatId, `📅 <b>حلقات اليوم (${items.length} حلقة)</b>`);
+      for (let i = 0; i < lines.length; i += CHUNK) {
+        const chunk = lines.slice(i, i + CHUNK).join("\n\n");
+        await sendMessage(chatId, chunk);
+        if (i + CHUNK < lines.length) await new Promise(r => setTimeout(r, 500));
+      }
+    }
     return;
   }
 
