@@ -594,7 +594,7 @@ export function RiftPlayer({
       setSubLoading(true);
       setLoadedCues([]);
       try {
-        const r = await fetch(url, { headers: { "Accept": "text/vtt,text/plain,*/*" } });
+        const r = await fetch(url, { headers: { "Accept": "text/vtt,text/plain,*/*" }, signal: AbortSignal.timeout(30_000) });
         const text = await r.text();
         if (cancelled) return;
         const cues = parseVTT(text);
