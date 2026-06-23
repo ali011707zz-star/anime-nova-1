@@ -193,15 +193,54 @@ export default function AnimationWatchScreen() {
   const lastTimeRef      = useRef(0);
   const seenKeys         = useRef(new Set<string>());
   const autoPlayFiredRef = useRef(false);
+  const hasCachedRef     = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
 
-  const progressKey = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
+  const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
+  /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
+  const animSrcCacheKey = tmdbId ? `anim-srcs-${tmdbId}-${type}-s${season}-e${ep}` : null;
+  const ANIM_SRC_CACHE_TTL = 60 * 60 * 1000; // ساعة واحدة
 
-  /* Load resume time */
+  /* ── تحميل المصادر المحفوظة + وقت الاستئناف ── */
   useEffect(() => {
     AsyncStorage.getItem(progressKey).then(v => {
       if (v) setResumeTime(parseFloat(v) || 0);
     });
-  }, [progressKey]);
+
+    /* فحص الكاش المحلي للمصادر — يتيح الفتح الفوري */
+    if (!animSrcCacheKey) return;
+    AsyncStorage.getItem(animSrcCacheKey).then(raw => {
+      if (!raw) return;
+      try {
+        const { sources: cached, ts }: { sources: AnimSrc[]; ts: number } = JSON.parse(raw);
+        if (!cached?.length || Date.now() - ts > ANIM_SRC_CACHE_TTL) return;
+
+        const base = getBaseUrl();
+        const resolved = cached.map(s => ({
+          ...s,
+          directUrl: s.directUrl ? (s.directUrl.startsWith("/") ? base + s.directUrl : s.directUrl) : undefined,
+          url: s.url ? (s.url.startsWith("/") ? base + s.url : s.url) : undefined,
+          proxyUrl: s.proxyUrl ? (s.proxyUrl.startsWith("/") ? base + s.proxyUrl : s.proxyUrl) : undefined,
+        }));
+
+        /* أضف المصادر المحفوظة فوراً وانتقل للـ picker */
+        hasCachedRef.current = true;
+        setSources(resolved);
+        seenKeys.current = new Set(resolved.map(s => s.proxyUrl || s.directUrl || s.url || "").filter(Boolean));
+        setLoading(false);
+        setScreen("picker");
+
+        /* شغّل أول مصدر مباشرة إذا كان مفعّل الـ autoplay */
+        if (autoplay) {
+          const first = resolved.find(s => isDirectPlayable(s));
+          if (first) {
+            autoPlayFiredRef.current = true;
+            setTimeout(() => { setPlayingSrc(first); setScreen("native"); }, 0);
+          }
+        }
+      } catch { /* تجاهل كاش تالف */ }
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progressKey, animSrcCacheKey]);
 
   /* ── Subtitle tracks — fetch in background for sources without subtitleUrl ── */
   useEffect(() => {
@@ -252,15 +291,19 @@ export default function AnimationWatchScreen() {
     if (!tmdbId) return;
     autoPlayFiredRef.current = false;
     setLoading(true);
-    setSources([]);
-    setScreen("loading");
-    seenKeys.current.clear();
+    const hasCached = hasCachedRef.current;
+    if (!hasCached) {
+      setSources([]);
+      seenKeys.current.clear();
+      setScreen("loading");
+    }
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
     const base = getBaseUrl();
     const url = `${base}/api/animation/sources-stream?title=${encodeURIComponent(titleStr)}&type=${type}&id=${tmdbId}&ep=${ep}&season=${season}`;
+    const freshSrcs: AnimSrc[] = []; // تتبع المصادر الجديدة من SSE لحفظها
 
     try {
       const response = await expoFetch(url, {
@@ -306,21 +349,20 @@ export default function AnimationWatchScreen() {
               const key = src.proxyUrl || src.directUrl || src.url || "";
               if (!key || seenKeys.current.has(key)) continue;
               seenKeys.current.add(key);
+              freshSrcs.push(src);
 
               setSources(prev => {
                 const next = [...prev, src];
                 const isGoodSrc = isDirectPlayable(src);
-                /* on web, expo-video has no HLS support — only auto-play mp4 */
                 const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
-                /* auto-play first high-quality direct source immediately */
+                /* أول مصدر جيد → شغّله مباشرة */
                 if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
-                  setTimeout(() => {
-                    setPlayingSrc(src);
-                    setScreen("native");
-                  }, 0);
+                  setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
+                } else {
+                  /* أظهر الـ picker فوراً بمجرد وصول أي مصدر (لا تنتظر SSE done) */
+                  setScreen(s => s === "loading" ? "picker" : s);
                 }
-                /* Don't show picker until SSE done — keep loading screen */
                 return next;
               });
 
@@ -328,6 +370,12 @@ export default function AnimationWatchScreen() {
               setLoading(false);
               setSources(prev => {
                 if (prev.length === 0) setTimeout(() => setScreen("picker"), 0);
+                else {
+                  /* حفظ المصادر الجديدة في الكاش المحلي */
+                  if (animSrcCacheKey && freshSrcs.length > 0) {
+                    AsyncStorage.setItem(animSrcCacheKey, JSON.stringify({ sources: freshSrcs, ts: Date.now() })).catch(() => {});
+                  }
+                }
                 return prev;
               });
             }
@@ -346,19 +394,20 @@ export default function AnimationWatchScreen() {
         return prev;
       });
     }
-  }, [tmdbId, type, ep, season, titleStr]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tmdbId, type, ep, season, titleStr, animSrcCacheKey]);
 
   useEffect(() => {
     fetchSources();
     return () => abortRef.current?.abort();
   }, [fetchSources]);
 
-  /* ── 30-second timeout — prevents stuck loading screen ── */
+  /* ── 8-second timeout — انتقل للـ picker بدلاً من الانتظار 30 ثانية ── */
   useEffect(() => {
     const timeout = setTimeout(() => {
       setScreen(s => s === "loading" ? "picker" : s);
       setLoading(false);
-    }, 30000);
+    }, 8000);
     return () => clearTimeout(timeout);
   }, [tmdbId, ep, season]);
 
