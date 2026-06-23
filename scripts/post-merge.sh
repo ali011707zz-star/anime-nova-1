@@ -3,7 +3,7 @@ set -e
 pnpm install --no-frozen-lockfile
 
 # Install Python dependencies for CF Proxy and Whisper Service
-pip install flask curl_cffi faster-whisper 2>/dev/null || true
+.pythonlibs/bin/pip install flask curl_cffi faster-whisper 2>/dev/null || pip install flask curl_cffi faster-whisper 2>/dev/null || true
 
 # Run database migrations (idempotent — safe to re-run)
 python3 -c "
