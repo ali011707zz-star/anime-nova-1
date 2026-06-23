@@ -336,7 +336,7 @@ function AuthSheet({ open, onClose, onLogin }: {
   };
 
   const handleSignup = async () => {
-    if (code.length < 6) { setError("أدخل كود التحقق المكوّن من 6 أرقام"); return; }
+    if (code.length < 4) { setError("أدخل كود التحقق المكوّن من 4 أرقام"); return; }
     setLoading(true); setError("");
     try {
       const r = await fetch(`${base}/api/auth/signup`, {
@@ -423,22 +423,22 @@ function AuthSheet({ open, onClose, onLogin }: {
           {isVerify ? (
             <>
               <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", textAlign: "right", marginBottom: 20, lineHeight: 22 }}>
-                أُرسل كود تحقق إلى {email}،{"\n"}أدخل الكود المكوّن من 6 أرقام.
+                أُرسل كود تحقق إلى {email}،{"\n"}أدخل الكود المكوّن من 4 أرقام.
               </Text>
               <Text style={ts.authFieldLabel}>كود التحقق</Text>
               <TextInput
                 value={code}
-                onChangeText={v => { setCode(v.replace(/\D/g, "").slice(0, 6)); setError(""); }}
-                placeholder="• • • • • •"
+                onChangeText={v => { setCode(v.replace(/\D/g, "").slice(0, 4)); setError(""); }}
+                placeholder="• • • •"
                 placeholderTextColor="rgba(255,255,255,0.2)"
                 keyboardType="numeric"
-                maxLength={6}
-                style={[ts.authCodeInput, code.length === 6 && { borderColor: "rgba(139,92,246,0.50)" }]}
+                maxLength={4}
+                style={[ts.authCodeInput, code.length === 4 && { borderColor: "rgba(139,92,246,0.50)" }]}
               />
               <Pressable
                 onPress={handleSignup}
-                disabled={loading || code.length < 6}
-                style={[ts.authSubmitBtn, code.length < 6 && { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.06)" }]}
+                disabled={loading || code.length < 4}
+                style={[ts.authSubmitBtn, code.length < 4 && { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.06)" }]}
               >
                 {loading ? <ActivityIndicator color="#fff" size="small" /> : (
                   <>
@@ -1205,7 +1205,7 @@ const ts = StyleSheet.create({
   authFieldLabel: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.35)", marginBottom: 8, textAlign: "right", letterSpacing: 0.8 },
   authFieldWrap: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)", borderRadius: 18, paddingHorizontal: 16, paddingVertical: 4, marginBottom: 14, gap: 10 },
   authFieldInput: { flex: 1, paddingVertical: 12, fontSize: 13.5, fontFamily: "Cairo_400Regular", color: "#fff", textAlign: "right" },
-  authCodeInput: { backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)", borderRadius: 18, paddingHorizontal: 20, paddingVertical: 14, fontSize: 24, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "center", letterSpacing: 16, marginBottom: 20 },
+  authCodeInput: { backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.08)", borderRadius: 18, paddingHorizontal: 20, paddingVertical: 12, fontSize: 18, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "center", letterSpacing: 8, marginBottom: 20 },
   authSubmitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, borderRadius: 20, backgroundColor: "#7C3AED", borderWidth: 1, borderColor: "rgba(139,92,246,0.35)", marginTop: 4, marginBottom: 12 },
   authSubmitText: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 

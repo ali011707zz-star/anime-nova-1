@@ -312,16 +312,15 @@ export default function AnimationWatchScreen() {
                 const isGoodSrc = isDirectPlayable(src);
                 /* on web, expo-video has no HLS support — only auto-play mp4 */
                 const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
-                /* auto-play first good source automatically */
+                /* auto-play first high-quality direct source immediately */
                 if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
                   setTimeout(() => {
                     setPlayingSrc(src);
                     setScreen("native");
                   }, 0);
-                } else if (next.length === 1) {
-                  setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 }
+                /* Don't show picker until SSE done — keep loading screen */
                 return next;
               });
 
