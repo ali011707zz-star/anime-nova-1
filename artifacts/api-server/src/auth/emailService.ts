@@ -141,7 +141,7 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
 
 function verifyHtml(code: string): string {
   const digits = code.split("").map(d =>
-    `<td style="padding:0 5px;"><div style="width:52px;height:64px;background:#1a1040;border:2px solid #7c3aed;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;"><span style="font-size:34px;font-weight:900;color:#c4b5fd;font-family:'Courier New',monospace;line-height:1;">${d}</span></div></td>`
+    `<td style="padding:0 3px;"><div style="width:44px;height:54px;background:#1a1040;border:2px solid #7c3aed;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;"><span style="font-size:28px;font-weight:900;color:#c4b5fd;font-family:'Courier New',monospace;line-height:1;">${d}</span></div></td>`
   ).join("");
   return `<!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -187,7 +187,7 @@ function verifyHtml(code: string): string {
 
 function resetHtml(code: string): string {
   const digits = code.split("").map(d =>
-    `<td style="padding:0 5px;"><div style="width:52px;height:64px;background:#1a1040;border:2px solid #7c3aed;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;"><span style="font-size:34px;font-weight:900;color:#c4b5fd;font-family:'Courier New',monospace;line-height:1;">${d}</span></div></td>`
+    `<td style="padding:0 3px;"><div style="width:44px;height:54px;background:#1a1040;border:2px solid #7c3aed;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;"><span style="font-size:28px;font-weight:900;color:#c4b5fd;font-family:'Courier New',monospace;line-height:1;">${d}</span></div></td>`
   ).join("");
   return `<!DOCTYPE html>
 <html dir="rtl" lang="ar">

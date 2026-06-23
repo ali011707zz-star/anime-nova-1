@@ -9,7 +9,7 @@ const MAX_ATTEMPTS       = 5;
 const RESEND_COOLDOWN_MS = 60 * 1000;
 
 function generateCode(): string {
-  return String(Math.floor(1000 + Math.random() * 9000));
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 async function setPendingCode(email: string, code: string, type: "signup" | "reset"): Promise<void> {

@@ -434,8 +434,6 @@ export default function WatchScreen() {
         return;
       }
       const reader   = response.body.getReader();
-      // Switch to picker immediately when SSE connects — sources stream in live, auto-play on first direct
-      setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
       const decoder  = new TextDecoder();
       let buffer     = "";
       let currentEvent = "";
@@ -592,9 +590,9 @@ export default function WatchScreen() {
         label: def?.name || getCdnDisplayName(rawUrl),
         quality: getSrcQualityTier(s),
         isArabic: isArabicSrc,
-        subtitleUrl: isArabicSrc ? undefined : (s.subtitleUrl
+        subtitleUrl: s.subtitleUrl
           ? resolveUrl(s.subtitleUrl, base)
-          : globalSubUrl),
+          : globalSubUrl,
       };
     }).filter(s => s.url);
   }, [directSrcs, globalSubUrl]);
