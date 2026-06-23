@@ -5907,7 +5907,7 @@ function re_runDecrypt(wasm: Uint8Array, frag1: Uint8Array, kf2: Uint8Array, T: 
   for (let i = 0; i < frag1.length; i++) out[i] = transform((frag1[i] ^ kf2[i] ^ T[i]) & 255) ^ ((i * step + seedInt) & 255);
   return out;
 }
-async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: any[] }> {
+async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: any[]; introChapter: any; outroChapter: any }> {
   const raw  = re_extractSsrObj(html);
   const data = re_parseJsLiteral(raw);
   const seed: string = data.obfuscation_seed;
@@ -5952,7 +5952,12 @@ async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: 
   const plain  = await crypto.subtle.decrypt({ name: "AES-CBC", iv: Buffer.from(iv) }, aesKey, Buffer.from(v_bytes));
   const url    = re_dec.decode(plain).trim().replace(/\0+$/, "");
   if (!url.startsWith("http")) throw new Error(`Unexpected decrypted value: ${url.substring(0, 60)}`);
-  return { url, subtitles: data.subtitles ?? [] };
+  return {
+    url,
+    subtitles: data.subtitles ?? [],
+    introChapter: data.intro_chapter ?? null,
+    outroChapter: data.outro_chapter ?? null,
+  };
 }
 
 const reanimeSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
@@ -5990,9 +5995,9 @@ async function getReanímeSources(
     }).then(r => r.ok ? r.text() : "").catch(() => "");
     if (!embedHtml) return [];
 
-    const { url: m3u8Url, subtitles } = await re_decryptEmbed(embedHtml);
+    const { url: m3u8Url, subtitles, introChapter, outroChapter } = await re_decryptEmbed(embedHtml);
 
-    // subtitle: أول ترجمة إنجليزية متاحة
+    // subtitle: أول ترجمة إنجليزية متاحة → ترجم للعربية
     const subTrack = subtitles.find((s: any) =>
       (s.label || s.lang || "").toLowerCase().includes("eng") ||
       (s.label || s.lang || "").toLowerCase().includes("english")
@@ -6004,7 +6009,17 @@ async function getReanímeSources(
       subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxyVtt)}&from=en&to=ar`;
     }
 
-    // أرسل عبر hls-proxy أولاً
+    // intro/outro من embed (intro_chapter له start/end بالثواني)
+    let skipIntro: { start: number; end: number } | undefined;
+    let skipOutro: { start: number; end: number } | undefined;
+    if (introChapter?.start !== undefined && introChapter?.end !== undefined) {
+      skipIntro = { start: Number(introChapter.start), end: Number(introChapter.end) };
+    }
+    if (outroChapter?.start !== undefined && outroChapter?.end !== undefined) {
+      skipOutro = { start: Number(outroChapter.start), end: Number(outroChapter.end) };
+    }
+
+    // أرسل عبر hls-proxy
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(embedUrl)}`;
     const sources: UnifiedSource[] = [{
       name: "Reanime · FlixCloud · ياباني مترجم",
@@ -6013,6 +6028,8 @@ async function getReanímeSources(
       directUrl: proxied,
       directType: "hls",
       subtitleUrl,
+      skipIntro,
+      skipOutro,
     }];
     reanimeSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
@@ -7173,7 +7190,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
       // allmanga:     clock.json→500, fast4speed→401
-      // reanime:      FlixCloud يبلوك Replit IP
+      scrapeCached("reanime",      () => getReanímeSources(title, english, ep, anilistId),      false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
     ]);
 
