@@ -66,35 +66,58 @@ export default function AnimationDetailScreen() {
   useEffect(() => {
     if (!id || !type) return;
     setLoading(true);
-    setDetail(null);
     setDescAr(null);
 
     AsyncStorage.getItem(saveKey).then(v => setSaved(v === "1"));
 
     const base = getBaseUrl();
-    fetch(`${base}/api/animation/detail?type=${type}&id=${id}`)
-      .then(r => r.json())
-      .then(async d => {
-        setDetail(d);
-        setLoading(false);
-        const overview = d.overview || "";
-        if (!overview) return;
-        const cacheKey = `anim-desc-ar-${type}-${id}`;
-        const cached = await AsyncStorage.getItem(cacheKey);
-        if (cached) { setDescAr(cached); return; }
-        try {
-          const r2 = await fetch(`${base}/api/anime/translate?text=${encodeURIComponent(overview.slice(0, 480))}`);
-          const d2 = await r2.json();
-          if (d2.translated && d2.translated !== overview && d2.translated.length > 10) {
-            setDescAr(d2.translated);
-            AsyncStorage.setItem(cacheKey, d2.translated).catch(() => {});
-          } else {
-            setDescAr(overview);
+    const detailCacheKey = `anim-detail-${type}-${id}`;
+    const DETAIL_TTL = 2 * 60 * 60 * 1000; // ساعتان
+
+    const processDetail = async (d: any) => {
+      setDetail(d);
+      setLoading(false);
+      const overview = d.overview || "";
+      if (!overview) return;
+      const descCacheKey = `anim-desc-ar-${type}-${id}`;
+      const cachedDesc = await AsyncStorage.getItem(descCacheKey);
+      if (cachedDesc) { setDescAr(cachedDesc); return; }
+      try {
+        const r2 = await fetch(`${base}/api/anime/translate?text=${encodeURIComponent(overview.slice(0, 480))}`);
+        const d2 = await r2.json();
+        if (d2.translated && d2.translated !== overview && d2.translated.length > 10) {
+          setDescAr(d2.translated);
+          AsyncStorage.setItem(descCacheKey, d2.translated).catch(() => {});
+        } else {
+          setDescAr(overview);
+        }
+      } catch { setDescAr(overview); }
+    };
+
+    (async () => {
+      /* 1. فحص الكاش المحلي أولاً → فتح فوري */
+      try {
+        const raw = await AsyncStorage.getItem(detailCacheKey);
+        if (raw) {
+          const { data, ts } = JSON.parse(raw);
+          if (Date.now() - ts < DETAIL_TTL && data?.id) {
+            await processDetail(data);
+            /* ما زال يُحدَّث في الخلفية */
           }
-        } catch { setDescAr(overview); }
-      })
-      .catch(() => setLoading(false));
-  }, [type, id]);
+        }
+      } catch { /* كاش تالف، تجاهل */ }
+
+      /* 2. جلب من API (دائماً لضمان البيانات محدّثة) */
+      try {
+        const r = await fetch(`${base}/api/animation/detail?type=${type}&id=${id}`);
+        const d = await r.json();
+        if (d?.id) {
+          await processDetail(d);
+          AsyncStorage.setItem(detailCacheKey, JSON.stringify({ data: d, ts: Date.now() })).catch(() => {});
+        }
+      } catch { setLoading(false); }
+    })();
+  }, [type, id]); // eslint-disable-line
 
   const toggleSave = useCallback(async () => {
     const next = !saved;
