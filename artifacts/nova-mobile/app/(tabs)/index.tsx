@@ -19,6 +19,7 @@ import {
   POPULAR_QUERY, TRENDING_QUERY,
   SEASONAL_QUERY, TOP_RATED_QUERY, MOVIES_QUERY, UPCOMING_QUERY,
   ACTION_QUERY, ROMANCE_QUERY, ISEKAI_QUERY, FANTASY_QUERY,
+  TODAY_EPISODES_QUERY, formatAiringTime,
   getCurrentSeason,
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
@@ -116,6 +117,20 @@ export default function HomeScreen() {
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(FANTASY_QUERY),
   });
 
+  /* حلقات اليوم — جدول البث اليوم */
+  const todayStart = (() => {
+    const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000);
+  })();
+  const todayEnd = todayStart + 86399;
+
+  type TodayEp = { episode: number; airingAt: number; media: { id: number; title: { romaji: string; english: string | null }; coverImage: { large: string }; averageScore: number | null; popularity: number } };
+  const { data: todayEpsData } = useQuery({
+    queryKey: ["todayEps", todayStart],
+    queryFn: () => anilistQuery<{ Page: { airingSchedules: TodayEp[] } }>(TODAY_EPISODES_QUERY, { gt: todayStart, lt: todayEnd }),
+    staleTime: 10 * 60 * 1000,
+  });
+  const todayEps = (todayEpsData?.Page?.airingSchedules || []).filter(e => !e.media.title.romaji?.toLowerCase().includes("(") );
+
   const isLoading = loadingT || loadingP || loadingA;
 
   const trendingList = trending?.Page?.media || [];
@@ -203,6 +218,38 @@ export default function HomeScreen() {
                   <View style={styles.playOverlay}>
                     <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.85)" />
                   </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* حلقات اليوم */}
+        {todayEps.length > 0 && (
+          <View style={{ marginTop: 24 }}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionLeft}>
+                <View style={[styles.sectionDot, { backgroundColor: "#f43f5e" }]} />
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>📅 حلقات اليوم</Text>
+              </View>
+              <Pressable onPress={() => router.push("/schedule" as any)} style={styles.seeAllBtn}>
+                <Text style={[styles.seeAllText, { color: colors.primary }]}>الجدول الكامل</Text>
+                <Ionicons name="chevron-back" size={13} color={colors.primary} />
+              </Pressable>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+              {todayEps.map((ep) => (
+                <Pressable
+                  key={`${ep.media.id}-${ep.episode}`}
+                  onPress={() => router.push(`/anime/${ep.media.id}?title=${encodeURIComponent(ep.media.title.romaji)}&english=${encodeURIComponent(ep.media.title.english || ep.media.title.romaji)}` as any)}
+                  style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                >
+                  <Image source={{ uri: ep.media.coverImage.large }} style={todayEpStyles.img} contentFit="cover" />
+                  <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
+                    <Text style={todayEpStyles.ep}>حلقة {ep.episode}</Text>
+                    <Text style={todayEpStyles.title} numberOfLines={2}>{ep.media.title.english || ep.media.title.romaji}</Text>
+                    <Text style={todayEpStyles.time}>{formatAiringTime(ep.airingAt)}</Text>
+                  </LinearGradient>
                 </Pressable>
               ))}
             </ScrollView>
@@ -440,4 +487,21 @@ const todayStyles = StyleSheet.create({
   title: {
     color: "#fff", fontSize: 11, fontFamily: "Cairo_600SemiBold", lineHeight: 15,
   },
+});
+
+const todayEpStyles = StyleSheet.create({
+  card: {
+    width: 120, height: 175, borderRadius: 12,
+    overflow: "hidden", borderWidth: 1, position: "relative",
+  },
+  img: { width: "100%", height: "100%" },
+  grad: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    paddingHorizontal: 8, paddingBottom: 8, paddingTop: 50,
+  },
+  ep: { color: "#f43f5e", fontSize: 10, fontFamily: "Cairo_700Bold" },
+  title: {
+    color: "#fff", fontSize: 10, fontFamily: "Cairo_600SemiBold", lineHeight: 14, marginTop: 2,
+  },
+  time: { color: "rgba(255,255,255,0.5)", fontSize: 9, fontFamily: "Cairo_400Regular", marginTop: 3 },
 });
