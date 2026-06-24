@@ -139,8 +139,8 @@ export default function ProfileScreen() {
 
   const handleLogout = async () => {
     await AsyncStorage.removeItem(AUTH_KEY);
-    try { await fetch(`${base}/api/auth/logout`, { method: "POST", credentials: "include" }); } catch {}
-    router.replace("/(tabs)/settings" as any);
+    try { await fetch(`${base}/api/auth/signout`, { method: "POST", credentials: "include" }); } catch {}
+    router.replace("/settings" as any);
   };
 
   if (!user) {
