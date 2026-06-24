@@ -291,10 +291,8 @@ function AuthSheet({ open, onClose, onLogin }: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [devCode, setDevCode] = useState<string | null>(null);
-
   useEffect(() => {
-    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); setDevCode(null); }
+    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); }
   }, [open]);
 
   useEffect(() => {
