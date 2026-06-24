@@ -355,6 +355,8 @@ export function RiftPlayer({
   const [showFitMenu, setShowFitMenu]     = useState(false);
   const [showSubPanel, setShowSubPanel]   = useState(false);
   const [subLang, setSubLang]             = useState<"ar" | "en">("ar");
+  const rawSubUrlRef      = useRef<string | null>(null); // original English VTT URL before translation
+  const autoRawSubUrlRef  = useRef<string | null>(null); // English URL discovered by auto-fetch
   const [autoPlayEnabled, setAutoPlayEnabled] = useState(true);
   const prevVolRef                        = useRef(1);
   const subPanelX                         = useRef(new Animated.Value(400)).current;
@@ -551,12 +553,32 @@ export function RiftPlayer({
     const rawUrl = currentSrc?.subtitleUrl;
     if (!rawUrl) { setLoadedCues([]); return; }
 
-    /* ── Auto-translate English subs → Arabic for non-Arabic sources ── */
+    /* ── حساب الـ URL الإنجليزي الخام (قبل أي ترجمة) ── */
     const base = getBaseUrl();
     const alreadyTranslated = rawUrl.includes("translate-vtt") || rawUrl.includes("proxy-text");
-    const url = (!currentSrc?.isArabic && base && !alreadyTranslated)
-      ? `${base}/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=en&to=ar`
-      : rawUrl;
+
+    // استخراج الـ URL الداخلي إذا كان translate-vtt
+    const innerUrl = alreadyTranslated ? (() => {
+      try {
+        const params = new URLSearchParams(rawUrl.split("?")[1] || "");
+        const inner = params.get("url");
+        return inner ? decodeURIComponent(inner) : rawUrl;
+      } catch { return rawUrl; }
+    })() : rawUrl;
+
+    rawSubUrlRef.current = innerUrl; // حفظ الـ URL الإنجليزي الخام
+
+    /* ── اختيار الـ URL بناءً على اللغة المختارة ── */
+    let url: string;
+    if (subLang === "en") {
+      url = innerUrl; // إنجليزي خام مباشر
+    } else if (currentSrc?.isArabic || alreadyTranslated) {
+      url = rawUrl; // عربي مباشر أو translate-vtt جاهز
+    } else {
+      url = base
+        ? `${base}/api/anime/translate-vtt?url=${encodeURIComponent(rawUrl)}&from=en&to=ar`
+        : rawUrl;
+    }
 
     /* ── 0. In-memory URL cache — instant when same URL (server switch) ── */
     const urlHit = urlCueCacheRef.current.get(url);
@@ -632,7 +654,7 @@ export function RiftPlayer({
     })();
 
     return () => { cancelled = true; setSubLoading(false); };
-  }, [currentSrc?.subtitleUrl, anilistId, episode]); // eslint-disable-line
+  }, [currentSrc?.subtitleUrl, anilistId, episode, subLang]); // eslint-disable-line
 
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
@@ -756,9 +778,18 @@ export function RiftPlayer({
         const tracks: any[] = data.tracks || [];
         if (cancelled || tracks.length === 0) return;
 
-        /* Prefer Arabic direct, then any track (auto-translated) */
+        /* Store raw English URL for language switching */
+        const enTrack = tracks.find((t: any) => t.lang === "en");
         const arTrack = tracks.find((t: any) => t.lang === "ar");
-        const track   = arTrack || tracks[0];
+        if (enTrack?.url) {
+          autoRawSubUrlRef.current = enTrack.url.startsWith("/")
+            ? `${base}${enTrack.url}` : enTrack.url;
+        }
+
+        /* Pick track based on current language preference */
+        const track = subLang === "en"
+          ? (enTrack || arTrack || tracks[0])
+          : (arTrack || enTrack || tracks[0]);
         if (!track?.url) return;
 
         const trackUrl = track.url.startsWith("/") ? `${base}${track.url}` : track.url;
@@ -795,7 +826,7 @@ export function RiftPlayer({
       finally { if (!cancelled) setSubLoading(false); }
     })();
     return () => { cancelled = true; setSubLoading(false); };
-  }, [anilistId, episode]); // eslint-disable-line
+  }, [anilistId, episode, subLang]); // eslint-disable-line
 
   /* ─── Subtitle panel slide animation ─── */
   useEffect(() => {
@@ -1590,13 +1621,15 @@ export function RiftPlayer({
               <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
                 <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
               </Pressable>
-              <Pressable
-                onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
-                style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
-                hitSlop={10}
-              >
-                <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
-              </Pressable>
+              {!currentSrc?.isArabic && (
+                <Pressable
+                  onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
+                  style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
+                  hitSlop={10}
+                >
+                  <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
+                </Pressable>
+              )}
               {/* زر تدوير الشاشة ↻ */}
               <Pressable onPress={flipScreen} style={[s.topRotateBtn, isFlipped && s.topRotateBtnActive]} hitSlop={10}>
                 <Ionicons name="repeat-outline" size={16} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
