@@ -139,7 +139,14 @@ export function registerEmailAuthRoutes(app: Express): void {
       if (!result.ok)
         return res.status(500).json({ error: "فشل إرسال البريد، حاول مرة أخرى" });
 
-      return res.json({ sent: true });
+      // نُرجع devCode عندما نكون على Replit (بيئة تطوير) أو خارج الـ production الحقيقي
+      // يساعد على تجاوز مشكلة البريد في الـ spam أثناء التطوير
+      const devPayload: Record<string, unknown> = { sent: true };
+      const isDevEnv = !!process.env.REPLIT_DEV_DOMAIN || process.env.NODE_ENV !== "production";
+      if (isDevEnv) {
+        devPayload.devCode = code;
+      }
+      return res.json(devPayload);
     } catch (err) {
       console.error("[send-verify-code]", err);
       return res.status(500).json({ error: "حدث خطأ، حاول مرة أخرى" });
