@@ -140,7 +140,7 @@ const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
   Page(page:1,perPage:25){
     airingSchedules(airingAt_greater:$gt,airingAt_lesser:$lt,sort:[TIME_DESC]){
       episode airingAt
-      media{id title{romaji english}coverImage{large}averageScore popularity format isAdult}
+      media{id title{romaji english}coverImage{large}averageScore popularity format isAdult countryOfOrigin}
     }
   }
 }`;
@@ -284,11 +284,12 @@ export default function Home() {
       .then(async d => {
         const ECCHI_BLOCKED = new Set(["Ecchi", "Hentai"]);
         const now = Math.floor(Date.now() / 1000);
-        // فقط الحلقات التي بثّت فعلاً (ليس المستقبلية)
+        // فقط الحلقات التي بثّت فعلاً (ليس المستقبلية) وأنمي ياباني فقط
         const arr = (d.data?.Page?.airingSchedules || [])
           .filter((s: any) => {
             if (!s.media?.id || s.media?.isAdult) return false;
             if (s.airingAt > now) return false; // استثنِ الحلقات المستقبلية
+            if (s.media?.countryOfOrigin && s.media.countryOfOrigin !== "JP") return false; // أنمي ياباني فقط
             const genres: string[] = s.media?.genres || [];
             return !genres.some((g: string) => ECCHI_BLOCKED.has(g));
           });

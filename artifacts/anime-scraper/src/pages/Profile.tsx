@@ -412,7 +412,13 @@ export default function Profile() {
             </button>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
           </div>
-
+          {/* Always-visible photo upload button */}
+          <button onClick={() => fileRef.current?.click()}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl active:scale-95 transition-transform mt-1"
+            style={{ background: "rgba(124,58,237,0.12)", border: "1px solid rgba(124,58,237,0.25)" }}>
+            <Camera className="w-3.5 h-3.5 text-violet-400" />
+            <span className="text-[11.5px] font-bold font-['Cairo'] text-violet-300">تغيير الصورة</span>
+          </button>
           {/* Name */}
           <div className="text-center">
             <h2 className="text-[19px] font-black text-white/95 leading-tight">
