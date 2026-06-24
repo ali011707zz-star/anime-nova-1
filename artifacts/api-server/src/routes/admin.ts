@@ -10,6 +10,27 @@ async function isAdmin(req: Request): Promise<boolean> {
   return eu?.plan === "admin";
 }
 
+// ── Env Relay — يُرجع المفاتيح لخوادم Replit الفرعية ───────────────────────
+
+/* GET /api/admin/env-relay — يُرجع SUPABASE + SMTP vars محمية بـ APP_SECRET */
+router.get("/admin/env-relay", async (req: Request, res: Response) => {
+  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const provided  = (req.headers["x-relay-secret"] as string | undefined) || req.query.s;
+  if (provided !== appSecret) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  return res.json({
+    SUPABASE_URL:         process.env.SUPABASE_URL         || "",
+    SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY || "",
+    SMTP_PASS:            process.env.SMTP_PASS             || "",
+    SMTP_USER:            process.env.SMTP_USER             || "",
+    SMTP_HOST:            process.env.SMTP_HOST             || "",
+    SMTP_PORT:            process.env.SMTP_PORT             || "",
+    GITHUB_CLIENT_ID:     process.env.GITHUB_CLIENT_ID     || "",
+    GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET || "",
+  });
+});
+
 // ── SMTP Config ─────────────────────────────────────────────────────────────
 
 /* تشخيص SMTP — بدون مصادقة للاختبار السريع */
