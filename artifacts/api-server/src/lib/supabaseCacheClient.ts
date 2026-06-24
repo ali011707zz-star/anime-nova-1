@@ -1,16 +1,16 @@
 /**
- * supabaseCacheClient.ts — PostgreSQL direct cache client (Replit migration)
- * Drop-in replacement for the Supabase REST cache client.
+ * supabaseCacheClient.ts — Cache client يعيد تصدير دوال supabaseClient
+ * يعمل عبر Supabase REST API (لا يحتاج اتصال PostgreSQL مباشر)
  */
 
-import { sbSelect, sbInsert, sbUpsert, sbPatch, sbDelete } from "./supabaseClient.js";
+import { sbSelect, sbInsert, sbUpsert, sbPatch, sbDelete, isSupabaseReady } from "./supabaseClient.js";
 
-export const isCacheDbReady = !!process.env.DATABASE_URL;
+export const isCacheDbReady = isSupabaseReady;
 
 if (isCacheDbReady) {
-  console.log("[cacheClient] ✅ PostgreSQL جاهز للكاش المشترك");
+  console.log("[cacheClient] ✅ Supabase جاهز للكاش المشترك");
 } else {
-  console.warn("[cacheClient] ⚠️ DATABASE_URL غير موجود — الكاش L2 معطّل");
+  console.warn("[cacheClient] ⚠️ Supabase غير مُهيَّأ — الكاش L2 معطّل");
 }
 
 export const cacheSelect  = sbSelect;
