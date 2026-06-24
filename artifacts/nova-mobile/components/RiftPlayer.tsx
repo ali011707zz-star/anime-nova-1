@@ -592,7 +592,8 @@ export function RiftPlayer({
     subOffsetRef.current = 0;
     let cancelled = false;
 
-    const cacheKey = anilistId && episode ? `sub-ar-${anilistId}-${episode}` : null;
+    /* مفتاح الكاش خاص بكل لغة لتجنب إرجاع cues الإنجليزية حين يطلب المستخدم العربية */
+    const cacheKey = (anilistId && episode && subLang === "ar") ? `sub-ar-${anilistId}-${episode}` : null;
     const isTranslated = url.includes("translate-vtt") || url.includes("proxy-text");
 
     (async () => {
@@ -792,7 +793,13 @@ export function RiftPlayer({
           : (arTrack || enTrack || tracks[0]);
         if (!track?.url) return;
 
-        const trackUrl = track.url.startsWith("/") ? `${base}${track.url}` : track.url;
+        const rawTrackUrl = track.url.startsWith("/") ? `${base}${track.url}` : track.url;
+
+        /* إذا طلب المستخدم عربي لكن المسار إنجليزي → ترجمة تلقائية */
+        const trackUrl = (subLang === "ar" && track.lang !== "ar")
+          ? `${base}/api/anime/translate-vtt?url=${encodeURIComponent(rawTrackUrl)}&from=en&to=ar`
+          : rawTrackUrl;
+
         setSubLoading(true);
 
         /* ── fetch + parse: translate-vtt → JSON, others → VTT text ── */
