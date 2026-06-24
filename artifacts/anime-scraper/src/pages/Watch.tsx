@@ -157,6 +157,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
+  { site: "anikototv",    name: "AniKototv",     desc: "ياباني مترجم · skip مدمج", tag: "ATV" },
   { site: "animekai",     name: "AnimeKai",      desc: "ياباني مترجم · DB مباشر",  tag: "KI" },
   { site: "hianime",      name: "HiAnime",       desc: "ياباني مترجم · HLS نظيف", tag: "HI" },
   { site: "animepahe",    name: "AnimePahe",      desc: "ياباني مترجم · HLS نظيف", tag: "AP" },
@@ -2850,9 +2851,22 @@ export default function WatchPage() {
           /* ── cache MAL ID for next visit (instant aniskip) ── */
           if (d.idMal) { try { localStorage.setItem(`malid-${animeId}`, String(d.idMal)); } catch {} }
 
+          // من: surajklmn/animepahe-aniskip — تحقق صحة نطاقات التخطي
+          const validateSkipInterval = (iv: { start: number; end: number } | undefined) => {
+            if (!iv) return undefined;
+            const dur = iv.end - iv.start;
+            if (iv.start < 0 || iv.end <= iv.start) return undefined; // نطاق سالب
+            if (dur < 15 || dur > 210) return undefined;              // قصير جداً أو طويل جداً
+            return iv;
+          };
+
           const mergeSkip = (st: SkipTimes) => {
-            setSkipTimes(prev => ({ ...prev, ...st }));
-            try { localStorage.setItem(_skipKey, JSON.stringify({ data: { ...st }, exp: Date.now() + 7 * 86400_000 })); } catch {}
+            const validated: SkipTimes = {};
+            if (st.op) { const v = validateSkipInterval(st.op); if (v) validated.op = v; }
+            if (st.ed) { const v = validateSkipInterval(st.ed); if (v) validated.ed = v; }
+            if (!validated.op && !validated.ed) return;
+            setSkipTimes(prev => ({ ...prev, ...validated }));
+            try { localStorage.setItem(_skipKey, JSON.stringify({ data: { ...validated }, exp: Date.now() + 7 * 86400_000 })); } catch {}
           };
 
           // aniskip (MAL ID)
@@ -2903,6 +2917,21 @@ export default function WatchPage() {
               const st: SkipTimes = {};
               if (data.intro) st.op = data.intro;
               if (data.outro) st.ed = data.outro;
+              if (st.op || st.ed) mergeSkip(st);
+            })
+            .catch(() => {});
+
+          // Anime-Skip (AniList ID مباشرة — لا يحتاج MAL ID)
+          // من: surajklmn/animepahe-aniskip userscript
+          fetch(`/api/anime/anime-skip?anilistId=${animeId}&ep=${ep}`, {
+            signal: AbortSignal.timeout(9000),
+          })
+            .then(r => r.ok ? r.json() : null)
+            .then((data: any) => {
+              if (!data?.found) return;
+              const st: SkipTimes = {};
+              if (data.op) st.op = data.op;
+              if (data.ed) st.ed = data.ed;
               if (st.op || st.ed) mergeSkip(st);
             })
             .catch(() => {});
