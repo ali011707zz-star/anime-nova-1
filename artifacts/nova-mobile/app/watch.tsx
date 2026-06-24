@@ -162,26 +162,11 @@ function SpinRing() {
 /* ── Poster glow — elliptical radial style matching web (cross-platform) ── */
 function PosterGlow() {
   return (
-    <>
-      {/* Outer ellipse — matches web radial-gradient ellipse 68% stop */}
-      <View style={{
-        position: "absolute", width: 260, height: 320, borderRadius: 130,
-        backgroundColor: "rgba(109,40,217,0.08)",
-        shadowColor: "#7C3AED", shadowOpacity: 0.85, shadowRadius: 72, shadowOffset: { width: 0, height: 0 },
-      }} />
-      {/* Mid ellipse */}
-      <View style={{
-        position: "absolute", width: 210, height: 270, borderRadius: 105,
-        backgroundColor: "rgba(124,58,237,0.13)",
-        shadowColor: "#8B5CF6", shadowOpacity: 0.55, shadowRadius: 44, shadowOffset: { width: 0, height: 0 },
-      }} />
-      {/* Inner ellipse — closest to web 22% opacity center */}
-      <View style={{
-        position: "absolute", width: 180, height: 220, borderRadius: 90,
-        backgroundColor: "rgba(139,92,246,0.18)",
-        shadowColor: "#a78bfa", shadowOpacity: 0.45, shadowRadius: 28, shadowOffset: { width: 0, height: 0 },
-      }} />
-    </>
+    <View style={{
+      position: "absolute", width: 200, height: 250, borderRadius: 100,
+      backgroundColor: "transparent",
+      shadowColor: "#7C3AED", shadowOpacity: 0.45, shadowRadius: 40, shadowOffset: { width: 0, height: 0 },
+    }} />
   );
 }
 
@@ -228,11 +213,8 @@ function LoadingScreen({ cover, title, ep, onBack, foundCount }: { cover?: strin
           ) : null}
         </View>
 
-        {/* Title + badge */}
-        <View style={{ alignItems: "center", gap: 8 }}>
-          {title ? <Text style={d.ldTitle} numberOfLines={2}>{title}</Text> : null}
-          <View style={d.ldEpBadge}><Text style={d.ldEpText}>الحلقة {ep}</Text></View>
-        </View>
+        {/* Episode badge only — no title text (poster already shows it) */}
+        <View style={d.ldEpBadge}><Text style={d.ldEpText}>الحلقة {ep}</Text></View>
 
         {/* Spinner + status */}
         <View style={{ alignItems: "center", gap: 12 }}>

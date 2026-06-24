@@ -510,27 +510,12 @@ export default function AnimationWatchScreen() {
         <View style={w.loadCard}>
           <Text style={w.loadPrayerText}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
 
-          {/* Poster with radial glow */}
+          {/* Poster with subtle glow */}
           <View style={w.loadPosterWrap}>
-            {/* Outer ellipse — matches web radial-gradient ellipse */}
             <View style={{
-              position: "absolute", width: 260, height: 320, borderRadius: 130,
-              backgroundColor: "rgba(109,40,217,0.08)",
-              shadowColor: "#7C3AED", shadowOpacity: 0.85, shadowRadius: 72,
-              shadowOffset: { width: 0, height: 0 },
-            }} />
-            {/* Mid ellipse */}
-            <View style={{
-              position: "absolute", width: 210, height: 270, borderRadius: 105,
-              backgroundColor: "rgba(124,58,237,0.13)",
-              shadowColor: "#8B5CF6", shadowOpacity: 0.55, shadowRadius: 44,
-              shadowOffset: { width: 0, height: 0 },
-            }} />
-            {/* Inner ellipse */}
-            <View style={{
-              position: "absolute", width: 180, height: 220, borderRadius: 90,
-              backgroundColor: "rgba(139,92,246,0.18)",
-              shadowColor: "#a78bfa", shadowOpacity: 0.45, shadowRadius: 28,
+              position: "absolute", width: 200, height: 250, borderRadius: 100,
+              backgroundColor: "transparent",
+              shadowColor: "#7C3AED", shadowOpacity: 0.45, shadowRadius: 40,
               shadowOffset: { width: 0, height: 0 },
             }} />
             {posterUrl ? (
@@ -544,15 +529,12 @@ export default function AnimationWatchScreen() {
             )}
           </View>
 
-          {/* Title + badge */}
-          <View style={{ alignItems: "center", gap: 8, width: "100%" }}>
-            {titleStr ? <Text style={w.loadCardTitle} numberOfLines={2}>{titleStr}</Text> : null}
-            <View style={w.loadEpBadge}>
-              <Ionicons name={type === "movie" ? "film" : "tv"} size={10} color="#a78bfa" />
-              <Text style={w.loadEpBadgeText}>
-                {type === "movie" ? "فيلم" : `الموسم ${season} • الحلقة ${ep}`}
-              </Text>
-            </View>
+          {/* Episode/movie badge only — no title text (poster already shows it) */}
+          <View style={w.loadEpBadge}>
+            <Ionicons name={type === "movie" ? "film" : "tv"} size={10} color="#a78bfa" />
+            <Text style={w.loadEpBadgeText}>
+              {type === "movie" ? "فيلم" : `الموسم ${season} • الحلقة ${ep}`}
+            </Text>
           </View>
 
           {/* Spinner */}
