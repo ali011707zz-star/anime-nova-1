@@ -275,7 +275,7 @@ function DangerRow({ label, sub, onPress }: { label: string; sub?: string; onPre
 
 /* ══════════════════════ AUTH TYPES ══════════════════════ */
 type AuthFlow = "login" | "signup" | "verify";
-interface MobileUser { email: string; displayName: string; id: string }
+interface MobileUser { email: string; displayName: string; id: string; username?: string; avatarColor?: number }
 const AUTH_KEY = "nova-mobile-user";
 
 /* ── Auth Sheet ── */
@@ -337,7 +337,7 @@ function AuthSheet({ open, onClose, onLogin }: {
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || "حدث خطأ"); }
-      else { setFlow("verify"); setResendCooldown(60); if (d.devCode) setCode(String(d.devCode)); }
+      else { setFlow("verify"); setResendCooldown(60); }
     } catch { setError("تعذّر الوصول للخادم"); }
     setLoading(false);
   };
@@ -353,7 +353,7 @@ function AuthSheet({ open, onClose, onLogin }: {
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || "حدث خطأ"); }
-      else { setResendCooldown(60); if (d.devCode) setCode(String(d.devCode)); }
+      else { setResendCooldown(60); }
     } catch { setError("تعذّر الوصول للخادم"); }
     setLoading(false);
   };
@@ -684,6 +684,280 @@ function PremiumSheet({ open, onClose, user }: {
   );
 }
 
+/* ══════════════════════ PROFILE SHEET ══════════════════════ */
+const AVATAR_COLORS = ["#7c3aed","#2563eb","#db2777","#ea580c","#16a34a","#ca8a04","#0891b2","#dc2626"];
+
+function ProfileSheet({ open, onClose, user, onUpdate, onLogout }: {
+  open: boolean; onClose: () => void;
+  user: MobileUser | null;
+  onUpdate: (u: MobileUser) => void;
+  onLogout: () => void;
+}) {
+  const base = getBaseUrl();
+  const [tab, setTab] = useState<"profile"|"password">("profile");
+  const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
+  const [currentPass, setCurrentPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    if (open && user) {
+      setDisplayName(user.displayName || "");
+      setUsername(user.username || "");
+      setTab("profile");
+      setError(""); setSuccess("");
+      setCurrentPass(""); setNewPass(""); setConfirmPass("");
+    }
+  }, [open]);
+
+  const handleSave = async () => {
+    if (!displayName.trim()) { setError("الاسم الظاهر مطلوب"); return; }
+    setLoading(true); setError(""); setSuccess("");
+    try {
+      const r = await fetch(`${base}/api/auth/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ displayName: displayName.trim(), username: username.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ"); }
+      else {
+        const updated: MobileUser = {
+          ...user!,
+          displayName: d.displayName || displayName.trim(),
+          username: d.username || username.trim() || user!.username,
+        };
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
+        onUpdate(updated);
+        setSuccess("تم حفظ التغييرات ✓");
+        setTimeout(() => setSuccess(""), 2500);
+      }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPass) { setError("أدخل كلمة المرور الحالية"); return; }
+    if (newPass.length < 6) { setError("كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل"); return; }
+    if (newPass !== confirmPass) { setError("كلمتا المرور غير متطابقتين"); return; }
+    setLoading(true); setError(""); setSuccess("");
+    try {
+      const r = await fetch(`${base}/api/auth/change-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ currentPassword: currentPass, newPassword: newPass }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ"); }
+      else {
+        setSuccess("تم تغيير كلمة المرور بنجاح ✓");
+        setCurrentPass(""); setNewPass(""); setConfirmPass("");
+        setTimeout(() => { setSuccess(""); setTab("profile"); }, 2000);
+      }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  if (!open || !user) return null;
+
+  const avatarColor = AVATAR_COLORS[(user.avatarColor ?? 0) % AVATAR_COLORS.length];
+  const letter = (user.displayName || user.email || "?").charAt(0).toUpperCase();
+  const changed = displayName.trim() !== user.displayName || (username.trim() || "") !== (user.username || "");
+
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={ts.overlay} onPress={onClose} />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
+        <View style={[ts.bottomSheet, { maxHeight: "94%", paddingBottom: 0 }]}>
+          <View style={[ts.sheetAccentBar, { backgroundColor: "#7C3AED" }]} />
+          <View style={ts.sheetHandle} />
+
+          {/* Header */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8 }}>
+            <Pressable onPress={onClose} style={ts.reportCloseBtn}>
+              <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+            </Pressable>
+            <Text style={{ fontSize: 15, fontFamily: "Cairo_800ExtraBold", color: "#fff" }}>الملف الشخصي</Text>
+            <View style={ts.reportIconWrap}>
+              <Ionicons name="person" size={15} color="#c4b5fd" />
+            </View>
+          </View>
+
+          {/* Avatar */}
+          <View style={{ alignItems: "center", paddingVertical: 16 }}>
+            <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: avatarColor + "28", borderWidth: 2, borderColor: avatarColor + "80", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
+              <Text style={{ fontSize: 32, fontFamily: "Cairo_800ExtraBold", color: avatarColor }}>{letter}</Text>
+            </View>
+            <Text style={{ fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.85)" }}>{user.displayName}</Text>
+            <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" }}>{user.email}</Text>
+          </View>
+
+          {/* Tabs */}
+          <View style={{ flexDirection: "row", gap: 4, marginHorizontal: 20, padding: 4, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)", marginBottom: 8 }}>
+            {(["profile", "password"] as const).map(t => (
+              <Pressable key={t} onPress={() => { setTab(t); setError(""); setSuccess(""); }}
+                style={[{ flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: "center" },
+                  tab === t && { backgroundColor: "rgba(124,58,237,0.50)", borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" }]}>
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_800ExtraBold", color: tab === t ? "#fff" : "rgba(255,255,255,0.35)" }}>
+                  {t === "profile" ? "بيانات الحساب" : "كلمة المرور"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 48 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+            {/* Error / Success */}
+            {!!error && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.10)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
+                <Ionicons name="alert-circle" size={14} color="#f87171" />
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: "#fca5a5", flex: 1, textAlign: "right" }}>{error}</Text>
+              </View>
+            )}
+            {!!success && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(16,185,129,0.10)", borderWidth: 1, borderColor: "rgba(16,185,129,0.25)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
+                <Ionicons name="checkmark-circle" size={14} color="#34d399" />
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: "#6ee7b7", flex: 1, textAlign: "right" }}>{success}</Text>
+              </View>
+            )}
+
+            {tab === "profile" ? (
+              <>
+                {/* Display Name */}
+                <Text style={ts.authFieldLabel}>الاسم الظاهر</Text>
+                <View style={ts.authFieldWrap}>
+                  <TextInput value={displayName} onChangeText={v => { setDisplayName(v); setError(""); }}
+                    placeholder="اسمك الظاهر للآخرين"
+                    placeholderTextColor="rgba(255,255,255,0.18)"
+                    style={ts.authFieldInput}
+                    textAlign="right"
+                  />
+                  <Ionicons name="person-outline" size={16} color="rgba(255,255,255,0.2)" />
+                </View>
+
+                {/* Username */}
+                <Text style={ts.authFieldLabel}>اسم المستخدم (إنجليزي)</Text>
+                <View style={ts.authFieldWrap}>
+                  <TextInput value={username} onChangeText={v => { setUsername(v.replace(/[^a-zA-Z0-9_.]/g, "").toLowerCase()); setError(""); }}
+                    placeholder="@username"
+                    placeholderTextColor="rgba(255,255,255,0.18)"
+                    autoCapitalize="none"
+                    style={ts.authFieldInput}
+                    textAlign="right"
+                  />
+                  <Ionicons name="at" size={16} color="rgba(255,255,255,0.2)" />
+                </View>
+
+                {/* Email (readonly) */}
+                <Text style={ts.authFieldLabel}>البريد الإلكتروني</Text>
+                <View style={[ts.authFieldWrap, { opacity: 0.5 }]}>
+                  <Text style={[ts.authFieldInput, { paddingVertical: 12, color: "rgba(255,255,255,0.5)" }]}>{user.email}</Text>
+                  <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.2)" />
+                </View>
+
+                {/* Save */}
+                <Pressable onPress={handleSave} disabled={loading || !changed}
+                  style={[ts.authSubmitBtn, { marginTop: 6, opacity: !changed ? 0.45 : 1 }]}>
+                  {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={16} color="#fff" />
+                      <Text style={ts.authSubmitText}>حفظ التغييرات</Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {/* Divider */}
+                <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.06)", marginVertical: 22 }} />
+
+                {/* Logout */}
+                <Pressable onPress={() => { onLogout(); onClose(); }}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 14, borderRadius: 18, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.20)", marginBottom: 12 }}>
+                  <Ionicons name="log-out" size={16} color="#f87171" />
+                  <Text style={{ fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#f87171" }}>تسجيل الخروج</Text>
+                </Pressable>
+
+                {/* Switch account */}
+                <Pressable onPress={() => { onLogout(); onClose(); }}
+                  style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", marginBottom: 12 }}>
+                  <Ionicons name="swap-horizontal" size={14} color="rgba(255,255,255,0.5)" />
+                  <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.50)" }}>تبديل الحساب</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                {/* Current password */}
+                <Text style={ts.authFieldLabel}>كلمة المرور الحالية</Text>
+                <View style={ts.authFieldWrap}>
+                  <Pressable onPress={() => setShowCurrent(p => !p)}>
+                    <Ionicons name={showCurrent ? "eye-off" : "eye"} size={16} color="rgba(255,255,255,0.3)" />
+                  </Pressable>
+                  <TextInput value={currentPass} onChangeText={v => { setCurrentPass(v); setError(""); }}
+                    placeholder="••••••••"
+                    placeholderTextColor="rgba(255,255,255,0.18)"
+                    secureTextEntry={!showCurrent}
+                    style={ts.authFieldInput}
+                    textAlign="right"
+                  />
+                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.2)" />
+                </View>
+
+                {/* New password */}
+                <Text style={ts.authFieldLabel}>كلمة المرور الجديدة</Text>
+                <View style={ts.authFieldWrap}>
+                  <Pressable onPress={() => setShowNew(p => !p)}>
+                    <Ionicons name={showNew ? "eye-off" : "eye"} size={16} color="rgba(255,255,255,0.3)" />
+                  </Pressable>
+                  <TextInput value={newPass} onChangeText={v => { setNewPass(v); setError(""); }}
+                    placeholder="6 أحرف على الأقل"
+                    placeholderTextColor="rgba(255,255,255,0.18)"
+                    secureTextEntry={!showNew}
+                    style={ts.authFieldInput}
+                    textAlign="right"
+                  />
+                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.2)" />
+                </View>
+
+                {/* Confirm */}
+                <Text style={ts.authFieldLabel}>تأكيد كلمة المرور الجديدة</Text>
+                <View style={[ts.authFieldWrap, confirmPass ? { borderColor: newPass === confirmPass ? "rgba(52,211,153,0.35)" : "rgba(239,68,68,0.35)" } : {}]}>
+                  <Ionicons name={newPass === confirmPass && confirmPass ? "checkmark-circle" : "ellipse-outline"} size={16} color={newPass === confirmPass && confirmPass ? "#34d399" : "rgba(255,255,255,0.2)"} />
+                  <TextInput value={confirmPass} onChangeText={v => { setConfirmPass(v); setError(""); }}
+                    placeholder="••••••••"
+                    placeholderTextColor="rgba(255,255,255,0.18)"
+                    secureTextEntry
+                    style={ts.authFieldInput}
+                    textAlign="right"
+                  />
+                  <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.2)" />
+                </View>
+
+                {/* Save password */}
+                <Pressable onPress={handleChangePassword} disabled={loading}
+                  style={[ts.authSubmitBtn, { marginTop: 6 }]}>
+                  {loading ? <ActivityIndicator color="#fff" size="small" /> : (
+                    <>
+                      <Ionicons name="shield-checkmark" size={16} color="#fff" />
+                      <Text style={ts.authSubmitText}>تغيير كلمة المرور</Text>
+                    </>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 /* ══════════════════════ MAIN ══════════════════════ */
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -696,6 +970,7 @@ export default function SettingsScreen() {
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
 
   useEffect(() => {
@@ -812,21 +1087,27 @@ export default function SettingsScreen() {
         {/* ── Profile / Login card ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
           {currentUser ? (
-            <View style={ts.profileCard}>
-              <View style={[ts.profileAvatar, { backgroundColor: "rgba(124,58,237,0.20)", borderColor: "rgba(139,92,246,0.40)" }]}>
-                <Text style={{ fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd" }}>
+            <Pressable onPress={() => setShowProfile(true)} style={ts.profileCard}>
+              {/* Avatar */}
+              <View style={[ts.profileAvatar, { backgroundColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "28", borderColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "80" }]}>
+                <Text style={{ fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length] }}>
                   {currentUser.displayName.charAt(0).toUpperCase()}
                 </Text>
               </View>
+              {/* Info */}
               <View style={{ flex: 1, alignItems: "flex-end" }}>
                 <Text style={ts.profileLoginTitle}>{currentUser.displayName}</Text>
+                {currentUser.username ? (
+                  <Text style={[ts.profileLoginSub, { color: "rgba(196,181,253,0.5)" }]}>@{currentUser.username}</Text>
+                ) : null}
                 <Text style={ts.profileLoginSub}>{currentUser.email}</Text>
               </View>
-              <Pressable onPress={handleLogout} style={[ts.profileLoginBtn, { backgroundColor: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.25)" }]}>
-                <Ionicons name="log-out" size={14} color="#f87171" />
-                <Text style={[ts.profileLoginBtnText, { color: "#f87171" }]}>خروج</Text>
-              </Pressable>
-            </View>
+              {/* Edit chevron */}
+              <View style={ts.profileLoginBtn}>
+                <Ionicons name="create-outline" size={14} color="#c4b5fd" />
+                <Text style={ts.profileLoginBtnText}>تعديل</Text>
+              </View>
+            </Pressable>
           ) : (
             <Pressable onPress={() => setShowAuth(true)} style={ts.profileCard}>
               <View style={ts.profileAvatar}>
@@ -1085,6 +1366,15 @@ export default function SettingsScreen() {
         open={showAuth}
         onClose={() => setShowAuth(false)}
         onLogin={u => { setCurrentUser(u); showToast(`مرحباً ${u.displayName}! 🎉`); }}
+      />
+
+      {/* Profile Sheet */}
+      <ProfileSheet
+        open={showProfile}
+        onClose={() => setShowProfile(false)}
+        user={currentUser}
+        onUpdate={u => { setCurrentUser(u); showToast("تم تحديث الملف الشخصي ✓"); }}
+        onLogout={handleLogout}
       />
 
       {/* Premium Sheet */}
