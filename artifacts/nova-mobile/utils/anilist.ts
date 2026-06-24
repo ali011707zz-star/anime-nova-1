@@ -140,6 +140,39 @@ query TodayEpisodes($gt: Int!, $lt: Int!) {
   }
 }`;
 
+export const TODAY_EPISODES_QUERY_PAGED = `
+query TodayEpisodesPaged($gt: Int!, $lt: Int!, $page: Int!) {
+  Page(page: $page, perPage: 50) {
+    pageInfo { hasNextPage }
+    airingSchedules(airingAt_greater: $gt, airingAt_lesser: $lt, sort: TIME) {
+      episode airingAt
+      media {
+        id title { romaji english } coverImage { large } averageScore popularity
+        format isAdult genres
+      }
+    }
+  }
+}`;
+
+export async function fetchAllTodayEpisodes(gt: number, lt: number): Promise<any[]> {
+  const all: any[] = [];
+  let page = 1;
+  let hasNext = true;
+  while (hasNext && page <= 5) {
+    try {
+      const data = await anilistQuery<{
+        Page: { pageInfo: { hasNextPage: boolean }; airingSchedules: any[] };
+      }>(TODAY_EPISODES_QUERY_PAGED, { gt, lt, page });
+      all.push(...(data?.Page?.airingSchedules || []));
+      hasNext = data?.Page?.pageInfo?.hasNextPage ?? false;
+      page++;
+    } catch { break; }
+  }
+  return all.filter(
+    (e) => !e.media?.isAdult && !(e.media?.genres || []).includes("Hentai")
+  );
+}
+
 export const ACTION_QUERY = `
 query ActionAnime {
   Page(page: 1, perPage: 20) {

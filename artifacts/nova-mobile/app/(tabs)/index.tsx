@@ -19,7 +19,7 @@ import {
   POPULAR_QUERY, TRENDING_QUERY,
   SEASONAL_QUERY, TOP_RATED_QUERY, MOVIES_QUERY, UPCOMING_QUERY,
   ACTION_QUERY, ROMANCE_QUERY, ISEKAI_QUERY, FANTASY_QUERY,
-  TODAY_EPISODES_QUERY, formatAiringTime,
+  fetchAllTodayEpisodes, formatAiringTime,
   getCurrentSeason,
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
@@ -117,19 +117,26 @@ export default function HomeScreen() {
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(FANTASY_QUERY),
   });
 
-  /* حلقات اليوم — جدول البث اليوم */
+  /* حلقات اليوم — جلب كل الصفحات مثل تطبيق الويب */
   const todayStart = (() => {
     const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000);
   })();
   const todayEnd = todayStart + 86399;
 
   type TodayEp = { episode: number; airingAt: number; media: { id: number; title: { romaji: string; english: string | null }; coverImage: { large: string }; averageScore: number | null; popularity: number } };
-  const { data: todayEpsData } = useQuery({
-    queryKey: ["todayEps", todayStart],
-    queryFn: () => anilistQuery<{ Page: { airingSchedules: TodayEp[] } }>(TODAY_EPISODES_QUERY, { gt: todayStart, lt: todayEnd }),
-    staleTime: 10 * 60 * 1000,
-  });
-  const todayEps = (todayEpsData?.Page?.airingSchedules || []).filter(e => !e.media.title.romaji?.toLowerCase().includes("(") );
+  const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchAllTodayEpisodes(todayStart, todayEnd).then(eps => {
+      if (!cancelled) {
+        const filtered = eps
+          .filter((e: any) => !e.media.title.romaji?.toLowerCase().includes("("))
+          .sort((a: any, b: any) => b.airingAt - a.airingAt);
+        setTodayEps(filtered);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [todayStart]);
 
   const isLoading = loadingT || loadingP || loadingA;
 

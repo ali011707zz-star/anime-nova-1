@@ -45,6 +45,7 @@ function RootLayoutNav() {
       <Stack.Screen name="animation/watch" options={{ headerShown: false, orientation: "landscape" }} />
       <Stack.Screen name="settings" options={{ headerShown: false }} />
       <Stack.Screen name="schedule" options={{ headerShown: false }} />
+      <Stack.Screen name="profile" options={{ headerShown: false, animation: "slide_from_right" }} />
       <Stack.Screen name="+not-found" />
     </Stack>
   );

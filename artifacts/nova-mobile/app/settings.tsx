@@ -967,7 +967,6 @@ export default function SettingsScreen() {
   const [showReport, setShowReport] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
   const [currentUser, setCurrentUser] = useState<MobileUser | null>(null);
 
   useEffect(() => {
@@ -1084,7 +1083,7 @@ export default function SettingsScreen() {
         {/* ── Profile / Login card ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
           {currentUser ? (
-            <Pressable onPress={() => setShowProfile(true)} style={ts.profileCard}>
+            <Pressable onPress={() => router.push("/profile" as any)} style={ts.profileCard}>
               {/* Avatar */}
               <View style={[ts.profileAvatar, { backgroundColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "28", borderColor: (AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length]) + "80" }]}>
                 <Text style={{ fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: AVATAR_COLORS[(currentUser.avatarColor ?? 0) % AVATAR_COLORS.length] }}>
@@ -1363,15 +1362,6 @@ export default function SettingsScreen() {
         open={showAuth}
         onClose={() => setShowAuth(false)}
         onLogin={u => { setCurrentUser(u); showToast(`مرحباً ${u.displayName}! 🎉`); }}
-      />
-
-      {/* Profile Sheet */}
-      <ProfileSheet
-        open={showProfile}
-        onClose={() => setShowProfile(false)}
-        user={currentUser}
-        onUpdate={u => { setCurrentUser(u); showToast("تم تحديث الملف الشخصي ✓"); }}
-        onLogout={handleLogout}
       />
 
       {/* Premium Sheet */}
