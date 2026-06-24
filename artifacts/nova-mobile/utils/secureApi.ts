@@ -82,17 +82,31 @@ export async function invalidateToken(): Promise<void> {
   await secureDelete(TOKEN_EXP_KEY);
 }
 
+const MOBILE_USER_KEY = "nova-mobile-user";
+
+async function getMobileUserId(): Promise<string | null> {
+  try {
+    const raw = await AsyncStorage.getItem(MOBILE_USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.id || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function secureFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const token = await getAuthToken();
+  const [token, mobileUserId] = await Promise.all([getAuthToken(), getMobileUserId()]);
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {}),
     "X-Nova-Client": CLIENT_ID,
     "User-Agent": APP_UA,
   };
   if (token) headers["X-App-Token"] = token;
+  if (mobileUserId) headers["X-Mobile-User-Id"] = mobileUserId;
   return fetch(url, { ...options, headers });
 }
 

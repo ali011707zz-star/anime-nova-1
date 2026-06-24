@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  Alert, Linking, Modal, Platform, Pressable, ScrollView,
+  Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView,
   Share, StyleSheet, Switch, Text, TextInput, View, ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -291,9 +291,10 @@ function AuthSheet({ open, onClose, onLogin }: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [devCode, setDevCode] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); }
+    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); setDevCode(null); }
   }, [open]);
 
   useEffect(() => {
@@ -337,7 +338,7 @@ function AuthSheet({ open, onClose, onLogin }: {
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || "حدث خطأ"); }
-      else { setFlow("verify"); setResendCooldown(60); }
+      else { setFlow("verify"); setResendCooldown(60); if (d.devCode) setDevCode(String(d.devCode)); }
     } catch { setError("تعذّر الوصول للخادم"); }
     setLoading(false);
   };
@@ -353,7 +354,7 @@ function AuthSheet({ open, onClose, onLogin }: {
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || "حدث خطأ"); }
-      else { setResendCooldown(60); }
+      else { setResendCooldown(60); if (d.devCode) setDevCode(String(d.devCode)); }
     } catch { setError("تعذّر الوصول للخادم"); }
     setLoading(false);
   };
@@ -445,9 +446,17 @@ function AuthSheet({ open, onClose, onLogin }: {
           {/* ── Verify ── */}
           {isVerify ? (
             <>
-              <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", textAlign: "right", marginBottom: 20, lineHeight: 22 }}>
+              <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", textAlign: "right", marginBottom: 12, lineHeight: 22 }}>
                 أُرسل كود تحقق إلى {email}،{"\n"}أدخل الكود المكوّن من <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold" }}>6 أرقام</Text>.
               </Text>
+              {devCode ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(16,185,129,0.10)", borderWidth: 1, borderColor: "rgba(16,185,129,0.30)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 }}>
+                  <Ionicons name="shield-checkmark" size={14} color="#34d399" />
+                  <Text style={{ flex: 1, fontSize: 12, fontFamily: "Cairo_400Regular", color: "#6ee7b7", textAlign: "right" }}>
+                    كود التطوير: <Text style={{ fontFamily: "Cairo_800ExtraBold", fontSize: 16, color: "#34d399", letterSpacing: 3 }}>{devCode}</Text>
+                  </Text>
+                </View>
+              ) : null}
               <Text style={ts.authFieldLabel}>كود التحقق</Text>
               <TextInput
                 value={code}
