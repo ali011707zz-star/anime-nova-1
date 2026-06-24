@@ -594,11 +594,27 @@ export function RiftPlayer({
       setSubLoading(true);
       setLoadedCues([]);
       try {
-        const r = await fetch(url, { headers: { "Accept": "text/vtt,text/plain,*/*" }, signal: AbortSignal.timeout(30_000) });
-        const text = await r.text();
+        const r = await fetch(url, { headers: { "Accept": "application/json,text/vtt,text/plain,*/*" }, signal: AbortSignal.timeout(30_000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         if (cancelled) return;
-        const cues = parseVTT(text);
-        if (cues.length > 0) urlCueCacheRef.current.set(url, cues); // populate URL cache
+
+        /* ── translate-vtt returns JSON {cues:[{timing,text}]}, NOT VTT text ── */
+        let cues: SubCue[];
+        if (url.includes("translate-vtt")) {
+          const data = await r.json() as { cues?: Array<{timing: string; text: string}> };
+          cues = (data.cues || [])
+            .map(c => {
+              const [s, e] = (c.timing || "").split("-->").map(x => x.trim());
+              return { start: parseVTTTime(s || ""), end: parseVTTTime(e || ""), text: (c.text || "").trim() };
+            })
+            .filter(c => c.start < c.end && c.text.length > 0);
+        } else {
+          const text = await r.text();
+          if (cancelled) return;
+          cues = parseVTT(text);
+        }
+
+        if (cues.length > 0) urlCueCacheRef.current.set(url, cues);
         setLoadedCues(cues);
         if (cues.length > 0) {
           if (!cancelled) setSubLoading(false);
@@ -717,40 +733,63 @@ export function RiftPlayer({
     return () => { cancelled = true; };
   }, [anilistId, episode]);
 
-  /* ─── Auto-fetch subtitles from multi-source API (jimaku.cc → animetosho) ─── */
+  /* ─── Auto-fetch subtitles via subtitle-tracks API (wyzie.ru + SubDL + HiAnime) ─── */
   useEffect(() => {
     if (!anilistId || !episode) return;
-    /* Don't skip Arabic sources — they benefit from auto-fetched + translated subs too.
-       Only skip if cues are already successfully loaded. */
-    if (loadedCues.length > 0 || subCues?.length) return;
+    if (subCues?.length) return; // already provided as prop
     let cancelled = false;
     setAutoSubSource(null);
     (async () => {
       try {
         const base = getBaseUrl();
         if (!base) return;
+        const params = new URLSearchParams({
+          anilistId: String(anilistId),
+          ep: String(episode),
+        });
         const res = await fetch(
-          `${base}/api/anime/subtitles?anilistId=${anilistId}&ep=${episode}`,
-          { signal: AbortSignal.timeout(9000) }
+          `${base}/api/anime/subtitle-tracks?${params}`,
+          { signal: AbortSignal.timeout(20_000) }
         );
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const tracks: any[] = data.tracks || [];
         if (cancelled || tracks.length === 0) return;
-        const track = tracks[0];
-        const vttUrl = track.url.startsWith("/") ? `${base}${track.url}` : track.url;
+
+        /* Prefer Arabic direct, then any track (auto-translated) */
+        const arTrack = tracks.find((t: any) => t.lang === "ar");
+        const track   = arTrack || tracks[0];
+        if (!track?.url) return;
+
+        const trackUrl = track.url.startsWith("/") ? `${base}${track.url}` : track.url;
         setSubLoading(true);
-        const vttRes = await fetch(vttUrl, {
-          headers: { Accept: "text/vtt,text/plain,*/*" },
-          signal: AbortSignal.timeout(7000),
+
+        /* ── fetch + parse: translate-vtt → JSON, others → VTT text ── */
+        const vttRes = await fetch(trackUrl, {
+          headers: { Accept: "application/json,text/vtt,text/plain,*/*" },
+          signal: AbortSignal.timeout(30_000),
         });
-        const text = await vttRes.text();
-        if (cancelled) return;
-        const cues = parseVTT(text);
-        if (cues.length > 0) {
+        if (!vttRes.ok || cancelled) return;
+
+        let cues: SubCue[] = [];
+        if (trackUrl.includes("translate-vtt")) {
+          const d = await vttRes.json() as { cues?: Array<{timing: string; text: string}> };
+          cues = (d.cues || [])
+            .map((c: any) => {
+              const [s, e] = (c.timing || "").split("-->").map((x: string) => x.trim());
+              return { start: parseVTTTime(s), end: parseVTTTime(e), text: (c.text || "").trim() };
+            })
+            .filter((c: SubCue) => c.start < c.end && c.text.length > 0);
+        } else {
+          const text = await vttRes.text();
+          if (cancelled) return;
+          cues = parseVTT(text);
+        }
+
+        if (cues.length > 0 && !cancelled) {
           setLoadedCues(cues);
           setSubOn(true);
-          setAutoSubSource(track.source || "auto");
+          setAutoSubSource(track.lang === "ar" ? "wyzie-ar" : "wyzie-en-translated");
         }
       } catch {}
       finally { if (!cancelled) setSubLoading(false); }
