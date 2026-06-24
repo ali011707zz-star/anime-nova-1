@@ -144,11 +144,6 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
       const data = await res.json();
       if (!res.ok) { setError(data.error || "حدث خطأ"); setLoading(false); return false; }
       startCooldown(60);
-      // وضع التطوير: الكود يُملأ تلقائياً من الاستجابة
-      if (data.devCode) {
-        const digits = String(data.devCode).slice(0, 6).split("");
-        setCode(digits.concat(Array(6 - digits.length).fill("")).slice(0, 6));
-      }
       setLoading(false);
       return true;
     } catch {
