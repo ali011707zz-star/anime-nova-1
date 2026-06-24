@@ -142,7 +142,9 @@ export async function sbInsert<T = any>(
   if (!pool) return null;
   try {
     const cols   = Object.keys(row);
-    const vals   = Object.values(row);
+    const vals   = Object.values(row).map(v =>
+      (v !== null && typeof v === "object" && !Buffer.isBuffer(v)) ? JSON.stringify(v) : v
+    );
     const places = cols.map((_, i) => `$${i + 1}`).join(", ");
     const colStr = cols.map((c) => `"${c}"`).join(", ");
     const sql    = `INSERT INTO "${table}" (${colStr}) VALUES (${places}) RETURNING *`;
@@ -164,7 +166,10 @@ export async function sbUpsert<T = any>(
   if (!pool) return null;
   try {
     const cols   = Object.keys(row);
-    const vals   = Object.values(row);
+    // Serialize objects/arrays to JSON strings for JSONB columns
+    const vals   = Object.values(row).map(v =>
+      (v !== null && typeof v === "object" && !Buffer.isBuffer(v)) ? JSON.stringify(v) : v
+    );
     const places = cols.map((_, i) => `$${i + 1}`).join(", ");
     const colStr = cols.map((c) => `"${c}"`).join(", ");
 
