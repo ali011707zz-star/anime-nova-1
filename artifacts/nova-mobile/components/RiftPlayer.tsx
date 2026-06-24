@@ -1236,6 +1236,10 @@ export function RiftPlayer({
               <Text style={s.errorBtnText}>جرّب المصدر التالي</Text>
             </Pressable>
           )}
+          <Pressable onPress={onBack} style={s.errorBtnBack}>
+            <Ionicons name="arrow-back" size={14} color="rgba(255,255,255,0.6)" />
+            <Text style={s.errorBtnBackText}>العودة</Text>
+          </Pressable>
         </View>
       )}
 
@@ -1896,6 +1900,8 @@ const s = StyleSheet.create({
   errorTitle:  { color: "rgba(255,255,255,0.85)", fontSize: 15, fontFamily: "Cairo_700Bold" },
   errorBtn:    { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(239,68,68,0.15)", borderRadius: 20, paddingHorizontal: 22, paddingVertical: 11, borderWidth: 1, borderColor: "rgba(239,68,68,0.35)" },
   errorBtnText: { color: "#ef4444", fontFamily: "Cairo_600SemiBold", fontSize: 14 },
+  errorBtnBack: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 20, paddingHorizontal: 22, paddingVertical: 11, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
+  errorBtnBackText: { color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_600SemiBold", fontSize: 13 },
 
   /* Subtitle */
   subtitleWrap: { position: "absolute", left: 16, right: 16, alignItems: "center", zIndex: 8 },

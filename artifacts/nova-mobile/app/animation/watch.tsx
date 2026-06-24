@@ -390,34 +390,9 @@ export default function AnimationWatchScreen() {
                 const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
                 if (!isGoodSrc || !isWebCompatible || autoPlayFiredRef.current) return next;
 
-                const lbl = (src.label || "").toLowerCase();
-                const isFast = lbl.startsWith("videasy") || lbl.startsWith("vidlink");
-
-                if (isFast) {
-                  /* Videasy / VidLink → شغّل فوراً */
-                  autoPlayFiredRef.current = true;
-                  setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
-                } else {
-                  /* مصدر آخر → انتظر 5 ثواني ريثما يصل Videasy/VidLink */
-                  if (!autoPlayTimerRef.current) {
-                    autoPlayTimerRef.current = setTimeout(() => {
-                      autoPlayTimerRef.current = null;
-                      if (autoPlayFiredRef.current) return;
-                      setSources(latest => {
-                        const fastSrc = latest.find(s => {
-                          const l = (s.label || "").toLowerCase();
-                          return (l.startsWith("videasy") || l.startsWith("vidlink")) && isDirectPlayable(s);
-                        });
-                        const best = fastSrc || latest.find(s => isDirectPlayable(s));
-                        if (best && !autoPlayFiredRef.current) {
-                          autoPlayFiredRef.current = true;
-                          setTimeout(() => { setPlayingSrc(best); setScreen("native"); }, 0);
-                        }
-                        return latest;
-                      });
-                    }, 5_000);
-                  }
-                }
+                /* شغّل أول مصدر جيد يصل فوراً بدون انتظار */
+                autoPlayFiredRef.current = true;
+                setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
                 return next;
               });
 
