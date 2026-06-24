@@ -290,10 +290,17 @@ function AuthSheet({ open, onClose, onLogin }: {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   useEffect(() => {
-    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); }
+    if (open) { setFlow("login"); setEmail(""); setPassword(""); setName(""); setCode(""); setError(""); setShowPass(false); setResendCooldown(0); }
   }, [open]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setInterval(() => setResendCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [resendCooldown]);
 
   const base = getBaseUrl();
 
@@ -330,7 +337,23 @@ function AuthSheet({ open, onClose, onLogin }: {
       });
       const d = await r.json();
       if (!r.ok) { setError(d.error || "حدث خطأ"); }
-      else { setFlow("verify"); if (d.devCode) setCode(String(d.devCode)); }
+      else { setFlow("verify"); setResendCooldown(60); if (d.devCode) setCode(String(d.devCode)); }
+    } catch { setError("تعذّر الوصول للخادم"); }
+    setLoading(false);
+  };
+
+  const handleResendCode = async () => {
+    if (resendCooldown > 0 || loading) return;
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`${base}/api/auth/send-verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), type: "signup" }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "حدث خطأ"); }
+      else { setResendCooldown(60); if (d.devCode) setCode(String(d.devCode)); }
     } catch { setError("تعذّر الوصول للخادم"); }
     setLoading(false);
   };
@@ -423,7 +446,7 @@ function AuthSheet({ open, onClose, onLogin }: {
           {isVerify ? (
             <>
               <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", textAlign: "right", marginBottom: 20, lineHeight: 22 }}>
-                أُرسل كود تحقق إلى {email}،{"\n"}أدخل الكود المكوّن من 4 أرقام.
+                أُرسل كود تحقق إلى {email}،{"\n"}أدخل الكود المكوّن من <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold" }}>6 أرقام</Text>.
               </Text>
               <Text style={ts.authFieldLabel}>كود التحقق</Text>
               <TextInput
@@ -447,12 +470,38 @@ function AuthSheet({ open, onClose, onLogin }: {
                   </>
                 )}
               </Pressable>
-              <Pressable onPress={() => setFlow("signup")} style={{ alignItems: "center", paddingVertical: 12 }}>
-                <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)" }}>رجوع</Text>
+              <Pressable
+                onPress={handleResendCode}
+                disabled={resendCooldown > 0 || loading}
+                style={{ alignItems: "center", paddingVertical: 10 }}
+              >
+                <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: resendCooldown > 0 ? "rgba(255,255,255,0.20)" : "rgba(167,139,250,0.80)" }}>
+                  {resendCooldown > 0 ? `إعادة الإرسال بعد ${resendCooldown}ث` : "لم يصلك الكود؟ إعادة الإرسال"}
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => { setFlow("signup"); setError(""); }} style={{ alignItems: "center", paddingVertical: 8 }}>
+                <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)" }}>رجوع</Text>
               </Pressable>
             </>
           ) : (
             <>
+              {/* Name — signup only, FIRST (same order as web) */}
+              {!isLogin && (
+                <>
+                  <Text style={ts.authFieldLabel}>الاسم (اختياري)</Text>
+                  <View style={ts.authFieldWrap}>
+                    <Ionicons name="person" size={16} color="rgba(255,255,255,0.25)" />
+                    <TextInput
+                      value={name}
+                      onChangeText={v => { setName(v); setError(""); }}
+                      placeholder="ما اسمك؟ (اختياري)"
+                      placeholderTextColor="rgba(255,255,255,0.2)"
+                      style={ts.authFieldInput}
+                    />
+                  </View>
+                </>
+              )}
+
               {/* Email */}
               <Text style={ts.authFieldLabel}>البريد الإلكتروني</Text>
               <View style={ts.authFieldWrap}>
@@ -477,29 +526,12 @@ function AuthSheet({ open, onClose, onLogin }: {
                 <TextInput
                   value={password}
                   onChangeText={v => { setPassword(v); setError(""); }}
-                  placeholder="أدخل كلمة المرور"
+                  placeholder={isLogin ? "أدخل كلمة المرور" : "كلمة المرور (6 أحرف على الأقل)"}
                   placeholderTextColor="rgba(255,255,255,0.2)"
                   secureTextEntry={!showPass}
                   style={ts.authFieldInput}
                 />
               </View>
-
-              {/* Name (signup only) */}
-              {!isLogin && (
-                <>
-                  <Text style={ts.authFieldLabel}>الاسم (اختياري)</Text>
-                  <View style={ts.authFieldWrap}>
-                    <Ionicons name="person" size={16} color="rgba(255,255,255,0.25)" />
-                    <TextInput
-                      value={name}
-                      onChangeText={v => { setName(v); setError(""); }}
-                      placeholder="ما اسمك؟ (اختياري)"
-                      placeholderTextColor="rgba(255,255,255,0.2)"
-                      style={ts.authFieldInput}
-                    />
-                  </View>
-                </>
-              )}
 
               <Pressable onPress={isLogin ? handleLogin : handleSendCode} disabled={loading} style={ts.authSubmitBtn}>
                 {loading ? <ActivityIndicator color="#fff" size="small" /> : (
