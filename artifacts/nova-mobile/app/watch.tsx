@@ -196,12 +196,9 @@ function LoadingScreen({ cover, title, ep, onBack, foundCount }: { cover?: strin
 
         {/* Poster */}
         <View style={d.ldPosterWrap}>
-          <PosterGlow />
           {/* Fallback always rendered behind; image overlaid on top */}
           <View style={[d.ldPoster, d.ldPosterFallback]}>
-            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" }}>
-              <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(139,92,246,0.40)" }} />
-            </View>
+            <Ionicons name="film" size={36} color="rgba(139,92,246,0.4)" />
           </View>
           {cover ? (
             <Image
