@@ -125,16 +125,41 @@ function SpinRing() {
   );
 }
 
+/* ── 2-letter tag from animation source label (mirrors web AnimationWatch) ── */
+function getAnimTag(label: string): string {
+  const l = label.toLowerCase();
+  if (l.startsWith("vyla"))        return "VY";
+  if (l.startsWith("videasy"))     return "VE";
+  if (l.startsWith("vidlink"))     return "VL";
+  if (l.startsWith("lordflix"))    return "LF";
+  if (l.startsWith("starcima"))    return "SC";
+  if (l.startsWith("stardima"))    return "SD";
+  if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "MG";
+  if (l.includes("ميغا") || l.startsWith("mega"))        return "MG";
+  if (l.startsWith("aflaam"))      return "AF";
+  if (l.startsWith("arabseed"))    return "AS";
+  if (l.startsWith("ezvidapi"))    return "EZ";
+  if (l.startsWith("topcinema"))   return "TC";
+  if (l.startsWith("moviz"))       return "MV";
+  if (l.startsWith("seepan"))      return "SP";
+  if (l.startsWith("animewitcher")) return "AW";
+  if (l.startsWith("toonstream"))  return "TS";
+  if (l.startsWith("anikoto"))     return "AK";
+  if (l.startsWith("anineko"))     return "AN";
+  if (l.startsWith("kawaii"))      return "KW";
+  if (l.startsWith("animephoenix") || l.startsWith("phoenix")) return "PH";
+  if (l.startsWith("animehub"))    return "AH";
+  const word = label.replace(/[^a-zA-Z\u0621-\u064a]/g, "").slice(0, 2).toUpperCase();
+  return word || "??";
+}
+
 /* ── Source row ── */
 function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: AnimSrc) => void }) {
   const q = getSrcQuality(src);
   const qs = QUALITY_STYLE[q];
   const label = src.label || `مصدر ${idx + 1}`;
   const isEmbed = isEmbedSrc(src);
-  /* "StarCima · الثريا" → tag="StarCima", cdn="الثريا" */
-  const parts = label.split(/\s*·\s*/);
-  const tag = (parts[0] || label).slice(0, 12).trim();
-  const cdn = parts.slice(1).join(" · ").trim();
+  const tag = getAnimTag(label);
   const hasSub = !!src.subtitleUrl;
 
   return (
@@ -148,7 +173,6 @@ function SrcRow({ src, idx, onPlay }: { src: AnimSrc; idx: number; onPlay: (s: A
           <View style={w.srcTag}><Text style={w.srcTagText}>{tag}</Text></View>
           {hasSub && <View style={w.srcSubBadge}><Text style={w.srcSubText}>ترجمة</Text></View>}
         </View>
-        {cdn ? <Text style={w.srcCdn} numberOfLines={1}>{cdn}</Text> : null}
       </View>
       <View style={w.srcRight}>
         <View style={[w.srcQBadge, { backgroundColor: qs.badge, borderColor: qs.border }]}>
