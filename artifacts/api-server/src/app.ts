@@ -7,6 +7,7 @@ import router from "./routes";
 import userdataRouter from "./routes/userdata.js";
 import commentsRouter from "./routes/comments.js";
 import adminRouter from "./routes/admin.js";
+import dbRelayRouter from "./routes/dbRelay.js";
 import reportRouter from "./routes/report.js";
 import telegramRouter from "./routes/telegram.js";
 import authTokenRouter from "./routes/authToken.js";
@@ -91,6 +92,7 @@ export async function createApp(): Promise<Express> {
   app.use("/api", userdataRouter);
   app.use("/api", commentsRouter);
   app.use("/api", adminRouter);
+  app.use("/api", dbRelayRouter);
   app.use(reportRouter);
   app.use(telegramRouter);
 
