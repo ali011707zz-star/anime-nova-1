@@ -110,7 +110,7 @@ setInterval(() => {
 
 // ── L2: Supabase REST (مشترك بين جميع المستخدمين، دائم) ──
 async function sbGet(cacheKey: string): Promise<{ sources: any[]; expiresAt: number } | null> {
-  if (!isCacheDbReady) return null;
+  if (!isCacheDbReady()) return null;
   try {
     const rows = await cacheSelect("source_cache", { cache_key: `eq.${cacheKey}` }, { limit: 1 });
     if (!rows[0]) return null;
@@ -119,7 +119,7 @@ async function sbGet(cacheKey: string): Promise<{ sources: any[]; expiresAt: num
 }
 
 async function sbUpsertCache(cacheKey: string, site: string, sources: any[], expiresAt: number): Promise<void> {
-  if (!isCacheDbReady) return;
+  if (!isCacheDbReady()) return;
   try {
     await cacheUpsert("source_cache", {
       cache_key:  cacheKey,
@@ -134,7 +134,7 @@ async function sbUpsertCache(cacheKey: string, site: string, sources: any[], exp
 }
 
 async function sbDeleteExpired(): Promise<void> {
-  if (!isCacheDbReady) return;
+  if (!isCacheDbReady()) return;
   try {
     await cacheDelete("source_cache", { expires_at: `lt.${Date.now()}` });
   } catch { /* silent */ }
@@ -142,11 +142,13 @@ async function sbDeleteExpired(): Promise<void> {
 
 setInterval(sbDeleteExpired, 3_600_000);
 
-if (isCacheDbReady) {
-  console.log("[sourceCache] ✅ Supabase L2 cache مفعّل — الروابط مشتركة بين جميع المستخدمين");
-} else {
-  console.warn("[sourceCache] ⚠️ Supabase غير مُهيَّأ — L2 cache معطّل (L1 ذاكرة فقط حتى تُضاف بيانات Supabase)");
-}
+setTimeout(() => {
+  if (isCacheDbReady()) {
+    console.log("[sourceCache] ✅ Supabase L2 cache مفعّل — الروابط مشتركة بين جميع المستخدمين");
+  } else {
+    console.warn("[sourceCache] ⚠️ Supabase غير مُهيَّأ — L2 cache معطّل");
+  }
+}, 600);
 
 // ── صنع مفتاح cache ──
 export function makeSourceCacheKey(site: string, title: string, ep: number): string {
@@ -208,7 +210,7 @@ export function shouldRefreshCache(expiresAt: number): boolean {
 }
 
 export function getCacheStats(): { l1Size: number; supabaseEnabled: boolean } {
-  return { l1Size: l1.size, supabaseEnabled: isCacheDbReady };
+  return { l1Size: l1.size, supabaseEnabled: isCacheDbReady() };
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -225,7 +227,7 @@ setInterval(() => {
 }, 5 * 60_000);
 
 async function cdnSbGet(key: string): Promise<{ content: string; ct: string } | null> {
-  if (!isCacheDbReady) return null;
+  if (!isCacheDbReady()) return null;
   try {
     const rows = await cacheSelect("cdn_cache", { cache_key: `eq.${key}` }, { limit: 1 });
     if (!rows[0]) return null;
@@ -235,7 +237,7 @@ async function cdnSbGet(key: string): Promise<{ content: string; ct: string } | 
 }
 
 async function cdnSbUpsert(key: string, content: string, ct: string, expiresAt: number): Promise<void> {
-  if (!isCacheDbReady) return;
+  if (!isCacheDbReady()) return;
   try {
     await cacheUpsert("cdn_cache", {
       cache_key:  key,
@@ -248,7 +250,7 @@ async function cdnSbUpsert(key: string, content: string, ct: string, expiresAt: 
 }
 
 setInterval(async () => {
-  if (!isCacheDbReady) return;
+  if (!isCacheDbReady()) return;
   try { await cacheDelete("cdn_cache", { expires_at: `lt.${Date.now()}` }); } catch {}
 }, 60 * 60_000);
 
@@ -285,7 +287,7 @@ export async function getSubtitleCache(
   if (mem && Date.now() - mem.ts < SUB_L1_TTL) return mem.cues;
 
   // L2: Supabase (مشترك)
-  if (!isCacheDbReady) return null;
+  if (!isCacheDbReady()) return null;
   try {
     const rows = await cacheSelect("subtitle_cache", { cache_key: `eq.${cacheKey}` }, { limit: 1 });
     if (!rows[0] || Number(rows[0].expires_at) < Date.now()) return null;
@@ -304,7 +306,7 @@ export async function setSubtitleCache(
   // L1 فوري
   SUB_L1.set(cacheKey, { cues, ts: Date.now() });
   // L2 Supabase: fire-and-forget
-  if (!isCacheDbReady) return;
+  if (!isCacheDbReady()) return;
   const now = Date.now();
   cacheUpsert("subtitle_cache", {
     cache_key:  cacheKey,
