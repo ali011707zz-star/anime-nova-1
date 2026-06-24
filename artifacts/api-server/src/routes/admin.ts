@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { setConfig, resetTransporter } from "../auth/emailService.js";
+import { setConfig, resetTransporter, initEmailService } from "../auth/emailService.js";
 import { getEmailUser } from "../auth/emailAuth.js";
 import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 
@@ -11,6 +11,22 @@ async function isAdmin(req: Request): Promise<boolean> {
 }
 
 // ── SMTP Config ─────────────────────────────────────────────────────────────
+
+/* تشخيص SMTP — بدون مصادقة للاختبار السريع */
+router.get("/admin/smtp-ping", async (_req: Request, res: Response) => {
+  try {
+    resetTransporter();
+    await initEmailService();
+    return res.json({
+      ok:       true,
+      smtpUser: process.env.SMTP_USER || "غير مضبوط",
+      hasPass:  !!process.env.SMTP_PASS,
+      nodeEnv:  process.env.NODE_ENV,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 router.post("/admin/smtp-config", async (req: Request, res: Response) => {
   if (!(await isAdmin(req)))

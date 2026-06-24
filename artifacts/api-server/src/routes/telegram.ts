@@ -167,19 +167,14 @@ async function markNotified(anilistId: number, ep: number): Promise<void> {
 
 function buildCaption(media: any, ep: number): string {
   const title  = media.title?.english || media.title?.romaji || media.title?.native || "أنمي";
-  const domain = process.env.APP_DOMAIN
-    || process.env.REPLIT_DEV_DOMAIN
-    || "animenova.replit.app";
-  const watchUrl = `https://${domain}/watch?anime=${media.id}&ep=${ep}&title=${encodeURIComponent(media.title?.romaji || title)}`;
   const genres = (media.genres || []).slice(0, 3).join(" • ");
 
   return (
     `🎌 <b>حلقة جديدة!</b>\n\n` +
     `🎬 <b>${title}</b>\n` +
     `📺 <b>الحلقة:</b> ${ep}\n` +
-    (genres ? `🏷 ${genres}\n` : "") +
-    `\n<a href="${watchUrl}">▶️ شاهد الآن على Anime NOVA</a>`
-  );
+    (genres ? `🏷 ${genres}\n` : "")
+  ).trimEnd();
 }
 
 /* ── حالة الـ scheduler ──────────────────────────────────────────────── */
@@ -388,13 +383,11 @@ async function handleUpdate(update: any) {
     if (items.length === 0) {
       await sendMessage(chatId, `📭 لا توجد حلقات عُرضت اليوم`);
     } else {
-      const domain = process.env.APP_DOMAIN || process.env.REPLIT_DEV_DOMAIN || "animenova.replit.app";
       const lines = items.map((item: any) => {
         const m = item.media;
         const title = m?.title?.english || m?.title?.romaji || "أنمي";
         const ep    = item.episode;
-        const url   = `https://${domain}/watch?anime=${m?.id}&ep=${ep}&title=${encodeURIComponent(m?.title?.romaji || title)}`;
-        return `🎌 <b>${title}</b> · ح${ep}\n<a href="${url}">▶️ شاهد الآن</a>`;
+        return `🎌 <b>${title}</b> · ح${ep}`;
       });
       // إرسال على شكل مجموعات (10 لكل رسالة)
       const CHUNK = 10;
