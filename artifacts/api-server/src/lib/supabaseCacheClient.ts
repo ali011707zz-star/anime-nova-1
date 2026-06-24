@@ -5,13 +5,18 @@
 
 import { sbSelect, sbInsert, sbUpsert, sbPatch, sbDelete, isSupabaseReady } from "./supabaseClient.js";
 
-export const isCacheDbReady = isSupabaseReady;
-
-if (isCacheDbReady) {
-  console.log("[cacheClient] ✅ Supabase جاهز للكاش المشترك");
-} else {
-  console.warn("[cacheClient] ⚠️ Supabase غير مُهيَّأ — الكاش L2 معطّل");
+export function isCacheDbReady(): boolean {
+  return isSupabaseReady();
 }
+
+// سيُطبَع بعد تحميل env من Orkestr (داخل createApp أو بعد bootstrap)
+setTimeout(() => {
+  if (isSupabaseReady()) {
+    console.log("[cacheClient] ✅ Supabase جاهز للكاش المشترك");
+  } else {
+    console.warn("[cacheClient] ⚠️ Supabase غير مُهيَّأ — الكاش L2 معطّل");
+  }
+}, 500);
 
 export const cacheSelect  = sbSelect;
 export const cacheInsert  = sbInsert;
