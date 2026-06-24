@@ -720,8 +720,9 @@ export function RiftPlayer({
   /* ─── Auto-fetch subtitles from multi-source API (jimaku.cc → animetosho) ─── */
   useEffect(() => {
     if (!anilistId || !episode) return;
-    if (currentSrc?.isArabic) return;
-    if (currentSrc?.subtitleUrl || subCues?.length) return;
+    /* Don't skip Arabic sources — they benefit from auto-fetched + translated subs too.
+       Only skip if cues are already successfully loaded. */
+    if (loadedCues.length > 0 || subCues?.length) return;
     let cancelled = false;
     setAutoSubSource(null);
     (async () => {

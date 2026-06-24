@@ -661,7 +661,12 @@ export default function WatchScreen() {
 
   /* ══ RIFT PLAYER ══ */
   if (screen === "native" && riftSources.length > 0) {
-    const startIdx = riftSources.findIndex(s => s.url === (playingSrc?.directUrl || playingSrc?.url)) ?? 0;
+    /* Fix: resolve the raw playingSrc URL the same way riftSources does,
+       so the findIndex comparison always works (relative /api/... paths). */
+    const _base = getBaseUrl();
+    const _rawUrl = playingSrc?.directUrl || playingSrc?.url || "";
+    const _resolvedUrl = _rawUrl.startsWith("/") ? _base + _rawUrl : _rawUrl;
+    const startIdx = riftSources.findIndex(s => s.url === _resolvedUrl);
     return (
       <RiftPlayer
         sources={riftSources}
