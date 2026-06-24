@@ -52,10 +52,6 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 23210
-externalPort = 3002
-
-[[ports]]
 localPort = 24968
 externalPort = 3000
 
@@ -69,17 +65,10 @@ packages = ["openssl", "postgresql"]
 PORT = "5000"
 BASE_PATH = "/"
 SMTP_USER = "lya482569@gmail.com"
-NODE_ENV = "development"
+NODE_ENV = "production"
 CF_PROXY_PORT = "8000"
 TELEGRAM_CHAT_ID = "5477879129"
 TELEGRAM_CHANNEL_ID = "-1003917929487"
-APP_SECRET = "534def19634fbf8584b48eb725318ad53f9a966b88b1fadbc460de73014d2c6c"
-SUPABASE_URL = "https://lylapkfnizpjoyutnlin.supabase.co"
-RENDER_API_KEY = "rnd_cUzvvsmgArSkJH4kwk98fhTG2IzQ"
-ORKESTR_API_KEY = "ork_q_CSitHVosWp-AS01Ew0gqI7-6l3WQcTrVFNQQwKT58"
-TELEGRAM_BOT_TOKEN = "8203586223:AAHpDLjGpr6LL-j4yU3jHfIHoCVG7uwRawk"
-SMTP_PASS = "baqv qrjc hqfb tnal"
 TELEGRAM_SCHEDULER_ENABLED = "false"
-SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5bGFwa2ZuaXpwam95dXRubGluIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQ5NDE0NiwiZXhwIjoyMDk0MDcwMTQ2fQ.qMod_nEbDhkGwNNMRoOWmXt4TMxrk0itA6pnI0SIvTc"
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = "587"
