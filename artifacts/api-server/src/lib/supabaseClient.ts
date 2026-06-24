@@ -84,6 +84,15 @@ function parseFilter(col: string, val: string): { sql: string; value: any } {
     if (raw === "not.null") return { sql: `"${col}" IS NOT NULL`, value: undefined };
   }
 
+  if (op === "in") {
+    // Supabase format: in.(val1,val2,...) — strip surrounding parens
+    const inner = raw.replace(/^\(|\)$/g, "");
+    const values = inner.split(",").map(v => v.trim()).filter(Boolean);
+    if (values.length === 0) return { sql: "FALSE", value: undefined };
+    const placeholders = values.map((_: string, i: number) => `$IDX_${i}`).join(", ");
+    return { sql: `"${col}" IN (${placeholders})`, value: values };
+  }
+
   const sqlOp = opMap[op] || "=";
   return { sql: `"${col}" ${sqlOp} $?`, value: raw };
 }
@@ -106,9 +115,20 @@ function buildWhere(
     const strVal = String(v);
     const { sql, value } = parseFilter(k, strVal);
     if (value !== undefined) {
-      conds.push(sql.replace("$?", `$${idx}`));
-      values.push(value);
-      idx++;
+      if (Array.isArray(value)) {
+        // in.(val1,val2,...) — replace each $IDX_N with sequential positional params
+        let resolved = sql;
+        for (let i = 0; i < value.length; i++) {
+          resolved = resolved.replace(`$IDX_${i}`, `$${idx}`);
+          values.push(value[i]);
+          idx++;
+        }
+        conds.push(resolved);
+      } else {
+        conds.push(sql.replace("$?", `$${idx}`));
+        values.push(value);
+        idx++;
+      }
     } else {
       conds.push(sql);
     }

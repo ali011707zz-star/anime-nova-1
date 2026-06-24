@@ -74,8 +74,8 @@ export default function CommentsPage() {
     loadComments();
     secureFetch(`${getBaseUrl()}/api/auth/me`).then(r => {
       if (r.ok) r.json().then((d: any) => {
-        setMyUserId(d.user?.id || null);
-        setMyUsername(d.user?.username || null);
+        setMyUserId(d.id || null);
+        setMyUsername(d.username || null);
       });
     }).catch(() => {});
   }, []);
