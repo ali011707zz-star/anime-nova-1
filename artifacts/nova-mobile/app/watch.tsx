@@ -626,9 +626,10 @@ export default function WatchScreen() {
         label: def?.name || getCdnDisplayName(rawUrl),
         quality: getSrcQualityTier(s),
         isArabic: isArabicSrc,
+        /* المصادر العربية (مدبلجة أو مترجمة) لا تحتاج ترجمة — الصوت عربي أصلاً */
         subtitleUrl: s.subtitleUrl
           ? resolveUrl(s.subtitleUrl, base)
-          : globalSubUrl,
+          : isArabicSrc ? undefined : globalSubUrl,
       };
     }).filter(s => s.url);
   }, [directSrcs, globalSubUrl]);
