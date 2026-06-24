@@ -59,6 +59,10 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
   }
 }
 
+// ── تشغيل migration على Supabase ──
+const { runSupabaseMigration } = await import("./lib/supabaseMigrate.js");
+await runSupabaseMigration();
+
 // ── تحميل التطبيق بعد البوتستراب ──
 const { createApp }          = await import("./app.js");
 const { logger }             = await import("./lib/logger.js");

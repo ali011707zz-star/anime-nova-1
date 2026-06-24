@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { setConfig, resetTransporter, initEmailService } from "../auth/emailService.js";
 import { getEmailUser } from "../auth/emailAuth.js";
 import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
+import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
 
 const router = Router();
 
@@ -32,6 +33,17 @@ router.get("/admin/env-relay", async (req: Request, res: Response) => {
 });
 
 // ── SMTP Config ─────────────────────────────────────────────────────────────
+
+/* GET /api/admin/db-setup — يعرض SQL المطلوب لإنشاء الجداول */
+router.get("/admin/db-setup", async (_req: Request, res: Response) => {
+  const status = await getTableStatus();
+  return res.json({
+    tables: status,
+    allOk: Object.values(status).every(Boolean),
+    sql: SETUP_SQL,
+    instructions: "افتح Supabase SQL Editor وشغّل SQL أعلاه: https://supabase.com/dashboard/project/_/sql",
+  });
+});
 
 /* تشخيص SMTP — بدون مصادقة للاختبار السريع */
 router.get("/admin/smtp-ping", async (_req: Request, res: Response) => {
