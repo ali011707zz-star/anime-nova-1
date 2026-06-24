@@ -255,13 +255,21 @@ export default function AnimationWatchScreen() {
       .then((data: any) => {
         const tracks: any[] = data?.tracks || [];
         const arTrack = tracks.find((t: any) => t.lang === "ar" || t.lang === "ar-auto");
+        const enTrack = tracks.find((t: any) => t.lang === "en" || t.label?.toLowerCase().includes("english"));
+        const b = getBaseUrl();
         if (arTrack?.url) {
-          const b = getBaseUrl();
-          /* Proxy through server to avoid CORS + prevent RiftPlayer from
-             double-wrapping Arabic VTT in translate-vtt (alreadyTranslated check) */
+          /* ترجمة عربية مباشرة — proxy لتفادي CORS */
           setGlobalSubUrl(b
             ? `${b}/api/anime/proxy-text?url=${encodeURIComponent(arTrack.url)}&ref=https://cache.vdrk.site/`
             : arTrack.url);
+        } else if (enTrack?.url) {
+          /* ترجمة إنجليزية → ترجمة تلقائية للعربية */
+          const proxyUrl = b
+            ? `${b}/api/anime/proxy-text?url=${encodeURIComponent(enTrack.url)}`
+            : enTrack.url;
+          setGlobalSubUrl(b
+            ? `${b}/api/anime/translate-vtt?url=${encodeURIComponent(proxyUrl)}&from=en&to=ar`
+            : enTrack.url);
         }
       })
       .catch(() => {});
@@ -355,14 +363,12 @@ export default function AnimationWatchScreen() {
                 const next = [...prev, src];
                 const isGoodSrc = isDirectPlayable(src);
                 const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
-                /* أول مصدر جيد → شغّله مباشرة */
+                /* أول مصدر جيد → شغّله مباشرة دون إظهار الـ picker */
                 if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
                   autoPlayFiredRef.current = true;
                   setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
-                } else {
-                  /* أظهر الـ picker فوراً بمجرد وصول أي مصدر (لا تنتظر SSE done) */
-                  setScreen(s => s === "loading" ? "picker" : s);
                 }
+                /* لا نُظهر الـ picker هنا — ننتظر حتى SSE done أو timeout */
                 return next;
               });
 
@@ -510,21 +516,13 @@ export default function AnimationWatchScreen() {
         <View style={w.loadCard}>
           <Text style={w.loadPrayerText}>اللهم صلِّ وسلِّم على نبينا محمد ﷺ</Text>
 
-          {/* Poster with subtle glow */}
+          {/* Poster */}
           <View style={w.loadPosterWrap}>
-            <View style={{
-              position: "absolute", width: 200, height: 250, borderRadius: 100,
-              backgroundColor: "transparent",
-              shadowColor: "#7C3AED", shadowOpacity: 0.45, shadowRadius: 40,
-              shadowOffset: { width: 0, height: 0 },
-            }} />
             {posterUrl ? (
               <AnimPosterImg uri={posterUrl} type={type} />
             ) : (
               <View style={[w.loadPosterImg, w.loadPosterPlaceholder]}>
-                <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(139,92,246,0.18)", alignItems: "center", justifyContent: "center" }}>
-                  <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(139,92,246,0.40)" }} />
-                </View>
+                <Ionicons name="film" size={36} color="rgba(139,92,246,0.4)" />
               </View>
             )}
           </View>
