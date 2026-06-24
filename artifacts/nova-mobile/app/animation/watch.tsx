@@ -192,8 +192,9 @@ export default function AnimationWatchScreen() {
   const lastSaveTs       = useRef(0);
   const lastTimeRef      = useRef(0);
   const seenKeys         = useRef(new Set<string>());
-  const autoPlayFiredRef = useRef(false);
-  const hasCachedRef     = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
+  const autoPlayFiredRef  = useRef(false);
+  const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
@@ -363,12 +364,36 @@ export default function AnimationWatchScreen() {
                 const next = [...prev, src];
                 const isGoodSrc = isDirectPlayable(src);
                 const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
-                /* أول مصدر جيد → شغّله مباشرة دون إظهار الـ picker */
-                if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
+                if (!isGoodSrc || !isWebCompatible || autoPlayFiredRef.current) return next;
+
+                const lbl = (src.label || "").toLowerCase();
+                const isFast = lbl.startsWith("videasy") || lbl.startsWith("vidlink");
+
+                if (isFast) {
+                  /* Videasy / VidLink → شغّل فوراً */
                   autoPlayFiredRef.current = true;
                   setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
+                } else {
+                  /* مصدر آخر → انتظر 5 ثواني ريثما يصل Videasy/VidLink */
+                  if (!autoPlayTimerRef.current) {
+                    autoPlayTimerRef.current = setTimeout(() => {
+                      autoPlayTimerRef.current = null;
+                      if (autoPlayFiredRef.current) return;
+                      setSources(latest => {
+                        const fastSrc = latest.find(s => {
+                          const l = (s.label || "").toLowerCase();
+                          return (l.startsWith("videasy") || l.startsWith("vidlink")) && isDirectPlayable(s);
+                        });
+                        const best = fastSrc || latest.find(s => isDirectPlayable(s));
+                        if (best && !autoPlayFiredRef.current) {
+                          autoPlayFiredRef.current = true;
+                          setTimeout(() => { setPlayingSrc(best); setScreen("native"); }, 0);
+                        }
+                        return latest;
+                      });
+                    }, 5_000);
+                  }
                 }
-                /* لا نُظهر الـ picker هنا — ننتظر حتى SSE done أو timeout */
                 return next;
               });
 

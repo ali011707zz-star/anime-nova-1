@@ -305,54 +305,69 @@ export default function AnimationWatch() {
   useEffect(() => { onFailRef.current = playNext; }, [playNext]);
 
   /* ── Auto-play first available "ok" source (respects pref-autoplay setting) ── */
-  /* Priority: Vyla > EzVidAPI > aflaam > StarCima > SeePanal > AnimePhoenix > AnimeWitcher > أول مصدر */
+  /* Fast tier (immediate): Videasy, VidLink
+     Slow tier (wait 5s for fast first): StarCima, Vyla, EzVidAPI, aflaam, SeePanal, …  */
   const autoPlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (autoPlayedRef.current) return;
     if (!prefAutoplay.current) return;
     const okSources = sources.filter(s => s.status === "ok");
     if (!okSources.length) return;
-    // Prefer sources that go through our own proxy (/api/) — avoids IP-bound raw tokens
+
     const prefProxy = (arr: Source[], prefix: string) =>
       arr.find(s => s.label?.startsWith(prefix) && (s.proxyUrl?.startsWith("/api/") || s.directUrl?.startsWith("/api/"))) ??
       arr.find(s => s.label?.startsWith(prefix));
+
+    // ── FAST tier: Videasy & VidLink — play the instant they arrive ──
+    const videasy = prefProxy(okSources, "Videasy");
+    const vidlink = prefProxy(okSources, "VidLink");
+    const fastSrc = vidlink ?? videasy;
+    if (fastSrc) {
+      if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      autoPlayAttemptsRef.current += 1;
+      autoPlayedRef.current = true;
+      playSource(fastSrc);
+      return;
+    }
+
+    // ── SLOW tier: other reliable sources ──
     const starcima     = prefProxy(okSources, "StarCima");
-    const videasy      = prefProxy(okSources, "Videasy");
     const vyla         = okSources.find(s => s.label?.startsWith("Vyla"));
-    const vidlink      = prefProxy(okSources, "VidLink");
     const ezv          = prefProxy(okSources, "EzVidAPI");
     const aflaam       = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
     const seepanel     = okSources.find(s => s.label?.startsWith("SeePanal"));
     const animephoenix = okSources.find(s => s.label?.startsWith("AnimePhoenix"));
     const witcher      = okSources.find(s => s.label?.includes("AnimeWitcher"));
-    // Tier-1 (trusted direct/proxied HLS): auto-play immediately
-    // Priority: VidLink > Videasy > StarCima (الثريا) > Vyla > EzVidAPI > aflaam > …
-    const tier1 = vidlink ?? videasy ?? starcima ?? vyla ?? ezv ?? aflaam ?? seepanel ?? animephoenix ?? witcher;
-    if (tier1) {
-      if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
-      autoPlayAttemptsRef.current += 1;
-      autoPlayedRef.current = true;
-      playSource(tier1);
-      return;
-    }
-    // Tier-2: if SSE done OR 10s elapsed with any source → play best available
+    const slowSrc      = starcima ?? vyla ?? ezv ?? aflaam ?? seepanel ?? animephoenix ?? witcher;
+
+    // If SSE done → play best slow source now (fast sources never arrived)
     if (sseDone) {
       if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      const best = slowSrc ?? okSources[0];
       autoPlayAttemptsRef.current += 1;
       autoPlayedRef.current = true;
-      playSource(okSources[0]);
+      playSource(best);
       return;
     }
-    // Schedule fallback: 10s after first source arrives, play it
-    if (!autoPlayTimerRef.current) {
+
+    // Wait 5s for fast sources to arrive; if they don't → fall back to slow
+    if (slowSrc && !autoPlayTimerRef.current) {
       autoPlayTimerRef.current = setTimeout(() => {
         autoPlayTimerRef.current = null;
         if (autoPlayedRef.current) return;
         const stillOk = sources.filter(s => s.status === "ok");
+        const fastNow = prefProxy(stillOk, "VidLink") ?? prefProxy(stillOk, "Videasy");
+        if (fastNow) {
+          autoPlayAttemptsRef.current += 1;
+          autoPlayedRef.current = true;
+          playSource(fastNow);
+          return;
+        }
         if (!stillOk.length) return;
+        autoPlayAttemptsRef.current += 1;
         autoPlayedRef.current = true;
         playSource(stillOk[0]);
-      }, 10_000);
+      }, 5_000);
     }
   }, [sources, sseDone, playSource]);
 
