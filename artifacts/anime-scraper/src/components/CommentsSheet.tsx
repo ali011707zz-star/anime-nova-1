@@ -13,11 +13,11 @@ import { useAuth } from "@/lib/auth-context";
 
 /* ── types ─────────────────────────────────────────────── */
 interface Reply {
-  id: number; text: string; author: string;
+  id: number; text: string; author: string; authorImg?: string | null;
   ts: number; likes: number; likedByMe: boolean;
 }
 interface Comment {
-  id: number; text: string; author: string;
+  id: number; text: string; author: string; authorImg?: string | null;
   ts: number; likes: number; likedByMe: boolean;
   replies: Reply[];
 }
@@ -90,7 +90,7 @@ export default function CommentsSheet({
   const addComment = () => {
     const t = text.trim();
     if (!t) return;
-    const c: Comment = { id: Date.now(), text: t, author: myName, ts: Date.now(), likes: 0, likedByMe: false, replies: [] };
+    const c: Comment = { id: Date.now(), text: t, author: myName, authorImg: myImg ?? null, ts: Date.now(), likes: 0, likedByMe: false, replies: [] };
     commit([c, ...comments]);
     setText("");
   };
@@ -99,7 +99,7 @@ export default function CommentsSheet({
   const addReply = (cid: number) => {
     const t = replyText.trim();
     if (!t) return;
-    const r: Reply = { id: Date.now(), text: t, author: myName, ts: Date.now(), likes: 0, likedByMe: false };
+    const r: Reply = { id: Date.now(), text: t, author: myName, authorImg: myImg ?? null, ts: Date.now(), likes: 0, likedByMe: false };
     commit(comments.map(c => c.id === cid ? { ...c, replies: [...c.replies, r] } : c));
     setReplyText(""); setReplyTo(null);
     setExpanded(prev => new Set([...prev, cid]));
@@ -213,7 +213,7 @@ export default function CommentsSheet({
                       <div key={c.id}>
                         {/* ── Comment row ── */}
                         <div className="flex gap-3 px-4 py-3.5">
-                          <Av name={c.author} img={isMe ? myImg : null} size={36} />
+                          <Av name={c.author} img={c.authorImg ?? (isMe ? myImg : null)} size={36} />
                           <div className="flex-1 min-w-0">
                             {/* Name + time + delete */}
                             <div className="flex items-center justify-between mb-1">
@@ -276,7 +276,7 @@ export default function CommentsSheet({
                                   const rMe = r.author === myName;
                                   return (
                                     <div key={r.id} className="flex gap-2.5">
-                                      <Av name={r.author} img={rMe ? myImg : null} size={28} />
+                                      <Av name={r.author} img={r.authorImg ?? (rMe ? myImg : null)} size={28} />
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-1.5 mb-1">
                                           <span className="text-[11px] font-black font-['Cairo'] text-white/80">{r.author}</span>
