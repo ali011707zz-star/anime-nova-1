@@ -1,113 +1,42 @@
 /**
- * supabaseClient.ts — PostgreSQL client (Replit Database)
- * Drop-in replacement for Supabase REST API using pg directly.
- * Uses DATABASE_URL from Replit's provisioned PostgreSQL.
+ * supabaseClient.ts — Supabase REST API client
+ * يتصل بـ Supabase عبر HTTPS (REST API) بدلاً من pg مباشرة.
+ * متوافق مع Replit الذي يحجب اتصالات TCP الخارجية.
  */
 
-import pg from "pg";
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
-const { Pool } = pg;
-
-const DATABASE_URL = process.env.DATABASE_URL || "";
-
-export const isSupabaseReady = !!DATABASE_URL;
-
-let _pool: InstanceType<typeof Pool> | null = null;
-
-function getPool(): InstanceType<typeof Pool> {
-  if (!_pool) {
-    _pool = new Pool({
-      connectionString: DATABASE_URL,
-      ssl: DATABASE_URL.includes("localhost") || DATABASE_URL.includes("127.0.0.1")
-        ? false
-        : { rejectUnauthorized: false },
-      max: 10,
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 10_000,
-    });
-    _pool.on("error", (err) => {
-      console.error("[db] Pool error:", err.message);
-    });
-    console.log("[db] ✅ PostgreSQL pool جاهز");
-  }
-  return _pool;
-}
+export const isSupabaseReady = !!(SUPABASE_URL && SUPABASE_KEY);
 
 if (isSupabaseReady) {
-  getPool();
+  console.log("[db] ✅ Supabase REST API جاهز →", SUPABASE_URL.substring(0, 40));
 } else {
-  console.warn("[db] ⚠️ DATABASE_URL غير موجود — قاعدة البيانات معطّلة");
+  console.warn("[db] ⚠️ SUPABASE_URL أو SUPABASE_SERVICE_KEY غير موجود");
 }
 
-/**
- * Parse a PostgREST-style filter value into SQL fragment.
- * e.g. "eq.foo" → `= 'foo'`
- *      "lt.2024-01-01T00:00:00Z" → `< '2024-...'`
- *      "is.null" → `IS NULL`
- *      "ilike.*foo*" → `ILIKE '%foo%'`
- */
-function parseFilter(col: string, val: string): { sql: string; params: any[] } {
-  const dot = val.indexOf(".");
-  const op  = dot === -1 ? val : val.slice(0, dot);
-  const raw = dot === -1 ? ""  : val.slice(dot + 1);
-
-  switch (op) {
-    case "eq":   return { sql: `"${col}" = $PARAM`, params: [raw] };
-    case "neq":  return { sql: `"${col}" != $PARAM`, params: [raw] };
-    case "lt":   return { sql: `"${col}" < $PARAM`, params: [raw] };
-    case "lte":  return { sql: `"${col}" <= $PARAM`, params: [raw] };
-    case "gt":   return { sql: `"${col}" > $PARAM`, params: [raw] };
-    case "gte":  return { sql: `"${col}" >= $PARAM`, params: [raw] };
-    case "is":   return raw === "null"
-                   ? { sql: `"${col}" IS NULL`, params: [] }
-                   : { sql: `"${col}" IS NOT NULL`, params: [] };
-    case "in": {
-      const items = raw.replace(/^\(/, "").replace(/\)$/, "").split(",").map(s => s.trim());
-      return { sql: `"${col}" = ANY($PARAM::text[])`, params: [items] };
-    }
-    case "ilike": {
-      const likeVal = raw.replace(/\*/g, "%");
-      return { sql: `"${col}" ILIKE $PARAM`, params: [likeVal] };
-    }
-    default:
-      return { sql: `"${col}" = $PARAM`, params: [val] };
-  }
+function baseHeaders() {
+  return {
+    "apikey": SUPABASE_KEY,
+    "Authorization": `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+  };
 }
 
 const SKIP_KEYS = new Set(["order", "limit", "offset", "select"]);
 
-function buildWhereClause(
-  params: Record<string, string>,
-  startIdx: number
-): { where: string; values: any[]; nextIdx: number } {
-  const clauses: string[] = [];
-  const values: any[] = [];
-  let idx = startIdx;
-
-  for (const [col, val] of Object.entries(params)) {
-    if (SKIP_KEYS.has(col)) continue;
-    const { sql, params: ps } = parseFilter(col, val);
-    clauses.push(sql.replace("$PARAM", `$${idx}`));
-    values.push(...ps);
-    if (ps.length > 0) idx++;
+function buildQuery(params: Record<string, string>, opts: { limit?: number; select?: string } = {}): string {
+  const qs = new URLSearchParams();
+  if (opts.select) qs.set("select", opts.select);
+  for (const [k, v] of Object.entries(params)) {
+    if (SKIP_KEYS.has(k)) continue;
+    qs.set(k, v);
   }
-
-  return {
-    where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
-    values,
-    nextIdx: idx,
-  };
-}
-
-function buildOrderClause(order?: string): string {
-  if (!order) return "";
-  const parts = order.split(",").map(part => {
-    const segs = part.trim().split(".");
-    const col  = segs[0];
-    const dir  = segs[1]?.toUpperCase() === "DESC" ? "DESC" : "ASC";
-    return `"${col}" ${dir}`;
-  });
-  return `ORDER BY ${parts.join(", ")}`;
+  if (params.order) qs.set("order", params.order);
+  if (params.offset) qs.set("offset", params.offset);
+  if (opts.limit) qs.set("limit", String(opts.limit));
+  else if (params.limit) qs.set("limit", params.limit);
+  return qs.toString() ? `?${qs.toString()}` : "";
 }
 
 /** SELECT rows */
@@ -118,16 +47,17 @@ export async function sbSelect<T = any>(
 ): Promise<T[]> {
   if (!isSupabaseReady) return [];
   try {
-    const pool = getPool();
-    const { where, values } = buildWhereClause(params, 1);
-    const order  = buildOrderClause(params.order);
-    const select = opts.select ? opts.select.split(",").map(c => `"${c.trim()}"`).join(", ") : "*";
-    const limit  = opts.limit  ? `LIMIT ${opts.limit}`  : "";
-    const offset = params.offset ? `OFFSET ${params.offset}` : "";
-
-    const sql = `SELECT ${select} FROM "${table}" ${where} ${order} ${limit} ${offset}`.trim();
-    const result = await pool.query(sql, values);
-    return result.rows as T[];
+    const qs = buildQuery(params, opts);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${qs}`, {
+      headers: baseHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`[db] sbSelect "${table}":`, err.substring(0, 200));
+      return [];
+    }
+    return await res.json() as T[];
   } catch (e: any) {
     console.error(`[db] sbSelect "${table}":`, e.message);
     return [];
@@ -141,15 +71,19 @@ export async function sbInsert<T = any>(
 ): Promise<T | null> {
   if (!isSupabaseReady) return null;
   try {
-    const pool = getPool();
-    const keys   = Object.keys(row);
-    const cols   = keys.map(k => `"${k}"`).join(", ");
-    const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
-    const vals   = keys.map(k => row[k]);
-
-    const sql = `INSERT INTO "${table}" (${cols}) VALUES (${placeholders}) RETURNING *`;
-    const result = await pool.query(sql, vals);
-    return (result.rows[0] ?? null) as T | null;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: { ...baseHeaders(), "Prefer": "return=representation" },
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`[db] sbInsert "${table}":`, err.substring(0, 200));
+      return null;
+    }
+    const data = await res.json();
+    return (Array.isArray(data) ? data[0] : data) as T | null;
   } catch (e: any) {
     console.error(`[db] sbInsert "${table}":`, e.message);
     return null;
@@ -164,28 +98,23 @@ export async function sbUpsert<T = any>(
 ): Promise<T | null> {
   if (!isSupabaseReady) return null;
   try {
-    const pool = getPool();
-    const keys   = Object.keys(row);
-    const cols   = keys.map(k => `"${k}"`).join(", ");
-    const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
-    const vals   = keys.map(k => row[k]);
-
-    let conflictClause = "";
-    if (onConflict) {
-      const conflictCols = onConflict.split(",").map(c => `"${c.trim()}"`).join(", ");
-      const updateCols   = keys
-        .filter(k => !onConflict.split(",").map(c => c.trim()).includes(k))
-        .map(k => `"${k}" = EXCLUDED."${k}"`);
-      conflictClause = updateCols.length
-        ? `ON CONFLICT (${conflictCols}) DO UPDATE SET ${updateCols.join(", ")}`
-        : `ON CONFLICT (${conflictCols}) DO NOTHING`;
-    } else {
-      conflictClause = "ON CONFLICT DO NOTHING";
+    const prefer = onConflict
+      ? `return=representation,resolution=merge-duplicates`
+      : `return=representation,resolution=ignore-duplicates`;
+    const qs = onConflict ? `?on_conflict=${encodeURIComponent(onConflict)}` : "";
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${qs}`, {
+      method: "POST",
+      headers: { ...baseHeaders(), "Prefer": prefer },
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`[db] sbUpsert "${table}":`, err.substring(0, 200));
+      return null;
     }
-
-    const sql = `INSERT INTO "${table}" (${cols}) VALUES (${placeholders}) ${conflictClause} RETURNING *`;
-    const result = await pool.query(sql, vals);
-    return (result.rows[0] ?? null) as T | null;
+    const data = await res.json();
+    return (Array.isArray(data) ? data[0] : data) as T | null;
   } catch (e: any) {
     console.error(`[db] sbUpsert "${table}":`, e.message);
     return null;
@@ -200,16 +129,20 @@ export async function sbPatch<T = any>(
 ): Promise<T | null> {
   if (!isSupabaseReady) return null;
   try {
-    const pool = getPool();
-    const dataKeys = Object.keys(data);
-    const dataVals = dataKeys.map(k => data[k]);
-
-    const setClauses = dataKeys.map((k, i) => `"${k}" = $${i + 1}`).join(", ");
-    const { where, values: whereVals } = buildWhereClause(filter, dataKeys.length + 1);
-
-    const sql = `UPDATE "${table}" SET ${setClauses} ${where} RETURNING *`;
-    const result = await pool.query(sql, [...dataVals, ...whereVals]);
-    return (result.rows[0] ?? null) as T | null;
+    const qs = buildQuery(filter);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${qs}`, {
+      method: "PATCH",
+      headers: { ...baseHeaders(), "Prefer": "return=representation" },
+      body: JSON.stringify(data),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`[db] sbPatch "${table}":`, err.substring(0, 200));
+      return null;
+    }
+    const result = await res.json();
+    return (Array.isArray(result) ? result[0] : result) as T | null;
   } catch (e: any) {
     console.error(`[db] sbPatch "${table}":`, e.message);
     return null;
@@ -223,14 +156,21 @@ export async function sbDelete(
 ): Promise<boolean> {
   if (!isSupabaseReady) return false;
   try {
-    const pool = getPool();
-    const { where, values } = buildWhereClause(filter, 1);
-    if (!where) {
+    const qs = buildQuery(filter);
+    if (!qs) {
       console.warn(`[db] sbDelete "${table}" called with no filter — skipping`);
       return false;
     }
-    const sql = `DELETE FROM "${table}" ${where}`;
-    await pool.query(sql, values);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${qs}`, {
+      method: "DELETE",
+      headers: baseHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`[db] sbDelete "${table}":`, err.substring(0, 200));
+      return false;
+    }
     return true;
   } catch (e: any) {
     console.error(`[db] sbDelete "${table}":`, e.message);
@@ -238,12 +178,14 @@ export async function sbDelete(
   }
 }
 
-/** فحص الاتصال بقاعدة البيانات */
+/** فحص الاتصال */
 export async function checkSupabase(): Promise<boolean> {
   if (!isSupabaseReady) return false;
   try {
-    const pool = getPool();
-    await pool.query("SELECT 1");
-    return true;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/users?limit=1`, {
+      headers: baseHeaders(),
+      signal: AbortSignal.timeout(5000),
+    });
+    return res.ok || res.status === 416;
   } catch { return false; }
 }
