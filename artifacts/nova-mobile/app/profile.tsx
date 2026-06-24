@@ -165,16 +165,14 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
         {/* Hero Avatar */}
         <View style={s.heroSection}>
-          <View style={[s.avatarGlow, { shadowColor: g1 }]}>
+          <Pressable onPress={() => setShowColorPicker(true)} style={[s.avatarGlow, { shadowColor: g1 }]}>
             <LinearGradient colors={[g1, g2]} style={s.avatarCircle}>
               <Text style={s.avatarLetter}>{letter}</Text>
             </LinearGradient>
-          </View>
-
-          {/* Color picker button */}
-          <Pressable onPress={() => setShowColorPicker(true)} style={[s.colorBtn, { backgroundColor: g1 + "25", borderColor: g1 + "60" }]}>
-            <Ionicons name="color-palette" size={13} color={g1} />
-            <Text style={[s.colorBtnText, { color: g1 }]}>تغيير اللون</Text>
+            {/* Camera badge overlay */}
+            <View style={[s.cameraBadge, { backgroundColor: g1 }]}>
+              <Ionicons name="camera" size={12} color="#fff" />
+            </View>
           </Pressable>
 
           <Text style={[s.heroName, { color: colors.text }]}>{user.displayName}</Text>
@@ -373,11 +371,10 @@ const s = StyleSheet.create({
   backBtn: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
   headerTitle: { fontSize: 17, fontFamily: "Cairo_800ExtraBold" },
   heroSection: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 20 },
-  avatarGlow: { shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 12, marginBottom: 12 },
+  avatarGlow: { shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 12, marginBottom: 16 },
   avatarCircle: { width: 96, height: 96, borderRadius: 28, alignItems: "center", justifyContent: "center" },
   avatarLetter: { fontSize: 40, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
-  colorBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, marginBottom: 12 },
-  colorBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
+  cameraBadge: { position: "absolute", bottom: -6, right: -6, width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#fff" },
   heroName: { fontSize: 20, fontFamily: "Cairo_800ExtraBold", marginBottom: 2 },
   heroSub: { fontSize: 12.5, fontFamily: "Cairo_400Regular", marginBottom: 2 },
   heroEmail: { fontSize: 11, fontFamily: "Cairo_400Regular", marginBottom: 10 },

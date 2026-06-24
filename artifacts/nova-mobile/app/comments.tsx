@@ -64,8 +64,9 @@ export default function CommentsPage() {
   const [text, setText]           = useState("");
   const [replyTo, setReplyTo]     = useState<Comment | null>(null);
   const [postError, setPostError] = useState<string | null>(null);
-  const [myUserId, setMyUserId]   = useState<string | null>(null);
-  const [myUsername, setMyUsername] = useState<string | null>(null);
+  const [myUserId, setMyUserId]     = useState<string | null>(null);
+  const [myUsername, setMyUsername]   = useState<string | null>(null);
+  const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
   const [liking, setLiking]       = useState<Set<string>>(new Set());
   const inputRef  = useRef<TextInput>(null);
   const listRef   = useRef<FlatList>(null);
@@ -76,6 +77,7 @@ export default function CommentsPage() {
       if (r.ok) r.json().then((d: any) => {
         setMyUserId(d.id || null);
         setMyUsername(d.username || null);
+        setMyDisplayName(d.displayName || d.display_name || null);
       });
     }).catch(() => {});
   }, []);
@@ -104,7 +106,7 @@ export default function CommentsPage() {
     try {
       const body: any = {
         text: text.trim(),
-        username: myUsername || "مستخدم",
+        username: myUsername || myDisplayName || "مستخدم",
         animeType: tmdbId ? "animation" : "anime",
       };
       if (animeId) body.animeId = animeId;
@@ -262,7 +264,7 @@ export default function CommentsPage() {
           </View>
         )}
         <View style={s.inputRow}>
-          <Avatar username={myUsername || "م"} />
+          <Avatar username={myUsername || myDisplayName || "م"} />
           <TextInput
             ref={inputRef}
             style={s.input}
