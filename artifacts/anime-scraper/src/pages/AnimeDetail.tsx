@@ -117,7 +117,7 @@ function fmtRuntime(mins: number) {
   if (!mins) return "";
   if (mins < 60) return `${mins} دقيقة`;
   const h = Math.floor(mins / 60), m = mins % 60;
-  return m > 0 ? `${h}س ${m}د` : `${h} ساعة`;
+  return m > 0 ? `${h} ساعة و${m} دقيقة` : `${h} ساعة`;
 }
 
 // ── Types ─────────────────────────────────────────────────────────
