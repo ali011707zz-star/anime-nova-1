@@ -4779,7 +4779,8 @@ async function getHiAnimeSources(
     const toProcess = (hsub.length ? hsub : serverEntries).slice(0, 3);
 
     const sources: UnifiedSource[] = [];
-    for (const { embedUrl, rawSubUrl } of toProcess) {
+    for (const { embedUrl, rawSubUrl: _rawSubUrl } of toProcess) {
+      let rawSubUrl = _rawSubUrl;
       let m3u8Url: string | null = null;
       let referer = HIANIME_REF;
 
@@ -4788,6 +4789,16 @@ async function getHiAnimeSources(
       if (vibeToken) {
         m3u8Url = `https://vibeplayer.site/public/stream/${vibeToken}/master.m3u8`;
         referer  = `https://vibeplayer.site/${vibeToken}`;
+        // من HiAnime-API: استخرج الترجمة من صفحة الـ embed إذا غابت عن URL
+        // const subtitle = "..." يوجد في صفحة vibeplayer عند توفر ترجمة
+        if (!rawSubUrl) {
+          const vibeHtml = await fetch(`https://vibeplayer.site/${vibeToken}`, {
+            headers: { ...BASE_HDRS, Referer: HIANIME_REF },
+            signal: AbortSignal.timeout(6000),
+          }).then(r => r.ok ? r.text() : "").catch(() => "");
+          const subM = vibeHtml.match(/const\s+subtitle\s*=\s*["']([^"']{10,})["']/i);
+          if (subM?.[1]?.startsWith("http")) rawSubUrl = subM[1];
+        }
       } else if (embedUrl.includes("bibiemb.xyz")) {
         // bibiemb.xyz — اشتق الـ m3u8 من صفحة الـ embed
         const bibiPath = embedUrl.match(/bibiemb\.xyz\/([^/?#]+)/i)?.[1];
@@ -4798,6 +4809,10 @@ async function getHiAnimeSources(
           }).then(r => r.ok ? r.text() : "").catch(() => "");
           const mm = bibiHtml.match(/["'](https?:\/\/[^"'<> ]+\.m3u8[^"'<> ]*)["']/);
           if (mm) { m3u8Url = mm[1]; referer = `https://bibiemb.xyz/${bibiPath}`; }
+          if (!rawSubUrl) {
+            const subM = bibiHtml.match(/const\s+subtitle\s*=\s*["']([^"']{10,})["']/i);
+            if (subM?.[1]?.startsWith("http")) rawSubUrl = subM[1];
+          }
         }
       } else {
         // خوادم أخرى (OtakuHG / OtakuVid / PlayMogo) — استخرج HLS من embed page
@@ -4834,6 +4849,153 @@ async function getHiAnimeSources(
       });
 
       if (sources.length >= 2) break;
+    }
+    return sources;
+  } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIKOTOTV (anikototv.to) — صوت ياباني + ترجمة + skip_data مدمج
+//  من: AniKotoAPI repo (milkaunmutilated455/AniKotoAPI)
+//  Flow: /filter?keyword → slug → /watch/{slug}/ep-{N} →
+//        li[data-link-id] (sub) → /ajax/server?get={linkId} →
+//        { result: { url, skip_data } } → extractVideoDeep → HLS
+// ════════════════════════════════════════════════════════════════════
+const ANIKOTOTV_BASE = "https://anikototv.to";
+const anikototvSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const ANIKOTOTV_SLUG_TTL = 10 * 3_600_000;
+
+async function findAnikototvSlug(title: string, english: string | null): Promise<string | null> {
+  const ck = `${title}|${english || ""}`.toLowerCase();
+  const cached = anikototvSlugCache.get(ck);
+  if (cached && Date.now() - cached.ts < ANIKOTOTV_SLUG_TTL) return cached.slug;
+
+  const queries = [...new Set([english, title].filter(Boolean) as string[])];
+  for (const q of queries) {
+    const html = await orkestGet(
+      `${ANIKOTOTV_BASE}/filter?keyword=${encodeURIComponent(q)}`,
+      `${ANIKOTOTV_BASE}/`,
+      14000
+    ) ?? "";
+    if (!html || html.length < 500 || isCloudflareBlock(html)) continue;
+
+    const seen = new Set<string>();
+    const slugs: Array<{ slug: string }> = [];
+    for (const m of html.matchAll(/href=["']\/watch\/([^/"'?#]+)/gi)) {
+      const slug = m[1];
+      if (slug && !seen.has(slug)) { seen.add(slug); slugs.push({ slug }); }
+    }
+    if (!slugs.length) continue;
+
+    let bestSlug: string | null = null, bestSc = 0;
+    for (const { slug } of slugs) {
+      const slugTitle = slug.replace(/-/g, " ");
+      const sc = Math.max(
+        similarity(slugTitle, title.toLowerCase()),
+        english ? similarity(slugTitle, english.toLowerCase()) : 0,
+        asciiSimilarity(slug, title),
+        english ? asciiSimilarity(slug, english) : 0,
+      );
+      if (sc > bestSc) { bestSc = sc; bestSlug = slug; }
+    }
+    if (bestSlug && bestSc >= 0.28) {
+      anikototvSlugCache.set(ck, { slug: bestSlug, ts: Date.now() });
+      return bestSlug;
+    }
+  }
+  anikototvSlugCache.set(ck, { slug: null, ts: Date.now() });
+  return null;
+}
+
+async function getAnikototvSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    const slug = await findAnikototvSlug(title, english);
+    if (!slug) return [];
+
+    // صفحة الحلقة عبر Orkestr relay
+    const epHtml = await orkestGet(
+      `${ANIKOTOTV_BASE}/watch/${slug}/ep-${ep}`,
+      `${ANIKOTOTV_BASE}/watch/${slug}`,
+      16000
+    ) ?? "";
+    if (!epHtml || epHtml.length < 500 || isCloudflareBlock(epHtml)) return [];
+
+    // استخرج link IDs من قسم SUB فقط (صوت ياباني + ترجمة إنجليزية)
+    const subSection = (() => {
+      const m = epHtml.match(
+        /<div\b[^>]*data-type=["']sub["'][^>]*>([\s\S]*?)(?=<div\b[^>]*data-type=["'](?:dub|raw)|$)/i
+      );
+      return m?.[1] || epHtml;
+    })();
+
+    const linkIds: string[] = [];
+    for (const m of subSection.matchAll(/data-link-id=["']([^"']+)["']/gi)) {
+      if (!linkIds.includes(m[1])) linkIds.push(m[1]);
+    }
+    if (!linkIds.length) return [];
+
+    const sources: UnifiedSource[] = [];
+
+    for (const linkId of linkIds.slice(0, 4)) {
+      try {
+        // AJAX: /ajax/server?get={linkId} → { status, result: { url, skip_data } }
+        const ajaxRaw = await orkestGet(
+          `${ANIKOTOTV_BASE}/ajax/server?get=${encodeURIComponent(linkId)}`,
+          `${ANIKOTOTV_BASE}/watch/${slug}/ep-${ep}`,
+          10000
+        ) ?? "";
+        if (!ajaxRaw) continue;
+
+        let playerUrl: string | null = null;
+        let skipIntro: { start: number; end: number } | undefined;
+        let skipOutro: { start: number; end: number } | undefined;
+
+        try {
+          const parsed = JSON.parse(ajaxRaw) as Record<string, unknown>;
+          const result: Record<string, unknown> =
+            typeof parsed.result === "string"
+              ? (JSON.parse(parsed.result as string) as Record<string, unknown>)
+              : ((parsed.result as Record<string, unknown>) ?? {});
+
+          playerUrl = typeof result.url === "string" ? result.url : null;
+
+          // skip_data تحتوي على توقيتات المقدمة/الخاتمة المدمجة من AniKototv
+          const sd = result.skip_data as Record<string, number> | undefined;
+          if (sd && typeof sd === "object") {
+            const is = Number(sd.intro_start ?? sd.introStart ?? sd.opening_start);
+            const ie = Number(sd.intro_end   ?? sd.introEnd   ?? sd.opening_end);
+            const os = Number(sd.outro_start ?? sd.outroStart ?? sd.ending_start);
+            const oe = Number(sd.outro_end   ?? sd.outroEnd   ?? sd.ending_end);
+            if (!isNaN(is) && !isNaN(ie) && ie > is) skipIntro = { start: is, end: ie };
+            if (!isNaN(os) && !isNaN(oe) && oe > os) skipOutro = { start: os, end: oe };
+          }
+        } catch { continue; }
+
+        if (!playerUrl?.startsWith("http")) continue;
+
+        // استخرج HLS من player URL باستخدام محرك الاستخراج الموجود
+        const hls = await extractVideoDeep(playerUrl, `${ANIKOTOTV_BASE}/`).catch(() => null);
+        if (!hls) continue;
+
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hls)}&ref=${encodeURIComponent(ANIKOTOTV_BASE + "/")}`;
+
+        sources.push({
+          name: `AniKototv · ياباني · مترجم`,
+          url: hls,
+          quality: "1080p",
+          qualityRank: 9,
+          site: "anikototv",
+          directUrl: proxied,
+          directType: "hls",
+          skipIntro,
+          skipOutro,
+        });
+
+        if (sources.length >= 2) break;
+      } catch { continue; }
     }
     return sources;
   } catch { return []; }
@@ -4897,14 +5059,32 @@ async function findAninekoSlug(title: string, english: string | null): Promise<s
 async function extractAninekoHls(embedUrl: string, seriesSlug: string): Promise<string | null> {
   const html = await orkestGet(embedUrl, `${ANINEKO_BASE}/watch/${seriesSlug}`, 18000) ?? "";
 
+  // من HiAnime-API: فك packed JS أولاً — otakuhg/otakuvid يستخدمان p,a,c,k,e,d
+  // والـ hls4 هو أعلى جودة، hls3 هو الثانوي
+  const unpacked = unpackPacked(html) ?? "";
+  const embedDomain = (() => { try { return new URL(embedUrl).origin; } catch { return ""; } })();
+  if (unpacked) {
+    const hls4 = unpacked.match(/"hls4"\s*:\s*["']([^"']+)["']/);
+    if (hls4) {
+      const url = hls4[1].startsWith("/") ? `${embedDomain}${hls4[1]}` : hls4[1];
+      if (url.startsWith("http")) return url.replace(/&amp;/g, "&");
+    }
+    const hls3 = unpacked.match(/"hls3"\s*:\s*["']([^"']+)["']/);
+    if (hls3) {
+      const url = hls3[1].startsWith("/") ? `${embedDomain}${hls3[1]}` : hls3[1];
+      if (url.startsWith("http")) return url.replace(/&amp;/g, "&");
+    }
+  }
+
   const patterns = [
     /const\s+src\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
     /file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
     /["'](https?:\/\/[^"']+\/master\.m3u8[^"']*)["']/i,
     /["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
   ];
+  const toSearch = unpacked || html;
   for (const pattern of patterns) {
-    const m = html.match(pattern);
+    const m = toSearch.match(pattern);
     if (m) return m[1].replace(/&amp;/g, "&");
   }
   return null;
@@ -7202,6 +7382,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
+      scrapeCached("anikototv",    () => getAnikototvSources(title, english, ep),               false, 22000),
       // anikuro: محذوف
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
       scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId),     false, 20000),
@@ -7307,7 +7488,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // scrapers that use probe-only (no deep extraction)
-  const probeOnly = new Set(["animeify","kawaii","anikoto","animewitcher","anineko","mitanime"]);
+  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anineko","mitanime"]);
 
   try {
     switch (site) {
@@ -7325,6 +7506,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    SCRAPER_MS, [])).forEach(collectSrc); break;
       // anikuro: محذوف
       // anivault: محذوف
@@ -8053,6 +8235,82 @@ router.get("/anime/aniskip", async (req, res) => {
     if (!r.ok) { res.json({ found: false }); return; }
     const data = await r.json();
     res.json(data);
+  } catch { res.json({ found: false }); }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  anime-skip  GET /api/anime/anime-skip?anilistId=&ep=
+//  من: surajklmn/animepahe-aniskip — Anime-Skip GraphQL API
+//  يستخدم AniList ID مباشرة (لا يحتاج MAL ID)
+//  الـ timestamps: نقاط تحول بين أقسام الحلقة (op, ed, recap, ...)
+// ════════════════════════════════════════════════════════════════════
+const animeSkipCache = new Map<string, { data: any; ts: number }>();
+const ANIME_SKIP_TTL = 7 * 86_400_000;
+
+router.get("/anime/anime-skip", async (req, res) => {
+  const anilistId = Number(req.query.anilistId || "");
+  const ep        = Number(req.query.ep        || "");
+  if (!anilistId || !ep || isNaN(anilistId) || isNaN(ep)) {
+    res.json({ found: false }); return;
+  }
+
+  const ck = `${anilistId}-${ep}`;
+  const cached = animeSkipCache.get(ck);
+  if (cached && Date.now() - cached.ts < ANIME_SKIP_TTL) {
+    res.json(cached.data); return;
+  }
+
+  try {
+    const query = `{
+      findEpisodesByExternalLinks(anilistId: ${anilistId}, episodeNumber: ${ep}) {
+        timestamps {
+          at
+          type { name }
+        }
+      }
+    }`;
+    const r = await fetch("https://api.anime-skip.com/public-api/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        // Client ID مشترك يستخدمه الـ userscript للوصول العام
+        "X-Client-ID": "WXPpNdxpPfE6FVSmPMjp",
+      },
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!r.ok) { res.json({ found: false }); return; }
+
+    const data = await r.json() as any;
+    const episodes = data?.data?.findEpisodesByExternalLinks as any[] | null;
+    if (!episodes?.length) { res.json({ found: false }); return; }
+
+    // كل حلقة قد تُطابق من مصادر متعددة — خذ أول نتيجة
+    const epData = episodes[0];
+    const rawTs: Array<{ at: number; name: string }> = (epData?.timestamps || [])
+      .map((t: any) => ({ at: Number(t.at), name: (t.type?.name || "").toLowerCase() }))
+      .sort((a: any, b: any) => a.at - b.at);
+
+    // الـ timestamps هي نقاط تحول: (op → next) = نطاق التخطي
+    let op: { start: number; end: number } | undefined;
+    let ed: { start: number; end: number } | undefined;
+
+    for (let i = 0; i < rawTs.length; i++) {
+      const ts    = rawTs[i];
+      const nextAt = rawTs[i + 1]?.at ?? null;
+      if (nextAt === null) continue;
+      if (ts.name === "op" && !op) {
+        op = { start: ts.at, end: nextAt };
+      }
+      if ((ts.name === "ed" || ts.name === "credits" || ts.name === "ending") && !ed) {
+        ed = { start: ts.at, end: nextAt };
+      }
+    }
+
+    const result = { found: !!(op || ed), op: op ?? null, ed: ed ?? null };
+    animeSkipCache.set(ck, { data: result, ts: Date.now() });
+    res.json(result);
   } catch { res.json({ found: false }); }
 });
 
