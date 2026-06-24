@@ -3,8 +3,18 @@ import { sbSelect, sbInsert, sbDelete, sbPatch } from "../lib/supabaseClient.js"
 
 const router = Router();
 
-function getUserId(req: Request): string | null {
-  return (req.session as any)?.userId || (req.session as any)?.emailUserId || null;
+async function getUserId(req: Request): Promise<string | null> {
+  const sessionId = (req.session as any)?.userId || (req.session as any)?.emailUserId || null;
+  if (sessionId) return sessionId;
+
+  const mobileUserId = req.headers["x-mobile-user-id"] as string | undefined;
+  if (mobileUserId) {
+    try {
+      const rows = await sbSelect("users", { id: `eq.${mobileUserId}` }, { limit: 1 });
+      if (rows.length > 0) return mobileUserId;
+    } catch { /* ignore */ }
+  }
+  return null;
 }
 
 function mapRow(r: any, liked: boolean) {
@@ -39,7 +49,7 @@ router.get("/comments", async (req: Request, res: Response) => {
     const ep      = req.query.ep !== undefined ? Number(req.query.ep) : null;
     const limit   = Math.min(Number(req.query.limit) || 100, 200);
     const offset  = Number(req.query.offset) || 0;
-    const userId  = getUserId(req);
+    const userId  = await getUserId(req);
 
     if (!animeId && !tmdbId) return res.status(400).json({ error: "animeId أو tmdbId مطلوب" });
 
@@ -74,7 +84,7 @@ router.get("/comments", async (req: Request, res: Response) => {
    POST /api/comments
 ───────────────────────────────────────── */
 router.post("/comments", async (req: Request, res: Response) => {
-  const userId = getUserId(req);
+  const userId = await getUserId(req);
   if (!userId) return res.status(401).json({ error: "يجب تسجيل الدخول للتعليق" });
 
   try {
@@ -114,7 +124,7 @@ router.post("/comments", async (req: Request, res: Response) => {
    DELETE /api/comments/:id
 ───────────────────────────────────────── */
 router.delete("/comments/:id", async (req: Request, res: Response) => {
-  const userId = getUserId(req);
+  const userId = await getUserId(req);
   if (!userId) return res.status(401).json({ error: "غير مصرّح" });
 
   try {
@@ -130,7 +140,7 @@ router.delete("/comments/:id", async (req: Request, res: Response) => {
    POST /api/comments/:id/like — toggle
 ───────────────────────────────────────── */
 router.post("/comments/:id/like", async (req: Request, res: Response) => {
-  const userId = getUserId(req);
+  const userId = await getUserId(req);
   if (!userId) return res.status(401).json({ error: "يجب تسجيل الدخول" });
 
   try {
