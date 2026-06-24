@@ -647,8 +647,12 @@ export default function WatchScreen() {
     const _rawUrl = playingSrc?.directUrl || playingSrc?.url || "";
     const _resolvedUrl = _rawUrl.startsWith("/") ? _base + _rawUrl : _rawUrl;
     const startIdx = riftSources.findIndex(s => s.url === _resolvedUrl);
+    /* key = selected source URL → forces RiftPlayer to fully remount when
+       the user picks a different server from the picker, guaranteeing the
+       new source actually loads instead of staying on the previous one. */
     return (
       <RiftPlayer
+        key={_resolvedUrl}
         sources={riftSources}
         initialSourceIndex={Math.max(0, startIdx)}
         title={displayTitle}
