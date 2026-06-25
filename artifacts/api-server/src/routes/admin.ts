@@ -51,10 +51,13 @@ router.get("/admin/smtp-ping", async (_req: Request, res: Response) => {
   try {
     resetTransporter();
     await initEmailService();
+    const { getDbConfig } = await import("../lib/dbConfig.js");
+    const dbPass = await getDbConfig("smtp_pass");
     return res.json({
       ok:       true,
-      smtpUser: process.env.SMTP_USER || "غير مضبوط",
-      hasPass:  !!process.env.SMTP_PASS,
+      smtpUser: process.env.SMTP_USER || await getDbConfig("smtp_user") || "غير مضبوط",
+      hasPass:  !!(process.env.SMTP_PASS || dbPass),
+      source:   process.env.SMTP_PASS ? "env" : dbPass ? "db" : "none",
       nodeEnv:  process.env.NODE_ENV,
     });
   } catch (err: any) {
