@@ -237,7 +237,7 @@ export default function SearchScreen() {
   const showEmpty = !query && !format && !status && !genre && !season;
 
   /* ── trace.moe handlers ── */
-  async function runTraceSearch(imageUri: string, mimeType?: string) {
+  async function runTraceSearch(imageUri: string, mimeType?: string, base64Data?: string | null) {
     setTraceLoading(true);
     setTraceResults([]);
     setTraceError("");
@@ -246,6 +246,13 @@ export default function SearchScreen() {
       let resp: Response;
       if (isUrl) {
         resp = await fetch(`${API_BASE}/anime/trace-search?url=${encodeURIComponent(imageUri)}`);
+      } else if (base64Data) {
+        // Send as JSON with base64 — avoids multipart issues on mobile
+        resp = await fetch(`${API_BASE}/anime/trace-search`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: base64Data, mimeType: mimeType || "image/jpeg" }),
+        });
       } else {
         const fd = new FormData();
         fd.append("image", { uri: imageUri, name: "image.jpg", type: mimeType || "image/jpeg" } as any);
@@ -277,7 +284,8 @@ export default function SearchScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"] as any,
-      quality: 0.8,
+      quality: 0.7,
+      base64: true,
     });
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
@@ -285,7 +293,7 @@ export default function SearchScreen() {
       setTraceResults([]);
       setTraceError("");
       setTraceUrl("");
-      runTraceSearch(asset.uri, asset.mimeType || "image/jpeg");
+      runTraceSearch(asset.uri, asset.mimeType || "image/jpeg", asset.base64);
     }
   }
 
@@ -515,38 +523,15 @@ export default function SearchScreen() {
               </Pressable>
             </View>
 
-            {/* URL input */}
-            <View style={sm.urlRow}>
-              <TextInput
-                value={traceUrl}
-                onChangeText={setTraceUrl}
-                placeholder="الصق رابط الصورة..."
-                placeholderTextColor="rgba(255,255,255,0.25)"
-                style={sm.urlInput}
-                autoCapitalize="none"
-                keyboardType="url"
-              />
-              <Pressable
-                onPress={() => traceUrl.trim() && runTraceSearch(traceUrl.trim())}
-                disabled={!traceUrl.trim() || traceLoading}
-                style={[sm.searchBtn, (!traceUrl.trim() || traceLoading) && { opacity: 0.4 }]}>
-                <Text style={sm.searchBtnText}>بحث</Text>
-              </Pressable>
-            </View>
-
-            {/* divider */}
-            <View style={sm.divider}>
-              <View style={sm.divLine} />
-              <Text style={sm.divText}>أو</Text>
-              <View style={sm.divLine} />
-            </View>
-
-            {/* Pick image */}
+            {/* Pick image — primary action */}
             <Pressable onPress={pickImageForTrace} disabled={traceLoading}
               style={[sm.uploadBtn, traceLoading && { opacity: 0.4 }]}>
-              <Ionicons name="image-outline" size={16} color="rgba(196,181,253,0.7)" />
+              <Ionicons name="image-outline" size={20} color="#c4b5fd" />
               <Text style={sm.uploadBtnText}>اختر صورة من الجهاز</Text>
             </Pressable>
+            <Text style={{ textAlign: "center", fontSize: 10, color: "rgba(255,255,255,0.2)", fontFamily: "Cairo_400Regular" }}>
+              التقط لقطة شاشة من مشهد الأنمي وارفعها للبحث
+            </Text>
 
             {/* Loading */}
             {traceLoading && (
