@@ -504,30 +504,33 @@ export default function WatchScreen() {
                 directUrl: resolveUrl(data.directUrl, base),
                 url: resolveUrl(data.url, base),
               };
+
+              /* ── تقييم المصدر (خارج state updater تماماً — لا setTimeout) ── */
+              const isGoodSrc = !!(src.directUrl || src.url) && !src.isEmbed;
+              /* على الويب expo-video لا يدعم HLS */
+              const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
+
+              /* إضافة المصدر للقائمة (updater نظيف بلا side effects) */
               setSources(prev => {
                 const key = src.directUrl || src.url;
                 if (prev.find(s => (s.directUrl || s.url) === key)) return prev;
                 const next = [...prev, src];
-                const isGoodSrc = !!(src.directUrl || src.url) && !src.isEmbed;
-                /* on web, expo-video has no HLS support — only auto-play mp4 */
-                const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
-                /* auto-play first good source — stay on loading screen until it fires */
-                if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
-                  autoPlayFiredRef.current = true;
-                  /* save to cache for instant resume on re-open */
-                  if (srcCacheKey) AsyncStorage.setItem(srcCacheKey, JSON.stringify({ src: data, ts: Date.now() })).catch(() => {});
-                  setTimeout(() => {
-                    setPlayingSrc(src);
-                    setScreen("native"); // loading → player directly (no picker flash)
-                  }, 0);
-                } else if (!autoPlayFiredRef.current && next.length >= 1) {
-                  /* show picker immediately after first source so user doesn't wait */
-                  setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
-                }
-                /* update live counter on loading screen */
                 setFoundCount(next.filter(s => !s.isEmbed).length);
                 return next;
               });
+
+              /* التشغيل التلقائي — خارج state updater لتجنب race condition مع setTimeout */
+              if (isGoodSrc && isWebCompatible && !autoPlayFiredRef.current) {
+                autoPlayFiredRef.current = true;
+                if (srcCacheKey) {
+                  AsyncStorage.setItem(srcCacheKey, JSON.stringify({ src: data, ts: Date.now() })).catch(() => {});
+                }
+                setPlayingSrc(src);
+                setScreen("native"); // مباشرة بدون setTimeout
+              } else if (!autoPlayFiredRef.current) {
+                /* لا مصدر جيد بعد — أظهر الـ picker */
+                setScreen(s => s === "loading" ? "picker" : s);
+              }
             } else if (evType === "done") {
               setLoading(false);
               setSources(prev => {
