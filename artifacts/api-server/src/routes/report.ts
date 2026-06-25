@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
+import { getEnvOrDb } from "../lib/dbConfig.js";
 
 const router = Router();
 
-const getBotToken = () => process.env.TELEGRAM_BOT_TOKEN || "";
+const getBotToken = async () => getEnvOrDb("TELEGRAM_BOT_TOKEN", "telegram_bot_token");
 const getChatId   = () => process.env.TELEGRAM_CHAT_ID   || "";
 
 router.post("/api/report", async (req, res) => {
@@ -34,7 +35,7 @@ router.post("/api/report", async (req, res) => {
   }
 
   // ── 2. إرسال Telegram اختياري ─────────────────────────────────────────────
-  const botToken = getBotToken();
+  const botToken = await getBotToken();
   const chatId   = getChatId();
   if (botToken && chatId) {
     const typeLabel: Record<string, string> = {

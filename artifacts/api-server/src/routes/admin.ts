@@ -3,6 +3,7 @@ import { setConfig, resetTransporter, initEmailService } from "../auth/emailServ
 import { getEmailUser } from "../auth/emailAuth.js";
 import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
+import { setDbConfig, clearDbConfigCache } from "../lib/dbConfig.js";
 
 const router = Router();
 
@@ -241,6 +242,100 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
   } catch (err) {
     return res.status(500).json({ error: "خطأ في الخادم" });
   }
+});
+
+// ── إعداد الأسرار من قاعدة البيانات (بدون Replit Secrets) ─────────────────
+// محمي بـ APP_SECRET فقط — لا يحتاج تسجيل دخول (للإعداد الأولي)
+router.post("/admin/setup", async (req: Request, res: Response) => {
+  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const provided  = (req.headers["x-setup-secret"] as string | undefined) || req.body?.secret;
+  if (provided !== appSecret) {
+    return res.status(401).json({ error: "x-setup-secret غير صحيح" });
+  }
+
+  const {
+    telegram_bot_token,
+    smtp_pass,
+    smtp_user,
+    smtp_host,
+    smtp_port,
+    telegram_chat_id,
+    telegram_channel_id,
+  } = req.body || {};
+
+  const saved: string[] = [];
+
+  if (telegram_bot_token) {
+    await setDbConfig("telegram_bot_token", String(telegram_bot_token));
+    saved.push("telegram_bot_token");
+  }
+  if (smtp_pass) {
+    await setDbConfig("smtp_pass", String(smtp_pass));
+    await setConfig("smtp_pass", String(smtp_pass));
+    saved.push("smtp_pass");
+  }
+  if (smtp_user) {
+    await setDbConfig("smtp_user", String(smtp_user));
+    await setConfig("smtp_user", String(smtp_user));
+    saved.push("smtp_user");
+  }
+  if (smtp_host) {
+    await setDbConfig("smtp_host", String(smtp_host));
+    await setConfig("smtp_host", String(smtp_host));
+    saved.push("smtp_host");
+  }
+  if (smtp_port) {
+    await setDbConfig("smtp_port", String(smtp_port));
+    await setConfig("smtp_port", String(smtp_port));
+    saved.push("smtp_port");
+  }
+  if (telegram_chat_id) {
+    await setDbConfig("telegram_chat_id", String(telegram_chat_id));
+    saved.push("telegram_chat_id (DB only — also set TELEGRAM_CHAT_ID env)");
+  }
+  if (telegram_channel_id) {
+    await setDbConfig("telegram_channel_id", String(telegram_channel_id));
+    saved.push("telegram_channel_id (DB only — also set TELEGRAM_CHANNEL_ID env)");
+  }
+
+  if (smtp_pass || smtp_user) resetTransporter();
+  clearDbConfigCache();
+
+  return res.json({
+    ok:    saved.length > 0,
+    saved,
+    message: saved.length > 0
+      ? `✅ تم حفظ ${saved.length} إعداد في قاعدة البيانات بشكل دائم`
+      : "لم يُرسَل أي إعداد للحفظ",
+  });
+});
+
+// ── عرض الإعدادات المحفوظة (بدون القيم الحساسة) ──────────────────────────
+router.get("/admin/setup/status", async (req: Request, res: Response) => {
+  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const provided  = (req.headers["x-setup-secret"] as string | undefined) || req.query.secret;
+  if (provided !== appSecret) {
+    return res.status(401).json({ error: "x-setup-secret غير صحيح" });
+  }
+
+  const rows = await sbSelect("app_config", {}).catch(() => [] as any[]);
+  const keys = rows.map((r: any) => r.key as string).filter((k: string) =>
+    ["telegram_bot_token","smtp_pass","smtp_user","smtp_host","smtp_port"].includes(k)
+  );
+
+  return res.json({
+    ok: true,
+    configuredKeys: keys,
+    telegram_bot_token: keys.includes("telegram_bot_token") ? "✅ موجود في DB" : "❌ غير موجود",
+    smtp_pass:          keys.includes("smtp_pass")          ? "✅ موجود في DB" : "❌ غير موجود",
+    smtp_user:          keys.includes("smtp_user")          ? "✅ موجود في DB" : "❌ غير موجود",
+    envVars: {
+      TELEGRAM_BOT_TOKEN:  process.env.TELEGRAM_BOT_TOKEN  ? "✅ في البيئة" : "⚠️ غير موجود",
+      TELEGRAM_CHANNEL_ID: process.env.TELEGRAM_CHANNEL_ID ? "✅ في البيئة" : "⚠️ غير موجود",
+      TELEGRAM_CHAT_ID:    process.env.TELEGRAM_CHAT_ID    ? "✅ في البيئة" : "⚠️ غير موجود",
+      SMTP_USER:           process.env.SMTP_USER            ? "✅ في البيئة" : "⚠️ غير موجود",
+    },
+  });
 });
 
 export default router;
