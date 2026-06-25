@@ -253,8 +253,10 @@ CREATE TABLE IF NOT EXISTS comments (
   likes             INTEGER NOT NULL DEFAULT 0 CHECK (likes >= 0),
   parent_id         UUID,
   reply_to_username TEXT,
+  user_handle       TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS user_handle TEXT;
 CREATE INDEX IF NOT EXISTS idx_comments_anime   ON comments(anime_id, episode_number);
 CREATE INDEX IF NOT EXISTS idx_comments_tmdb    ON comments(tmdb_id, episode_number);
 CREATE INDEX IF NOT EXISTS idx_comments_user    ON comments(user_id);
