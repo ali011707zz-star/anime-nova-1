@@ -222,7 +222,7 @@ async function runSchedulerCycle(): Promise<void> {
 
     if (await wasNotified(anilistId, ep)) continue;
 
-    // فحص توفر المصادر العربية قبل الإرسال
+    // فحص توفر المصادر العربية (اختياري — لا يوقف الإرسال عند الفشل)
     const titleToCheck = media.title?.romaji || media.title?.english || "";
     if (titleToCheck) {
       try {
@@ -233,12 +233,10 @@ async function runSchedulerCycle(): Promise<void> {
         );
         const { available } = await checkRes.json() as { available: string[] };
         if (!available.length) {
-          console.log(`[scheduler] ⏭ تخطي (لا مصادر عربية): ${titleToCheck} ح${ep}`);
-          continue;
+          console.log(`[scheduler] ℹ️ لا مصادر عربية حتى الآن: ${titleToCheck} ح${ep} — الإرسال على أي حال`);
         }
       } catch {
-        console.log(`[scheduler] ⏭ تخطي (فشل فحص المصادر): ${titleToCheck} ح${ep}`);
-        continue;
+        console.log(`[scheduler] ℹ️ فشل فحص المصادر: ${titleToCheck} ح${ep} — الإرسال على أي حال`);
       }
     }
 

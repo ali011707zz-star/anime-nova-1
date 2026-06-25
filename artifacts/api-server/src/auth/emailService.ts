@@ -27,7 +27,7 @@ export function resetTransporter() {
 async function getTransporter(): Promise<Transporter> {
   if (transporter) return transporter;
 
-  let user = process.env.SMTP_USER;
+  let user = process.env.SMTP_USER || process.env.EMAIL_USER;
   let pass = process.env.SMTP_PASS;
   let host = process.env.SMTP_HOST;
   let port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined;

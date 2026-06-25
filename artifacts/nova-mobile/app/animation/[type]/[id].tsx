@@ -158,7 +158,7 @@ export default function AnimationDetailScreen() {
     );
   }
 
-  const title = detail.title || detail.name || detail.original_title || detail.original_name || "—";
+  const title = detail.original_title || detail.original_name || detail.title || detail.name || "—";
   const year = (detail.release_date || detail.first_air_date || "").slice(0, 4);
   const runtime = detail.runtime || (detail.episode_run_time?.[0]) || 0;
   const score = detail.vote_average || 0;
@@ -462,7 +462,7 @@ const s = StyleSheet.create({
   coverImg: { width: 88, height: 128, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   coverPlaceholder: { backgroundColor: "rgba(139,92,246,0.1)", alignItems: "center", justifyContent: "center" },
   titleCol: { flex: 1, paddingBottom: 8, gap: 8 },
-  titleText: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 22, textAlign: "right" },
+  titleText: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff", lineHeight: 22, textAlign: "left" },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   metaChip: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.38)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(255,255,255,0.05)" },
   metaChipPurple: { color: "#a78bfa", borderColor: "rgba(139,92,246,0.25)", backgroundColor: "rgba(139,92,246,0.1)" },
