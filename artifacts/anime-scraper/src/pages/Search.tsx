@@ -60,7 +60,7 @@ const SORT_OPTIONS = [
   { label: "الأحدث",       value: "START_DATE_DESC" },
   { label: "الأقدم",       value: "START_DATE" },
 ];
-const BLOCKED_GENRES = new Set(["Hentai", "Ecchi"]);
+const BLOCKED_GENRES = new Set(["Hentai"]);
 
 const GENRES = [
   "Action", "Adventure", "Comedy", "Drama", "Fantasy",
@@ -118,7 +118,7 @@ function buildQuery(sort: string, format: string, status: string, genre: string,
   return `
 query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: ${sortArr}${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
+    media(search: $search, type: ANIME, sort: ${sortArr}${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji english native } coverImage { large }
       averageScore episodes format status startDate { year } genres
     }
@@ -134,7 +134,7 @@ function buildBrowseQuery(sort: string, format: string, status: string, genre: s
   return `
 query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}], countryOfOrigin: "JP"${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
+    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}], countryOfOrigin: "JP"${formatFilter}${statusFilter}${genreFilter}${seasonFilter}, isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji english native } coverImage { large }
       averageScore episodes format status startDate { year } genres
     }
