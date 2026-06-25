@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ChevronRight, MessageCircle, Send, Heart, Trash2,
+  ChevronLeft, ChevronRight, MessageCircle, Send, Heart, Trash2,
   Loader2, RefreshCw, MessageSquare, Film, Tv, CornerDownLeft, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
