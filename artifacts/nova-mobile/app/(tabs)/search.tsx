@@ -84,7 +84,7 @@ const GENRES_AR: Record<string,string> = {
 const FORMAT_AR: Record<string,string> = {
   TV:"مسلسل",MOVIE:"فيلم",OVA:"OVA",ONA:"ONA",SPECIAL:"خاص",MUSIC:"موسيقى",
 };
-const BLOCKED_GENRES = new Set(["Hentai","Ecchi"]);
+const BLOCKED_GENRES = new Set<string>();
 
 /* ── Arabic transliteration ── */
 const AR_TO_EN: Record<string,string> = {
@@ -109,7 +109,7 @@ function buildSearchQuery(sort: string, format: string, status: string, genre: s
   const sortArr = sort ? `[SEARCH_MATCH, ${sort}]` : "[SEARCH_MATCH, POPULARITY_DESC]";
   return `query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}, isAdult: false, genre_not_in: ["Ecchi","Hentai"]) {
+    media(search: $search, type: ANIME, sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
@@ -119,7 +119,7 @@ function buildSearchQuery(sort: string, format: string, status: string, genre: s
 function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}, isAdult: false, genre_not_in: ["Ecchi","Hentai"]) {
+    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }

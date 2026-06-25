@@ -11,6 +11,34 @@ import {
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
 import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
+import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
+import pg from "pg";
+// Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
+let _tcPool: pg.Pool | null = null;
+function getTcPool(): pg.Pool | null {
+  if (!process.env.DATABASE_URL) return null;
+  if (!_tcPool) _tcPool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+  return _tcPool;
+}
+async function pgTranslateGet(key: string): Promise<string | null> {
+  try {
+    const pool = getTcPool();
+    if (!pool) return null;
+    const r = await pool.query("SELECT translated FROM translations_cache WHERE cache_key=$1 LIMIT 1", [key]);
+    return r.rows[0]?.translated ?? null;
+  } catch { return null; }
+}
+async function pgTranslateSave(key: string, translated: string, from: string, to: string): Promise<void> {
+  try {
+    const pool = getTcPool();
+    if (!pool) return;
+    await pool.query(
+      `INSERT INTO translations_cache (cache_key, translated, from_lang, to_lang)
+       VALUES ($1,$2,$3,$4) ON CONFLICT (cache_key) DO UPDATE SET translated=EXCLUDED.translated`,
+      [key, translated, from, to]
+    );
+  } catch { /* silent */ }
+}
 const router = Router();
 
 const BROWSER_UA =
@@ -7976,15 +8004,31 @@ router.get("/anime/translate", async (req, res) => {
   const from = ((req.query.from as string) || "en").trim();
   const to   = ((req.query.to   as string) || "ar").trim();
   if (!text) { res.json({ translated: "" }); return; }
-  const cacheKey = `${from}:${to}:${text.substring(0, 80)}`;
+  const cacheKey = `${from}:${to}:${text.substring(0, 200)}`;
+
+  // 1. L1: in-memory cache (instant)
   if (translateCache.has(cacheKey)) { res.json({ translated: translateCache.get(cacheKey) }); return; }
+
+  // 2. L2: PostgreSQL persistent cache
+  const cached = await pgTranslateGet(cacheKey);
+  if (cached !== null) {
+    translateCache.set(cacheKey, cached);
+    res.json({ translated: cached });
+    return;
+  }
+
+  // 3. Google Translate
   try {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
     const r = await fetch(url, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(6000) });
     if (!r.ok) throw new Error(`translate ${r.status}`);
     const data = await r.json() as any;
     const translated = data?.[0]?.map((x: any) => x?.[0] || "").join("") || text;
+
+    // Save to L1 (memory) + L2 (PostgreSQL) — fire-and-forget
     translateCache.set(cacheKey, translated);
+    pgTranslateSave(cacheKey, translated, from, to);
+
     res.json({ translated });
   } catch { res.json({ translated: text }); }
 });
