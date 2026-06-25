@@ -299,6 +299,7 @@ export default function WatchScreen() {
   const [sources, setSources]     = useState<Src[]>([]);
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<Src | null>(null);
+  const [playingRiftIdx, setPlayingRiftIdx] = useState(0);
   const [cover, setCover]         = useState(() => {
     const id = parseInt(anime || "0");
     return id ? `https://img.anili.st/media/${id}` : "";
@@ -646,15 +647,16 @@ export default function WatchScreen() {
     const _base = getBaseUrl();
     const _rawUrl = playingSrc?.directUrl || playingSrc?.url || "";
     const _resolvedUrl = _rawUrl.startsWith("/") ? _base + _rawUrl : _rawUrl;
-    const startIdx = riftSources.findIndex(s => s.url === _resolvedUrl);
     /* key = selected source URL → forces RiftPlayer to fully remount when
        the user picks a different server from the picker, guaranteeing the
-       new source actually loads instead of staying on the previous one. */
+       new source actually loads instead of staying on the previous one.
+       initialSourceIndex uses playingRiftIdx set at click-time (avoids URL
+       comparison race that caused startIdx=-1 → always server 0). */
     return (
       <RiftPlayer
         key={_resolvedUrl}
         sources={riftSources}
-        initialSourceIndex={Math.max(0, startIdx)}
+        initialSourceIndex={playingRiftIdx}
         title={displayTitle}
         episode={epNum}
         episodeTitle={etitle ? decodeURIComponent(etitle) : undefined}
@@ -733,6 +735,10 @@ export default function WatchScreen() {
     if (srcCacheKey) {
       AsyncStorage.setItem(srcCacheKey, JSON.stringify({ src, ts: Date.now() })).catch(() => {});
     }
+    /* حساب الفهرس مسبقاً عند الاختيار — أكثر موثوقية من مقارنة الروابط لاحقاً */
+    const srcKey = src.directUrl || src.url || "";
+    const idx = directSrcs.findIndex(s => (s.directUrl || s.url) === srcKey);
+    setPlayingRiftIdx(Math.max(0, idx));
     setPlayingSrc(src);
     const url = src.directUrl || src.url || "";
     if (src.isEmbed || (!src.directUrl && !url.match(/\.(m3u8|mp4|mkv|webm)/i) && url.startsWith("https://"))) {
