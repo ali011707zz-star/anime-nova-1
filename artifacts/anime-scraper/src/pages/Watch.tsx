@@ -187,9 +187,9 @@ function getSrcQualityTier(src: FetchedSrc): Quality {
   if (name.includes("1080") || name.includes("fhd")) return "1080p FHD";
   if (name.includes("720")  || name.includes("hd"))  return "720p HD";
   if (name.includes("360")  || name.includes("sd"))  return "360p SD";
-  /* Fall back to rank — conservative thresholds */
-  if (rank >= 13) return "1080p FHD";
-  if (rank >= 9)  return "720p HD";
+  /* Fall back to rank — lowered thresholds so 720p sources are not mis-classified as 360p */
+  if (rank >= 12) return "1080p FHD";
+  if (rank >= 6)  return "720p HD";
   return "360p SD";
 }
 
@@ -1778,6 +1778,18 @@ function EpisodePlayer({
     setSubLang(null);
   }, [subtitleUrl]);
 
+  /* ── Reset subtitle state when switching to Arabic source (built-in audio — no external sub) ── */
+  useEffect(() => {
+    if (!hideSubtitle) return;
+    subAbortRef.current?.abort();
+    setSubCues([]);
+    setSubLang(null);
+    setSubState("idle");
+    setSubStatus("off");
+    setSubChoice("off");
+    setSubTracks([]);
+  }, [hideSubtitle]);
+
   /* ── Re-apply subtitle choice when server URL changes ── */
   const prevUrlForSubRef = useRef(currentUrl);
   useEffect(() => {
@@ -1785,6 +1797,16 @@ function EpisodePlayer({
     prevUrlForSubRef.current = currentUrl;
     // Reset timing offset on every server switch so old adjustments don't bleed over
     setSubOffset(0);
+    // If switching to an Arabic source, clear subtitle state — built-in audio, no external sub needed
+    if (hideSubtitle) {
+      subAbortRef.current?.abort();
+      setSubCues([]);
+      setSubLang(null);
+      setSubState("idle");
+      setSubStatus("off");
+      setSubChoice("off");
+      return;
+    }
     if (subChoice === "off") return;
     const saved = subChoice;
     /* ── FIX: Videasy desync — if new source has its OWN subtitleUrl (Videasy, kawaii, AniKoto),
@@ -2178,13 +2200,13 @@ function EpisodePlayer({
               serverIndex={currentServer}
               downloadUrl={downloadUrl}
               resumeTime={resumeTime > 10 ? resumeTime : undefined}
-              subCues={subState === "ready" && subCues.length > 0 ? subCues : undefined}
+              subCues={subState === "ready" && !hideSubtitle && subCues.length > 0 ? subCues : undefined}
               subOffset={subOffset}
               subSettings={subSettings}
-              subEnabled={subState === "ready"}
+              subEnabled={subState === "ready" && !hideSubtitle}
               skipIntro={skipTimes?.op}
               skipOutro={skipTimes?.ed}
-              autoPlay={localStorage.getItem("pref-autoplay") !== "false"}
+              autoPlay={localStorage.getItem("pref-autoplay") === "true"}
               onSubtitleClick={fetchSubtitles}
               onSubSettingsChange={s => setSubSettings(s)}
               onSubtitleOff={() => changeSubChoice("off")}

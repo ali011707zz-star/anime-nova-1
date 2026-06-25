@@ -3,8 +3,8 @@ import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 
 const router = Router();
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const CHAT_ID   = process.env.TELEGRAM_CHAT_ID   || "";
+const getBotToken = () => process.env.TELEGRAM_BOT_TOKEN || "";
+const getChatId   = () => process.env.TELEGRAM_CHAT_ID   || "";
 
 router.post("/api/report", async (req, res) => {
   const { message, type, page, userDisplayName } = req.body as {
@@ -34,7 +34,9 @@ router.post("/api/report", async (req, res) => {
   }
 
   // ── 2. إرسال Telegram اختياري ─────────────────────────────────────────────
-  if (BOT_TOKEN && CHAT_ID) {
+  const botToken = getBotToken();
+  const chatId   = getChatId();
+  if (botToken && chatId) {
     const typeLabel: Record<string, string> = {
       bug:        "🐛 خلل تقني",
       suggestion: "💡 اقتراح",
@@ -56,12 +58,12 @@ router.post("/api/report", async (req, res) => {
     ].filter(l => l !== "");
 
     fetch(
-      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+      `https://api.telegram.org/bot${botToken}/sendMessage`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chat_id:    CHAT_ID,
+          chat_id:    chatId,
           text:       lines.join("\n"),
           parse_mode: "Markdown",
         }),
