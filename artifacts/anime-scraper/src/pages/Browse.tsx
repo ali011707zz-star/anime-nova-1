@@ -21,7 +21,6 @@ const GENRES: { ar: string; en: string; color: string; animeId: number; adult?: 
   { ar: "ميكا",        en: "Mecha",         color: "#94A3B8", animeId: 30     },
   { ar: "موسيقى",      en: "Music",         color: "#A78BFA", animeId: 100916 },
   { ar: "إثارة",       en: "Thriller",      color: "#DC2626", animeId: 30002  },
-  { ar: "إيتشي",       en: "Ecchi",         color: "#F472B6", animeId: 11617,  adult: true },
 ];
 
 /* Stable AniList cover URLs — large format, always available */

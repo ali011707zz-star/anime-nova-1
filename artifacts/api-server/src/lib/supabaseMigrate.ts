@@ -127,13 +127,12 @@ CREATE TABLE IF NOT EXISTS cdn_cache (
 );
 
 CREATE TABLE IF NOT EXISTS reports (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
-  anime_id   TEXT,
-  episode    INTEGER,
-  reason     TEXT,
-  details    TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  id                SERIAL PRIMARY KEY,
+  type              TEXT NOT NULL DEFAULT 'other',
+  message           TEXT NOT NULL,
+  page              TEXT,
+  user_display_name TEXT,
+  created_at        TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS app_config (
@@ -233,20 +232,28 @@ CREATE TABLE IF NOT EXISTS watch_progress (
 );
 CREATE INDEX IF NOT EXISTS idx_wp_user ON watch_progress(user_id);
 CREATE TABLE IF NOT EXISTS comments (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
-  anime_id   TEXT NOT NULL,
-  episode    INTEGER,
-  content    TEXT NOT NULL,
-  likes      INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           TEXT NOT NULL,
+  username          TEXT NOT NULL DEFAULT 'مستخدم',
+  avatar_url        TEXT,
+  anime_id          INTEGER,
+  tmdb_id           TEXT,
+  anime_type        TEXT NOT NULL DEFAULT 'anime',
+  episode_number    INTEGER,
+  text              TEXT NOT NULL CHECK (char_length(text) <= 1000),
+  likes             INTEGER NOT NULL DEFAULT 0 CHECK (likes >= 0),
+  parent_id         UUID,
+  reply_to_username TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_comments_anime ON comments(anime_id, episode);
+CREATE INDEX IF NOT EXISTS idx_comments_anime   ON comments(anime_id, episode_number);
+CREATE INDEX IF NOT EXISTS idx_comments_tmdb    ON comments(tmdb_id, episode_number);
+CREATE INDEX IF NOT EXISTS idx_comments_user    ON comments(user_id);
+CREATE INDEX IF NOT EXISTS idx_comments_parent  ON comments(parent_id);
 CREATE TABLE IF NOT EXISTS comment_likes (
-  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
-  comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
-  PRIMARY KEY(user_id, comment_id)
+  comment_id UUID NOT NULL,
+  user_id    TEXT NOT NULL,
+  PRIMARY KEY (comment_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS source_cache (
   cache_key  TEXT PRIMARY KEY,
@@ -268,14 +275,14 @@ CREATE TABLE IF NOT EXISTS cdn_cache (
   checked_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE IF NOT EXISTS reports (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
-  anime_id   TEXT,
-  episode    INTEGER,
-  reason     TEXT,
-  details    TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  id                SERIAL PRIMARY KEY,
+  type              TEXT NOT NULL DEFAULT 'other',
+  message           TEXT NOT NULL,
+  page              TEXT,
+  user_display_name TEXT,
+  created_at        TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at DESC);
 CREATE TABLE IF NOT EXISTS app_config (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
