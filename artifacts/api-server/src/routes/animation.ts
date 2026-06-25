@@ -493,7 +493,7 @@ router.get("/animation/browse", async (req: Request, res: Response) => {
     const yearParam = year
       ? (type === "tv" ? `&first_air_date_year=${year}` : `&primary_release_year=${year}`)
       : "";
-    const data: any = await tmdb(`${ep}?with_genres=${gp}&sort_by=${sort}&page=${page}&include_adult=false${tvExtra}${yearParam}&vote_count.gte=10`);
+    const data: any = await tmdb(`${ep}?with_genres=${gp}&sort_by=${sort}&page=${page}&include_adult=true${tvExtra}${yearParam}&vote_count.gte=10`);
     // Remove results whose TMDB title is still in Japanese/Chinese (no Arabic translation)
     const results = (data.results || []).filter((r: any) => {
       const title = r.title || r.name || "";
@@ -548,7 +548,7 @@ router.get("/animation/search", async (req: Request, res: Response) => {
     const q    = String(req.query.q   || "");
     const type = String(req.query.type || "multi");
     if (!q) { res.status(400).json({ error: "q required" }); return; }
-    const data: any = await tmdb(`/search/${type}?query=${encodeURIComponent(q)}&include_adult=false`);
+    const data: any = await tmdb(`/search/${type}?query=${encodeURIComponent(q)}&include_adult=true`);
     const results = (data.results || []).filter((r: any) => {
       if (type === "multi" && !(r.genre_ids || []).includes(16)) return false;
       const title = r.title || r.name || "";

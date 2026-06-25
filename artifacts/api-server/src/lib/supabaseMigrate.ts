@@ -2,9 +2,13 @@
  * supabaseMigrate.ts
  * يتحقق من وجود الجداول في Supabase، وإن لم تكن موجودة
  * يطبعها في اللوج ليتمكن المستخدم من تشغيلها في SQL Editor.
+ * كذلك يُشغّل migration مباشرةً على PostgreSQL (DATABASE_URL) عند الحاجة.
  */
 import { logger } from "./logger.js";
 import { sbSelect } from "./supabaseClient.js";
+import pg from "pg";
+
+const { Pool } = pg;
 
 // SQL لإنشاء كل الجداول المطلوبة
 export const SETUP_SQL = `
@@ -137,16 +141,204 @@ CREATE TABLE IF NOT EXISTS app_config (
   value      TEXT NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- جدول كاش الترجمات: يخزّن ترجمة أي نص (عنوان، وصف، حلقة) إلى العربية
+CREATE TABLE IF NOT EXISTS translations_cache (
+  cache_key    TEXT PRIMARY KEY,
+  translated   TEXT NOT NULL,
+  from_lang    TEXT NOT NULL DEFAULT 'en',
+  to_lang      TEXT NOT NULL DEFAULT 'ar',
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- جدول الميتاداتا العربية للأنمي والأنيميشن
+CREATE TABLE IF NOT EXISTS anime_meta_ar (
+  source_id    TEXT NOT NULL,
+  source_type  TEXT NOT NULL DEFAULT 'anime',
+  title_ar     TEXT,
+  overview_ar  TEXT,
+  updated_at   TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (source_id, source_type)
+);
 `;
 
-const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites"];
+const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar"];
+
+// ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
+const PG_MIGRATION_SQL = `
+CREATE TABLE IF NOT EXISTS users (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email                TEXT UNIQUE,
+  username             TEXT UNIQUE,
+  display_name         TEXT,
+  first_name           TEXT,
+  last_name            TEXT,
+  password_hash        TEXT,
+  profile_image_url    TEXT,
+  profile_image_custom TEXT,
+  avatar_color         INTEGER DEFAULT 0,
+  email_verified       BOOLEAN DEFAULT FALSE,
+  plan                 TEXT DEFAULT 'free',
+  expires_at           TIMESTAMPTZ,
+  auth_type            TEXT DEFAULT 'email',
+  google_id            TEXT,
+  github_id            TEXT,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS pending_verifications (
+  email      TEXT PRIMARY KEY,
+  code       TEXT NOT NULL,
+  type       TEXT NOT NULL DEFAULT 'signup',
+  expires_at TIMESTAMPTZ NOT NULL,
+  attempts   INTEGER DEFAULT 0,
+  sent_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  sid    TEXT PRIMARY KEY,
+  sess   JSONB NOT NULL,
+  expire TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_expire ON sessions(expire);
+CREATE TABLE IF NOT EXISTS watch_history (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
+  anime_id   TEXT NOT NULL,
+  episode    INTEGER NOT NULL,
+  title      TEXT,
+  image      TEXT,
+  watched_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, anime_id, episode)
+);
+CREATE INDEX IF NOT EXISTS idx_wh_user ON watch_history(user_id);
+CREATE TABLE IF NOT EXISTS favorites (
+  id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id  UUID REFERENCES users(id) ON DELETE CASCADE,
+  anime_id TEXT NOT NULL,
+  title    TEXT,
+  image    TEXT,
+  added_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, anime_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fav_user ON favorites(user_id);
+CREATE TABLE IF NOT EXISTS watch_progress (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
+  anime_id   TEXT NOT NULL,
+  episode    INTEGER NOT NULL,
+  progress   FLOAT DEFAULT 0,
+  duration   FLOAT DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, anime_id, episode)
+);
+CREATE INDEX IF NOT EXISTS idx_wp_user ON watch_progress(user_id);
+CREATE TABLE IF NOT EXISTS comments (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
+  anime_id   TEXT NOT NULL,
+  episode    INTEGER,
+  content    TEXT NOT NULL,
+  likes      INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_comments_anime ON comments(anime_id, episode);
+CREATE TABLE IF NOT EXISTS comment_likes (
+  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
+  comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
+  PRIMARY KEY(user_id, comment_id)
+);
+CREATE TABLE IF NOT EXISTS source_cache (
+  cache_key  TEXT PRIMARY KEY,
+  sources    JSONB NOT NULL DEFAULT '[]',
+  site       TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS subtitle_cache (
+  cache_key  TEXT PRIMARY KEY,
+  vtt        TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS cdn_cache (
+  url        TEXT PRIMARY KEY,
+  status     INTEGER,
+  ok         BOOLEAN,
+  checked_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS reports (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+  anime_id   TEXT,
+  episode    INTEGER,
+  reason     TEXT,
+  details    TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS app_config (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS translations_cache (
+  cache_key    TEXT PRIMARY KEY,
+  translated   TEXT NOT NULL,
+  from_lang    TEXT NOT NULL DEFAULT 'en',
+  to_lang      TEXT NOT NULL DEFAULT 'ar',
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS anime_meta_ar (
+  source_id    TEXT NOT NULL,
+  source_type  TEXT NOT NULL DEFAULT 'anime',
+  title_ar     TEXT,
+  overview_ar  TEXT,
+  updated_at   TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (source_id, source_type)
+);
+`;
+
+/** يُنشئ الجداول مباشرةً في Replit PostgreSQL عند الـ startup */
+export async function runPostgresMigration(): Promise<void> {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    logger.warn("[pg-migrate] DATABASE_URL غير موجود — تخطّي");
+    return;
+  }
+  const pool = new Pool({ connectionString: dbUrl });
+  try {
+    // Split by semicolons and run each statement separately
+    const statements = PG_MIGRATION_SQL
+      .split(";")
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !s.startsWith("--"));
+    for (const stmt of statements) {
+      try {
+        await pool.query(stmt);
+      } catch (e: any) {
+        // Ignore already-exists errors
+        if (!e.message?.includes("already exists")) {
+          logger.warn({ err: e.message, stmt: stmt.slice(0, 80) }, "[pg-migrate] تحذير");
+        }
+      }
+    }
+    logger.info("[pg-migrate] ✅ جداول PostgreSQL جاهزة (translations_cache + anime_meta_ar مُضافة)");
+  } catch (e: any) {
+    logger.error({ err: e.message }, "[pg-migrate] ❌ فشل migration PostgreSQL");
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
 
 export async function runSupabaseMigration(): Promise<void> {
+  // دائماً شغّل migration على PostgreSQL أولاً (Replit native DB)
+  await runPostgresMigration();
+
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey  = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceKey) {
-    logger.warn("[migrate] SUPABASE_URL أو SUPABASE_SERVICE_KEY غير موجود — تخطّي");
+    logger.warn("[migrate] SUPABASE_URL أو SUPABASE_SERVICE_KEY غير موجود — تخطّي Supabase");
     return;
   }
 

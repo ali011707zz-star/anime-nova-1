@@ -35,7 +35,7 @@ export async function anilistQuery<T = unknown>(
 export const TRENDING_QUERY = `
 query TrendingAnime($page: Int) {
   Page(page: $page, perPage: 20) {
-    media(sort: TRENDING_DESC, type: ANIME, isAdult: false) {
+    media(sort: TRENDING_DESC, type: ANIME) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format nextAiringEpisode { episode airingAt }
     }
   }
@@ -44,7 +44,7 @@ query TrendingAnime($page: Int) {
 export const POPULAR_QUERY = `
 query PopularAnime($page: Int) {
   Page(page: $page, perPage: 20) {
-    media(sort: POPULARITY_DESC, type: ANIME, isAdult: false) {
+    media(sort: POPULARITY_DESC, type: ANIME) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -53,7 +53,7 @@ query PopularAnime($page: Int) {
 export const AIRING_QUERY = `
 query AiringAnime {
   Page(page: 1, perPage: 20) {
-    media(status: RELEASING, sort: POPULARITY_DESC, type: ANIME, isAdult: false) {
+    media(status: RELEASING, sort: POPULARITY_DESC, type: ANIME) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes nextAiringEpisode { episode airingAt }
     }
   }
@@ -62,7 +62,7 @@ query AiringAnime {
 export const SEARCH_QUERY = `
 query SearchAnime($search: String!, $page: Int, $genre: String, $format: MediaFormat) {
   Page(page: $page, perPage: 30) {
-    media(search: $search, type: ANIME, isAdult: false, genre: $genre, format: $format) {
+    media(search: $search, type: ANIME, genre: $genre, format: $format) {
       id title { romaji english } coverImage { large } averageScore episodes format status genres
     }
   }
@@ -71,7 +71,7 @@ query SearchAnime($search: String!, $page: Int, $genre: String, $format: MediaFo
 export const BROWSE_QUERY = `
 query BrowseAnime($page: Int, $genre: String, $format: MediaFormat, $sort: [MediaSort]) {
   Page(page: $page, perPage: 30) {
-    media(type: ANIME, isAdult: false, genre: $genre, format: $format, sort: $sort) {
+    media(type: ANIME, genre: $genre, format: $format, sort: $sort) {
       id title { romaji english } coverImage { large } averageScore episodes format status genres
     }
   }
@@ -94,7 +94,7 @@ query AnimeDetail($id: Int!) {
 export const SEASONAL_QUERY = `
 query SeasonalAnime($season: MediaSeason!, $year: Int!) {
   Page(page: 1, perPage: 30) {
-    media(season: $season, seasonYear: $year, type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+    media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC) {
       id title { romaji english } coverImage { large } averageScore episodes status format nextAiringEpisode { episode airingAt }
     }
   }
@@ -103,7 +103,7 @@ query SeasonalAnime($season: MediaSeason!, $year: Int!) {
 export const TOP_RATED_QUERY = `
 query TopRatedAnime {
   Page(page: 1, perPage: 20) {
-    media(sort: SCORE_DESC, type: ANIME, isAdult: false, averageScore_greater: 70) {
+    media(sort: SCORE_DESC, type: ANIME, averageScore_greater: 70) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -112,7 +112,7 @@ query TopRatedAnime {
 export const MOVIES_QUERY = `
 query AnimeMovies {
   Page(page: 1, perPage: 20) {
-    media(format: MOVIE, type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+    media(format: MOVIE, type: ANIME, sort: POPULARITY_DESC) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -121,7 +121,7 @@ query AnimeMovies {
 export const UPCOMING_QUERY = `
 query UpcomingAnime {
   Page(page: 1, perPage: 20) {
-    media(status: NOT_YET_RELEASED, type: ANIME, isAdult: false, sort: POPULARITY_DESC) {
+    media(status: NOT_YET_RELEASED, type: ANIME, sort: POPULARITY_DESC) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -168,15 +168,13 @@ export async function fetchAllTodayEpisodes(gt: number, lt: number): Promise<any
       page++;
     } catch { break; }
   }
-  return all.filter(
-    (e) => !e.media?.isAdult && !(e.media?.genres || []).includes("Hentai")
-  );
+  return all;
 }
 
 export const ACTION_QUERY = `
 query ActionAnime {
   Page(page: 1, perPage: 20) {
-    media(genre: "Action", type: ANIME, isAdult: false, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+    media(genre: "Action", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -185,7 +183,7 @@ query ActionAnime {
 export const ROMANCE_QUERY = `
 query RomanceAnime {
   Page(page: 1, perPage: 20) {
-    media(genre: "Romance", type: ANIME, isAdult: false, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+    media(genre: "Romance", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -194,7 +192,7 @@ query RomanceAnime {
 export const ISEKAI_QUERY = `
 query IsekaiAnime {
   Page(page: 1, perPage: 20) {
-    media(genre: "Isekai", type: ANIME, isAdult: false, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+    media(genre: "Isekai", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -203,7 +201,7 @@ query IsekaiAnime {
 export const FANTASY_QUERY = `
 query FantasyAnime {
   Page(page: 1, perPage: 20) {
-    media(genre: "Fantasy", type: ANIME, isAdult: false, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+    media(genre: "Fantasy", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }

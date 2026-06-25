@@ -118,13 +118,13 @@ function AnimeCard({ anime, onPress }: { anime: AnimeResult; onPress: () => void
 /* ── Genre query to get a cover image ── */
 const GENRE_COVER_QUERY = (genre: string) => `
 query { Page(page:1,perPage:1) {
-  media(type:ANIME,genre:"${genre}",sort:[POPULARITY_DESC],isAdult:false){id}
+  media(type:ANIME,genre:"${genre}",sort:[POPULARITY_DESC]){id}
 }}`;
 
 const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string) => `
 query ($page: Int) {
   Page(page: $page, perPage: 30) {
-    media(type:ANIME, sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}, isAdult:false, genre_not_in:["Ecchi","Hentai"]) {
+    media(type:ANIME, sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
