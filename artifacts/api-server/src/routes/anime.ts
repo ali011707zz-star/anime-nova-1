@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createHash } from "crypto";
 import {
   makeSourceCacheKey,
   getFromSourceCache,
@@ -9628,8 +9629,184 @@ router.get("/anime/animewitcher-catalog", async (req, res) => {
   }
 });
 
-// ── AniList GraphQL Proxy (يحل مشكلة CORS في المتصفح) ──────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// Metadata Cache + Multi-Source Proxy (AniList → Jikan fallback + PostgreSQL cache)
+// ════════════════════════════════════════════════════════════════════════════
+
+/** حسب نوع الاستعلام نحدد مدة الـ cache */
+function metaTtl(body: any): number {
+  const q = JSON.stringify(body?.query ?? "");
+  if (q.includes("airingSchedules")) return 1800;       // 30 دقيقة — الجداول الزمنية
+  if (q.includes("TRENDING_DESC"))   return 3600;       // 1 ساعة — trending
+  if (q.includes("POPULARITY_DESC")) return 3600;       // 1 ساعة — popular
+  if (q.includes("season") && body?.variables?.season) return 21600; // 6 ساعات — موسمي
+  if (body?.variables?.search)        return 3600;       // 1 ساعة — بحث
+  if (body?.variables?.id)            return 86400;      // 24 ساعة — تفاصيل أنمي
+  return 21600; // 6 ساعات افتراضي
+}
+
+function metaHash(body: any): string {
+  return createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 40);
+}
+
+/** إنشاء الجدول عند الإقلاع */
+async function initMetaCache(): Promise<void> {
+  const pool = getTcPool();
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS anime_meta_cache (
+        cache_key   TEXT PRIMARY KEY,
+        data        JSONB NOT NULL,
+        source      TEXT DEFAULT 'anilist',
+        ttl_seconds INTEGER DEFAULT 21600,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+  } catch {}
+}
+
+async function metaCacheGet(key: string): Promise<any | null> {
+  const pool = getTcPool();
+  if (!pool) return null;
+  try {
+    const r = await pool.query(
+      `SELECT data, created_at, ttl_seconds FROM anime_meta_cache WHERE cache_key=$1 LIMIT 1`,
+      [key]
+    );
+    if (!r.rows.length) return null;
+    const { data, created_at, ttl_seconds } = r.rows[0];
+    const ageSeconds = (Date.now() - new Date(created_at).getTime()) / 1000;
+    if (ageSeconds > ttl_seconds) return null; // انتهت صلاحية الـ cache
+    return data;
+  } catch { return null; }
+}
+
+async function metaCacheSet(key: string, data: any, ttl: number, source: string): Promise<void> {
+  const pool = getTcPool();
+  if (!pool) return;
+  try {
+    await pool.query(
+      `INSERT INTO anime_meta_cache (cache_key, data, ttl_seconds, source)
+       VALUES ($1, $2::jsonb, $3, $4)
+       ON CONFLICT (cache_key) DO UPDATE
+         SET data=$2::jsonb, ttl_seconds=$3, source=$4, created_at=NOW()`,
+      [key, JSON.stringify(data), ttl, source]
+    );
+  } catch {}
+}
+
+/** تحويل بيانات Jikan إلى تنسيق AniList */
+function jikanToAniList(a: any): any {
+  return {
+    id: a.mal_id,
+    idMal: a.mal_id,
+    title: { romaji: a.title, english: a.title_english, native: a.title_japanese },
+    coverImage: {
+      large: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url || null,
+      extraLarge: a.images?.jpg?.large_image_url || null,
+      color: null,
+    },
+    bannerImage: null,
+    description: a.synopsis || null,
+    episodes: a.episodes || null,
+    status: a.airing ? "RELEASING" : a.status === "Finished Airing" ? "FINISHED" : "NOT_YET_RELEASED",
+    averageScore: a.score ? Math.round(a.score * 10) : null,
+    popularity: a.popularity || null,
+    genres: (a.genres || []).map((g: any) => g.name),
+    season: a.season ? String(a.season).toUpperCase() : null,
+    seasonYear: a.year || null,
+    format: a.type === "TV" ? "TV" : a.type === "Movie" ? "MOVIE" : a.type === "OVA" ? "OVA" : (a.type || "TV"),
+    countryOfOrigin: "JP",
+    isAdult: Boolean(a.rating?.startsWith("Rx")),
+    nextAiringEpisode: null,
+    bannerImageInitialized: false,
+  };
+}
+
+/** Jikan v4 fallback — يُرجع بنية AniList متوافقة */
+async function jikanFallback(body: any): Promise<any | null> {
+  try {
+    const q   = JSON.stringify(body?.query ?? "");
+    const vars = body?.variables ?? {};
+    let url = "";
+
+    if (q.includes("airingSchedules")) return null; // لا بديل لجداول البث
+
+    if (vars.search) {
+      url = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(vars.search)}&sfw=true&limit=20`;
+    } else if (vars.season && vars.seasonYear) {
+      url = `https://api.jikan.moe/v4/seasons/${vars.seasonYear}/${String(vars.season).toLowerCase()}?sfw=true&limit=20`;
+    } else if (vars.genre) {
+      url = `https://api.jikan.moe/v4/anime?genres=${vars.genre}&sfw=true&limit=20`;
+    } else if (q.includes("TRENDING_DESC") || q.includes("POPULARITY_DESC")) {
+      url = "https://api.jikan.moe/v4/top/anime?filter=airing&limit=20&sfw=true";
+    } else if (q.includes("SCORE_DESC")) {
+      url = "https://api.jikan.moe/v4/top/anime?limit=20&sfw=true";
+    } else {
+      url = "https://api.jikan.moe/v4/top/anime?limit=20&sfw=true";
+    }
+
+    const r = await fetch(url, {
+      headers: { "Accept": "application/json", "User-Agent": "AnimeNova/1.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return null;
+    const d    = await r.json();
+    const media = (d.data || []).map(jikanToAniList);
+    return {
+      data: {
+        Page: {
+          media,
+          pageInfo: { hasNextPage: d.pagination?.has_next_page ?? false, total: d.pagination?.items?.total ?? media.length },
+        },
+      },
+    };
+  } catch { return null; }
+}
+
+/** Kitsu — يُستخدم لتعبئة bannerImage عندما تكون فارغة */
+async function kitsuEnrichBannerImages(mediaList: any[]): Promise<any[]> {
+  const missing = mediaList.filter(m => !m.bannerImage && m.title?.romaji);
+  if (!missing.length) return mediaList;
+  try {
+    await Promise.allSettled(
+      missing.slice(0, 6).map(async m => {
+        try {
+          const r = await fetch(
+            `https://kitsu.app/api/edge/anime?filter[text]=${encodeURIComponent(m.title.romaji)}&page[limit]=1&fields[anime]=coverImage,posterImage`,
+            { headers: { "Accept": "application/vnd.api+json" }, signal: AbortSignal.timeout(5000) }
+          );
+          if (!r.ok) return;
+          const d = await r.json();
+          const hit = d.data?.[0]?.attributes;
+          if (hit?.coverImage?.original || hit?.coverImage?.large) {
+            m.bannerImage = hit.coverImage.original || hit.coverImage.large;
+          }
+        } catch {}
+      })
+    );
+  } catch {}
+  return mediaList;
+}
+
+// ── AniList GraphQL Proxy — Cache + Multi-Source ─────────────────────────────
+initMetaCache().catch(() => {}); // إنشاء الجدول بمجرد تشغيل السيرفر
+
 router.post("/anilist", async (req, res) => {
+  const body     = req.body;
+  const cacheKey = metaHash(body);
+  const ttl      = metaTtl(body);
+
+  // 1️⃣ PostgreSQL cache — أسرع مصدر
+  const cached = await metaCacheGet(cacheKey);
+  if (cached) {
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("X-Meta-Source", "cache");
+    return res.json(cached);
+  }
+
+  // 2️⃣ AniList GraphQL — المصدر الأساسي
   try {
     const r = await fetch("https://graphql.anilist.co", {
       method: "POST",
@@ -9639,17 +9816,38 @@ router.post("/anilist", async (req, res) => {
         "Origin": "https://anilist.co",
         "Referer": "https://anilist.co/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
       },
-      body: JSON.stringify(req.body),
-      signal: AbortSignal.timeout(15000),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(12000),
     });
-    const data = await r.json();
+    if (r.ok) {
+      const data = await r.json() as any;
+      if (!data?.errors?.length) {
+        // تخزين في الـ cache (async — لا ننتظر)
+        metaCacheSet(cacheKey, data, ttl, "anilist").catch(() => {});
+        res.setHeader("Cache-Control", "public, max-age=60");
+        res.setHeader("X-Meta-Source", "anilist");
+        return res.json(data);
+      }
+    }
+  } catch {}
+
+  // 3️⃣ Jikan (MyAnimeList) fallback — عندما تُحجب AniList
+  const jikanData = await jikanFallback(body);
+  if (jikanData) {
+    // تعبئة صور الـ banner من Kitsu إذا كانت فارغة
+    if (jikanData.data?.Page?.media) {
+      jikanData.data.Page.media = await kitsuEnrichBannerImages(jikanData.data.Page.media);
+    }
+    metaCacheSet(cacheKey, jikanData, Math.min(ttl, 3600), "jikan").catch(() => {});
     res.setHeader("Cache-Control", "public, max-age=60");
-    res.json(data);
-  } catch (e: any) {
-    res.status(502).json({ error: e?.message ?? "AniList proxy error" });
+    res.setHeader("X-Meta-Source", "jikan");
+    return res.json(jikanData);
   }
+
+  // 4️⃣ كل المصادر فشلت — هيكل فارغ بدل خطأ
+  return res.json({ data: { Page: { media: [], pageInfo: { hasNextPage: false, total: 0 } }, Media: null } });
 });
 
 // ── بناء كتالوج AnimeWitcher في الخلفية عند إقلاع السيرفر ──
