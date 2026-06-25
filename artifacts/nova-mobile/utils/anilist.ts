@@ -174,7 +174,7 @@ export async function fetchAllTodayEpisodes(gt: number, lt: number): Promise<any
 export const ACTION_QUERY = `
 query ActionAnime {
   Page(page: 1, perPage: 20) {
-    media(genre: "Action", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+    media(genre: "Action", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -183,7 +183,7 @@ query ActionAnime {
 export const ROMANCE_QUERY = `
 query RomanceAnime {
   Page(page: 1, perPage: 20) {
-    media(genre: "Romance", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+    media(genre: "Romance", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -192,7 +192,7 @@ query RomanceAnime {
 export const ISEKAI_QUERY = `
 query IsekaiAnime {
   Page(page: 1, perPage: 20) {
-    media(genre: "Isekai", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+    media(genre: "Isekai", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -201,7 +201,7 @@ query IsekaiAnime {
 export const FANTASY_QUERY = `
 query FantasyAnime {
   Page(page: 1, perPage: 20) {
-    media(genre: "Fantasy", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP") {
+    media(genre: "Fantasy", type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
