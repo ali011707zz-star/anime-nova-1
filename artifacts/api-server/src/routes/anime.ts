@@ -4686,7 +4686,7 @@ async function getAniKotoSources(
     if (!fileId) return [];
 
     const origin = new URL(actualEmbedUrl).origin;
-    const data = await fetch(`${origin}/stream/getSources?id=${fileId}&id=${fileId}`, {
+    const data = await fetch(`${origin}/stream/getSources?id=${fileId}`, {
       headers: {
         ...BASE_HDRS,
         Referer: `${origin}/`,
@@ -7414,6 +7414,7 @@ async function getVylaAnimeSources(title: string, english: string | null, ep: nu
 }
 
 // ── StarCima vidzee (TMDB-native, direct HLS CDN) ──
+const SC_HINDI_RE = /\b(hindi|bolly|bollywood|hin|urdu)\b/i;
 async function getStarCimaAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
   const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
@@ -7437,31 +7438,52 @@ async function getStarCimaAnimeSources(title: string, english: string | null, ep
     const data: any = await r.json();
     const servers: any[] = data.servers || [];
     if (!servers.length) return [];
-    const PROBE_PORT = parseInt(String(process.env.PORT || 8080), 10);
-    const prepared = servers
-      .filter((srv: any) => !!srv.url)
-      .map((srv: any) => {
-        let rawUrl = String(srv.url);
-        let referer = SC_REF_HLS;
-        if (rawUrl.includes(`${SC_BASE}/cdn/?`)) {
-          try { const pu = new URL(rawUrl); rawUrl = pu.searchParams.get("url") || rawUrl; referer = pu.searchParams.get("referer") || SC_REF_HLS; } catch {}
-        }
-        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
-        return { proxied, rawUrl, label: `StarCima · ${srv.name || "HD"}` };
+
+    // الترتيب: isMain أولاً، ثم الباقي، ثم Najm (CDN أبطأ) — وفلترة الخوادم الهندية
+    const srvSorted = [...servers]
+      .filter((srv: any) => !!srv.url && !SC_HINDI_RE.test(srv.name || ""))
+      .sort((a: any, b: any) => {
+        const rank = (s: any) => s.isMain ? 0 : (s.name || "").startsWith("Najm") ? 2 : 1;
+        return rank(a) - rank(b);
       });
+
+    const PROBE_PORT = parseInt(String(process.env.PORT || 8080), 10);
+    const prepared = srvSorted.map((srv: any) => {
+      let rawUrl = String(srv.url);
+      let referer = SC_REF_HLS;
+      if (rawUrl.includes(`${SC_BASE}/cdn/?`)) {
+        try { const pu = new URL(rawUrl); rawUrl = pu.searchParams.get("url") || rawUrl; referer = pu.searchParams.get("referer") || SC_REF_HLS; } catch {}
+      }
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(referer)}`;
+      return { proxied, rawUrl, label: `StarCima · ${srv.name || "HD"}` };
+    });
+
     const probeResults = await Promise.allSettled(
       prepared.map(async ({ proxied, rawUrl, label }) => {
         try {
           const pr = await fetch(`http://127.0.0.1:${PROBE_PORT}${proxied}`, { signal: AbortSignal.timeout(6_000) });
-          return { proxied, rawUrl, label, ok: pr.ok || pr.status === 206 };
-        } catch { return { proxied, rawUrl, label, ok: false }; }
+          const serverAccessible = pr.ok || pr.status === 206;
+          return { proxied, rawUrl, label, serverAccessible };
+        } catch { return { proxied, rawUrl, label, serverAccessible: false }; }
       }),
     );
+
     return probeResults
-      .filter((r): r is PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; ok: boolean }> => r.status === "fulfilled")
+      .filter((r): r is PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; serverAccessible: boolean }> => r.status === "fulfilled")
       .map(r => {
-        const { proxied, rawUrl, label } = r.value;
-        return { name: label, url: proxied, quality: "HD", qualityRank: 9, site: "starcima_anim", directUrl: rawUrl, directType: "hls" as const };
+        const { proxied, rawUrl, label, serverAccessible } = r.value;
+        // CDN متاح من السيرفر → hls-proxy (CORS + segment rewriting)
+        // CDN محجوب → raw URL للمتصفح مباشرة (IP المستخدم المنزلي)
+        const directUrl = serverAccessible ? proxied : rawUrl;
+        return {
+          name: label,
+          url: directUrl,
+          quality: "HD",
+          qualityRank: 9,
+          site: "starcima_anim",
+          directUrl,
+          directType: "hls" as const,
+        };
       });
   } catch { return []; }
 }
@@ -8096,7 +8118,7 @@ router.get("/anime/subtitle-tracks", async (req, res) => {
       const fileId = html.match(/data-id="([^"]+)"/)?.[1];
       if (fileId) {
         const origin = new URL(embedUrl).origin;
-        const sourcesData = await fetch(`${origin}/stream/getSources?id=${fileId}&id=${fileId}`, {
+        const sourcesData = await fetch(`${origin}/stream/getSources?id=${fileId}`, {
           headers: { "User-Agent": BROWSER_UA, "Referer": `${origin}/`, "X-Requested-With": "XMLHttpRequest", "Accept": "application/json" },
           signal: AbortSignal.timeout(8_000),
         }).then(r => r.ok ? r.json() : null).catch(() => null) as {
