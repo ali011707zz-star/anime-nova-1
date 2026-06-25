@@ -964,7 +964,7 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
       );
       if (s > bestScore && s > 0.40) { bestScore = s; best = r.url; }
     }
-    if (best && bestScore > 0.5) break;
+    if (best && bestScore > 0.60) break;
   }
 
   shahiidSeriesCache.set(cacheKey, { url: best, ts: Date.now() });
@@ -974,7 +974,7 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
 async function resolveAllShahiidUrls(romaji: string, english?: string | null, isMovie = false): Promise<string[]> {
   const seen = new Set<string>();
   const all: Array<{ url: string; score: number }> = [];
-  const MIN_SCORE = isMovie ? 0.58 : 0.40;
+  const MIN_SCORE = isMovie ? 0.68 : 0.60;
 
   for (const q of [english, romaji].filter(Boolean) as string[]) {
     const results = await searchShahiid(q);
@@ -1574,7 +1574,7 @@ async function searchAnimelek(title: string, english: string | null, isMovie = f
   }
 
   // Search fallback — use ?s= (standard WP search, ?search_term_string= is broken)
-  const alkMinScore = isMovie ? 0.58 : 0.40;
+  const alkMinScore = isMovie ? 0.68 : 0.60;
   for (const q of [english, title].filter(Boolean) as string[]) {
     const html = await cfProxyGet(`${ALK_BASE}/search/?s=${encodeURIComponent(q as string)}`, `${ALK_BASE}/`);
     if (!html || !html.includes("/anime/")) continue;
@@ -1830,7 +1830,7 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
         const label = rawLabel.replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim()
           || slugAscii
           || slugDecoded.replace(/-/g, " ");
-        const adarMin = isMovie ? 0.58 : 0.40;
+        const adarMin = isMovie ? 0.68 : 0.60;
         const score = isMovie
           ? Math.max(
               strictMovieSimilarity(label, title),
@@ -2000,7 +2000,7 @@ async function searchAnimePhoenix(title: string, english: string | null, isMovie
         let best: string | null = null;
         let bestScore = 0;
 
-        const aphMin = isMovie ? 0.58 : 0.25;
+        const aphMin = isMovie ? 0.68 : 0.55;
         for (const m of html.matchAll(/href="(https?:\/\/anime-phoenix\.com\/animes\/([^/"]+)\/?)"/gi)) {
           const slug  = m[2];
           const label = slug.replace(/-/g, " ");
@@ -2693,7 +2693,7 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
 
   // Method 1: Direct slug check via /anime/{slug} page (try all domains via cfProxy)
   // Must verify page title matches the requested anime (score >= 0.40) to avoid wrong matches
-  const okDirectMin = isMovie ? 0.58 : 0.40;
+  const okDirectMin = isMovie ? 0.68 : 0.60;
   for (const slug of [...new Set(slugVariants)]) {
     for (const domain of OK_DOMAINS) {
       const html = await cfProxyGet(`${domain}/anime/${slug}`, `${domain}/`);
@@ -2729,7 +2729,7 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
       const data = await r.json() as Array<{ name?: string; slug?: string }>;
       if (!Array.isArray(data) || !data.length) continue;
 
-      const okMin = isMovie ? 0.58 : 0.40;
+      const okMin = isMovie ? 0.68 : 0.60;
       let best: string | null = null, bestScore = 0;
       for (const item of data) {
         if (!item.slug) continue;
@@ -8336,18 +8336,61 @@ router.get("/anime/trace-search", async (req, res) => {
   }
 });
 
-// POST (multipart image upload → trace.moe)
+// POST (image upload → trace.moe)
+// Accepts: multipart/form-data (field="image"), application/json {image:base64,mimeType}, or raw binary (image/*)
 router.post("/anime/trace-search", async (req, res) => {
   try {
     const chunks: Buffer[] = [];
     req.on("data", c => chunks.push(c));
     await new Promise(resolve => req.on("end", resolve));
-    const body = Buffer.concat(chunks);
-    const ct   = req.headers["content-type"] || "application/octet-stream";
+    const rawBody = Buffer.concat(chunks);
+    const ct = (req.headers["content-type"] || "application/octet-stream").toLowerCase();
+
+    let imageData: Buffer;
+    let imageMime = "image/jpeg";
+
+    if (ct.startsWith("application/json")) {
+      // Mobile: { image: base64string, mimeType: "image/jpeg" }
+      const json = JSON.parse(rawBody.toString("utf8")) as { image?: string; mimeType?: string };
+      if (!json.image) { res.status(400).json({ error: "no image in JSON body" }); return; }
+      imageData = Buffer.from(json.image, "base64");
+      imageMime = json.mimeType || "image/jpeg";
+    } else if (ct.includes("multipart/form-data")) {
+      // Parse multipart: extract raw bytes of the "image" field
+      const bm = ct.match(/boundary=([^\s;]+)/);
+      if (!bm) { res.status(400).json({ error: "missing boundary" }); return; }
+      const boundary = Buffer.from("--" + bm[1].replace(/"/g, ""));
+      let pos = rawBody.indexOf(boundary);
+      let found = false;
+      while (pos >= 0) {
+        const partStart = pos + boundary.length;
+        if (rawBody[partStart] === 0x2d && rawBody[partStart + 1] === 0x2d) break; // end boundary
+        const hdEnd = rawBody.indexOf(Buffer.from("\r\n\r\n"), partStart);
+        if (hdEnd < 0) break;
+        const headers = rawBody.slice(partStart + 2, hdEnd).toString("utf8");
+        if (/name=["']?image["']?/i.test(headers) || /Content-Type:\s*image\//i.test(headers)) {
+          const dataStart = hdEnd + 4;
+          const nextBound = rawBody.indexOf(boundary, dataStart);
+          const dataEnd = nextBound > 0 ? nextBound - 2 : rawBody.length;
+          imageData = rawBody.slice(dataStart, dataEnd);
+          const mimeMatch = headers.match(/Content-Type:\s*(\S+)/i);
+          if (mimeMatch) imageMime = mimeMatch[1].trim();
+          found = true;
+          break;
+        }
+        pos = rawBody.indexOf(boundary, partStart + 1);
+      }
+      if (!found) { res.status(400).json({ error: "no image field in multipart" }); return; }
+    } else {
+      // Raw binary (image/jpeg, image/png, etc.)
+      imageData = rawBody;
+      imageMime = ct.split(";")[0].trim();
+    }
+
     const r = await fetch("https://api.trace.moe/search?anilistInfo=1", {
       method: "POST",
-      headers: { "User-Agent": BROWSER_UA, "Content-Type": ct },
-      body,
+      headers: { "User-Agent": BROWSER_UA, "Content-Type": imageMime },
+      body: imageData,
       signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) { res.status(r.status).json({ error: `trace.moe: ${r.status}` }); return; }

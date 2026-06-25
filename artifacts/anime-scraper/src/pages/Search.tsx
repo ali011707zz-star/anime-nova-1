@@ -287,9 +287,13 @@ export default function Search() {
       if (typeof urlOrFile === 'string') {
         resp = await fetch(`/api/anime/trace-search?url=${encodeURIComponent(urlOrFile)}`);
       } else {
-        const fd = new FormData();
-        fd.append('image', urlOrFile);
-        resp = await fetch('/api/anime/trace-search', { method: 'POST', body: fd });
+        // Send as raw binary — trace.moe expects raw image bytes, not multipart
+        const arrayBuf = await urlOrFile.arrayBuffer();
+        resp = await fetch('/api/anime/trace-search', {
+          method: 'POST',
+          headers: { 'Content-Type': urlOrFile.type || 'image/jpeg' },
+          body: arrayBuf,
+        });
       }
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({})) as { error?: string };
@@ -582,37 +586,15 @@ export default function Search() {
               </div>
 
               <div className="px-5 pb-5 space-y-3">
-                {/* URL input */}
-                <form onSubmit={handleTraceUrl} className="flex gap-2">
-                  <input
-                    type="url"
-                    value={traceUrl}
-                    onChange={e => setTraceUrl(e.target.value)}
-                    placeholder="الصق رابط الصورة هنا..."
-                    className="flex-1 bg-[#18181B] border border-white/[0.07] rounded-xl px-3 py-2.5 text-[13px] text-white font-['Cairo'] outline-none focus:border-violet-500/50 placeholder:text-white/25"
-                    dir="ltr"
-                  />
-                  <button type="submit" disabled={!traceUrl.trim() || traceLoading}
-                    className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl text-[12px] font-black font-['Cairo'] transition-all active:scale-95">
-                    بحث
-                  </button>
-                </form>
-
-                {/* OR divider */}
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-px bg-white/[0.06]" />
-                  <span className="text-[10px] text-white/25 font-['Cairo']">أو</span>
-                  <div className="flex-1 h-px bg-white/[0.06]" />
-                </div>
-
-                {/* Upload button */}
+                {/* Upload button — primary action */}
                 <button
                   onClick={() => traceFileRef.current?.click()}
                   disabled={traceLoading}
-                  className="w-full flex items-center justify-center gap-2 bg-[#18181B] hover:bg-[#222226] border border-dashed border-white/10 hover:border-violet-500/30 rounded-xl py-3.5 text-[13px] font-black font-['Cairo'] text-white/50 hover:text-violet-300 transition-all active:scale-95 disabled:opacity-40">
-                  <Upload className="w-4 h-4" />
-                  رفع صورة من الجهاز
+                  className="w-full flex items-center justify-center gap-2.5 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 hover:border-violet-500/60 rounded-2xl py-5 text-[14px] font-black font-['Cairo'] text-violet-300 hover:text-violet-200 transition-all active:scale-95 disabled:opacity-40">
+                  <Upload className="w-5 h-5" />
+                  ارفع صورة من هاتفك
                 </button>
+                <p className="text-center text-[10px] text-white/25 font-['Cairo']">التقط لقطة شاشة من مشهد الأنمي وارفعها للبحث</p>
 
                 {/* Loading */}
                 {traceLoading && (

@@ -354,7 +354,7 @@ export default function EpisodeListPage() {
     const t = encodeURIComponent(anime?.title?.romaji || "");
     const eng = encodeURIComponent(anime?.title?.english || "");
     const cvr = encodeURIComponent(anime?.coverImage?.large || anime?.coverImage?.medium || "");
-    navigate(`/watch?anime=${params.id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${cvr ? `&cover=${cvr}` : ""}`);
+    navigate(`/watch?anime=${params.id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${cvr ? `&cover=${cvr}` : ""}${total > 0 && total < 990 ? `&totalEps=${total}` : ""}`);
   }
 
   const total = anime

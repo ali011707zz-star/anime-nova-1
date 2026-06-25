@@ -2574,6 +2574,7 @@ export default function WatchPage() {
   const titleParam   = sp.get("title") || "";
   const englishParam = sp.get("english") || "";
   const coverParam   = sp.get("cover") || "";
+  const totalEpsParam = parseInt(sp.get("totalEps") || "0");
 
   const [anime,        setAnime]        = useState<any>(null);
   const [skipTimes,    setSkipTimes]    = useState<SkipTimes>({});
@@ -2615,7 +2616,7 @@ export default function WatchPage() {
     ? (anime!.episodes as number)
     : (anime?.nextAiringEpisode?.episode ?? 0) > 0
       ? anime!.nextAiringEpisode!.episode - 1
-      : 999;
+      : totalEpsParam > 0 ? totalEpsParam : 999;
   /* Cover: prefer AniList data, fallback to URL param, then watch history */
   const coverFromHistory = useMemo(() => {
     if (anime) return "";
@@ -2864,7 +2865,9 @@ export default function WatchPage() {
 
   function goEp(n: number) {
     /* Navigate via wouter — WatchWrapper adds key={search} so Watch remounts with fresh params */
-    navigate(`/watch?${new URLSearchParams({ anime: String(animeId), ep: String(n), title: titleParam, english: englishParam, cover })}`);
+    const goParams: Record<string, string> = { anime: String(animeId), ep: String(n), title: titleParam, english: englishParam, cover };
+    if (totalEps > 0 && totalEps < 990) goParams.totalEps = String(totalEps);
+    navigate(`/watch?${new URLSearchParams(goParams)}`);
   }
 
   function handleBack() {
