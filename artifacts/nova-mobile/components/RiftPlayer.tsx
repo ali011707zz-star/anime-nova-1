@@ -279,6 +279,7 @@ export function RiftPlayer({
   const [buffering, setBuffering]     = useState(true);
   const [isPlaying, setIsPlaying]     = useState(true);
   const [error, setError]             = useState(false);
+  const [isAutoCycling, setIsAutoCycling] = useState(false);
   const [isEnded, setIsEnded]         = useState(false);
 
   /* ─── UI state ─── */
@@ -480,11 +481,12 @@ export function RiftPlayer({
   /* ─── Auto-advance on error ─── */
   const consecutiveErrorsRef = useRef(0);
   useEffect(() => {
-    if (!error) { consecutiveErrorsRef.current = 0; return; }
-    if (sources.length <= 1) return;
+    if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
+    if (sources.length <= 1) { setIsAutoCycling(false); return; }
     consecutiveErrorsRef.current += 1;
-    if (consecutiveErrorsRef.current > sources.length) return; // all tried, stop cycling
-    const t = setTimeout(() => switchSource((srcIdx + 1) % sources.length), 1500);
+    if (consecutiveErrorsRef.current > sources.length) { setIsAutoCycling(false); return; } // all tried, stop cycling
+    setIsAutoCycling(true); // suppress full error UI — show silent loading instead
+    const t = setTimeout(() => switchSource((srcIdx + 1) % sources.length), 1200);
     return () => clearTimeout(t);
   }, [error, srcIdx, sources.length]); // eslint-disable-line
 
@@ -939,13 +941,18 @@ export function RiftPlayer({
     if (savedPos > 5) switchPosRef.current = savedPos;
     setSrcIdx(idx);
     setError(false);
+    setIsAutoCycling(false);
     setBuffering(true);
     setIsEnded(false);
     resumedRef.current = false;
     /* Reset whisper status when source changes */
     setWhisperStatus("idle");
     setWhisperLang("");
-    try { player.replace(sources[idx].url); } catch {}
+    try {
+      player.replace(sources[idx].url);
+      /* Some expo-video versions need an explicit play() after replace */
+      setTimeout(() => { try { player.play(); } catch {} }, 80);
+    } catch {}
   }, [player, sources]);
 
   /* ─── Whisper audio transcription ─── */
@@ -1228,8 +1235,18 @@ export function RiftPlayer({
       )}
 
 
-      {/* ── Error state ── */}
-      {error && (
+      {/* ── Auto-cycling: silent "trying next source" indicator ── */}
+      {isAutoCycling && (
+        <View style={s.errorWrap} pointerEvents="none">
+          <SpinRing size={44} />
+          <Text style={[s.errorTitle, { color: "rgba(167,139,250,0.9)", marginTop: 12 }]}>
+            جاري تجربة مصدر آخر… ({consecutiveErrorsRef.current}/{sources.length})
+          </Text>
+        </View>
+      )}
+
+      {/* ── Error state (only shown when all sources exhausted or single source) ── */}
+      {error && !isAutoCycling && (
         <View style={s.errorWrap}>
           <View style={s.errorIconBox}>
             <Ionicons name="alert-circle" size={36} color="rgba(239,68,68,0.9)" />
