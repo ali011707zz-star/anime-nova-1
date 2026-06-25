@@ -48,7 +48,13 @@ async function fetchAnimePoster(anilistId: number): Promise<string | null> {
   try {
     const res = await fetch("https://graphql.anilist.co", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": "https://anilist.co",
+        "Referer": "https://anilist.co/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      },
       body: JSON.stringify({
         query: `query ($id: Int) { Media(id: $id) { coverImage { extraLarge large } } }`,
         variables: { id: anilistId },

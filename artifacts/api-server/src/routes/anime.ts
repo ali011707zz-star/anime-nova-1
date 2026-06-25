@@ -9649,49 +9649,27 @@ function metaHash(body: any): string {
   return createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 40);
 }
 
-/** إنشاء الجدول عند الإقلاع */
-async function initMetaCache(): Promise<void> {
-  const pool = getTcPool();
-  if (!pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS anime_meta_cache (
-        cache_key   TEXT PRIMARY KEY,
-        data        JSONB NOT NULL,
-        source      TEXT DEFAULT 'anilist',
-        ttl_seconds INTEGER DEFAULT 21600,
-        created_at  TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-  } catch {}
-}
-
 async function metaCacheGet(key: string): Promise<any | null> {
-  const pool = getTcPool();
-  if (!pool) return null;
   try {
-    const r = await pool.query(
-      `SELECT data, created_at, ttl_seconds FROM anime_meta_cache WHERE cache_key=$1 LIMIT 1`,
-      [key]
+    const rows = await sbSelect<{ data: any; created_at: string; ttl_seconds: number }>(
+      "anime_meta_cache",
+      { cache_key: `eq.${key}` },
+      { limit: 1, select: "data,created_at,ttl_seconds" }
     );
-    if (!r.rows.length) return null;
-    const { data, created_at, ttl_seconds } = r.rows[0];
+    if (!rows.length) return null;
+    const { data, created_at, ttl_seconds } = rows[0];
     const ageSeconds = (Date.now() - new Date(created_at).getTime()) / 1000;
-    if (ageSeconds > ttl_seconds) return null; // انتهت صلاحية الـ cache
+    if (ageSeconds > ttl_seconds) return null;
     return data;
   } catch { return null; }
 }
 
 async function metaCacheSet(key: string, data: any, ttl: number, source: string): Promise<void> {
-  const pool = getTcPool();
-  if (!pool) return;
   try {
-    await pool.query(
-      `INSERT INTO anime_meta_cache (cache_key, data, ttl_seconds, source)
-       VALUES ($1, $2::jsonb, $3, $4)
-       ON CONFLICT (cache_key) DO UPDATE
-         SET data=$2::jsonb, ttl_seconds=$3, source=$4, created_at=NOW()`,
-      [key, JSON.stringify(data), ttl, source]
+    await sbUpsert(
+      "anime_meta_cache",
+      { cache_key: key, data, ttl_seconds: ttl, source, created_at: new Date().toISOString() },
+      "cache_key"
     );
   } catch {}
 }
@@ -9791,8 +9769,6 @@ async function kitsuEnrichBannerImages(mediaList: any[]): Promise<any[]> {
 }
 
 // ── AniList GraphQL Proxy — Cache + Multi-Source ─────────────────────────────
-initMetaCache().catch(() => {}); // إنشاء الجدول بمجرد تشغيل السيرفر
-
 router.post("/anilist", async (req, res) => {
   const body     = req.body;
   const cacheKey = metaHash(body);
