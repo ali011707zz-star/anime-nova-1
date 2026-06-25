@@ -50,15 +50,10 @@ export default function HomeScreen() {
 
   /* TMDB animation movies */
   const [animMovies, setAnimMovies] = useState<TmdbMovie[]>([]);
-  const [animTvShows, setAnimTvShows] = useState<TmdbMovie[]>([]);
   useEffect(() => {
-    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=ar&with_genres=16&sort_by=popularity.desc&page=1`)
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=ar&with_genres=16&with_original_language=ja&with_origin_country=JP&include_adult=false&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
-      .then(d => setAnimMovies((d.results || []).slice(0, 12)))
-      .catch(() => {});
-    fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${TMDB_KEY}&language=ar&with_genres=16&sort_by=popularity.desc&page=1`)
-      .then(r => r.json())
-      .then(d => setAnimTvShows((d.results || []).slice(0, 12)))
+      .then(d => setAnimMovies((d.results || []).filter((m: any) => m.original_language === 'ja').slice(0, 12)))
       .catch(() => {});
   }, []);
 
@@ -129,8 +124,15 @@ export default function HomeScreen() {
     let cancelled = false;
     fetchAllTodayEpisodes(todayStart, todayEnd).then(eps => {
       if (!cancelled) {
+        const ADULT_GENRES = new Set(["Hentai"]);
         const filtered = eps
-          .filter((e: any) => !e.media.title.romaji?.toLowerCase().includes("("))
+          .filter((e: any) => {
+            if (!e.media?.id || e.media?.isAdult) return false;
+            if (e.media?.countryOfOrigin && e.media.countryOfOrigin !== "JP") return false;
+            if (e.media.title.romaji?.toLowerCase().includes("(")) return false;
+            const genres: string[] = e.media?.genres || [];
+            return !genres.some((g: string) => ADULT_GENRES.has(g));
+          })
           .sort((a: any, b: any) => b.airingAt - a.airingAt);
         setTodayEps(filtered);
       }
@@ -348,44 +350,6 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {/* TMDB Animation TV Shows */}
-              {animTvShows.length > 0 && (
-                <View style={{ marginTop: 8 }}>
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.sectionLeft}>
-                      <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
-                      <Text style={[styles.sectionTitle, { color: colors.text }]}>📺 مسلسلات أنيميشن عالمية</Text>
-                    </View>
-                    <Pressable onPress={() => router.push("/(tabs)/animations" as any)} style={styles.seeAllBtn}>
-                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
-                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
-                    </Pressable>
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-                    {animTvShows.map((m) => {
-                      const poster = m.poster_path ? `https://image.tmdb.org/t/p/w300${m.poster_path}` : null;
-                      return (
-                        <Pressable
-                          key={m.id}
-                          onPress={() => router.push(`/animation/tv/${m.id}` as any)}
-                          style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-                        >
-                          {poster ? (
-                            <Image source={{ uri: poster }} style={todayStyles.img} contentFit="cover" />
-                          ) : (
-                            <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                              <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
-                            </View>
-                          )}
-                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                            <Text style={todayStyles.title} numberOfLines={2}>{(m as any).name || m.title}</Text>
-                          </LinearGradient>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              )}
 
               {actionList.length > 0 && (
                 <SectionRow

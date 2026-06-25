@@ -224,7 +224,6 @@ export default function Home() {
 
   const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
-  const [animationTv, setAnimationTv] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>(_cachedTodayEps || []);
   const [todayChecking, setTodayChecking] = useState(false);
@@ -237,13 +236,9 @@ export default function Home() {
   /* Load popular animation movies + TV from TMDB, and trending news from AniList */
   useEffect(() => {
     const key = "8265bd1679663a7ea12ac168da84d2e8";
-    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&with_origin_country=JP&sort_by=popularity.desc&page=1`)
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&with_origin_country=JP&include_adult=false&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
       .then(d => setAnimationMovies((d.results || []).filter((m: any) => m.original_language === 'ja').slice(0, 10)))
-      .catch(() => {});
-    fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&with_origin_country=JP&sort_by=popularity.desc&page=1`)
-      .then(r => r.json())
-      .then(d => setAnimationTv((d.results || []).filter((m: any) => m.original_language === 'ja').slice(0, 10)))
       .catch(() => {});
   }, []);
 
@@ -953,49 +948,6 @@ export default function Home() {
             </>
           )}
 
-          {/* مسلسلات الأنيميشن */}
-          {animationTv.length > 0 && (
-            <>
-              <div className="flex items-center justify-between mt-4 mb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#06b6d4,#0891b2)" }}>
-                    <Tv2 className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <h2 className="text-[13px] font-black font-['Cairo'] text-white">مسلسلات أنيميشن</h2>
-                </div>
-                <Link href="/animations?type=tv">
-                  <button className="text-[10px] text-cyan-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-cyan-500/8 px-2.5 py-1 rounded-xl border border-cyan-500/15">
-                    عرض الكل <ChevronLeft className="w-3 h-3" />
-                  </button>
-                </Link>
-              </div>
-              <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-                {animationTv.map(m => (
-                  <Link key={m.id} href={`/animation/tv/${m.id}`}>
-                    <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
-                      <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                        {m.poster_path
-                          ? <img src={`https://image.tmdb.org/t/p/w300${m.poster_path}`} alt="" className="w-full h-full object-cover" loading="lazy" />
-                          : <div className="w-full h-full bg-cyan-900/20 flex items-center justify-center"><Tv2 className="w-8 h-8 text-cyan-600/30" /></div>
-                        }
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
-                        {m.vote_average > 0 && (
-                          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/20">
-                            <Star className="w-1.5 h-1.5 fill-current" /> {m.vote_average.toFixed(1)}
-                          </div>
-                        )}
-                        <div className="absolute top-2 left-2 text-[7px] font-black px-1.5 py-0.5 rounded-md"
-                          style={{ background: "rgba(6,182,212,0.88)", color: "#fff" }}>مسلسل</div>
-                        <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
-                          <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">{m.name}</p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  </Link>
-                ))}
-              </div>
-            </>
-          )}
         </div>
       )}
 
