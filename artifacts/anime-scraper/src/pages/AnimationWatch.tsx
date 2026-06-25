@@ -979,11 +979,10 @@ export default function AnimationWatch() {
           }
           subSettings={subSettings}
           onSubSettingsChange={setSubSettings}
-          onSubtitleClick={
-            subStatus === "failed" || subStatus === "off"
-              ? retrySubtitles
-              : () => setShowSubPanel(p => !p)
-          }
+          onSubtitleClick={() => {
+            setShowSubPanel(p => !p);
+            if (subStatus === "failed" || subStatus === "off") retrySubtitles();
+          }}
           onTimeUpdate={handleTimeUpdate}
           onFail={stableOnFail}
           onBack={() => setStep("sources")}
