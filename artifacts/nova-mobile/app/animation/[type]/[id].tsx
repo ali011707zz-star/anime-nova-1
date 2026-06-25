@@ -158,7 +158,7 @@ export default function AnimationDetailScreen() {
     );
   }
 
-  const title = detail.original_title || detail.original_name || detail.title || detail.name || "—";
+  const title = detail.title || detail.name || detail.original_title || detail.original_name || "—";
   const year = (detail.release_date || detail.first_air_date || "").slice(0, 4);
   const runtime = detail.runtime || (detail.episode_run_time?.[0]) || 0;
   const score = detail.vote_average || 0;

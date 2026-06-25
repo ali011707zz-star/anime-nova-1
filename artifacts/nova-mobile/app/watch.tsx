@@ -762,7 +762,11 @@ export default function WatchScreen() {
             <Ionicons name="chevron-forward" size={12} color="rgba(255,255,255,0.55)" />
             <Text style={d.epNavText}>السابقة</Text>
           </Pressable>
-          <Pressable onPress={() => goEp(epNum + 1)} style={[d.epNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" }]}>
+          <Pressable
+            disabled={!!(totalEpsCount && epNum >= totalEpsCount)}
+            onPress={() => goEp(epNum + 1)}
+            style={[d.epNavBtn, { borderColor: "rgba(139,92,246,0.35)", backgroundColor: "rgba(139,92,246,0.10)" }, !!(totalEpsCount && epNum >= totalEpsCount) && { opacity: 0.22 }]}
+          >
             <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
             <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
           </Pressable>
