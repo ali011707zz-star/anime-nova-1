@@ -2,9 +2,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import React, { useEffect, useState, useCallback } from "react";
 import {
-  ActivityIndicator, Platform, Pressable, ScrollView,
+  ActivityIndicator, Image, Platform, Pressable, ScrollView,
   StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,7 +27,7 @@ const AVATAR_COLORS = [
 
 type MobileUser = {
   id: string; email: string; displayName: string;
-  username?: string; avatarColor?: number;
+  username?: string; avatarColor?: number; profileImageUrl?: string | null;
 };
 
 export default function ProfileScreen() {
@@ -48,9 +49,9 @@ export default function ProfileScreen() {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [uploadingImg, setUploadingImg] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [showColorPicker, setShowColorPicker] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem(AUTH_KEY).then(v => {
@@ -63,6 +64,20 @@ export default function ProfileScreen() {
         } catch {}
       }
     });
+    /* Also reload from server to get latest profileImageUrl */
+    fetch(`${base}/api/auth/me`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then((d: any) => {
+        if (!d) return;
+        setUser(prev => prev ? {
+          ...prev,
+          displayName:    d.displayName    || prev.displayName,
+          username:       d.username       || prev.username,
+          avatarColor:    d.avatarColor    ?? prev.avatarColor,
+          profileImageUrl: d.profileImageUrl || d.profile_image_custom || prev.profileImageUrl || null,
+        } : null);
+      })
+      .catch(() => {});
   }, []);
 
   const colorIdx = Math.min((user?.avatarColor ?? 0) % AVATAR_COLORS.length, AVATAR_COLORS.length - 1);
@@ -123,18 +138,64 @@ export default function ProfileScreen() {
     setLoading(false);
   };
 
-  const handleChangeColor = async (idx: number) => {
-    if (!user) return;
-    const updated = { ...user, avatarColor: idx };
-    await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
-    setUser(updated);
-    setShowColorPicker(false);
+  /* ── Pick profile image from library ── */
+  const handlePickImage = async () => {
     try {
-      await fetch(`${base}/api/auth/profile`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        credentials: "include", body: JSON.stringify({ avatarColor: idx }),
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        showMsg("الرجاء السماح بالوصول للصور", false);
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.6,
+        base64: true,
       });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      if (!asset.base64) { showMsg("تعذّر تحميل الصورة", false); return; }
+
+      const dataUrl = `data:image/jpeg;base64,${asset.base64}`;
+      setUploadingImg(true);
+      const r = await fetch(`${base}/api/auth/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profileImageCustom: dataUrl }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showMsg(d.error || "فشل رفع الصورة", false); }
+      else {
+        const imgUrl = d.profileImageUrl || dataUrl;
+        const updated: MobileUser = { ...user!, profileImageUrl: imgUrl };
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
+        setUser(updated);
+        showMsg("تم تحديث صورة الملف الشخصي ✓", true);
+      }
+    } catch { showMsg("تعذّر رفع الصورة", false); }
+    setUploadingImg(false);
+  };
+
+  /* ── Remove profile image ── */
+  const handleRemoveImage = async () => {
+    setUploadingImg(true);
+    try {
+      const r = await fetch(`${base}/api/auth/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ profileImageCustom: null }),
+      });
+      if (r.ok) {
+        const updated: MobileUser = { ...user!, profileImageUrl: null };
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updated));
+        setUser(updated);
+        showMsg("تمت إزالة الصورة ✓", true);
+      }
     } catch {}
+    setUploadingImg(false);
   };
 
   const handleLogout = async () => {
@@ -165,13 +226,20 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
         {/* Hero Avatar */}
         <View style={s.heroSection}>
-          <Pressable onPress={() => setShowColorPicker(true)} style={[s.avatarGlow, { shadowColor: g1 }]}>
-            <LinearGradient colors={[g1, g2]} style={s.avatarCircle}>
-              <Text style={s.avatarLetter}>{letter}</Text>
-            </LinearGradient>
+          <Pressable onPress={handlePickImage} style={[s.avatarGlow, { shadowColor: g1 }]} disabled={uploadingImg}>
+            {user.profileImageUrl ? (
+              <Image source={{ uri: user.profileImageUrl }} style={s.avatarImage} />
+            ) : (
+              <LinearGradient colors={[g1, g2]} style={s.avatarCircle}>
+                <Text style={s.avatarLetter}>{letter}</Text>
+              </LinearGradient>
+            )}
             {/* Camera badge overlay */}
             <View style={[s.cameraBadge, { backgroundColor: g1 }]}>
-              <Ionicons name="camera" size={12} color="#fff" />
+              {uploadingImg
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons name="camera" size={12} color="#fff" />
+              }
             </View>
           </Pressable>
 
@@ -180,6 +248,22 @@ export default function ProfileScreen() {
             <Text style={[s.heroSub, { color: colors.mutedForeground }]}>@{user.username}</Text>
           ) : null}
           <Text style={[s.heroEmail, { color: colors.mutedForeground }]}>{user.email}</Text>
+
+          {/* Image action buttons */}
+          <View style={s.imgActions}>
+            <Pressable onPress={handlePickImage} disabled={uploadingImg}
+              style={[s.imgBtn, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "40" }]}>
+              <Ionicons name="image" size={14} color={colors.primary} />
+              <Text style={[s.imgBtnText, { color: colors.primary }]}>تغيير الصورة</Text>
+            </Pressable>
+            {user.profileImageUrl && (
+              <Pressable onPress={handleRemoveImage} disabled={uploadingImg}
+                style={[s.imgBtn, { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.25)" }]}>
+                <Ionicons name="trash" size={14} color="#f87171" />
+                <Text style={[s.imgBtnText, { color: "#f87171" }]}>إزالة</Text>
+              </Pressable>
+            )}
+          </View>
 
           {/* Active badge */}
           <View style={[s.activeBadge, { backgroundColor: "#16a34a18", borderColor: "#16a34a40" }]}>
@@ -339,28 +423,6 @@ export default function ProfileScreen() {
           )}
         </View>
       </ScrollView>
-
-      {/* Color Picker Modal */}
-      {showColorPicker && (
-        <Pressable style={s.colorOverlay} onPress={() => setShowColorPicker(false)}>
-          <Pressable style={[s.colorSheet, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={e => e.stopPropagation()}>
-            <View style={[s.colorSheetHandle, { backgroundColor: colors.border }]} />
-            <Text style={[s.colorSheetTitle, { color: colors.text }]}>🎨 اختر لون الأفاتار</Text>
-            <Text style={[s.colorSheetSub, { color: colors.mutedForeground }]}>اللون يظهر كخلفية الحرف الأول من اسمك</Text>
-            <View style={s.colorGrid}>
-              {AVATAR_COLORS.map(([gc1, gc2], i) => (
-                <Pressable key={i} onPress={() => handleChangeColor(i)} style={s.colorSwatchWrap}>
-                  <LinearGradient colors={[gc1, gc2]} style={[s.colorSwatch,
-                    { borderWidth: i === colorIdx ? 3 : 1.5, borderColor: i === colorIdx ? "#fff" : gc1 + "50" }]}>
-                    <Text style={s.colorSwatchLetter}>A</Text>
-                  </LinearGradient>
-                  {i === colorIdx && <Ionicons name="checkmark-circle" size={14} color="#fff" style={{ marginTop: 4 }} />}
-                </Pressable>
-              ))}
-            </View>
-          </Pressable>
-        </Pressable>
-      )}
     </View>
   );
 }
@@ -373,11 +435,15 @@ const s = StyleSheet.create({
   heroSection: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 20 },
   avatarGlow: { shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 12, marginBottom: 16 },
   avatarCircle: { width: 96, height: 96, borderRadius: 28, alignItems: "center", justifyContent: "center" },
+  avatarImage: { width: 96, height: 96, borderRadius: 28 },
   avatarLetter: { fontSize: 40, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   cameraBadge: { position: "absolute", bottom: -6, right: -6, width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#fff" },
   heroName: { fontSize: 20, fontFamily: "Cairo_800ExtraBold", marginBottom: 2 },
   heroSub: { fontSize: 12.5, fontFamily: "Cairo_400Regular", marginBottom: 2 },
   heroEmail: { fontSize: 11, fontFamily: "Cairo_400Regular", marginBottom: 10 },
+  imgActions: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  imgBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, borderWidth: 1 },
+  imgBtnText: { fontSize: 11, fontFamily: "Cairo_700Bold" },
   activeBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, borderWidth: 1 },
   activeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#22c55e" },
   activeBadgeText: { fontSize: 10.5, fontFamily: "Cairo_700Bold", color: "#4ade80" },
@@ -396,13 +462,4 @@ const s = StyleSheet.create({
   dangerBtnText: { fontSize: 13, fontFamily: "Cairo_800ExtraBold" },
   secondaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, paddingVertical: 12, borderRadius: 18, borderWidth: 1 },
   secondaryBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold" },
-  colorOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
-  colorSheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, borderWidth: 1, alignItems: "center" },
-  colorSheetHandle: { width: 40, height: 4, borderRadius: 2, marginBottom: 14 },
-  colorSheetTitle: { fontSize: 15, fontFamily: "Cairo_800ExtraBold", marginBottom: 4 },
-  colorSheetSub: { fontSize: 11, fontFamily: "Cairo_400Regular", marginBottom: 20, textAlign: "center" },
-  colorGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16, justifyContent: "center", width: "100%" },
-  colorSwatchWrap: { alignItems: "center", width: 64 },
-  colorSwatch: { width: 56, height: 56, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  colorSwatchLetter: { fontSize: 22, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
 });
