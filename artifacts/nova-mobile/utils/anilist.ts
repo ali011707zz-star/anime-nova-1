@@ -35,7 +35,7 @@ export async function anilistQuery<T = unknown>(
 export const TRENDING_QUERY = `
 query TrendingAnime($page: Int) {
   Page(page: $page, perPage: 20) {
-    media(sort: TRENDING_DESC, type: ANIME) {
+    media(sort: TRENDING_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai", "Ecchi"]) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format nextAiringEpisode { episode airingAt }
     }
   }
@@ -44,7 +44,7 @@ query TrendingAnime($page: Int) {
 export const POPULAR_QUERY = `
 query PopularAnime($page: Int) {
   Page(page: $page, perPage: 20) {
-    media(sort: POPULARITY_DESC, type: ANIME) {
+    media(sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai", "Ecchi"]) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes status format
     }
   }
@@ -53,7 +53,7 @@ query PopularAnime($page: Int) {
 export const AIRING_QUERY = `
 query AiringAnime {
   Page(page: 1, perPage: 20) {
-    media(status: RELEASING, sort: POPULARITY_DESC, type: ANIME) {
+    media(status: RELEASING, sort: POPULARITY_DESC, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai", "Ecchi"]) {
       id title { romaji english } coverImage { large extraLarge } averageScore episodes nextAiringEpisode { episode airingAt }
     }
   }
@@ -62,7 +62,7 @@ query AiringAnime {
 export const SEARCH_QUERY = `
 query SearchAnime($search: String!, $page: Int, $genre: String, $format: MediaFormat) {
   Page(page: $page, perPage: 30) {
-    media(search: $search, type: ANIME, genre: $genre, format: $format) {
+    media(search: $search, type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai", "Ecchi"], genre: $genre, format: $format) {
       id title { romaji english } coverImage { large } averageScore episodes format status genres
     }
   }
@@ -71,7 +71,7 @@ query SearchAnime($search: String!, $page: Int, $genre: String, $format: MediaFo
 export const BROWSE_QUERY = `
 query BrowseAnime($page: Int, $genre: String, $format: MediaFormat, $sort: [MediaSort]) {
   Page(page: $page, perPage: 30) {
-    media(type: ANIME, genre: $genre, format: $format, sort: $sort) {
+    media(type: ANIME, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai", "Ecchi"], genre: $genre, format: $format, sort: $sort) {
       id title { romaji english } coverImage { large } averageScore episodes format status genres
     }
   }

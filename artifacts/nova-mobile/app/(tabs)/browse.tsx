@@ -124,7 +124,7 @@ query { Page(page:1,perPage:1) {
 const BROWSE_QUERY = (sort: string, format: string, season: string, year: string, genre: string) => `
 query ($page: Int) {
   Page(page: $page, perPage: 30) {
-    media(type:ANIME, sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}) {
+    media(type:ANIME, countryOfOrigin:"JP", isAdult:false, genre_not_in:["Hentai","Ecchi"], sort:[${sort || "POPULARITY_DESC"}]${format ? `, format:${format}` : ""}${season ? `, season:${season}` : ""}${year ? `, seasonYear:${year}` : ""}${genre ? `, genre:"${genre}"` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
