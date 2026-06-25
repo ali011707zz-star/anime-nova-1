@@ -194,7 +194,7 @@ export default function Schedule() {
       let allItems: any[] = [];
       let hasNext = true;
       while (hasNext && page <= 5) {
-        const res = await fetch('https://graphql.anilist.co', {
+        const res = await fetch('/api/anilist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: SCHEDULE_QUERY, variables: { page, perPage: 50, weekStart, weekEnd } }),

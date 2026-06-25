@@ -255,7 +255,7 @@ export default function Search() {
         } else {
           q = { query: buildBrowseQuery(sort, format, status, genre, season), variables: { page: 1, perPage: 30 } };
         }
-        const res  = await fetch('https://graphql.anilist.co', {
+        const res  = await fetch('/api/anilist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(q),

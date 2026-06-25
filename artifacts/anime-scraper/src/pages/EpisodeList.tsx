@@ -300,7 +300,7 @@ export default function EpisodeListPage() {
     setActiveCommentEp(null);
     setArEpTitles({});
 
-    fetch("https://graphql.anilist.co", {
+    fetch("/api/anilist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANIME_QUERY, variables: { id: parseInt(params.id) } }),

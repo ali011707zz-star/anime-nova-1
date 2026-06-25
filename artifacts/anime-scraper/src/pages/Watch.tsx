@@ -2761,7 +2761,7 @@ export default function WatchPage() {
           return r.json();
         })
         .catch(() =>
-          fetch("https://graphql.anilist.co", { method: "POST", headers, body, signal: AbortSignal.timeout(10000) })
+          fetch("/api/anilist", { method: "POST", headers, body, signal: AbortSignal.timeout(10000) })
             .then(r => r.json())
         );
     fetchAniList()

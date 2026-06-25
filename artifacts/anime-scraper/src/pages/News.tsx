@@ -55,7 +55,7 @@ export default function News() {
   const [loading, setLoading] = useState(true);
 
   const fetch$ = async (query: string) => {
-    const r = await fetch("https://graphql.anilist.co", {
+    const r = await fetch("/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
     });
