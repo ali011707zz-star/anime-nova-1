@@ -605,11 +605,14 @@ export default function WatchScreen() {
 
   /* ══ RIFT PLAYER ══ */
   if (screen === "native" && riftSources.length > 0) {
-    const startIdx = riftSources.findIndex(s => s.url === (playingSrc?.directUrl || playingSrc?.url)) ?? 0;
+    const base = getBaseUrl();
+    const resolvedPlayingUrl = resolveUrl(playingSrc?.directUrl || playingSrc?.url || "", base);
+    const startIdx = riftSources.findIndex(s => s.url === resolvedPlayingUrl);
     return (
       <RiftPlayer
         sources={riftSources}
         initialSourceIndex={Math.max(0, startIdx)}
+        subEnabled={riftSources.some(s => s.subtitleUrl)}
         title={displayTitle}
         episode={epNum}
         episodeTitle={etitle ? decodeURIComponent(etitle) : undefined}
