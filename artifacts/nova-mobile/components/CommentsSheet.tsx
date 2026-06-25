@@ -16,6 +16,7 @@ interface Comment {
   id: string;
   userId: string;
   username: string;
+  userHandle: string | null;
   avatarUrl: string | null;
   text: string;
   likes: number;
@@ -157,10 +158,11 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
       /* Use displayName as the visible name, fallback to username or default */
       const displayName = myUser?.displayName || myUser?.username || "مستخدم";
       const body: any = {
-        text:      text.trim(),
-        username:  displayName,
-        avatarUrl: myUser?.avatarUrl || null,
-        animeType: tmdbId ? "animation" : "anime",
+        text:       text.trim(),
+        username:   displayName,
+        userHandle: myUser?.username || null,
+        avatarUrl:  myUser?.avatarUrl || null,
+        animeType:  tmdbId ? "animation" : "anime",
       };
       if (animeId) body.animeId = animeId;
       if (tmdbId)  body.tmdbId = tmdbId;
@@ -228,11 +230,14 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
       <Avatar username={c.username} avatarUrl={c.avatarUrl} size={isReply ? 30 : 36} />
 
       <View style={{ flex: 1, gap: 4 }}>
-        {/* Name row: display name + @username tag + time */}
+        {/* Name row: display name + @handle tag + time */}
         <View style={cs.commentMeta}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <Text style={cs.commentUser} numberOfLines={1}>{c.username}</Text>
+              {c.userHandle && (
+                <Text style={cs.handleTag}>@{c.userHandle}</Text>
+              )}
               {c.replyToUsername && (
                 <Text style={cs.replyTag}>↩ {c.replyToUsername}</Text>
               )}
@@ -438,6 +443,7 @@ const cs = StyleSheet.create({
   avatarText: { fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   commentMeta: { flexDirection: "row", alignItems: "flex-start", gap: 6, flexWrap: "wrap" },
   commentUser: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "#e2e2e2" },
+  handleTag: { fontSize: 10, color: "rgba(167,139,250,0.55)", fontFamily: "Cairo_400Regular" },
   replyTag: { fontSize: 10, color: "rgba(139,92,246,0.7)", fontFamily: "Cairo_700Bold" },
   commentTime: { fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_400Regular", marginTop: 1 },
   commentText: {

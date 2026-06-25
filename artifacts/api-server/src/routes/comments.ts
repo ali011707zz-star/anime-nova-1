@@ -22,6 +22,7 @@ function mapRow(r: any, liked: boolean) {
     id:              r.id,
     userId:          r.user_id,
     username:        r.username,
+    userHandle:      r.user_handle  || null,
     avatarUrl:       r.avatar_url   || null,
     animeId:         r.anime_id     ?? null,
     tmdbId:          r.tmdb_id      ?? null,
@@ -90,7 +91,7 @@ router.post("/comments", async (req: Request, res: Response) => {
   try {
     const {
       animeId, tmdbId, episodeNumber, text: txt,
-      username, avatarUrl, animeType,
+      username, userHandle, avatarUrl, animeType,
       parentId, replyToUsername,
     } = req.body;
 
@@ -100,16 +101,17 @@ router.post("/comments", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "التعليق طويل جداً (الحد 1000 حرف)" });
 
     const row = await sbInsert("comments", {
-      user_id:         userId,
-      username:        username || "مستخدم",
-      avatar_url:      avatarUrl || null,
-      anime_id:        animeId ? Number(animeId) : null,
-      tmdb_id:         tmdbId  ? String(tmdbId)  : null,
-      episode_number:  episodeNumber !== undefined && episodeNumber !== null ? Number(episodeNumber) : null,
-      anime_type:      animeType || "anime",
-      text:            txt.trim(),
-      likes:           0,
-      parent_id:        parentId || null,
+      user_id:           userId,
+      username:          username || "مستخدم",
+      user_handle:       userHandle || null,
+      avatar_url:        avatarUrl || null,
+      anime_id:          animeId ? Number(animeId) : null,
+      tmdb_id:           tmdbId  ? String(tmdbId)  : null,
+      episode_number:    episodeNumber !== undefined && episodeNumber !== null ? Number(episodeNumber) : null,
+      anime_type:        animeType || "anime",
+      text:              txt.trim(),
+      likes:             0,
+      parent_id:         parentId || null,
       reply_to_username: replyToUsername || null,
     });
 

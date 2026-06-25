@@ -645,21 +645,21 @@ export default function WatchScreen() {
 
   /* ══ RIFT PLAYER ══ */
   if (screen === "native" && riftSources.length > 0) {
-    /* Fix: resolve the raw playingSrc URL the same way riftSources does,
-       so the findIndex comparison always works (relative /api/... paths). */
     const _base = getBaseUrl();
     const _rawUrl = playingSrc?.directUrl || playingSrc?.url || "";
     const _resolvedUrl = _rawUrl.startsWith("/") ? _base + _rawUrl : _rawUrl;
-    /* key = selected source URL → forces RiftPlayer to fully remount when
-       the user picks a different server from the picker, guaranteeing the
-       new source actually loads instead of staying on the previous one.
-       initialSourceIndex uses playingRiftIdx set at click-time (avoids URL
-       comparison race that caused startIdx=-1 → always server 0). */
+    /* Find the index of the playing source inside riftSources by URL.
+       This handles the auto-play path where playingRiftIdx was never set
+       (stays 0) — we derive the correct index from the URL instead. */
+    const _srcIdxFromUrl = riftSources.findIndex(s => s.url === _resolvedUrl);
+    const _initialIdx = _srcIdxFromUrl >= 0 ? _srcIdxFromUrl : playingRiftIdx;
+    const _hasSubtitles = !!(globalSubUrl || riftSources.some(s => !!s.subtitleUrl));
     return (
       <RiftPlayer
         key={_resolvedUrl}
         sources={riftSources}
-        initialSourceIndex={playingRiftIdx}
+        initialSourceIndex={_initialIdx}
+        subEnabled={_hasSubtitles}
         title={displayTitle}
         episode={epNum}
         episodeTitle={etitle ? decodeURIComponent(etitle) : undefined}
