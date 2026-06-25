@@ -1294,13 +1294,50 @@ async function getShahiidSources(
 
     embedUrls.sort((a, b) => a.idx - b.idx);
 
-    const sources: UnifiedSource[] = embedUrls.map(({ url }, i) => ({
-      name: `شاهيد · سيرفر ${i + 1}`,
-      url,
-      quality: "HD",
-      qualityRank: 2,
-      site: "shahiid",
+    const sources: UnifiedSource[] = [];
+    await Promise.allSettled(embedUrls.map(async ({ url }, i) => {
+      try {
+        const result = await Promise.race([
+          extractVideoDeep(url, episodePage ?? url),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 12000)),
+        ]);
+        if (result?.url) {
+          const directUrl = result.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(url)}`
+            : result.url;
+          sources.push({
+            name: `شاهيد · سيرفر ${i + 1}`,
+            url,
+            quality: "HD",
+            qualityRank: 9,
+            site: "shahiid",
+            directUrl,
+            directType: result.type,
+          });
+        } else {
+          sources.push({
+            name: `شاهيد · سيرفر ${i + 1}`,
+            url,
+            quality: "HD",
+            qualityRank: 9,
+            site: "shahiid",
+          });
+        }
+      } catch {
+        sources.push({
+          name: `شاهيد · سيرفر ${i + 1}`,
+          url,
+          quality: "HD",
+          qualityRank: 9,
+          site: "shahiid",
+        });
+      }
     }));
+    sources.sort((a, b) => {
+      const ai = embedUrls.findIndex(e => e.url === a.url);
+      const bi = embedUrls.findIndex(e => e.url === b.url);
+      return ai - bi;
+    });
 
     if (sources.length) shahiidSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
@@ -1593,7 +1630,7 @@ async function getAnimelekSources(
         idx++;
         sources.push({
           name: `AnimeLek · ${label || `Mega ${idx}`}`,
-          url: rawUrl, quality: "HD", qualityRank: 2, site: "animelek",
+          url: rawUrl, quality: "HD", qualityRank: 9, site: "animelek",
           directUrl: rawUrl, isEmbed: true,
         });
         continue;
@@ -1606,11 +1643,33 @@ async function getAnimelekSources(
       const nameM = innerHtml.match(/<span[^>]*class="[^"]*server[^"]*"[^>]*>([^<]+)<\/span>/i);
       const label = (nameM?.[1] || "").trim().replace(/\s*\|.*$/, "").trim();
       idx++;
+      // Try to extract direct HLS/MP4 stream for better quality
+      try {
+        const result = await Promise.race([
+          extractVideoDeep(rawUrl, seriesUrl),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
+        ]);
+        if (result?.url) {
+          const directUrl = result.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(rawUrl)}`
+            : result.url;
+          sources.push({
+            name: `AnimeLek · ${label || `سيرفر ${idx}`}`,
+            url: rawUrl,
+            quality: "HD",
+            qualityRank: 9,
+            site: "animelek",
+            directUrl,
+            directType: result.type,
+          });
+          continue;
+        }
+      } catch {}
       sources.push({
         name: `AnimeLek · ${label || `سيرفر ${idx}`}`,
         url: rawUrl,
         quality: "HD",
-        qualityRank: 2,
+        qualityRank: 9,
         site: "animelek",
       });
     }
@@ -2860,13 +2919,47 @@ async function getAnimeTimeSources(
     const epUrls = globalEpMap.get(ep);
     if (!epUrls || !epUrls.length) return [];
 
-    const sources: UnifiedSource[] = [...new Set(epUrls)].map((url, i) => ({
-      name: `أنمي تايم · سيرفر ${i + 1}`,
-      url,
-      quality: "HD",
-      qualityRank: 2,
-      site: "animetime",
+    const uniqueUrls = [...new Set(epUrls)];
+    const sources: UnifiedSource[] = [];
+    await Promise.allSettled(uniqueUrls.map(async (url, i) => {
+      try {
+        const result = await Promise.race([
+          extractVideoDeep(url, url),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
+        ]);
+        if (result?.url) {
+          const directUrl = result.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(url)}`
+            : result.url;
+          sources.push({
+            name: `أنمي تايم · سيرفر ${i + 1}`,
+            url,
+            quality: "HD",
+            qualityRank: 9,
+            site: "animetime",
+            directUrl,
+            directType: result.type,
+          });
+        } else {
+          sources.push({
+            name: `أنمي تايم · سيرفر ${i + 1}`,
+            url,
+            quality: "HD",
+            qualityRank: 9,
+            site: "animetime",
+          });
+        }
+      } catch {
+        sources.push({
+          name: `أنمي تايم · سيرفر ${i + 1}`,
+          url,
+          quality: "HD",
+          qualityRank: 9,
+          site: "animetime",
+        });
+      }
     }));
+    sources.sort((a, b) => uniqueUrls.indexOf(a.url) - uniqueUrls.indexOf(b.url));
 
     atimeSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
