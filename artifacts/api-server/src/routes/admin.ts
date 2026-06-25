@@ -53,9 +53,10 @@ router.get("/admin/smtp-ping", async (_req: Request, res: Response) => {
     await initEmailService();
     const { getDbConfig } = await import("../lib/dbConfig.js");
     const dbPass = await getDbConfig("smtp_pass");
+    const dbUser = await getDbConfig("smtp_user");
     return res.json({
       ok:       true,
-      smtpUser: process.env.SMTP_USER || await getDbConfig("smtp_user") || "غير مضبوط",
+      smtpUser: process.env.SMTP_USER || dbUser || "غير مضبوط",
       hasPass:  !!(process.env.SMTP_PASS || dbPass),
       source:   process.env.SMTP_PASS ? "env" : dbPass ? "db" : "none",
       nodeEnv:  process.env.NODE_ENV,
@@ -63,6 +64,24 @@ router.get("/admin/smtp-ping", async (_req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+/* تحديث SMTP في process.env مباشرة — محمي بـ APP_SECRET — يعمل بدون إعادة نشر */
+router.post("/admin/smtp-env-patch", async (req: Request, res: Response) => {
+  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const provided = (req.headers["x-relay-secret"] as string | undefined) || (req.query.s as string | undefined);
+  if (provided !== appSecret) return res.status(401).json({ error: "unauthorized" });
+
+  const { smtp_user, smtp_pass, smtp_host, smtp_port } = req.body || {};
+  if (smtp_user) process.env.SMTP_USER = String(smtp_user);
+  if (smtp_pass) process.env.SMTP_PASS = String(smtp_pass);
+  if (smtp_host) process.env.SMTP_HOST = String(smtp_host);
+  if (smtp_port) process.env.SMTP_PORT = String(smtp_port);
+
+  resetTransporter();
+  try { await initEmailService(); } catch {}
+
+  return res.json({ ok: true, smtp_user: process.env.SMTP_USER, hasPass: !!process.env.SMTP_PASS });
 });
 
 router.post("/admin/smtp-config", async (req: Request, res: Response) => {
