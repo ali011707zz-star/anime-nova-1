@@ -1,7 +1,6 @@
 /**
  * index.ts — نقطة الدخول
- * 1. يجلب المتغيرات من Orkestr API إذا كان SUPABASE_URL غير موجود
- * 2. يُشغّل التطبيق بعد اكتمال البوتستراب
+ * يتصل مباشرة بـ Supabase عبر متغيرات البيئة (SUPABASE_URL + SUPABASE_SERVICE_KEY)
  */
 
 const rawPort = process.env["PORT"];
@@ -9,61 +8,22 @@ if (!rawPort) throw new Error("PORT environment variable is required but was not
 const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${rawPort}"`);
 
-// Generate a session secret if not set
 if (!process.env.SESSION_SECRET) {
   process.env.SESSION_SECRET = "nova-anime-replit-secret-" + Math.random().toString(36).slice(2);
   console.warn("[bootstrap] ⚠️ SESSION_SECRET not set — using ephemeral secret.");
 }
 
-// ── Bootstrap: جلب متغيرات Orkestr إذا كانت Supabase غير مضبوطة ──────────
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-  const apiKey    = process.env.ORKESTR_API_KEY;
-  const projectId = process.env.ORKESTR_PROJECT_ID || "69e4e91d-22a1-4b4e-ac3f-00bac7bc5c4d";
-
-  if (apiKey) {
-    try {
-      console.log("[bootstrap] 🔄 جلب إعدادات Supabase من Orkestr...");
-      const res = await fetch(
-        `https://console.orkestr.eu/api/projects/${projectId}/env-vars`,
-        {
-          headers: { "Authorization": `Bearer ${apiKey}` },
-          signal: AbortSignal.timeout(12000),
-        }
-      );
-      if (res.ok) {
-        const data = await res.json() as { env_vars?: Record<string, string> };
-        const vars = data.env_vars || {};
-        const injected: string[] = [];
-        for (const key of [
-          "SUPABASE_URL", "SUPABASE_SERVICE_KEY",
-          "SMTP_USER", "SMTP_PASS", "SMTP_HOST", "SMTP_PORT",
-          "TELEGRAM_BOT_TOKEN",
-          "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET",
-        ]) {
-          if (vars[key] && !process.env[key]) {
-            process.env[key] = vars[key];
-            injected.push(key);
-          }
-        }
-        if (injected.length > 0) {
-          console.log("[bootstrap] ✅ تم جلب:", injected.join(", "));
-        }
-      } else {
-        console.warn("[bootstrap] ⚠️ Orkestr API أعاد:", res.status);
-      }
-    } catch (e: any) {
-      console.warn("[bootstrap] ⚠️ فشل جلب إعدادات Orkestr:", e.message);
-    }
-  } else {
-    console.warn("[bootstrap] ⚠️ ORKESTR_API_KEY غير موجود — Supabase لن يعمل");
-  }
+  console.warn("[bootstrap] ⚠️ SUPABASE_URL أو SUPABASE_SERVICE_KEY غير موجودين — Supabase لن يعمل");
+} else {
+  console.log("[bootstrap] ✅ Supabase متصل مباشرة عبر متغيرات البيئة");
 }
 
 // ── تشغيل migration على Supabase ──
 const { runSupabaseMigration } = await import("./lib/supabaseMigrate.js");
 await runSupabaseMigration();
 
-// ── تحميل التطبيق بعد البوتستراب ──
+// ── تحميل التطبيق ──
 const { createApp }          = await import("./app.js");
 const { logger }             = await import("./lib/logger.js");
 const { initEmailService }   = await import("./auth/emailService.js");
