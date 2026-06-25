@@ -237,11 +237,11 @@ export default function Home() {
   /* Load popular animation movies + TV from TMDB, and trending news from AniList */
   useEffect(() => {
     const key = "8265bd1679663a7ea12ac168da84d2e8";
-    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&sort_by=popularity.desc&page=1`)
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&with_origin_country=JP&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
       .then(d => setAnimationMovies((d.results || []).filter((m: any) => m.original_language === 'ja').slice(0, 10)))
       .catch(() => {});
-    fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&sort_by=popularity.desc&page=1`)
+    fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&with_origin_country=JP&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
       .then(d => setAnimationTv((d.results || []).filter((m: any) => m.original_language === 'ja').slice(0, 10)))
       .catch(() => {});
@@ -749,7 +749,7 @@ export default function Home() {
       )}
 
       {/* ── حلقات اليوم ── */}
-      {todayEps.length > 0 && !selectedGenre && (
+      {todayEps.length > 0 && (
         <div className="mt-5">
           <div className="flex items-center justify-between px-4 mb-3">
             <div className="flex items-center gap-2">
