@@ -3,7 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
 import {
-  Animated, Dimensions, Easing, Modal, Platform, Pressable,
+  Animated, Dimensions, Easing, Image, Modal, Platform, Pressable,
   ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,6 +13,17 @@ import { secureFetch } from "@/utils/secureApi";
 
 const { width: W } = Dimensions.get("window");
 const DRAWER_W = Math.min(W * 0.80, 320);
+
+const AVATAR_COLORS = [
+  ["#7c3aed", "#4c1d95"],
+  ["#2563eb", "#1e3a8a"],
+  ["#db2777", "#831843"],
+  ["#059669", "#064e3b"],
+  ["#ea580c", "#78350f"],
+  ["#dc2626", "#7f1d1d"],
+  ["#0891b2", "#164e63"],
+  ["#6d28d9", "#2e1065"],
+];
 
 type NavItem = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -41,6 +52,13 @@ const NAV_OTHER: NavItem[] = [
   { icon: "settings",        label: "الإعدادات",             route: "/settings",           color: "#64748b" },
 ];
 
+type UserData = {
+  displayName: string | null;
+  username: string | null;
+  profileImageUrl: string | null;
+  avatarColor: number;
+};
+
 type Props = { visible: boolean; onClose: () => void };
 
 export function DrawerMenu({ visible, onClose }: Props) {
@@ -48,15 +66,26 @@ export function DrawerMenu({ visible, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { watchHistory, favorites } = useApp();
-  const [username, setUsername] = React.useState<string | null>(null);
+  const [userData, setUserData] = React.useState<UserData | null>(null);
 
   React.useEffect(() => {
     if (!visible) return;
     const base = getBaseUrl();
     secureFetch(`${base}/api/auth/me`).then(r => {
-      if (r.ok) return r.json().then((d: any) => setUsername(d.user?.username || null));
+      if (r.ok) return r.json().then((d: any) => {
+        setUserData({
+          displayName:     d.displayName     || d.display_name || null,
+          username:        d.username        || null,
+          profileImageUrl: d.profileImageUrl || d.profile_image_custom || d.profile_image_url || null,
+          avatarColor:     d.avatarColor     ?? d.avatar_color ?? 0,
+        });
+      });
     }).catch(() => {});
   }, [visible]);
+
+  const colorIdx = Math.min((userData?.avatarColor ?? 0) % AVATAR_COLORS.length, AVATAR_COLORS.length - 1);
+  const [g1, g2] = AVATAR_COLORS[colorIdx];
+  const avatarLetter = ((userData?.displayName || userData?.username || "م")[0] || "م").toUpperCase();
 
   const slideX = useRef(new Animated.Value(DRAWER_W)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -120,14 +149,29 @@ export function DrawerMenu({ visible, onClose }: Props) {
           {/* ── User card ── */}
           <Pressable onPress={() => nav("/settings")} style={s.userCard}>
             <LinearGradient colors={["rgba(139,92,246,0.15)", "rgba(109,40,217,0.08)"]} style={s.userCardInner}>
-              <View style={s.userAvatar}>
-                <Text style={s.userAvatarText}>{username?.[0]?.toUpperCase() || "م"}</Text>
-              </View>
+              {/* Avatar: real photo or gradient letter */}
+              {userData?.profileImageUrl ? (
+                <Image
+                  source={{ uri: userData.profileImageUrl }}
+                  style={s.userAvatarImg}
+                  resizeMode="cover"
+                />
+              ) : (
+                <LinearGradient colors={[g1, g2]} style={s.userAvatar}>
+                  <Text style={s.userAvatarText}>{avatarLetter}</Text>
+                </LinearGradient>
+              )}
               <View style={{ flex: 1 }}>
-                <Text style={s.userName}>{username || "الملف الشخصي"}</Text>
-                <Text style={s.userSub}>
-                  {`${watchHistory.length} مشاهدة · ${favorites.length} مفضلة`}
+                <Text style={s.userName} numberOfLines={1}>
+                  {userData?.displayName || userData?.username || "الملف الشخصي"}
                 </Text>
+                {userData?.username ? (
+                  <Text style={s.userSub} numberOfLines={1}>@{userData.username}</Text>
+                ) : (
+                  <Text style={s.userSub}>
+                    {`${watchHistory.length} مشاهدة · ${favorites.length} مفضلة`}
+                  </Text>
+                )}
               </View>
               <Ionicons name="chevron-back" size={16} color="rgba(139,92,246,0.6)" />
             </LinearGradient>
@@ -219,11 +263,15 @@ const s = StyleSheet.create({
   userCard: { marginHorizontal: 14, marginTop: 16, marginBottom: 8, borderRadius: 18, overflow: "hidden", borderWidth: 1, borderColor: "rgba(139,92,246,0.2)" },
   userCardInner: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
   userAvatar: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#7C3AED",
+    width: 42, height: 42, borderRadius: 14,
     alignItems: "center", justifyContent: "center",
+    flexShrink: 0,
   },
-  userAvatarText: { fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+  userAvatarImg: {
+    width: 42, height: 42, borderRadius: 14,
+    flexShrink: 0,
+  },
+  userAvatarText: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   userName: { fontSize: 14, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   userSub: { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.35)", marginTop: 2 },
   sectionLabel: {
