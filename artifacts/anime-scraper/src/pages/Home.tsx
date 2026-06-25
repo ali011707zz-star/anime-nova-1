@@ -88,7 +88,7 @@ function buildPopularQuery(genre: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA], isAdult: false, genre_not_in: ["Ecchi", "Hentai"]${gf}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA], isAdult: false, genre_not_in: ["Hentai"]${gf}) {
       id title { romaji english } coverImage { large extraLarge }
       bannerImage averageScore episodes genres status format
     }
@@ -98,7 +98,7 @@ function buildPopularQuery(genre: string) {
 
 const SPRING_2026_QUERY = `query {
   Page(perPage: 20) {
-    media(type: ANIME, season: SPRING, seasonYear: 2026, sort: POPULARITY_DESC, format_in: [TV, ONA], isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
+    media(type: ANIME, season: SPRING, seasonYear: 2026, sort: POPULARITY_DESC, format_in: [TV, ONA], isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji english } coverImage { large } averageScore episodes nextAiringEpisode { episode } status
     }
   }
@@ -106,7 +106,7 @@ const SPRING_2026_QUERY = `query {
 
 const MOVIES_QUERY = `query {
   Page(perPage: 12) {
-    media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
+    media(type: ANIME, sort: POPULARITY_DESC, format: MOVIE, countryOfOrigin: "JP", isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji } coverImage { large } averageScore
     }
   }
@@ -114,7 +114,7 @@ const MOVIES_QUERY = `query {
 
 const TOP_RATED_QUERY = `query {
   Page(perPage: 14) {
-    media(type: ANIME, sort: SCORE_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE], isAdult: false, genre_not_in: ["Ecchi", "Hentai"], averageScore_greater: 75) {
+    media(type: ANIME, sort: SCORE_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE], isAdult: false, genre_not_in: ["Hentai"], averageScore_greater: 75) {
       id title { romaji } coverImage { large } averageScore format status
     }
   }
@@ -122,7 +122,7 @@ const TOP_RATED_QUERY = `query {
 
 const FALL_2025_QUERY = `query {
   Page(perPage: 14) {
-    media(type: ANIME, season: FALL, seasonYear: 2025, sort: POPULARITY_DESC, format_in: [TV, ONA], isAdult: false, genre_not_in: ["Ecchi", "Hentai"]) {
+    media(type: ANIME, season: FALL, seasonYear: 2025, sort: POPULARITY_DESC, format_in: [TV, ONA], isAdult: false, genre_not_in: ["Hentai"]) {
       id title { romaji } coverImage { large } averageScore episodes nextAiringEpisode { episode } status
     }
   }
@@ -282,7 +282,7 @@ export default function Home() {
     })
       .then(r => r.json())
       .then(async d => {
-        const ECCHI_BLOCKED = new Set(["Ecchi", "Hentai"]);
+        const ECCHI_BLOCKED = new Set(["Hentai"]);
         const now = Math.floor(Date.now() / 1000);
         // فقط الحلقات التي بثّت فعلاً (ليس المستقبلية) وأنمي ياباني فقط
         const arr = (d.data?.Page?.airingSchedules || [])
