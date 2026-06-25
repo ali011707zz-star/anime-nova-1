@@ -69,6 +69,7 @@ const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isE
   { site: "vidlink_anim",  tag: "VL", name: "VidLink",       desc: "TMDB · ترجمة عربية",     isEn: true },
   { site: "lordflix_anim", tag: "LF", name: "LordFlix",      desc: "TMDB · ترجمة عربية",     isEn: true },
   { site: "vyla_anim",     tag: "VY", name: "Vyla",          desc: "TMDB · HLS · ترجمة",     isEn: true },
+  { site: "vidfast",       tag: "VF", name: "VidFast",       desc: "TMDB · متعدد الخوادم",   isEn: true },
 ];
 
 
