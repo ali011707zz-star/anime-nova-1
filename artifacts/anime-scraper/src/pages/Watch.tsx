@@ -2251,14 +2251,12 @@ function EpisodePlayer({
               backdropFilter: "blur(40px)",
               WebkitBackdropFilter: "blur(40px)",
               border: "1px solid rgba(139,92,246,0.22)",
-              boxShadow: isLandscape
-                ? "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)"
-                : "0 12px 48px rgba(0,0,0,0.80), inset 0 0 0 0.5px rgba(255,255,255,0.07)",
-              borderRadius: isLandscape ? "20px 0 0 20px" : "20px",
+              boxShadow: "inset 0 0 0 0.5px rgba(255,255,255,0.06), -20px 0 60px rgba(0,0,0,0.80)",
+              borderRadius: "20px 0 0 20px",
               overflowY: "auto",
-              height: isLandscape ? "100%" : undefined,
-              maxHeight: isLandscape ? "100dvh" : "70dvh",
-              width: isLandscape ? "290px" : "min(360px, calc(100vw - 20px))",
+              height: "100%",
+              maxHeight: "100dvh",
+              width: "290px",
             }}>
 
               {/* ── Header ── */}
@@ -2353,61 +2351,6 @@ function EpisodePlayer({
                 )}
               </div>
 
-              {/* ── ترجمة صوتية ── */}
-              <div className="px-4 pb-1 border-t border-white/[0.05]">
-                <div className="flex items-center justify-between py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
-                      <span className="text-[15px]">🎙</span>
-                    </div>
-                    <div>
-                      <p className="text-[12px] font-black font-['Cairo'] text-white/70">ترجمة صوتية</p>
-                      <p className="text-[9px] font-['Cairo'] text-white/28">
-                        {whisperStatus === "ready" && whisperLang ? `تم · لغة المصدر: ${whisperLang}` : "يكتشف اللغة ويترجم تلقائياً"}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={triggerWhisperTranscription}
-                    disabled={whisperStatus === "loading"}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] transition-all active:scale-90 disabled:opacity-50"
-                    style={{
-                      background: whisperStatus === "ready" ? "rgba(52,211,153,0.18)" : whisperStatus === "error" ? "rgba(239,68,68,0.15)" : "rgba(139,92,246,0.25)",
-                      border: whisperStatus === "ready" ? "1px solid rgba(52,211,153,0.38)" : whisperStatus === "error" ? "1px solid rgba(239,68,68,0.32)" : "1px solid rgba(139,92,246,0.48)",
-                      color: whisperStatus === "ready" ? "rgba(110,231,183,0.95)" : whisperStatus === "error" ? "rgba(252,165,165,0.90)" : "rgba(196,181,253,0.95)",
-                    }}>
-                    {whisperStatus === "loading" ? (
-                      <motion.span className="w-3 h-3 rounded-full border border-violet-300/40 border-t-violet-300"
-                        animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }} />
-                    ) : null}
-                    {whisperStatus === "ready" ? "✓ جاهز" : whisperStatus === "error" ? "خطأ · إعادة" : whisperStatus === "loading" ? "…" : "تشغيل"}
-                  </button>
-                </div>
-              </div>
-
-              {/* ── دبلجة صوتية ── */}
-              <div className="px-4 pb-1 border-t border-white/[0.05]">
-                <div className="flex items-center justify-between py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.20)" }}>
-                      <span className="text-[15px]">🔊</span>
-                    </div>
-                    <div>
-                      <p className="text-[12px] font-black font-['Cairo'] text-white/70">دبلجة صوتية</p>
-                      <p className="text-[9px] font-['Cairo'] text-white/28">تجريبي · يقرأ الترجمة عربياً</p>
-                    </div>
-                  </div>
-                  <button onClick={() => setTtsDub(d => !d)}
-                    className="relative w-11 h-6 rounded-full transition-all active:scale-90 shrink-0"
-                    style={{ background: ttsDub ? "rgba(139,92,246,0.75)" : "rgba(255,255,255,0.10)", border: ttsDub ? "1px solid rgba(139,92,246,0.75)" : "1px solid rgba(255,255,255,0.14)" }}>
-                    <motion.div className="absolute top-[3px] w-[18px] h-[18px] rounded-full"
-                      style={{ background: ttsDub ? "#c4b5fd" : "rgba(255,255,255,0.50)" }}
-                      animate={{ left: ttsDub ? "auto" : "3px", right: ttsDub ? "3px" : "auto" }}
-                      transition={{ duration: 0.18 }} />
-                  </button>
-                </div>
-              </div>
-
               {/* ── إعدادات divider ── */}
               <div className="flex items-center gap-2 px-4 py-2 border-t border-white/[0.05]">
                 <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.07)" }} />
@@ -2442,44 +2385,6 @@ function EpisodePlayer({
               </div>
 
               {/* ── Expandable sections ── */}
-
-              {/* عام */}
-              <div className="border-t border-white/[0.05]">
-                <button onClick={() => toggleSection("general")}
-                  className="flex items-center justify-between w-full px-4 py-3 active:bg-white/[0.03] transition-colors">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.20)" }}>
-                      <span className="text-[12px]">⚙️</span>
-                    </div>
-                    <span className="text-[12px] font-black font-['Cairo'] text-white/70">عام</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {subStatus === "ready" && <div className="w-1.5 h-1.5 rounded-full" style={{ background: "rgba(52,211,153,0.80)" }} />}
-                    <span className="text-[10px] text-white/25">{expandedSection === "general" ? "▲" : "▼"}</span>
-                  </div>
-                </button>
-                {expandedSection === "general" && (
-                  <div className="px-4 pb-3">
-                    <p className="text-[9px] font-['Cairo'] text-white/30 mb-2">مصادر الترجمة المكتشفة</p>
-                    {subTracks.length === 0 ? (
-                      <span className="text-[10px] font-['Cairo'] text-white/20">لا توجد مصادر مكتشفة</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {subTracks.map(t => (
-                          <span key={t.id} className="text-[9px] px-2 py-1 rounded-xl font-['Cairo'] font-bold"
-                            style={{
-                              background: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.09)" : "rgba(147,197,253,0.09)",
-                              border: t.lang === "ar" || t.lang === "ar-auto" ? "1px solid rgba(110,231,183,0.22)" : "1px solid rgba(147,197,253,0.22)",
-                              color: t.lang === "ar" || t.lang === "ar-auto" ? "rgba(110,231,183,0.70)" : "rgba(147,197,253,0.70)",
-                            }}>
-                            {t.label}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
 
               {/* المظهر */}
               <div className="border-t border-white/[0.05]">
@@ -2612,19 +2517,14 @@ function EpisodePlayer({
 
           return (
             <motion.div key="subpanel"
-              initial={isLandscape ? { opacity: 0, x: 60 } : { opacity: 0, y: -20, scale: 0.97 }}
-              animate={isLandscape ? { opacity: 1, x: 0 } : { opacity: 1, y: 0, scale: 1 }}
-              exit={isLandscape ? { opacity: 0, x: 60 } : { opacity: 0, y: -20, scale: 0.97 }}
+              initial={{ opacity: 0, x: 60 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 60 }}
               transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-              className={isLandscape ? "fixed inset-y-0 right-0 z-[400] flex items-stretch" : "fixed inset-x-0 top-0 z-[400]"}
-              style={isLandscape ? {
+              className="fixed inset-y-0 right-0 z-[400] flex items-stretch"
+              style={{
                 paddingTop: "max(0px, env(safe-area-inset-top))",
                 paddingBottom: "max(0px, env(safe-area-inset-bottom))",
-              } : {
-                paddingTop: "max(10px, env(safe-area-inset-top))",
-                paddingInline: "10px",
-                display: "flex",
-                justifyContent: "center",
               }}
             >
               <div className="fixed inset-0 z-[-1]" style={{ background: "rgba(0,0,0,0.45)" }} onClick={() => setShowSubPanel(false)} />

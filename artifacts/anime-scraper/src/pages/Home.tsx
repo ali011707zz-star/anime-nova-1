@@ -237,11 +237,11 @@ export default function Home() {
   /* Load popular animation movies + TV from TMDB, and trending news from AniList */
   useEffect(() => {
     const key = "8265bd1679663a7ea12ac168da84d2e8";
-    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&sort_by=popularity.desc&page=1`)
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
       .then(d => setAnimationMovies((d.results || []).slice(0, 10)))
       .catch(() => {});
-    fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${key}&language=ar&with_genres=16&sort_by=popularity.desc&page=1`)
+    fetch(`https://api.themoviedb.org/3/discover/tv?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
       .then(d => setAnimationTv((d.results || []).slice(0, 10)))
       .catch(() => {});

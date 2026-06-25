@@ -1,6 +1,6 @@
 ---
 name: Mitanime RSC scraper
-description: How mitanime.com works and what content is actually extractable
+name: How mitanime.com works and what content is actually extractable
 ---
 
 ## Rule
