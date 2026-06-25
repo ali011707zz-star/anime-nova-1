@@ -196,6 +196,8 @@ async function cfGet(url: string, referer?: string): Promise<string> {
 
 function titleSim(a: string, b: string): number {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff ]/g, "").replace(/\s+/g, " ").trim();
+  // ASCII-only fallback: strips non-ASCII (e.g. Arabic chars) — helps with mixed-language slugs
+  const normAscii = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
   const na = norm(a); const nb = norm(b);
   if (na === nb) return 1;
   if (na.includes(nb) || nb.includes(na)) {
@@ -209,7 +211,19 @@ function titleSim(a: string, b: string): number {
   }
   const wa = na.split(" "); const wb = nb.split(" ");
   const common = wa.filter(w => wb.some(x => x === w || (w.length > 3 && (x.includes(w) || w.includes(x))))).length;
-  return common / Math.max(wa.length, wb.length);
+  const score = common / Math.max(wa.length, wb.length);
+  if (score > 0) return score;
+  // ASCII fallback: useful when one string has Arabic that the other omits
+  const aa = normAscii(a); const ab = normAscii(b);
+  if (!aa || !ab) return 0;
+  if (aa === ab) return 0.92;
+  if (aa.includes(ab) || ab.includes(aa)) {
+    const rl = Math.min(aa.length, ab.length) / Math.max(aa.length, ab.length || 1);
+    return Math.min(0.88, 0.75 * (0.4 + rl * 0.6));
+  }
+  const wa2 = aa.split(" "); const wb2 = ab.split(" ");
+  const c2 = wa2.filter(w => wb2.some(x => x === w || (w.length > 3 && (x.includes(w) || w.includes(x))))).length;
+  return (c2 / Math.max(wa2.length, wb2.length)) * 0.9; // slight penalty for ASCII-only match
 }
 
 function parsePostId(html: string): string | null {
@@ -1379,7 +1393,7 @@ async function scrapeAflaamMovie(
       const best = results
         .map(r => ({ ...r, sc: titleSim(t, r.slug.replace(/-/g, " ")) }))
         .sort((a, b) => b.sc - a.sc)[0];
-      if (best.sc < 0.15) continue;
+      if (best.sc < 0.30) continue;
 
       const movieRef  = `${AFLAAM_BASE}/movie/${best.id}/${best.slug}`;
       const movieHtml = await cfGet(movieRef, AFLAAM_BASE + "/");
@@ -1417,7 +1431,7 @@ async function scrapeAflaamSeries(
           return { ...r, sc };
         })
         .sort((a, b) => b.sc - a.sc)[0];
-      if (best.sc < 0.1) continue;
+      if (best.sc < 0.28) continue;
 
       const seriesRef  = `${AFLAAM_BASE}/series/${best.id}/${best.slug}`;
       const seriesHtml = await cfGet(seriesRef, AFLAAM_BASE + "/");
