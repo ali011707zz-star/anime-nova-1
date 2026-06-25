@@ -430,6 +430,52 @@ function qualityRank(quality: string): number {
   if (q.includes("SD") || q.includes("480") || q.includes("360")) return 1;
   return 0;
 }
+
+/** فحص HLS master.m3u8 وإعادة قائمة الجودات المتاحة مع روابطها */
+async function parseM3u8Qualities(
+  masterUrl: string,
+  referer: string,
+): Promise<Array<{ quality: string; rank: number; url: string }>> {
+  try {
+    const text = await fetch(masterUrl, {
+      headers: { ...BASE_HDRS, Referer: referer },
+      signal: AbortSignal.timeout(8000),
+    }).then(r => r.ok ? r.text() : "").catch(() => "");
+
+    if (!text || !text.includes("#EXTM3U") || !text.includes("#EXT-X-STREAM-INF")) return [];
+
+    const results: Array<{ quality: string; rank: number; url: string }> = [];
+    const base = masterUrl.replace(/[^/]+$/, "");
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (!lines[i].startsWith("#EXT-X-STREAM-INF")) continue;
+      const urlLine = lines[i + 1];
+      if (!urlLine || urlLine.startsWith("#")) continue;
+
+      const resM = lines[i].match(/RESOLUTION=(\d+)x(\d+)/i);
+      const bwM  = lines[i].match(/BANDWIDTH=(\d+)/i);
+      const height = resM ? parseInt(resM[2]) : 0;
+      const bw     = bwM  ? parseInt(bwM[1])  : 0;
+
+      let quality: string, rank: number;
+      if      (height >= 1080 || bw >= 2_000_000) { quality = "1080p"; rank = 11; }
+      else if (height >=  720 || bw >= 1_000_000) { quality = "720p";  rank = 10; }
+      else if (height >=  480 || bw >=   500_000) { quality = "480p";  rank = 9;  }
+      else                                          { quality = "360p";  rank = 8;  }
+
+      const url = urlLine.startsWith("http") ? urlLine
+        : urlLine.startsWith("//") ? "https:" + urlLine
+        : base + urlLine;
+
+      if (!results.find(r => r.quality === quality)) {
+        results.push({ quality, rank, url });
+      }
+    }
+
+    return results.sort((a, b) => b.rank - a.rank);
+  } catch { return []; }
+}
 async function safeHead(url: string, headers: Record<string, string>): Promise<number> {
   try {
     const r = await fetch(url, { method: "HEAD", headers, signal: AbortSignal.timeout(4000), redirect: "follow" });
@@ -4656,13 +4702,11 @@ async function getAniKotoSources(
 
     const m3u8Url = data.sources.file;
 
-    // اختر الـ subtitle المتاحة — بدون ترجمة فورية (ثقيلة)
-    // نعطي الأولوية للعربية ثم الإنجليزية — عرضها مباشرة عبر proxy-text فقط
+    // اختر الـ subtitle المتاحة
     const subTrack =
       data.tracks?.find(t => t.kind !== "thumbnails" && /(arabic|arab|\bar\b)/i.test(t.label || "")) ||
       data.tracks?.find(t => t.kind !== "thumbnails" && /(english|eng)/i.test(t.label || "")) ||
       data.tracks?.find(t => t.kind !== "thumbnails");
-    // proxy-text فقط لتجاوز CORS — بدون translate-vtt الثقيل
     const subtitleUrl = subTrack?.file
       ? `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(origin + "/")}`
       : undefined;
@@ -4670,8 +4714,28 @@ async function getAniKotoSources(
       ? (/(arabic|arab|\bar\b)/i.test(subTrack.label || "") ? "عربي" : "إنجليزي")
       : "";
 
-    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(origin + "/")}`;
+    const referer = origin + "/";
 
+    // استخرج كل الجودات من master.m3u8
+    const qualities = await parseM3u8Qualities(m3u8Url, referer);
+    if (qualities.length > 0) {
+      return qualities.map(q => {
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(q.url)}&ref=${encodeURIComponent(referer)}`;
+        return {
+          name: `AniKoto · ${q.quality} · ياباني${subLang ? " · " + subLang : ""}`,
+          url: q.url,
+          quality: q.quality,
+          qualityRank: q.rank + 5, // AniKoto rank base 16
+          site: "anikoto",
+          directUrl: proxied,
+          directType: "hls" as const,
+          subtitleUrl,
+        };
+      });
+    }
+
+    // fallback: جودة واحدة
+    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
     return [{
       name: `AniKoto · 1080p · ياباني${subLang ? " · " + subLang : ""}`,
       url: m3u8Url,
@@ -4775,8 +4839,25 @@ async function getAnimexSources(
       if (!m3u8 || !m3u8.startsWith("http")) continue;
 
       const ref = payload?.headers?.Referer || payload?.headers?.referer || `${ANIMEX_BASE}/`;
-      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(ref)}`;
 
+      // استخرج كل الجودات من master.m3u8
+      const qualities = await parseM3u8Qualities(m3u8, ref);
+      if (qualities.length > 0) {
+        return qualities.map(q => {
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(q.url)}&ref=${encodeURIComponent(ref)}`;
+          return {
+            name: `AnimEx · ${providerId} · ${q.quality} · ياباني مترجم`,
+            url: q.url,
+            quality: q.quality,
+            qualityRank: q.rank,
+            site: "animex",
+            directUrl: proxied,
+            directType: "hls" as const,
+          };
+        });
+      }
+
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(ref)}`;
       return [{
         name: `AnimEx · ${providerId} · ياباني مترجم`,
         url:  m3u8,
@@ -4904,14 +4985,13 @@ async function getHiAnimeSources(
       let rawSubUrl = _rawSubUrl;
       let m3u8Url: string | null = null;
       let referer = HIANIME_REF;
+      let multiQualities: Array<{ quality: string; rank: number; url: string }> = [];
 
       // vibeplayer.site — اشتقاق مباشر بدون HTTP request إضافي
       const vibeToken = embedUrl.match(/vibeplayer\.site\/([a-zA-Z0-9]{10,})/i)?.[1];
       if (vibeToken) {
         m3u8Url = `https://vibeplayer.site/public/stream/${vibeToken}/master.m3u8`;
         referer  = `https://vibeplayer.site/${vibeToken}`;
-        // من HiAnime-API: استخرج الترجمة من صفحة الـ embed إذا غابت عن URL
-        // const subtitle = "..." يوجد في صفحة vibeplayer عند توفر ترجمة
         if (!rawSubUrl) {
           const vibeHtml = await fetch(`https://vibeplayer.site/${vibeToken}`, {
             headers: { ...BASE_HDRS, Referer: HIANIME_REF },
@@ -4920,6 +5000,8 @@ async function getHiAnimeSources(
           const subM = vibeHtml.match(/const\s+subtitle\s*=\s*["']([^"']{10,})["']/i);
           if (subM?.[1]?.startsWith("http")) rawSubUrl = subM[1];
         }
+        // فحص الجودات من master.m3u8
+        multiQualities = await parseM3u8Qualities(m3u8Url, referer);
       } else if (embedUrl.includes("bibiemb.xyz")) {
         // bibiemb.xyz — اشتق الـ m3u8 من صفحة الـ embed
         const bibiPath = embedUrl.match(/bibiemb\.xyz\/([^/?#]+)/i)?.[1];
@@ -4934,16 +5016,16 @@ async function getHiAnimeSources(
             const subM = bibiHtml.match(/const\s+subtitle\s*=\s*["']([^"']{10,})["']/i);
             if (subM?.[1]?.startsWith("http")) rawSubUrl = subM[1];
           }
+          if (m3u8Url) multiQualities = await parseM3u8Qualities(m3u8Url, referer);
         }
       } else {
-        // خوادم أخرى (OtakuHG / OtakuVid / PlayMogo) — استخرج HLS من embed page
+        // خوادم أخرى (OtakuHG / OtakuVid / PlayMogo) — استخرج كل الجودات
         try { referer = new URL(embedUrl).origin + "/"; } catch {}
-        m3u8Url = await extractAninekoHls(embedUrl, slug);
+        multiQualities = await extractAninekoAllHls(embedUrl, slug);
+        m3u8Url = multiQualities[0]?.url ?? null;
       }
 
-      if (!m3u8Url) continue;
-
-      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
+      if (!m3u8Url && !multiQualities.length) continue;
 
       // الترجمة الإنجليزية → العربية عبر translate-vtt
       let subtitleUrl: string | undefined;
@@ -4957,19 +5039,39 @@ async function getHiAnimeSources(
                       : embedUrl.includes("otakuvid") ? "OtakuVid"
                       : embedUrl.includes("playmogo") ? "PlayMogo"
                       : "VibePlayer";
+      const subLabel = rawSubUrl ? " · مترجم" : "";
 
-      sources.push({
-        name: `HiAnime · ${hostLabel} · ياباني${rawSubUrl ? " · مترجم" : ""}`,
-        url: m3u8Url,
-        quality: "1080p",
-        qualityRank: 9,
-        site: "hianime",
-        directUrl: proxied,
-        directType: "hls",
-        subtitleUrl,
-      });
+      if (multiQualities.length > 0) {
+        // أضف مصدر منفصل لكل جودة
+        for (const q of multiQualities) {
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(q.url)}&ref=${encodeURIComponent(referer)}`;
+          sources.push({
+            name: `HiAnime · ${hostLabel} · ${q.quality} · ياباني${subLabel}`,
+            url: q.url,
+            quality: q.quality,
+            qualityRank: q.rank,
+            site: "hianime",
+            directUrl: proxied,
+            directType: "hls",
+            subtitleUrl,
+          });
+        }
+      } else if (m3u8Url) {
+        // fallback: جودة واحدة
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
+        sources.push({
+          name: `HiAnime · ${hostLabel} · ياباني${subLabel}`,
+          url: m3u8Url,
+          quality: "1080p",
+          qualityRank: 9,
+          site: "hianime",
+          directUrl: proxied,
+          directType: "hls",
+          subtitleUrl,
+        });
+      }
 
-      if (sources.length >= 2) break;
+      if (sources.length >= 8) break;
     }
     return sources;
   } catch { return []; }
@@ -5101,21 +5203,40 @@ async function getAnikototvSources(
         const hls = await extractVideoDeep(playerUrl, `${ANIKOTOTV_BASE}/`).catch(() => null);
         if (!hls) continue;
 
-        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hls)}&ref=${encodeURIComponent(ANIKOTOTV_BASE + "/")}`;
+        const refAnikototv = `${ANIKOTOTV_BASE}/`;
+        // استخرج كل الجودات من master.m3u8
+        const qualities = await parseM3u8Qualities(hls, refAnikototv);
+        if (qualities.length > 0) {
+          for (const q of qualities) {
+            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(q.url)}&ref=${encodeURIComponent(refAnikototv)}`;
+            sources.push({
+              name: `AniKototv · ${q.quality} · ياباني مترجم`,
+              url: q.url,
+              quality: q.quality,
+              qualityRank: q.rank,
+              site: "anikototv",
+              directUrl: proxied,
+              directType: "hls",
+              skipIntro,
+              skipOutro,
+            });
+          }
+        } else {
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hls)}&ref=${encodeURIComponent(refAnikototv)}`;
+          sources.push({
+            name: `AniKototv · ياباني مترجم`,
+            url: hls,
+            quality: "1080p",
+            qualityRank: 9,
+            site: "anikototv",
+            directUrl: proxied,
+            directType: "hls",
+            skipIntro,
+            skipOutro,
+          });
+        }
 
-        sources.push({
-          name: `AniKototv · ياباني · مترجم`,
-          url: hls,
-          quality: "1080p",
-          qualityRank: 9,
-          site: "anikototv",
-          directUrl: proxied,
-          directType: "hls",
-          skipIntro,
-          skipOutro,
-        });
-
-        if (sources.length >= 2) break;
+        if (sources.length >= 8) break;
       } catch { continue; }
     }
     return sources;
@@ -5178,37 +5299,50 @@ async function findAninekoSlug(title: string, english: string | null): Promise<s
 }
 
 async function extractAninekoHls(embedUrl: string, seriesSlug: string): Promise<string | null> {
-  const html = await orkestGet(embedUrl, `${ANINEKO_BASE}/watch/${seriesSlug}`, 18000) ?? "";
+  const results = await extractAninekoAllHls(embedUrl, seriesSlug);
+  return results[0]?.url ?? null;
+}
 
-  // من HiAnime-API: فك packed JS أولاً — otakuhg/otakuvid يستخدمان p,a,c,k,e,d
-  // والـ hls4 هو أعلى جودة، hls3 هو الثانوي
+/** استخرج كل الجودات المتاحة (hls1..hls4) من صفحة embed نصية */
+async function extractAninekoAllHls(
+  embedUrl: string, seriesSlug: string,
+): Promise<Array<{ quality: string; rank: number; url: string }>> {
+  const html = await orkestGet(embedUrl, `${ANINEKO_BASE}/watch/${seriesSlug}`, 18000) ?? "";
   const unpacked = unpackPacked(html) ?? "";
   const embedDomain = (() => { try { return new URL(embedUrl).origin; } catch { return ""; } })();
+
+  const results: Array<{ quality: string; rank: number; url: string }> = [];
+
   if (unpacked) {
-    const hls4 = unpacked.match(/"hls4"\s*:\s*["']([^"']+)["']/);
-    if (hls4) {
-      const url = hls4[1].startsWith("/") ? `${embedDomain}${hls4[1]}` : hls4[1];
-      if (url.startsWith("http")) return url.replace(/&amp;/g, "&");
-    }
-    const hls3 = unpacked.match(/"hls3"\s*:\s*["']([^"']+)["']/);
-    if (hls3) {
-      const url = hls3[1].startsWith("/") ? `${embedDomain}${hls3[1]}` : hls3[1];
-      if (url.startsWith("http")) return url.replace(/&amp;/g, "&");
+    const hlsKeys: Array<{ key: string; quality: string; rank: number }> = [
+      { key: "hls4", quality: "1080p", rank: 11 },
+      { key: "hls3", quality: "720p",  rank: 10 },
+      { key: "hls2", quality: "480p",  rank: 9  },
+      { key: "hls1", quality: "360p",  rank: 8  },
+    ];
+    for (const { key, quality, rank } of hlsKeys) {
+      const m = unpacked.match(new RegExp(`"${key}"\\s*:\\s*["']([^"']+)["']`));
+      if (!m) continue;
+      const url = m[1].startsWith("/") ? `${embedDomain}${m[1]}` : m[1];
+      if (url.startsWith("http")) results.push({ quality, rank, url: url.replace(/&amp;/g, "&") });
     }
   }
 
-  const patterns = [
-    /const\s+src\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
-    /file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
-    /["'](https?:\/\/[^"']+\/master\.m3u8[^"']*)["']/i,
-    /["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
-  ];
-  const toSearch = unpacked || html;
-  for (const pattern of patterns) {
-    const m = toSearch.match(pattern);
-    if (m) return m[1].replace(/&amp;/g, "&");
+  if (!results.length) {
+    const toSearch = unpacked || html;
+    const patterns = [
+      /const\s+src\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+      /file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+      /["'](https?:\/\/[^"']+\/master\.m3u8[^"']*)["']/i,
+      /["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
+    ];
+    for (const pattern of patterns) {
+      const m = toSearch.match(pattern);
+      if (m) { results.push({ quality: "1080p", rank: 9, url: m[1].replace(/&amp;/g, "&") }); break; }
+    }
   }
-  return null;
+
+  return results;
 }
 
 const ANINEKO_DISABLED = false; // مُعاد تفعيله عبر Orkestr external relay (IP أوروبي)
@@ -5261,23 +5395,22 @@ async function getAninekoSources(
       const { embedUrl, rawSubUrl } = entry;
       let m3u8Url: string | null = null;
       let referer = ANINEKO_BASE + "/";
+      let multiQualities: Array<{ quality: string; rank: number; url: string }> = [];
 
       // vibeplayer.site: اشتقاق مباشر للـ HLS من الـ token بدون HTTP request إضافي
-      // pattern: vibeplayer.site/TOKEN → /public/stream/TOKEN/master.m3u8
       const vibeToken = embedUrl.match(/vibeplayer\.site\/([a-zA-Z0-9]{10,})/i)?.[1];
       if (vibeToken) {
         m3u8Url = `https://vibeplayer.site/public/stream/${vibeToken}/master.m3u8`;
         referer = `https://vibeplayer.site/${vibeToken}`;
+        multiQualities = await parseM3u8Qualities(m3u8Url, referer);
       } else {
-        // خوادم أخرى: استخراج HLS من صفحة الـ embed
+        // خوادم أخرى (OtakuHG / OtakuVid): استخراج كل الجودات hls1-hls4
         try { referer = new URL(embedUrl).origin + "/"; } catch {}
-        m3u8Url = await extractAninekoHls(embedUrl, slug);
+        multiQualities = await extractAninekoAllHls(embedUrl, slug);
+        m3u8Url = multiQualities[0]?.url ?? null;
       }
 
-      if (!m3u8Url) continue;
-
-      // وجّه الـ HLS عبر hls-proxy (CORS + Referer)
-      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
+      if (!m3u8Url && !multiQualities.length) continue;
 
       // الترجمة: proxy-text لتجاوز CDN → translate-vtt للعربية
       let subtitleUrl: string | undefined;
@@ -5286,23 +5419,40 @@ async function getAninekoSources(
         subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxySubUrl)}&from=en&to=ar`;
       }
 
-      const hostLabel = embedUrl.includes("bibi") ? "BibiEmb"
-                      : embedUrl.includes("otakuhg") ? "OtakuHG"
+      const hostLabel = embedUrl.includes("bibi")     ? "BibiEmb"
+                      : embedUrl.includes("otakuhg")  ? "OtakuHG"
                       : embedUrl.includes("otakuvid") ? "OtakuVid"
                       : "VibePlayer";
 
-      sources.push({
-        name: `AniNeko · ${hostLabel} · ياباني مترجم`,
-        url: m3u8Url,
-        quality: "1080p",
-        qualityRank: 9,
-        site: "anineko",
-        directUrl: proxied,
-        directType: "hls",
-        subtitleUrl,
-      });
+      if (multiQualities.length > 0) {
+        for (const q of multiQualities) {
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(q.url)}&ref=${encodeURIComponent(referer)}`;
+          sources.push({
+            name: `AniNeko · ${hostLabel} · ${q.quality} · ياباني مترجم`,
+            url: q.url,
+            quality: q.quality,
+            qualityRank: q.rank,
+            site: "anineko",
+            directUrl: proxied,
+            directType: "hls",
+            subtitleUrl,
+          });
+        }
+      } else if (m3u8Url) {
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8Url)}&ref=${encodeURIComponent(referer)}`;
+        sources.push({
+          name: `AniNeko · ${hostLabel} · ياباني مترجم`,
+          url: m3u8Url,
+          quality: "1080p",
+          qualityRank: 9,
+          site: "anineko",
+          directUrl: proxied,
+          directType: "hls",
+          subtitleUrl,
+        });
+      }
 
-      if (sources.length >= 2) break;
+      if (sources.length >= 8) break;
     }
     return sources;
   } catch { return []; }
