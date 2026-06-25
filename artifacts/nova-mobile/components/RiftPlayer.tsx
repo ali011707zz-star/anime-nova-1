@@ -657,6 +657,11 @@ export function RiftPlayer({
     return () => { cancelled = true; setSubLoading(false); };
   }, [currentSrc?.subtitleUrl, anilistId, episode, subLang]); // eslint-disable-line
 
+  /* ─── Auto-enable subtitles when source provides a subtitle URL ─── */
+  useEffect(() => {
+    if (currentSrc?.subtitleUrl) setSubOn(true);
+  }, [currentSrc?.subtitleUrl]);
+
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT)
@@ -1429,165 +1434,6 @@ export function RiftPlayer({
       {/* ════════════════════════════════════════
           CONTROLS OVERLAY
       ════════════════════════════════════════ */}
-      {/* ════════════════════════════════════════
-          SUBTITLE SIDE PANEL
-      ════════════════════════════════════════ */}
-      {showSubPanel && (
-        <Pressable
-          style={[StyleSheet.absoluteFill, s.subPanelBackdrop]}
-          onPress={() => setShowSubPanel(false)}
-        >
-          <Animated.View
-            style={[
-              s.subPanel,
-              isPortrait ? s.subPanelPortrait : s.subPanelLandscape,
-              { transform: [{ translateX: subPanelX }] },
-            ]}
-          >
-            <Pressable onPress={() => {}} style={{ flex: 1 }}>
-              {/* ─ Header ─ */}
-              <View style={s.subPanelHeader}>
-                <Text style={s.subPanelTitle}>الترجمات</Text>
-                <Pressable onPress={() => setShowSubPanel(false)} style={s.subPanelClose} hitSlop={12}>
-                  <Ionicons name="close" size={18} color="rgba(255,255,255,0.75)" />
-                </Pressable>
-              </View>
-              <View style={s.subPanelDivider} />
-
-              {loadedCues.length === 0 && !subLoading ? (
-                /* ─ No subtitles state ─ */
-                <View style={s.subEmptyWrap}>
-                  <View style={s.subEmptyIcon}>
-                    <Text style={s.subEmptyCCText}>CC</Text>
-                  </View>
-                  <Text style={s.subEmptyText}>لا توجد ترجمات متاحة</Text>
-                  <Text style={{ color: "rgba(148,163,184,0.6)", fontSize: 12, fontFamily: "Cairo_400Regular", textAlign: "center", marginTop: 8, lineHeight: 18 }}>
-                    قد تتوفر الترجمة مع بعض المصادر الأخرى
-                  </Text>
-                </View>
-              ) : (
-                <View style={s.subPanelBody}>
-
-                  {/* ─ Toggle on/off ─ */}
-                  <View style={s.subRow}>
-                    <View style={s.subRowLeft}>
-                      <Ionicons name="eye-outline" size={16} color="rgba(255,255,255,0.65)" />
-                      <Text style={s.subRowLabel}>تفعيل الترجمة</Text>
-                    </View>
-                    <Pressable
-                      onPress={() => setSubOn(v => !v)}
-                      style={[s.subToggle, subOn && s.subToggleOn]}
-                    >
-                      <View style={[s.subToggleThumb, subOn && s.subToggleThumbOn]} />
-                    </Pressable>
-                  </View>
-
-                  {/* ─ Language ─ */}
-                  <Text style={s.subSectionLabel}>اللغة</Text>
-                  <View style={s.subChipRow}>
-                    {([
-                      { v: "ar" as const, label: "العربية",  icon: "🇸🇦" },
-                      { v: "en" as const, label: "English",  icon: "🇬🇧" },
-                    ]).map(({ v, label, icon }) => (
-                      <Pressable
-                        key={v}
-                        onPress={() => setSubLang(v)}
-                        style={[s.subChip, subLang === v && s.subChipActive]}
-                      >
-                        <Text style={s.subChipEmoji}>{icon}</Text>
-                        <Text style={[s.subChipText, subLang === v && s.subChipTextActive]}>{label}</Text>
-                        {subLang === v && <Ionicons name="checkmark-circle" size={13} color="#c4b5fd" />}
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  {/* ─ Font Size ─ */}
-                  <Text style={s.subSectionLabel}>حجم الخط</Text>
-                  <View style={s.subChipRow}>
-                    {FONT_SIZES.map(({ sz, label, name }) => (
-                      <Pressable
-                        key={sz}
-                        onPress={() => updateSubSettings({ fontSize: sz })}
-                        style={[s.subSizeChip, subSettings.fontSize === sz && s.subChipActive]}
-                      >
-                        <Text style={[s.subSizeLabel, { fontSize: sz * 0.65 }, subSettings.fontSize === sz && s.subChipTextActive]}>{label}</Text>
-                        <Text style={[s.subSizeNameText, subSettings.fontSize === sz && s.subChipTextActive]}>{name}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  {/* ─ Color ─ */}
-                  <Text style={s.subSectionLabel}>لون النص</Text>
-                  <View style={s.subColorRow}>
-                    {SUB_COLORS.map(({ v, label }) => (
-                      <Pressable
-                        key={v}
-                        onPress={() => updateSubSettings({ color: v })}
-                        style={[s.subColorDot, { backgroundColor: v }, subSettings.color === v && s.subColorDotActive]}
-                      >
-                        {subSettings.color === v && <Ionicons name="checkmark" size={11} color="#000" />}
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  {/* ─ Position ─ */}
-                  <Text style={s.subSectionLabel}>موضع الترجمة</Text>
-                  <View style={s.subChipRow}>
-                    {SUB_POSITIONS.map(({ v, label, icon }) => (
-                      <Pressable
-                        key={v}
-                        onPress={() => updateSubSettings({ position: v })}
-                        style={[s.subChip, subSettings.position === v && s.subChipActive]}
-                      >
-                        <Text style={s.subPosIcon}>{icon}</Text>
-                        <Text style={[s.subChipText, subSettings.position === v && s.subChipTextActive]}>{label}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  {/* ─ Bold ─ */}
-                  <View style={[s.subRow, { marginTop: 8 }]}>
-                    <View style={s.subRowLeft}>
-                      <Text style={{ color: "rgba(255,255,255,0.65)", fontSize: 14, fontWeight: "900" }}>B</Text>
-                      <Text style={s.subRowLabel}>خط عريض</Text>
-                    </View>
-                    <Pressable
-                      onPress={() => updateSubSettings({ bold: !subSettings.bold })}
-                      style={[s.subToggle, subSettings.bold && s.subToggleOn]}
-                    >
-                      <View style={[s.subToggleThumb, subSettings.bold && s.subToggleThumbOn]} />
-                    </Pressable>
-                  </View>
-
-                  {/* ─ Whisper re-transcription (inside has-subs section) ─ */}
-                  <View style={s.subPanelDivider} />
-                  <Pressable
-                    onPress={triggerWhisper}
-                    disabled={whisperStatus === "loading"}
-                    style={[s.whisperBtn, whisperStatus === "loading" && s.whisperBtnLoading, { marginTop: 4 }]}
-                  >
-                    {whisperStatus === "loading" ? (
-                      <ActivityIndicator size="small" color="#c4b5fd" />
-                    ) : (
-                      <Ionicons name="mic-outline" size={15} color={whisperStatus === "error" ? "#fca5a5" : whisperStatus === "ready" ? "#86efac" : "#c4b5fd"} />
-                    )}
-                    <Text style={[s.whisperBtnText,
-                      whisperStatus === "error" && { color: "#fca5a5" },
-                      whisperStatus === "ready" && { color: "#86efac" },
-                    ]}>
-                      {whisperStatus === "idle"    ? "ترجمة صوتية" :
-                       whisperStatus === "loading" ? "جاري التحليل الصوتي..." :
-                       whisperStatus === "error"   ? "فشل — أعد المحاولة"    :
-                       `✓ ${whisperLang ? `لغة: ${whisperLang}` : "ترجمة جاهزة"}`}
-                    </Text>
-                  </Pressable>
-
-                </View>
-              )}
-            </Pressable>
-          </Animated.View>
-        </Pressable>
-      )}
 
 
       {showControls && !error && !isEnded && !isLocked && (
@@ -1634,8 +1480,8 @@ export function RiftPlayer({
               </Pressable>
               {!currentSrc?.isArabic && (
                 <Pressable
-                  onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
-                  style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
+                  onPress={() => { setSubOn(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
+                  style={[s.topIconBtn, s.topCCBtn, subOn && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
                   hitSlop={10}
                 >
                   <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
@@ -1904,8 +1750,8 @@ const s = StyleSheet.create({
   errorBtnBackText: { color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_600SemiBold", fontSize: 13 },
 
   /* Subtitle */
-  subtitleWrap: { position: "absolute", left: 16, right: 16, alignItems: "center", zIndex: 8 },
-  subtitleText: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, textAlign: "center", lineHeight: 26 },
+  subtitleWrap: { position: "absolute", left: 16, right: 16, alignItems: "stretch", zIndex: 8 },
+  subtitleText: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, textAlign: "center", lineHeight: 26, alignSelf: "center", maxWidth: "100%" },
 
   /* Ripples */
   rippleLeft:   { position: "absolute", left: 0, top: "10%", width: "45%", height: "80%", alignItems: "center", justifyContent: "center", zIndex: 25 },

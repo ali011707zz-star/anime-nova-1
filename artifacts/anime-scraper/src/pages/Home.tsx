@@ -758,9 +758,19 @@ export default function Home() {
               </div>
             </div>
             {/* Live dot */}
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-[9px] font-black text-red-400 font-['Cairo']">LIVE</span>
+            <div className="flex items-center gap-2.5">
+              <Link
+                href="/schedule"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-['Cairo'] text-[9px] font-black text-orange-300 active:scale-90 transition-transform"
+                style={{ background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.22)" }}
+              >
+                عرض المزيد
+                <ChevronLeft className="w-3 h-3" />
+              </Link>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[9px] font-black text-red-400 font-['Cairo']">LIVE</span>
+              </div>
             </div>
           </div>
 
