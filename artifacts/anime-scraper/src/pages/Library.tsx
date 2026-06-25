@@ -106,7 +106,7 @@ export default function Library() {
     if (savedIds.length === 0) { setSavedAnime([]); return; }
     setLoading(true);
     try {
-      const r = await fetch("https://graphql.anilist.co", {
+      const r = await fetch("/api/anilist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: savedIds } }),
@@ -128,7 +128,7 @@ export default function Library() {
       if (savedIds.length === 0) { if (!cancelled) setSavedAnime([]); return; }
       if (!cancelled) setLoading(true);
       try {
-        const r = await fetch("https://graphql.anilist.co", {
+        const r = await fetch("/api/anilist", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: savedIds } }),

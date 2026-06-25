@@ -497,7 +497,7 @@ export default function AnimationWatch() {
 
     // ── 3. ابحث عبر AniList بالعنوان للحصول على MAL ID ──
     const ANILIST_Q = `query ($s: String) { Media(search: $s, type: ANIME) { idMal } }`;
-    fetch("https://graphql.anilist.co", {
+    fetch("/api/anilist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANILIST_Q, variables: { s: displayTitle } }),

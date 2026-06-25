@@ -215,7 +215,7 @@ export default function Home() {
   }, []);
 
   const fetch$ = async (query: string, variables?: any) => {
-    const r = await fetch("https://graphql.anilist.co", {
+    const r = await fetch("/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, variables }),
     });
@@ -244,7 +244,7 @@ export default function Home() {
 
   /* Load Spring 2026 seasonal anime */
   useEffect(() => {
-    fetch("https://graphql.anilist.co", {
+    fetch("/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: SPRING_2026_QUERY }),
     })
@@ -255,7 +255,7 @@ export default function Home() {
 
   /* Load extra sections — Top Rated, Fall 2025, Isekai */
   useEffect(() => {
-    const post = (q: string) => fetch("https://graphql.anilist.co", {
+    const post = (q: string) => fetch("/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: q }),
     }).then(r => r.json());
@@ -271,7 +271,7 @@ export default function Home() {
     const gt  = now - 72 * 3600;   // آخر 3 أيام
     const lt  = now + 12 * 3600;   // 12 ساعة قادمة
     setTodayChecking(true);
-    fetch("https://graphql.anilist.co", {
+    fetch("/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: TODAY_EPISODES_QUERY, variables: { gt, lt } }),
     })

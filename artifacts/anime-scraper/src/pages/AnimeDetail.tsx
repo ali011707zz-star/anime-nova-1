@@ -219,7 +219,7 @@ export default function AnimeDetail() {
             body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id!) } }),
             signal: ctrl.signal,
           }).then(r => r.json())
-        : fetch("https://graphql.anilist.co", {
+        : fetch("/api/anilist", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Accept": "application/json" },
             body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id!) } }),
@@ -384,7 +384,7 @@ export default function AnimeDetail() {
             onClick={() => {
               if (!params.id) { navigate("/"); return; }
               setLoading(true); setAnime(null);
-              fetch("https://graphql.anilist.co", {
+              fetch("/api/anilist", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Accept": "application/json" },
                 body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id) } }),

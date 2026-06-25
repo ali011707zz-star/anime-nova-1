@@ -9628,6 +9628,30 @@ router.get("/anime/animewitcher-catalog", async (req, res) => {
   }
 });
 
+// ── AniList GraphQL Proxy (يحل مشكلة CORS في المتصفح) ──────────────────────
+router.post("/anilist", async (req, res) => {
+  try {
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": "https://anilist.co",
+        "Referer": "https://anilist.co/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await r.json();
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.json(data);
+  } catch (e: any) {
+    res.status(502).json({ error: e?.message ?? "AniList proxy error" });
+  }
+});
+
 // ── بناء كتالوج AnimeWitcher في الخلفية عند إقلاع السيرفر ──
 buildAWCatalog().catch(() => {});
 
