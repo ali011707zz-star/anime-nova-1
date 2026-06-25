@@ -42,6 +42,22 @@ app.listen(port, host, (err) => {
 
   initEmailService().catch(() => {});
 
+  // ── تصحيح SMTP على Orkestr تلقائياً عند الـ startup ──
+  const orkestrUrl = process.env.ORKESTR_RELAY_URL;
+  const appSecret  = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const smtpUser   = process.env.SMTP_USER;
+  const smtpPass   = process.env.SMTP_PASS;
+  if (orkestrUrl && smtpUser && smtpPass) {
+    fetch(`${orkestrUrl}/api/admin/smtp-env-patch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
+      body: JSON.stringify({ smtp_user: smtpUser, smtp_pass: smtpPass, smtp_host: process.env.SMTP_HOST || "smtp.gmail.com", smtp_port: process.env.SMTP_PORT || "587" }),
+    }).then(r => r.json()).then((d: any) => {
+      if (d.ok) console.log("[smtp-sync] ✅ Orkestr SMTP synced →", d.smtp_user);
+      else console.warn("[smtp-sync] ⚠️ Orkestr SMTP sync failed:", d.error || JSON.stringify(d));
+    }).catch(() => {});
+  }
+
   const schedulerEnabled = process.env.TELEGRAM_SCHEDULER_ENABLED !== "false";
   if (schedulerEnabled) {
     const domain =

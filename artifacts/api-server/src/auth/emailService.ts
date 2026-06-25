@@ -27,23 +27,19 @@ export function resetTransporter() {
 async function getTransporter(): Promise<Transporter> {
   if (transporter) return transporter;
 
-  let user = process.env.SMTP_USER || process.env.EMAIL_USER;
-  let pass = process.env.SMTP_PASS;
-  let host = process.env.SMTP_HOST;
-  let port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined;
+  // اقرأ DB دائماً — إذا وُجد smtp_pass في DB فهو يأخذ الأولوية (يسمح بتحديث SMTP بدون إعادة نشر)
+  const [dbUser, dbPass, dbHost, dbPort] = await Promise.all([
+    getConfig("smtp_user"),
+    getConfig("smtp_pass"),
+    getConfig("smtp_host"),
+    getConfig("smtp_port"),
+  ]);
 
-  if (!pass) {
-    const [dbUser, dbPass, dbHost, dbPort] = await Promise.all([
-      user ? Promise.resolve(null) : getConfig("smtp_user"),
-      getConfig("smtp_pass"),
-      host ? Promise.resolve(null) : getConfig("smtp_host"),
-      port ? Promise.resolve(null) : getConfig("smtp_port"),
-    ]);
-    if (!user && dbUser) user = dbUser;
-    if (!pass && dbPass) pass = dbPass;
-    if (!host && dbHost) host = dbHost;
-    if (!port && dbPort) port = Number(dbPort);
-  }
+  // DB له الأولوية، ENV كـ fallback
+  let user = dbUser || process.env.SMTP_USER || process.env.EMAIL_USER;
+  let pass = dbPass || process.env.SMTP_PASS;
+  let host = dbHost || process.env.SMTP_HOST;
+  let port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined);
 
   if (user && pass) {
     const smtpHost = host || "smtp.gmail.com";
