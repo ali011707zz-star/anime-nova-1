@@ -1403,33 +1403,21 @@ export default function RiftPlayer({
 
                   {/* RIGHT: action buttons */}
                   <div className="flex items-center gap-2 shrink-0">
-                    {/* Subtitle / CC button — opens inline settings menu */}
+                    {/* Subtitle / CC button — opens side subtitle panel */}
                     {onSubtitleClick && (
                       <button
-                        onClick={() => {
-                          if (subEnabled) {
-                            setShowSubMenu(m => !m);
-                          } else {
-                            onSubtitleClick();
-                            setShowSubMenu(true);
-                          }
-                        }}
+                        onClick={() => onSubtitleClick()}
                         className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all duration-150 relative"
-                        style={showSubMenu
-                          ? { background: "rgba(139,92,246,0.45)", border: "1px solid rgba(139,92,246,0.70)" }
-                          : subEnabled
+                        style={subEnabled
                           ? { background: "rgba(139,92,246,0.30)", border: "1px solid rgba(139,92,246,0.50)" }
                           : { background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }
                         }
                       >
                         <SubtitleIcon className="w-[15px] h-[15px]"
-                          style={{ color: (subEnabled || showSubMenu) ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
+                          style={{ color: subEnabled ? "#c4b5fd" : "rgba(255,255,255,0.65)" }} />
                         {/* Loading spinner ring — shown while subtitle is being fetched/translated */}
                         {!subEnabled && subNote && subNote !== "لا تتوفر ترجمة" && (
                           <span className="absolute inset-0 rounded-full border border-t-violet-400 border-violet-400/0 animate-spin pointer-events-none" />
-                        )}
-                        {showSubMenu && (
-                          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-violet-400" />
                         )}
                       </button>
                     )}
@@ -1854,11 +1842,9 @@ export default function RiftPlayer({
           )}
         </AnimatePresence>
 
-        {/* ════════════════════════════════════════
-            SUBTITLE SETTINGS BOTTOM SHEET — Accordion design
-        ════════════════════════════════════════ */}
+        {/* SUBTITLE SETTINGS BOTTOM SHEET — removed, now handled by side SubPanel */}
         <AnimatePresence>
-          {showSubMenu && !error && !isLocked && (
+          {false && !error && !isLocked && (
             <motion.div
               key="submenu-sheet"
               initial={{ y: "100%" }}
