@@ -6,17 +6,30 @@
 
 import { Router, type Request, type Response } from "express";
 import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
+import { getEnvOrDb } from "../lib/dbConfig.js";
 
 const router = Router();
 
-const TOKEN   = () => process.env.TELEGRAM_BOT_TOKEN || "";
+// يقرأ من البيئة أولاً، ثم من app_config في قاعدة البيانات
+let _cachedToken = "";
+let _cachedTokenTs = 0;
+async function getToken(): Promise<string> {
+  const now = Date.now();
+  if (_cachedToken && now - _cachedTokenTs < 60_000) return _cachedToken;
+  _cachedToken = await getEnvOrDb("TELEGRAM_BOT_TOKEN", "telegram_bot_token");
+  _cachedTokenTs = now;
+  return _cachedToken;
+}
+
+const TOKEN   = () => process.env.TELEGRAM_BOT_TOKEN || _cachedToken;
 const API     = () => `https://api.telegram.org/bot${TOKEN()}`;
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
 
 async function sendMessage(chatId: number | string, text: string, extra: Record<string, any> = {}) {
-  if (!TOKEN()) return;
-  await fetch(`${API()}/sendMessage`, {
+  const tok = await getToken();
+  if (!tok) return;
+  await fetch(`https://api.telegram.org/bot${tok}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...extra }),
@@ -26,8 +39,9 @@ async function sendMessage(chatId: number | string, text: string, extra: Record<
 
 async function sendChannelPhoto(photoUrl: string, caption: string) {
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
-  if (!channelId || !TOKEN()) return;
-  const r = await fetch(`${API()}/sendPhoto`, {
+  const tok = await getToken();
+  if (!channelId || !tok) return;
+  const r = await fetch(`https://api.telegram.org/bot${tok}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -83,7 +97,8 @@ export async function notifyNewEpisode(
   notifiedEpisodes.add(key);
 
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
-  if (!channelId || !TOKEN()) return;
+  const tok = await getToken();
+  if (!channelId || !tok) return;
 
   const poster  = await fetchAnimePoster(anilistId);
   const caption =
@@ -196,7 +211,8 @@ const INTERVAL_MS = 30 * 60 * 1000; // كل 30 دقيقة
 /* ── الدورة الواحدة ────────────────────────────────────────────────────── */
 
 async function runSchedulerCycle(): Promise<void> {
-  if (!TOKEN() || !process.env.TELEGRAM_CHANNEL_ID) return;
+  const tok = await getToken();
+  if (!tok || !process.env.TELEGRAM_CHANNEL_ID) return;
 
   const now  = Math.floor(Date.now() / 1000);
   const from = schedulerLastRun > 0
@@ -275,19 +291,21 @@ export function startEpisodeScheduler(): void {
   if (schedulerRunning) return;
   schedulerRunning = true;
 
-  if (!TOKEN()) {
-    console.warn("[scheduler] ⚠️ TELEGRAM_BOT_TOKEN غير موجود — الـ scheduler لن يعمل");
-    return;
-  }
   if (!process.env.TELEGRAM_CHANNEL_ID) {
     console.warn("[scheduler] ⚠️ TELEGRAM_CHANNEL_ID غير موجود — الـ scheduler لن يعمل");
+    schedulerRunning = false;
     return;
   }
 
-  console.log(`[scheduler] 🚀 بدأ — يفحص كل ${INTERVAL_MS / 60_000} دقيقة`);
-
-  // أول فحص بعد 10 ثوانٍ من البدء
-  setTimeout(() => {
+  // نبدأ أول فحص بعد 10 ثوانٍ (يعطي وقتاً لـ getToken() لتحميل التوكن من DB)
+  setTimeout(async () => {
+    const tok = await getToken();
+    if (!tok) {
+      console.warn("[scheduler] ⚠️ TELEGRAM_BOT_TOKEN غير موجود في البيئة أو DB — الـ scheduler لن يعمل");
+      schedulerRunning = false;
+      return;
+    }
+    console.log(`[scheduler] 🚀 بدأ — يفحص كل ${INTERVAL_MS / 60_000} دقيقة`);
     runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
     schedulerTimer = setInterval(() => {
       runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
@@ -298,13 +316,14 @@ export function startEpisodeScheduler(): void {
 /* ── تسجيل الـ webhook ────────────────────────────────────────────────── */
 
 export async function registerTelegramWebhook(domain: string) {
-  if (!TOKEN()) {
-    console.warn("[telegram] ❌ TELEGRAM_BOT_TOKEN غير موجود");
+  const tok = await getToken();
+  if (!tok) {
+    console.warn("[telegram] ❌ TELEGRAM_BOT_TOKEN غير موجود في البيئة أو DB");
     return;
   }
   const url = `https://${domain}/api/telegram/webhook`;
   try {
-    const res  = await fetch(`${API()}/setWebhook`, {
+    const res  = await fetch(`https://api.telegram.org/bot${tok}/setWebhook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, allowed_updates: ["message", "callback_query"] }),
@@ -492,14 +511,15 @@ router.post("/api/telegram/webhook", async (req: Request, res: Response) => {
 /* ── Status endpoint ──────────────────────────────────────────────────── */
 
 router.get("/api/telegram/status", async (_req: Request, res: Response) => {
-  if (!TOKEN()) {
-    res.json({ ok: false, error: "TELEGRAM_BOT_TOKEN غير موجود" });
+  const tok = await getToken();
+  if (!tok) {
+    res.json({ ok: false, error: "TELEGRAM_BOT_TOKEN غير موجود — أضفه عبر /api/admin/setup" });
     return;
   }
   try {
-    const r    = await fetch(`${API()}/getMe`, { signal: AbortSignal.timeout(8_000) });
+    const r    = await fetch(`https://api.telegram.org/bot${tok}/getMe`, { signal: AbortSignal.timeout(8_000) });
     const data = await r.json() as any;
-    const webhookR = await fetch(`${API()}/getWebhookInfo`, { signal: AbortSignal.timeout(8_000) });
+    const webhookR = await fetch(`https://api.telegram.org/bot${tok}/getWebhookInfo`, { signal: AbortSignal.timeout(8_000) });
     const webhook  = await webhookR.json() as any;
     res.json({
       ok:               data.ok,
@@ -525,8 +545,9 @@ router.post("/api/telegram/notify-test", async (_req: Request, res: Response) =>
     });
     return;
   }
-  if (!TOKEN()) {
-    res.status(400).json({ ok: false, error: "TELEGRAM_BOT_TOKEN غير موجود" });
+  const tok2 = await getToken();
+  if (!tok2) {
+    res.status(400).json({ ok: false, error: "TELEGRAM_BOT_TOKEN غير موجود — أضفه عبر /api/admin/setup" });
     return;
   }
 
@@ -560,13 +581,14 @@ router.get("/api/telegram/scheduler", (_req: Request, res: Response) => {
     lastRun:    schedulerLastRun ? new Date(schedulerLastRun * 1000).toISOString() : null,
     nextRun:    schedulerNextRun ? new Date(schedulerNextRun * 1000).toISOString() : null,
     sentToday:  schedulerSentToday,
-    tokenOk:    !!TOKEN(),
+    tokenOk:    !!(process.env.TELEGRAM_BOT_TOKEN || _cachedToken),
     channelOk:  !!process.env.TELEGRAM_CHANNEL_ID,
   });
 });
 
 router.post("/api/telegram/scheduler/run-now", async (_req: Request, res: Response) => {
-  if (!TOKEN() || !process.env.TELEGRAM_CHANNEL_ID) {
+  const runTok = await getToken();
+  if (!runTok || !process.env.TELEGRAM_CHANNEL_ID) {
     res.status(400).json({ ok: false, error: "token أو channel غير مضبوط" });
     return;
   }
