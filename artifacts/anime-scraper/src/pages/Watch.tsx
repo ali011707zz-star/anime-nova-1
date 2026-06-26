@@ -847,6 +847,12 @@ function ScraperPicker({
     slotStatus[d.site] === "ready" || slotStatus[d.site] === "failed"
   );
 
+  /* Next-episode guard: use nextAiringEpisode when totalEps is unknown (999 fallback) */
+  const nextAiringEp = anime?.nextAiringEpisode?.episode;
+  const isNextDisabled = totalEps < 900
+    ? ep >= totalEps
+    : nextAiringEp ? ep >= nextAiringEp - 1 : false;
+
   /* Flatten + filter + deduplicate all fetched sources — memoised to avoid re-work on every SSE tick */
   const { displaySources, embedFallbacks } = useMemo(() => {
     const flat: FetchedSrc[] = [];
@@ -921,7 +927,7 @@ function ScraperPicker({
             style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(10px)", color: "rgba(255,255,255,0.65)" }}>
             <ChevronRight className="w-3.5 h-3.5" />السابقة
           </button>
-          <button onClick={onNextEp} disabled={totalEps < 900 && ep >= totalEps}
+          <button onClick={onNextEp} disabled={isNextDisabled}
             className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
             style={{ background: "rgba(109,40,217,0.55)", border: "1px solid rgba(139,92,246,0.38)", backdropFilter: "blur(10px)", color: "rgba(196,181,253,0.92)" }}>
             التالية<ChevronLeft className="w-3.5 h-3.5" />

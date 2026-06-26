@@ -1099,7 +1099,13 @@ export default function RiftPlayer({
                   <p className="text-white text-[16px] font-black font-['Cairo']">{title}</p>
                   {ep > 0 && <p className="text-white/60 text-[13px] font-['Cairo']">الحلقة {ep}</p>}
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap justify-center">
+                  <button
+                    onPointerDown={e => { e.stopPropagation(); setIsEnded(false); onBack?.(); }}
+                    className="flex items-center gap-2 px-5 py-3 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
+                    style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.65)" }}>
+                    ← رجوع
+                  </button>
                   <button
                     onPointerDown={e => { e.stopPropagation(); const v = videoRef.current; if (v) { v.currentTime = 0; v.play().catch(() => {}); } setIsEnded(false); showControls(); }}
                     className="flex items-center gap-2 px-5 py-3 rounded-2xl text-[13px] font-black font-['Cairo'] active:scale-95 transition-transform"
