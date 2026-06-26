@@ -28,6 +28,8 @@ export type PlayerSource = {
   quality: "1080p FHD" | "720p HD" | "360p SD";
   subtitleUrl?: string;
   isArabic?: boolean;
+  /** المزوّد يحتاج ترجمة ذكية تلقائية (مصدر ياباني بدون ترجمة عربية مدمجة) */
+  wantsSmartSub?: boolean;
 };
 
 export interface SubCue { start: number; end: number; text: string }

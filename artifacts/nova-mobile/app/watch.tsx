@@ -34,6 +34,15 @@ interface Src {
 
 
 /* ── Scraper definitions ── */
+/**
+ * المصادر اليابانية التي تستفيد من الترجمة الذكية التلقائية في نوفا موبايل.
+ * المصادر ذات subtitleUrl مدمج (kawaii/anikoto) تتعامل معها RiftPlayer تلقائياً.
+ */
+const PROVIDER_WANTS_SMART_SUB = new Set([
+  "hianime", "animepahe", "anineko", "mitanime", "reanime",
+  "starcima_anim", "anikototv", "animekai",
+]);
+
 const SCRAPER_DEFS: { site: string; tag: string; name: string; desc: string; isEn?: boolean; isArabic?: boolean }[] = [
   { site: "shahiid",       tag: "SH", name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",     isArabic: true },
   { site: "animelek",      tag: "AL", name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",     isArabic: true },
@@ -625,13 +634,15 @@ export default function WatchScreen() {
     return srcs.map(s => {
       const def = SCRAPER_DEFS.find(d => d.site === s.site);
       const isArabicSrc = def?.isArabic === true;
+      const wantsSmartSub = !isArabicSrc && PROVIDER_WANTS_SMART_SUB.has(s.site || "");
       const rawUrl = s.directUrl || s.url || "";
       return {
         url: resolveUrl(rawUrl, base),
         label: def?.name || getCdnDisplayName(rawUrl),
         quality: getSrcQualityTier(s),
         isArabic: isArabicSrc,
-        /* المصادر العربية (مدبلجة أو مترجمة) لا تحتاج ترجمة — الصوت عربي أصلاً */
+        wantsSmartSub,
+        /* المصادر العربية لا تحتاج ترجمة — الصوت عربي أصلاً */
         subtitleUrl: s.subtitleUrl
           ? resolveUrl(s.subtitleUrl, base)
           : isArabicSrc ? undefined : globalSubUrl,
