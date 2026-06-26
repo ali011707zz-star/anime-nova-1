@@ -31,7 +31,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py & sleep 2 && PORT=5000 node --enable-source-maps artifacts/api-server/dist/index.mjs"
+args = "pkill -f cf_proxy.py 2>/dev/null; fuser -k 8000/tcp 2>/dev/null; fuser -k 5000/tcp 2>/dev/null; sleep 1; CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py & sleep 2 && PORT=5000 node --enable-source-maps artifacts/api-server/dist/index.mjs"
 waitForPort = 5000
 
 [agent]

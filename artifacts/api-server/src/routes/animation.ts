@@ -197,6 +197,51 @@ async function cfProxyGet(url: string): Promise<string> {
   return r.text();
 }
 
+// CF + Orkestr fallback — يجرب cfProxyGet أولاً، إذا حجبه CF يجرب خادم Orkestr الخارجي (EU IP)
+async function cfOrOrkestGet(url: string): Promise<string> {
+  const isCfPage = (h: string) =>
+    h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
+  try {
+    const html = await cfProxyGet(url);
+    if (!isCfPage(html)) return html;
+  } catch { /* fall through */ }
+  // Fallback: Orkestr relay (EU IP, not Replit datacenter)
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const r = await fetch(
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
+    { signal: AbortSignal.timeout(25_000) }
+  );
+  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
+  const html = await r.text();
+  if (isCfPage(html)) throw new Error("CF still blocked via Orkestr");
+  return html;
+}
+
+// CF proxy POST — يرسل POST عبر curl_cffi مع Orkestr fallback
+async function cfOrOrkestPost(url: string): Promise<string> {
+  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
+  const isCfPage = (h: string) =>
+    h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
+  try {
+    const r = await fetch(
+      `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
+      { signal: AbortSignal.timeout(18_000) }
+    );
+    if (r.ok) {
+      const html = await r.text();
+      if (!isCfPage(html)) return html;
+    }
+  } catch { /* fall through */ }
+  // Fallback: Orkestr POST relay
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const r2 = await fetch(
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}&method=POST`,
+    { signal: AbortSignal.timeout(25_000) }
+  );
+  if (!r2.ok) throw new Error(`Orkestr POST HTTP ${r2.status}`);
+  return r2.text();
+}
+
 async function asFetchPosts(params: string): Promise<Array<{ id: number; link: string; title: { rendered: string } }>> {
   try {
     const url = `${AS_BASE}/wp-json/wp/v2/posts?${params}&_fields=id,link,title`;
@@ -1760,9 +1805,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
 
 
-    // Fetch IMDB ID + English title from TMDB in parallel (needed for multiple scrapers)
+    // Fetch IMDB ID + English title + release year from TMDB in parallel (needed for multiple scrapers)
     let imdbId = "";
     let enTitlePrefetched = "";
+    let releaseYear = "";
     await Promise.allSettled([
       (async () => {
         if (!tmdbId) return;
@@ -1783,6 +1829,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (r.ok) {
             const d: any = await r.json();
             enTitlePrefetched = d.title || d.name || "";
+            const dateStr: string = d.release_date || d.first_air_date || "";
+            if (dateStr) releaseYear = dateStr.slice(0, 4);
           }
         } catch { /* silent */ }
       })(),
@@ -2307,6 +2355,126 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         try {
           send("status", { msg: "VidFast: جاري الاستخراج…" });
           await scrapeVidFastAnim(tmdbId, type as "movie" | "tv", season, epNum, sendSource);
+        } catch { /* silent */ }
+      }),
+
+      // ── VidCore (vidcore.net) — نفس نمط VidFast عبر enc-dec.app ─────────────
+      scrapeAnimCached("vidcore", async () => {
+        if (!tmdbId) return;
+        const ENCDEC    = "https://enc-dec.app/api";
+        const VC_ORIGIN = "https://vidcore.net";
+        send("status", { msg: "VidCore: جاري الاستخراج…" });
+        try {
+          // Step 1: fetch player page to get text token
+          const pagePath = type === "tv" ? `/tv/${tmdbId}/${season}/${epNum}/` : `/movie/${tmdbId}/`;
+          const pageRes = await fetch(`${VC_ORIGIN}${pagePath}`, {
+            headers: { "User-Agent": UA, "Referer": VC_ORIGIN + "/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!pageRes.ok) return;
+          const pageHtml = await pageRes.text();
+          const textMatch = pageHtml.match(/\\"en\\":\\"([^"\\]+)\\"/);
+          if (!textMatch) return;
+
+          // Step 2: enc-vidcore → {servers, stream, token}
+          const encRes = await fetch(`${ENCDEC}/enc-vidcore?text=${encodeURIComponent(textMatch[1])}`, {
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!encRes.ok) return;
+          const encData: any = await encRes.json();
+          if (encData.status !== 200) return;
+          const { servers: srvUrl, stream: streamBase, token: csrf } = encData.result;
+
+          const VC_HEADERS = {
+            "User-Agent": UA, "Referer": VC_ORIGIN + "/",
+            "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": csrf,
+          };
+
+          // Step 3: POST servers URL → decrypt
+          const srvEncRes = await fetch(srvUrl, { method: "POST", headers: VC_HEADERS, signal: AbortSignal.timeout(10_000) });
+          const srvEncText = await srvEncRes.text();
+          const decSrvRes = await fetch(`${ENCDEC}/dec-vidcore`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: srvEncText }), signal: AbortSignal.timeout(10_000),
+          });
+          const decSrvData: any = await decSrvRes.json();
+          if (decSrvData.status !== 200) return;
+          const serversList: Array<{ name: string; data: string }> = decSrvData.result;
+
+          // Step 4: fetch each server stream → decrypt → sendSource
+          const seen = new Set<string>();
+          await Promise.allSettled(
+            serversList.slice(0, 8).map(async (srv) => {
+              try {
+                const stRes = await fetch(`${streamBase}/${srv.data}`, {
+                  method: "POST", headers: VC_HEADERS, signal: AbortSignal.timeout(10_000),
+                });
+                const stText = await stRes.text();
+                const decStRes = await fetch(`${ENCDEC}/dec-vidcore`, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text: stText }), signal: AbortSignal.timeout(10_000),
+                });
+                const decSt: any = await decStRes.json();
+                if (decSt.status !== 200) return;
+                const m3u8: string = decSt.result?.url || decSt.result || "";
+                if (typeof m3u8 !== "string" || !m3u8.includes(".m3u8") || seen.has(m3u8)) return;
+                seen.add(m3u8);
+                sendSource(wrapHls(m3u8, VC_ORIGIN + "/"), `VidCore · ${srv.name}`, m3u8, wrapHls(m3u8, VC_ORIGIN + "/"));
+              } catch { /* silent */ }
+            })
+          );
+        } catch { /* silent */ }
+      }),
+
+      // ── VidSync (vidsync.xyz) — Turnstile token عبر enc-dec.app, 7 سيرفرات ─
+      scrapeAnimCached("vidsync", async () => {
+        if (!tmdbId) return;
+        const ENCDEC    = "https://enc-dec.app/api";
+        const VS_ORIGIN = "https://vidsync.xyz";
+        const ENC_TITLE = (enTitlePrefetched || title).replace(/\s+/g, "+");
+        const YEAR      = releaseYear || "";
+        const SERVERS   = ["cinevault", "cinedub", "cinebox", "cineflix", "cinevip", "cinecloud", "cine4k"];
+        send("status", { msg: "VidSync: جاري الاستخراج…" });
+        try {
+          // Step 1: get Cloudflare turnstile token
+          const encRes = await fetch(`${ENCDEC}/enc-vidsync`, { signal: AbortSignal.timeout(10_000) });
+          if (!encRes.ok) return;
+          const encData: any = await encRes.json();
+          if (encData.status !== 200) return;
+          const turnstileToken: string = encData.result?.token || "";
+          if (!turnstileToken) return;
+
+          const VS_HEADERS = {
+            "User-Agent": UA, "Origin": VS_ORIGIN, "Referer": VS_ORIGIN + "/",
+            "X-Requested-With": "XMLHttpRequest", "X-Cf-Turnstile": turnstileToken,
+          };
+
+          const seen = new Set<string>();
+          // Step 2: fetch each server stream → decrypt → sendSource
+          await Promise.allSettled(
+            SERVERS.map(async (server) => {
+              try {
+                const fetchUrl = type === "tv"
+                  ? `${VS_ORIGIN}/api/stream/fetch?title=${ENC_TITLE}&type=tv&releaseYear=${YEAR}&mediaId=${tmdbId}&serverName=${server}&season=${season}&episode=${epNum}`
+                  : `${VS_ORIGIN}/api/stream/fetch?title=${ENC_TITLE}&type=movie&releaseYear=${YEAR}&mediaId=${tmdbId}&serverName=${server}`;
+
+                const res = await fetch(fetchUrl, { headers: VS_HEADERS, signal: AbortSignal.timeout(14_000) });
+                const encrypted = await res.text();
+                if (!encrypted || encrypted.trim().startsWith("{")) return;
+
+                const decRes = await fetch(`${ENCDEC}/dec-vidsync`, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text: encrypted, id: tmdbId }), signal: AbortSignal.timeout(10_000),
+                });
+                const decData: any = await decRes.json();
+                if (decData.status !== 200) return;
+                const m3u8: string = decData.result?.url || decData.result?.stream || decData.result || "";
+                if (typeof m3u8 !== "string" || !m3u8.includes(".m3u8") || seen.has(m3u8)) return;
+                seen.add(m3u8);
+                sendSource(wrapHls(m3u8, VS_ORIGIN + "/"), `VidSync · ${server}`, m3u8, wrapHls(m3u8, VS_ORIGIN + "/"));
+              } catch { /* silent */ }
+            })
+          );
         } catch { /* silent */ }
       }),
 
@@ -2908,42 +3076,22 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       Promise.resolve(),
 
       // ── FaselHD (faselhds.biz / faselhd.club) — أفلام ومسلسلات عربية مترجمة ────
-      // CF-protected: يحتاج cfProxyGet (curl_cffi) لتجاوز Cloudflare
+      // CF-protected: يجرب cfProxyGet أولاً ثم يعود لـ Orkestr (EU IP) كـ fallback
       scrapeAnimCached("faselhd", async () => {
         const FASEL_BASE = "https://www.faselhds.biz";
         const FASEL_ALT  = "https://faselhd.club";
-        const CF_PORT    = process.env["CF_PROXY_PORT"] || "8000";
         const q = encodeURIComponent(title);
         send("status", { msg: "FaselHD: جاري البحث…" });
-
-        // Helper: fetch via CF proxy
-        const faselGet = async (url: string): Promise<string> => {
-          const r = await fetch(
-            `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
-            { signal: AbortSignal.timeout(18_000) }
-          );
-          if (!r.ok) throw new Error(`CF proxy ${r.status}`);
-          return r.text();
-        };
-
-        const faselPost = async (url: string): Promise<string> => {
-          const r = await fetch(
-            `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
-            { signal: AbortSignal.timeout(18_000) }
-          );
-          if (!r.ok) throw new Error(`CF proxy POST ${r.status}`);
-          return r.text();
-        };
 
         const isCfBlocked = (html: string) =>
           html.includes("Just a moment") || html.includes("cf-browser-verification") || html.length < 500;
 
         try {
-          // Step 1: Search
+          // Step 1: Search (cfProxyGet → Orkestr fallback)
           let html = "";
           for (const base of [FASEL_BASE, FASEL_ALT]) {
             try {
-              html = await faselGet(`${base}/?s=${q}`);
+              html = await cfOrOrkestGet(`${base}/?s=${q}`);
               if (!isCfBlocked(html)) break;
               html = "";
             } catch { /* try alt */ }
@@ -2968,7 +3116,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
           // Step 4: Load content page
           let pageHtml = "";
-          try { pageHtml = await faselGet(best.url); } catch { return; }
+          try { pageHtml = await cfOrOrkestGet(best.url); } catch { return; }
           if (isCfBlocked(pageHtml)) return;
 
           const isMoviePage = !/<div[^>]+class="[^"]*epAll[^"]*"/.test(pageHtml);
@@ -2983,7 +3131,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               return;
             }
             try {
-              const dlHtml = await faselPost(dlM[1]);
+              const dlHtml = await cfOrOrkestPost(dlM[1]);
               const directM = dlHtml.match(/class="dl-link[^"]*"[^>]*href="([^"]+)"/);
               if (!directM) return;
               const directUrl = directM[1];
@@ -2999,12 +3147,12 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const num = parseInt(m[3]) || 0;
               if (num !== epNum) continue;
               let epHtml = "";
-              try { epHtml = await faselGet(m[2]); } catch { break; }
+              try { epHtml = await cfOrOrkestGet(m[2]); } catch { break; }
               if (isCfBlocked(epHtml)) break;
               const dlM2 = epHtml.match(/class="downloadLinks"[\s\S]*?<a\s+href="([^"]+)"/);
               if (dlM2) {
                 try {
-                  const dlHtml = await faselPost(dlM2[1]);
+                  const dlHtml = await cfOrOrkestPost(dlM2[1]);
                   const directM = dlHtml.match(/class="dl-link[^"]*"[^>]*href="([^"]+)"/);
                   if (directM?.length) {
                     const directUrl = directM[1];
@@ -3027,34 +3175,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // CF-protected: يحتاج cfProxyGet (curl_cffi)
       scrapeAnimCached("egydead", async () => {
         const EGYD_BASE = "https://tv9.egydead.live";
-        const CF_PORT   = process.env["CF_PROXY_PORT"] || "8000";
         const q = encodeURIComponent(title);
         send("status", { msg: "EgyDead: جاري البحث…" });
-
-        const egydGet = async (url: string): Promise<string> => {
-          const r = await fetch(
-            `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
-            { signal: AbortSignal.timeout(18_000) }
-          );
-          if (!r.ok) throw new Error(`CF proxy ${r.status}`);
-          return r.text();
-        };
-
-        const egydPost = async (url: string): Promise<string> => {
-          const r = await fetch(
-            `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
-            { signal: AbortSignal.timeout(18_000) }
-          );
-          if (!r.ok) throw new Error(`CF proxy POST ${r.status}`);
-          return r.text();
-        };
 
         const isCfBlocked = (html: string) =>
           html.includes("Attention Required") || html.includes("Just a moment") || html.length < 300;
 
         try {
-          // Step 1: Search
-          const searchHtml = await egydGet(`${EGYD_BASE}/?s=${q}`);
+          // Step 1: Search (cfProxyGet → Orkestr fallback)
+          const searchHtml = await cfOrOrkestGet(`${EGYD_BASE}/?s=${q}`);
           if (isCfBlocked(searchHtml)) return;
 
           // Step 2: Parse — li.movieItem → a[href] + h1.BottomTitle
@@ -3073,7 +3202,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (!best) return;
 
           // Step 3: POST View=1 to get page content
-          const pageHtml = await egydPost(best.url);
+          const pageHtml = await cfOrOrkestPost(best.url);
           if (!pageHtml || isCfBlocked(pageHtml)) return;
 
           if (type === "movie") {
@@ -3106,7 +3235,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const epEntry = eps.find(e => e.num === epNum);
             if (!epEntry) return;
 
-            const epHtml = await egydPost(epEntry.url);
+            const epHtml = await cfOrOrkestPost(epEntry.url);
             if (!epHtml || isCfBlocked(epHtml)) return;
 
             const svrRe2 = /<li[^>]+data-link="([^"]+)"[^>]*>/g;
