@@ -524,10 +524,13 @@ router.get("/api/telegram/status", async (_req: Request, res: Response) => {
     res.json({
       ok:               data.ok,
       bot:              data.result,
+      telegramError:    data.ok ? undefined : (data.description || "unknown"),
+      errorCode:        data.ok ? undefined : data.error_code,
       webhook:          webhook.result,
       adminConfigured:  !!(await getAdminChatId()),
       channelConfigured: !!process.env.TELEGRAM_CHANNEL_ID,
       channelId:        process.env.TELEGRAM_CHANNEL_ID || null,
+      tokenPrefix:      tok ? tok.substring(0, 10) + "..." : null,
     });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
