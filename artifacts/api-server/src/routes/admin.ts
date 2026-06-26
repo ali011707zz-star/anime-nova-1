@@ -46,23 +46,57 @@ router.get("/admin/db-setup", async (_req: Request, res: Response) => {
   });
 });
 
-/* تشخيص SMTP — بدون مصادقة للاختبار السريع */
+/* تشخيص SMTP — يكشف الخطأ الحقيقي من Gmail */
 router.get("/admin/smtp-ping", async (_req: Request, res: Response) => {
-  try {
-    resetTransporter();
-    await initEmailService();
-    const { getDbConfig } = await import("../lib/dbConfig.js");
-    const dbPass = await getDbConfig("smtp_pass");
-    const dbUser = await getDbConfig("smtp_user");
+  const { getDbConfig } = await import("../lib/dbConfig.js");
+  const dbPass = await getDbConfig("smtp_pass");
+  const dbUser = await getDbConfig("smtp_user");
+  const dbHost = await getDbConfig("smtp_host");
+  const dbPort = await getDbConfig("smtp_port");
+
+  const user = dbUser || process.env.SMTP_USER || process.env.EMAIL_USER || "";
+  const pass = dbPass || process.env.SMTP_PASS || "";
+  const host = dbHost || process.env.SMTP_HOST || "smtp.gmail.com";
+  const port = dbPort ? Number(dbPort) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587);
+
+  if (!user || !pass) {
     return res.json({
-      ok:       true,
-      smtpUser: process.env.SMTP_USER || dbUser || "غير مضبوط",
-      hasPass:  !!(process.env.SMTP_PASS || dbPass),
-      source:   process.env.SMTP_PASS ? "env" : dbPass ? "db" : "none",
-      nodeEnv:  process.env.NODE_ENV,
+      ok: false,
+      error: "SMTP_USER أو SMTP_PASS غير موجود",
+      source: "none",
+    });
+  }
+
+  // اختبار اتصال SMTP مباشر مع إظهار الخطأ الحقيقي
+  try {
+    const nodemailer = (await import("nodemailer")).default;
+    const t = nodemailer.createTransport({
+      host, port,
+      secure: port === 465,
+      auth: { user, pass },
+      tls: { rejectUnauthorized: false },
+    });
+    await t.verify();  // هذا يكشف الخطأ الحقيقي من Gmail
+    t.close();
+    return res.json({
+      ok: true,
+      smtpUser: user,
+      smtpHost: `${host}:${port}`,
+      hasPass: true,
+      source: dbPass ? "db" : "env",
+      nodeEnv: process.env.NODE_ENV,
+      message: "✅ SMTP يعمل بنجاح",
     });
   } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err.message });
+    return res.status(500).json({
+      ok: false,
+      smtpUser: user,
+      smtpHost: `${host}:${port}`,
+      source: dbPass ? "db" : "env",
+      error: err.message,  // ← الخطأ الحقيقي من Gmail
+      code: err.code,
+      responseCode: err.responseCode,
+    });
   }
 });
 
