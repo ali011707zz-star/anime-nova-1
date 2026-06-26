@@ -2365,43 +2365,46 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         const VC_ORIGIN = "https://vidcore.net";
         send("status", { msg: "VidCore: جاري الاستخراج…" });
         try {
-          // Step 1: fetch player page to get text token
+          // Step 1: جلب الصفحة عبر Orkestr (CF يحجب Replit IPs مباشرة)
           const pagePath = type === "tv" ? `/tv/${tmdbId}/${season}/${epNum}/` : `/movie/${tmdbId}/`;
-          const pageRes = await fetch(`${VC_ORIGIN}${pagePath}`, {
-            headers: { "User-Agent": UA, "Referer": VC_ORIGIN + "/" },
-            signal: AbortSignal.timeout(12_000),
-          });
-          if (!pageRes.ok) return;
-          const pageHtml = await pageRes.text();
-          const textMatch = pageHtml.match(/\\"en\\":\\"([^"\\]+)\\"/);
+          const pageHtml = await cfOrOrkestGet(`${VC_ORIGIN}${pagePath}`);
+          if (!pageHtml || pageHtml.length < 500) return;
+
+          // استخراج النص المشفر من صفحة الـ player (React/Next.js inlined JSON)
+          const textMatch =
+            pageHtml.match(/[?&](?:key|token|data|hash)=([A-Za-z0-9_-]{16,})/)?.[1] ||
+            pageHtml.match(/"(?:key|token|data|encKey)"\s*:\s*"([A-Za-z0-9_-]{16,})"/) ?.[1] ||
+            pageHtml.match(/src="[^"]*\/e\/([A-Za-z0-9_-]{16,})"/) ?.[1];
           if (!textMatch) return;
 
           // Step 2: enc-vidcore → {servers, stream, token}
-          const encRes = await fetch(`${ENCDEC}/enc-vidcore?text=${encodeURIComponent(textMatch[1])}`, {
+          const encRes = await fetch(`${ENCDEC}/enc-vidcore?text=${encodeURIComponent(textMatch)}`, {
             signal: AbortSignal.timeout(10_000),
           });
           if (!encRes.ok) return;
           const encData: any = await encRes.json();
           if (encData.status !== 200) return;
           const { servers: srvUrl, stream: streamBase, token: csrf } = encData.result;
+          if (!srvUrl || !streamBase) return;
 
           const VC_HEADERS = {
             "User-Agent": UA, "Referer": VC_ORIGIN + "/",
-            "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": csrf,
+            "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": csrf || "",
           };
 
-          // Step 3: POST servers URL → decrypt
+          // Step 3: POST servers URL → decrypt list
           const srvEncRes = await fetch(srvUrl, { method: "POST", headers: VC_HEADERS, signal: AbortSignal.timeout(10_000) });
+          if (!srvEncRes.ok) return;
           const srvEncText = await srvEncRes.text();
           const decSrvRes = await fetch(`${ENCDEC}/dec-vidcore`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: srvEncText }), signal: AbortSignal.timeout(10_000),
           });
           const decSrvData: any = await decSrvRes.json();
-          if (decSrvData.status !== 200) return;
+          if (decSrvData.status !== 200 || !Array.isArray(decSrvData.result)) return;
           const serversList: Array<{ name: string; data: string }> = decSrvData.result;
 
-          // Step 4: fetch each server stream → decrypt → sendSource
+          // Step 4: جلب كل سيرفر → فك التشفير → sendSource
           const seen = new Set<string>();
           await Promise.allSettled(
             serversList.slice(0, 8).map(async (srv) => {
@@ -2426,57 +2429,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── VidSync (vidsync.xyz) — Turnstile token عبر enc-dec.app, 7 سيرفرات ─
-      scrapeAnimCached("vidsync", async () => {
-        if (!tmdbId) return;
-        const ENCDEC    = "https://enc-dec.app/api";
-        const VS_ORIGIN = "https://vidsync.xyz";
-        const ENC_TITLE = (enTitlePrefetched || title).replace(/\s+/g, "+");
-        const YEAR      = releaseYear || "";
-        const SERVERS   = ["cinevault", "cinedub", "cinebox", "cineflix", "cinevip", "cinecloud", "cine4k"];
-        send("status", { msg: "VidSync: جاري الاستخراج…" });
-        try {
-          // Step 1: get Cloudflare turnstile token
-          const encRes = await fetch(`${ENCDEC}/enc-vidsync`, { signal: AbortSignal.timeout(10_000) });
-          if (!encRes.ok) return;
-          const encData: any = await encRes.json();
-          if (encData.status !== 200) return;
-          const turnstileToken: string = encData.result?.token || "";
-          if (!turnstileToken) return;
-
-          const VS_HEADERS = {
-            "User-Agent": UA, "Origin": VS_ORIGIN, "Referer": VS_ORIGIN + "/",
-            "X-Requested-With": "XMLHttpRequest", "X-Cf-Turnstile": turnstileToken,
-          };
-
-          const seen = new Set<string>();
-          // Step 2: fetch each server stream → decrypt → sendSource
-          await Promise.allSettled(
-            SERVERS.map(async (server) => {
-              try {
-                const fetchUrl = type === "tv"
-                  ? `${VS_ORIGIN}/api/stream/fetch?title=${ENC_TITLE}&type=tv&releaseYear=${YEAR}&mediaId=${tmdbId}&serverName=${server}&season=${season}&episode=${epNum}`
-                  : `${VS_ORIGIN}/api/stream/fetch?title=${ENC_TITLE}&type=movie&releaseYear=${YEAR}&mediaId=${tmdbId}&serverName=${server}`;
-
-                const res = await fetch(fetchUrl, { headers: VS_HEADERS, signal: AbortSignal.timeout(14_000) });
-                const encrypted = await res.text();
-                if (!encrypted || encrypted.trim().startsWith("{")) return;
-
-                const decRes = await fetch(`${ENCDEC}/dec-vidsync`, {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ text: encrypted, id: tmdbId }), signal: AbortSignal.timeout(10_000),
-                });
-                const decData: any = await decRes.json();
-                if (decData.status !== 200) return;
-                const m3u8: string = decData.result?.url || decData.result?.stream || decData.result || "";
-                if (typeof m3u8 !== "string" || !m3u8.includes(".m3u8") || seen.has(m3u8)) return;
-                seen.add(m3u8);
-                sendSource(wrapHls(m3u8, VS_ORIGIN + "/"), `VidSync · ${server}`, m3u8, wrapHls(m3u8, VS_ORIGIN + "/"));
-              } catch { /* silent */ }
-            })
-          );
-        } catch { /* silent */ }
-      }),
+      // ── VidSync — مُعطَّل: enc-vidsync يحتاج Turnstile في المتصفح (InitTabs2)
+      Promise.resolve(),
 
       // ── 16. Vyla SSE stream (missourimonster-vyla.hf.space) ──────────────────
       // Correct endpoint: /api/movie?id={tmdbId} or /api/tv?id={tmdbId}&season=&episode=
