@@ -118,6 +118,68 @@ router.post("/admin/smtp-env-patch", async (req: Request, res: Response) => {
   return res.json({ ok: true, smtp_user: process.env.SMTP_USER, hasPass: !!process.env.SMTP_PASS });
 });
 
+/* POST /api/admin/telegram-env-patch — تعيين TELEGRAM_BOT_TOKEN مباشرة في process.env + DB */
+router.post("/admin/telegram-env-patch", async (req: Request, res: Response) => {
+  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const provided = (req.headers["x-relay-secret"] as string | undefined) || (req.query.s as string | undefined);
+  if (provided !== appSecret && !(await isAdmin(req)))
+    return res.status(401).json({ error: "unauthorized" });
+
+  const { telegram_bot_token, telegram_chat_id, telegram_channel_id } = req.body || {};
+
+  if (telegram_bot_token) {
+    process.env.TELEGRAM_BOT_TOKEN = String(telegram_bot_token);
+    await setDbConfig("telegram_bot_token", String(telegram_bot_token));
+  }
+  if (telegram_chat_id) {
+    process.env.TELEGRAM_CHAT_ID = String(telegram_chat_id);
+    await setDbConfig("telegram_chat_id", String(telegram_chat_id));
+  }
+  if (telegram_channel_id) {
+    process.env.TELEGRAM_CHANNEL_ID = String(telegram_channel_id);
+    await setDbConfig("telegram_channel_id", String(telegram_channel_id));
+  }
+
+  return res.json({
+    ok: true,
+    hasToken:   !!process.env.TELEGRAM_BOT_TOKEN,
+    chatId:     process.env.TELEGRAM_CHAT_ID     || "(من DB)",
+    channelId:  process.env.TELEGRAM_CHANNEL_ID  || "(من DB)",
+    message:    "✅ إعدادات Telegram مُحدَّثة",
+  });
+});
+
+/* GET /api/admin/telegram-status — حالة Telegram */
+router.get("/admin/telegram-status", async (req: Request, res: Response) => {
+  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const provided = (req.headers["x-relay-secret"] as string | undefined) || (req.query.s as string | undefined);
+  if (provided !== appSecret && !(await isAdmin(req)))
+    return res.status(401).json({ error: "unauthorized" });
+
+  const { getEnvOrDb } = await import("../lib/dbConfig.js");
+  const token     = await getEnvOrDb("TELEGRAM_BOT_TOKEN", "telegram_bot_token");
+  const chatId    = await getEnvOrDb("TELEGRAM_CHAT_ID",   "telegram_chat_id");
+  const channelId = await getEnvOrDb("TELEGRAM_CHANNEL_ID","telegram_channel_id");
+
+  let botInfo: any = null;
+  if (token) {
+    try {
+      const r = await fetch(`https://api.telegram.org/bot${token}/getMe`, { signal: AbortSignal.timeout(5000) });
+      botInfo = await r.json();
+    } catch { /* ignore */ }
+  }
+
+  return res.json({
+    hasToken:   !!token,
+    hasChatId:  !!chatId,
+    hasChannel: !!channelId,
+    chatId,
+    channelId,
+    botInfo: botInfo?.result ?? null,
+    source:  token ? (process.env.TELEGRAM_BOT_TOKEN ? "env" : "db") : "none",
+  });
+});
+
 router.post("/admin/smtp-config", async (req: Request, res: Response) => {
   const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
   const relaySecret = (req.headers["x-relay-secret"] as string | undefined) || req.query.s;

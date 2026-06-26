@@ -5,7 +5,7 @@ import { getEnvOrDb } from "../lib/dbConfig.js";
 const router = Router();
 
 const getBotToken = async () => getEnvOrDb("TELEGRAM_BOT_TOKEN", "telegram_bot_token");
-const getChatId   = () => process.env.TELEGRAM_CHAT_ID   || "";
+const getChatId   = async () => process.env.TELEGRAM_CHAT_ID || await getEnvOrDb("TELEGRAM_CHAT_ID", "telegram_chat_id");
 
 router.post("/api/report", async (req, res) => {
   const { message, type, page, userDisplayName } = req.body as {
@@ -36,7 +36,7 @@ router.post("/api/report", async (req, res) => {
 
   // ── 2. إرسال Telegram اختياري ─────────────────────────────────────────────
   const botToken = await getBotToken();
-  const chatId   = getChatId();
+  const chatId   = await getChatId();
   if (botToken && chatId) {
     const typeLabel: Record<string, string> = {
       bug:        "🐛 خلل تقني",

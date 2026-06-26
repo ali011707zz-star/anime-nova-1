@@ -100,10 +100,9 @@ router.post("/comments", async (req: Request, res: Response) => {
     if (txt.trim().length > 1000)
       return res.status(400).json({ error: "التعليق طويل جداً (الحد 1000 حرف)" });
 
-    const row = await sbInsert("comments", {
+    const baseRow = {
       user_id:           userId,
       username:          username || "مستخدم",
-      user_handle:       userHandle || null,
       avatar_url:        avatarUrl || null,
       anime_id:          animeId ? Number(animeId) : null,
       tmdb_id:           tmdbId  ? String(tmdbId)  : null,
@@ -113,7 +112,20 @@ router.post("/comments", async (req: Request, res: Response) => {
       likes:             0,
       parent_id:         parentId || null,
       reply_to_username: replyToUsername || null,
-    });
+    };
+
+    let row = await sbInsert("comments", { ...baseRow, user_handle: userHandle || null });
+
+    // إذا فشل الإدراج (مثلاً عمود user_handle ناقص في Supabase القديم) — أعد المحاولة بدونه
+    if (!row) {
+      console.warn("[comments] sbInsert with user_handle failed — retrying without it");
+      row = await sbInsert("comments", baseRow);
+    }
+
+    if (!row) {
+      console.error("[comments] POST: sbInsert returned null after retry");
+      return res.status(500).json({ error: "فشل إنشاء التعليق في قاعدة البيانات" });
+    }
 
     return res.status(201).json({ comment: mapRow(row, false) });
   } catch (err) {

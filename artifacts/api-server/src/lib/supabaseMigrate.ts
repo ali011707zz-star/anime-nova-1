@@ -87,16 +87,36 @@ CREATE TABLE IF NOT EXISTS watch_progress (
 CREATE INDEX IF NOT EXISTS idx_wp_user ON watch_progress(user_id);
 
 CREATE TABLE IF NOT EXISTS comments (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
-  anime_id   TEXT NOT NULL,
-  episode    INTEGER,
-  content    TEXT NOT NULL,
-  likes      INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           TEXT        NOT NULL,
+  username          TEXT        NOT NULL DEFAULT 'مستخدم',
+  user_handle       TEXT,
+  avatar_url        TEXT,
+  anime_id          INTEGER,
+  tmdb_id           TEXT,
+  anime_type        TEXT        NOT NULL DEFAULT 'anime',
+  episode_number    INTEGER,
+  text              TEXT        NOT NULL CHECK (char_length(text) <= 1000),
+  likes             INTEGER     NOT NULL DEFAULT 0 CHECK (likes >= 0),
+  parent_id         UUID,
+  reply_to_username TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_comments_anime ON comments(anime_id, episode);
+-- إضافة الأعمدة الناقصة إن كان الجدول موجوداً بمخطط قديم
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS user_handle       TEXT;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS username          TEXT NOT NULL DEFAULT 'مستخدم';
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS user_id           TEXT NOT NULL DEFAULT '';
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS anime_type        TEXT NOT NULL DEFAULT 'anime';
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS tmdb_id           TEXT;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS anime_id          INTEGER;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS episode_number    INTEGER;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS text              TEXT;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id         UUID;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS reply_to_username TEXT;
+CREATE INDEX IF NOT EXISTS idx_comments_anime   ON comments(anime_id, episode_number);
+CREATE INDEX IF NOT EXISTS idx_comments_tmdb    ON comments(tmdb_id, episode_number);
+CREATE INDEX IF NOT EXISTS idx_comments_user    ON comments(user_id);
+CREATE INDEX IF NOT EXISTS idx_comments_parent  ON comments(parent_id);
 
 -- إضافة أعمدة ناقصة في users (safe migration)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS plan                 TEXT DEFAULT 'free';

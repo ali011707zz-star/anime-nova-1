@@ -42,28 +42,48 @@ app.listen(port, host, (err) => {
 
   initEmailService().catch(() => {});
 
-  // ── مزامنة ENV → Supabase app_config عند كل startup ──────────────────
-  // يضمن أن الإعدادات في DB صحيحة دائماً (يُستخدم بواسطة Orkestr بعد نشر الكود الجديد)
+  // ── مزامنة ENV ↔ DB عند كل startup ──────────────────────────────────────
+  // اتجاه 1: ENV → DB  (تثبيت القيم الجديدة)
+  // اتجاه 2: DB → ENV  (استعادة القيم المحفوظة إن لم تكن في ENV)
   (async () => {
     try {
-      const { setDbConfig } = await import("./lib/dbConfig.js");
+      const { setDbConfig, getDbConfig } = await import("./lib/dbConfig.js");
+
+      // ENV → DB (push env vars إلى DB إن وُجدت)
       const envMap: Record<string, string> = {
-        smtp_user:          process.env.SMTP_USER          || "",
-        smtp_pass:          process.env.SMTP_PASS          || "",
-        smtp_host:          process.env.SMTP_HOST          || "",
-        smtp_port:          process.env.SMTP_PORT          || "",
-        telegram_bot_token: process.env.TELEGRAM_BOT_TOKEN || "",
-        telegram_channel_id:process.env.TELEGRAM_CHANNEL_ID|| "",
-        telegram_chat_id:   process.env.TELEGRAM_CHAT_ID   || "",
+        smtp_user:           process.env.SMTP_USER           || "",
+        smtp_pass:           process.env.SMTP_PASS           || "",
+        smtp_host:           process.env.SMTP_HOST           || "",
+        smtp_port:           process.env.SMTP_PORT           || "",
+        telegram_bot_token:  process.env.TELEGRAM_BOT_TOKEN  || "",
+        telegram_channel_id: process.env.TELEGRAM_CHANNEL_ID || "",
+        telegram_chat_id:    process.env.TELEGRAM_CHAT_ID    || "",
       };
       const synced: string[] = [];
       for (const [key, val] of Object.entries(envMap)) {
         if (val) { await setDbConfig(key, val); synced.push(key); }
       }
       if (synced.length > 0)
-        console.log("[config-sync] ✅ ENV → Supabase app_config:", synced.join(", "));
+        console.log("[config-sync] ✅ ENV → DB:", synced.join(", "));
+
+      // DB → ENV (استعادة القيم الناقصة من DB إلى process.env)
+      const restored: string[] = [];
+      if (!process.env.TELEGRAM_BOT_TOKEN) {
+        const v = await getDbConfig("telegram_bot_token");
+        if (v) { process.env.TELEGRAM_BOT_TOKEN = v; restored.push("TELEGRAM_BOT_TOKEN"); }
+      }
+      if (!process.env.TELEGRAM_CHAT_ID) {
+        const v = await getDbConfig("telegram_chat_id");
+        if (v) { process.env.TELEGRAM_CHAT_ID = v; restored.push("TELEGRAM_CHAT_ID"); }
+      }
+      if (!process.env.TELEGRAM_CHANNEL_ID) {
+        const v = await getDbConfig("telegram_channel_id");
+        if (v) { process.env.TELEGRAM_CHANNEL_ID = v; restored.push("TELEGRAM_CHANNEL_ID"); }
+      }
+      if (restored.length > 0)
+        console.log("[config-sync] ✅ DB → ENV (restored):", restored.join(", "));
     } catch (e: any) {
-      console.warn("[config-sync] ⚠️ فشل مزامنة ENV → DB:", e.message);
+      console.warn("[config-sync] ⚠️ فشل مزامنة ENV ↔ DB:", e.message);
     }
   })();
 
