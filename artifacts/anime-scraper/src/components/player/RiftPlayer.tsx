@@ -432,6 +432,7 @@ export default function RiftPlayer({
   /* ── load source ── */
   const loadSource = useCallback(async () => {
     const v = videoRef.current; if (!v) return;
+    console.log(`[Nova Player] تحميل المصدر (سيرفر ${serverIndex + 1}/${serverCount}): ${src?.slice(0, 140)}`);
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     v.src = "";
     setLoading(true); setBuffering(false); setError(null); setCurrentTime(0); setDuration(0); setPlaying(false); setIsEnded(false);

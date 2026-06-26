@@ -2109,8 +2109,11 @@ function EpisodePlayer({
 
     /* Persist current position so the next server resumes from the same point */
     savePositionBeforeSwitch();
+    /* إلغاء أي طلب ترجمة جارٍ للسيرفر السابق */
+    subAbortRef.current?.abort();
 
     if (currentServer + 1 < servers.length) {
+      console.log(`[Nova] تبديل تلقائي → سيرفر ${currentServer + 2}/${servers.length}: ${servers[currentServer + 1]?.slice(0, 120)}`);
       setCurrentServer(currentServer + 1);
       setRealQuality(null);
     } else {
@@ -2273,7 +2276,14 @@ function EpisodePlayer({
           return (
             <button
               key={i}
-              onClick={() => { savePositionBeforeSwitch(); setCurrentServer(i); setRealQuality(null); }}
+              onClick={() => {
+                savePositionBeforeSwitch();
+                /* إلغاء أي طلب ترجمة جارٍ للسيرفر السابق قبل التبديل */
+                subAbortRef.current?.abort();
+                console.log(`[Nova] تبديل السيرفر → ${info.label} (${i + 1}/${servers.length}): ${servers[i]?.slice(0, 120)}`);
+                setCurrentServer(i);
+                setRealQuality(null);
+              }}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold font-['Cairo'] whitespace-nowrap transition-all active:scale-90 shrink-0"
               style={{
                 background: isActive ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.08)",
