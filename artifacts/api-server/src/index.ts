@@ -42,20 +42,52 @@ app.listen(port, host, (err) => {
 
   initEmailService().catch(() => {});
 
+  // ── مزامنة ENV → Supabase app_config عند كل startup ──────────────────
+  // يضمن أن الإعدادات في DB صحيحة دائماً (يُستخدم بواسطة Orkestr بعد نشر الكود الجديد)
+  (async () => {
+    try {
+      const { setDbConfig } = await import("./lib/dbConfig.js");
+      const envMap: Record<string, string> = {
+        smtp_user:          process.env.SMTP_USER          || "",
+        smtp_pass:          process.env.SMTP_PASS          || "",
+        smtp_host:          process.env.SMTP_HOST          || "",
+        smtp_port:          process.env.SMTP_PORT          || "",
+        telegram_bot_token: process.env.TELEGRAM_BOT_TOKEN || "",
+        telegram_channel_id:process.env.TELEGRAM_CHANNEL_ID|| "",
+        telegram_chat_id:   process.env.TELEGRAM_CHAT_ID   || "",
+      };
+      const synced: string[] = [];
+      for (const [key, val] of Object.entries(envMap)) {
+        if (val) { await setDbConfig(key, val); synced.push(key); }
+      }
+      if (synced.length > 0)
+        console.log("[config-sync] ✅ ENV → Supabase app_config:", synced.join(", "));
+    } catch (e: any) {
+      console.warn("[config-sync] ⚠️ فشل مزامنة ENV → DB:", e.message);
+    }
+  })();
+
   // ── تصحيح SMTP على Orkestr تلقائياً عند الـ startup ──
   const orkestrUrl = process.env.ORKESTR_RELAY_URL;
   const appSecret  = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
   const smtpUser   = process.env.SMTP_USER;
   const smtpPass   = process.env.SMTP_PASS;
   if (orkestrUrl && smtpUser && smtpPass) {
+    // جرب smtp-env-patch أولاً (كود جديد)، ثم smtp-config كـ fallback (كود قديم)
     fetch(`${orkestrUrl}/api/admin/smtp-env-patch`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
       body: JSON.stringify({ smtp_user: smtpUser, smtp_pass: smtpPass, smtp_host: process.env.SMTP_HOST || "smtp.gmail.com", smtp_port: process.env.SMTP_PORT || "587" }),
-    }).then(r => r.json()).then((d: any) => {
-      if (d.ok) console.log("[smtp-sync] ✅ Orkestr SMTP synced →", d.smtp_user);
-      else console.warn("[smtp-sync] ⚠️ Orkestr SMTP sync failed:", d.error || JSON.stringify(d));
-    }).catch(() => {});
+    }).then(r => r.ok ? r.json() : Promise.reject(r.status)).then((d: any) => {
+      if (d.ok) console.log("[smtp-sync] ✅ Orkestr smtp-env-patch →", d.smtp_user);
+    }).catch(() => {
+      // fallback: جرب smtp-config (يحفظ في DB — يعمل بعد نشر الكود الجديد)
+      fetch(`${orkestrUrl}/api/admin/smtp-config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
+        body: JSON.stringify({ smtp_user: smtpUser, smtp_pass: smtpPass, smtp_host: process.env.SMTP_HOST || "smtp.gmail.com", smtp_port: process.env.SMTP_PORT || "587" }),
+      }).catch(() => {});
+    });
   }
 
   const schedulerEnabled = process.env.TELEGRAM_SCHEDULER_ENABLED !== "false";
