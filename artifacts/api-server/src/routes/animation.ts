@@ -2907,6 +2907,220 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // (متاح في قسم الأنمي عبر /api/anime/fetch-source?site=animeify)
       Promise.resolve(),
 
+      // ── FaselHD (faselhds.biz / faselhd.club) — أفلام ومسلسلات عربية مترجمة ────
+      // CF-protected: يحتاج cfProxyGet (curl_cffi) لتجاوز Cloudflare
+      scrapeAnimCached("faselhd", async () => {
+        const FASEL_BASE = "https://www.faselhds.biz";
+        const FASEL_ALT  = "https://faselhd.club";
+        const CF_PORT    = process.env["CF_PROXY_PORT"] || "8000";
+        const q = encodeURIComponent(title);
+        send("status", { msg: "FaselHD: جاري البحث…" });
+
+        // Helper: fetch via CF proxy
+        const faselGet = async (url: string): Promise<string> => {
+          const r = await fetch(
+            `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
+            { signal: AbortSignal.timeout(18_000) }
+          );
+          if (!r.ok) throw new Error(`CF proxy ${r.status}`);
+          return r.text();
+        };
+
+        const faselPost = async (url: string): Promise<string> => {
+          const r = await fetch(
+            `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
+            { signal: AbortSignal.timeout(18_000) }
+          );
+          if (!r.ok) throw new Error(`CF proxy POST ${r.status}`);
+          return r.text();
+        };
+
+        const isCfBlocked = (html: string) =>
+          html.includes("Just a moment") || html.includes("cf-browser-verification") || html.length < 500;
+
+        try {
+          // Step 1: Search
+          let html = "";
+          for (const base of [FASEL_BASE, FASEL_ALT]) {
+            try {
+              html = await faselGet(`${base}/?s=${q}`);
+              if (!isCfBlocked(html)) break;
+              html = "";
+            } catch { /* try alt */ }
+          }
+          if (!html || isCfBlocked(html)) return;
+
+          // Step 2: Parse results — div#postList div.postDiv a
+          const results: Array<{ url: string; ttl: string }> = [];
+          const itemRe = /<div[^>]+class="[^"]*postDiv[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>[\s\S]*?img[^>]+alt="([^"]*)"[\s\S]*?<\/a>/g;
+          let m: RegExpExecArray | null;
+          while ((m = itemRe.exec(html))) {
+            results.push({ url: m[1], ttl: m[2].trim() });
+          }
+          if (!results.length) return;
+
+          // Step 3: Best match
+          const best = results
+            .map(r => ({ ...r, sc: Math.max(titleSim(title, r.ttl), titleSim(enTitlePrefetched, r.ttl)) }))
+            .filter(r => r.sc > 0.38)
+            .sort((a, b) => b.sc - a.sc)[0];
+          if (!best) return;
+
+          // Step 4: Load content page
+          let pageHtml = "";
+          try { pageHtml = await faselGet(best.url); } catch { return; }
+          if (isCfBlocked(pageHtml)) return;
+
+          const isMoviePage = !/<div[^>]+class="[^"]*epAll[^"]*"/.test(pageHtml);
+
+          if (isMoviePage || type === "movie") {
+            // Movie: download link page → POST → direct MP4
+            const dlM = pageHtml.match(/class="downloadLinks"[\s\S]*?<a\s+href="([^"]+)"/);
+            if (!dlM) {
+              // Try iframe player
+              const ifrM = pageHtml.match(/iframe[^>]+name="player_iframe"[^>]+src="([^"]+)"/);
+              if (ifrM) await sendExtracted(ifrM[1], "FaselHD");
+              return;
+            }
+            try {
+              const dlHtml = await faselPost(dlM[1]);
+              const directM = dlHtml.match(/class="dl-link[^"]*"[^>]*href="([^"]+)"/);
+              if (!directM) return;
+              const directUrl = directM[1];
+              if (directUrl.includes(".mp4") || directUrl.includes("download")) {
+                const proxied = wrapMp4(directUrl, FASEL_BASE + "/");
+                sendSource(proxied, "FaselHD · تحميل مباشر", directUrl, proxied);
+              }
+            } catch { /* silent */ }
+          } else {
+            // Series: find episode N in div.epAll
+            const epRe = /<div[^>]+class="[^"]*epAll[^"]*"[\s\S]*?(<a[^>]+href="([^"]+)"[^>]*>\s*(?:حلقة\s*)?(\d+)\s*<\/a>)/g;
+            while ((m = epRe.exec(pageHtml))) {
+              const num = parseInt(m[3]) || 0;
+              if (num !== epNum) continue;
+              let epHtml = "";
+              try { epHtml = await faselGet(m[2]); } catch { break; }
+              if (isCfBlocked(epHtml)) break;
+              const dlM2 = epHtml.match(/class="downloadLinks"[\s\S]*?<a\s+href="([^"]+)"/);
+              if (dlM2) {
+                try {
+                  const dlHtml = await faselPost(dlM2[1]);
+                  const directM = dlHtml.match(/class="dl-link[^"]*"[^>]*href="([^"]+)"/);
+                  if (directM?.length) {
+                    const directUrl = directM[1];
+                    if (directUrl.includes(".mp4")) {
+                      const proxied = wrapMp4(directUrl, FASEL_BASE + "/");
+                      sendSource(proxied, `FaselHD · حلقة ${epNum}`, directUrl, proxied);
+                    }
+                  }
+                } catch { /* silent */ }
+              }
+              const ifrM = epHtml.match(/iframe[^>]+name="player_iframe"[^>]+src="([^"]+)"/);
+              if (ifrM) await sendExtracted(ifrM[1], `FaselHD · ح${epNum}`);
+              break;
+            }
+          }
+        } catch { /* silent */ }
+      }),
+
+      // ── EgyDead (tv9.egydead.live) — أفلام ومسلسلات عربية ─────────────────────
+      // CF-protected: يحتاج cfProxyGet (curl_cffi)
+      scrapeAnimCached("egydead", async () => {
+        const EGYD_BASE = "https://tv9.egydead.live";
+        const CF_PORT   = process.env["CF_PROXY_PORT"] || "8000";
+        const q = encodeURIComponent(title);
+        send("status", { msg: "EgyDead: جاري البحث…" });
+
+        const egydGet = async (url: string): Promise<string> => {
+          const r = await fetch(
+            `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
+            { signal: AbortSignal.timeout(18_000) }
+          );
+          if (!r.ok) throw new Error(`CF proxy ${r.status}`);
+          return r.text();
+        };
+
+        const egydPost = async (url: string): Promise<string> => {
+          const r = await fetch(
+            `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
+            { signal: AbortSignal.timeout(18_000) }
+          );
+          if (!r.ok) throw new Error(`CF proxy POST ${r.status}`);
+          return r.text();
+        };
+
+        const isCfBlocked = (html: string) =>
+          html.includes("Attention Required") || html.includes("Just a moment") || html.length < 300;
+
+        try {
+          // Step 1: Search
+          const searchHtml = await egydGet(`${EGYD_BASE}/?s=${q}`);
+          if (isCfBlocked(searchHtml)) return;
+
+          // Step 2: Parse — li.movieItem → a[href] + h1.BottomTitle
+          const results: Array<{ url: string; ttl: string }> = [];
+          const itemRe = /<li[^>]+class="[^"]*movieItem[^"]*"[\s\S]*?<a\s+href="([^"]+)"[^>]*>[\s\S]*?<h1[^>]+class="[^"]*BottomTitle[^"]*"[^>]*>([^<]+)<\/h1>/g;
+          let m: RegExpExecArray | null;
+          while ((m = itemRe.exec(searchHtml))) {
+            results.push({ url: m[1], ttl: m[2].trim() });
+          }
+          if (!results.length) return;
+
+          const best = results
+            .map(r => ({ ...r, sc: Math.max(titleSim(title, r.ttl), titleSim(enTitlePrefetched, r.ttl)) }))
+            .filter(r => r.sc > 0.38)
+            .sort((a, b) => b.sc - a.sc)[0];
+          if (!best) return;
+
+          // Step 3: POST View=1 to get page content
+          const pageHtml = await egydPost(best.url);
+          if (!pageHtml || isCfBlocked(pageHtml)) return;
+
+          if (type === "movie") {
+            // Download servers: ul.donwload-servers-list li a.ser-link
+            const dlRe = /<li[^>]*>[\s\S]*?<a[^>]+class="[^"]*ser-link[^"]*"[^>]+href="([^"]+)"/g;
+            while ((m = dlRe.exec(pageHtml))) {
+              const dlUrl = m[1];
+              if (!dlUrl.startsWith("http")) continue;
+              if (dlUrl.includes(".mp4") || dlUrl.includes(".m3u8")) {
+                const isHls = dlUrl.includes(".m3u8");
+                const proxied = isHls ? wrapHls(dlUrl, EGYD_BASE + "/") : wrapMp4(dlUrl, EGYD_BASE + "/");
+                sendSource(proxied, "EgyDead · تحميل", dlUrl, proxied);
+              }
+            }
+            // Watch servers: ul.serversList li[data-link]
+            const svrRe = /<li[^>]+data-link="([^"]+)"[^>]*>/g;
+            while ((m = svrRe.exec(pageHtml))) {
+              const svrUrl = m[1];
+              if (svrUrl.startsWith("http")) await sendExtracted(svrUrl, "EgyDead");
+            }
+          } else {
+            // Series: find episode in div.episodes-list
+            const epRe = /<a[^>]+href="([^"]+)"[^>]+title="([^"]*)"[^>]*>/g;
+            const eps: Array<{ url: string; num: number }> = [];
+            const epSection = pageHtml.match(/class="episodes-list"[\s\S]*?<\/div>\s*<\/div>/)?.[0] || pageHtml;
+            while ((m = epRe.exec(epSection))) {
+              const numM = m[2].match(/(\d+)/);
+              if (numM) eps.push({ url: m[1], num: parseInt(numM[1]) });
+            }
+            const epEntry = eps.find(e => e.num === epNum);
+            if (!epEntry) return;
+
+            const epHtml = await egydPost(epEntry.url);
+            if (!epHtml || isCfBlocked(epHtml)) return;
+
+            const svrRe2 = /<li[^>]+data-link="([^"]+)"[^>]*>/g;
+            while ((m = svrRe2.exec(epHtml))) {
+              if (m[1].startsWith("http")) await sendExtracted(m[1], `EgyDead · ح${epNum}`);
+            }
+            const ifrRe = /<iframe[^>]+src="([^"]+)"/g;
+            while ((m = ifrRe.exec(epHtml))) {
+              if (m[1].startsWith("http")) await sendExtracted(m[1], `EgyDead · ح${epNum}`);
+            }
+          }
+        } catch { /* silent */ }
+      }),
+
       // ── Hexa (hexa.su / flixer.su) — TMDB-native HLS متعدد السيرفرات ──────────
       // CDN: nxt.cfw69.workers.dev — CORS * — يعمل من Replit مباشرة
       // cooldown: enc-dec.app/api/enc-hexa يعيد 500 مع "Next retry: N minutes"
