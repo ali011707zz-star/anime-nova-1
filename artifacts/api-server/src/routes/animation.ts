@@ -2604,7 +2604,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const proxied = isHls
                   ? (d.startsWith("/") ? d : wrapHls(d, src.url))
                   : wrapMp4(d, src.url);
-                sendSource(proxied, `SeePanal · مدبلج · ${src.quality}`, proxied, proxied);
+                sendSource(proxied, `SeePanal · Dubbed · ${src.quality}`, proxied, proxied);
               } catch { /* skip */ }
             }));
 
@@ -2865,7 +2865,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const proxied = u.startsWith("/api/") ? u
               : u.includes(".m3u8") ? wrapHls(u, "https://mycima.gives/")
               : u;
-            sendSource(proxied, `MyCima · ${src.name || "عربي مترجم"}`, proxied, proxied);
+            sendSource(proxied, `MyCima · ${src.name || "Arabic Dubbed"}`, proxied, proxied);
           }
         } catch { /* silent */ }
       }),
@@ -2898,7 +2898,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const proxied = u.startsWith("/api/") ? u
               : u.includes(".m3u8") ? wrapHls(u, "https://web.topcinemaa.com/")
               : wrapMp4(u, "https://web.topcinemaa.com/");
-            sendSource(proxied, `TopCinema · ${src.name || "عربي مترجم"}`, proxied, proxied);
+            sendSource(proxied, `TopCinema · ${src.name || "Arabic Dubbed"}`, proxied, proxied);
           }
         } catch { /* silent */ }
       }),
