@@ -137,6 +137,91 @@ function parseVTTTime(s: string): number {
   return isNaN(sec) ? 0 : sec;
 }
 
+/* ─── Merge + sort subtitle cue arrays by start time ─── */
+function _mergeCues(existing: SubCue[], incoming: SubCue[]): SubCue[] {
+  if (!existing.length) return incoming;
+  const out = [...existing, ...incoming];
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
+/**
+ * Fetch translated subtitles progressively via /translate-vtt-stream SSE.
+ * Uses fetch + ReadableStream (works in React Native / Expo).
+ * Calls onChunk for each arriving batch of cues.
+ * Returns total cue count when done.
+ */
+async function _fetchStreamedSubtitles(
+  url: string,
+  onChunk: (cues: SubCue[]) => void,
+  signal?: AbortSignal,
+): Promise<number> {
+  const streamUrl = url.includes("/translate-vtt-stream")
+    ? url
+    : url.replace("/translate-vtt?", "/translate-vtt-stream?");
+
+  const r = await fetch(streamUrl, {
+    headers: { Accept: "text/event-stream,application/json,text/vtt,text/plain,*/*" },
+    signal: signal ?? AbortSignal.timeout(90_000),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+  const reader = r.body?.getReader();
+  if (!reader) {
+    // Fallback: read body as text and treat as single chunk
+    const text = await r.text();
+    try {
+      const lines = text.split("\n");
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const msg = JSON.parse(line.slice(6)) as { type: string; cues?: any[]; totalCues?: number };
+        if (msg.type === "chunk" && msg.cues?.length) {
+          const parsed = msg.cues.map((c: any) => {
+            const pts = (c.timing || "").split("-->");
+            return { start: parseVTTTime((pts[0] || "").trim()), end: parseVTTTime((pts[1] || "").trim()), text: (c.text || "").trim() };
+          }).filter((c: SubCue) => c.start < c.end && c.text.length > 0);
+          if (parsed.length) onChunk(parsed);
+        } else if (msg.type === "done") return msg.totalCues ?? 0;
+      }
+    } catch {}
+    return 0;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let total = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (signal?.aborted) { reader.cancel(); break; }
+    buffer += decoder.decode(value, { stream: true });
+
+    // Parse complete SSE events (delimited by \n\n)
+    let sepIdx: number;
+    while ((sepIdx = buffer.indexOf("\n\n")) >= 0) {
+      const event = buffer.slice(0, sepIdx);
+      buffer = buffer.slice(sepIdx + 2);
+      for (const line of event.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const msg = JSON.parse(line.slice(6)) as { type: string; cues?: any[]; totalCues?: number };
+          if (msg.type === "chunk" && msg.cues?.length) {
+            const parsed = msg.cues.map((c: any) => {
+              const pts = (c.timing || "").split("-->");
+              return { start: parseVTTTime((pts[0] || "").trim()), end: parseVTTTime((pts[1] || "").trim()), text: (c.text || "").trim() };
+            }).filter((c: SubCue) => c.start < c.end && c.text.length > 0);
+            if (parsed.length) { onChunk(parsed); total += parsed.length; }
+          } else if (msg.type === "done") {
+            return msg.totalCues ?? total;
+          }
+        } catch {}
+      }
+    }
+  }
+  return total;
+}
+
 function parseVTT(text: string): SubCue[] {
   const cues: SubCue[] = [];
   // ── X-TIMESTAMP-MAP: HLS-native VTT (e.g. Videasy cc.boopigcdn.com) ──
@@ -593,6 +678,7 @@ export function RiftPlayer({
     setSubOffset(0);
     subOffsetRef.current = 0;
     let cancelled = false;
+    const streamAbort = new AbortController(); // هوست هنا حتى نتمكن من إلغائه في cleanup
 
     /* مفتاح الكاش خاص بكل لغة لتجنب إرجاع cues الإنجليزية حين يطلب المستخدم العربية */
     const cacheKey = (anilistId && episode && subLang === "ar") ? `sub-ar-${anilistId}-${episode}` : null;
@@ -616,47 +702,56 @@ export function RiftPlayer({
       }
 
       if (cancelled) return;
-      setSubLoading(true);
-      setLoadedCues([]);
-      try {
-        const r = await fetch(url, { headers: { "Accept": "application/json,text/vtt,text/plain,*/*" }, signal: AbortSignal.timeout(30_000) });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        if (cancelled) return;
 
-        /* ── translate-vtt returns JSON {cues:[{timing,text}]}, NOT VTT text ── */
-        let cues: SubCue[];
-        if (url.includes("translate-vtt")) {
-          const data = await r.json() as { cues?: Array<{timing: string; text: string}> };
-          cues = (data.cues || [])
-            .map(c => {
-              const [s, e] = (c.timing || "").split("-->").map(x => x.trim());
-              return { start: parseVTTTime(s || ""), end: parseVTTTime(e || ""), text: (c.text || "").trim() };
-            })
-            .filter(c => c.start < c.end && c.text.length > 0);
-        } else {
+      if (url.includes("translate-vtt")) {
+        // 🌊 متدفق: ترجمة عربية chunk by chunk عبر SSE
+        setSubLoading(true);
+        setLoadedCues([]);
+
+        let allCues: SubCue[] = [];
+        _fetchStreamedSubtitles(url, (incoming) => {
+          if (cancelled) return;
+          allCues = _mergeCues(allCues, incoming);
+          setLoadedCues(allCues);
+          setSubOn(true);
+          if (allCues.length > 0) setSubLoading(false);
+        }, streamAbort.signal).then(() => {
+          if (cancelled) return;
+          setSubLoading(false);
+          if (allCues.length > 0) {
+            urlCueCacheRef.current.set(url, allCues);
+            if (cacheKey && isTranslated) {
+              AsyncStorage.setItem(cacheKey, JSON.stringify(allCues)).catch(() => {});
+            }
+          }
+        }).catch(() => {
+          if (!cancelled) setSubLoading(false);
+        });
+      } else {
+        // VTT/SRT نص مباشر
+        setSubLoading(true);
+        setLoadedCues([]);
+        fetch(url, {
+          headers: { "Accept": "text/vtt,text/plain,*/*" },
+          signal: AbortSignal.timeout(30_000),
+        }).then(async r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          if (cancelled) return;
           const text = await r.text();
           if (cancelled) return;
-          cues = parseVTT(text);
-        }
-
-        if (cues.length > 0) urlCueCacheRef.current.set(url, cues);
-        setLoadedCues(cues);
-        if (cues.length > 0) {
+          const cues = parseVTT(text);
+          if (cues.length > 0) urlCueCacheRef.current.set(url, cues);
+          setLoadedCues(cues);
+          if (cues.length > 0) setSubOn(true);
+        }).catch(() => {
+          if (!cancelled) setLoadedCues([]);
+        }).finally(() => {
           if (!cancelled) setSubLoading(false);
-          setSubOn(true);
-          /* ── 2. Save to AsyncStorage if this was a translation ── */
-          if (cacheKey && isTranslated) {
-            AsyncStorage.setItem(cacheKey, JSON.stringify(cues)).catch(() => {});
-          }
-        }
-      } catch {
-        if (!cancelled) setLoadedCues([]);
-      } finally {
-        if (!cancelled) setSubLoading(false);
+        });
       }
     })();
 
-    return () => { cancelled = true; setSubLoading(false); };
+    return () => { cancelled = true; streamAbort.abort(); setSubLoading(false); };
   }, [currentSrc?.subtitleUrl, anilistId, episode, subLang]); // eslint-disable-line
 
   /* ─── Auto-enable subtitles when source provides a subtitle URL ─── */

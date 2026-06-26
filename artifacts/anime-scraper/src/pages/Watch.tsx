@@ -432,6 +432,97 @@ function setCachedCues(key: string, cues: SubCue[]) {
   } catch { /* ignore quota exceeded */ }
 }
 
+/* ── Module-level timestamp parser (HH:MM:SS.mmm or MM:SS.mmm) ── */
+function _vttTimingToSec(ts: string): number {
+  const m3 = ts.match(/(\d+):(\d{2}):(\d{2})[,.](\d{3})/);
+  if (m3) return +m3[1] * 3600 + +m3[2] * 60 + +m3[3] + +m3[4] / 1000;
+  const m2 = ts.match(/(\d+):(\d{2})[,.](\d{3})/);
+  if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
+  return 0;
+}
+
+/* ── Merge + sort subtitle cue arrays (preserves timeline order) ── */
+function _mergeSubCues(existing: SubCue[], incoming: SubCue[]): SubCue[] {
+  if (!existing.length) return incoming;
+  const out = [...existing, ...incoming];
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
+/* ── Parse SSE chunk cues into SubCue[] ── */
+function _parseSseCues(raw: Array<{ timing: string; text: string }>): SubCue[] {
+  return raw.map(c => {
+    const parts = c.timing.split("-->");
+    return {
+      start: _vttTimingToSec((parts[0] || "").trim()),
+      end:   _vttTimingToSec((parts[1] || "").trim()),
+      text:  c.text,
+    };
+  }).filter(c => c.start < c.end && c.text.trim().length > 0);
+}
+
+/**
+ * Open an SSE stream to /translate-vtt-stream and deliver cues progressively.
+ * Converts /translate-vtt?… → /translate-vtt-stream?… automatically.
+ * Returns a cleanup() function — call on abort / unmount.
+ */
+function _streamVttTranslation(
+  vttUrl: string,
+  callbacks: {
+    onChunk: (cues: SubCue[], isFirst: boolean) => void;
+    onDone:  (totalCues: number) => void;
+    onError: () => void;
+  },
+  signal?: AbortSignal,
+): () => void {
+  const streamUrl = vttUrl.includes("/translate-vtt-stream")
+    ? vttUrl
+    : vttUrl.replace("/translate-vtt?", "/translate-vtt-stream?");
+
+  const es = new EventSource(streamUrl);
+  let closed = false;
+  let chunkCount = 0;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    es.close();
+  };
+
+  if (signal) {
+    if (signal.aborted) { cleanup(); return cleanup; }
+    signal.addEventListener("abort", cleanup, { once: true });
+  }
+
+  es.onmessage = (e: MessageEvent) => {
+    if (closed || signal?.aborted) { cleanup(); return; }
+    try {
+      const msg = JSON.parse(e.data as string) as {
+        type: string;
+        cues?: Array<{ timing: string; text: string }>;
+        totalCues?: number;
+      };
+      if (msg.type === "chunk" && msg.cues?.length) {
+        const parsed = _parseSseCues(msg.cues);
+        if (parsed.length > 0) {
+          callbacks.onChunk(parsed, chunkCount === 0);
+          chunkCount++;
+        }
+      } else if (msg.type === "done") {
+        callbacks.onDone(msg.totalCues ?? 0);
+        cleanup();
+      } else if (msg.type === "error") {
+        callbacks.onError();
+        cleanup();
+      }
+    } catch {}
+  };
+
+  es.onerror = () => { if (!closed) { callbacks.onError(); cleanup(); } };
+
+  return cleanup;
+}
+
 /* ══════════════════════════════════ LOADING SCREEN ══════════ */
 function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep: number }) {
   return (
@@ -1567,27 +1658,34 @@ function EpisodePlayer({
         } catch { /* ignore — translation will still load */ }
       })();
 
-      // 🌍 Phase 2: ترجمة عربية كاملة (تُستبدل الإنجليزية عند الانتهاء)
+      // 🌊 Phase 2: ترجمة عربية متدفقة — أول دفعة تظهر خلال ~3 ثوان
       const vttUrl = isTranslateUrl
         ? track.url
         : `/api/anime/translate-vtt?url=${encodeURIComponent(track.url)}&from=en&to=ar`;
-      try {
-        const r = await fetch(vttUrl, { signal: signal ?? AbortSignal.timeout(120_000) });
-        if (!r.ok) { setSubStatus("failed"); return false; }
-        const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-        if (!d.cues?.length) { setSubStatus("failed"); return false; }
-        const cues = d.cues.map(c => {
-          const [s, e] = c.timing.split("-->").map(x => x.trim());
-          return { start: toSec(s||""), end: toSec(e||""), text: c.text };
-        }).filter(c => c.start < c.end && c.text.trim());
-        if (!cues.length || (signal && signal.aborted)) { setSubStatus("failed"); return false; }
-        arDone = true;
-        // 💾 حفظ بالمفتاحين: الموحّد (لتسريع تغيير السيرفر) + URL (للرجوع)
-        setCachedCues(normKey, cues);
-        setCachedCues(urlKey,  cues);
-        setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
-        return true;
-      } catch { setSubStatus("failed"); return false; }
+      return new Promise<boolean>((resolve) => {
+        let allCues: SubCue[] = [];
+        _streamVttTranslation(vttUrl, {
+          onChunk: (incoming, isFirst) => {
+            if (signal?.aborted) { resolve(false); return; }
+            arDone = true;
+            allCues = _mergeSubCues(allCues, incoming);
+            setSubCues(allCues);
+            if (isFirst) {
+              setSubLang("ara"); setSubState("ready"); setSubStatus("translating");
+              setCachedCues(normKey, allCues);
+            }
+          },
+          onDone: () => {
+            if (allCues.length > 0) {
+              setCachedCues(normKey, allCues);
+              setCachedCues(urlKey, allCues);
+              setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+              resolve(true);
+            } else { setSubStatus("failed"); resolve(false); }
+          },
+          onError: () => { setSubStatus("failed"); resolve(false); },
+        }, signal);
+      });
     } else {
       setSubCues([]);
       setSubStatus("loading");
@@ -1655,74 +1753,53 @@ function EpisodePlayer({
       setSubStatus("translating");
       setSubState("loading");
       setSubCues([]);
+      // 🔤 Phase 1: عرض إنجليزي فوري بينما تجري الترجمة في الخلفية
+      const rawEnUrl = subtitleUrl.startsWith("/api/anime/translate-vtt")
+        ? (() => { try { return new URL("http://x" + subtitleUrl).searchParams.get("url"); } catch { return null; } })()
+        : subtitleUrl;
+      let arStreamDone = false;
+      if (rawEnUrl) {
+        void (async () => {
+          try {
+            const enR = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawEnUrl)}`, { signal: ctrl.signal });
+            if (enR.ok && !arStreamDone && !ctrl.signal.aborted) {
+              const enCues = parseSrt(await enR.text());
+              if (enCues.length && !arStreamDone && !ctrl.signal.aborted) {
+                setSubCues(enCues); setSubLang("eng"); setSubState("ready"); setSubStatus("translating");
+              }
+            }
+          } catch {}
+        })();
+      }
+      // 🌊 Phase 2: ترجمة عربية متدفقة — أول دفعة تظهر خلال ~3 ثوان
+      const translateUrl = subtitleUrl.startsWith("/api/anime/translate-vtt")
+        ? subtitleUrl
+        : `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`;
       try {
-        if (subtitleUrl.startsWith("/api/anime/translate-vtt")) {
-          // 🔤 Phase 1: عرض إنجليزي فوري ريثما تنتهي الترجمة
-          let arAutoloadDone = false;
-          const rawEnUrl = (() => { try { return new URL("http://x" + subtitleUrl).searchParams.get("url"); } catch { return null; } })();
-          if (rawEnUrl) {
-            void (async () => {
-              try {
-                const enR = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawEnUrl)}`, { signal: AbortSignal.timeout(10_000) });
-                if (enR.ok && !arAutoloadDone) {
-                  const enCues = parseSrt(await enR.text());
-                  if (enCues.length && !arAutoloadDone) {
-                    setSubCues(enCues); setSubLang("eng"); setSubState("ready"); setSubStatus("translating");
-                  }
-                }
-              } catch {}
-            })();
-          }
-          // 🌍 Phase 2: الترجمة العربية الكاملة
-          const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(45_000) });
-          if (r.ok) {
-            const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-            if (d.cues?.length) {
-              const cues = d.cues.map(c => {
-                const [s, e] = c.timing.split("-->").map(x => x.trim());
-                return { start: toSec(s||""), end: toSec(e||""), text: c.text };
-              }).filter(c => c.start < c.end && c.text.trim());
-              if (cues.length) {
-                arAutoloadDone = true;
-                setCachedCues(subtitleUrl, cues); // 💾
-                setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
+        await new Promise<void>((resolve) => {
+          let allCues: SubCue[] = [];
+          _streamVttTranslation(translateUrl, {
+            onChunk: (incoming, isFirst) => {
+              if (ctrl.signal.aborted) { resolve(); return; }
+              arStreamDone = true;
+              allCues = _mergeSubCues(allCues, incoming);
+              setSubCues(allCues);
+              if (isFirst) {
+                setSubLang("ara"); setSubState("ready"); setSubStatus("translating");
+                setCachedCues(subtitleUrl, allCues);
               }
-            }
-          }
-        } else {
-          // 🔤 Phase 1: عرض إنجليزي فوري
-          let arFetchDone = false;
-          void (async () => {
-            try {
-              const enR = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10_000) });
-              if (enR.ok && !arFetchDone) {
-                const enCues = parseSrt(await enR.text());
-                if (enCues.length && !arFetchDone) {
-                  setSubCues(enCues); setSubLang("eng"); setSubState("ready"); setSubStatus("translating");
-                }
+            },
+            onDone: () => {
+              if (allCues.length > 0) {
+                setCachedCues(subtitleUrl, allCues);
+                setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
               }
-            } catch {}
-          })();
-          // 🌍 Phase 2: ترجمة عربية
-          const r = await fetch(
-            `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`,
-            { signal: AbortSignal.timeout(45_000) },
-          );
-          if (r.ok) {
-            const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-            if (d.cues?.length) {
-              const cues = d.cues.map(c => {
-                const [s, e] = c.timing.split("-->").map(x => x.trim());
-                return { start: toSec(s||""), end: toSec(e||""), text: c.text };
-              }).filter(c => c.start < c.end && c.text.trim());
-              if (cues.length) {
-                arFetchDone = true;
-                setCachedCues(subtitleUrl, cues); // 💾
-                setSubCues(cues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
-              }
-            }
-          }
-        }
+              resolve();
+            },
+            onError: () => resolve(),
+          }, ctrl.signal);
+        });
+        if (arStreamDone) return; // نجحت الترجمة المتدفقة
       } catch { /* fall through to API discovery */ }
     }
 
@@ -1855,67 +1932,42 @@ function EpisodePlayer({
     }
 
     let cancelled = false;
+    const ctrl2 = new AbortController();
 
-    const toSecLocal = (ts: string): number => {
-      const m = ts.match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
-      if (m) return +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000;
-      const m2 = ts.match(/(\d{1,2}):(\d{2})[,.](\d{3})/);
-      if (m2) return +m2[1] * 60 + +m2[2] + +m2[3] / 1000;
-      return 0;
-    };
+    setSubState("loading");
 
-    (async () => {
-      if (cancelled) return;
-      setSubState("loading");
+    const translateUrl = subtitleUrl.startsWith("/api/anime/translate-vtt")
+      ? subtitleUrl
+      : `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`;
 
-      try {
-        /* subtitleUrl from anikoto/anineko is already a /api/anime/translate-vtt URL → fetch directly */
-        if (subtitleUrl.startsWith("/api/anime/translate-vtt")) {
-          const r = await fetch(subtitleUrl, { signal: AbortSignal.timeout(30000) });
-          if (!cancelled && r.ok) {
-            const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-            if (d.cues?.length) {
-              const arCues = d.cues.map(c => {
-                const pts = c.timing.split("-->").map(s => s.trim());
-                return { start: toSecLocal(pts[0] || ""), end: toSecLocal(pts[1] || ""), text: c.text };
-              }).filter(c => c.start < c.end && c.text.trim());
-              if (!cancelled && arCues.length) {
-                setCachedCues(subtitleUrl, arCues); // 💾 حفظ
-                setSubCues(arCues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
-              }
-            }
-          }
-        } else {
-          /* Raw VTT/SRT URL — translate to Arabic */
-          const translateUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(subtitleUrl)}&from=en&to=ar`;
-          const r = await fetch(translateUrl, { signal: AbortSignal.timeout(30000) });
-          if (!cancelled && r.ok) {
-            const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-            if (d.cues?.length) {
-              const arCues = d.cues.map(c => {
-                const pts = c.timing.split("-->").map(s => s.trim());
-                return { start: toSecLocal(pts[0] || ""), end: toSecLocal(pts[1] || ""), text: c.text };
-              }).filter(c => c.start < c.end && c.text.trim());
-              if (!cancelled && arCues.length) {
-                setCachedCues(subtitleUrl, arCues); // 💾 حفظ
-                setSubCues(arCues); setSubLang("ara"); setSubState("ready"); setSubStatus("ready"); return;
-              }
-            }
-          }
-          /* English fallback */
-          if (!cancelled) {
-            const r2 = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(subtitleUrl)}`, { signal: AbortSignal.timeout(10000) });
-            if (!cancelled && r2.ok) {
-              const cues = parseSrt(await r2.text());
-              if (!cancelled && cues.length) { setSubCues(cues); setSubLang("eng"); setSubState("ready"); return; }
-            }
-          }
+    let allCues: SubCue[] = [];
+    const stopStream = _streamVttTranslation(translateUrl, {
+      onChunk: (incoming, isFirst) => {
+        if (cancelled) return;
+        allCues = _mergeSubCues(allCues, incoming);
+        setSubCues(allCues);
+        if (isFirst) {
+          setSubLang("ara"); setSubState("ready"); setSubStatus("translating");
+          setCachedCues(subtitleUrl, allCues);
         }
-      } catch { /* fall through */ }
+      },
+      onDone: () => {
+        if (cancelled) return;
+        if (allCues.length > 0) {
+          setCachedCues(subtitleUrl, allCues);
+          setSubLang("ara"); setSubState("ready"); setSubStatus("ready");
+        } else {
+          setSubState("none");
+        }
+      },
+      onError: () => { if (!cancelled) setSubState("none"); },
+    }, ctrl2.signal);
 
-      if (!cancelled) setSubState("none");
-    })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      ctrl2.abort();
+      stopStream();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtitleUrl]);
 
