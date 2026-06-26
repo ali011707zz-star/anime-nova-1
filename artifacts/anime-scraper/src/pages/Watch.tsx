@@ -3104,6 +3104,9 @@ export default function WatchPage() {
       ep:      String(ep),
       anime:   String(animeId || 0),
       format:  sp.get("format") || "",
+      year:    String(anime?.seasonYear || ""),
+      episodes: String(anime?.episodes || ""),
+      native:  anime?.title?.native || "",
     });
 
     /* ── اتصال SSE واحد — كل المصادر تأتي منه تلقائياً ── */

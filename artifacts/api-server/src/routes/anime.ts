@@ -419,6 +419,119 @@ function strictMovieSimilarity(siteTitle: string, queryTitle: string): number {
   if (lenRatio < 0.65) return base * lenRatio;
   return base;
 }
+// ─── Multi-criteria matching helpers ─────────────────────────────────────────
+
+/**
+ * Extracts the season/part number from any title string.
+ * Handles Arabic ("الموسم الثاني"), English ("Season 2", "2nd Season"),
+ * Roman numerals ("II", "III"), and bare trailing digits ("Dragon Ball Super 2").
+ * Returns null if no explicit season marker found (treated as season 1 / unknown).
+ */
+function extractSeasonNum(title: string): number | null {
+  if (!title) return null;
+  const t = title.toLowerCase();
+  // Arabic ordinals for الموسم / الجزء context
+  const arOrdinals: [string, number][] = [
+    ["العاشر",10],["التاسع",9],["الثامن",8],["السابع",7],
+    ["السادس",6],["الخامس",5],["الرابع",4],["الثالث",3],["الثاني",2],
+  ];
+  if (t.includes("الموسم") || t.includes("الجزء")) {
+    for (const [ar, n] of arOrdinals) { if (t.includes(ar)) return n; }
+    const dm = t.match(/(?:الموسم|الجزء)\s*(\d+)/); if (dm) return parseInt(dm[1]);
+  }
+  // English "Season N" / "Nth Season" / "Cour N"
+  let m = t.match(/\b(?:season|cour)\s*(\d+)\b/i); if (m) return parseInt(m[1]);
+  m = t.match(/\b(\d+)(?:st|nd|rd|th)\s+(?:season|cour)\b/i); if (m) return parseInt(m[1]);
+  // Part N / Part-N
+  m = t.match(/\bpart[-\s]*(\d+)\b/i); if (m) return parseInt(m[1]);
+  // S2, S3 … S9 (S1 → null same as no marker)
+  m = t.match(/\bs([2-9]|1[0-9])\b/i); if (m) return parseInt(m[1]);
+  // Roman numerals as standalone words (order: longer first to avoid partial match)
+  const romMap: [RegExp, number][] = [
+    [/\bviii\b/, 8],[/\bvii\b/, 7],[/\bvi\b/, 6],[/\biv\b/, 4],
+    [/\biii\b/, 3],[/\bii\b/, 2],
+  ];
+  for (const [re, n] of romMap) { if (re.test(t)) return n; }
+  // Bare trailing digit ≥ 2 with word boundary (e.g. "Sword Art Online 2")
+  m = t.match(/\b([2-9])\s*$/); if (m) return parseInt(m[1]);
+  return null;
+}
+
+/** Context object for multi-criteria matching — passed through scraper call chain */
+interface MatchCtx {
+  romaji: string;
+  english?: string | null;
+  native?: string | null;
+  year?: number | null;       // AniList seasonYear
+  totalEps?: number | null;   // AniList total episodes
+  seasonNum?: number | null;  // expected season number (derived from romaji/english title)
+  isMovie: boolean;
+  scraper: string;            // label for console.log
+}
+
+/**
+ * Multi-criteria match score.
+ * Combines title similarity + year bonus + season number match + ep count hint.
+ * Returns score (0..1.2, slightly above 1 for excellent multi-signal matches)
+ * and a human-readable log string.
+ *
+ * Usage: replace `similarity(siteTitle, queryTitle) > threshold`
+ *        with    `multiScore(siteTitle, ctx).score > threshold`
+ */
+function multiScore(
+  siteTitle: string,
+  ctx: MatchCtx,
+  siteYear?: number | null,
+  siteTotalEps?: number | null,
+): { score: number; log: string } {
+  const { romaji, english, native, year, totalEps, seasonNum, isMovie, scraper } = ctx;
+  const simFn = isMovie ? strictMovieSimilarity : similarity;
+
+  // 1. Base title similarity — max across all known title variants
+  const baseSim = Math.max(
+    simFn(siteTitle, romaji),
+    english  ? simFn(siteTitle, english) : 0,
+    native   ? simFn(siteTitle, native)  : 0,
+    asciiSimilarity(siteTitle, romaji),
+    english  ? asciiSimilarity(siteTitle, english) : 0,
+  );
+
+  let score = baseSim;
+  const parts: string[] = [`base=${baseSim.toFixed(2)}`];
+
+  // 2. Year match bonus / penalty (only when both sides available)
+  if (siteYear && year) {
+    const diff = Math.abs(siteYear - year);
+    if (diff === 0)      { score += 0.15; parts.push(`year✓+0.15`); }
+    else if (diff === 1) { score += 0.05; parts.push(`year≈+0.05`); }
+    else if (diff <= 3)  {                parts.push(`year~`); }
+    else                 { score -= 0.15; parts.push(`year✗-0.15`); }
+  }
+
+  // 3. Season number match / mismatch
+  const siteSeasonNum = extractSeasonNum(siteTitle);
+  if (seasonNum !== null && seasonNum !== undefined) {
+    if (siteSeasonNum !== null) {
+      if (siteSeasonNum === seasonNum) { score += 0.12; parts.push(`s${siteSeasonNum}✓+0.12`); }
+      else                            { score -= 0.25; parts.push(`s${siteSeasonNum}≠s${seasonNum}-0.25`); }
+    } else if (seasonNum >= 2) {
+      // Expected season ≥2 but site title has no season marker → likely wrong season
+      score -= 0.10; parts.push(`noSMark(exp:s${seasonNum})-0.10`);
+    }
+  }
+
+  // 4. Episode count proximity (small bonus, never penalise)
+  if (siteTotalEps && totalEps && totalEps > 0) {
+    const ratio = Math.min(siteTotalEps, totalEps) / Math.max(siteTotalEps, totalEps);
+    if (ratio >= 0.90) { score += 0.05; parts.push(`eps≈+0.05`); }
+  }
+
+  const clamped = Math.max(0, Math.min(1.2, score));
+  const log = `[match:${scraper}] "${siteTitle}" ${parts.join(" | ")} = ${clamped.toFixed(3)}`;
+  console.log(log);
+  return { score: clamped, log };
+}
+
 function toSlug(s: string): string {
   return s.toLowerCase()
     .replace(/[^\w\s-]/g, " ").trim()
@@ -971,19 +1084,24 @@ async function resolveShahiidUrl(romaji: string, english?: string | null): Promi
   return best;
 }
 
-async function resolveAllShahiidUrls(romaji: string, english?: string | null, isMovie = false): Promise<string[]> {
+async function resolveAllShahiidUrls(romaji: string, english?: string | null, isMovie = false, ctx?: MatchCtx): Promise<string[]> {
   const seen = new Set<string>();
   const all: Array<{ url: string; score: number }> = [];
-  const MIN_SCORE = isMovie ? 0.68 : 0.60;
+  const MIN_SCORE = isMovie ? 0.65 : 0.52; // lower threshold since multiScore is more precise
 
   for (const q of [english, romaji].filter(Boolean) as string[]) {
     const results = await searchShahiid(q);
     for (const r of results) {
       if (seen.has(r.url)) continue;
       seen.add(r.url);
-      const s = isMovie
-        ? Math.max(strictMovieSimilarity(r.label, romaji), english ? strictMovieSimilarity(r.label, english) : 0)
-        : Math.max(similarity(r.label, romaji), english ? similarity(r.label, english) : 0);
+      let s: number;
+      if (ctx) {
+        s = multiScore(r.label, { ...ctx, scraper: "shahiid" }).score;
+      } else {
+        s = isMovie
+          ? Math.max(strictMovieSimilarity(r.label, romaji), english ? strictMovieSimilarity(r.label, english) : 0)
+          : Math.max(similarity(r.label, romaji), english ? similarity(r.label, english) : 0);
+      }
       if (s > MIN_SCORE) all.push({ url: r.url, score: s });
     }
   }
@@ -1262,13 +1380,14 @@ async function findShahiidEpisodeUrl(seasonsUrl: string, epNum: number): Promise
 
 async function getShahiidSources(
   romaji: string, english?: string | null, ep: number = 1, isMovie = false,
+  ctx?: MatchCtx,
 ): Promise<UnifiedSource[]> {
   const ck = `shahiid:${romaji.toLowerCase()}:${ep}`;
   const cached = shahiidSrcCache.get(ck);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
 
   try {
-    let candidateUrls = await resolveAllShahiidUrls(romaji, english, isMovie);
+    let candidateUrls = await resolveAllShahiidUrls(romaji, english, isMovie, ctx);
 
     // Supplement with direct slug construction (covers Season 1 not returned by search)
     const slugsToTry: string[] = [];
@@ -1545,7 +1664,7 @@ const ALK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime
 const alkSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const alkSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchAnimelek(title: string, english: string | null, isMovie = false): Promise<string | null> {
+async function searchAnimelek(title: string, english: string | null, isMovie = false, ctx?: MatchCtx): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = alkSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
@@ -1574,7 +1693,7 @@ async function searchAnimelek(title: string, english: string | null, isMovie = f
   }
 
   // Search fallback — use ?s= (standard WP search, ?search_term_string= is broken)
-  const alkMinScore = isMovie ? 0.68 : 0.60;
+  const alkMinScore = ctx ? 0.52 : (isMovie ? 0.68 : 0.60);
   for (const q of [english, title].filter(Boolean) as string[]) {
     const html = await cfProxyGet(`${ALK_BASE}/search/?s=${encodeURIComponent(q as string)}`, `${ALK_BASE}/`);
     if (!html || !html.includes("/anime/")) continue;
@@ -1582,9 +1701,11 @@ async function searchAnimelek(title: string, english: string | null, isMovie = f
     for (const m of html.matchAll(/href="https?:\/\/animelek\.top\/anime\/([^/"]+)\/?"/gi)) {
       const s = m[1];
       const label = s.replace(/-/g, " ");
-      const score = isMovie
-        ? Math.max(strictMovieSimilarity(label, title), english ? strictMovieSimilarity(label, english as string) : 0)
-        : Math.max(similarity(label, title), english ? similarity(label, english as string) : 0);
+      const score = ctx
+        ? multiScore(label, { ...ctx, scraper: "animelek" }).score
+        : isMovie
+          ? Math.max(strictMovieSimilarity(label, title), english ? strictMovieSimilarity(label, english as string) : 0)
+          : Math.max(similarity(label, title), english ? similarity(label, english as string) : 0);
       if (score > bestScore && score > alkMinScore) { bestScore = score; best = s; }
     }
     if (best && bestScore > alkMinScore) {
@@ -1603,13 +1724,14 @@ async function searchAnimelek(title: string, english: string | null, isMovie = f
 
 async function getAnimelekSources(
   title: string, english: string | null, ep: number, isMovie = false,
+  ctx?: MatchCtx,
 ): Promise<UnifiedSource[]> {
   const ck = `alk:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = alkSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    const slug = await searchAnimelek(title, english, isMovie);
+    const slug = await searchAnimelek(title, english, isMovie, ctx);
     if (!slug) return [];
 
     const seriesUrl = `${ALK_BASE}/anime/${slug}/`;
@@ -1800,7 +1922,7 @@ function parseAnimadarServers(
   return episodes;
 }
 
-async function searchAnimedar(title: string, english: string | null, isMovie = false): Promise<string | null> {
+async function searchAnimedar(title: string, english: string | null, isMovie = false, ctx?: MatchCtx): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = adarSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.url;
@@ -1830,20 +1952,22 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
         const label = rawLabel.replace(/&amp;/g, "&").replace(/&#\d+;/g, "").replace(/&[a-z]+;/g, " ").trim()
           || slugAscii
           || slugDecoded.replace(/-/g, " ");
-        const adarMin = isMovie ? 0.68 : 0.60;
-        const score = isMovie
-          ? Math.max(
-              strictMovieSimilarity(label, title),
-              english ? strictMovieSimilarity(label, english) : 0,
-              slugAscii ? strictMovieSimilarity(slugAscii, title) : 0,
-              slugAscii && english ? strictMovieSimilarity(slugAscii, english) : 0,
-            )
-          : Math.max(
-              similarity(label, title),
-              english ? similarity(label, english) : 0,
-              slugAscii ? similarity(slugAscii, title) : 0,
-              slugAscii && english ? similarity(slugAscii, english) : 0,
-            );
+        const adarMin = ctx ? 0.52 : (isMovie ? 0.68 : 0.60);
+        const score = ctx
+          ? multiScore(label || slugAscii, { ...ctx, scraper: "animedar" }).score
+          : isMovie
+            ? Math.max(
+                strictMovieSimilarity(label, title),
+                english ? strictMovieSimilarity(label, english) : 0,
+                slugAscii ? strictMovieSimilarity(slugAscii, title) : 0,
+                slugAscii && english ? strictMovieSimilarity(slugAscii, english) : 0,
+              )
+            : Math.max(
+                similarity(label, title),
+                english ? similarity(label, english) : 0,
+                slugAscii ? similarity(slugAscii, title) : 0,
+                slugAscii && english ? similarity(slugAscii, english) : 0,
+              );
         if (score > bestScore && score > adarMin) { bestScore = score; best = url.replace(/\/?$/, "/"); }
       }
 
@@ -1887,13 +2011,14 @@ async function searchAnimedar(title: string, english: string | null, isMovie = f
 
 async function getAnimadarSources(
   title: string, english: string | null, ep: number, isMovie = false,
+  ctx?: MatchCtx,
 ): Promise<UnifiedSource[]> {
   const ck = `adar:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = adarSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    const seriesUrl = await searchAnimedar(title, english, isMovie);
+    const seriesUrl = await searchAnimedar(title, english, isMovie, ctx);
     if (!seriesUrl) return [];
 
     const html = await cfProxyGet(seriesUrl, "https://animedar.net/", 14000);
@@ -1954,7 +2079,7 @@ const APH_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime
 const aphSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const aphSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchAnimePhoenix(title: string, english: string | null, isMovie = false): Promise<string | null> {
+async function searchAnimePhoenix(title: string, english: string | null, isMovie = false, ctx?: MatchCtx): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = aphSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
@@ -2000,13 +2125,15 @@ async function searchAnimePhoenix(title: string, english: string | null, isMovie
         let best: string | null = null;
         let bestScore = 0;
 
-        const aphMin = isMovie ? 0.68 : 0.55;
+        const aphMin = ctx ? 0.52 : (isMovie ? 0.68 : 0.55);
         for (const m of html.matchAll(/href="(https?:\/\/anime-phoenix\.com\/animes\/([^/"]+)\/?)"/gi)) {
           const slug  = m[2];
           const label = slug.replace(/-/g, " ");
-          const score = isMovie
-            ? Math.max(strictMovieSimilarity(label, title), english ? strictMovieSimilarity(label, english) : 0)
-            : Math.max(similarity(label, title), english ? similarity(label, english) : 0);
+          const score = ctx
+            ? multiScore(label, { ...ctx, scraper: "animephoenix" }).score
+            : isMovie
+              ? Math.max(strictMovieSimilarity(label, title), english ? strictMovieSimilarity(label, english) : 0)
+              : Math.max(similarity(label, title), english ? similarity(label, english) : 0);
           if (score > bestScore && score > aphMin) { bestScore = score; best = slug; }
         }
 
@@ -2081,12 +2208,13 @@ function parseAnimePhoenixVideo(html: string): Array<{ url: string; label: strin
 
 async function getAnimePhoenixSources(
   title: string, english: string | null, ep: number, isMovie = false,
+  ctx?: MatchCtx,
 ): Promise<UnifiedSource[]> {
   const cKey = `phoenix:${title}|${english ?? ""}|${ep}`;
   const cached = aphSrcCache.get(cKey);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
 
-  const slug = await searchAnimePhoenix(title, english, isMovie);
+  const slug = await searchAnimePhoenix(title, english, isMovie, ctx);
   if (!slug) { aphSrcCache.set(cKey, { sources: [], ts: Date.now() }); return []; }
 
   const epUrl = `${APH_BASE}/episodes/${slug}-episode-${ep}/`;
@@ -2658,7 +2786,7 @@ const OK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: `${OK_BASE}/` }
 const okSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const okSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchOkAnime(title: string, english: string | null, isMovie = false): Promise<string | null> {
+async function searchOkAnime(title: string, english: string | null, isMovie = false, ctx?: MatchCtx): Promise<string | null> {
   const ck = (title + "|" + (english || "")).toLowerCase();
   const hit = okSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
@@ -2693,7 +2821,7 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
 
   // Method 1: Direct slug check via /anime/{slug} page (try all domains via cfProxy)
   // Must verify page title matches the requested anime (score >= 0.40) to avoid wrong matches
-  const okDirectMin = isMovie ? 0.68 : 0.60;
+  const okDirectMin = ctx ? 0.52 : (isMovie ? 0.68 : 0.60);
   for (const slug of [...new Set(slugVariants)]) {
     for (const domain of OK_DOMAINS) {
       const html = await cfProxyGet(`${domain}/anime/${slug}`, `${domain}/`);
@@ -2703,12 +2831,14 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
         || html.match(/<h1[^>]*>([^<]{2,120})<\/h1>/i);
       const pageTitle = (pageTitleM?.[1] || "").replace(/\s*[-–|].*$/, "").replace(/\s*–\s*okanime.*/i, "").trim();
       const slugLabel = slug.replace(/-/g, " ");
-      const verScore = Math.max(
-        pageTitle ? similarity(pageTitle, title) : 0,
-        pageTitle && english ? similarity(pageTitle, english) : 0,
-        similarity(slugLabel, title),
-        english ? similarity(slugLabel, english) : 0,
-      );
+      const verScore = ctx
+        ? multiScore(pageTitle || slugLabel, { ...ctx, scraper: "okanime" }).score
+        : Math.max(
+          pageTitle ? similarity(pageTitle, title) : 0,
+          pageTitle && english ? similarity(pageTitle, english) : 0,
+          similarity(slugLabel, title),
+          english ? similarity(slugLabel, english) : 0,
+        );
       if (verScore >= okDirectMin) {
         OK_BASE = domain;
         okSlugCache.set(ck, { slug, ts: Date.now() });
@@ -2729,25 +2859,27 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
       const data = await r.json() as Array<{ name?: string; slug?: string }>;
       if (!Array.isArray(data) || !data.length) continue;
 
-      const okMin = isMovie ? 0.68 : 0.60;
+      const okMin = ctx ? 0.52 : (isMovie ? 0.68 : 0.60);
       let best: string | null = null, bestScore = 0;
       for (const item of data) {
         if (!item.slug) continue;
         const nameLabel = (item.name || "").toLowerCase();
         const slugLabel = item.slug.replace(/-/g, " ");
-        const score = isMovie
-          ? Math.max(
-              strictMovieSimilarity(nameLabel, title),
-              english ? strictMovieSimilarity(nameLabel, english) : 0,
-              strictMovieSimilarity(slugLabel, title),
-              english ? strictMovieSimilarity(slugLabel, english) : 0,
-            )
-          : Math.max(
-              similarity(nameLabel, title),
-              english ? similarity(nameLabel, english) : 0,
-              similarity(slugLabel, title),
-              english ? similarity(slugLabel, english) : 0,
-            );
+        const score = ctx
+          ? multiScore(nameLabel || slugLabel, { ...ctx, scraper: "okanime" }).score
+          : isMovie
+            ? Math.max(
+                strictMovieSimilarity(nameLabel, title),
+                english ? strictMovieSimilarity(nameLabel, english) : 0,
+                strictMovieSimilarity(slugLabel, title),
+                english ? strictMovieSimilarity(slugLabel, english) : 0,
+              )
+            : Math.max(
+                similarity(nameLabel, title),
+                english ? similarity(nameLabel, english) : 0,
+                similarity(slugLabel, title),
+                english ? similarity(slugLabel, english) : 0,
+              );
         if (score > bestScore && score > okMin) { bestScore = score; best = item.slug; }
       }
       if (best) { okSlugCache.set(ck, { slug: best, ts: Date.now() }); return best; }
@@ -2760,13 +2892,14 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
 
 async function getOkAnimeSources(
   title: string, english: string | null, ep: number, isMovie = false,
+  ctx?: MatchCtx,
 ): Promise<UnifiedSource[]> {
   const ck = `ok:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = okSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    const slug = await searchOkAnime(title, english, isMovie);
+    const slug = await searchOkAnime(title, english, isMovie, ctx);
     if (!slug) return [];
 
     // Try padded and non-padded episode number variants, across active domain
@@ -7581,6 +7714,17 @@ router.get("/anime/sources-stream", async (req, res) => {
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
 
+  // Multi-criteria matching context (enriched from client)
+  const reqYear     = parseInt((req.query.year     as string) || "0") || null;
+  const reqNative   = ((req.query.native   as string) || "").trim() || null;
+  const reqTotalEps = parseInt((req.query.episodes as string) || "0") || null;
+  const seasonNum   = extractSeasonNum(title) ?? extractSeasonNum(english || "") ?? null;
+  const matchCtx: MatchCtx = {
+    romaji: title, english, native: reqNative,
+    year: reqYear, totalEps: reqTotalEps,
+    seasonNum, isMovie, scraper: "",
+  };
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -7741,10 +7885,10 @@ router.get("/anime/sources-stream", async (req, res) => {
     // جميع الكاشطات تعمل بالتوازي
     await Promise.allSettled([
       // ── مصادر عربية مدبلجة / مترجمة ──────────────────────────────
-      scrapeCached("shahiid",      () => getShahiidSources(title, english, ep, isMovie)),
-      scrapeCached("animelek",     () => getAnimelekSources(title, english, ep, isMovie)),
-      scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie)),
-      scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie)),
+      scrapeCached("shahiid",      () => getShahiidSources(title, english, ep, isMovie, matchCtx)),
+      scrapeCached("animelek",     () => getAnimelekSources(title, english, ep, isMovie, matchCtx)),
+      scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
+      scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx)),
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
@@ -7753,6 +7897,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep),   true, 22000),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
+      scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep, isMovie, matchCtx)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
@@ -7766,7 +7911,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
-      scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep)),
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
       // scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────

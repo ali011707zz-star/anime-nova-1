@@ -297,8 +297,9 @@ function resolveUrl(url: string | undefined, base: string): string {
 
 /* ═══════════════════════════════════════ MAIN ═══ */
 export default function WatchScreen() {
-  const { anime, ep, title, english, format, etitle, autoplay, totalEps: totalEpsParam } = useLocalSearchParams<{
+  const { anime, ep, title, english, format, etitle, autoplay, totalEps: totalEpsParam, year, episodes, native } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string; format?: string; etitle?: string; autoplay?: string; totalEps?: string;
+    year?: string; episodes?: string; native?: string;
   }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -469,7 +470,7 @@ export default function WatchScreen() {
       } catch {}
     }
 
-    const url = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}&anime=${anime || ""}&format=${encodeURIComponent(format || "")}`;
+    const url = `${base}/api/anime/sources-stream?title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&ep=${ep}&anime=${anime || ""}&format=${encodeURIComponent(format || "")}&year=${encodeURIComponent(year || "")}&episodes=${encodeURIComponent(episodes || "")}&native=${encodeURIComponent(native || "")}`;
     try {
       const response = await expoFetch(url, {
         signal: abortRef.current.signal,
