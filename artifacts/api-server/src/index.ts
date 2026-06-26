@@ -126,4 +126,7 @@ app.listen(port, host, (err) => {
   } else {
     console.log("[telegram] ℹ️ TELEGRAM_SCHEDULER_ENABLED=false — الـ scheduler معطَّل");
   }
+
+  // ── relay تقارير Orkestr → Telegram (يعمل بغض النظر عن الـ scheduler) ──
+  import("./lib/reportRelay.js").then(({ startReportRelay }) => startReportRelay()).catch(() => {});
 });
