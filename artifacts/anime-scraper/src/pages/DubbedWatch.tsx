@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
-import { ChevronRight, Loader2, AlertCircle, RefreshCw, List } from "lucide-react";
+import { RefreshCw, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
 
@@ -23,6 +23,9 @@ export default function DubbedWatch() {
   const season  = params.get("season") || "الموسم 1";
   const poster  = params.get("poster") || "";
   const at      = params.get("at") || "";
+  const seasonsParam = params.get("seasons") || "";
+  const imgParam = params.get("img") || "";
+  const keyParam = params.get("key") || "";
 
   const [source, setSource] = useState<Source | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,11 +34,20 @@ export default function DubbedWatch() {
 
   const atIds = at ? at.split(",") : [];
 
+  /* Go back to episodes page with correct params */
+  const goBack = useCallback(() => {
+    if (keyParam && seasonsParam) {
+      const key = encodeURIComponent(decodeURIComponent(keyParam));
+      navigate(`/dubbed/${key}?seasons=${encodeURIComponent(seasonsParam)}&title=${encodeURIComponent(title)}&img=${encodeURIComponent(imgParam)}`);
+    } else {
+      window.history.back();
+    }
+  }, [keyParam, seasonsParam, title, imgParam, navigate]);
+
   const loadSource = useCallback(async () => {
     if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
     setLoading(true); setError(null); setSource(null);
 
-    // Check L1 cache
     const cacheKey = `dubbed-src-${epUrl}`;
     const cached = sessionStorage.getItem(cacheKey);
     if (cached) {
@@ -58,7 +70,7 @@ export default function DubbedWatch() {
       sessionStorage.setItem(cacheKey, JSON.stringify({ url: d.hlsUrl, ts: Date.now() }));
       setSource({ url: d.hlsUrl, label: "كرتون مدبلج", proxyUrl: d.hlsUrl, status: "ok" });
       setLoading(false);
-    } catch (e: any) {
+    } catch {
       if (!mountedRef.current) return;
       setError("خطأ في الاتصال");
       setLoading(false);
@@ -71,7 +83,6 @@ export default function DubbedWatch() {
     return () => { mountedRef.current = false; };
   }, [loadSource]);
 
-  // Save progress
   const handleTimeUpdate = useCallback((currentTime: number) => {
     if (!at || !ep) return;
     const firstId = atIds[0];
@@ -80,7 +91,6 @@ export default function DubbedWatch() {
     localStorage.setItem(k, String(Math.floor(currentTime)));
   }, [at, ep, atIds]);
 
-  // Save to history
   useEffect(() => {
     if (!title || !ep) return;
     const histKey = "dubbed-watch-history";
@@ -96,73 +106,74 @@ export default function DubbedWatch() {
     } catch {}
   }, [epUrl, title, ep, season, poster, at]);
 
-  const goBack = () => {
-    if (at) {
-      const firstId = atIds[0];
-      if (firstId) {
-        navigate(`/dubbed/${encodeURIComponent(title)}?seasons=${encodeURIComponent(JSON.stringify([]))}&title=${encodeURIComponent(title)}`);
-        return;
-      }
-    }
-    navigate("/dubbed");
-  };
-
   return (
-    <main className="bg-black min-h-screen text-white" dir="rtl">
-      {/* Header */}
-      <div className="sticky top-0 z-20 bg-black/90 backdrop-blur-xl border-b border-white/5">
-        <div className="px-4 pt-4 pb-3 flex items-center gap-3">
-          <button onClick={goBack} className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-white/5 border border-white/8 active:scale-90 transition-transform">
-            <ChevronRight className="w-4 h-4 text-white/70" />
-          </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-sm font-bold font-['Cairo'] text-white truncate">{title}</h1>
-            <p className="text-xs text-white/40 font-['Cairo']">{season} · الحلقة {ep}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Player area */}
+    <main className="bg-black min-h-screen text-white flex flex-col" dir="rtl">
+      {/* Player area — fills screen, no BottomNav overlap since HIDE_ON includes /dubbed/watch */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-4">
-          <Loader2 className="w-10 h-10 animate-spin text-[#7C3AED]" />
-          <p className="text-white/50 text-sm font-['Cairo']">جاري تحميل الحلقة...</p>
+        <div className="flex flex-col items-center justify-center flex-1 gap-4" style={{ minHeight: "100dvh" }}>
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.25)" }}>
+            <div className="w-7 h-7 border-2 border-[#7C3AED]/30 border-t-[#7C3AED] rounded-full animate-spin" />
+          </div>
+          <div className="text-center">
+            <p className="text-white/60 text-sm font-['Cairo']">جاري تحميل الحلقة…</p>
+            <p className="text-white/25 text-xs font-['Cairo'] mt-1">{title} · {season} · الحلقة {ep}</p>
+          </div>
         </div>
       ) : error ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-4 px-6">
-          <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+        <div className="flex flex-col items-center justify-center flex-1 gap-5 px-6" style={{ minHeight: "100dvh" }}>
+          <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.20)" }}>
             <AlertCircle className="w-8 h-8 text-red-400" />
           </div>
-          <p className="text-white/60 text-sm font-['Cairo'] text-center">{error}</p>
-          <button
-            onClick={loadSource}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#7C3AED]/20 border border-[#7C3AED]/30 rounded-xl text-[#A78BFA] text-sm font-['Cairo']"
-          >
-            <RefreshCw className="w-4 h-4" />
-            إعادة المحاولة
-          </button>
+          <div className="text-center">
+            <p className="text-white/70 text-sm font-['Cairo']">{error}</p>
+            <p className="text-white/25 text-xs font-['Cairo'] mt-1">{title} · الحلقة {ep}</p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={loadSource}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[#A78BFA] text-sm font-['Cairo']"
+              style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.30)" }}
+            >
+              <RefreshCw className="w-4 h-4" />
+              إعادة المحاولة
+            </button>
+            <button
+              onClick={goBack}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white/60 text-sm font-['Cairo']"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
+            >
+              الحلقات
+            </button>
+          </div>
         </div>
       ) : source ? (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="w-full"
+          className="flex flex-col"
+          style={{ minHeight: "100dvh" }}
         >
           <RiftPlayer
             src={source.proxyUrl || source.url}
             title={`${title} - ${season} - الحلقة ${ep}`}
             poster={poster ? decodeURIComponent(poster) : undefined}
             onTimeUpdate={handleTimeUpdate}
+            onBack={goBack}
           />
-          {/* Episode info */}
-          <div className="px-4 pt-4 pb-6">
+          {/* Episode info below player */}
+          <div className="px-4 pt-3 pb-6 flex-1">
             <h2 className="text-base font-black font-['Cairo'] text-white">{title}</h2>
-            <p className="text-sm text-white/50 font-['Cairo'] mt-0.5">{season} · الحلقة {ep}</p>
-            <div className="mt-3 px-3 py-2.5 bg-[#7C3AED]/10 border border-[#7C3AED]/20 rounded-xl">
-              <p className="text-xs text-[#A78BFA] font-['Cairo']">
-                📺 مصدر: arabic-toons.com · مدبلج للعربية
-              </p>
+            <p className="text-sm text-white/40 font-['Cairo'] mt-0.5">{season} · الحلقة {ep}</p>
+            <div className="mt-3 px-3 py-2.5 rounded-xl" style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.18)" }}>
+              <p className="text-xs text-[#A78BFA] font-['Cairo']">📺 مصدر: arabic-toons.com · مدبلج للعربية</p>
             </div>
+            <button
+              onClick={goBack}
+              className="mt-4 flex items-center gap-2 px-4 py-2 rounded-xl text-white/50 text-sm font-['Cairo']"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              ← العودة للحلقات
+            </button>
           </div>
         </motion.div>
       ) : null}
