@@ -336,9 +336,8 @@ export default function AnimationWatch() {
     const ezv          = prefProxy(okSources, "EzVidAPI");
     const aflaam       = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
     const seepanel     = okSources.find(s => s.label?.startsWith("SeePanal"));
-    const animephoenix = okSources.find(s => s.label?.startsWith("AnimePhoenix"));
     const witcher      = okSources.find(s => s.label?.includes("AnimeWitcher"));
-    const slowSrc      = starcima ?? vyla ?? ezv ?? aflaam ?? seepanel ?? animephoenix ?? witcher;
+    const slowSrc      = starcima ?? vyla ?? ezv ?? aflaam ?? seepanel ?? witcher;
 
     // If SSE done → play best slow source now (fast sources never arrived)
     if (sseDone) {
@@ -1448,6 +1447,7 @@ function getAnimTag(label: string): string {
   if (l.includes("ميغا") || l.startsWith("mega"))     return "MG";
   if (l.startsWith("aflaam"))     return "AF";
   if (l.startsWith("arabseed"))   return "AS";
+  if (l.startsWith("mycima"))     return "MY";
   if (l.startsWith("ezvidapi"))   return "EZ";
   if (l.startsWith("topcinema"))  return "TC";
   if (l.startsWith("moviz"))      return "MV";
