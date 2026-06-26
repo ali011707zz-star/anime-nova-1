@@ -83,6 +83,14 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="dubbed"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name={focused ? "tv" : "tv-outline"} label="مدبلج" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="news"
         options={{
           tabBarIcon: ({ color, focused }) => (

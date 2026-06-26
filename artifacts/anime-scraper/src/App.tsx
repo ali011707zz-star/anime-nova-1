@@ -64,6 +64,9 @@ const AnimationLibrary   = lazy(() => import("@/pages/AnimationLibrary"));
 const AnimationDetail    = lazy(() => import("@/pages/AnimationDetail"));
 const AnimationEpisodes  = lazy(() => import("@/pages/AnimationEpisodes"));
 const AnimationWatch     = lazy(() => import("@/pages/AnimationWatch"));
+const DubbedLibrary      = lazy(() => import("@/pages/DubbedLibrary"));
+const DubbedDetail       = lazy(() => import("@/pages/DubbedDetail"));
+const DubbedWatch        = lazy(() => import("@/pages/DubbedWatch"));
 const Updates            = lazy(() => import("@/pages/Updates"));
 const AuthPage           = lazy(() => import("@/pages/Auth"));
 const AuthCallback       = lazy(() => import("@/pages/AuthCallback"));
@@ -82,7 +85,7 @@ function PageLoader() {
   );
 }
 
-const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/browse", "/animation/", "/auth", "/subscription"];
+const NO_GLOBAL_HEADER = ["/watch", "/episodes/", "/anime/", "/settings", "/profile", "/browse", "/animation/", "/auth", "/subscription", "/dubbed/watch"];
 
 function applyTheme(t: string) {
   const root = document.documentElement;
@@ -168,6 +171,9 @@ function Router({ onMenuClick }: { onMenuClick: () => void }) {
                 <Route path="/animation/watch"                    component={AnimationWatchWrapper} />
                 <Route path="/animation/:type/:id/episodes"    component={AnimationEpisodes} />
                 <Route path="/animation/:type/:id"             component={AnimationDetail} />
+                <Route path="/dubbed"                          component={DubbedLibrary} />
+                <Route path="/dubbed/watch"                    component={DubbedWatch} />
+                <Route path="/dubbed/:key"                     component={DubbedDetail} />
                 <Route path="/comments"                component={CommentsPage} />
                 <Route path="/subscription"            component={Subscription} />
                 <Route path="/episodes/:id"            component={EpisodeList} />
