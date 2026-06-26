@@ -35,7 +35,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash -c 'PORT=5000 pnpm --filter @workspace/anime-scraper run dev'"
+args = "node artifacts/api-server/dist/index.mjs"
 waitForPort = 5000
 
 [[workflows.workflow]]
@@ -62,10 +62,6 @@ timeoutMs = 20000
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
 
 [nix]
 channel = "stable-25_05"
