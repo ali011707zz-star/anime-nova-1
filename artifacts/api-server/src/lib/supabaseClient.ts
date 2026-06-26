@@ -204,6 +204,23 @@ export async function sbInsert<T = any>(
   table: string,
   row: Record<string, any>,
 ): Promise<T | null> {
+  // ── PostgreSQL direct helper ───────────────────────────────────────────
+  const pgInsert = async (): Promise<T | null> => {
+    if (!isPgReady()) return null;
+    try {
+      const entries = Object.entries(row).filter(([, v]) => v !== undefined);
+      const cols = entries.map(([k]) => `"${k}"`).join(", ");
+      const placeholders = entries.map((_, i) => `$${i + 1}`).join(", ");
+      const values = entries.map(([, v]) => v);
+      const sql = `INSERT INTO "${table}" (${cols}) VALUES (${placeholders}) RETURNING *`;
+      const result = await getPool().query(sql, values);
+      return (result.rows[0] ?? null) as T | null;
+    } catch (e: any) {
+      console.error(`[pg] sbInsert "${table}":`, e.message);
+      return null;
+    }
+  };
+
   // Supabase path
   if (isSupabaseReady()) {
     try {
@@ -215,32 +232,26 @@ export async function sbInsert<T = any>(
         signal: AbortSignal.timeout(10000),
       });
       if (!res.ok) {
-        const err = await res.text();
-        console.error(`[sb] sbInsert "${table}" ${res.status}:`, err.slice(0, 200));
+        const errText = await res.text();
+        console.error(`[sb] sbInsert "${table}" ${res.status}:`, errText.slice(0, 200));
+        // عند خطأ 4xx (عمود ناقص، مخطط قديم) — جرّب PostgreSQL كـ fallback
+        if (res.status >= 400 && res.status < 500 && isPgReady()) {
+          console.warn(`[sb] sbInsert "${table}" Supabase 4xx — falling back to PostgreSQL`);
+          return pgInsert();
+        }
         return null;
       }
       const data = await res.json();
       return (Array.isArray(data) ? data[0] : data) as T | null;
     } catch (e: any) {
       console.error(`[sb] sbInsert "${table}":`, e.message);
+      // شبكة أو timeout — جرّب PostgreSQL
+      if (isPgReady()) return pgInsert();
       return null;
     }
   }
 
-  // PostgreSQL fallback
-  if (!isPgReady()) return null;
-  try {
-    const entries = Object.entries(row).filter(([, v]) => v !== undefined);
-    const cols = entries.map(([k]) => `"${k}"`).join(", ");
-    const placeholders = entries.map((_, i) => `$${i + 1}`).join(", ");
-    const values = entries.map(([, v]) => v);
-    const sql = `INSERT INTO "${table}" (${cols}) VALUES (${placeholders}) RETURNING *`;
-    const result = await getPool().query(sql, values);
-    return (result.rows[0] ?? null) as T | null;
-  } catch (e: any) {
-    console.error(`[pg] sbInsert "${table}":`, e.message);
-    return null;
-  }
+  return pgInsert();
 }
 
 // ── UPSERT ────────────────────────────────────────────────────────────────
