@@ -217,6 +217,21 @@ async function cfOrOrkestGet(url: string): Promise<string> {
   return html;
 }
 
+// Orkestr direct GET — يتجاوز CF proxy تماماً (مفيد للمواقع التي تحجب Replit IPs وcf_proxy معاً)
+async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string> {
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const r = await fetch(
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
+    { signal: AbortSignal.timeout(timeoutMs) }
+  );
+  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
+  const html = await r.text();
+  if (html.length < 500 || html.includes("Just a moment") || html.includes("Attention Required")) {
+    throw new Error("Orkestr: CF blocked");
+  }
+  return html;
+}
+
 // CF proxy POST — يرسل POST عبر curl_cffi مع Orkestr fallback
 async function cfOrOrkestPost(url: string): Promise<string> {
   const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
@@ -3125,81 +3140,116 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── EgyDead (tv9.egydead.live) — أفلام ومسلسلات عربية ─────────────────────
-      // CF-protected: يحتاج cfProxyGet (curl_cffi)
+      // ── EgyDead (tv9.egydead.live) — أنيمي وأفلام مترجمة للعربية ───────────────
+      // CF يحجب Replit IPs وcfProxy كلياً → نستخدم Orkestr مباشرة لكل الطلبات
+      // البحث يعيد صفحات حلقات منفردة: /episode/{slug}-e{N}/
+      // Servers محملة عبر AJAX → نستخرج slug من URL ونبني URL الحلقة مباشرة
       scrapeAnimCached("egydead", async () => {
         const EGYD_BASE = "https://tv9.egydead.live";
-        const q = encodeURIComponent(title);
+        const isBlocked = (h: string) =>
+          h.length < 500 || h.includes("Attention Required") || h.includes("Just a moment");
+
         send("status", { msg: "EgyDead: جاري البحث…" });
 
-        const isCfBlocked = (html: string) =>
-          html.includes("Attention Required") || html.includes("Just a moment") || html.length < 300;
+        // Helper: جلب صفحة حلقة وإرسال أي مصادر وجدناها
+        const fetchEpSources = async (epUrl: string, label: string): Promise<boolean> => {
+          let epHtml = "";
+          try { epHtml = await orkestDirectGet(epUrl, 20_000); } catch { return false; }
+          if (isBlocked(epHtml)) return false;
+
+          let m: RegExpExecArray | null;
+          let found = false;
+
+          // data-link attributes (قد تكون فارغة إذا AJAX-loaded)
+          const svrRe = /<li[^>]+data-link="(https?[^"]+)"[^>]*>/g;
+          while ((m = svrRe.exec(epHtml))) {
+            await sendExtracted(m[1], label); found = true;
+          }
+
+          // iframes غير YouTube
+          const ifrRe = /<iframe[^>]+src="(https?[^"]+)"/g;
+          while ((m = ifrRe.exec(epHtml))) {
+            const src = m[1];
+            if (!src.includes("youtube.com") && !src.includes("youtu.be")) {
+              await sendExtracted(src, label); found = true;
+            }
+          }
+
+          // روابط a.ser-link: تمريرتان — class أولاً ثم href مباشرة
+          // تمريرة 1: روابط ser-link (نُحلّل href من التاج الكامل)
+          const serLinkRe = /<a[^>]+class="[^"]*ser-link[^"]*"[^>]*>/g;
+          while ((m = serLinkRe.exec(epHtml))) {
+            const hrefM = m[0].match(/href="([^"]+)"/);
+            const dlHref = hrefM?.[1];
+            if (!dlHref?.startsWith("http")) continue;
+            const proxied = dlHref.includes(".m3u8") ? wrapHls(dlHref, EGYD_BASE + "/") : wrapMp4(dlHref, EGYD_BASE + "/");
+            sendSource(proxied, label + " · تحميل", dlHref, proxied); found = true;
+          }
+          // تمريرة 2: روابط mp4/m3u8 مباشرة
+          const directDlRe = /href="(https?[^"]+\.(?:mp4|m3u8)[^"]*)"/g;
+          while ((m = directDlRe.exec(epHtml))) {
+            const dlHref = m[1];
+            const proxied = dlHref.includes(".m3u8") ? wrapHls(dlHref, EGYD_BASE + "/") : wrapMp4(dlHref, EGYD_BASE + "/");
+            sendSource(proxied, label + " · تحميل", dlHref, proxied); found = true;
+          }
+
+          return found;
+        };
 
         try {
-          // Step 1: Search (cfProxyGet → Orkestr fallback)
-          const searchHtml = await cfOrOrkestGet(`${EGYD_BASE}/?s=${q}`);
-          if (isCfBlocked(searchHtml)) return;
+          // الخطوة 1: بحث عبر Orkestr مباشرة (لا cfProxy — محجوب لـ egydead.live)
+          const q = encodeURIComponent(title);
+          let searchHtml = "";
+          try { searchHtml = await orkestDirectGet(`${EGYD_BASE}/?s=${q}`); }
+          catch { send("status", { msg: "EgyDead: فشل الاتصال بـ Orkestr" }); return; }
+          if (isBlocked(searchHtml)) {
+            send("status", { msg: "EgyDead: محجوب" }); return;
+          }
 
-          // Step 2: Parse — li.movieItem → a[href] + h1.BottomTitle
+          // الخطوة 2: تحليل نتائج البحث — <li class="movieItem"><a href="{url}">...<h1 class="BottomTitle">{title}</h1>
           const results: Array<{ url: string; ttl: string }> = [];
-          const itemRe = /<li[^>]+class="[^"]*movieItem[^"]*"[\s\S]*?<a\s+href="([^"]+)"[^>]*>[\s\S]*?<h1[^>]+class="[^"]*BottomTitle[^"]*"[^>]*>([^<]+)<\/h1>/g;
+          const itemRe = /<li[^>]+class="[^"]*movieItem[^"]*"[\s\S]*?<a\s+href="([^"]+)"[\s\S]*?<h1[^>]+class="[^"]*BottomTitle[^"]*"[^>]*>([^<]+)<\/h1>/g;
           let m: RegExpExecArray | null;
           while ((m = itemRe.exec(searchHtml))) {
             results.push({ url: m[1], ttl: m[2].trim() });
           }
-          if (!results.length) return;
-
-          const best = results
-            .map(r => ({ ...r, sc: Math.max(titleSim(title, r.ttl), titleSim(enTitlePrefetched, r.ttl)) }))
-            .filter(r => r.sc > 0.38)
-            .sort((a, b) => b.sc - a.sc)[0];
-          if (!best) return;
-
-          // Step 3: POST View=1 to get page content
-          const pageHtml = await cfOrOrkestPost(best.url);
-          if (!pageHtml || isCfBlocked(pageHtml)) return;
+          if (!results.length) {
+            send("status", { msg: "EgyDead: لا نتائج" }); return;
+          }
 
           if (type === "movie") {
-            // Download servers: ul.donwload-servers-list li a.ser-link
-            const dlRe = /<li[^>]*>[\s\S]*?<a[^>]+class="[^"]*ser-link[^"]*"[^>]+href="([^"]+)"/g;
-            while ((m = dlRe.exec(pageHtml))) {
-              const dlUrl = m[1];
-              if (!dlUrl.startsWith("http")) continue;
-              if (dlUrl.includes(".mp4") || dlUrl.includes(".m3u8")) {
-                const isHls = dlUrl.includes(".m3u8");
-                const proxied = isHls ? wrapHls(dlUrl, EGYD_BASE + "/") : wrapMp4(dlUrl, EGYD_BASE + "/");
-                sendSource(proxied, "EgyDead · تحميل", dlUrl, proxied);
-              }
-            }
-            // Watch servers: ul.serversList li[data-link]
-            const svrRe = /<li[^>]+data-link="([^"]+)"[^>]*>/g;
-            while ((m = svrRe.exec(pageHtml))) {
-              const svrUrl = m[1];
-              if (svrUrl.startsWith("http")) await sendExtracted(svrUrl, "EgyDead");
-            }
+            // أفلام: ابحث عن أفضل تطابق وجرب استخراج المصادر
+            const best = results
+              .map(r => ({ ...r, sc: Math.max(titleSim(title, r.ttl), titleSim(enTitlePrefetched, r.ttl)) }))
+              .filter(r => r.sc > 0.4)
+              .sort((a, b) => b.sc - a.sc)[0];
+            if (!best) { send("status", { msg: "EgyDead: لا تطابق" }); return; }
+            await fetchEpSources(best.url, "EgyDead");
+
           } else {
-            // Series: find episode in div.episodes-list
-            const epRe = /<a[^>]+href="([^"]+)"[^>]+title="([^"]*)"[^>]*>/g;
-            const eps: Array<{ url: string; num: number }> = [];
-            const epSection = pageHtml.match(/class="episodes-list"[\s\S]*?<\/div>\s*<\/div>/)?.[0] || pageHtml;
-            while ((m = epRe.exec(epSection))) {
-              const numM = m[2].match(/(\d+)/);
-              if (numM) eps.push({ url: m[1], num: parseInt(numM[1]) });
+            // مسلسلات: نتائج البحث تعيد صفحات حلقات بنمط /episode/{slug}-e{N}/
+            // نستخرج slug من أول نتيجة مطابقة ونبني URL الحلقة المطلوبة مباشرة
+            let animeSlug = "";
+            for (const r of results) {
+              const sc = Math.max(titleSim(title, r.ttl), titleSim(enTitlePrefetched, r.ttl));
+              if (sc < 0.3) continue;
+              // نمط URL: /episode/{animeslug}-e{N}/ أو /episode/{animeslug}-e{N}-1/
+              const slugM = r.url.match(/\/episode\/([a-z0-9][a-z0-9-]*?)-e\d+/i);
+              if (slugM) { animeSlug = slugM[1]; break; }
             }
-            const epEntry = eps.find(e => e.num === epNum);
-            if (!epEntry) return;
+            if (!animeSlug) { send("status", { msg: "EgyDead: لم يُعثر على slug" }); return; }
 
-            const epHtml = await cfOrOrkestPost(epEntry.url);
-            if (!epHtml || isCfBlocked(epHtml)) return;
-
-            const svrRe2 = /<li[^>]+data-link="([^"]+)"[^>]*>/g;
-            while ((m = svrRe2.exec(epHtml))) {
-              if (m[1].startsWith("http")) await sendExtracted(m[1], `EgyDead · ح${epNum}`);
+            // بناء URL الحلقة المطلوبة مع تجربة متغيرات URL الشائعة
+            const urlVariants = [
+              `${EGYD_BASE}/episode/${animeSlug}-e${epNum}/`,
+              `${EGYD_BASE}/episode/${animeSlug}-e${epNum}-1/`,
+              `${EGYD_BASE}/episode/${animeSlug}-e${String(epNum).padStart(2, "0")}/`,
+            ];
+            let fetched = false;
+            for (const variant of urlVariants) {
+              if (await fetchEpSources(variant, `EgyDead · ح${epNum}`)) { fetched = true; break; }
             }
-            const ifrRe = /<iframe[^>]+src="([^"]+)"/g;
-            while ((m = ifrRe.exec(epHtml))) {
-              if (m[1].startsWith("http")) await sendExtracted(m[1], `EgyDead · ح${epNum}`);
-            }
+            if (!fetched) send("status", { msg: `EgyDead: لا مصادر ثابتة للحلقة ${epNum} (AJAX-only)` });
           }
         } catch { /* silent */ }
       }),
