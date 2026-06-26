@@ -13,7 +13,7 @@ const BROWSER_UA =
 let _cfProxyAlive: boolean | null = null;
 let _cfProxyCheckedAt = 0;
 
-async function cfGet(url: string, referer?: string, timeoutMs = 12000): Promise<string | null> {
+async function cfGet(url: string, referer?: string, timeoutMs = 15000): Promise<string | null> {
   const now = Date.now();
   if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
     try {
@@ -120,7 +120,8 @@ router.get("/dubbed/episodes", async (req, res) => {
 });
 
 // ── GET /api/dubbed/watch-src?epUrl= ──
-// Fetches the arabic-toons.com episode page and extracts the HLS URL
+// Fetches the arabic-toons.com episode page and extracts the video URL (MP4 or HLS).
+// arabic-toons uses a clappr player with a JS variable: const videoSrc = "https://...mp4?tkn=..."
 router.get("/dubbed/watch-src", async (req, res) => {
   const epUrl = (req.query.epUrl as string || "").trim();
   if (!epUrl || !epUrl.includes("arabic-toons.com")) {
@@ -128,57 +129,93 @@ router.get("/dubbed/watch-src", async (req, res) => {
   }
 
   try {
-    const html = await cfGet(epUrl, AT_BASE + "/");
+    const html = await cfGet(epUrl, AT_BASE + "/", 18000);
     if (!html) { res.status(502).json({ error: "failed to fetch episode page" }); return; }
 
-    // Extract HLS URL from <source src="...">
-    const srcMatch = html.match(/src=["']([^"']+\.m3u8[^"']*)['"]/);
-    if (!srcMatch) {
-      res.status(404).json({ error: "no HLS source found" }); return;
+    // Pattern 1: const videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."  (main pattern)
+    const videoSrcMatch = html.match(/const\s+videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/);
+    if (videoSrcMatch) {
+      const rawUrl = videoSrcMatch[1].split('"')[0].split("'")[0]; // strip any trailing quote
+      const isHls = rawUrl.includes(".m3u8");
+      if (isHls) {
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+        res.json({ hlsUrl: proxied, rawUrl, type: "hls" });
+      } else {
+        const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+        res.json({ hlsUrl: proxied, rawUrl, type: "mp4" });
+      }
+      return;
     }
-    const hlsRaw = srcMatch[1];
-    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsRaw)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
-    res.json({ hlsUrl: proxied, rawUrl: hlsRaw });
+
+    // Pattern 2: file: "https://....mp4" (JW Player or Video.js setup)
+    const fileMatch = html.match(/['"](https?:\/\/[^"']+\.mp4[^"']*)['"]/);
+    if (fileMatch) {
+      const rawUrl = fileMatch[1];
+      const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+      res.json({ hlsUrl: proxied, rawUrl, type: "mp4" });
+      return;
+    }
+
+    // Pattern 3: HLS m3u8 in <source src="...">
+    const srcMatch = html.match(/src=["']([^"']+\.m3u8[^"']*)["']/);
+    if (srcMatch) {
+      const hlsRaw = srcMatch[1];
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsRaw)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+      res.json({ hlsUrl: proxied, rawUrl: hlsRaw, type: "hls" });
+      return;
+    }
+
+    logger.warn({ epUrl }, "dubbed: no video source found in episode page");
+    res.status(404).json({ error: "no video source found" });
   } catch (e: any) {
     logger.warn({ err: e }, "dubbed: watch-src error");
     res.status(502).json({ error: String(e?.message || e) });
   }
 });
 
-// ── GET /api/dubbed/img?f= → proxy arabic-toons thumbnail ──
-// arabic-toons.com images are CF-protected; route via CF proxy binary endpoint
+// ── GET /api/dubbed/img?f= → proxy image through StarCima's own img endpoint ──
+// StarCima hosts/proxies all arabic-toons images via /api/dubbed/img?f=
+// This approach is reliable and avoids CF challenges on arabic-toons.com directly.
+// Supports both series posters (cat_XXXXXXXXXX.jpg) and episode thumbnails (mqdefault_XXXXX.jpg)
 router.get("/dubbed/img", async (req, res) => {
   const f = (req.query.f as string || "").trim();
-  if (!f || !/^[\w\-\.\/]+$/.test(f)) { res.status(400).send("bad"); return; }
-  const imgUrl = f.startsWith("http") ? f : `${AT_BASE}/img/${f}`;
+  if (!f || !/^[\w\-\.]+$/.test(f)) { res.status(400).send("bad"); return; }
+
+  // Use StarCima's own image proxy endpoint (confirmed HTTP 200)
+  const scImgUrl = `${SC_BASE}/api/dubbed/img?f=${encodeURIComponent(f)}`;
+
   try {
-    // Use CF proxy /fetch endpoint — returns binary response via curl_cffi impersonate
-    const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
-    proxyUrl.searchParams.set("url", imgUrl);
-    proxyUrl.searchParams.set("ref", AT_BASE + "/");
-    const pr = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(12000) });
-    if (pr.ok) {
-      const ct = pr.headers.get("content-type") || "image/jpeg";
+    const r = await fetch(scImgUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: `${SC_BASE}/dubbed`,
+        Accept: "image/*,*/*",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (r.ok) {
+      const ct = r.headers.get("content-type") || "image/jpeg";
       if (ct.includes("image") || ct.includes("octet")) {
-        const buf = Buffer.from(await pr.arrayBuffer());
+        const buf = Buffer.from(await r.arrayBuffer());
         res.setHeader("Content-Type", ct);
         res.setHeader("Cache-Control", "public, max-age=86400");
         res.send(buf);
         return;
       }
     }
-    // Fallback: direct fetch with browser UA (may fail on CF-protected hosts)
-    const r = await fetch(imgUrl, {
-      headers: { "User-Agent": BROWSER_UA, Referer: AT_BASE + "/", Accept: "image/*,*/*" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!r.ok) { res.status(404).send("not found"); return; }
-    const ct = r.headers.get("content-type") || "image/jpeg";
-    const buf = Buffer.from(await r.arrayBuffer());
-    res.setHeader("Content-Type", ct);
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    res.send(buf);
-  } catch { res.status(502).send("proxy error"); }
+    // Fallback: try arabic-toons.com/images/anime/{f} directly via CF proxy
+    const atImgUrl = `${AT_BASE}/images/anime/${f}`;
+    const html2 = await cfGet(atImgUrl, AT_BASE + "/", 8000);
+    if (html2) {
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.send(Buffer.from(html2, "binary"));
+      return;
+    }
+    res.status(404).send("not found");
+  } catch {
+    res.status(502).send("proxy error");
+  }
 });
 
 export default router;
