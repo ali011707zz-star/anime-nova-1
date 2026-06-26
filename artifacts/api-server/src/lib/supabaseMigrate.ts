@@ -98,6 +98,17 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS idx_comments_anime ON comments(anime_id, episode);
 
+-- إضافة أعمدة ناقصة في users (safe migration)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan                 TEXT DEFAULT 'free';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at           TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_type            TEXT DEFAULT 'email';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id            TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS github_id            TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_custom TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_color         INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code    TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS comment_likes (
   user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
   comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
@@ -257,6 +268,16 @@ CREATE TABLE IF NOT EXISTS comments (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE comments ADD COLUMN IF NOT EXISTS user_handle TEXT;
+-- إضافة أعمدة ناقصة في users إن وُجد الجدول بدون بعضها
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan                 TEXT DEFAULT 'free';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at           TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_type            TEXT DEFAULT 'email';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id            TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS github_id            TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_custom TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_color         INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code    TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_comments_anime   ON comments(anime_id, episode_number);
 CREATE INDEX IF NOT EXISTS idx_comments_tmdb    ON comments(tmdb_id, episode_number);
 CREATE INDEX IF NOT EXISTS idx_comments_user    ON comments(user_id);
