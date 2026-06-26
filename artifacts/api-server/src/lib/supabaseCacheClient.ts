@@ -1,20 +1,22 @@
 /**
  * supabaseCacheClient.ts — Cache client يعيد تصدير دوال supabaseClient
- * يعمل عبر Supabase REST API (لا يحتاج اتصال PostgreSQL مباشر)
+ * يعمل عبر Supabase REST API أو PostgreSQL مباشرة (DATABASE_URL)
  */
 
 import { sbSelect, sbInsert, sbUpsert, sbPatch, sbDelete, isSupabaseReady } from "./supabaseClient.js";
 
 export function isCacheDbReady(): boolean {
-  return isSupabaseReady();
+  return isSupabaseReady() || !!process.env.DATABASE_URL;
 }
 
-// سيُطبَع بعد تحميل env من Orkestr (داخل createApp أو بعد bootstrap)
+// سيُطبَع بعد تحميل env
 setTimeout(() => {
   if (isSupabaseReady()) {
     console.log("[cacheClient] ✅ Supabase جاهز للكاش المشترك");
+  } else if (process.env.DATABASE_URL) {
+    console.log("[cacheClient] ✅ PostgreSQL جاهز للكاش المشترك (Replit DB)");
   } else {
-    console.warn("[cacheClient] ⚠️ Supabase غير مُهيَّأ — الكاش L2 معطّل");
+    console.warn("[cacheClient] ⚠️ لا يوجد اتصال بقاعدة البيانات — الكاش L2 معطّل");
   }
 }, 500);
 
