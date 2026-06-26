@@ -1399,6 +1399,10 @@ export function RiftPlayer({
           )}
 
           <View style={s.endBtnRow}>
+            <Pressable onPress={() => { setIsEnded(false); onBack(); }} style={s.endBackBtn}>
+              <Ionicons name="arrow-back" size={16} color="rgba(255,255,255,0.65)" />
+              <Text style={[s.endBtnLabel, { color: "rgba(255,255,255,0.65)" }]}>رجوع</Text>
+            </Pressable>
             <Pressable
               onPress={() => { seek(0); setIsEnded(false); try { player.play(); } catch {} }}
               style={s.endReplayBtn}
@@ -1814,9 +1818,10 @@ const s = StyleSheet.create({
   endSubLabel: { color: "rgba(255,255,255,0.45)", fontSize: 12, fontFamily: "Cairo_400Regular" },
   endTitle: { color: "#fff", fontSize: 18, fontFamily: "Cairo_700Bold", textAlign: "center", paddingHorizontal: 24 },
   endEpText: { color: "rgba(255,255,255,0.55)", fontSize: 13, fontFamily: "Cairo_400Regular" },
-  endBtnRow: { flexDirection: "row", gap: 12, marginTop: 6 },
+  endBtnRow: { flexDirection: "row", gap: 12, marginTop: 6, flexWrap: "wrap", justifyContent: "center" },
+  endBackBtn:   { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
   endReplayBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)" },
-  endNextBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(139,92,246,0.90)", borderWidth: 1, borderColor: "rgba(167,139,250,0.55)" },
+  endNextBtn:   { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 18, backgroundColor: "rgba(139,92,246,0.90)", borderWidth: 1, borderColor: "rgba(167,139,250,0.55)" },
   endBtnLabel: { color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold" },
   autoPlayBar: { width: 220, height: 28, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.10)", overflow: "hidden", justifyContent: "center", borderWidth: 1, borderColor: "rgba(167,139,250,0.30)" },
   autoPlayBarFill: { position: "absolute", left: 0, top: 0, bottom: 0, backgroundColor: "rgba(139,92,246,0.60)", borderRadius: 14 },
