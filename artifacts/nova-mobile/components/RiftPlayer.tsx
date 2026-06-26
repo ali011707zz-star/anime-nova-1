@@ -1036,17 +1036,21 @@ export function RiftPlayer({
     /* ── Save current position before replacing source ── */
     const savedPos = player.currentTime || 0;
     if (savedPos > 5) switchPosRef.current = savedPos;
+    const newSrc = sources[idx];
+    console.log(`[Nova Mobile] تبديل المصدر → ${newSrc?.label || "مجهول"} (${idx + 1}/${sources.length}): ${newSrc?.url?.slice(0, 120)}`);
     setSrcIdx(idx);
     setError(false);
     setIsAutoCycling(false);
     setBuffering(true);
     setIsEnded(false);
     resumedRef.current = false;
+    /* مسح الترجمات القديمة فوراً حتى لا تظهر مع المصدر الجديد */
+    setLoadedCues([]);
     /* Reset whisper status when source changes */
     setWhisperStatus("idle");
     setWhisperLang("");
     try {
-      player.replace(sources[idx].url);
+      player.replace(newSrc.url);
       /* Some expo-video versions need an explicit play() after replace */
       setTimeout(() => { try { player.play(); } catch {} }, 80);
     } catch {}

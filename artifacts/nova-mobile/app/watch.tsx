@@ -754,6 +754,9 @@ export default function WatchScreen() {
     /* حساب الفهرس مسبقاً عند الاختيار — أكثر موثوقية من مقارنة الروابط لاحقاً */
     const srcKey = src.directUrl || src.url || "";
     const idx = directSrcs.findIndex(s => (s.directUrl || s.url) === srcKey);
+    const def = SCRAPER_DEFS.find(d => d.site === src.site);
+    const label = def?.name || src.label || src.site || "مجهول";
+    console.log(`[Nova] اختيار المصدر → ${label}: ${srcKey?.slice(0, 120)}`);
     setPlayingRiftIdx(Math.max(0, idx));
     setPlayingSrc(src);
     const url = src.directUrl || src.url || "";
