@@ -2717,6 +2717,8 @@ export default function WatchPage() {
   const [playerServers,setPlayerServers]= useState<Record<Quality, string[]>>({ "1080p FHD": [], "720p HD": [], "360p SD": [] });
   const [quality,      setQuality]      = useState<Quality>("720p HD");
   const [initialSrv,   setInitialSrv]   = useState(0);
+  /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
+  const [playKey,      setPlayKey]      = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
   // showPicker: false on first load (shows loading screen), true when user returns from player
   const [showPicker,   setShowPicker]   = useState(false);
@@ -3209,6 +3211,8 @@ export default function WatchPage() {
       setPlayerServers(srvMap);
       setQuality(clickedTier);
       setInitialSrv(0);
+      /* playKey++ يضمن إعادة تهيئة EpisodePlayer حتى لو تشابه المفتاح السابق */
+      setPlayKey(k => k + 1);
       /* Save for quick-resume (skip _resume + skip embed URLs to avoid iframe flicker on next visit) */
       if (animeId && firstSrc.site !== "_resume" && !isIframeUrl(clickedUrl)) saveLastSrc(animeId, ep, clickedUrl, firstSrc.qualityRank ?? 0);
       setPhase("player");
@@ -3323,6 +3327,8 @@ export default function WatchPage() {
     setPlayerServers(servers);
     setQuality(clickedTier);
     setInitialSrv(0);
+    /* playKey++ يضمن إعادة تهيئة EpisodePlayer الكاملة عند كل اختيار مصدر */
+    setPlayKey(k => k + 1);
 
     /* Save for quick-resume next time (skip embed URLs — they cause iframe flicker) */
     if (animeId && src.site !== "_resume" && !isIframeUrl(clickedUrl)) saveLastSrc(animeId, ep, clickedUrl, src.qualityRank ?? 0);
@@ -3467,7 +3473,7 @@ export default function WatchPage() {
 
   return (
     <AnimatePresence mode="wait">
-      <motion.div key={`player-${quality}-${initialSrv}`} className="fixed inset-0">
+      <motion.div key={`player-${playKey}`} className="fixed inset-0">
         <EpisodePlayer
           servers={servers}
           quality={quality}

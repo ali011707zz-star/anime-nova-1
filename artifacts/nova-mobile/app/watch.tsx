@@ -307,6 +307,10 @@ export default function WatchScreen() {
   const topPad = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
   const [screen, setScreen]       = useState<Screen>("loading");
+  /* playKey يتزايد عند كل اختيار مصدر → يجبر RiftPlayer على إعادة التهيئة الكاملة */
+  const [playKey, setPlayKey]           = useState(0);
+  /* riftInitialIdx: فهرس المصدر المختار في riftSources — يُجمَّد وقت الاختيار */
+  const [riftInitialIdx, setRiftInitialIdx] = useState(0);
   const [sources, setSources]     = useState<Src[]>([]);
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<Src | null>(null);
@@ -464,6 +468,8 @@ export default function WatchScreen() {
             autoPlayFiredRef.current = true;
             setSources([resolved]);
             setPlayingSrc(resolved);
+            setRiftInitialIdx(0);
+            setPlayKey(k => k + 1);
             setScreen("native");
           }
         }
@@ -537,6 +543,9 @@ export default function WatchScreen() {
                   AsyncStorage.setItem(srcCacheKey, JSON.stringify({ src: data, ts: Date.now() })).catch(() => {});
                 }
                 setPlayingSrc(src);
+                /* المصدر الأول دائماً عند index 0 في riftSources (لم تتراكم مصادر بعد) */
+                setRiftInitialIdx(0);
+                setPlayKey(k => k + 1);
                 setScreen("native"); // مباشرة بدون setTimeout
               } else if (!autoPlayFiredRef.current) {
                 /* لا مصدر جيد بعد — أظهر الـ picker */
@@ -658,20 +667,12 @@ export default function WatchScreen() {
 
   /* ══ RIFT PLAYER ══ */
   if (screen === "native" && riftSources.length > 0) {
-    const _base = getBaseUrl();
-    const _rawUrl = playingSrc?.directUrl || playingSrc?.url || "";
-    const _resolvedUrl = _rawUrl.startsWith("/") ? _base + _rawUrl : _rawUrl;
-    /* Find the index of the playing source inside riftSources by URL.
-       This handles the auto-play path where playingRiftIdx was never set
-       (stays 0) — we derive the correct index from the URL instead. */
-    const _srcIdxFromUrl = riftSources.findIndex(s => s.url === _resolvedUrl);
-    const _initialIdx = _srcIdxFromUrl >= 0 ? _srcIdxFromUrl : playingRiftIdx;
     const _hasSubtitles = !!(globalSubUrl || riftSources.some(s => !!s.subtitleUrl));
     return (
       <RiftPlayer
-        key={_resolvedUrl}
+        key={`rift-${playKey}`}
         sources={riftSources}
-        initialSourceIndex={_initialIdx}
+        initialSourceIndex={riftInitialIdx}
         subEnabled={_hasSubtitles}
         title={displayTitle}
         episode={epNum}
@@ -757,6 +758,13 @@ export default function WatchScreen() {
     const def = SCRAPER_DEFS.find(d => d.site === src.site);
     const label = def?.name || src.label || src.site || "مجهول";
     console.log(`[Nova] اختيار المصدر → ${label}: ${srcKey?.slice(0, 120)}`);
+    /* احسب الفهرس في riftSources الآن (وقت الاختيار) وجمّده — قبل أي إعادة ترتيب */
+    const base = getBaseUrl();
+    const resolvedKey = srcKey.startsWith("/") ? base + srcKey : srcKey;
+    const riftIdx = riftSources.findIndex(s => s.url === resolvedKey);
+    const finalRiftIdx = riftIdx >= 0 ? riftIdx : Math.max(0, idx);
+    setRiftInitialIdx(finalRiftIdx);
+    setPlayKey(k => k + 1);
     setPlayingRiftIdx(Math.max(0, idx));
     setPlayingSrc(src);
     const url = src.directUrl || src.url || "";
