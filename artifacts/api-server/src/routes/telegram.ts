@@ -530,9 +530,6 @@ router.get("/api/telegram/status", async (_req: Request, res: Response) => {
       adminConfigured:  !!(await getAdminChatId()),
       channelConfigured: !!process.env.TELEGRAM_CHANNEL_ID,
       channelId:        process.env.TELEGRAM_CHANNEL_ID || null,
-      tokenPrefix:      tok ? tok.substring(0, 20) + "..." : null,
-      tokenLength:      tok ? tok.length : 0,
-      hasColon:         tok ? tok.includes(":") : false,
     });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
