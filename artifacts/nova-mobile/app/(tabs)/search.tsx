@@ -31,9 +31,8 @@ function fmtTime(sec: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
-  ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
-  : "http://localhost:8080/api";
+import { getBaseUrl } from "@/utils/baseUrl";
+const API_BASE = `${getBaseUrl()}/api`;
 
 /* ── Types ── */
 interface AnimeResult {

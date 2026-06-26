@@ -386,7 +386,7 @@ async function handleUpdate(update: any) {
   if (text === "/help") {
     await sendMessage(chatId,
       `🆘 <b>المساعدة</b>\n\n` +
-      `🌐 الموقع: https://animenova.replit.app\n\n` +
+      `🌐 الموقع: ${(() => { const d = process.env.APP_DOMAIN; return d ? (d.startsWith("http") ? d : `https://${d}`) : "https://anime-nova.app"; })()}\n\n` +
       `📝 للإبلاغ عن مشكلة: /report ثم اكتب المشكلة\n` +
       `💡 اقتراحات؟ أرسلها مباشرة!\n` +
       `🔧 مشاكل تقنية؟ اوصف المشكلة وسنتواصل معك`

@@ -1,25 +1,34 @@
 import { Platform } from "react-native";
 
 /**
- * Returns the base URL for API calls.
+ * يُحوّل أي domain إلى URL كاملة بـ https
+ * يقبل: "example.com" أو "https://example.com" أو "http://..."
+ */
+function toAbsUrl(domain: string): string {
+  if (domain.startsWith("http://") || domain.startsWith("https://")) return domain;
+  return `https://${domain}`;
+}
+
+/**
+ * Returns the base URL for API calls — portable across all environments.
  * Priority:
- * 1. EXPO_PUBLIC_DOMAIN env var (set at build/dev time)
- * 2. window.location.origin when running on web
- * 3. REPLIT_DEV_DOMAIN env var (injected by Replit at runtime)
- * 4. Empty string fallback (will cause fetch to fail gracefully with error message)
+ * 1. EXPO_PUBLIC_DOMAIN env var (production / deployed build)
+ * 2. window.location.origin when running on web (Replit preview or production web)
+ * 3. EXPO_PUBLIC_REPLIT_DEV_DOMAIN (injected by Replit native dev)
+ * 4. http://localhost:8080 — explicit fallback for local native dev
  */
 export function getBaseUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  if (domain) {
-    return domain.startsWith("http") ? domain : `https://${domain}`;
-  }
+  if (domain) return toAbsUrl(domain);
+
   if (Platform.OS === "web" && typeof window !== "undefined") {
     return window.location.origin;
   }
-  // للتطبيق الـ native: استخدم REPLIT_DEV_DOMAIN إن وُجد
+
+  // بيئة Replit native dev
   const replitDomain = process.env.EXPO_PUBLIC_REPLIT_DEV_DOMAIN;
-  if (replitDomain) {
-    return replitDomain.startsWith("http") ? replitDomain : `https://${replitDomain}`;
-  }
-  return "";
+  if (replitDomain) return toAbsUrl(replitDomain);
+
+  // fallback لـ local dev (جهاز + Metro bundler محلي)
+  return "http://localhost:8080";
 }

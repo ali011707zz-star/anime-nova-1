@@ -139,11 +139,10 @@ export function registerEmailAuthRoutes(app: Express): void {
       if (!result.ok)
         return res.status(500).json({ error: "فشل إرسال البريد، حاول مرة أخرى" });
 
-      // نُرجع devCode عندما نكون على Replit (بيئة تطوير) أو خارج الـ production الحقيقي
-      // يساعد على تجاوز مشكلة البريد في الـ spam أثناء التطوير
+      // نُرجع devCode فقط في بيئة التطوير (NODE_ENV !== "production")
+      // في الـ production لا يُرسَل الكود في الاستجابة أبداً لأسباب أمنية
       const devPayload: Record<string, unknown> = { sent: true };
-      const isDevEnv = !!process.env.REPLIT_DEV_DOMAIN || process.env.NODE_ENV !== "production";
-      if (isDevEnv) {
+      if (process.env.NODE_ENV !== "production") {
         devPayload.devCode = code;
       }
       return res.json(devPayload);
