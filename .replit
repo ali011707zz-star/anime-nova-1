@@ -42,13 +42,13 @@ waitForPort = 5000
 name = "Backend API"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash -c 'PORT=8080 node --enable-source-maps artifacts/api-server/dist/index.mjs'"
-waitForPort = 8080
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash -c 'cd /home/runner/workspace && PORT=8080 node --enable-source-maps artifacts/api-server/dist/index.mjs'"
+waitForPort = 8080
 
 [agent]
 stack = "FLASK_VANILLA_JS"
@@ -62,6 +62,10 @@ timeoutMs = 20000
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
 
 [nix]
 channel = "stable-25_05"
