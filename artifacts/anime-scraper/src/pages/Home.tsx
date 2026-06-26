@@ -961,6 +961,41 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── قسم الكرتون المدبلج ── */}
+      {!selectedGenre && (
+      <div className="mt-5 px-4">
+        <Link href="/dubbed">
+          <motion.div
+            whileTap={{ scale: 0.97 }}
+            className="relative w-full h-[110px] rounded-3xl overflow-hidden cursor-pointer mb-3 shadow-2xl shadow-black/60"
+            style={{ background: "linear-gradient(135deg,#0f2027 0%,#203a43 40%,#2c5364 100%)" }}
+          >
+            <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full opacity-20" style={{ background: "radial-gradient(circle,#10b981,transparent)" }} />
+            <div className="absolute -bottom-6 -left-4 w-32 h-32 rounded-full opacity-15" style={{ background: "radial-gradient(circle,#f59e0b,transparent)" }} />
+            {[{top:"20%",left:"15%",size:2},{top:"65%",left:"30%",size:1.5},{top:"25%",left:"70%",size:2.5},{top:"72%",left:"82%",size:1.5}].map((s,i) => (
+              <div key={i} className="absolute rounded-full bg-white/60 animate-pulse" style={{ top:s.top,left:s.left,width:s.size,height:s.size }} />
+            ))}
+            <div className="absolute inset-0 flex items-center justify-between px-5">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg,#10b981,#f59e0b)" }}>
+                    <Tv2 className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <span className="text-[10px] text-white/40 font-['Cairo'] tracking-wider uppercase">Dubbed Arabic</span>
+                </div>
+                <h3 className="text-[20px] font-black text-white font-['Cairo'] leading-tight">كرتون مدبلج</h3>
+                <p className="text-[10px] text-white/45 font-['Cairo']">كرتون وأنمي مدبلج للعربية</p>
+              </div>
+              <div className="flex items-center gap-1.5 border border-white/20 px-3.5 py-2 rounded-2xl" style={{ background: "rgba(255,255,255,0.07)", backdropFilter: "blur(12px)" }}>
+                <span className="text-[11px] font-black text-white font-['Cairo']">اكتشف</span>
+                <ChevronLeft className="w-3.5 h-3.5 text-white" />
+              </div>
+            </div>
+          </motion.div>
+        </Link>
+      </div>
+      )}
+
       {/* ── موسم الربيع 2026 ── */}
       {spring2026.length > 0 && !selectedGenre && (
         <div className="mt-5">
