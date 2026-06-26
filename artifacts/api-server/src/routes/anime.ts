@@ -9061,6 +9061,146 @@ router.get("/anime/translate-vtt", async (req, res) => {
 
 
 // ════════════════════════════════════════════════════════════════════
+//  translate-vtt-stream  GET /api/anime/translate-vtt-stream?url=&from=en&to=ar
+//  SSE streaming version — sends translated cues chunk by chunk.
+//  First batch arrives in ~3 s; background continues until all done.
+//  Cache hit → instant single-chunk response.
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/translate-vtt-stream", async (req, res) => {
+  const rawUrl = ((req.query.url  as string) || "").trim();
+  const from   = ((req.query.from as string) || "en").trim();
+  const to     = ((req.query.to   as string) || "ar").trim();
+  if (!rawUrl) { res.status(400).end(); return; }
+
+  const PORT = process.env.PORT || 8080;
+  const url  = rawUrl.startsWith("/") ? `http://localhost:${PORT}${rawUrl}` : rawUrl;
+  const cacheKey = `${from}→${to}:${rawUrl}`;
+
+  res.setHeader("Content-Type",  "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection",    "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.flushHeaders();
+
+  const send = (data: object) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`); };
+  const ka   = setInterval(() => { if (!res.writableEnded) res.write(": keepalive\n\n"); }, 5000);
+
+  const finish = (totalCues: number) => {
+    clearInterval(ka);
+    send({ type: "done", totalCues });
+    if (!res.writableEnded) res.end();
+  };
+  req.on("close", () => clearInterval(ka));
+
+  try {
+    // ── Cache hit: instant full response ──
+    const cached = await getSubtitleCache(cacheKey);
+    if (cached) {
+      send({ type: "chunk", cues: cached, index: 0, total: 1, cached: true });
+      finish(cached.length);
+      return;
+    }
+
+    // ── Fetch source VTT/SRT ──
+    const r = await fetch(url, {
+      headers: {
+        ...BASE_HDRS,
+        Accept: "text/vtt,text/plain,*/*",
+        Referer: (() => { try { return new URL(url).origin + "/"; } catch { return url; } })(),
+        Origin:  (() => { try { return new URL(url).origin;       } catch { return "";  } })(),
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) { send({ type: "error", message: `Fetch failed: ${r.status}` }); finish(0); return; }
+    const vttText = await r.text();
+    const cues    = parseVttCues(vttText);
+    if (!cues.length) { finish(0); return; }
+
+    // ── No translation needed ──
+    if (from === to) {
+      const result = cues.map(c => ({ timing: c.timing, text: c.rawText }));
+      void setSubtitleCache(cacheKey, result);
+      send({ type: "chunk", cues: result, index: 0, total: 1 });
+      finish(result.length);
+      return;
+    }
+
+    const CHUNK    = 10;
+    const PARALLEL = 6;
+    const SEP      = " ||| ";
+
+    // Split all cues into chunks of CHUNK
+    const allChunks: Array<{ timing: string; rawText: string }[]> = [];
+    for (let i = 0; i < cues.length; i += CHUNK) allChunks.push(cues.slice(i, i + CHUNK));
+    const totalRounds = Math.ceil(allChunks.length / PARALLEL);
+
+    // Full accumulator for cache save at the end
+    const fullResult: { timing: string; text: string }[] = new Array(cues.length).fill(null as any);
+    let sentIndex = 0;
+
+    for (let roundStart = 0; roundStart < allChunks.length && !res.writableEnded; roundStart += PARALLEL) {
+      const group = allChunks.slice(roundStart, roundStart + PARALLEL);
+      const roundCues: { timing: string; text: string }[] = [];
+
+      await Promise.allSettled(
+        group.map(async (chunk, pi) => {
+          const cueStart = (roundStart + pi) * CHUNK;
+          const cleaned  = chunk.map(t => t.rawText.replace(/\|\|\|/g, "").trim());
+          let translated: string[] = cleaned; // fallback = original
+
+          try {
+            const tUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(cleaned.join(SEP))}`;
+            const tr   = await fetch(tUrl, {
+              headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+              signal: AbortSignal.timeout(15000),
+            });
+            if (tr.ok) {
+              const data = await tr.json() as any;
+              const joined: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || "";
+              if (joined) {
+                const parts = joined.split(/\s*\|\|\|\s*/);
+                translated = chunk.map((_, j) => parts[j]?.trim() || cleaned[j]);
+              }
+            }
+          } catch {
+            // MyMemory fallback for this chunk
+            await Promise.allSettled(chunk.map(async (c, j) => {
+              try {
+                const mm  = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(c.rawText.slice(0, 300))}&langpair=${from}|${to}`;
+                const mmR = await fetch(mm, { signal: AbortSignal.timeout(8000) });
+                if (mmR.ok) translated[j] = (await mmR.json() as any)?.responseData?.translatedText || c.rawText;
+              } catch {}
+            }));
+          }
+
+          chunk.forEach((c, j) => {
+            const row = { timing: c.timing, text: translated[j] ?? c.rawText };
+            fullResult[cueStart + j] = row;
+            roundCues.push(row);
+          });
+        }),
+      );
+
+      // Stream this round immediately
+      if (roundCues.length > 0 && !res.writableEnded) {
+        send({ type: "chunk", cues: roundCues, index: sentIndex++, total: totalRounds });
+      }
+    }
+
+    // Save complete translation to L1+L2 cache (fire-and-forget)
+    const finalCues = fullResult.filter(Boolean);
+    if (finalCues.length > 0) void setSubtitleCache(cacheKey, finalCues);
+    finish(finalCues.length);
+
+  } catch (e: any) {
+    send({ type: "error", message: e?.message || "Translation failed" });
+    clearInterval(ka);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════════
 //  Test Embed  GET /api/anime/test-embed?url=ENCODED_URL
 // ════════════════════════════════════════════════════════════════════
 router.get("/anime/test-embed", async (req, res) => {
