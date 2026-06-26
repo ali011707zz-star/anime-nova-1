@@ -964,10 +964,29 @@ export default function Home() {
       {/* ── قسم الكرتون المدبلج ── */}
       {!selectedGenre && (
       <div className="mt-5 px-4">
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-xl flex items-center justify-center shadow-lg shrink-0" style={{ background: "linear-gradient(135deg,#10b981,#f59e0b)" }}>
+              <Tv2 className="w-3.5 h-3.5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">كرتون مدبلج 📺</h2>
+              <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">+985 مسلسل مدبلج للعربية</p>
+            </div>
+          </div>
+          <Link href="/dubbed">
+            <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 px-2.5 py-1 rounded-xl" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.18)" }}>
+              عرض الكل
+              <ChevronLeft className="w-3 h-3" />
+            </button>
+          </Link>
+        </div>
+        {/* Banner card */}
         <Link href="/dubbed">
           <motion.div
             whileTap={{ scale: 0.97 }}
-            className="relative w-full h-[110px] rounded-3xl overflow-hidden cursor-pointer mb-3 shadow-2xl shadow-black/60"
+            className="relative w-full h-[90px] rounded-2xl overflow-hidden cursor-pointer shadow-xl shadow-black/50"
             style={{ background: "linear-gradient(135deg,#0f2027 0%,#203a43 40%,#2c5364 100%)" }}
           >
             <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full opacity-20" style={{ background: "radial-gradient(circle,#10b981,transparent)" }} />
@@ -976,19 +995,17 @@ export default function Home() {
               <div key={i} className="absolute rounded-full bg-white/60 animate-pulse" style={{ top:s.top,left:s.left,width:s.size,height:s.size }} />
             ))}
             <div className="absolute inset-0 flex items-center justify-between px-5">
-              <div className="space-y-1.5">
+              <div className="space-y-0.5">
+                <span className="text-[9px] text-white/35 font-['Cairo'] tracking-wider uppercase">Dubbed Arabic Cartoons</span>
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg,#10b981,#f59e0b)" }}>
-                    <Tv2 className="w-3.5 h-3.5 text-white" />
-                  </div>
-                  <span className="text-[10px] text-white/40 font-['Cairo'] tracking-wider uppercase">Dubbed Arabic</span>
+                  <h3 className="text-[18px] font-black text-white font-['Cairo'] leading-tight">كرتون زمان</h3>
+                  <span className="px-2 py-0.5 rounded-lg text-[9px] font-black font-['Cairo']" style={{ background: "rgba(16,185,129,0.25)", border: "1px solid rgba(16,185,129,0.35)", color: "#6ee7b7" }}>985+</span>
                 </div>
-                <h3 className="text-[20px] font-black text-white font-['Cairo'] leading-tight">كرتون مدبلج</h3>
-                <p className="text-[10px] text-white/45 font-['Cairo']">كرتون وأنمي مدبلج للعربية</p>
+                <p className="text-[9px] text-white/40 font-['Cairo']">سكوبي دو · سبونج بوب · توم وجيري · صوفيا الأولى</p>
               </div>
-              <div className="flex items-center gap-1.5 border border-white/20 px-3.5 py-2 rounded-2xl" style={{ background: "rgba(255,255,255,0.07)", backdropFilter: "blur(12px)" }}>
-                <span className="text-[11px] font-black text-white font-['Cairo']">اكتشف</span>
-                <ChevronLeft className="w-3.5 h-3.5 text-white" />
+              <div className="flex items-center gap-1.5 border border-white/20 px-3 py-1.5 rounded-xl" style={{ background: "rgba(255,255,255,0.07)", backdropFilter: "blur(12px)" }}>
+                <span className="text-[10px] font-black text-white font-['Cairo']">عرض الكل</span>
+                <ChevronLeft className="w-3 h-3 text-white" />
               </div>
             </div>
           </motion.div>
