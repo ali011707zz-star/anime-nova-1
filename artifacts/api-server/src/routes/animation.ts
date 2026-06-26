@@ -702,7 +702,7 @@ router.get("/animation/stardima-episode", async (req: Request, res: Response) =>
     const sources: { url: string; label: string; num: number }[] = [];
     if (postId) {
       const urls = await sdDoopPlayerAjax(postId, nonce, slug);
-      urls.forEach((url, i) => sources.push({ url, label: `سيرفر ${i + 1}`, num: i + 1 }));
+      urls.forEach((url, i) => sources.push({ url, label: `StarDima · سيرفر ${i + 1}`, num: i + 1 }));
     }
     res.json({ postId, iframes: iframeUrls, sources });
   } catch (e) {
@@ -2664,7 +2664,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const sData = await sResp.json() as any;
               const embedUrl: string = sData?.embed_url || sData?.url || sData?.link || "";
               if (!embedUrl?.startsWith("http")) return;
-              const srvLabel = `عرب سيد · سيرفر ${idx + 1}`;
+              const srvLabel = `ArabSeed · سيرفر ${idx + 1}`;
               const extracted = await callExtractApi(embedUrl);
               if (extracted?.directUrl) {
                 const d = extracted.directUrl;
@@ -2865,39 +2865,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const proxied = u.startsWith("/api/") ? u
               : u.includes(".m3u8") ? wrapHls(u, "https://mycima.gives/")
               : u;
-            sendSource(proxied, src.name || "ماي سيما", proxied, proxied);
+            sendSource(proxied, `MyCima · ${src.name || "عربي مترجم"}`, proxied, proxied);
           }
         } catch { /* silent */ }
       }),
 
-      scrapeAnimCached("animephoenix", async () => {
-        // AnimePhoenix هو موقع مسلسلات أنمي مدبلج فقط — لا يحتوي أفلام
-        if (type === "movie") return;
-        const q = enTitlePrefetched || title;
-        if (!q) return;
-        try {
-          send("status", { msg: "AnimePhoenix: جاري البحث…" });
-          const epN  = type === "movie" ? 1 : epNum;
-          const PORT = process.env["PORT"] || "8080";
-          const fsUrl = `http://localhost:${PORT}/api/anime/fetch-source?site=animephoenix`
-            + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${epN}`;
-          const r = await fetch(fsUrl, {
-            headers: { "x-internal": "1" },
-            signal: AbortSignal.timeout(20_000),
-          });
-          if (!r.ok) return;
-          const { sources } = await r.json() as {
-            sources?: Array<{ directUrl?: string; quality?: string }>;
-          };
-          for (const src of sources || []) {
-            if (!src.directUrl) continue;
-            const proxied = src.directUrl.startsWith("/api/")
-              ? src.directUrl
-              : wrapMp4(src.directUrl, "https://anime-phoenix.com/");
-            sendSource(proxied, `AnimePhoenix · ${src.quality || "1080p"} · مدبلج`, proxied, proxied);
-          }
-        } catch { /* silent */ }
-      }),
+      // AnimePhoenix → موقع أنمي ياباني مدبلج بالعربية — ليس أنيميشن غربي → مُعطَّل من قسم الأنيميشن
+      // (متاح في قسم الأنمي عبر /api/anime/fetch-source?site=animephoenix)
+      Promise.resolve(),
 
       scrapeAnimCached("topcinemaa_anim", async () => {
         const q = enTitlePrefetched || title;
@@ -2923,45 +2898,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const proxied = u.startsWith("/api/") ? u
               : u.includes(".m3u8") ? wrapHls(u, "https://web.topcinemaa.com/")
               : wrapMp4(u, "https://web.topcinemaa.com/");
-            sendSource(proxied, src.name || "توب سيما · عربي مترجم", proxied, proxied);
+            sendSource(proxied, `TopCinema · ${src.name || "عربي مترجم"}`, proxied, proxied);
           }
         } catch { /* silent */ }
       }),
 
-      // ── Animeify (animeify.net) — عربي مترجم · MediaFire/SendVid/Mega ─────────
-      scrapeAnimCached("animeify_anim", async () => {
-        const q = enTitlePrefetched || title;
-        if (!q) return;
-        try {
-          send("status", { msg: "أنمي فاي: جاري البحث…" });
-          const ep     = type === "movie" ? 1 : epNum;
-          const isMov  = type === "movie" ? "true" : "false";
-          const PORT   = process.env["PORT"] || "8080";
-          const fsUrl  = `http://localhost:${PORT}/api/anime/fetch-source?site=animeify`
-            + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMov}`;
-          const r = await fetch(fsUrl, {
-            headers: { "x-internal": "1" },
-            signal: AbortSignal.timeout(35_000),
-          });
-          if (!r.ok) return;
-          const { sources } = await r.json() as {
-            sources?: Array<{ directUrl?: string; url?: string; name?: string; directType?: string; isEmbed?: boolean }>;
-          };
-          for (const src of sources || []) {
-            const u = src.directUrl || src.url;
-            if (!u) continue;
-            // Embed sources (e.g. Mega.nz) — لا تُلفّ في proxy، أرسلها كـ isEmbed
-            if (src.isEmbed) {
-              sendSource(u, src.name || "أنمي فاي · ميغا", u, undefined, { isEmbed: true });
-              continue;
-            }
-            const proxied = u.startsWith("/api/") ? u
-              : src.directType === "hls" ? wrapHls(u, "https://animeify.net/")
-              : wrapMp4(u, "https://animeify.net/");
-            sendSource(proxied, src.name || "أنمي فاي · عربي مترجم", proxied, proxied);
-          }
-        } catch { /* silent */ }
-      }),
+      // Animeify (animeify.net) → موقع أنمي ياباني بالعربية — ليس أنيميشن غربي → مُعطَّل من قسم الأنيميشن
+      // (متاح في قسم الأنمي عبر /api/anime/fetch-source?site=animeify)
+      Promise.resolve(),
 
       // ── Hexa (hexa.su / flixer.su) — TMDB-native HLS متعدد السيرفرات ──────────
       // CDN: nxt.cfw69.workers.dev — CORS * — يعمل من Replit مباشرة
