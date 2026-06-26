@@ -179,6 +179,17 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
 const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.site));
 
+/**
+ * مجموعة المصادر اليابانية التي تستفيد من الترجمة الذكية التلقائية.
+ * هذه المصادر بدون ترجمة عربية مدمجة → يتم تفعيل الترجمة تلقائياً عند التشغيل.
+ * المصادر التي تُرسل subtitleUrl مدمجاً (kawaii/anikoto/videasy) يتم التعامل معها
+ * بواسطة تأثير subtitleUrl الحالي — لا تحتاج لإدراجها هنا.
+ */
+const PROVIDER_WANTS_SMART_SUB = new Set([
+  "hianime", "animepahe", "anineko", "mitanime", "reanime",
+  "starcima_anim", "anikototv", "animekai",
+]);
+
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
 
 function getSrcQualityTier(src: FetchedSrc): Quality {
@@ -1707,6 +1718,10 @@ function EpisodePlayer({
   /* ── changeSubChoice: user picks a language track ── */
   const changeSubChoice = useCallback(async (choice: SubChoice) => {
     setSubChoice(choice);
+    // حفظ تفضيل المستخدم لكل مزوّد: "off" عند الإيقاف، "on" عند التفعيل
+    if (subtitleSite && PROVIDER_WANTS_SMART_SUB.has(subtitleSite)) {
+      try { localStorage.setItem(`smartsub-pref-${subtitleSite}`, choice === "off" ? "off" : "on"); } catch {}
+    }
     if (choice === "off") {
       subAbortRef.current?.abort();
       setSubCues([]); setSubLang(null); setSubState("idle"); setSubStatus("off");
@@ -1873,6 +1888,56 @@ function EpisodePlayer({
     setSubChoice("off");
     setSubTracks([]);
   }, [hideSubtitle]);
+
+  /* ── Auto-enable smart subtitle for Japanese providers (PROVIDER_WANTS_SMART_SUB) ──
+     يتم التفعيل تلقائياً عند تحميل مصدر ياباني إذا لم يُعطِّله المستخدم مسبقاً.
+     المصادر التي تُرسل subtitleUrl جاهزاً (kawaii/anikoto/videasy/vidlink/vyla)
+     يتم التعامل معها تلقائياً بواسطة تأثير subtitleUrl — لا تحتاج لهذا التأثير. */
+  useEffect(() => {
+    if (!subtitleSite || !PROVIDER_WANTS_SMART_SUB.has(subtitleSite)) return;
+    if (hideSubtitle) return;
+    if (subtitleUrl) return; // يتعامل معها تأثير subtitleUrl
+    if (subTracks.length > 0 || subStatus === "discovering") return;
+    const pref = (() => { try { return localStorage.getItem(`smartsub-pref-${subtitleSite}`); } catch { return null; } })();
+    if (pref === "off") return; // المستخدم أوقفها لهذا المزوّد
+
+    let cancelled = false;
+    const ctrl = new AbortController();
+    subAbortRef.current?.abort();
+    subAbortRef.current = ctrl;
+    setSubStatus("discovering");
+
+    const params = new URLSearchParams({
+      anilistId: String(animeId || 0),
+      ep: String(ep),
+      title: animeTitle,
+      english: animeTitle,
+    });
+    fetch(`/api/anime/subtitle-tracks?${params}`, { signal: ctrl.signal })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(async (d: { tracks?: SubTrack[] }) => {
+        if (cancelled) return;
+        const tracks: SubTrack[] = d.tracks || [];
+        setSubTracks(tracks);
+        if (!tracks.length) { setSubStatus("failed"); return; }
+        const arTrk   = tracks.find(t => t.lang === "ar");
+        const arAuto  = tracks.find(t => t.lang === "ar-auto");
+        const enTrk   = tracks.find(t => t.lang === "en");
+        if (arTrk) {
+          setSubChoice("ar");
+          await loadTrack(arTrk, "direct", ctrl.signal);
+        } else if (arAuto || enTrk) {
+          setSubChoice("ar-auto");
+          const trk = arAuto ?? enTrk!;
+          await loadTrack(trk, arAuto ? "direct" : "translate", ctrl.signal);
+        } else {
+          setSubStatus("failed");
+        }
+      })
+      .catch(() => { if (!cancelled) setSubStatus("failed"); });
+    return () => { cancelled = true; ctrl.abort(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtitleSite, ep]);
 
   /* ── Re-apply subtitle choice when server URL changes ── */
   const prevUrlForSubRef = useRef(currentUrl);
@@ -3123,8 +3188,8 @@ export default function WatchPage() {
         if (!srvMap[tier].includes(u)) srvMap[tier].push(u);
       }
       setPlayerDlUrl(undefined);
-      // hasBuiltinSub أو مصادر عربية: لا ترجمة خارجية
-      const firstSkipSub = firstSrc.hasBuiltinSub || ARABIC_SITES.has(firstSrc.site || "");
+      // مصادر عربية: لا ترجمة خارجية (نعتمد على إعدادات المزود)
+      const firstSkipSub = ARABIC_SITES.has(firstSrc.site || "");
       setPlayerSubUrl(firstSkipSub ? undefined : (firstSrc.subtitleUrl || undefined));
       if (firstSkipSub) setKawaiiSubUrl(undefined);
       setPlayerSrcSite(firstSrc.site || "");
@@ -3174,7 +3239,9 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotSources, phase]);
 
-  /* ── Auto-upgrade to FHD: when 1080p source arrives and we started on lower quality, switch ── */
+  /* ── FHD availability: when 1080p sources arrive, add them silently to the server list.
+     We do NOT auto-switch quality here — that would remount EpisodePlayer and interrupt
+     current playback. The user can manually switch quality via the quality selector. ── */
   useEffect(() => {
     if (phase !== "player") return;
     if (upgradedToFhdRef.current) return;
@@ -3193,13 +3260,12 @@ export default function WatchPage() {
     if (fhdSrcs.length === 0) return;
     upgradedToFhdRef.current = true;
     fhdSrcs.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
-    const bestFhd  = fhdSrcs[0];
     const allFhdUs = fhdSrcs.map(s => s.directUrl || s.url).filter(Boolean) as string[];
-    setPlayerServers(prev => ({ ...prev, "1080p FHD": allFhdUs }));
-    setPlayerSubUrl(bestFhd.subtitleUrl || undefined);
-    setPlayerSrcSite(bestFhd.site || "");
-    setQuality("1080p FHD");
-    setInitialSrv(0);
+    // إضافة مصادر 1080p بصمت — لا نبدّل الجودة تلقائياً لتجنّب إيقاف التشغيل الحالي
+    setPlayerServers(prev => ({
+      ...prev,
+      "1080p FHD": [...new Set([...prev["1080p FHD"], ...allFhdUs])],
+    }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotSources, phase, quality]);
 
@@ -3234,8 +3300,8 @@ export default function WatchPage() {
 
     /* Store download URL + subtitle URL for player */
     setPlayerDlUrl(getDownloadUrl(src) || undefined);
-    // hasBuiltinSub أو seepanel أو مصادر عربية: ترجمة مدمجة/غير مطلوبة — لا تُشغّل ترجمة خارجية
-    const skipExternalSub = src.hasBuiltinSub || src.site === "seepanel" || ARABIC_SITES.has(src.site || "");
+    // مصادر عربية: ترجمة مدمجة/غير مطلوبة — لا تُشغّل ترجمة خارجية (نعتمد على إعدادات المزود)
+    const skipExternalSub = ARABIC_SITES.has(src.site || "");
     setPlayerSubUrl(skipExternalSub ? undefined : (src.subtitleUrl || undefined));
     // مصادر عربية: امسح kawaiiSubUrl أيضاً لمنع تداخل الترجمة
     if (skipExternalSub) setKawaiiSubUrl(undefined);

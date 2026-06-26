@@ -224,6 +224,11 @@ export default function RiftPlayer({
   const onFailRef    = useRef(onFail); onFailRef.current = onFail;
   const failFired    = useRef(false);
   const failTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* ── Guard: prevent server-switching after video has been playing successfully ──
+     بعد 20 ثانية من التشغيل الناجح، لا نبدّل السيرفر تلقائياً عند أي خطأ مؤقت.
+     HLS.js يتولى التعافي الداخلي من الأخطاء غير الحرجة. */
+  const hasPlayedSuccessRef = useRef(false);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestRef      = useRef<GS>({ active: "none", startX: 0, startY: 0, lastY: 0, lastX: 0, startValue: 0 });
   const volumeRef     = useRef(1);
   const brightnessRef = useRef(0.85);
@@ -415,6 +420,9 @@ export default function RiftPlayer({
   /* ── fail ── */
   const fireOnFail = useCallback(() => {
     if (failFired.current) return;
+    /* إذا كان الفيديو يعمل بنجاح (>20 ثانية) → لا نبدّل السيرفر تلقائياً.
+       نترك HLS.js يتعامل مع الخطأ داخلياً لأنه على الأرجح خطأ مؤقت. */
+    if (hasPlayedSuccessRef.current) return;
     failFired.current = true;
     setLoading(true); setBuffering(false); setError(null);
     if (failTimer.current) clearTimeout(failTimer.current);
@@ -430,6 +438,8 @@ export default function RiftPlayer({
     failFired.current = false;
     resumedRef.current = false;
     autoFsTriggered.current = false;
+    hasPlayedSuccessRef.current = false;
+    if (successTimerRef.current) { clearTimeout(successTimerRef.current); successTimerRef.current = null; }
     if (failTimer.current) { clearTimeout(failTimer.current); failTimer.current = null; }
 
     let m3u8 = src;
@@ -597,6 +607,7 @@ export default function RiftPlayer({
       if (v) { try { v.pause(); v.src = ""; v.load(); } catch {} }
       if (hideRef.current) clearTimeout(hideRef.current);
       if (failTimer.current) clearTimeout(failTimer.current);
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
     };
   }, [loadSource]);
 
@@ -639,6 +650,11 @@ export default function RiftPlayer({
         autoFsTriggered.current = true;
         containerRef.current?.requestFullscreen?.().catch(() => {});
         try { (screen.orientation as any).lock("landscape"); } catch {}
+      }
+      /* بعد 20 ثانية من التشغيل الناجح → وضع علامة نجاح لمنع تبديل السيرفر التلقائي */
+      if (!hasPlayedSuccessRef.current) {
+        if (successTimerRef.current) clearTimeout(successTimerRef.current);
+        successTimerRef.current = setTimeout(() => { hasPlayedSuccessRef.current = true; }, 20_000);
       }
     };
     const onPause = () => setPlaying(false);
