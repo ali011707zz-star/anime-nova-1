@@ -132,18 +132,42 @@ router.get("/dubbed/watch-src", async (req, res) => {
     const html = await cfGet(epUrl, AT_BASE + "/", 18000);
     if (!html) { res.status(502).json({ error: "failed to fetch episode page" }); return; }
 
+    // Helper: probe if a URL is accessible from our server (not IP-blocked)
+    async function probeOk(url: string): Promise<boolean> {
+      try {
+        const r = await fetch(url, {
+          method: "HEAD",
+          headers: { Referer: AT_BASE + "/", "User-Agent": BROWSER_UA },
+          signal: AbortSignal.timeout(6000),
+        });
+        return r.ok || r.status === 206;
+      } catch { return false; }
+    }
+
+    // Helper: choose between proxied URL and raw URL based on server-side probe
+    async function resolveVideoUrl(rawUrl: string, type: "hls" | "mp4"): Promise<{ hlsUrl: string; rawUrl: string; type: string }> {
+      if (type === "hls") {
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+        return { hlsUrl: proxied, rawUrl, type: "hls" };
+      }
+      // For MP4: probe to see if server can access it; if blocked, return raw URL to client
+      const accessible = await probeOk(rawUrl);
+      if (accessible) {
+        const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+        return { hlsUrl: proxied, rawUrl, type: "mp4" };
+      }
+      // CDN is IP-restricted (e.g. foupix.com:8443 token-tied to client IP)
+      // Return raw URL so the mobile WebView fetches it directly from the user's IP
+      return { hlsUrl: rawUrl, rawUrl, type: "mp4-direct" };
+    }
+
     // Pattern 1: const videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."  (main pattern)
     const videoSrcMatch = html.match(/const\s+videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/);
     if (videoSrcMatch) {
       const rawUrl = videoSrcMatch[1].split('"')[0].split("'")[0]; // strip any trailing quote
       const isHls = rawUrl.includes(".m3u8");
-      if (isHls) {
-        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
-        res.json({ hlsUrl: proxied, rawUrl, type: "hls" });
-      } else {
-        const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
-        res.json({ hlsUrl: proxied, rawUrl, type: "mp4" });
-      }
+      const resolved = await resolveVideoUrl(rawUrl, isHls ? "hls" : "mp4");
+      res.json(resolved);
       return;
     }
 
@@ -151,8 +175,8 @@ router.get("/dubbed/watch-src", async (req, res) => {
     const fileMatch = html.match(/['"](https?:\/\/[^"']+\.mp4[^"']*)['"]/);
     if (fileMatch) {
       const rawUrl = fileMatch[1];
-      const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
-      res.json({ hlsUrl: proxied, rawUrl, type: "mp4" });
+      const resolved = await resolveVideoUrl(rawUrl, "mp4");
+      res.json(resolved);
       return;
     }
 

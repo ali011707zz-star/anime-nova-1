@@ -432,12 +432,12 @@ export default function AnimationWatchScreen() {
     return () => abortRef.current?.abort();
   }, [fetchSources]);
 
-  /* ── 8-second timeout — انتقل للـ picker بدلاً من الانتظار 30 ثانية ── */
+  /* ── 22-second timeout — انتقل للـ picker بدلاً من الانتظار إلى الأبد ── */
   useEffect(() => {
     const timeout = setTimeout(() => {
       setScreen(s => s === "loading" ? "picker" : s);
       setLoading(false);
-    }, 8000);
+    }, 22000);
     return () => clearTimeout(timeout);
   }, [tmdbId, ep, season]);
 
