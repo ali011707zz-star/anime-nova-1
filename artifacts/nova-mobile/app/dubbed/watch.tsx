@@ -1,15 +1,29 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, Pressable, ActivityIndicator,
-  StyleSheet, Platform, Alert,
+  StyleSheet, Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Video, ResizeMode } from "expo-av";
+import WebView from "react-native-webview";
 import { getBaseUrl } from "@/utils/api";
 
 const BASE = getBaseUrl();
+
+function buildHlsHtml(url: string): string {
+  return `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#000;display:flex;align-items:center;justify-content:center;height:100vh}
+video{width:100%;height:100%;object-fit:contain}</style>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script></head>
+<body><video id="v" controls autoplay playsinline></video>
+<script>
+var v=document.getElementById('v');
+var src=${JSON.stringify(url)};
+if(Hls.isSupported()){var h=new Hls({enableCEA708Captions:false,maxBufferLength:20});h.loadSource(src);h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,function(){v.play().catch(function(){})});}
+else if(v.canPlayType('application/vnd.apple.mpegurl')){v.src=src;v.play().catch(function(){});}
+</script></body></html>`;
+}
 
 export default function DubbedWatchScreen() {
   const insets = useSafeAreaInsets();
@@ -24,7 +38,6 @@ export default function DubbedWatchScreen() {
   const [hlsUrl, setHlsUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const videoRef = useRef<any>(null);
   const mountedRef = useRef(true);
 
   const atIds = at ? at.split(",") : [];
@@ -33,7 +46,6 @@ export default function DubbedWatchScreen() {
     if (!epUrl) { setError("رابط الحلقة مفقود"); setLoading(false); return; }
     setLoading(true); setError(null);
 
-    const cacheKey = `dubbed-src-${epUrl}`;
     try {
       const r = await fetch(`${BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`);
       if (!mountedRef.current) return;
@@ -43,7 +55,7 @@ export default function DubbedWatchScreen() {
       const fullUrl = d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl;
       setHlsUrl(fullUrl);
       setLoading(false);
-    } catch (e: any) {
+    } catch {
       if (!mountedRef.current) return;
       setError("خطأ في الاتصال");
       setLoading(false);
@@ -55,21 +67,6 @@ export default function DubbedWatchScreen() {
     loadSource();
     return () => { mountedRef.current = false; };
   }, [loadSource]);
-
-  const saveProgress = useCallback(async (positionMillis: number) => {
-    if (!atIds[0] || !ep) return;
-    const k = `dubbed-wp-${atIds[0]}-${ep}`;
-    try {
-      const { AsyncStorage } = await import("@react-native-async-storage/async-storage");
-      await AsyncStorage.setItem(k, String(Math.floor(positionMillis / 1000)));
-    } catch {}
-  }, [atIds, ep]);
-
-  const handlePlaybackStatus = useCallback((status: any) => {
-    if (status.isLoaded && status.positionMillis > 0) {
-      saveProgress(status.positionMillis);
-    }
-  }, [saveProgress]);
 
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
@@ -103,14 +100,13 @@ export default function DubbedWatchScreen() {
         </View>
       ) : hlsUrl ? (
         <View style={{ flex: 1 }}>
-          <Video
-            ref={videoRef}
-            source={{ uri: hlsUrl }}
+          <WebView
+            source={{ html: buildHlsHtml(hlsUrl) }}
             style={styles.video}
-            resizeMode={ResizeMode.CONTAIN}
-            useNativeControls
-            shouldPlay
-            onPlaybackStatusUpdate={handlePlaybackStatus}
+            allowsFullscreenVideo
+            allowsInlineMediaPlayback
+            mediaPlaybackRequiresUserAction={false}
+            javaScriptEnabled
           />
           {/* Info */}
           <View style={styles.infoPanel}>
