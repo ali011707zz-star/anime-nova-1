@@ -23,6 +23,7 @@ import {
   getCurrentSeason,
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
+import { getBaseUrl } from "@/utils/api";
 
 const TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8";
 
@@ -141,6 +142,55 @@ export default function HomeScreen() {
   }, [todayStart]);
 
   const isLoading = loadingT || loadingP || loadingA;
+
+  /* ── Dubbed cartoon catalog ── */
+  const BASE_URL = getBaseUrl();
+  const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
+  useEffect(() => {
+    fetch(`${BASE_URL}/api/dubbed/catalog?page=1`)
+      .then(r => r.json())
+      .then(d => setDubbedSeries((d.series || []).slice(0, 14)))
+      .catch(() => {});
+  }, []);
+
+  /* ── Recently aired — news section ── */
+  const [recentAiring, setRecentAiring] = useState<any[]>([]);
+  useEffect(() => {
+    const RECENTLY_AIRED_Q = `{
+      Page(perPage: 30) {
+        airingSchedules(
+          airingAt_lesser: ${Math.floor(Date.now() / 1000)}
+          airingAt_greater: ${Math.floor(Date.now() / 1000) - 86400 * 3}
+          sort: TIME_DESC
+        ) {
+          episode airingAt
+          media {
+            id isAdult
+            title { romaji }
+            coverImage { large }
+            averageScore
+            format
+          }
+        }
+      }
+    }`;
+    fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ query: RECENTLY_AIRED_Q }),
+    })
+      .then(r => r.json())
+      .then(json => {
+        const schedules = (json?.data?.Page?.airingSchedules || []).filter((s: any) => s?.media && !s.media.isAdult);
+        const seen = new Set<number>();
+        const unique = schedules.filter((s: any) => {
+          if (seen.has(s.media.id)) return false;
+          seen.add(s.media.id); return true;
+        });
+        setRecentAiring(unique.slice(0, 14));
+      })
+      .catch(() => {});
+  }, []);
 
   const trendingList = trending?.Page?.media || [];
   const popularList = popular?.Page?.media || [];
@@ -389,6 +439,82 @@ export default function HomeScreen() {
                 size="md"
                 onSeeAll={() => router.push("/browse")}
               />
+
+              {/* ── Dubbed Cartoons Section ── */}
+              {dubbedSeries.length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionLeft}>
+                      <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
+                      <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
+                    </View>
+                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/(tabs)/dubbed" as any)}>
+                      <Text style={[styles.seeAllText, { color: colors.primary }]}>الكل</Text>
+                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                    </Pressable>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+                    {dubbedSeries.map((item: any, idx: number) => (
+                      <Pressable
+                        key={item.id || idx}
+                        onPress={() => router.push({ pathname: "/dubbed/[seriesId]" as any, params: { seriesId: item.id, title: item.title } })}
+                        style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                      >
+                        {item.poster ? (
+                          <Image source={{ uri: item.poster }} style={todayStyles.img} contentFit="cover" />
+                        ) : (
+                          <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                            <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                          </View>
+                        )}
+                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                          <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                        </LinearGradient>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* ── News / Recently Aired Section ── */}
+              {recentAiring.length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionLeft}>
+                      <View style={[styles.sectionDot, { backgroundColor: "#22c55e" }]} />
+                      <Text style={[styles.sectionTitle, { color: colors.text }]}>📡 آخر حلقات الأنمي</Text>
+                    </View>
+                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/(tabs)/news" as any)}>
+                      <Text style={[styles.seeAllText, { color: colors.primary }]}>المزيد</Text>
+                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
+                    </Pressable>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+                    {recentAiring.map((item: any, idx: number) => {
+                      const media = item.media;
+                      const minAgo = Math.floor((Date.now() / 1000 - item.airingAt) / 60);
+                      const timeLabel = minAgo < 60 ? `${minAgo}د` : `${Math.floor(minAgo / 60)}س`;
+                      return (
+                        <Pressable
+                          key={media.id + "-" + idx}
+                          onPress={() => router.push(`/anime/${media.id}` as any)}
+                          style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        >
+                          <Image source={{ uri: media.coverImage?.large }} style={todayEpStyles.img} contentFit="cover" />
+                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.93)"]} style={todayEpStyles.grad}>
+                            <Text style={todayEpStyles.ep}>ح {item.episode}</Text>
+                            <Text style={todayEpStyles.title} numberOfLines={2}>{media.title?.romaji}</Text>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
+                              <Ionicons name="radio" size={9} color="#22c55e" />
+                              <Text style={[todayEpStyles.time, { color: "#22c55e" }]}>منذ {timeLabel}</Text>
+                            </View>
+                          </LinearGradient>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
 
             </>
           )}

@@ -1461,23 +1461,28 @@ export function RiftPlayer({
       )}
 
 
-      {/* ── Lock screen indicator ── */}
-      {isLocked && (
-        <View style={s.lockIndicator} pointerEvents="none">
-          <Ionicons name="lock-closed" size={14} color="rgba(251,191,36,0.70)" />
+      {/* ── Lock screen: mini dot (always visible when locked, no unlock shown) ── */}
+      {isLocked && !showUnlock && (
+        <View style={s.lockDot} pointerEvents="none">
+          <Ionicons name="lock-closed" size={13} color="rgba(251,191,36,0.65)" />
         </View>
       )}
 
-      {/* ── Unlock button (tap when locked) ── */}
+      {/* ── Lock screen: elegant swipe-down bar (appears on tap) ── */}
       {isLocked && showUnlock && (
         <Pressable
-          style={s.unlockBtn}
+          style={s.swipeUnlockBar}
           onPress={() => { setIsLocked(false); setShowUnlock(false); }}
         >
-          <View style={s.unlockIcon}>
-            <Ionicons name="lock-open" size={22} color="#fbbf24" />
+          <View style={s.swipeChevrons}>
+            <Ionicons name="chevron-down" size={18} color="rgba(251,191,36,0.90)" />
+            <Ionicons name="chevron-down" size={14} color="rgba(251,191,36,0.55)" />
+            <Ionicons name="chevron-down" size={10} color="rgba(251,191,36,0.25)" />
           </View>
-          <Text style={s.unlockText}>فتح القفل</Text>
+          <View style={s.swipeUnlockIconWrap}>
+            <Ionicons name="lock-open-outline" size={20} color="#fbbf24" />
+          </View>
+          <Text style={s.swipeUnlockLabel}>{"اسحب\nلفتح"}</Text>
         </Pressable>
       )}
 
@@ -1602,8 +1607,8 @@ export function RiftPlayer({
               </Pressable>
               {!currentSrc?.isArabic && (
                 <Pressable
-                  onPress={() => { setSubOn(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
-                  style={[s.topIconBtn, s.topCCBtn, subOn && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
+                  onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
+                  style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
                   hitSlop={10}
                 >
                   <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
@@ -1800,6 +1805,155 @@ export function RiftPlayer({
       )}
 
 
+      {/* ════════════════════════════════════════
+          SUBTITLE SETTINGS PANEL (slides from right)
+      ════════════════════════════════════════ */}
+      {showSubPanel && (
+        <Pressable
+          style={[StyleSheet.absoluteFill, s.subPanelBackdrop, { zIndex: 60 }]}
+          onPress={() => setShowSubPanel(false)}
+        >
+          <Animated.View
+            style={[s.subPanel, isPortrait ? s.subPanelPortrait : s.subPanelLandscape, { transform: [{ translateX: subPanelX }] }]}
+          >
+            <Pressable onPress={() => {}} style={{ flex: 1 }}>
+              {/* Header */}
+              <View style={s.subPanelHeader}>
+                <Text style={s.subPanelTitle}>إعدادات الترجمة</Text>
+                <Pressable style={s.subPanelClose} onPress={() => setShowSubPanel(false)} hitSlop={10}>
+                  <Ionicons name="close" size={16} color="rgba(255,255,255,0.70)" />
+                </Pressable>
+              </View>
+              <View style={s.subPanelDivider} />
+
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.subPanelBody, { paddingBottom: 32 }]}>
+
+                {/* ── تشغيل / إيقاف ── */}
+                <View style={s.subRow}>
+                  <View style={s.subRowLeft}>
+                    <Ionicons name="logo-closed-captioning" size={16} color="rgba(255,255,255,0.70)" />
+                    <Text style={s.subRowLabel}>الترجمة</Text>
+                  </View>
+                  <Pressable style={[s.subToggle, subOn && s.subToggleOn]} onPress={() => setSubOn(v => !v)}>
+                    <View style={[s.subToggleThumb, subOn && s.subToggleThumbOn]} />
+                  </Pressable>
+                </View>
+
+                {/* ── اللغة ── */}
+                <Text style={s.subSectionLabel}>اللغة</Text>
+                <View style={s.subChipRow}>
+                  {(["ar", "en"] as const).map(lng => (
+                    <Pressable
+                      key={lng}
+                      style={[s.subChip, subLang === lng && subOn && s.subChipActive]}
+                      onPress={() => { setSubLang(lng); setSubOn(true); fadeIn(); }}
+                    >
+                      <Text style={[s.subChipText, subLang === lng && subOn && s.subChipTextActive]}>
+                        {lng === "ar" ? "عربي" : "إنجليزي"}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── حجم الخط ── */}
+                <Text style={s.subSectionLabel}>حجم الخط</Text>
+                <View style={s.subChipRow}>
+                  {FONT_SIZES.map(({ sz, label, name }) => (
+                    <Pressable
+                      key={sz}
+                      style={[s.subSizeChip, subSettings.fontSize === sz && s.subChipActive]}
+                      onPress={() => updateSubSettings({ fontSize: sz })}
+                    >
+                      <Text style={[s.subSizeLabel, { fontSize: sz * 0.85 }, subSettings.fontSize === sz && s.subChipTextActive]}>{label}</Text>
+                      <Text style={s.subSizeNameText}>{name}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── اللون ── */}
+                <Text style={s.subSectionLabel}>اللون</Text>
+                <View style={s.subColorRow}>
+                  {SUB_COLORS.map(({ v, label }) => (
+                    <Pressable
+                      key={v}
+                      style={[s.subColorDot, { backgroundColor: v }, subSettings.color === v && s.subColorDotActive]}
+                      onPress={() => updateSubSettings({ color: v })}
+                      hitSlop={6}
+                    >
+                      {subSettings.color === v && <Ionicons name="checkmark" size={14} color={v === "#ffffff" ? "#000" : "#fff"} />}
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── الموضع ── */}
+                <Text style={s.subSectionLabel}>الموضع</Text>
+                <View style={s.subChipRow}>
+                  {SUB_POSITIONS.map(({ v, label, icon }) => (
+                    <Pressable
+                      key={v}
+                      style={[s.subChip, subSettings.position === v && s.subChipActive]}
+                      onPress={() => updateSubSettings({ position: v })}
+                    >
+                      <Text style={s.subPosIcon}>{icon}</Text>
+                      <Text style={[s.subChipText, subSettings.position === v && s.subChipTextActive]}>{label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── خلفية النص ── */}
+                <Text style={s.subSectionLabel}>خلفية النص</Text>
+                <View style={s.subChipRow}>
+                  {([{ v: 0, l: "بلا" }, { v: 0.45, l: "خفيفة" }, { v: 0.82, l: "داكنة" }]).map(({ v, l }) => (
+                    <Pressable
+                      key={v}
+                      style={[s.subChip, subSettings.bgOpacity === v && s.subChipActive]}
+                      onPress={() => updateSubSettings({ bgOpacity: v })}
+                    >
+                      <Text style={[s.subChipText, subSettings.bgOpacity === v && s.subChipTextActive]}>{l}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {/* ── نص عريض ── */}
+                <View style={[s.subRow, { marginTop: 8 }]}>
+                  <View style={s.subRowLeft}>
+                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>ع</Text>
+                    <Text style={s.subRowLabel}>نص عريض</Text>
+                  </View>
+                  <Pressable style={[s.subToggle, subSettings.bold && s.subToggleOn]} onPress={() => updateSubSettings({ bold: !subSettings.bold })}>
+                    <View style={[s.subToggleThumb, subSettings.bold && s.subToggleThumbOn]} />
+                  </Pressable>
+                </View>
+
+                {/* ── إزاحة التوقيت ── */}
+                <Text style={s.subSectionLabel}>إزاحة التوقيت</Text>
+                <View style={[s.subRow, { marginBottom: 6 }]}>
+                  <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 13, fontFamily: "Cairo_600SemiBold" }}>
+                    {subOffset > 0 ? `+${subOffset.toFixed(1)}` : subOffset.toFixed(1)}s
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {([{ d: -0.5, l: "−0.5s" }, { d: 0, l: "تصفير" }, { d: 0.5, l: "+0.5s" }]).map(({ d, l }) => (
+                    <Pressable
+                      key={l}
+                      style={[s.subChip, { flex: 1, justifyContent: "center" }]}
+                      onPress={() => {
+                        const nv = d === 0 ? 0 : Math.max(-10, Math.min(10, subOffset + d));
+                        setSubOffset(nv);
+                        subOffsetRef.current = nv;
+                      }}
+                    >
+                      <Text style={[s.subChipText, { textAlign: "center" }]}>{l}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+              </ScrollView>
+            </Pressable>
+          </Animated.View>
+        </Pressable>
+      )}
+
     </View>
   );
 }
@@ -1907,11 +2061,20 @@ const s = StyleSheet.create({
 
   /* Skip notification */
 
-  /* Lock */
-  lockIndicator: { position: "absolute", right: 14, top: "48%", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 20, padding: 8, borderWidth: 1, borderColor: "rgba(251,191,36,0.30)", zIndex: 25 },
-  unlockBtn: { position: "absolute", right: 14, top: "42%", alignItems: "center", gap: 8, backgroundColor: "rgba(5,5,15,0.92)", borderRadius: 18, paddingHorizontal: 20, paddingVertical: 16, borderWidth: 1.5, borderColor: "rgba(251,191,36,0.40)", zIndex: 40 },
-  unlockIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: "rgba(251,191,36,0.14)", borderWidth: 1, borderColor: "rgba(251,191,36,0.32)", alignItems: "center", justifyContent: "center" },
-  unlockText: { color: "rgba(253,224,71,0.90)", fontSize: 12, fontFamily: "Cairo_700Bold" },
+  /* Lock — new swipe-down bar design */
+  lockDot: { position: "absolute", right: 12, top: "48%", backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 20, padding: 8, borderWidth: 1, borderColor: "rgba(251,191,36,0.25)", zIndex: 25 },
+  swipeUnlockBar: {
+    position: "absolute", right: 10, top: "18%", bottom: "18%",
+    width: 46,
+    alignItems: "center", justifyContent: "space-evenly",
+    backgroundColor: "rgba(5,5,15,0.88)",
+    borderRadius: 23,
+    borderWidth: 1.5, borderColor: "rgba(251,191,36,0.45)",
+    zIndex: 40,
+  },
+  swipeChevrons: { alignItems: "center", gap: -4 },
+  swipeUnlockIconWrap: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(251,191,36,0.14)", borderWidth: 1, borderColor: "rgba(251,191,36,0.32)", alignItems: "center", justifyContent: "center" },
+  swipeUnlockLabel: { color: "rgba(253,224,71,0.85)", fontSize: 9, fontFamily: "Cairo_700Bold", textAlign: "center", lineHeight: 13 },
 
   /* End card */
   endCard: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.88)", alignItems: "center", justifyContent: "center", gap: 14, zIndex: 35 },

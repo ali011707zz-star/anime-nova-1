@@ -1747,12 +1747,27 @@ function EpisodePlayer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subTracks, loadTrack]);
 
-  /* ── fetchSubtitles: called when user clicks the CC button ── */
-  async function fetchSubtitles() {
-    setShowSubPanel(p => !p);
+  /* ── toggleSubSilent: CC button simple on/off without panel ── */
+  function toggleSubSilent() {
+    if (subChoice !== "off" && subStatus !== "off") {
+      changeSubChoice("off");
+      return;
+    }
+    fetchSubtitles();
+  }
 
-    /* If already have tracks — just open the panel */
-    if (subTracks.length > 0 || subStatus === "discovering") return;
+  /* ── fetchSubtitles: loads subtitle tracks silently ── */
+  async function fetchSubtitles() {
+    /* If already have tracks — auto-pick best silently */
+    if (subTracks.length > 0 || subStatus === "discovering") {
+      if (subTracks.length > 0) {
+        const best: SubChoice = subTracks.find(t => t.lang === "ar") ? "ar"
+          : subTracks.some(t => t.lang === "en" || t.lang === "ar-auto") ? "ar-auto"
+          : "ar-auto";
+        changeSubChoice(best);
+      }
+      return;
+    }
 
     subAbortRef.current?.abort();
     const ctrl = new AbortController();
@@ -2215,7 +2230,8 @@ function EpisodePlayer({
       {/* Subtitle — مخفي للمصادر العربية (صوت عربي مدمج) */}
       {!hideSubtitle && (
       <button
-        onClick={fetchSubtitles}
+        onClick={toggleSubSilent}
+        title={subChoice !== "off" && subStatus !== "off" ? "إيقاف الترجمة" : "تشغيل الترجمة"}
         className="flex items-center gap-1 px-2.5 py-2 rounded-xl transition-all active:scale-90 shrink-0"
         style={{
           background: subState === "ready" ? "rgba(124,58,237,0.88)" : "rgba(255,255,255,0.08)",
