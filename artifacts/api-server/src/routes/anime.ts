@@ -325,13 +325,17 @@ async function orkestGet(
   referer?: string,
   timeoutMs = 25000,
 ): Promise<string | null> {
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkestHeaders: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkestHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
+
   // Health check مُؤقَّت
   const now = Date.now();
   if (_orkestAlive === null || now - _orkestCheckedAt > ORKESTR_HEALTH_TTL) {
     try {
       const h = await fetch(
         `${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`,
-        { signal: AbortSignal.timeout(12_000) },
+        { headers: orkestHeaders, signal: AbortSignal.timeout(12_000) },
       );
       _orkestAlive = h.ok;
     } catch { _orkestAlive = false; }
@@ -343,7 +347,7 @@ async function orkestGet(
     const ep = new URL(`${ORKESTR_BASE}/api/anime/proxy-text`);
     ep.searchParams.set("url", url);
     if (referer) ep.searchParams.set("ref", referer);
-    const r = await fetch(ep.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+    const r = await fetch(ep.toString(), { headers: orkestHeaders, signal: AbortSignal.timeout(timeoutMs) });
     if (!r.ok) return null;
     const text = await r.text();
     return text.length > 50 ? text : null;
