@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
-pnpm install --no-frozen-lockfile
+
+# Install all dependencies including devDependencies needed for build
+echo "y" | NODE_ENV=development pnpm install --no-frozen-lockfile
+
+# Build API server and frontend
+NODE_ENV=development pnpm --filter @workspace/api-server run build 2>&1 || true
+NODE_ENV=development pnpm --filter @workspace/anime-scraper run build 2>&1 || true
 
 # Install Python dependencies for CF Proxy and Whisper Service
 .pythonlibs/bin/pip install flask curl_cffi faster-whisper 2>/dev/null || pip install flask curl_cffi faster-whisper 2>/dev/null || true
