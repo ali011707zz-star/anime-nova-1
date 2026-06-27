@@ -22,6 +22,10 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Nova Mobile"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -33,6 +37,18 @@ outputType = "webview"
 task = "shell.exec"
 args = "pkill -f cf_proxy.py 2>/dev/null; fuser -k 8000/tcp 2>/dev/null; fuser -k 5000/tcp 2>/dev/null; sleep 1; CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py & sleep 2 && PORT=5000 node --enable-source-maps artifacts/api-server/dist/index.mjs"
 waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Nova Mobile"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "BASE_PATH=/nova-mobile PORT=3000 node artifacts/nova-mobile/server/serve.js"
+waitForPort = 3000
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "FLASK_VANILLA_JS"
@@ -46,6 +62,10 @@ timeoutMs = 20000
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 3000
+externalPort = 3000
 
 [nix]
 channel = "stable-25_05"
