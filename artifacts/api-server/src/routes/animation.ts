@@ -2567,9 +2567,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   const provLabel = `Vyla · ${sourceLabel}`;
 
                   if (sourceUrl.startsWith(VYLA_BASE_V2)) {
-                    // Vyla proxy URL: CORS * on all responses, segments already proxied
-                    // Send directly to browser — no hls-proxy needed
-                    sendSource(sourceUrl, provLabel, sourceUrl, sourceUrl);
+                    // Vyla proxy URL — wrap through our hls-proxy so mobile expo-video
+                    // talks to our stable server instead of the HF Space directly.
+                    // Vyla proxy URLs are publicly accessible (no session token in request).
+                    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(sourceUrl)}&ref=${encodeURIComponent(VYLA_BASE_V2 + "/")}`;
+                    sendSource(sourceUrl, provLabel, sourceUrl, proxied);
                   } else {
                     // Raw HLS/CDN URL: wrap with our hls-proxy for CORS safety
                     const proxied = sourceUrl.includes(".m3u8")
