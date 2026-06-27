@@ -136,7 +136,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     if (!email.trim()) { setError("أدخل بريدك الإلكتروني أولاً"); return false; }
     setLoading(true); setError("");
     try {
-      const res = await fetch("/api/auth/send-verify-code", {
+      const res = await fetch(API_BASE + "/api/auth/send-verify-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), type }),
@@ -204,7 +204,7 @@ function AuthContent({ onClose, isModal }: { onClose: () => void; isModal?: bool
     if (newPass.length < 6) { setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل"); return; }
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/reset-password", {
+      const res = await fetch(API_BASE + "/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim().toLowerCase(), verifyCode: fullCode, newPassword: newPass }),

@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
 import { ChevronRight, RefreshCw, AlertCircle } from "lucide-react";
@@ -59,7 +60,7 @@ export default function DubbedWatch() {
     } catch {}
 
     try {
-      const r = await fetch(`/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`);
+      const r = await fetch(`${API_BASE}/api/dubbed/watch-src?epUrl=${encodeURIComponent(epUrl)}`);
       if (!mountedRef.current) return;
       if (!r.ok) { setError("تعذّر تحميل الحلقة"); setLoading(false); return; }
       const d = await r.json();

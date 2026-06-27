@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { getAppToken } from "@/lib/appToken";
@@ -391,7 +392,7 @@ export default function AnimationWatch() {
   /* ── Front-end extraction fallback ── */
   const tryExtract = useCallback(async (url: string) => {
     try {
-      const r = await fetch(`/api/anime/extract-video?url=${encodeURIComponent(url)}`);
+      const r = await fetch(`${API_BASE}/api/anime/extract-video?url=${encodeURIComponent(url)}`);
       const d = await r.json();
       const raw = d.directUrl || d.url || "";
       // Keep raw URL as directUrl so retry-with-direct fallback can use it
@@ -415,7 +416,7 @@ export default function AnimationWatch() {
     histSavedRef.current = true;
     saveAnimHistory(tmdbId, type, displayTitle, posterUrl, ep, season);
     /* حفظ على الخادم (للمستخدمين المسجّلين) */
-    fetch("/api/user/history", {
+    fetch(API_BASE + "/api/user/history", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -436,7 +437,7 @@ export default function AnimationWatch() {
   /* ── Episode list ── */
   useEffect(() => {
     if (type !== "tv" || !tmdbId) return;
-    fetch(`/api/animation/season?id=${tmdbId}&season=${season}`)
+    fetch(`${API_BASE}/api/animation/season?id=${tmdbId}&season=${season}`)
       .then(r => r.json())
       .then(d => setEpisodes(d.episodes || []))
       .catch(() => {});
@@ -481,7 +482,7 @@ export default function AnimationWatch() {
     };
 
     const fetchSkip = (malId: number) =>
-      fetch(`/api/anime/aniskip?malId=${malId}&ep=${ep}`, { signal: AbortSignal.timeout(10_000) })
+      fetch(`${API_BASE}/api/anime/aniskip?malId=${malId}&ep=${ep}`, { signal: AbortSignal.timeout(10_000) })
         .then(r => r.ok ? r.json() : null)
         .then(applySkip)
         .catch(() => {});
@@ -495,7 +496,7 @@ export default function AnimationWatch() {
 
     // ── 3. ابحث عبر AniList بالعنوان للحصول على MAL ID ──
     const ANILIST_Q = `query ($s: String) { Media(search: $s, type: ANIME) { idMal } }`;
-    fetch("/api/anilist", {
+    fetch(API_BASE + "/api/anilist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANILIST_Q, variables: { s: displayTitle } }),
@@ -596,7 +597,7 @@ export default function AnimationWatch() {
   // Fetch VTT/SRT file via server proxy and parse into SubCue[]
   const fetchVttParsed = useCallback(async (url: string, signal?: AbortSignal): Promise<SubCue[]> => {
     try {
-      const r = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(url)}&ref=${SC_REF}`, {
+      const r = await fetch(`${API_BASE}/api/anime/proxy-text?url=${encodeURIComponent(url)}&ref=${SC_REF}`, {
         signal: signal ?? AbortSignal.timeout(10_000),
       });
       if (!r.ok) return [];

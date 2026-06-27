@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
@@ -255,7 +256,7 @@ export default function CommentsPage() {
         body.parentId = replyingTo.id;
         body.replyToUsername = replyingTo.username;
       }
-      const res  = await fetch("/api/comments", {
+      const res  = await fetch(API_BASE + "/api/comments", {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -278,7 +279,7 @@ export default function CommentsPage() {
       c.id === id ? { ...c, liked: !c.liked, likes: c.liked ? c.likes - 1 : c.likes + 1 } : c
     ));
     try {
-      await fetch(`/api/comments/${id}/like`, { method: "POST", credentials: "include" });
+      await fetch(`${API_BASE}/api/comments/${id}/like`, { method: "POST", credentials: "include" });
     } catch {
       setComments(prev => prev.map(c =>
         c.id === id ? { ...c, liked: !c.liked, likes: c.liked ? c.likes - 1 : c.likes + 1 } : c
@@ -288,7 +289,7 @@ export default function CommentsPage() {
 
   const deleteComment = async (id: string) => {
     setComments(prev => prev.filter(c => c.id !== id && c.parentId !== id));
-    try { await fetch(`/api/comments/${id}`, { method: "DELETE", credentials: "include" }); } catch {}
+    try { await fetch(`${API_BASE}/api/comments/${id}`, { method: "DELETE", credentials: "include" }); } catch {}
   };
 
   const threaded = threads(comments);

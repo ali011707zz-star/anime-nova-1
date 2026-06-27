@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Link } from "wouter";
 import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Heart, Clapperboard, Search as SearchIcon, X } from "lucide-react";
@@ -106,7 +107,7 @@ export default function Library() {
     if (savedIds.length === 0) { setSavedAnime([]); return; }
     setLoading(true);
     try {
-      const r = await fetch("/api/anilist", {
+      const r = await fetch(API_BASE + "/api/anilist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: savedIds } }),
@@ -128,7 +129,7 @@ export default function Library() {
       if (savedIds.length === 0) { if (!cancelled) setSavedAnime([]); return; }
       if (!cancelled) setLoading(true);
       try {
-        const r = await fetch("/api/anilist", {
+        const r = await fetch(API_BASE + "/api/anilist", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: ANIME_QUERY, variables: { ids: savedIds } }),

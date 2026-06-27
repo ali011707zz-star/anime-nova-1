@@ -47,7 +47,7 @@ export default function AuthCallback() {
       }
 
       const redirectUri = `${window.location.origin}/auth/callback`;
-      fetch("/api/auth/github/token", {
+      fetch(API_BASE + "/api/auth/github/token", {
         method : "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -95,7 +95,7 @@ export default function AuthCallback() {
       return;
     }
 
-    fetch("/api/auth/google/token", {
+    fetch(API_BASE + "/api/auth/google/token", {
       method : "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",

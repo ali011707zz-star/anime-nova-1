@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
 import { ChevronRight, Play, Trash2, Clock, History, Tv, Film } from "lucide-react";
@@ -84,7 +85,7 @@ function loadLocalHistory(): HistoryItem[] {
 
 async function loadServerHistory(): Promise<AnimeHistoryItem[]> {
   try {
-    const res = await fetch("/api/user/history?limit=60", { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/user/history?limit=60", { credentials: "include" });
     if (!res.ok) return [];
     const data = await res.json();
     return (data.history || []).map((r: any) => ({
@@ -136,7 +137,7 @@ export default function WatchHistory() {
 
   function removeAnime(serverId: string | undefined, id: number, ep: number) {
     if (userId && serverId) {
-      fetch(`/api/user/history/${serverId}`, { method: "DELETE", credentials: "include" }).catch(() => {});
+      fetch(`${API_BASE}/api/user/history/${serverId}`, { method: "DELETE", credentials: "include" }).catch(() => {});
     }
     try {
       const raw: any[] = JSON.parse(localStorage.getItem("watch-history") || "[]");
@@ -155,7 +156,7 @@ export default function WatchHistory() {
 
   function clearAll() {
     if (userId) {
-      fetch("/api/user/history", { method: "DELETE", credentials: "include" }).catch(() => {});
+      fetch(API_BASE + "/api/user/history", { method: "DELETE", credentials: "include" }).catch(() => {});
     }
     localStorage.removeItem("watch-history");
     localStorage.removeItem("anim-watch-history");

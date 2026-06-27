@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 /**
  * GLASSY PLAYER v5 — مشغل أنمي زجاجي فاخر
  */
@@ -494,7 +495,7 @@ export default function RiftPlayer({
       try {
         const qs = src.includes("?") ? src.split("?")[1] : "";
         const p = new URLSearchParams(qs); p.set("_t", String(Date.now()));
-        const r = await fetch(`/api/anime/animex-source?${p}`, { cache: "no-store", signal: AbortSignal.timeout(18000) });
+        const r = await fetch(`${API_BASE}/api/anime/animex-source?${p}`, { cache: "no-store", signal: AbortSignal.timeout(18000) });
         if (!r.ok) { const d = await r.json().catch(() => ({})); setError((d as any).error || `خطأ ${r.status}`); setLoading(false); return; }
         const data = await r.json() as { proxyUrl?: string; rawUrl?: string; quality?: string };
         const hlsUrl = data.proxyUrl || data.rawUrl;

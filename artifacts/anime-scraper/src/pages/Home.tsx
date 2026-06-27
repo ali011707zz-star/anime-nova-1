@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
 import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard, Tv2 } from "lucide-react";
@@ -167,7 +168,7 @@ function RecentNewsSection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/anime/new-episodes")
+    fetch(API_BASE + "/api/anime/new-episodes")
       .then(r => r.json())
       .then((data: any[]) => {
         if (Array.isArray(data)) setItems(data.slice(0, 8));
@@ -340,7 +341,7 @@ export default function Home() {
   }, []);
 
   const fetch$ = async (query: string, variables?: any) => {
-    const r = await fetch("/api/anilist", {
+    const r = await fetch(API_BASE + "/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, variables }),
     });
@@ -370,7 +371,7 @@ export default function Home() {
 
   /* Load Spring 2026 seasonal anime */
   useEffect(() => {
-    fetch("/api/anilist", {
+    fetch(API_BASE + "/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: SPRING_2026_QUERY }),
     })
@@ -381,7 +382,7 @@ export default function Home() {
 
   /* Load dubbed cartoon cards for Home section */
   useEffect(() => {
-    fetch("/api/dubbed/catalog?page=1")
+    fetch(API_BASE + "/api/dubbed/catalog?page=1")
       .then(r => r.json())
       .then(d => setDubbedCards((d.results || d.items || []).slice(0, 8)))
       .catch(() => {});
@@ -389,7 +390,7 @@ export default function Home() {
 
   /* Load extra sections — Top Rated, Fall 2025, Isekai */
   useEffect(() => {
-    const post = (q: string) => fetch("/api/anilist", {
+    const post = (q: string) => fetch(API_BASE + "/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: q }),
     }).then(r => r.json());
@@ -405,7 +406,7 @@ export default function Home() {
     const gt  = now - 72 * 3600;   // آخر 3 أيام
     const lt  = now + 12 * 3600;   // 12 ساعة قادمة
     setTodayChecking(true);
-    fetch("/api/anilist", {
+    fetch(API_BASE + "/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: TODAY_EPISODES_QUERY, variables: { gt, lt } }),
     })
@@ -428,7 +429,7 @@ export default function Home() {
         try {
           const params = new URLSearchParams();
           titles.forEach((t: string) => params.append("t", t));
-          const checkRes = await fetch(`/api/anime/check-arabic?${params}`, { signal: AbortSignal.timeout(20_000) });
+          const checkRes = await fetch(`${API_BASE}/api/anime/check-arabic?${params}`, { signal: AbortSignal.timeout(20_000) });
           const { available } = await checkRes.json() as { available: string[] };
           const availSet = new Set(available.map((t: string) => t.toLowerCase().trim()));
           // صارم: فقط الحلقات المتوفرة في المصادر العربية — بدون fallback

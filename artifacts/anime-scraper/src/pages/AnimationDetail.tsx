@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { useParams, useLocation, Link } from "wouter";
@@ -62,7 +63,7 @@ export default function AnimationDetail() {
     setMyRating(Number(localStorage.getItem(`anim-rating-${type}-${id}`) || "0"));
     setCommentsCount(loadCommentsCount(storageKey));
 
-    fetch(`/api/animation/detail?type=${type}&id=${id}`)
+    fetch(`${API_BASE}/api/animation/detail?type=${type}&id=${id}`)
       .then(r => r.json())
       .then(async d => {
         setDetail(d);
@@ -72,7 +73,7 @@ export default function AnimationDetail() {
         const cachedDesc = localStorage.getItem(`anim-desc-ar-${type}-${id}`);
         if (cachedDesc) { setDescAr(cachedDesc); return; }
         try {
-          const r2 = await fetch(`/api/anime/translate?text=${encodeURIComponent(overview.slice(0, 480))}`);
+          const r2 = await fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(overview.slice(0, 480))}`);
           const d2 = await r2.json();
           if (d2.translated && d2.translated !== overview && d2.translated.length > 10) {
             setDescAr(d2.translated);

@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { useParams, useLocation, useSearch, Link } from "wouter";
@@ -34,7 +35,7 @@ export default function AnimationEpisodes() {
 
   useEffect(() => {
     if (!id) return;
-    fetch(`/api/animation/detail?type=${type}&id=${id}`)
+    fetch(`${API_BASE}/api/animation/detail?type=${type}&id=${id}`)
       .then(r => r.json())
       .then(d => setDetail(d))
       .catch(() => {});
@@ -43,7 +44,7 @@ export default function AnimationEpisodes() {
   useEffect(() => {
     if (!id) return;
     setEpLoading(true);
-    fetch(`/api/animation/season?id=${id}&season=${selSeason}`)
+    fetch(`${API_BASE}/api/animation/season?id=${id}&season=${selSeason}`)
       .then(r => r.json())
       .then(d => { setEpisodes(d.episodes || []); setEpLoading(false); })
       .catch(() => setEpLoading(false));

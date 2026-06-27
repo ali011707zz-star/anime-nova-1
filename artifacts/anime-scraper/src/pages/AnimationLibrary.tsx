@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { Link, useLocation } from "wouter";
@@ -143,7 +144,7 @@ export default function AnimationLibrary() {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/animation/search?q=${encodeURIComponent(searchQ)}&type=${type}`);
+        const r = await fetch(`${API_BASE}/api/animation/search?q=${encodeURIComponent(searchQ)}&type=${type}`);
         const d = await r.json();
         const hasCjk = (s: string) => /[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/u.test(s);
         const filtered = (d.results || []).filter((item: TmdbItem) => {

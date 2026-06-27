@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import { Search, X, ChevronDown, Loader2 } from "lucide-react";
@@ -67,7 +68,7 @@ export default function DubbedLibrary() {
   const loadPage = useCallback(async (p: number, reset = false) => {
     if (reset) { setLoading(true); } else { setLoadingMore(true); }
     try {
-      const r = await fetch(`/api/dubbed/catalog?page=${p}`);
+      const r = await fetch(`${API_BASE}/api/dubbed/catalog?page=${p}`);
       const d = await r.json();
       const results: Series[] = d.results || [];
       setTotalPages(d.totalPages || 1);
@@ -100,7 +101,7 @@ export default function DubbedLibrary() {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/dubbed/search?q=${encodeURIComponent(q)}`);
+        const r = await fetch(`${API_BASE}/api/dubbed/search?q=${encodeURIComponent(q)}`);
         const d = await r.json();
         setSearchResults(d.results || []);
       } catch { setSearchResults([]); }

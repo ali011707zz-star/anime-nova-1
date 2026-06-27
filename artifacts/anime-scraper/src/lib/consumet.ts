@@ -1,4 +1,5 @@
-const API_BASE = "/api";
+import { API_BASE as _API_BASE } from "./apiBase";
+const API_BASE = _API_BASE + "/api";
 
 export interface SearchResult {
   id: string;

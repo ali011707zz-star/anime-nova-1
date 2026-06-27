@@ -113,7 +113,7 @@ export default function Browse() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetch$ = async (query: string) => {
-    const r = await fetch("/api/anime/anilist", {
+    const r = await fetch(API_BASE + "/api/anime/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
     });

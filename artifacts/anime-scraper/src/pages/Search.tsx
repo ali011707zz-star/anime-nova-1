@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef } from 'react';
 import { Search as SearchIcon, X, Loader2, SlidersHorizontal, ChevronDown, Camera, Upload, ExternalLink } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
@@ -285,7 +286,7 @@ export default function Search() {
     try {
       let resp: Response;
       if (typeof urlOrFile === 'string') {
-        resp = await fetch(`/api/anime/trace-search?url=${encodeURIComponent(urlOrFile)}`);
+        resp = await fetch(`${API_BASE}/api/anime/trace-search?url=${encodeURIComponent(urlOrFile)}`);
       } else {
         // Send as raw binary — trace.moe expects raw image bytes, not multipart
         const arrayBuf = await urlOrFile.arrayBuffer();

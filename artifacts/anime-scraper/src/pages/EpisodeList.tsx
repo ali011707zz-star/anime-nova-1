@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useParams, useLocation } from "wouter";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { ChevronRight, ChevronLeft, Loader2, Search, Eye, EyeOff, Play, Star, MessageCircle, Send, X } from "lucide-react";
@@ -136,7 +137,7 @@ function EpCommentSheet({ epNum, animeId, onClose, animeTitle }: {
 
   useEffect(() => {
     setLoadingCmts(true);
-    fetch(`/api/comments?animeId=${animeId}&ep=${epNum}`, { credentials: "include" })
+    fetch(`${API_BASE}/api/comments?animeId=${animeId}&ep=${epNum}`, { credentials: "include" })
       .then(r => r.json())
       .then(d => { if (d.comments) setComments(d.comments); })
       .catch(() => {})
@@ -149,7 +150,7 @@ function EpCommentSheet({ epNum, animeId, onClose, animeTitle }: {
     if (!text || !user) return;
     setSending(true);
     try {
-      const res = await fetch("/api/comments", {
+      const res = await fetch(API_BASE + "/api/comments", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -168,7 +169,7 @@ function EpCommentSheet({ epNum, animeId, onClose, animeTitle }: {
     setComments(prev => prev.map(c =>
       c.id === id ? { ...c, liked: !c.liked, likes: c.liked ? c.likes - 1 : c.likes + 1 } : c
     ));
-    await fetch(`/api/comments/${id}/like`, { method: "POST", credentials: "include" }).catch(() => {});
+    await fetch(`${API_BASE}/api/comments/${id}/like`, { method: "POST", credentials: "include" }).catch(() => {});
   }
 
   return (
@@ -300,7 +301,7 @@ export default function EpisodeListPage() {
     setActiveCommentEp(null);
     setArEpTitles({});
 
-    fetch("/api/anilist", {
+    fetch(API_BASE + "/api/anilist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANIME_QUERY, variables: { id: parseInt(params.id) } }),
@@ -329,7 +330,7 @@ export default function EpisodeListPage() {
 
   function closeComment() {
     if (activeCommentEp !== null && params.id) {
-      fetch(`/api/comments/count?animeId=${params.id}`, { credentials: "include" })
+      fetch(`${API_BASE}/api/comments/count?animeId=${params.id}`, { credentials: "include" })
         .then(r => r.json())
         .then(d => {
           if (d.counts) {
@@ -422,7 +423,7 @@ export default function EpisodeListPage() {
 
     const SEP = "\n§§§\n";
     const combined = toTranslate.map(t => t.title).join(SEP);
-    fetch(`/api/anime/translate?text=${encodeURIComponent(combined)}&from=en&to=ar`, { signal: ctrl.signal })
+    fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(combined)}&from=en&to=ar`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then((d: any) => {
         if (!d?.translated) return;
