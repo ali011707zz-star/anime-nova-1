@@ -102,10 +102,11 @@ export async function notifyNewEpisode(
 
   const poster  = await fetchAnimePoster(anilistId);
   const caption =
-    `🎬 <b>اسم الأنمي:</b> ${title}\n` +
-    `📺 <b>الحلقة:</b> ${ep}\n` +
-    `✨ تم إضافة الحلقة الجديدة\n\n` +
-    `مشاهدة ممتعة 💙`;
+    `🌸 <b>حلقة جديدة وصلت!</b>\n\n` +
+    `✨ <b>${title}</b>\n` +
+    `🎬 الحلقة <b>${ep}</b>\n\n` +
+    `✅ <b>متاحة الآن للمشاهدة</b> على Anime NOVA 🎮\n\n` +
+    `<i>شاهد بجودة عالية · بدون إعلانات 🚀</i>`;
 
   if (poster) {
     await sendChannelPhoto(poster, caption);
@@ -184,18 +185,73 @@ async function markNotified(anilistId: number, ep: number): Promise<void> {
   } catch { /* silent — in-memory Set is enough */ }
 }
 
+/* ── فحص توفر الحلقة في AnimeWitcher ───────────────────────────────────── */
+
+const AW_HF = "https://1we323-witcher.hf.space";
+const _awEpCache = new Map<string, { available: boolean; ts: number }>();
+
+async function checkAnimeWitcherEp(title: string, ep: number): Promise<boolean> {
+  const cacheKey = `${title.toLowerCase()}:${ep}`;
+  const hit = _awEpCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < 10 * 60_000) return hit.available;
+
+  try {
+    const searchRes = await fetch(
+      `${AW_HF}/api/search?q=${encodeURIComponent(title)}`,
+      { headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(8_000) }
+    );
+    if (!searchRes.ok) { _awEpCache.set(cacheKey, { available: false, ts: Date.now() }); return false; }
+    const results: any[] = await searchRes.json().catch(() => []);
+    if (!results.length) { _awEpCache.set(cacheKey, { available: false, ts: Date.now() }); return false; }
+
+    // أقرب نتيجة
+    const anime = results[0];
+    const animeId = anime?.id || anime?.anime_id || "";
+    if (!animeId) { _awEpCache.set(cacheKey, { available: false, ts: Date.now() }); return false; }
+
+    const epsRes = await fetch(
+      `${AW_HF}/api/episodes?id=${encodeURIComponent(String(animeId))}`,
+      { headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
+        signal: AbortSignal.timeout(8_000) }
+    );
+    if (!epsRes.ok) { _awEpCache.set(cacheKey, { available: false, ts: Date.now() }); return false; }
+    const episodes: any[] = await epsRes.json().catch(() => []);
+    const found = episodes.some((e: any) => {
+      const num = parseInt(String(e.episode_number ?? e.ep_num ?? e.number ?? "0"), 10);
+      return num === ep;
+    });
+    _awEpCache.set(cacheKey, { available: found, ts: Date.now() });
+    return found;
+  } catch {
+    _awEpCache.set(cacheKey, { available: false, ts: Date.now() });
+    return false;
+  }
+}
+
 /* ── بناء رسالة الإشعار ────────────────────────────────────────────────── */
 
-function buildCaption(media: any, ep: number): string {
+function buildCaption(media: any, ep: number, awAvailable: boolean): string {
   const title  = media.title?.english || media.title?.romaji || media.title?.native || "أنمي";
-  const genres = (media.genres || []).slice(0, 3).join(" • ");
+  const romaji = media.title?.romaji || "";
+  const genres = (media.genres || []).slice(0, 3).join(" · ");
+  const status = awAvailable
+    ? "✅ <b>متاحة الآن للمشاهدة</b> على Anime NOVA 🎮"
+    : "🔔 <b>نزلت للتو!</b> ترقّب توفرها على Anime NOVA";
 
-  return (
-    `🎌 <b>حلقة جديدة!</b>\n\n` +
-    `🎬 <b>${title}</b>\n` +
-    `📺 <b>الحلقة:</b> ${ep}\n` +
-    (genres ? `🏷 ${genres}\n` : "")
-  ).trimEnd();
+  const lines: string[] = [
+    `🌸 <b>حلقة جديدة وصلت!</b>`,
+    ``,
+    `✨ <b>${title}</b>`,
+  ];
+  if (romaji && romaji !== title) lines.push(`<i>${romaji}</i>`);
+  lines.push(`🎬 الحلقة <b>${ep}</b>`);
+  if (genres) lines.push(`🎭 ${genres}`);
+  lines.push(``);
+  lines.push(status);
+  lines.push(``);
+  lines.push(`<i>شاهد بجودة عالية · بدون إعلانات 🚀</i>`);
+  return lines.join("\n");
 }
 
 /* ── حالة الـ scheduler ──────────────────────────────────────────────── */
@@ -238,26 +294,20 @@ async function runSchedulerCycle(): Promise<void> {
 
     if (await wasNotified(anilistId, ep)) continue;
 
-    // فحص توفر المصادر العربية (اختياري — لا يوقف الإرسال عند الفشل)
+    // فحص توفر الحلقة في AnimeWitcher (الأولوية الأولى للإشعار)
     const titleToCheck = media.title?.romaji || media.title?.english || "";
+    let awAvailable = false;
     if (titleToCheck) {
-      try {
-        const PORT = process.env["PORT"] || "8080";
-        const checkRes = await fetch(
-          `http://localhost:${PORT}/api/anime/check-arabic?t=${encodeURIComponent(titleToCheck)}`,
-          { headers: { "x-internal": "1" }, signal: AbortSignal.timeout(6_000) }
-        );
-        const { available } = await checkRes.json() as { available: string[] };
-        if (!available.length) {
-          console.log(`[scheduler] ℹ️ لا مصادر عربية حتى الآن: ${titleToCheck} ح${ep} — الإرسال على أي حال`);
-        }
-      } catch {
-        console.log(`[scheduler] ℹ️ فشل فحص المصادر: ${titleToCheck} ح${ep} — الإرسال على أي حال`);
+      awAvailable = await checkAnimeWitcherEp(titleToCheck, ep);
+      if (awAvailable) {
+        console.log(`[scheduler] ✨ AnimeWitcher أكّد توفر: ${titleToCheck} ح${ep}`);
+      } else {
+        console.log(`[scheduler] ℹ️ AnimeWitcher لم يُضف بعد: ${titleToCheck} ح${ep} — إرسال الإشعار المسبق`);
       }
     }
 
     const poster  = media.coverImage?.extraLarge || media.coverImage?.large || null;
-    const caption = buildCaption(media, ep);
+    const caption = buildCaption(media, ep, awAvailable);
 
     if (poster) {
       await sendChannelPhoto(poster, caption);
