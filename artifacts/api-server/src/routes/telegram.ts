@@ -231,16 +231,13 @@ async function checkAnimeWitcherEp(title: string, ep: number): Promise<boolean> 
 
 /* ── بناء رسالة الإشعار ────────────────────────────────────────────────── */
 
-function buildCaption(media: any, ep: number, awAvailable: boolean): string {
+function buildCaption(media: any, ep: number): string {
   const title  = media.title?.english || media.title?.romaji || media.title?.native || "أنمي";
   const romaji = media.title?.romaji || "";
   const genres = (media.genres || []).slice(0, 3).join(" · ");
-  const status = awAvailable
-    ? "✅ <b>متاحة الآن للمشاهدة</b> على Anime NOVA 🎮"
-    : "🔔 <b>نزلت للتو!</b> ترقّب توفرها على Anime NOVA";
 
   const lines: string[] = [
-    `🌸 <b>حلقة جديدة وصلت!</b>`,
+    `🌸 <b>حلقة جديدة متاحة الآن!</b>`,
     ``,
     `✨ <b>${title}</b>`,
   ];
@@ -248,9 +245,9 @@ function buildCaption(media: any, ep: number, awAvailable: boolean): string {
   lines.push(`🎬 الحلقة <b>${ep}</b>`);
   if (genres) lines.push(`🎭 ${genres}`);
   lines.push(``);
-  lines.push(status);
+  lines.push(`✅ <b>متاحة الآن على Anime NOVA</b> 🎮`);
   lines.push(``);
-  lines.push(`<i>شاهد بجودة عالية · بدون إعلانات 🚀</i>`);
+  lines.push(`🎉 <b>مشاهدة ممتعة!</b> 🌟`);
   return lines.join("\n");
 }
 
@@ -294,20 +291,22 @@ async function runSchedulerCycle(): Promise<void> {
 
     if (await wasNotified(anilistId, ep)) continue;
 
-    // فحص توفر الحلقة في AnimeWitcher (الأولوية الأولى للإشعار)
+    // فحص توفر الحلقة في AnimeWitcher — فقط أرسل عندما تكون متاحة فعلاً
     const titleToCheck = media.title?.romaji || media.title?.english || "";
-    let awAvailable = false;
-    if (titleToCheck) {
-      awAvailable = await checkAnimeWitcherEp(titleToCheck, ep);
-      if (awAvailable) {
-        console.log(`[scheduler] ✨ AnimeWitcher أكّد توفر: ${titleToCheck} ح${ep}`);
-      } else {
-        console.log(`[scheduler] ℹ️ AnimeWitcher لم يُضف بعد: ${titleToCheck} ح${ep} — إرسال الإشعار المسبق`);
-      }
+    if (!titleToCheck) continue;
+
+    const awAvailable = await checkAnimeWitcherEp(titleToCheck, ep);
+    if (!awAvailable) {
+      console.log(`[scheduler] ⏳ AnimeWitcher لم يُضف بعد: ${titleToCheck} ح${ep} — تخطّي`);
+      // لا نُرسل إشعاراً مسبقاً، ننتظر التأكيد
+      notifiedEpisodes.delete(`tg_notify:${anilistId}:${ep}`); // أبقِه غير مُعلَّم حتى يتوفر
+      continue;
     }
 
+    console.log(`[scheduler] ✨ AnimeWitcher أكّد توفر: ${titleToCheck} ح${ep} — إرسال الإشعار`);
+
     const poster  = media.coverImage?.extraLarge || media.coverImage?.large || null;
-    const caption = buildCaption(media, ep, awAvailable);
+    const caption = buildCaption(media, ep);
 
     if (poster) {
       await sendChannelPhoto(poster, caption);

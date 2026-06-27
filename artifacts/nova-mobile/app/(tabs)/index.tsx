@@ -153,41 +153,13 @@ export default function HomeScreen() {
       .catch(() => {});
   }, []);
 
-  /* ── Recently aired — news section ── */
+  /* ── حلقات مؤكدة من AnimeWitcher — قسم الأخبار ── */
   const [recentAiring, setRecentAiring] = useState<any[]>([]);
   useEffect(() => {
-    const RECENTLY_AIRED_Q = `{
-      Page(perPage: 30) {
-        airingSchedules(
-          airingAt_lesser: ${Math.floor(Date.now() / 1000)}
-          airingAt_greater: ${Math.floor(Date.now() / 1000) - 86400 * 3}
-          sort: TIME_DESC
-        ) {
-          episode airingAt
-          media {
-            id isAdult
-            title { romaji }
-            coverImage { large }
-            averageScore
-            format
-          }
-        }
-      }
-    }`;
-    fetch("https://graphql.anilist.co", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ query: RECENTLY_AIRED_Q }),
-    })
+    fetch(`${BASE_URL}/api/anime/new-episodes`)
       .then(r => r.json())
-      .then(json => {
-        const schedules = (json?.data?.Page?.airingSchedules || []).filter((s: any) => s?.media && !s.media.isAdult);
-        const seen = new Set<number>();
-        const unique = schedules.filter((s: any) => {
-          if (seen.has(s.media.id)) return false;
-          seen.add(s.media.id); return true;
-        });
-        setRecentAiring(unique.slice(0, 14));
+      .then((data: any[]) => {
+        if (Array.isArray(data)) setRecentAiring(data.slice(0, 10));
       })
       .catch(() => {});
   }, []);
@@ -490,22 +462,21 @@ export default function HomeScreen() {
                     </Pressable>
                   </View>
                   <View style={{ gap: 10 }}>
-                    {recentAiring.slice(0, 6).map((item: any, idx: number) => {
-                      const media = item.media;
-                      const diffSec = Date.now() / 1000 - item.airingAt;
+                    {recentAiring.slice(0, 6).map((ep: any, idx: number) => {
+                      const diffSec = Date.now() / 1000 - ep.airingAt;
                       const timeLabel = diffSec < 3600
                         ? `منذ ${Math.floor(diffSec / 60)} دقيقة`
                         : diffSec < 86400
                           ? `منذ ${Math.floor(diffSec / 3600)} ساعة`
                           : `منذ ${Math.floor(diffSec / 86400)} يوم`;
-                      const views = media.popularity
-                        ? media.popularity > 1000 ? `${(media.popularity / 1000).toFixed(1)}K` : String(media.popularity)
+                      const views = ep.popularity
+                        ? ep.popularity > 1000 ? `${(ep.popularity / 1000).toFixed(1)}K` : String(ep.popularity)
                         : "0";
-                      const newsTitle = `تم بث الحلقة ${item.episode} من أنمي "${media.title?.romaji}"`;
+                      const newsTitle = `تم بث الحلقة ${ep.episode} من أنمي "${ep.title}"`;
                       return (
                         <Pressable
-                          key={media.id + "-" + idx}
-                          onPress={() => router.push(`/anime/${media.id}` as any)}
+                          key={ep.anilistId + "-" + idx}
+                          onPress={() => router.push(`/anime/${ep.anilistId}` as any)}
                           style={[newsCardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                         >
                           {/* Text content on the left */}
@@ -513,12 +484,15 @@ export default function HomeScreen() {
                             <View style={newsCardStyles.tagsRow}>
                               <View style={newsCardStyles.badge}>
                                 <Text style={newsCardStyles.badgeText}>
-                                  {media.format === "TV" ? "مسلسل" : media.format === "MOVIE" ? "فيلم" : "أنمي"}
+                                  {ep.format === "TV" ? "مسلسل" : ep.format === "MOVIE" ? "فيلم" : "أنمي"}
                                 </Text>
                               </View>
-                              {media.averageScore ? (
-                                <Text style={newsCardStyles.score}>⭐ {(media.averageScore / 10).toFixed(1)}</Text>
+                              {ep.averageScore ? (
+                                <Text style={newsCardStyles.score}>⭐ {(ep.averageScore / 10).toFixed(1)}</Text>
                               ) : null}
+                              <View style={[newsCardStyles.badge, { backgroundColor: "rgba(34,197,94,0.15)", borderColor: "rgba(34,197,94,0.3)" }]}>
+                                <Text style={[newsCardStyles.badgeText, { color: "#4ade80" }]}>✓ AW</Text>
+                              </View>
                             </View>
                             <Text style={[newsCardStyles.title, { color: colors.text }]} numberOfLines={3}>{newsTitle}</Text>
                             <View style={newsCardStyles.metaRow}>
@@ -541,7 +515,7 @@ export default function HomeScreen() {
                           {/* Thumbnail on the right */}
                           <View style={newsCardStyles.thumbWrap}>
                             <Image
-                              source={{ uri: media.coverImage?.large }}
+                              source={{ uri: ep.poster || ep.anilistPoster }}
                               style={newsCardStyles.thumb}
                               contentFit="cover"
                             />
