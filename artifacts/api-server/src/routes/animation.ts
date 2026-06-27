@@ -18,24 +18,9 @@ const MV_BASE   = "https://moviz-time.co";
 const AS_CDN_B  = "https://as-cdn21.top";
 const RUBY_B    = "https://rubystm.com";
 
-// ── Vyla v2 (missourimonster-vyla-v2.hf.space) token cache ────────────────────
-const VYLA_BASE_V2 = "https://missourimonster-vyla-v2.hf.space";
-let _vylaToken     = "";
-let _vylaTokenExp  = 0;
-async function getVylaToken(): Promise<string> {
-  if (_vylaToken && Date.now() < _vylaTokenExp - 60_000) return _vylaToken;
-  const r = await fetch(`${VYLA_BASE_V2}/api/auth`, {
-    method : "POST",
-    headers: { "Authorization": "Bearer public_api_key", "Content-Type": "application/json" },
-    signal : AbortSignal.timeout(8_000),
-  });
-  if (!r.ok) throw new Error(`Vyla auth failed: ${r.status}`);
-  const d = await r.json() as { token?: string; expires_in?: number };
-  if (!d.token) throw new Error("Vyla: no token in response");
-  _vylaToken    = d.token;
-  _vylaTokenExp = Date.now() + (d.expires_in ?? 1800) * 1000;
-  return _vylaToken;
-}
+// ── Icefy (streams.icefy.top) — عبر Orkestr EU relay ─────────────────────────
+// API: GET /movie/{tmdbId} → {"stream":"https://streams.icefy.top/{hash}/master.m3u8"}
+// CF blocks Replit IPs → route API + HLS through anime-nova.orkestr.run (EU IP)
 
 // ── SeePanal (panel.seepanel.top) ─────────────────────────────────────────────
 const SP_BASE = "https://panel.seepanel.top/api";
@@ -1259,40 +1244,8 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     }
   } catch { /* ignore */ }
 
-  // ── 5. Vyla v2 subtitle API (missourimonster-vyla-v2.hf.space) ──
-  // Returns Arabic + English separate VTT files from cache.vdrk.site — no auth needed for subtitles
+  // Vyla subtitle API removed — Vyla HF Space replaced by Icefy scraper
   const vylaItems: Track[] = [];
-  try {
-    const vylaUrl = type === "tv"
-      ? `${VYLA_BASE_V2}/api/subtitles/tv/${tmdbId}/${season}/${ep}`
-      : `${VYLA_BASE_V2}/api/subtitles/movie/${tmdbId}`;
-    const r = await fetch(vylaUrl, {
-      headers: { "User-Agent": UA, Accept: "application/json" },
-      signal: AbortSignal.timeout(9_000),
-    });
-    if (r.ok) {
-      const data = await r.json() as any[];
-      if (Array.isArray(data)) {
-        const cnt: Record<string, number> = {};
-        for (const s of data) {
-          if (!s.file || !s.label) continue;
-          const lbl = (s.label as string).toLowerCase();
-          const isAr = lbl.startsWith("arabic");
-          const isEn = lbl.startsWith("english");
-          if (!isAr && !isEn) continue;
-          const lang = isAr ? "ar" : "en";
-          const i = (cnt[lang] = (cnt[lang] ?? 0) + 1);
-          const sfx = i > 1 ? ` ${i}` : "";
-          vylaItems.push({
-            id: `${lang}-vyla-${i}`,
-            lang,
-            label: isAr ? `عربي · Vyla${sfx}` : `إنجليزي · Vyla${sfx}`,
-            url: s.file,
-          });
-        }
-      }
-    }
-  } catch { /* silent */ }
 
   // ── Anime-Day GitHub subtitles (Arabic, hosted on GitHub Pages) ──
   const adGhUrl = getAnimeDaySubtitleUrl(title, season, ep);
@@ -1447,34 +1400,21 @@ router.get("/animation/quick-check", async (req: Request, res: Response) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 6_500);
 
+  // Quick probe via Icefy (movie only) — fast EU relay check
   try {
-    const vylaToken = await getVylaToken().catch(() => "");
-    const sseUrl = type === "tv"
-      ? `${VYLA_BASE_V2}/tv?id=${tmdbId}&season=${season}&episode=${ep}`
-      : `${VYLA_BASE_V2}/movie?id=${tmdbId}`;
-
-    const r = await fetch(sseUrl, {
-      headers: { "User-Agent": UA, "Accept": "text/event-stream", "X-Session-Token": vylaToken },
-      signal: controller.signal,
-    });
-
-    if (r.ok && r.body) {
-      const reader = r.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      outer: while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        // Vyla sends {"type":"source",...} events after a large meta event
-        if (buf.includes('"type":"source"')) {
-          available = true;
-          break outer;
-        }
-      }
-      reader.cancel().catch(() => {});
+    if (type === "movie") {
+      const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+      const raw = await fetch(
+        `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(`https://streams.icefy.top/movie/${tmdbId}`)}`,
+        { signal: controller.signal }
+      ).then(r => r.ok ? r.text() : "{}").catch(() => "{}");
+      const data = JSON.parse(raw) as { stream?: string };
+      if (data.stream) available = true;
+    } else {
+      // TV: always assume available (many scrapers support it)
+      available = true;
     }
-  } catch { /* timeout or network error → unavailable */ }
+  } catch { /* timeout or network error */ }
 
   clearTimeout(timer);
   availCache.set(ck, { ok: available, ts: Date.now() });
@@ -2452,90 +2392,21 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
       // rivestream: محذوف (iframe fallback غير مرغوب)
 
-      // ── 16. Vyla v2 SSE stream (missourimonster-vyla-v2.hf.space) ─────────────
-      // Vyla fans out to 14+ backend providers, returns pre-proxied CORS-safe HLS URLs
-      // Auth: POST /api/auth Bearer public_api_key → X-Session-Token header
-      scrapeAnimCached("vyla", async () => {
+      // ── 16. Icefy (streams.icefy.top) — عبر Orkestr EU relay ────────────────
+      // CF تحجب IPs ريبليت → Orkestr (EU) يتجاوزها للـ API والـ CDN معاً
+      scrapeAnimCached("icefy", async () => {
         if (!tmdbId) return;
+        if (type !== "movie") return; // TV endpoint format غير مكتشف
         try {
-          send("status", { msg: "Vyla v2: جاري الاستخراج…" });
-
-          const vylaToken = await getVylaToken();
-          const sseUrl = type === "tv"
-            ? `${VYLA_BASE_V2}/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
-            : `${VYLA_BASE_V2}/movie?id=${tmdbId}`;
-
-          const r = await fetch(sseUrl, {
-            headers: {
-              "User-Agent"     : UA,
-              "Accept"         : "text/event-stream",
-              "X-Session-Token": vylaToken,
-            },
-            signal: AbortSignal.timeout(28_000),
-          });
-          if (!r.ok || !r.body) return;
-
-          const reader = r.body.getReader();
-          const dec    = new TextDecoder();
-          let buf      = "";
-
-          outer: while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += dec.decode(value, { stream: true });
-
-            const lines = buf.split("\n");
-            buf = lines.pop() ?? "";
-
-            for (const rawLine of lines) {
-              const line = rawLine.trim();
-              if (!line.startsWith("data:")) continue;
-              try {
-                const d = JSON.parse(line.slice(5).trim()) as any;
-
-                if (d.type === "source") {
-                  const sourceUrl: string = d.source?.url || "";
-                  const sourceLabel: string = d.source?.label || d.source?.source || "Vyla";
-                  if (!sourceUrl) continue;
-
-                  // Determine dedup key: for Vyla proxy URLs extract inner CDN URL
-                  let dedupKey = sourceUrl;
-                  if (sourceUrl.startsWith(VYLA_BASE_V2)) {
-                    try {
-                      const pu = new URL(sourceUrl);
-                      const inner = pu.searchParams.get("url");
-                      if (inner) dedupKey = inner;
-                    } catch { /* keep sourceUrl */ }
-                  }
-                  if (seenUrls.has(dedupKey)) continue;
-                  seenUrls.add(dedupKey);
-
-                  const provLabel = `Vyla · ${sourceLabel}`;
-
-                  if (sourceUrl.startsWith(VYLA_BASE_V2)) {
-                    // Vyla proxy URL — wrap through our hls-proxy so mobile expo-video
-                    // talks to our stable server instead of the HF Space directly.
-                    // Vyla proxy URLs are publicly accessible (no session token in request).
-                    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(sourceUrl)}&ref=${encodeURIComponent(VYLA_BASE_V2 + "/")}`;
-                    sendSource(sourceUrl, provLabel, sourceUrl, proxied);
-                  } else {
-                    // Raw HLS/CDN URL: wrap with our hls-proxy for CORS safety
-                    const proxied = sourceUrl.includes(".m3u8")
-                      ? `/api/anime/hls-proxy?url=${encodeURIComponent(sourceUrl)}&ref=${encodeURIComponent(VYLA_BASE_V2 + "/")}`
-                      : sourceUrl;
-                    const probeOk = await probeHlsProxy(proxied);
-                    if (!probeOk) continue;
-                    sendSource(proxied, provLabel, sourceUrl, proxied);
-                  }
-
-                } else if (d.type === "done" || d.type === "end") {
-                  break outer;
-                }
-              } catch { /* ignore malformed SSE event */ }
-            }
-          }
-          reader.cancel().catch(() => {});
-        } catch { /* silent — HF Space may sleep or token expired */ }
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+          send("status", { msg: "Icefy: جاري الاستخراج…" });
+          const raw = await orkestDirectGet(`https://streams.icefy.top/movie/${tmdbId}`, 12_000);
+          const data = JSON.parse(raw) as { stream?: string };
+          if (!data.stream) return;
+          // HLS عبر Orkestr hls-proxy (EU IP يصل CDN بدون حجب)
+          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(data.stream)}&ref=${encodeURIComponent("https://icefy.top/")}`;
+          sendSource(proxied, "Icefy · FHD", data.stream, proxied);
+        } catch { /* silent */ }
       }),
 
       // ── anime-day.com — أنمي داي (كرتون غربي/أنمي صيني) ────────────────────
@@ -3152,9 +3023,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // CF يحجب Replit+cfProxy كلياً → الكود يستخدم orkestDirectGet
       // الكود كاملاً محفوظ في egydead-scraper.md و git history
       Promise.resolve(),
-
-      // ── Icefy (streams.icefy.top) — محجوب بـ CF من Replit IPs ──────────────
-      // DISABLED: Cloudflare Managed Challenge blocks all datacenter IPs
 
       // ── Aether / Nebula (nebula.aether.cx) — TMDB-native، CDN مفتوح ────────
       // nebula.aether.cx/movie/{id} → {stream_url:"..."} مباشرة بدون proxy
