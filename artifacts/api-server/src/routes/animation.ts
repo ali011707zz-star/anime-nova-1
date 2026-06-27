@@ -220,9 +220,12 @@ async function cfOrOrkestGet(url: string): Promise<string> {
   } catch { /* fall through */ }
   // Fallback: Orkestr relay (EU IP, not Replit datacenter)
   const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
   const r = await fetch(
     `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
-    { signal: AbortSignal.timeout(25_000) }
+    { headers: orkHeaders, signal: AbortSignal.timeout(25_000) }
   );
   if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
   const html = await r.text();
@@ -233,9 +236,12 @@ async function cfOrOrkestGet(url: string): Promise<string> {
 // Orkestr direct GET — يتجاوز CF proxy تماماً (مفيد للمواقع التي تحجب Replit IPs وcf_proxy معاً)
 async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string> {
   const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
   const r = await fetch(
     `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
-    { signal: AbortSignal.timeout(timeoutMs) }
+    { headers: orkHeaders, signal: AbortSignal.timeout(timeoutMs) }
   );
   if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
   const html = await r.text();
@@ -262,9 +268,12 @@ async function cfOrOrkestPost(url: string): Promise<string> {
   } catch { /* fall through */ }
   // Fallback: Orkestr POST relay
   const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders2: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders2["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
   const r2 = await fetch(
     `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}&method=POST`,
-    { signal: AbortSignal.timeout(25_000) }
+    { headers: orkHeaders2, signal: AbortSignal.timeout(25_000) }
   );
   if (!r2.ok) throw new Error(`Orkestr POST HTTP ${r2.status}`);
   return r2.text();
