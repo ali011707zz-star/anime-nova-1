@@ -71,6 +71,7 @@ export default function AnimationLibrary() {
     setType(t); setGenre(0); setSort("popularity.desc"); setYear(""); setPage(1);
   };
   const [year, setYear]    = useState("");
+  const [imgLoaded, setImgLoaded] = useState<Record<number, boolean>>({});
   const [items, setItems]  = useState<TmdbItem[]>([]);
   const [page, setPage]    = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -415,9 +416,17 @@ export default function AnimationLibrary() {
       {/* ── Grid ── */}
       <div className="px-4 pt-4">
         {items.length === 0 && loading ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-2">
-            <AnimeMascot mood="loading" />
-            <p className="text-white/30 text-xs font-['Cairo']">جارٍ تحميل المحتوى…</p>
+          <div className="grid grid-cols-3 gap-3">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="flex flex-col gap-1.5">
+                <div className="rounded-2xl aspect-[2/3] bg-white/[0.06] overflow-hidden relative">
+                  <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/[0.06] to-white/[0.03]" />
+                  <div className="absolute inset-0"
+                    style={{ background: "linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.04) 50%,transparent 100%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite" }} />
+                </div>
+                <div className="h-2.5 rounded-full bg-white/[0.05] w-3/4 mx-auto animate-pulse" />
+              </div>
+            ))}
           </div>
         ) : items.length === 0 && !loading ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3">
@@ -444,8 +453,15 @@ export default function AnimationLibrary() {
                     <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/6 aspect-[2/3]"
                       style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
                       {item.poster_path ? (
-                        <img src={`${IMG}${item.poster_path}`} alt={displayTitle(item)}
-                          loading="lazy" className="w-full h-full object-cover" />
+                        <>
+                          {!imgLoaded[item.id] && (
+                            <div className="absolute inset-0 bg-white/[0.06] animate-pulse" />
+                          )}
+                          <img src={`${IMG}${item.poster_path}`} alt={displayTitle(item)}
+                            loading="lazy"
+                            onLoad={() => setImgLoaded(p => ({ ...p, [item.id]: true }))}
+                            className={`w-full h-full object-cover transition-opacity duration-300 ${imgLoaded[item.id] ? "opacity-100" : "opacity-0"}`} />
+                        </>
                       ) : (
                         <div className="w-full h-full flex items-center justify-center bg-violet-900/10">
                           <Film className="w-8 h-8 text-white/15" />

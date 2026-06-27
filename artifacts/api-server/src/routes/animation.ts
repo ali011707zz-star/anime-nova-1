@@ -186,12 +186,21 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-async function tmdb(path: string): Promise<any> {
+const _tmdbCache = new Map<string, { data: any; ts: number }>();
+const TMDB_TTL_BROWSE = 10 * 60_000;
+const TMDB_TTL_DETAIL = 30 * 60_000;
+const TMDB_TTL_SEARCH = 5  * 60_000;
+
+async function tmdb(path: string, ttl = TMDB_TTL_BROWSE): Promise<any> {
   const sep = path.includes("?") ? "&" : "?";
   const url = `${TMDB_BASE}${path}${sep}api_key=${TMDB_KEY}&language=ar`;
+  const hit = _tmdbCache.get(url);
+  if (hit && Date.now() - hit.ts < ttl) return hit.data;
   const r = await fetch(url, { signal: AbortSignal.timeout(12_000) });
   if (!r.ok) throw new Error(`TMDB ${r.status} — ${path}`);
-  return r.json() as Promise<any>;
+  const data = await r.json();
+  _tmdbCache.set(url, { data, ts: Date.now() });
+  return data;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -676,7 +685,7 @@ router.get("/animation/detail", async (req: Request, res: Response) => {
     const app = type === "tv"
       ? "aggregate_credits,recommendations,content_ratings,videos"
       : "credits,recommendations,videos";
-    const data: any = await tmdb(`/${type}/${id}?append_to_response=${app}`);
+    const data: any = await tmdb(`/${type}/${id}?append_to_response=${app}`, TMDB_TTL_DETAIL);
     // Fallback: if no Arabic overview, fetch English overview so the synopsis section is never empty
     if (!data.overview) {
       try {
@@ -713,7 +722,7 @@ router.get("/animation/search", async (req: Request, res: Response) => {
     const q    = String(req.query.q   || "");
     const type = String(req.query.type || "multi");
     if (!q) { res.status(400).json({ error: "q required" }); return; }
-    const data: any = await tmdb(`/search/${type}?query=${encodeURIComponent(q)}&include_adult=true`);
+    const data: any = await tmdb(`/search/${type}?query=${encodeURIComponent(q)}&include_adult=true`, TMDB_TTL_SEARCH);
     const results = (data.results || []).filter((r: any) => {
       if (type === "multi" && !(r.genre_ids || []).includes(16)) return false;
       const title = r.title || r.name || "";
