@@ -3158,7 +3158,7 @@ async function getAnimeTimeSources(
 const RISTO_BASE = "https://ristoanime.me";
 const RISTO_AJAX = `${RISTO_BASE}/wp-content/themes/TopAnime/Ajaxt`;
 const RISTO_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ristoanime.me/" };
-const RISTOANIME_DISABLED = true; // CF Managed Challenge blocks all AJAX on AJAX endpoints from datacenter IPs
+const RISTOANIME_DISABLED = false; // AJAX endpoints work directly from Replit; HTML pages use orkestGet (EU IP)
 
 const ristoSeriesCache = new Map<string, { url: string | null; ts: number }>();
 const ristoSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
