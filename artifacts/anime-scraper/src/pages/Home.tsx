@@ -258,7 +258,7 @@ export default function Home() {
   useEffect(() => {
     fetch("/api/dubbed/catalog?page=1")
       .then(r => r.json())
-      .then(d => setDubbedCards((d.items || []).slice(0, 8)))
+      .then(d => setDubbedCards((d.results || d.items || []).slice(0, 8)))
       .catch(() => {});
   }, []);
 
@@ -994,7 +994,7 @@ export default function Home() {
         <div className="flex gap-3 overflow-x-auto pb-1 px-4" style={{ scrollbarWidth: "none" }}>
           {dubbedCards.length > 0 ? dubbedCards.map((c: any, i: number) => {
             /* نفس منطق imgSrc في DubbedDetail */
-            const rawImg = c.img || "";
+            const rawImg = c.image || c.img || "";
             const imgSrc = rawImg.startsWith("http") ? rawImg
               : rawImg.startsWith("/api/dubbed/img") ? rawImg
               : rawImg ? `/api/dubbed/img?f=${encodeURIComponent(rawImg.split("?f=")[1] || rawImg.split("/").pop() || rawImg)}`
