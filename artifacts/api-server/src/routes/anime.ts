@@ -2774,11 +2774,11 @@ async function getToonStreamSources(
 // ════════════════════════════════════════════════════════════════════
 
 const OK_DOMAINS = [
-  "https://ww3.okanime.xyz",
-  "https://ww4.okanime.xyz",
+  "https://ww3.okanime.xyz",  // ✅ confirmed working 2026-06
+  "https://okanime.xyz",
   "https://ww1.okanime.xyz",
   "https://ww2.okanime.xyz",
-  "https://okanime.xyz",
+  "https://ww4.okanime.xyz",
 ];
 let OK_BASE = OK_DOMAINS[0];
 const OK_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: `${OK_BASE}/` };
@@ -3158,7 +3158,7 @@ async function getAnimeTimeSources(
 const RISTO_BASE = "https://ristoanime.me";
 const RISTO_AJAX = `${RISTO_BASE}/wp-content/themes/TopAnime/Ajaxt`;
 const RISTO_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://ristoanime.me/" };
-const RISTOANIME_DISABLED = false; // re-enabled: cfProxyPost bypasses CF JS challenge
+const RISTOANIME_DISABLED = true; // CF Managed Challenge blocks all AJAX on AJAX endpoints from datacenter IPs
 
 const ristoSeriesCache = new Map<string, { url: string | null; ts: number }>();
 const ristoSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
@@ -6585,9 +6585,13 @@ async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: 
 const reanimeSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 const REANIME_TTL = 30 * 60_000;
 
+// DISABLED 2026-06: reanime.to CF Managed Challenge blocks all datacenter IPs on /api/flix/*
+// FlixCloud CDN also blocks Replit IPs (403 on HLS after decrypt)
+const REANIME_DISABLED = true;
 async function getReanímeSources(
   title: string, english: string | null, ep: number, anilistId?: number,
 ): Promise<UnifiedSource[]> {
+  if (REANIME_DISABLED) return [];
   if (!anilistId) return [];
   const ck = `reanime:${anilistId}:${ep}`;
   const cached = reanimeSrcCache.get(ck);
@@ -7918,6 +7922,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep, anilistId),  false),
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
       // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
+      scrapeCached("vidfast",       () => getVidFastAnimeSources(title, english, ep, anilistId),  false, 22000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
@@ -7926,7 +7931,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
       // allmanga:     clock.json→500, fast4speed→401
-      scrapeCached("reanime",      () => getReanímeSources(title, english, ep, anilistId),      false, 25000),
+      // reanime:      CF Managed Challenge يحجب reanime.to/api/flix من IPs الـ datacenter (2026-06)
+      // scrapeCached("reanime", () => getReanímeSources(title, english, ep, anilistId), false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
     ]);
 
