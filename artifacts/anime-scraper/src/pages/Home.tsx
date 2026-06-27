@@ -225,6 +225,7 @@ export default function Home() {
   const [mergedContinue, setMergedContinue] = useState<MergedContinueItem[]>([]);
   const [animationMovies, setAnimationMovies] = useState<any[]>([]);
   const [spring2026, setSpring2026] = useState<any[]>([]);
+  const [dubbedCards, setDubbedCards] = useState<any[]>([]);
   const [todayEps, setTodayEps] = useState<any[]>(_cachedTodayEps || []);
   const [todayChecking, setTodayChecking] = useState(false);
 
@@ -250,6 +251,14 @@ export default function Home() {
     })
       .then(r => r.json())
       .then(d => setSpring2026(d.data?.Page?.media || []))
+      .catch(() => {});
+  }, []);
+
+  /* Load dubbed cartoon cards for Home section */
+  useEffect(() => {
+    fetch("/api/dubbed/catalog?page=1")
+      .then(r => r.json())
+      .then(d => setDubbedCards((d.items || []).slice(0, 8)))
       .catch(() => {});
   }, []);
 
@@ -963,53 +972,51 @@ export default function Home() {
 
       {/* ── قسم الكرتون المدبلج ── */}
       {!selectedGenre && (
-      <div className="mt-5 px-4">
+      <div className="mt-5">
         {/* Header row */}
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between px-4 mb-2.5">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-xl flex items-center justify-center shadow-lg shrink-0" style={{ background: "linear-gradient(135deg,#10b981,#f59e0b)" }}>
+            <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#10b981,#f59e0b)" }}>
               <Tv2 className="w-3.5 h-3.5 text-white" />
             </div>
             <div>
               <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">كرتون مدبلج 📺</h2>
-              <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">+985 مسلسل مدبلج للعربية</p>
+              <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">كرتون وأنمي مدبلج للعربية</p>
             </div>
           </div>
           <Link href="/dubbed">
-            <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 px-2.5 py-1 rounded-xl" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.18)" }}>
-              عرض الكل
-              <ChevronLeft className="w-3 h-3" />
+            <button className="text-[10px] text-emerald-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-emerald-500/8 px-2.5 py-1 rounded-xl border border-emerald-500/15">
+              عرض الكل <ChevronLeft className="w-3 h-3" />
             </button>
           </Link>
         </div>
-        {/* Banner card */}
-        <Link href="/dubbed">
-          <motion.div
-            whileTap={{ scale: 0.97 }}
-            className="relative w-full h-[90px] rounded-2xl overflow-hidden cursor-pointer shadow-xl shadow-black/50"
-            style={{ background: "linear-gradient(135deg,#0f2027 0%,#203a43 40%,#2c5364 100%)" }}
-          >
-            <div className="absolute -top-8 -right-8 w-40 h-40 rounded-full opacity-20" style={{ background: "radial-gradient(circle,#10b981,transparent)" }} />
-            <div className="absolute -bottom-6 -left-4 w-32 h-32 rounded-full opacity-15" style={{ background: "radial-gradient(circle,#f59e0b,transparent)" }} />
-            {[{top:"20%",left:"15%",size:2},{top:"65%",left:"30%",size:1.5},{top:"25%",left:"70%",size:2.5},{top:"72%",left:"82%",size:1.5}].map((s,i) => (
-              <div key={i} className="absolute rounded-full bg-white/60 animate-pulse" style={{ top:s.top,left:s.left,width:s.size,height:s.size }} />
-            ))}
-            <div className="absolute inset-0 flex items-center justify-between px-5">
-              <div className="space-y-0.5">
-                <span className="text-[9px] text-white/35 font-['Cairo'] tracking-wider uppercase">Dubbed Arabic Cartoons</span>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-[18px] font-black text-white font-['Cairo'] leading-tight">كرتون زمان</h3>
-                  <span className="px-2 py-0.5 rounded-lg text-[9px] font-black font-['Cairo']" style={{ background: "rgba(16,185,129,0.25)", border: "1px solid rgba(16,185,129,0.35)", color: "#6ee7b7" }}>985+</span>
-                </div>
-                <p className="text-[9px] text-white/40 font-['Cairo']">سكوبي دو · سبونج بوب · توم وجيري · صوفيا الأولى</p>
-              </div>
-              <div className="flex items-center gap-1.5 border border-white/20 px-3 py-1.5 rounded-xl" style={{ background: "rgba(255,255,255,0.07)", backdropFilter: "blur(12px)" }}>
-                <span className="text-[10px] font-black text-white font-['Cairo']">عرض الكل</span>
-                <ChevronLeft className="w-3 h-3 text-white" />
-              </div>
-            </div>
-          </motion.div>
-        </Link>
+        {/* Horizontal poster cards */}
+        <div className="flex gap-3 overflow-x-auto pb-1 px-4" style={{ scrollbarWidth: "none" }}>
+          {dubbedCards.length > 0 ? dubbedCards.map((c: any, i: number) => {
+            const imgSrc = c.img
+              ? (c.img.startsWith("/api/") ? c.img : `/api/dubbed/img?f=${encodeURIComponent(c.img.split("/").pop() || c.img)}`)
+              : null;
+            const toDetail = `/dubbed/${encodeURIComponent(c.title)}?seasons=${encodeURIComponent(JSON.stringify(c.seasons || [{ label: "الموسم 1", arabicToonsId: c.arabicToonsId }]))}&title=${encodeURIComponent(c.title)}&img=${encodeURIComponent(c.img || "")}`;
+            return (
+              <Link key={i} href={toDetail}>
+                <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">
+                  <div className="relative w-[110px] h-[158px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
+                    {imgSrc
+                      ? <img src={imgSrc} alt={c.title} className="w-full h-full object-cover" loading="lazy" />
+                      : <div className="w-full h-full bg-emerald-900/20 flex items-center justify-center"><Tv2 className="w-8 h-8 text-emerald-600/30" /></div>
+                    }
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
+                      <p className="text-[9px] text-white/90 font-bold line-clamp-2 leading-tight">{c.title}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+            );
+          }) : Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="shrink-0 w-[110px] h-[158px] rounded-2xl bg-white/4 border border-white/6 animate-pulse" />
+          ))}
+        </div>
       </div>
       )}
 

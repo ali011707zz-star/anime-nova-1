@@ -116,25 +116,50 @@ export default function DubbedDetail() {
           )}
         </div>
 
-        {/* Season tabs */}
+        {/* Season tabs — visual poster cards like AnimationEpisodes */}
         {seasons.length > 1 && (
-          <div ref={tabsRef} className="flex gap-2 px-4 pb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+          <div ref={tabsRef} className="flex gap-2.5 px-4 pb-3.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
             {seasons.map((s, i) => {
               const isAct = i === selSeason;
+              const seasonImgSrc = `/api/dubbed/img?f=cat_${s.arabicToonsId}.jpg`;
               return (
                 <button
                   key={s.arabicToonsId}
                   data-active={isAct}
                   onClick={() => setSelSeason(i)}
-                  className="shrink-0 relative overflow-hidden transition-all active:scale-95 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo']"
+                  className="shrink-0 relative overflow-hidden transition-all active:scale-95"
                   style={{
+                    borderRadius: 14,
+                    width: 80,
+                    height: 108,
                     border: isAct ? "1.5px solid rgba(167,139,250,0.55)" : "1px solid rgba(255,255,255,0.08)",
-                    background: isAct ? "linear-gradient(135deg,rgba(109,40,217,0.55),rgba(139,92,246,0.28))" : "rgba(255,255,255,0.04)",
-                    color: isAct ? "#c4b5fd" : "rgba(255,255,255,0.55)",
-                    boxShadow: isAct ? "0 0 16px rgba(139,92,246,0.20)" : "none",
+                    boxShadow: isAct ? "0 0 22px rgba(139,92,246,0.22), 0 4px 16px rgba(0,0,0,0.45)" : "0 2px 8px rgba(0,0,0,0.30)",
+                    transform: isAct ? "scale(1.04)" : "scale(1)",
                   }}
                 >
-                  {s.label}
+                  <img
+                    src={seasonImgSrc}
+                    alt={s.label}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                  <div className="absolute inset-0"
+                    style={{ background: isAct
+                      ? "linear-gradient(145deg, rgba(109,40,217,0.60), rgba(139,92,246,0.30))"
+                      : "linear-gradient(145deg, rgba(30,20,55,0.80), rgba(15,10,30,0.90))" }} />
+                  <div className="absolute inset-0"
+                    style={{ background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.30) 55%, rgba(0,0,0,0.10) 100%)" }} />
+                  {isAct && <div className="absolute inset-0" style={{ background: "rgba(139,92,246,0.15)" }} />}
+                  <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-1.5 text-center">
+                    <p className="text-[8px] font-black font-['Cairo'] leading-tight"
+                      style={{ color: isAct ? "#c4b5fd" : "rgba(255,255,255,0.70)" }}>
+                      {s.label}
+                    </p>
+                  </div>
+                  {isAct && (
+                    <div className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-violet-400"
+                      style={{ boxShadow: "0 0 6px rgba(167,139,250,0.80)" }} />
+                  )}
                 </button>
               );
             })}
