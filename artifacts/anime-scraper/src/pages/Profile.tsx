@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -267,7 +268,7 @@ export default function Profile() {
   /* Fetch server stats when logged in */
   useEffect(() => {
     if (user?.id) {
-      fetch("/api/user/stats", { credentials: "include" })
+      fetch(API_BASE + "/api/user/stats", { credentials: "include" })
         .then(r => r.ok ? r.json() : null)
         .then(d => { if (d) setStats(d); })
         .catch(() => {});

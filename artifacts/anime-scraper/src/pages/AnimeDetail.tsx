@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useParams, useLocation } from "wouter";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "wouter";
@@ -207,19 +208,19 @@ export default function AnimeDetail() {
     setSaved(savedList.includes(parseInt(params.id)));
     setMyRating(parseInt(localStorage.getItem(`nova-rating-${params.id}`) || "0"));
     setComments([]);
-    fetch(`/api/comments?animeId=${params.id}`, { credentials: "include" })
+    fetch(`${API_BASE}/api/comments?animeId=${params.id}`, { credentials: "include" })
       .then(r => r.json()).then(d => { if (!cancelled && d.comments) setComments(d.comments); })
       .catch(() => {});
 
     const doFetch = (useProxy: boolean) => {
       const p: Promise<any> = useProxy
-        ? fetch("/api/anime/anilist", {
+        ? fetch(API_BASE + "/api/anime/anilist", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id!) } }),
             signal: ctrl.signal,
           }).then(r => r.json())
-        : fetch("/api/anilist", {
+        : fetch(API_BASE + "/api/anilist", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Accept": "application/json" },
             body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id!) } }),
@@ -251,7 +252,7 @@ export default function AnimeDetail() {
           .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
           .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
           .replace(/\s+/g," ").trim().substring(0, 500);
-        fetch(`/api/anime/translate?text=${encodeURIComponent(stripped)}`, { signal: ctrl.signal })
+        fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(stripped)}`, { signal: ctrl.signal })
           .then(r2 => r2.json()).then(d2 => {
             if (cancelled) return;
             const t = d2.translated;
@@ -293,7 +294,7 @@ export default function AnimeDetail() {
     const myAvatar = user?.profileImageUrl || (user as any)?.avatarUrl || null;
     setSendingComment(true);
     try {
-      const res = await fetch("/api/comments", {
+      const res = await fetch(API_BASE + "/api/comments", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -309,12 +310,12 @@ export default function AnimeDetail() {
     setComments(prev => prev.map(c =>
       c.id === id ? { ...c, liked: !c.liked, likes: c.liked ? c.likes - 1 : c.likes + 1 } : c
     ));
-    await fetch(`/api/comments/${id}/like`, { method: "POST", credentials: "include" }).catch(() => {});
+    await fetch(`${API_BASE}/api/comments/${id}/like`, { method: "POST", credentials: "include" }).catch(() => {});
   };
 
   const deleteComment = async (id: string) => {
     setComments(prev => prev.filter(c => c.id !== id));
-    await fetch(`/api/comments/${id}`, { method: "DELETE", credentials: "include" }).catch(() => {});
+    await fetch(`${API_BASE}/api/comments/${id}`, { method: "DELETE", credentials: "include" }).catch(() => {});
   };
 
   const toggleCharFav = (charNode: any) => {
@@ -384,7 +385,7 @@ export default function AnimeDetail() {
             onClick={() => {
               if (!params.id) { navigate("/"); return; }
               setLoading(true); setAnime(null);
-              fetch("/api/anilist", {
+              fetch(API_BASE + "/api/anilist", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Accept": "application/json" },
                 body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id) } }),

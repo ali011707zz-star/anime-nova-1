@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { ChevronRight, Zap, Wrench, Rocket, Sparkles, TrendingUp, Star, Loader2 } from "lucide-react";
@@ -34,7 +35,7 @@ export default function Updates() {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    fetch("/api/updates")
+    fetch(API_BASE + "/api/updates")
       .then(r => r.json())
       .then(d => { setUpdates(d.updates || []); setLoading(false); })
       .catch(() => { setError(true); setLoading(false); });

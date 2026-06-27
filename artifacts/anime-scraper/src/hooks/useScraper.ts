@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 /**
  * useScraper Hook
  * Hook مخصص للتعامل مع سحب روابط الفيديو من المواقع العربية
@@ -46,7 +47,7 @@ export const useScraper = (animeId: string, episodeNum: number) => {
       const fetchWithFallback = withFallback(
         [
           () => getEpisodesWithCache(animeId),
-          () => fetch(`/api/anime/${animeId}/episodes`).then(r => r.json()),
+          () => fetch(`${API_BASE}/api/anime/${animeId}/episodes`).then(r => r.json()),
         ],
         'Failed to fetch episodes'
       );

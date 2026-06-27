@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Bell, BellOff, Check, Shield, LogOut, User,
@@ -163,7 +164,7 @@ function ReportSheet({ open, onClose, userDisplayName }: { open: boolean; onClos
     if (!msg.trim()) { taRef.current?.focus(); return; }
     setStatus("sending");
     try {
-      const r = await fetch("/api/report", {
+      const r = await fetch(API_BASE + "/api/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

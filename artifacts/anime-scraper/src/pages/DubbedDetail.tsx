@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation, useSearch } from "wouter";
 import { ChevronRight, Play, Clock, Loader2 } from "lucide-react";
@@ -52,7 +53,7 @@ export default function DubbedDetail() {
     if (!curSeason) return;
     setEpLoading(true);
     setEpisodes([]);
-    fetch(`/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`)
+    fetch(`${API_BASE}/api/dubbed/episodes?series=${encodeURIComponent(curSeason.arabicToonsId)}`)
       .then(r => r.json())
       .then(d => { setEpisodes(d.episodes || []); setEpLoading(false); })
       .catch(() => setEpLoading(false));

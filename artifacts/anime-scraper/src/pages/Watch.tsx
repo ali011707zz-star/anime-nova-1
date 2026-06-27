@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { getAppToken } from "@/lib/appToken";
 import { useLocation } from "wouter";
@@ -115,7 +116,7 @@ function saveHistory(id: number, title: string, cover: string, ep: number, total
     const syncCover = finalCover;
     const syncTitle = finalTitle;
     if (userId) {
-      fetch("/api/user/history", {
+      fetch(API_BASE + "/api/user/history", {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ animeId: id, animeTitle: syncTitle, animeCover: syncCover, animeType: "anime", episodeNumber: ep }),
@@ -1659,7 +1660,7 @@ function EpisodePlayer({
             ? (() => { try { return new URL("http://x" + track.url).searchParams.get("url"); } catch { return null; } })()
             : track.url;
           if (!rawVtt || signal?.aborted) return;
-          const enR = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawVtt)}`, {
+          const enR = await fetch(`${API_BASE}/api/anime/proxy-text?url=${encodeURIComponent(rawVtt)}`, {
             signal: AbortSignal.timeout(10_000),
           });
           if (!enR.ok || signal?.aborted || arDone) return;
@@ -1702,7 +1703,7 @@ function EpisodePlayer({
       setSubCues([]);
       setSubStatus("loading");
       try {
-        const r = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(track.url)}`, {
+        const r = await fetch(`${API_BASE}/api/anime/proxy-text?url=${encodeURIComponent(track.url)}`, {
           signal: signal ?? AbortSignal.timeout(12_000),
         });
         if (!r.ok) { setSubStatus("failed"); return false; }
@@ -1792,7 +1793,7 @@ function EpisodePlayer({
       if (rawEnUrl) {
         void (async () => {
           try {
-            const enR = await fetch(`/api/anime/proxy-text?url=${encodeURIComponent(rawEnUrl)}`, { signal: ctrl.signal });
+            const enR = await fetch(`${API_BASE}/api/anime/proxy-text?url=${encodeURIComponent(rawEnUrl)}`, { signal: ctrl.signal });
             if (enR.ok && !arStreamDone && !ctrl.signal.aborted) {
               const enCues = parseSrt(await enR.text());
               if (enCues.length && !arStreamDone && !ctrl.signal.aborted) {
@@ -1843,7 +1844,7 @@ function EpisodePlayer({
         title: animeTitle,
         english: animeTitle,
       });
-      const r = await fetch(`/api/anime/subtitle-tracks?${params}`, { signal: AbortSignal.timeout(20_000) });
+      const r = await fetch(`${API_BASE}/api/anime/subtitle-tracks?${params}`, { signal: AbortSignal.timeout(20_000) });
       if (!r.ok || ctrl.signal.aborted) { setSubStatus("failed"); return; }
       const d = await r.json() as { tracks?: SubTrack[] };
       const tracks = d.tracks || [];
@@ -1929,7 +1930,7 @@ function EpisodePlayer({
       title: animeTitle,
       english: animeTitle,
     });
-    fetch(`/api/anime/subtitle-tracks?${params}`, { signal: ctrl.signal })
+    fetch(`${API_BASE}/api/anime/subtitle-tracks?${params}`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(async (d: { tracks?: SubTrack[] }) => {
         if (cancelled) return;
@@ -2081,7 +2082,7 @@ function EpisodePlayer({
     setWhisperStatus("loading");
     setWhisperLang("");
     try {
-      const r = await fetch("/api/anime/whisper-transcribe", {
+      const r = await fetch(API_BASE + "/api/anime/whisper-transcribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: rawUrl, duration: 120 }),
@@ -2801,7 +2802,7 @@ export default function WatchPage() {
 
     const translateAndSet = (raw: string) => {
       if (!raw) return;
-      fetch(`/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar`, { signal: ctrl.signal })
+      fetch(`${API_BASE}/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar`, { signal: ctrl.signal })
         .then(r => r.ok ? r.json() : null)
         .then((d: any) => {
           const t = d?.translated?.trim();
@@ -2817,7 +2818,7 @@ export default function WatchPage() {
       // AniList streamingEpisodes is empty — try Jikan (MAL) for episode title
       const malId = anime?.idMal || localStorage.getItem(`malid-${animeId}`);
       if (malId && Number(malId) > 0) {
-        fetch(`/api/anime/ep-title?malId=${malId}&ep=${ep}`, { signal: ctrl.signal })
+        fetch(`${API_BASE}/api/anime/ep-title?malId=${malId}&ep=${ep}`, { signal: ctrl.signal })
           .then(r => r.ok ? r.json() : null)
           .then((d: any) => {
             const t = (d?.title || "").trim();
@@ -2841,7 +2842,7 @@ export default function WatchPage() {
     if (!animeId) return;
     setKawaiiSubUrl(undefined);
     const ctrl = new AbortController();
-    fetch(`/api/anime/kawaii-meta?anilistId=${animeId}&ep=${ep}`, { signal: ctrl.signal })
+    fetch(`${API_BASE}/api/anime/kawaii-meta?anilistId=${animeId}&ep=${ep}`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then((data: any) => {
         if (!data) return;
@@ -2884,7 +2885,7 @@ export default function WatchPage() {
     // ── 2. Immediate aniskip fetch using cached MAL ID (no AniList wait) ──
     const _cachedMal = localStorage.getItem(`malid-${animeId}`);
     if (_cachedMal && _cachedMal !== "null" && Number(_cachedMal) > 0) {
-      fetch(`/api/anime/aniskip?malId=${_cachedMal}&ep=${ep}`, {
+      fetch(`${API_BASE}/api/anime/aniskip?malId=${_cachedMal}&ep=${ep}`, {
         signal: AbortSignal.timeout(10000),
       })
         .then(r => r.ok ? r.json() : null)
@@ -2909,13 +2910,13 @@ export default function WatchPage() {
     const body = JSON.stringify({ query: ANILIST_Q, variables: { id: animeId } });
     const headers = { "Content-Type": "application/json" };
     const fetchAniList = () =>
-      fetch("/api/anime/anilist", { method: "POST", headers, body, signal: AbortSignal.timeout(10000) })
+      fetch(API_BASE + "/api/anime/anilist", { method: "POST", headers, body, signal: AbortSignal.timeout(10000) })
         .then(r => {
           if (!r.ok) throw new Error(`proxy ${r.status}`);
           return r.json();
         })
         .catch(() =>
-          fetch("/api/anilist", { method: "POST", headers, body, signal: AbortSignal.timeout(10000) })
+          fetch(API_BASE + "/api/anilist", { method: "POST", headers, body, signal: AbortSignal.timeout(10000) })
             .then(r => r.json())
         );
     fetchAniList()
@@ -2947,7 +2948,7 @@ export default function WatchPage() {
 
           // aniskip (MAL ID)
           if (d.idMal) {
-            fetch(`/api/anime/aniskip?malId=${d.idMal}&ep=${ep}`, {
+            fetch(`${API_BASE}/api/anime/aniskip?malId=${d.idMal}&ep=${ep}`, {
               signal: AbortSignal.timeout(10000),
             })
               .then(r => r.ok ? r.json() : null)
@@ -2969,7 +2970,7 @@ export default function WatchPage() {
           {
             const titleEnc   = encodeURIComponent(d.title?.english || d.title?.romaji || "");
             const nativeEnc  = encodeURIComponent(d.title?.native || "");
-            fetch(`/api/anime/baha-skip?title=${titleEnc}&native=${nativeEnc}&ep=${ep}`, {
+            fetch(`${API_BASE}/api/anime/baha-skip?title=${titleEnc}&native=${nativeEnc}&ep=${ep}`, {
               signal: AbortSignal.timeout(12000),
             })
               .then(r => r.ok ? r.json() : null)
@@ -2984,7 +2985,7 @@ export default function WatchPage() {
           }
 
           // AniZip — بيانات الحلقات من anizip.moe (تُكمل ما فات aniskip/baha)
-          fetch(`/api/anime/anizip?anilistId=${animeId}&ep=${ep}`, {
+          fetch(`${API_BASE}/api/anime/anizip?anilistId=${animeId}&ep=${ep}`, {
             signal: AbortSignal.timeout(10000),
           })
             .then(r => r.ok ? r.json() : null)
@@ -2999,7 +3000,7 @@ export default function WatchPage() {
 
           // Anime-Skip (AniList ID مباشرة — لا يحتاج MAL ID)
           // من: surajklmn/animepahe-aniskip userscript
-          fetch(`/api/anime/anime-skip?anilistId=${animeId}&ep=${ep}`, {
+          fetch(`${API_BASE}/api/anime/anime-skip?anilistId=${animeId}&ep=${ep}`, {
             signal: AbortSignal.timeout(9000),
           })
             .then(r => r.ok ? r.json() : null)
@@ -3065,7 +3066,7 @@ export default function WatchPage() {
 
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
-      const r    = await fetch(`/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(40000), headers: { "X-App-Token": await getAppToken() } });
+      const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(40000), headers: { "X-App-Token": await getAppToken() } });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
 

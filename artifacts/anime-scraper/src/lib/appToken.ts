@@ -10,7 +10,8 @@ let _inflight: Promise<string> | null = null;
 
 async function fetchToken(): Promise<string> {
   try {
-    const res = await fetch("/api/auth/anon-token", {
+    const { API_BASE } = await import("./apiBase");
+    const res = await fetch(API_BASE + "/api/auth/anon-token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });

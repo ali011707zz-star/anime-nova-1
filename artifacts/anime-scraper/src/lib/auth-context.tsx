@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { API_BASE } from "./apiBase";
 
 export interface AuthUser {
   id: string;
@@ -42,7 +43,7 @@ const AuthContext = createContext<AuthContextType>({
 
 async function fetchCurrentUser(): Promise<AuthUser | null> {
   try {
-    const res = await fetch("/api/auth/me", { credentials: "include" });
+    const res = await fetch(API_BASE + "/api/auth/me", { credentials: "include" });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -68,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     try {
-      const res = await fetch("/api/auth/signin", {
+      const res = await fetch(API_BASE + "/api/auth/signin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, displayName?: string, verifyCode?: string) => {
     try {
-      const res = await fetch("/api/auth/signup", {
+      const res = await fetch(API_BASE + "/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -102,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
-      await fetch("/api/auth/signout", { method: "POST", credentials: "include" });
+      await fetch(API_BASE + "/api/auth/signout", { method: "POST", credentials: "include" });
     } catch {}
     setUser(null);
   };
@@ -114,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profileImageCustom?: string | null;
   }) => {
     try {
-      const res = await fetch("/api/auth/profile", {
+      const res = await fetch(API_BASE + "/api/auth/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -131,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const changePassword = async (currentPassword: string, newPassword: string) => {
     try {
-      const res = await fetch("/api/auth/change-password", {
+      const res = await fetch(API_BASE + "/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -147,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const deleteAccount = async () => {
     try {
-      const res = await fetch("/api/auth/account", {
+      const res = await fetch(API_BASE + "/api/auth/account", {
         method: "DELETE",
         credentials: "include",
       });

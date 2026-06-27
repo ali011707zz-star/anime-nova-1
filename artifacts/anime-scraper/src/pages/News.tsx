@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { ChevronRight, Clock, Eye, Share2, Loader2, TrendingUp, Newspaper, ExternalLink } from "lucide-react";
@@ -55,7 +56,7 @@ export default function News() {
   const [loading, setLoading] = useState(true);
 
   const fetch$ = async (query: string) => {
-    const r = await fetch("/api/anilist", {
+    const r = await fetch(API_BASE + "/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
     });

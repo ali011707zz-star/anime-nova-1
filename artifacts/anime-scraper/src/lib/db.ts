@@ -4,7 +4,8 @@
    • Always keep localStorage in sync as cache / offline
 ───────────────────────────────────────────────────── */
 
-const API = "/api/user";
+import { API_BASE } from "./apiBase";
+const API = API_BASE + "/api/user";
 
 async function apiFetch(path: string, init?: RequestInit) {
   try {
