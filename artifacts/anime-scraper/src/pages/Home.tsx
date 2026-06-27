@@ -993,10 +993,13 @@ export default function Home() {
         {/* Horizontal poster cards */}
         <div className="flex gap-3 overflow-x-auto pb-1 px-4" style={{ scrollbarWidth: "none" }}>
           {dubbedCards.length > 0 ? dubbedCards.map((c: any, i: number) => {
-            const imgSrc = c.img
-              ? (c.img.startsWith("/api/") ? c.img : `/api/dubbed/img?f=${encodeURIComponent(c.img.split("/").pop() || c.img)}`)
+            /* نفس منطق imgSrc في DubbedDetail */
+            const rawImg = c.img || "";
+            const imgSrc = rawImg.startsWith("http") ? rawImg
+              : rawImg.startsWith("/api/dubbed/img") ? rawImg
+              : rawImg ? `/api/dubbed/img?f=${encodeURIComponent(rawImg.split("?f=")[1] || rawImg.split("/").pop() || rawImg)}`
               : null;
-            const toDetail = `/dubbed/${encodeURIComponent(c.title)}?seasons=${encodeURIComponent(JSON.stringify(c.seasons || [{ label: "الموسم 1", arabicToonsId: c.arabicToonsId }]))}&title=${encodeURIComponent(c.title)}&img=${encodeURIComponent(c.img || "")}`;
+            const toDetail = `/dubbed/${encodeURIComponent(c.title)}?seasons=${encodeURIComponent(JSON.stringify(c.seasons || [{ label: "الموسم 1", arabicToonsId: c.arabicToonsId }]))}&title=${encodeURIComponent(c.title)}&img=${encodeURIComponent(rawImg)}`;
             return (
               <Link key={i} href={toDetail}>
                 <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[110px] cursor-pointer">

@@ -29,11 +29,15 @@ export default function DubbedWatch() {
   const mountedRef = useRef(true);
 
   const goBack = useCallback(() => {
-    if (keyParam && seasonsParam) {
+    // نستخدم history.back() دائماً لتجنب دفع entry جديد في التاريخ
+    // مما يُحدث مشكلة زر الرجوع (يذهب لحلقة عشوائية)
+    if (window.history.length > 1) {
+      window.history.back();
+    } else if (keyParam) {
       const k = encodeURIComponent(decodeURIComponent(keyParam));
       navigate(`/dubbed/${k}?seasons=${encodeURIComponent(seasonsParam)}&title=${encodeURIComponent(title)}&img=${encodeURIComponent(imgParam)}`);
     } else {
-      window.history.back();
+      navigate("/dubbed");
     }
   }, [keyParam, seasonsParam, title, imgParam, navigate]);
 

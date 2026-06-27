@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import path from "path";
+import http from "http";
 import { fileURLToPath } from "url";
 import pinoHttp from "pino-http";
 import router from "./routes";
@@ -95,6 +96,24 @@ export async function createApp(): Promise<Express> {
   app.use("/api", dbRelayRouter);
   app.use(reportRouter);
   app.use(telegramRouter);
+
+  // ── Proxy /nova-mobile/* → port 3000 (Nova Mobile static server) ──
+  app.use("/nova-mobile", (req, res) => {
+    const qs = req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : "";
+    const target = `http://127.0.0.1:3000/nova-mobile${req.path}${qs}`;
+    const proxyReq = http.request(
+      target,
+      { method: req.method, headers: { ...req.headers, host: "127.0.0.1:3000" } },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode!, proxyRes.headers as any);
+        proxyRes.pipe(res, { end: true });
+      }
+    );
+    proxyReq.on("error", () => {
+      if (!res.headersSent) res.status(502).send("Nova Mobile غير متاح حالياً");
+    });
+    req.pipe(proxyReq, { end: true });
+  });
 
   // Serve built frontend in production
   const frontendDist = path.resolve(__dirname, "../../anime-scraper/dist/public");
