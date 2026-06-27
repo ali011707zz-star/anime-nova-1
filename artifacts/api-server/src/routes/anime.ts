@@ -4884,140 +4884,7 @@ async function getAniKotoSources(
 }
 
 
-// ════════════════════════════════════════════════════════════════════
-//  ANIMEX (animex.one + pp.animex.one) — صوت ياباني مترجم
-//  AniList ID → slug via SvelteKit __data.json → pp.animex.one REST API
-//  Providers: mimi → yuki → miku → neko → mochi
-//  CDN: vibeplayer.site (HTTP 200 من Replit)
-// ════════════════════════════════════════════════════════════════════
-const ANIMEX_BASE     = "https://animex.one";
-const ANIMEX_PP_BASE  = "https://pp.animex.one/rest/api";
-const ANIMEX_SUB_PROVIDERS = ["mimi", "yuki", "miku", "neko", "mochi"];
-const animexSlugCache  = new Map<number, { slug: string; ts: number }>();
-const ANIMEX_SLUG_TTL  = 30 * 60_000;
-
-// استخراج slug من بيانات SvelteKit devalue بدون hydration كامل
-// data[0] = {anime: N, ...} → data[N] = {slug: M, ...} → data[M] = "slug-string"
-function extractAnimexSlugFromDevalue(arr: unknown[]): string | null {
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-
-  // الجذر عند index 0
-  const root = arr[0];
-  if (!root || typeof root !== "object" || Array.isArray(root)) return null;
-
-  const animeRef = (root as Record<string, number>).anime;
-  if (typeof animeRef !== "number" || animeRef < 0 || animeRef >= arr.length) return null;
-
-  const animeObj = arr[animeRef];
-  if (!animeObj || typeof animeObj !== "object" || Array.isArray(animeObj)) return null;
-
-  const slugRef = (animeObj as Record<string, number>).slug;
-  if (typeof slugRef !== "number" || slugRef < 0 || slugRef >= arr.length) return null;
-
-  const slug = arr[slugRef];
-  return typeof slug === "string" && slug ? slug : null;
-}
-
-async function resolveAnimexSlug(anilistId: number): Promise<string | null> {
-  const cached = animexSlugCache.get(anilistId);
-  if (cached && Date.now() - cached.ts < ANIMEX_SLUG_TTL) return cached.slug;
-
-  const text = await fetch(`${ANIMEX_BASE}/watch/${anilistId}/__data.json`, {
-    headers: { ...BASE_HDRS, Accept: "application/json" },
-    signal: AbortSignal.timeout(8000),
-  }).then(r => r.ok ? r.text() : null).catch(() => null);
-
-  if (!text) return null;
-
-  // SvelteKit may return multiple JSON objects separated by newlines (NDJSON)
-  // Try full parse first, then fall back to first line only
-  let data: { nodes?: Array<{ type?: string; data?: unknown[] }> } | null = null;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    try { data = JSON.parse(text.split("\n")[0]); } catch { return null; }
-  }
-
-  if (!data?.nodes) return null;
-  for (const node of data.nodes) {
-    if (node?.type !== "data" || !Array.isArray(node.data)) continue;
-    const slug = extractAnimexSlugFromDevalue(node.data);
-    if (slug) {
-      animexSlugCache.set(anilistId, { slug, ts: Date.now() });
-      return slug;
-    }
-  }
-  return null;
-}
-
-async function getAnimexSources(
-  _title: string, _english: string | null, ep: number, anilistId?: number,
-): Promise<UnifiedSource[]> {
-  if (!anilistId) { console.error("[animex] no anilistId"); return []; }
-  try {
-    const slug = await resolveAnimexSlug(anilistId);
-    console.error(`[animex] slug=${slug} anilistId=${anilistId} ep=${ep}`);
-    if (!slug) return [];
-
-    const hdrs = {
-      ...BASE_HDRS,
-      Referer: `${ANIMEX_BASE}/`,
-      Origin: ANIMEX_BASE,
-      Accept: "application/json, text/plain, */*",
-    };
-
-    for (const providerId of ANIMEX_SUB_PROVIDERS) {
-      const payload = await fetch(
-        `${ANIMEX_PP_BASE}/sources?id=${encodeURIComponent(slug)}&epNum=${ep}&type=sub&providerId=${providerId}`,
-        { headers: hdrs, signal: AbortSignal.timeout(5000) },
-      ).then(r => r.ok ? r.json() : null).catch(() => null) as {
-        sources?: Array<{ url?: string }> | string;
-        headers?: Record<string, string>;
-      } | null;
-
-      let m3u8: string | null = null;
-      if (typeof payload?.sources === "string") {
-        m3u8 = payload.sources;
-      } else if (Array.isArray(payload?.sources) && payload.sources.length) {
-        m3u8 = payload.sources.find((s: any) => s?.url)?.url || null;
-      }
-      if (!m3u8 || !m3u8.startsWith("http")) continue;
-
-      const ref = payload?.headers?.Referer || payload?.headers?.referer || `${ANIMEX_BASE}/`;
-
-      // استخرج كل الجودات من master.m3u8
-      const qualities = await parseM3u8Qualities(m3u8, ref);
-      if (qualities.length > 0) {
-        return qualities.map(q => {
-          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(q.url)}&ref=${encodeURIComponent(ref)}`;
-          return {
-            name: `AnimEx · ${providerId} · ${q.quality} · ياباني مترجم`,
-            url: q.url,
-            quality: q.quality,
-            qualityRank: q.rank,
-            site: "animex",
-            directUrl: proxied,
-            directType: "hls" as const,
-          };
-        });
-      }
-
-      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(ref)}`;
-      return [{
-        name: `AnimEx · ${providerId} · ياباني مترجم`,
-        url:  m3u8,
-        quality: "1080p",
-        qualityRank: 10,
-        site: "animex",
-        directUrl: proxied,
-        directType: "hls",
-      }];
-    }
-    return [];
-  } catch { return []; }
-}
-
-
+// animex: محذوف بالكامل (animex.one)
 // anikuro: محذوف — موقع anikuro.ru تم إيقافه
 
 
@@ -7921,7 +7788,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
       scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId),     false, 20000),
       scrapeCached("hianime",      () => getHiAnimeSources(title, english, ep, anilistId),      false, 22000),
-      scrapeCached("animex",       () => getAnimexSources(title, english, ep, anilistId),       false, 25000),
+      // animex: محذوف
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
@@ -8058,7 +7925,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
-      case "animex":        (await race(getAnimexSources(title, english, ep, anilistId),        25_000, [])).forEach(collectSrc); break;
       default: break;
     }
 

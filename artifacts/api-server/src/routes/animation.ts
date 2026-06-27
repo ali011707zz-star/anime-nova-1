@@ -2467,44 +2467,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── VidSync — مُعطَّل: enc-vidsync يحتاج Turnstile في المتصفح (InitTabs2)
       Promise.resolve(),
 
-      // ── RiveStream (rivestream.ru) — TMDB-native embed, مصدر watchers-heaven ──────
-      // Movie: /embed?type=movie&id={tmdbId}
-      // TV:    /embed?type=tv&id={tmdbId}&season={S}&episode={E}
-      scrapeAnimCached("rivestream", async () => {
-        if (!tmdbId) return;
-        const RIVE_BASE = "https://rivestream.ru";
-        const embedUrl = type === "movie"
-          ? `${RIVE_BASE}/embed?type=movie&id=${tmdbId}`
-          : `${RIVE_BASE}/embed?type=tv&id=${tmdbId}&season=${season}&episode=${epNum}`;
-        try {
-          // Try to probe accessibility (returns 200 for valid content)
-          const probe = await fetch(embedUrl, {
-            method: "GET",
-            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", Referer: RIVE_BASE + "/" },
-            signal: AbortSignal.timeout(10_000),
-          });
-          const html = probe.ok ? await probe.text() : "";
-          // Try to extract HLS stream from the embed page
-          const m3u8Match = html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/);
-          if (m3u8Match) {
-            const rawM3u8 = m3u8Match[1];
-            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawM3u8)}&ref=${encodeURIComponent(RIVE_BASE + "/")}`;
-            sendSource(proxied, "RiveStream · HLS", rawM3u8, proxied);
-            return;
-          }
-          const mp4Match = html.match(/["'](https?:\/\/[^"']+\.mp4[^"']*)["']/);
-          if (mp4Match) {
-            const rawMp4 = mp4Match[1];
-            const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawMp4)}&ref=${encodeURIComponent(RIVE_BASE + "/")}`;
-            sendSource(proxied, "RiveStream · MP4", rawMp4, proxied);
-            return;
-          }
-          // Fallback: send as embed source (playable via WebView in mobile/web)
-          if (probe.ok) {
-            sendSource(embedUrl, "RiveStream", embedUrl, embedUrl, { isEmbed: true });
-          }
-        } catch { /* silent */ }
-      }),
+      // rivestream: محذوف (iframe fallback غير مرغوب)
 
       // ── 16. Vyla v2 SSE stream (missourimonster-vyla-v2.hf.space) ─────────────
       // Vyla fans out to 14+ backend providers, returns pre-proxied CORS-safe HLS URLs
