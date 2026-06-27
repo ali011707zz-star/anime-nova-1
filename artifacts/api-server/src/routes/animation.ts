@@ -817,7 +817,7 @@ function extractStreamsFromHtml(html: string): { url: string; type: "hls" | "mp4
 // Try to call the internal anime extract-video API (reuses extractVideoDeep logic)
 async function callExtractApi(url: string): Promise<{ directUrl?: string } | null> {
   try {
-    const port   = process.env["PORT"] || "8080";
+    const port   = process.env["PORT"] || "5000";
     const apiUrl = `http://localhost:${port}/api/anime/extract-video?url=${encodeURIComponent(url)}`;
     const r = await fetch(apiUrl, { signal: AbortSignal.timeout(14_000) });
     if (!r.ok) return null;
@@ -844,7 +844,7 @@ let _hexaFailUntil = 0;
 async function probeHlsProxy(proxied: string): Promise<boolean> {
   if (!proxied.startsWith("/api/anime/")) return true; // external URL — assume OK
   try {
-    const port = process.env.PORT || "8080";
+    const port = process.env.PORT || "5000";
     const pr = await fetch(`http://localhost:${port}${proxied}`, {
       signal: AbortSignal.timeout(5_000),
     });
@@ -2003,7 +2003,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 // If CDN returns 200/206 from server: send via hls-proxy (CORS + segment rewriting).
                 // If CDN returns 403 from server (IP-blocked): send raw URL for browser direct access
                 // (browser fetches m3u8 + segments from user's home IP, bypassing our datacenter IP).
-                const PROBE_PORT = process.env.PORT || 8080;
+                const PROBE_PORT = process.env.PORT || 5000;
                 const probeResults = await Promise.allSettled(
                   prepared.map(async ({ proxied, rawUrl: pRaw, label }) => {
                     try {
@@ -3044,7 +3044,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!q) return;
         try {
           send("status", { msg: "ماي سيما: جاري البحث…" });
-          const PORT    = process.env["PORT"] || "8080";
+          const PORT    = process.env["PORT"] || "5000";
           const ep      = type === "movie" ? 1 : epNum;
           const isMovie = type === "movie" ? "true" : "false";
           const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=mycima`
@@ -3079,7 +3079,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "توب سيما: جاري البحث…" });
           const ep      = type === "movie" ? 1 : epNum;
           const isMovie = type === "movie" ? "true" : "false";
-          const PORT    = process.env["PORT"] || "8080";
+          const PORT    = process.env["PORT"] || "5000";
           const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=topcinemaa`
             + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMovie}`;
           const r = await fetch(fsUrl, {
