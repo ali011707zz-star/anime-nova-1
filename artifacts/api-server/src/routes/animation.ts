@@ -18,6 +18,25 @@ const MV_BASE   = "https://moviz-time.co";
 const AS_CDN_B  = "https://as-cdn21.top";
 const RUBY_B    = "https://rubystm.com";
 
+// ── Vyla v2 (missourimonster-vyla-v2.hf.space) token cache ────────────────────
+const VYLA_BASE_V2 = "https://missourimonster-vyla-v2.hf.space";
+let _vylaToken     = "";
+let _vylaTokenExp  = 0;
+async function getVylaToken(): Promise<string> {
+  if (_vylaToken && Date.now() < _vylaTokenExp - 60_000) return _vylaToken;
+  const r = await fetch(`${VYLA_BASE_V2}/api/auth`, {
+    method : "POST",
+    headers: { "Authorization": "Bearer public_api_key", "Content-Type": "application/json" },
+    signal : AbortSignal.timeout(8_000),
+  });
+  if (!r.ok) throw new Error(`Vyla auth failed: ${r.status}`);
+  const d = await r.json() as { token?: string; expires_in?: number };
+  if (!d.token) throw new Error("Vyla: no token in response");
+  _vylaToken    = d.token;
+  _vylaTokenExp = Date.now() + (d.expires_in ?? 1800) * 1000;
+  return _vylaToken;
+}
+
 // ── SeePanal (panel.seepanel.top) ─────────────────────────────────────────────
 const SP_BASE = "https://panel.seepanel.top/api";
 const SP_KEY  = "4F5A9C3D9A86FA54EACEDDD635185";
@@ -1231,13 +1250,13 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     }
   } catch { /* ignore */ }
 
-  // ── 5. Vyla subtitle API (missourimonster-vyla.hf.space) ──
-  // Returns Arabic1–9 + English VTT from cache.vdrk.site; run in parallel with above
+  // ── 5. Vyla v2 subtitle API (missourimonster-vyla-v2.hf.space) ──
+  // Returns Arabic + English separate VTT files from cache.vdrk.site — no auth needed for subtitles
   const vylaItems: Track[] = [];
   try {
     const vylaUrl = type === "tv"
-      ? `https://missourimonster-vyla.hf.space/api/subtitles/tv/${tmdbId}/${season}/${ep}`
-      : `https://missourimonster-vyla.hf.space/api/subtitles/movie/${tmdbId}`;
+      ? `${VYLA_BASE_V2}/api/subtitles/tv/${tmdbId}/${season}/${ep}`
+      : `${VYLA_BASE_V2}/api/subtitles/movie/${tmdbId}`;
     const r = await fetch(vylaUrl, {
       headers: { "User-Agent": UA, Accept: "application/json" },
       signal: AbortSignal.timeout(9_000),
@@ -1420,12 +1439,13 @@ router.get("/animation/quick-check", async (req: Request, res: Response) => {
   const timer = setTimeout(() => controller.abort(), 6_500);
 
   try {
+    const vylaToken = await getVylaToken().catch(() => "");
     const sseUrl = type === "tv"
-      ? `https://missourimonster-vyla.hf.space/api/tv?id=${tmdbId}&season=${season}&episode=${ep}`
-      : `https://missourimonster-vyla.hf.space/api/movie?id=${tmdbId}`;
+      ? `${VYLA_BASE_V2}/tv?id=${tmdbId}&season=${season}&episode=${ep}`
+      : `${VYLA_BASE_V2}/movie?id=${tmdbId}`;
 
     const r = await fetch(sseUrl, {
-      headers: { "User-Agent": UA, "Accept": "text/event-stream" },
+      headers: { "User-Agent": UA, "Accept": "text/event-stream", "X-Session-Token": vylaToken },
       signal: controller.signal,
     });
 
@@ -2447,27 +2467,32 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── VidSync — مُعطَّل: enc-vidsync يحتاج Turnstile في المتصفح (InitTabs2)
       Promise.resolve(),
 
-      // ── 16. Vyla SSE stream — DEAD (missourimonster-vyla.hf.space returns 404 since 2026-06) ──
-      Promise.resolve() || scrapeAnimCached("vyla", async () => {
+      // ── 16. Vyla v2 SSE stream (missourimonster-vyla-v2.hf.space) ─────────────
+      // Vyla fans out to 14+ backend providers, returns pre-proxied CORS-safe HLS URLs
+      // Auth: POST /api/auth Bearer public_api_key → X-Session-Token header
+      scrapeAnimCached("vyla", async () => {
         if (!tmdbId) return;
-        const VYLA_BASE = "https://missourimonster-vyla.hf.space";
         try {
-          send("status", { msg: "Vyla: جاري الاستخراج…" });
+          send("status", { msg: "Vyla v2: جاري الاستخراج…" });
 
+          const vylaToken = await getVylaToken();
           const sseUrl = type === "tv"
-            ? `${VYLA_BASE}/api/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
-            : `${VYLA_BASE}/api/movie?id=${tmdbId}`;
+            ? `${VYLA_BASE_V2}/tv?id=${tmdbId}&season=${season}&episode=${epNum}`
+            : `${VYLA_BASE_V2}/movie?id=${tmdbId}`;
 
           const r = await fetch(sseUrl, {
-            headers: { "User-Agent": UA, "Accept": "text/event-stream" },
-            signal: AbortSignal.timeout(22_000),
+            headers: {
+              "User-Agent"     : UA,
+              "Accept"         : "text/event-stream",
+              "X-Session-Token": vylaToken,
+            },
+            signal: AbortSignal.timeout(28_000),
           });
           if (!r.ok || !r.body) return;
 
           const reader = r.body.getReader();
           const dec    = new TextDecoder();
           let buf      = "";
-          let provIdx  = 0;
 
           outer: while (true) {
             const { done, value } = await reader.read();
@@ -2484,48 +2509,46 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 const d = JSON.parse(line.slice(5).trim()) as any;
 
                 if (d.type === "source") {
-                  // d.source.url is the Vyla proxy URL (missourimonster-vyla.hf.space/api?url=...)
-                  // Vyla proxy rewrites ALL segment URLs within the m3u8 to also go through itself
-                  // with correct Referer/Origin headers; sets CORS * on all responses.
-                  // → Send the Vyla proxy URL directly to the browser (no hls-proxy needed).
-                  const proxyUrl: string = d.source?.url || "";
-                  if (!proxyUrl) continue;
+                  const sourceUrl: string = d.source?.url || "";
+                  const sourceLabel: string = d.source?.label || d.source?.source || "Vyla";
+                  if (!sourceUrl) continue;
 
-                  // Deduplicate by inner CDN URL (the ?url= param)
-                  let innerUrl = proxyUrl;
-                  try {
-                    const pu = new URL(proxyUrl);
-                    const encoded = pu.searchParams.get("url");
-                    if (encoded) innerUrl = encoded;
-                  } catch { /* keep proxyUrl */ }
+                  // Determine dedup key: for Vyla proxy URLs extract inner CDN URL
+                  let dedupKey = sourceUrl;
+                  if (sourceUrl.startsWith(VYLA_BASE_V2)) {
+                    try {
+                      const pu = new URL(sourceUrl);
+                      const inner = pu.searchParams.get("url");
+                      if (inner) dedupKey = inner;
+                    } catch { /* keep sourceUrl */ }
+                  }
+                  if (seenUrls.has(dedupKey)) continue;
+                  seenUrls.add(dedupKey);
 
-                  if (!innerUrl || seenUrls.has(innerUrl)) continue;
-                  seenUrls.add(innerUrl);
+                  const provLabel = `Vyla · ${sourceLabel}`;
 
-                  const provLabel = d.source?.provider
-                    ? `Vyla · ${d.source.provider}`
-                    : `Vyla · ${++provIdx}`;
-
-                  // Quick probe: if Vyla proxy URL itself is down (502/503), skip source
-                  const probeOk = await fetch(proxyUrl, {
-                    method: "HEAD",
-                    headers: { "User-Agent": UA, "Origin": "https://www.netflix.com" },
-                    signal: AbortSignal.timeout(5_000),
-                  }).then(r => r.ok).catch(() => false);
-                  if (!probeOk) continue;
-
-                  // Send Vyla proxy URL directly — browser plays it without our hls-proxy
-                  // (Vyla already handles CORS + segment proxying internally)
-                  sendSource(proxyUrl, provLabel, proxyUrl, proxyUrl);
+                  if (sourceUrl.startsWith(VYLA_BASE_V2)) {
+                    // Vyla proxy URL: CORS * on all responses, segments already proxied
+                    // Send directly to browser — no hls-proxy needed
+                    sendSource(sourceUrl, provLabel, sourceUrl, sourceUrl);
+                  } else {
+                    // Raw HLS/CDN URL: wrap with our hls-proxy for CORS safety
+                    const proxied = sourceUrl.includes(".m3u8")
+                      ? `/api/anime/hls-proxy?url=${encodeURIComponent(sourceUrl)}&ref=${encodeURIComponent(VYLA_BASE_V2 + "/")}`
+                      : sourceUrl;
+                    const probeOk = await probeHlsProxy(proxied);
+                    if (!probeOk) continue;
+                    sendSource(proxied, provLabel, sourceUrl, proxied);
+                  }
 
                 } else if (d.type === "done" || d.type === "end") {
                   break outer;
                 }
-              } catch { /* ignore malformed event */ }
+              } catch { /* ignore malformed SSE event */ }
             }
           }
           reader.cancel().catch(() => {});
-        } catch { /* silent — HF Space may be sleeping */ }
+        } catch { /* silent — HF Space may sleep or token expired */ }
       }),
 
       // ── anime-day.com — أنمي داي (كرتون غربي/أنمي صيني) ────────────────────
