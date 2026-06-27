@@ -4922,10 +4922,21 @@ async function resolveAnimexSlug(anilistId: number): Promise<string | null> {
   const cached = animexSlugCache.get(anilistId);
   if (cached && Date.now() - cached.ts < ANIMEX_SLUG_TTL) return cached.slug;
 
-  const data = await fetch(`${ANIMEX_BASE}/watch/${anilistId}/__data.json`, {
+  const text = await fetch(`${ANIMEX_BASE}/watch/${anilistId}/__data.json`, {
     headers: { ...BASE_HDRS, Accept: "application/json" },
     signal: AbortSignal.timeout(8000),
-  }).then(r => r.ok ? r.json() : null).catch(() => null) as { nodes?: Array<{ type?: string; data?: unknown[] }> } | null;
+  }).then(r => r.ok ? r.text() : null).catch(() => null);
+
+  if (!text) return null;
+
+  // SvelteKit may return multiple JSON objects separated by newlines (NDJSON)
+  // Try full parse first, then fall back to first line only
+  let data: { nodes?: Array<{ type?: string; data?: unknown[] }> } | null = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    try { data = JSON.parse(text.split("\n")[0]); } catch { return null; }
+  }
 
   if (!data?.nodes) return null;
   for (const node of data.nodes) {
@@ -7910,6 +7921,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // anivault: محذوف — ترجمة إنجليزية مدمجة في الـ stream
       scrapeCached("animekai",      () => getAnimeKaiSources(title, english, ep, anilistId),     false, 20000),
       scrapeCached("hianime",      () => getHiAnimeSources(title, english, ep, anilistId),      false, 22000),
+      scrapeCached("animex",       () => getAnimexSources(title, english, ep, anilistId),       false, 25000),
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
@@ -8046,6 +8058,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
+      case "animex":        (await race(getAnimexSources(title, english, ep, anilistId),        25_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
