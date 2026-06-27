@@ -3218,8 +3218,8 @@ async function getRistoAnimeSources(
     const seriesUrl = await searchRistoAnime(title, english);
     if (!seriesUrl) return [];
 
-    // Fetch series page → get post_id and season IDs (via CF proxy to bypass Turnstile)
-    const seriesHtml = await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000);
+    // Fetch series page via Orkestr EU relay (bypasses Cloudflare)
+    const seriesHtml = (await orkestGet(seriesUrl, `${RISTO_BASE}/`, 12000)) ?? await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000);
     if (!seriesHtml || isCloudflareBlock(seriesHtml)) return [];
 
     const postIdM = seriesHtml.match(/post_id:\s*'(\d+)'/);
@@ -3286,7 +3286,7 @@ async function getRistoAnimeSources(
 
     // Fetch episode page with ?watch=1 → server list is only in this variant
     const watchEpUrl = epUrl + (epUrl.includes("?") ? "&" : "?") + "watch=1";
-    const epHtml = await cfProxyGet(watchEpUrl, seriesUrl, 10000);
+    const epHtml = (await orkestGet(watchEpUrl, seriesUrl, 12000)) ?? await cfProxyGet(watchEpUrl, seriesUrl, 10000);
     if (!epHtml || isCloudflareBlock(epHtml)) return [];
 
     const watchUrls: string[] = [];
@@ -3330,13 +3330,18 @@ const a4upSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }
  * We extract the redirect URL and follow it to get the real page.
  */
 async function a4upFetchHtml(url: string): Promise<{ ok: boolean; html: string }> {
+  // Try Orkestr EU relay first (bypasses Cloudflare block on datacenter IPs)
+  try {
+    const html = await orkestGet(url, "https://anime4up.cam/", 15000);
+    if (html && !isCloudflareBlock(html) && html.length > 200) return { ok: true, html };
+  } catch {}
+  // Fallback: direct fetch (may hit CF challenge)
   try {
     const r = await fetch(url, {
       headers: A4UP_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow",
     });
     if (!r.ok) return { ok: false, html: "" };
     let html = await r.text();
-    // Detect JS bot-protection redirect
     const jsRedir = html.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/)?.[1];
     if (jsRedir) {
       const r2 = await fetch(jsRedir, {

@@ -2182,19 +2182,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const proxied = wrapMp4(apiUrl, "https://pixeldrain.com/");
               sendSource(proxied, label, proxied, proxied);
             } else if (srvName === "ST") {
-              try {
-                const stHtml = await fetch(link, {
-                  headers: { "User-Agent": UA, "Referer": "https://streamtape.com/" },
-                  signal : AbortSignal.timeout(10_000),
-                }).then(r => r.ok ? r.text() : "").catch(() => "");
-                const m1 = stHtml.match(/robotlink'\)\.innerHTML\s*=\s*'([^']+)'/);
-                const m2 = stHtml.match(/'([^']+)'\s*\+\s*\('([^']+)'\)/);
-                if (m1 && m2) {
-                  const stUrl   = "https:" + m1[1] + m2[2];
-                  const proxied = wrapMp4(stUrl, "https://streamtape.com/");
-                  sendSource(proxied, label, proxied, proxied);
-                }
-              } catch { /* skip */ }
+              // Streamtape — محجوب/متغير الـ obfuscation → متجاهَل
             } else if (srvName === "VT") {
               try {
                 const extracted = await callExtractApi(link);
@@ -2330,21 +2318,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               sendSource(proxied, label, proxied, proxied);
 
             } else if (srvName === "ST") {
-              // Streamtape → استخراج الرابط المباشر من صفحة HTML
-              try {
-                const stHtml = await fetch(link, {
-                  headers: { "User-Agent": UA, "Referer": "https://streamtape.com/" },
-                  signal : AbortSignal.timeout(10_000),
-                }).then(r => r.ok ? r.text() : "").catch(() => "");
-                // parseStreamtape pattern
-                const m1 = stHtml.match(/robotlink'\)\.innerHTML\s*=\s*'([^']+)'/);
-                const m2 = stHtml.match(/'([^']+)'\s*\+\s*\('([^']+)'\)/);
-                if (m1 && m2) {
-                  const stUrl   = "https:" + m1[1] + m2[2];
-                  const proxied = wrapMp4(stUrl, "https://streamtape.com/");
-                  sendSource(proxied, label, proxied, proxied);
-                }
-              } catch { /* skip */ }
+              // Streamtape — محجوب/متغير الـ obfuscation → متجاهَل
 
             } else if (srvName === "VT") {
               // VidTube → استخراج عبر callExtractApi (extractVideoDeep)

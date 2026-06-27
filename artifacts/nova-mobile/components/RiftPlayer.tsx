@@ -771,17 +771,9 @@ export function RiftPlayer({
     };
   }, []);
 
-  /* ─── Flip screen (toggle LANDSCAPE_LEFT ↔ LANDSCAPE_RIGHT) ─── */
-  const flipScreen = useCallback(async () => {
-    try {
-      const next = orientLockRef.current === "left" ? "right" : "left";
-      orientLockRef.current = next;
-      const lock = next === "right"
-        ? ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT
-        : ScreenOrientation.OrientationLock.LANDSCAPE_LEFT;
-      await ScreenOrientation.lockAsync(lock);
-      setIsFlipped(f => !f);
-    } catch {}
+  /* ─── Flip screen — rotate 180° using CSS transform (no surface recreation = no black flash) ─── */
+  const flipScreen = useCallback(() => {
+    setIsFlipped(f => !f);
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
   }, []);
 
@@ -1277,7 +1269,7 @@ export function RiftPlayer({
   if (!currentSrc) return null;
 
   return (
-    <View ref={rootViewRef} style={s.root}>
+    <View ref={rootViewRef} style={[s.root, isFlipped && { transform: [{ rotate: "180deg" }] }]}>
       <StatusBar hidden />
       {/* ── Video ── */}
       <VideoView
