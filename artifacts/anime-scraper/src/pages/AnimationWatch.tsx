@@ -123,8 +123,7 @@ function getSourceTier(src: Source): QualityTier {
   const lblUp = lbl.toUpperCase();
   if (lblUp.includes("1080") || lblUp.includes("FHD") || lblUp.includes("4K") || lblUp.includes("2160")) return "1080p FHD";
   if (lblUp.includes("480") || lblUp.includes("360") || lblUp.includes("240") || lblUp.includes(" SD")) return "360p SD";
-  // Vyla is always high-quality multi-stream HLS (self-proxied, CORS-safe)
-  if (lbl.startsWith("Vyla")) return "1080p FHD";
+  if (lbl.startsWith("Icefy") || lbl.startsWith("Vyla")) return "1080p FHD";
   if (url.includes("hls-proxy")) {
     if (
       lbl.startsWith("VidLink") ||
@@ -332,12 +331,12 @@ export default function AnimationWatch() {
 
     // ── SLOW tier: other reliable sources ──
     const starcima     = prefProxy(okSources, "StarCima");
-    const vyla         = okSources.find(s => s.label?.startsWith("Vyla"));
+    const icefy        = okSources.find(s => s.label?.startsWith("Icefy") || s.label?.startsWith("Vyla"));
     const ezv          = prefProxy(okSources, "EzVidAPI");
     const aflaam       = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
     const seepanel     = okSources.find(s => s.label?.startsWith("SeePanal"));
     const witcher      = okSources.find(s => s.label?.includes("AnimeWitcher"));
-    const slowSrc      = starcima ?? vyla ?? ezv ?? aflaam ?? seepanel ?? witcher;
+    const slowSrc      = starcima ?? icefy ?? ezv ?? aflaam ?? seepanel ?? witcher;
 
     // If SSE done → play best slow source now (fast sources never arrived)
     if (sseDone) {
@@ -1437,6 +1436,7 @@ function NoSourcesMessage({
 /* ── 2-letter tag from animation source label ── */
 function getAnimTag(label: string): string {
   const l = label.toLowerCase();
+  if (l.startsWith("icefy"))      return "IC";
   if (l.startsWith("vyla"))       return "VY";
   if (l.startsWith("videasy"))    return "VE";
   if (l.startsWith("vidlink"))    return "VL";
