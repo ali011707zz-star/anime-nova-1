@@ -2447,11 +2447,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── VidSync — مُعطَّل: enc-vidsync يحتاج Turnstile في المتصفح (InitTabs2)
       Promise.resolve(),
 
-      // ── 16. Vyla SSE stream (missourimonster-vyla.hf.space) ──────────────────
-      // Correct endpoint: /api/movie?id={tmdbId} or /api/tv?id={tmdbId}&season=&episode=
-      // Returns SSE: {"type":"source","source":{"url":"https://vyla.hf.space/api?url=<encoded_m3u8>"}}
-      // The Vyla proxy URL encodes the real CDN m3u8; extract inner URL, wrap in our hls-proxy.
-      scrapeAnimCached("vyla", async () => {
+      // ── 16. Vyla SSE stream — DEAD (missourimonster-vyla.hf.space returns 404 since 2026-06) ──
+      Promise.resolve() || scrapeAnimCached("vyla", async () => {
         if (!tmdbId) return;
         const VYLA_BASE = "https://missourimonster-vyla.hf.space";
         try {
