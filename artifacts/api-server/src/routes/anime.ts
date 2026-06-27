@@ -7595,7 +7595,7 @@ async function getStarCimaAnimeSources(title: string, english: string | null, ep
         return rank(a) - rank(b);
       });
 
-    const PROBE_PORT = parseInt(String(process.env.PORT || 8080), 10);
+    const PROBE_PORT = parseInt(String(process.env.PORT || 5000), 10);
     const prepared = srvSorted.map((srv: any) => {
       let rawUrl = String(srv.url);
       let referer = SC_REF_HLS;
@@ -7791,7 +7791,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 
     // ── مساعد: probe سريع للمصادر عبر proxy الداخلي ──
-    const PORT_NUM = parseInt(String(process.env.PORT || 8080), 10);
+    const PORT_NUM = parseInt(String(process.env.PORT || 5000), 10);
     async function probeOwnProxy(s: UnifiedSource): Promise<boolean> {
       const cu = s.directUrl || s.url;
       if (!cu.startsWith("/api/")) return true; // روابط خارجية: نثق بها
@@ -9173,7 +9173,7 @@ router.get("/anime/translate-vtt", async (req, res) => {
   if (!rawUrl) { res.status(400).json({ error: "url required" }); return; }
 
   // دعم URLs نسبية مثل /api/anime/proxy-text?... (تُحوَّل لـ localhost)
-  const PORT = process.env.PORT || 8080;
+  const PORT = process.env.PORT || 5000;
   const url = rawUrl.startsWith("/") ? `http://localhost:${PORT}${rawUrl}` : rawUrl;
 
   const cacheKey = `${from}→${to}:${rawUrl}`;
@@ -9235,7 +9235,7 @@ router.get("/anime/translate-vtt-stream", async (req, res) => {
   const to     = ((req.query.to   as string) || "ar").trim();
   if (!rawUrl) { res.status(400).end(); return; }
 
-  const PORT = process.env.PORT || 8080;
+  const PORT = process.env.PORT || 5000;
   const url  = rawUrl.startsWith("/") ? `http://localhost:${PORT}${rawUrl}` : rawUrl;
   const cacheKey = `${from}→${to}:${rawUrl}`;
 

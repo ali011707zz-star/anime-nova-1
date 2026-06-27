@@ -3,8 +3,7 @@
  * يتصل مباشرة بـ Supabase عبر متغيرات البيئة (SUPABASE_URL + SUPABASE_SERVICE_KEY)
  */
 
-const rawPort = process.env["PORT"];
-if (!rawPort) throw new Error("PORT environment variable is required but was not provided.");
+const rawPort = process.env["PORT"] ?? "5000";
 const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${rawPort}"`);
 
