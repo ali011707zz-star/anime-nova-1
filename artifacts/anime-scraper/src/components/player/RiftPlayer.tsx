@@ -215,7 +215,8 @@ export default function RiftPlayer({
   const hlsRef       = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const progressRef  = useRef<HTMLDivElement>(null);
-  const hideRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedbackHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekDrag     = useRef(false);
   const touchScrubbing = useRef(false);
   const resumedRef     = useRef(false);
@@ -607,6 +608,7 @@ export default function RiftPlayer({
       const v = videoRef.current;
       if (v) { try { v.pause(); v.src = ""; v.load(); } catch {} }
       if (hideRef.current) clearTimeout(hideRef.current);
+      if (feedbackHideRef.current) clearTimeout(feedbackHideRef.current);
       if (failTimer.current) clearTimeout(failTimer.current);
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
     };
@@ -924,7 +926,9 @@ export default function RiftPlayer({
         delta = (dx / window.innerWidth) * maxD;
       }
       const seekVal = Math.max(0, Math.min(duration, g.startValue + delta));
+      if (feedbackHideRef.current) clearTimeout(feedbackHideRef.current);
       setFeedback({ type: "seek", value: seekVal, delta });
+      feedbackHideRef.current = setTimeout(() => setFeedback(null), 1500);
       // Real-time seek (throttled to 180ms to avoid HLS thrash)
       const now = Date.now();
       if (videoRef.current && now - seekThrottle.current > 180) {
@@ -950,14 +954,18 @@ export default function RiftPlayer({
         videoRef.current.muted = false;
         setMuted(false);
       }
+      if (feedbackHideRef.current) clearTimeout(feedbackHideRef.current);
       setFeedback({ type: "volume", value: nV });
+      feedbackHideRef.current = setTimeout(() => setFeedback(null), 1500);
     } else if (g.active === "brightness") {
       // Same directional fix as volume
       const dV = (isPortrait && !isFs) ? (t.clientX - g.lastX) : (g.lastY - t.clientY);
       if (isPortrait && !isFs) g.lastX = t.clientX; else g.lastY = t.clientY;
       const nB = Math.max(0.3, Math.min(1.5, brightnessRef.current + dV / 150));
       brightnessRef.current = nB;
+      if (feedbackHideRef.current) clearTimeout(feedbackHideRef.current);
       setBrightness(nB); setFeedback({ type: "brightness", value: nB });
+      feedbackHideRef.current = setTimeout(() => setFeedback(null), 1500);
     }
   }
   function onTE(e: React.TouchEvent<HTMLDivElement>) {
@@ -975,10 +983,14 @@ export default function RiftPlayer({
     const g = gestRef.current;
     if (g.active === "seek") {
       if (feedback?.type === "seek" && videoRef.current) { videoRef.current.currentTime = feedback.value; setCurrentTime(feedback.value); }
-      setTimeout(() => setFeedback(null), 200); gestRef.current.active = "none"; return;
+      if (feedbackHideRef.current) clearTimeout(feedbackHideRef.current);
+      setTimeout(() => setFeedback(null), 400); gestRef.current.active = "none"; return;
     }
-    if (g.active !== "none") { setTimeout(() => setFeedback(null), 800); gestRef.current.active = "none"; return; }
-    if (moved.current) { setFeedback(null); return; }
+    if (g.active !== "none") {
+      if (feedbackHideRef.current) clearTimeout(feedbackHideRef.current);
+      setTimeout(() => setFeedback(null), 800); gestRef.current.active = "none"; return;
+    }
+    if (moved.current) { if (feedbackHideRef.current) clearTimeout(feedbackHideRef.current); setFeedback(null); return; }
 
     const touch = e.changedTouches[0];
     /* In portrait (CSS-rotated 90° CW): video's left/right = screen's top/bottom (Y axis) */
