@@ -3330,12 +3330,25 @@ const a4upSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }
  * We extract the redirect URL and follow it to get the real page.
  */
 async function a4upFetchHtml(url: string): Promise<{ ok: boolean; html: string }> {
-  // Try Orkestr EU relay first (bypasses Cloudflare block on datacenter IPs)
+  const isJwtRedir = (h: string) => /window\.location\.replace\(/.test(h);
+
+  // ── المسار 1: Orkestr EU relay (يتجاوز CF) ──────────────────────────────
   try {
-    const html = await orkestGet(url, "https://anime4up.cam/", 15000);
-    if (html && !isCloudflareBlock(html) && html.length > 200) return { ok: true, html };
-  } catch {}
-  // Fallback: direct fetch (may hit CF challenge)
+    let html = await orkestGet(url, "https://anime4up.cam/", 15000) ?? "";
+    if (html && !isCloudflareBlock(html)) {
+      // تحقق من JWT redirect وتابعه عبر Orkestr
+      const redir = html.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/)?.[1];
+      if (redir && isJwtRedir(html)) {
+        const html2 = await orkestGet(redir, "https://anime4up.cam/", 12000) ?? "";
+        if (html2 && !isCloudflareBlock(html2) && !isJwtRedir(html2) && html2.length > 300)
+          return { ok: true, html: html2 };
+      } else if (html.length > 300 && !isJwtRedir(html)) {
+        return { ok: true, html };
+      }
+    }
+  } catch { /* fall through */ }
+
+  // ── المسار 2: direct fetch مع متابعة JWT redirect مباشرة ─────────────────
   try {
     const r = await fetch(url, {
       headers: A4UP_HDRS, signal: AbortSignal.timeout(12000), redirect: "follow",
@@ -3350,10 +3363,10 @@ async function a4upFetchHtml(url: string): Promise<{ ok: boolean; html: string }
       if (!r2.ok) return { ok: false, html: "" };
       html = await r2.text();
     }
-    return { ok: true, html };
-  } catch {
-    return { ok: false, html: "" };
-  }
+    if (html.length > 300 && !isCloudflareBlock(html)) return { ok: true, html };
+  } catch { /* fall through */ }
+
+  return { ok: false, html: "" };
 }
 
 async function searchAnime4up(title: string, english: string | null): Promise<string | null> {
@@ -3526,7 +3539,23 @@ const a4up2SeriesCache = new Map<string, { url: string | null; ts: number }>();
 const a4up2SrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
 async function a4up2Fetch(url: string, timeoutMs = 7000): Promise<string> {
-  // anime4up returns HTTP 404 for valid episode pages (WP quirk) → must not check r.ok
+  // المسار 1: Orkestr EU relay (يتجاوز CF ويتابع JWT redirect تلقائياً)
+  try {
+    const html = await orkestGet(url, `${A4UP2_BASE}/`, Math.min(timeoutMs, 14000)) ?? "";
+    if (html && !isCloudflareBlock(html)) {
+      // تابع JWT redirect عبر Orkestr إذا وجد
+      const redir = html.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/)?.[1];
+      if (redir) {
+        const html2 = await orkestGet(redir, `${A4UP2_BASE}/`, Math.min(timeoutMs, 12000)) ?? "";
+        if (html2 && !isCloudflareBlock(html2) && !/window\.location\.replace\(/.test(html2))
+          return html2;
+      } else if (html.length > 200) {
+        return html;
+      }
+    }
+  } catch { /* fall through */ }
+
+  // المسار 2: CF proxy محلي (curl_cffi - يقبل 404 كنتيجة صحيحة)
   try {
     const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
     proxyUrl.searchParams.set("url", url);
