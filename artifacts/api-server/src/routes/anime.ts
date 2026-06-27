@@ -10265,4 +10265,143 @@ router.post("/anilist", async (req, res) => {
 // ── بناء كتالوج AnimeWitcher في الخلفية عند إقلاع السيرفر ──
 buildAWCatalog().catch(() => {});
 
+// ══════════════════════════════════════════════════════════════════════════
+//  NEW EPISODES — حلقات جديدة مؤكدة التوفر في AnimeWitcher (للقسم الإخباري)
+// ══════════════════════════════════════════════════════════════════════════
+
+const _awNewEpsCache: { ts: number; items: any[] } = { ts: 0, items: [] };
+const _awNewEpsTTL = 15 * 60_000; // 15 دقيقة cache
+
+router.get("/anime/new-episodes", async (req, res) => {
+  // أرجع من الـ cache إذا كان حديثاً
+  if (Date.now() - _awNewEpsCache.ts < _awNewEpsTTL && _awNewEpsCache.items.length) {
+    res.setHeader("Cache-Control", "public, max-age=300");
+    return res.json(_awNewEpsCache.items);
+  }
+
+  try {
+    // 1️⃣ جلب جدول البث من AniList (آخر 36 ساعة)
+    const now  = Math.floor(Date.now() / 1000);
+    const from = now - 36 * 3600;
+
+    const anilistRes = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      },
+      body: JSON.stringify({
+        query: `query($greater: Int, $lesser: Int) {
+          Page(perPage: 50) {
+            airingSchedules(
+              airingAt_greater: $greater
+              airingAt_lesser: $lesser
+              sort: [TIME_DESC]
+            ) {
+              episode airingAt
+              media {
+                id type isAdult format
+                title { romaji english native }
+                coverImage { extraLarge large }
+                popularity genres averageScore
+              }
+            }
+          }
+        }`,
+        variables: { greater: from, lesser: now },
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+
+    const anilistData = await anilistRes.json() as any;
+    const schedules: any[] = (anilistData?.data?.Page?.airingSchedules || [])
+      .filter((s: any) => s.media?.type === "ANIME" && !s.media?.isAdult);
+
+    // إزالة التكرار — نبقي الحلقة الأحدث لكل أنمي
+    const byId = new Map<number, any>();
+    for (const s of schedules) {
+      const existing = byId.get(s.media.id);
+      if (!existing || s.episode > existing.episode) byId.set(s.media.id, s);
+    }
+    const unique = Array.from(byId.values()).slice(0, 20);
+
+    // 2️⃣ التحقق من توفر كل حلقة في AnimeWitcher بشكل متوازٍ
+    const results = await Promise.allSettled(unique.map(async (sched: any) => {
+      const title = sched.media.title?.romaji || sched.media.title?.english || "";
+      const ep    = sched.episode;
+      if (!title) return null;
+
+      try {
+        // بحث في AW
+        const sr = await fetch(
+          `${AW_HF_BASE}/api/search?q=${encodeURIComponent(title)}`,
+          {
+            headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
+            signal: AbortSignal.timeout(7_000),
+          }
+        );
+        if (!sr.ok) return null;
+        const raw = await sr.json().catch(() => null);
+        const hits: any[] = raw?.hits ?? (Array.isArray(raw) ? raw : []);
+        if (!hits.length) return null;
+
+        const hit     = hits[0];
+        const animeId = hit?.id || hit?.anime_id || "";
+        if (!animeId) return null;
+
+        // بوستر AW أو AniList كاحتياط
+        const awPoster = hit?.poster || hit?.cover || null;
+
+        // التحقق من الحلقة
+        const er = await fetch(
+          `${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(String(animeId))}`,
+          {
+            headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
+            signal: AbortSignal.timeout(7_000),
+          }
+        );
+        if (!er.ok) return null;
+        const episodes: any[] = await er.json().catch(() => []);
+        const found = episodes.some((e: any) => {
+          const num = parseInt(String(e.episode_number ?? e.ep_num ?? e.number ?? "0"), 10);
+          return num === ep;
+        });
+        if (!found) return null;
+
+        return {
+          anilistId:    sched.media.id,
+          title,
+          titleAr:      sched.media.title?.native || null,
+          episode:      ep,
+          airingAt:     sched.airingAt,
+          poster:       awPoster || sched.media.coverImage?.extraLarge || sched.media.coverImage?.large || null,
+          anilistPoster: sched.media.coverImage?.extraLarge || sched.media.coverImage?.large || null,
+          format:       sched.media.format || "TV",
+          popularity:   sched.media.popularity || 0,
+          averageScore: sched.media.averageScore || null,
+          genres:       (sched.media.genres || []).slice(0, 3),
+        };
+      } catch { return null; }
+    }));
+
+    const confirmed = results
+      .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled" && r.value !== null)
+      .map(r => r.value)
+      .sort((a, b) => b.airingAt - a.airingAt);
+
+    if (confirmed.length > 0) {
+      _awNewEpsCache.ts    = Date.now();
+      _awNewEpsCache.items = confirmed;
+    }
+
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json(confirmed.length > 0 ? confirmed : _awNewEpsCache.items);
+  } catch (e: any) {
+    console.warn("[new-episodes] error:", e.message);
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.json(_awNewEpsCache.items);
+  }
+});
+
 export default router;

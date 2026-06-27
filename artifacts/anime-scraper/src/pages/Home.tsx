@@ -146,14 +146,6 @@ const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
 }`;
 
 /* ─── RecentNewsSection ─── */
-const RECENTLY_AIRED_NEWS_Q = `query {
-  Page(perPage: 20) {
-    airingSchedules(notYetAired: false, sort: TIME_DESC) {
-      episode airingAt
-      media { id title { romaji } coverImage { large } averageScore popularity format isAdult }
-    }
-  }
-}`;
 
 function timeAgoAr(ts: number): string {
   const diff = Date.now() / 1000 - ts;
@@ -175,22 +167,10 @@ function RecentNewsSection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("https://graphql.anilist.co", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ query: RECENTLY_AIRED_NEWS_Q }),
-    })
+    fetch("/api/anime/new-episodes")
       .then(r => r.json())
-      .then(d => {
-        const schedules = (d.data?.Page?.airingSchedules || []).filter(
-          (s: any) => s.media && !s.media.isAdult
-        );
-        const seen = new Set<number>();
-        const unique = schedules.filter((s: any) => {
-          if (seen.has(s.media.id)) return false;
-          seen.add(s.media.id); return true;
-        });
-        setItems(unique.slice(0, 8));
+      .then((data: any[]) => {
+        if (Array.isArray(data)) setItems(data.slice(0, 8));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -221,17 +201,16 @@ function RecentNewsSection() {
 
       {/* News cards — vertical list */}
       <div className="flex flex-col gap-2.5">
-        {items.map((sched: any, i: number) => {
-          const m = sched.media;
-          const newsTitle = `تم بث الحلقة ${sched.episode} من أنمي "${m.title?.romaji}"`;
-          const views = fmtViews(m.popularity || 0);
-          const ago = timeAgoAr(sched.airingAt);
-          const format = m.format === "TV" ? "مسلسل" : m.format === "MOVIE" ? "فيلم" : "أنمي";
+        {items.map((ep: any, i: number) => {
+          const newsTitle = `تم بث الحلقة ${ep.episode} من أنمي "${ep.title}"`;
+          const views = fmtViews(ep.popularity || 0);
+          const ago = timeAgoAr(ep.airingAt);
+          const format = ep.format === "TV" ? "مسلسل" : ep.format === "MOVIE" ? "فيلم" : "أنمي";
           return (
-            <motion.div key={m.id + "-" + i}
+            <motion.div key={ep.anilistId + "-" + i}
               initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.04 }}>
-              <Link href={`/anime/${m.id}`}>
+              <Link href={`/anime/${ep.anilistId}`}>
                 <div className="flex items-center gap-3 p-3 bg-[#111116] border border-white/[0.07] rounded-2xl cursor-pointer hover:bg-white/[0.03] transition-colors active:scale-[0.98]">
                   {/* Text column */}
                   <div className="flex-1 min-w-0">
@@ -240,9 +219,12 @@ function RecentNewsSection() {
                       <span className="text-[8px] bg-primary/15 text-primary border border-primary/20 px-1.5 py-0.5 rounded-full font-black font-['Cairo']">
                         {format}
                       </span>
-                      {m.averageScore ? (
-                        <span className="text-[8px] text-yellow-400 font-bold">⭐ {(m.averageScore / 10).toFixed(1)}</span>
+                      {ep.averageScore ? (
+                        <span className="text-[8px] text-yellow-400 font-bold">⭐ {(ep.averageScore / 10).toFixed(1)}</span>
                       ) : null}
+                      <span className="text-[8px] bg-green-500/15 text-green-400 border border-green-500/20 px-1.5 py-0.5 rounded-full font-black font-['Cairo']">
+                        ✓ AW
+                      </span>
                     </div>
                     {/* Headline */}
                     <p className="text-[12px] font-black text-white/90 line-clamp-3 font-['Cairo'] leading-snug">{newsTitle}</p>
@@ -271,9 +253,9 @@ function RecentNewsSection() {
                       </div>
                     </div>
                   </div>
-                  {/* Thumbnail on left (RTL → appears on right visually) */}
+                  {/* Thumbnail */}
                   <img
-                    src={m.coverImage?.large}
+                    src={ep.poster || ep.anilistPoster}
                     alt=""
                     className="w-[58px] h-[82px] rounded-xl object-cover shrink-0 border border-white/10"
                     loading="lazy"
