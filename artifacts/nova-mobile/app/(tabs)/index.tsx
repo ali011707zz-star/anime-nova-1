@@ -476,43 +476,80 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {/* ── News / Recently Aired Section ── */}
+              {/* ── أخبار الأنمي Section ── */}
               {recentAiring.length > 0 && (
-                <View style={{ marginBottom: 24 }}>
-                  <View style={styles.sectionHeader}>
+                <View style={{ marginBottom: 24, paddingHorizontal: 16 }}>
+                  <View style={[styles.sectionHeader, { paddingHorizontal: 0 }]}>
                     <View style={styles.sectionLeft}>
-                      <View style={[styles.sectionDot, { backgroundColor: "#22c55e" }]} />
-                      <Text style={[styles.sectionTitle, { color: colors.text }]}>📡 آخر حلقات الأنمي</Text>
+                      <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
+                      <Text style={[styles.sectionTitle, { color: colors.text }]}>📰 آخر أخبار الأنمي</Text>
                     </View>
                     <Pressable style={styles.seeAllBtn} onPress={() => router.push("/(tabs)/news" as any)}>
                       <Text style={[styles.seeAllText, { color: colors.primary }]}>المزيد</Text>
                       <Ionicons name="chevron-back" size={13} color={colors.primary} />
                     </Pressable>
                   </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-                    {recentAiring.map((item: any, idx: number) => {
+                  <View style={{ gap: 10 }}>
+                    {recentAiring.slice(0, 6).map((item: any, idx: number) => {
                       const media = item.media;
-                      const minAgo = Math.floor((Date.now() / 1000 - item.airingAt) / 60);
-                      const timeLabel = minAgo < 60 ? `${minAgo}د` : `${Math.floor(minAgo / 60)}س`;
+                      const diffSec = Date.now() / 1000 - item.airingAt;
+                      const timeLabel = diffSec < 3600
+                        ? `منذ ${Math.floor(diffSec / 60)} دقيقة`
+                        : diffSec < 86400
+                          ? `منذ ${Math.floor(diffSec / 3600)} ساعة`
+                          : `منذ ${Math.floor(diffSec / 86400)} يوم`;
+                      const views = media.popularity
+                        ? media.popularity > 1000 ? `${(media.popularity / 1000).toFixed(1)}K` : String(media.popularity)
+                        : "0";
+                      const newsTitle = `تم بث الحلقة ${item.episode} من أنمي "${media.title?.romaji}"`;
                       return (
                         <Pressable
                           key={media.id + "-" + idx}
                           onPress={() => router.push(`/anime/${media.id}` as any)}
-                          style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                          style={[newsCardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                         >
-                          <Image source={{ uri: media.coverImage?.large }} style={todayEpStyles.img} contentFit="cover" />
-                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.93)"]} style={todayEpStyles.grad}>
-                            <Text style={todayEpStyles.ep}>ح {item.episode}</Text>
-                            <Text style={todayEpStyles.title} numberOfLines={2}>{media.title?.romaji}</Text>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
-                              <Ionicons name="radio" size={9} color="#22c55e" />
-                              <Text style={[todayEpStyles.time, { color: "#22c55e" }]}>منذ {timeLabel}</Text>
+                          {/* Text content on the left */}
+                          <View style={newsCardStyles.content}>
+                            <View style={newsCardStyles.tagsRow}>
+                              <View style={newsCardStyles.badge}>
+                                <Text style={newsCardStyles.badgeText}>
+                                  {media.format === "TV" ? "مسلسل" : media.format === "MOVIE" ? "فيلم" : "أنمي"}
+                                </Text>
+                              </View>
+                              {media.averageScore ? (
+                                <Text style={newsCardStyles.score}>⭐ {(media.averageScore / 10).toFixed(1)}</Text>
+                              ) : null}
                             </View>
-                          </LinearGradient>
+                            <Text style={[newsCardStyles.title, { color: colors.text }]} numberOfLines={3}>{newsTitle}</Text>
+                            <View style={newsCardStyles.metaRow}>
+                              <View style={newsCardStyles.metaItem}>
+                                <Ionicons name="eye-outline" size={11} color="rgba(255,255,255,0.4)" />
+                                <Text style={newsCardStyles.metaText}>{views} مشاهدة</Text>
+                              </View>
+                              <Text style={newsCardStyles.metaDot}>·</Text>
+                              <View style={newsCardStyles.metaItem}>
+                                <Ionicons name="chatbubble-outline" size={11} color="rgba(255,255,255,0.4)" />
+                                <Text style={newsCardStyles.metaText}>0</Text>
+                              </View>
+                              <Text style={newsCardStyles.metaDot}>·</Text>
+                              <View style={newsCardStyles.metaItem}>
+                                <Ionicons name="time-outline" size={11} color="rgba(255,255,255,0.4)" />
+                                <Text style={newsCardStyles.metaText}>{timeLabel}</Text>
+                              </View>
+                            </View>
+                          </View>
+                          {/* Thumbnail on the right */}
+                          <View style={newsCardStyles.thumbWrap}>
+                            <Image
+                              source={{ uri: media.coverImage?.large }}
+                              style={newsCardStyles.thumb}
+                              contentFit="cover"
+                            />
+                          </View>
                         </Pressable>
                       );
                     })}
-                  </ScrollView>
+                  </View>
                 </View>
               )}
 
@@ -601,4 +638,79 @@ const todayEpStyles = StyleSheet.create({
     color: "#fff", fontSize: 10, fontFamily: "Cairo_600SemiBold", lineHeight: 14, marginTop: 2,
   },
   time: { color: "rgba(255,255,255,0.5)", fontSize: 9, fontFamily: "Cairo_400Regular", marginTop: 3 },
+});
+
+const newsCardStyles = StyleSheet.create({
+  card: {
+    flexDirection: "row",
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: "hidden",
+    padding: 10,
+    gap: 10,
+    alignItems: "center",
+  },
+  content: {
+    flex: 1,
+    gap: 5,
+  },
+  tagsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  badge: {
+    backgroundColor: "rgba(139,92,246,0.18)",
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: "rgba(139,92,246,0.3)",
+  },
+  badgeText: {
+    color: "#a78bfa",
+    fontSize: 9,
+    fontFamily: "Cairo_700Bold",
+  },
+  score: {
+    color: "#facc15",
+    fontSize: 9,
+    fontFamily: "Cairo_700Bold",
+  },
+  title: {
+    fontSize: 12,
+    fontFamily: "Cairo_700Bold",
+    lineHeight: 18,
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    flexWrap: "wrap",
+  },
+  metaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  metaText: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 9,
+    fontFamily: "Cairo_400Regular",
+  },
+  metaDot: {
+    color: "rgba(255,255,255,0.2)",
+    fontSize: 10,
+  },
+  thumbWrap: {
+    width: 70,
+    height: 95,
+    borderRadius: 10,
+    overflow: "hidden",
+    flexShrink: 0,
+  },
+  thumb: {
+    width: "100%",
+    height: "100%",
+  },
 });

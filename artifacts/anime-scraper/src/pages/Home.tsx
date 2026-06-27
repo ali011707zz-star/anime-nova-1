@@ -145,6 +145,149 @@ const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
   }
 }`;
 
+/* ─── RecentNewsSection ─── */
+const RECENTLY_AIRED_NEWS_Q = `query {
+  Page(perPage: 20) {
+    airingSchedules(notYetAired: false, sort: TIME_DESC) {
+      episode airingAt
+      media { id title { romaji } coverImage { large } averageScore popularity format isAdult }
+    }
+  }
+}`;
+
+function timeAgoAr(ts: number): string {
+  const diff = Date.now() / 1000 - ts;
+  if (diff < 3600) return `منذ ${Math.floor(diff / 60)} دقيقة`;
+  if (diff < 86400) return `منذ ${Math.floor(diff / 3600)} ساعة`;
+  if (diff < 604800) return `منذ ${Math.floor(diff / 86400)} يوم`;
+  return `منذ ${Math.floor(diff / 604800)} أسبوع`;
+}
+
+function fmtViews(n: number): string {
+  if (!n) return "0";
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+}
+
+function RecentNewsSection() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ query: RECENTLY_AIRED_NEWS_Q }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        const schedules = (d.data?.Page?.airingSchedules || []).filter(
+          (s: any) => s.media && !s.media.isAdult
+        );
+        const seen = new Set<number>();
+        const unique = schedules.filter((s: any) => {
+          if (seen.has(s.media.id)) return false;
+          seen.add(s.media.id); return true;
+        });
+        setItems(unique.slice(0, 8));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading || !items.length) return null;
+
+  return (
+    <div className="mt-5 px-4">
+      {/* Section header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)" }}>
+            <span className="text-white text-[13px] leading-none">📰</span>
+          </div>
+          <div>
+            <h2 className="text-[13px] font-black font-['Cairo'] text-white leading-none">آخر أخبار الأنمي</h2>
+            <p className="text-[9px] text-white/25 font-['Cairo'] mt-0.5">آخر الحلقات المُضافة</p>
+          </div>
+        </div>
+        <Link href="/news">
+          <button className="text-[10px] text-amber-400/80 font-black font-['Cairo'] flex items-center gap-0.5 bg-amber-500/8 px-2.5 py-1 rounded-xl border border-amber-500/15">
+            المزيد <ChevronLeft className="w-3 h-3" />
+          </button>
+        </Link>
+      </div>
+
+      {/* News cards — vertical list */}
+      <div className="flex flex-col gap-2.5">
+        {items.map((sched: any, i: number) => {
+          const m = sched.media;
+          const newsTitle = `تم بث الحلقة ${sched.episode} من أنمي "${m.title?.romaji}"`;
+          const views = fmtViews(m.popularity || 0);
+          const ago = timeAgoAr(sched.airingAt);
+          const format = m.format === "TV" ? "مسلسل" : m.format === "MOVIE" ? "فيلم" : "أنمي";
+          return (
+            <motion.div key={m.id + "-" + i}
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.04 }}>
+              <Link href={`/anime/${m.id}`}>
+                <div className="flex items-center gap-3 p-3 bg-[#111116] border border-white/[0.07] rounded-2xl cursor-pointer hover:bg-white/[0.03] transition-colors active:scale-[0.98]">
+                  {/* Text column */}
+                  <div className="flex-1 min-w-0">
+                    {/* Tags row */}
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <span className="text-[8px] bg-primary/15 text-primary border border-primary/20 px-1.5 py-0.5 rounded-full font-black font-['Cairo']">
+                        {format}
+                      </span>
+                      {m.averageScore ? (
+                        <span className="text-[8px] text-yellow-400 font-bold">⭐ {(m.averageScore / 10).toFixed(1)}</span>
+                      ) : null}
+                    </div>
+                    {/* Headline */}
+                    <p className="text-[12px] font-black text-white/90 line-clamp-3 font-['Cairo'] leading-snug">{newsTitle}</p>
+                    {/* Meta row */}
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <div className="flex items-center gap-1 text-white/35">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        <span className="text-[9px] font-bold font-['Cairo']">{views} مشاهدة</span>
+                      </div>
+                      <span className="text-white/15">·</span>
+                      <div className="flex items-center gap-1 text-white/35">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                        <span className="text-[9px] font-bold">0</span>
+                      </div>
+                      <span className="text-white/15">·</span>
+                      <div className="flex items-center gap-1 text-primary/70">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-[9px] font-bold font-['Cairo']">{ago}</span>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Thumbnail on left (RTL → appears on right visually) */}
+                  <img
+                    src={m.coverImage?.large}
+                    alt=""
+                    className="w-[58px] h-[82px] rounded-xl object-cover shrink-0 border border-white/10"
+                    loading="lazy"
+                  />
+                </div>
+              </Link>
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AnimeCard({ anime }: { anime: any }) {
   return (
     <Link href={`/anime/${anime.id}`}>
@@ -1266,6 +1409,9 @@ export default function Home() {
         </div>
       )}
 
+
+      {/* ── آخر أخبار الأنمي ── */}
+      {!selectedGenre && <RecentNewsSection />}
 
       {/* ── Popular grid ── */}
       <div className="mt-6 px-4">
