@@ -1,55 +1,62 @@
-# نشر Nova Anime على Cloudflare Pages
+# نشر Nova Anime على Cloudflare Pages + APK
 
-## 1. واجهة الويب (anime-scraper)
+## الرابط الخلفي: https://anime-nova.orkestr.run
 
-### إعدادات Cloudflare Pages:
+---
+
+## 1. واجهة الويب — Cloudflare Pages
+
+### إعدادات البناء في Cloudflare:
 | الحقل | القيمة |
 |-------|--------|
 | **Framework preset** | None |
-| **Build command** | `cd artifacts/anime-scraper && pnpm install && pnpm run build` |
+| **Build command** | `cd artifacts/anime-scraper && npm install -g pnpm@10 && pnpm install && pnpm run build` |
 | **Build output directory** | `artifacts/anime-scraper/dist/public` |
-| **Root directory** | `/` (اتركه فارغاً) |
-| **Node version** | `20` |
+| **Root directory** | (اتركه فارغاً) |
 
-### متغيرات البيئة في Cloudflare Pages:
+### متغيرات البيئة (Environment Variables):
 | المتغير | القيمة |
 |---------|--------|
-| `VITE_API_URL` | رابط خادم Orkestr (مثل `https://api.nova-anime.com`) |
+| `VITE_API_URL` | `https://anime-nova.orkestr.run` |
 | `NODE_VERSION` | `20` |
+| `BASE_PATH` | `/` |
 
 ---
 
-## 2. APK لأندرويد (nova-mobile)
+## 2. APK لأندرويد
 
-### المتطلبات:
-- حساب Expo (مجاني): https://expo.dev
-- تثبيت EAS CLI: `npm install -g eas-cli`
-
-### خطوات البناء:
+### على جهازك المحلي:
 ```bash
+# 1. تثبيت EAS CLI
+npm install -g eas-cli
+
+# 2. الانتقال لمجلد nova-mobile
 cd artifacts/nova-mobile
 
-# تسجيل الدخول لـ Expo
+# 3. تسجيل الدخول بحساب Expo (أنشئ واحداً مجاناً على expo.dev)
 eas login
 
-# إعداد المشروع (مرة واحدة)
-eas build:configure
-
-# بناء APK (مجاناً على Expo cloud)
+# 4. بناء APK (مجاناً على سيرفرات Expo)
 eas build --platform android --profile preview
+
+# بعد 15-20 دقيقة ستحصل على رابط تحميل APK مباشر
 ```
 
-### متغيرات البيئة للـ APK:
+### EXPO_PUBLIC_DOMAIN مضبوط تلقائياً في eas.json على:
 ```
-EXPO_PUBLIC_DOMAIN=https://api.nova-anime.com
+https://anime-nova.orkestr.run
 ```
-أضفها في: https://expo.dev → مشروعك → Environment Variables
 
 ---
 
-## 3. الخادم الخلفي على Orkestr
+## 3. تحديث الـ Backend (Orkestr) لقبول طلبات Cloudflare
 
-الـ backend يعمل على Replit ويتصل بـ Orkestr كـ relay.
-لا حاجة لنقله — فقط تأكد أن:
-- `ORKESTR_API_KEY` موجود في Replit Secrets ✅
-- الـ CORS يسمح بدومين Cloudflare Pages
+الـ CORS في الـ backend مضبوط على `origin: true` ← يقبل كل المصادر ✅
+لا حاجة لأي تعديل.
+
+---
+
+## ملاحظة مهمة
+
+عند نشر Cloudflare Pages، يجب أن يكون خادم Orkestr يعمل 24/7.
+الخادم الحالي على Replit (development) — للإنتاج الحقيقي يُنصح بنشر الـ backend على Orkestr أو Railway.

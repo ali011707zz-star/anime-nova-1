@@ -43,7 +43,7 @@
       [
         "expo-router",
         {
-          "origin": "https://replit.com/"
+          "origin": "https://anime-nova.orkestr.run"
         }
       ],
       "expo-font",
