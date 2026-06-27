@@ -970,9 +970,15 @@ export default function RiftPlayer({
   }
   function onTE(e: React.TouchEvent<HTMLDivElement>) {
     if (isLocked) {
-      if (unlockBtnHideRef.current) clearTimeout(unlockBtnHideRef.current);
-      setShowUnlockBtn(true);
-      unlockBtnHideRef.current = setTimeout(() => setShowUnlockBtn(false), 3000);
+      if (showUnlockBtn) {
+        setIsLocked(false);
+        setShowUnlockBtn(false);
+        if (unlockBtnHideRef.current) clearTimeout(unlockBtnHideRef.current);
+      } else {
+        if (unlockBtnHideRef.current) clearTimeout(unlockBtnHideRef.current);
+        setShowUnlockBtn(true);
+        unlockBtnHideRef.current = setTimeout(() => setShowUnlockBtn(false), 2000);
+      }
       return;
     }
     if (longTimer.current) { clearTimeout(longTimer.current); longTimer.current = null; }
@@ -1306,34 +1312,41 @@ export default function RiftPlayer({
         ════════════════════════════════════════ */}
 
 
-        {/* Unlock button — slides in from right side on tap, auto-hides after 3s */}
+        {/* ── lock badge — always visible small indicator when locked ── */}
+        {isLocked && (
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 z-40 pointer-events-none">
+            <div className="flex items-center gap-1 px-2 py-1 rounded-full"
+              style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(251,191,36,0.22)" }}>
+              <Lock className="w-3 h-3 text-amber-300/70" strokeWidth={2.2} />
+            </div>
+          </div>
+        )}
+
+        {/* Unlock pill — compact, slides up from center on tap, auto-hides after 2s */}
         <AnimatePresence>
           {isLocked && showUnlockBtn && (
             <motion.button
               key="unlock-btn"
-              initial={{ opacity: 0, x: 14 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 14 }}
-              transition={{ duration: 0.20, ease: [0.22, 1, 0.36, 1] }}
+              initial={{ opacity: 0, y: 8, scale: 0.92 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.94 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
               onClick={() => {
                 setIsLocked(false);
                 setShowUnlockBtn(false);
                 if (unlockBtnHideRef.current) clearTimeout(unlockBtnHideRef.current);
               }}
               onTouchEnd={e => e.stopPropagation()}
-              className="absolute right-4 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-2.5 px-5 py-4 rounded-2xl active:scale-95 transition-transform pointer-events-auto"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full active:scale-95 transition-transform pointer-events-auto"
               style={{
-                background: "rgba(5,5,15,0.90)",
-                backdropFilter: "blur(28px) saturate(180%)",
-                border: "1.5px solid rgba(251,191,36,0.40)",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.65)",
+                background: "rgba(10,10,20,0.82)",
+                backdropFilter: "blur(20px)",
+                border: "1px solid rgba(251,191,36,0.35)",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.55)",
               }}
             >
-              <div className="w-11 h-11 rounded-xl flex items-center justify-center"
-                style={{ background: "rgba(251,191,36,0.14)", border: "1px solid rgba(251,191,36,0.32)" }}>
-                <Unlock className="w-5 h-5 text-amber-300" strokeWidth={1.8} />
-              </div>
-              <p className="text-amber-200/90 text-[11px] font-black font-['Cairo'] leading-none">فتح القفل</p>
+              <Unlock className="w-3.5 h-3.5 text-amber-300" strokeWidth={2} />
+              <span className="text-amber-200/90 text-[12px] font-bold font-['Cairo'] leading-none">المس مرة أخرى للفتح</span>
             </motion.button>
           )}
         </AnimatePresence>
