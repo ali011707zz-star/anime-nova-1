@@ -49,3 +49,13 @@ Thumbs.db
 .local/
 .replit
 replit.nix
+
+# Large binary files - do not commit
+artifacts/api-server/bin/
+anime-nova-1/artifacts/api-server/bin/
+**/bin/yt-dlp
+**/bin/yt-dlp_*
+
+# Attached assets (screenshots/videos from chat - not needed in repo)
+attached_assets/
+anime-nova-1/attached_assets/
