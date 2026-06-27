@@ -3510,13 +3510,13 @@ async function getAnime4upSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  Anime4up NEW (w1.anime4up.rest) — Arabic dubbed/subbed scraper
+//  Anime4up (anime4up.cam / w1.anime4up.rest) — Arabic dubbed/subbed scraper
 //  Confirmed working via CF proxy (200). 13 servers per episode.
 //  Episode structure: <li data-watch="URL"><a>Name</a></li>
 //  Series page: shows latest 48 eps. Search: /?search_param=animes&s=
 // ════════════════════════════════════════════════════════════════════
 
-const A4UP2_BASE = "https://w1.anime4up.rest";
+const A4UP2_BASE = "https://anime4up.cam";
 const a4up2SeriesCache = new Map<string, { url: string | null; ts: number }>();
 const a4up2SrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
@@ -3545,7 +3545,7 @@ async function searchAnime4up2(title: string, english: string | null): Promise<s
 
     const candidates: Array<{ url: string; score: number }> = [];
     // Confirmed structure: <a href="URL" class="overlay" aria-label="Title">
-    const cardRe = /<a\s+href="(https?:\/\/w1\.anime4up\.rest\/anime\/[^"]+)"\s+class="overlay"[^>]+aria-label="([^"]+)"/gi;
+    const cardRe = /<a\s+href="(https?:\/\/(?:anime4up\.cam|w1\.anime4up\.rest)\/anime\/[^"]+)"\s+class="overlay"[^>]+aria-label="([^"]+)"/gi;
     for (const m of html.matchAll(cardRe)) {
       const url   = m[1];
       const rawTitle = m[2].trim();
@@ -3611,7 +3611,7 @@ async function getAnime4up2Sources(
   const searchPromise = searchAnime4up2(title, english);
 
   // ── FAST PATH: try direct URL construction (old format slug-الحلقة-N) ──
-  // Old format still works for most anime on w1.anime4up.rest.
+  // Old format still works for most anime on anime4up.cam.
   // Each request has a 7s timeout (previously 20s), so parallel runs cost at most 7s.
   const fastCandidates: string[] = [];
   const seenSlugs = new Set<string>();
@@ -3650,7 +3650,7 @@ async function getAnime4up2Sources(
   }
 
   const epLinks: string[] = [];
-  for (const m of srHtml.matchAll(/href=["'](https?:\/\/w1\.anime4up\.rest\/episode\/[^"']+)["']/g)) {
+  for (const m of srHtml.matchAll(/href=["'](https?:\/\/(?:anime4up\.cam|w1\.anime4up\.rest)\/episode\/[^"']+)["']/g)) {
     if (!m[1].includes("/page/") && !epLinks.includes(m[1])) epLinks.push(m[1]);
   }
 
@@ -7892,7 +7892,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
-      scrapeCached("seepanel",     () => getSeepanelSources(title, english, ep, isMovie)),
+      // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
       scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep),   true, 22000),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
@@ -7917,7 +7917,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep, anilistId),  false),
       scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep, anilistId),  false),
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
-      scrapeCached("vyla_anim",     () => getVylaAnimeSources(title, english, ep, anilistId),  false),
+      // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
@@ -8017,7 +8017,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, [])); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
-      case "seepanel":     await runExtract(await race(getSeepanelSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
+      // case "seepanel": DEAD
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  25000, [])); break;
       case "mycima":       await runExtract(await race(getMyCimaSources(title, english, ep, isMovie), 30000, [])); break;
@@ -8038,7 +8038,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       case "vidlink_anim":  (await race(getVidLinkAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       // lordflix_anim: محذوف
-      case "vyla_anim":     (await race(getVylaAnimeSources(title, english, ep),         SCRAPER_MS, [])).forEach(collectSrc); break;
+      // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       default: break;
     }

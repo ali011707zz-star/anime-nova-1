@@ -1312,15 +1312,19 @@ export default function RiftPlayer({
         ════════════════════════════════════════ */}
 
 
-        {/* ── lock badge — always visible small indicator when locked ── */}
-        {isLocked && (
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 z-40 pointer-events-none">
-            <div className="flex items-center gap-1 px-2 py-1 rounded-full"
-              style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(251,191,36,0.22)" }}>
-              <Lock className="w-3 h-3 text-amber-300/70" strokeWidth={2.2} />
-            </div>
-          </div>
-        )}
+        {/* ── lock badge — only visible with unlock pill ── */}
+        <AnimatePresence>
+          {isLocked && showUnlockBtn && (
+            <motion.div key="lock-badge" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="absolute left-3 top-1/2 -translate-y-1/2 z-40 pointer-events-none">
+              <div className="flex items-center gap-1 px-2 py-1 rounded-full"
+                style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(251,191,36,0.28)" }}>
+                <Lock className="w-3 h-3 text-amber-300/70" strokeWidth={2.2} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Unlock pill — compact, slides up from center on tap, auto-hides after 2s */}
         <AnimatePresence>
