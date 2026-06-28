@@ -3131,11 +3131,17 @@ export default function WatchPage() {
         allSrcs.push(s);
       }
     }
+    /* لا نُشغّل تلقائياً إذا كان المصدر الوحيد هو _resume (قد يكون منتهياً) —
+       ننتظر وصول مصدر حقيقي من أحد المكاشطات */
+    const hasRealSrc = allSrcs.some(s => s.site !== "_resume");
+    if (!hasRealSrc) return;
+
     if (allSrcs.length > 0) {
       autoPlayedRef.current = true;
-      /* أولوية التشغيل التلقائي: AF → AW → KW → PH → باقي المصادر */
+      /* أولوية التشغيل التلقائي: AF → AW → KW → AS → AL → OK → باقي المصادر */
       const SITE_AUTO_PRI: Record<string, number> = {
-        animeify: 4, animewitcher: 3, kawaii: 2, animephoenix: 1,
+        animeify: 6, animewitcher: 5, kawaii: 4, arabseed: 3,
+        animephoenix: 2, animelek: 2, okanime: 1,
       };
       allSrcs.sort((a, b) => {
         const pa = SITE_AUTO_PRI[a.site || ""] ?? 0;
