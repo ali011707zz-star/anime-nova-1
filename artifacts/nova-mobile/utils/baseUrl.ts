@@ -30,5 +30,5 @@ export function getBaseUrl(): string {
   if (replitDomain) return toAbsUrl(replitDomain);
 
   // fallback لـ local dev (جهاز + Metro bundler محلي)
-  return "http://localhost:8080";
+  return "http://localhost:5000";
 }
