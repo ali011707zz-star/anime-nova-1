@@ -313,9 +313,9 @@ export default function WatchScreen() {
               if (!autoPlayFiredRef.current) {
                 setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
               }
-              /* شغّل أول مصدر جيد تلقائياً على native فقط */
+              /* شغّل أول مصدر جيد تلقائياً */
               const isGood = isDirectPlayable(src);
-              if (isGood && Platform.OS !== "web" && !autoPlayFiredRef.current) {
+              if (isGood && !autoPlayFiredRef.current) {
                 autoPlayFiredRef.current = true;
                 setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
               }

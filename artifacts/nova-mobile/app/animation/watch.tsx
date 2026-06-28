@@ -210,7 +210,9 @@ export default function AnimationWatchScreen() {
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
   const [resumeTime, setResumeTime] = useState(0);
-  const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
+  const [globalArSubUrl, setGlobalArSubUrl] = useState<string | undefined>();
+  const [globalEnSubUrl, setGlobalEnSubUrl] = useState<string | undefined>();
+  const [subLang, setSubLang] = useState<"ar" | "en" | "off">("ar");
 
   const abortRef         = useRef<AbortController | null>(null);
   const lastSaveTs       = useRef(0);
@@ -282,20 +284,28 @@ export default function AnimationWatchScreen() {
         const arTrack = tracks.find((t: any) => t.lang === "ar" || t.lang === "ar-auto");
         const enTrack = tracks.find((t: any) => t.lang === "en" || t.label?.toLowerCase().includes("english"));
         const b = getBaseUrl();
+        /* — مسار العربية — */
         if (arTrack?.url) {
-          /* ترجمة عربية مباشرة — proxy لتفادي CORS */
-          setGlobalSubUrl(b
+          setGlobalArSubUrl(b
             ? `${b}/api/anime/proxy-text?url=${encodeURIComponent(arTrack.url)}&ref=https://cache.vdrk.site/`
             : arTrack.url);
         } else if (enTrack?.url) {
-          /* ترجمة إنجليزية → ترجمة تلقائية للعربية */
+          /* إنجليزية → ترجمة تلقائية للعربية */
           const proxyUrl = b
             ? `${b}/api/anime/proxy-text?url=${encodeURIComponent(enTrack.url)}`
             : enTrack.url;
-          setGlobalSubUrl(b
+          setGlobalArSubUrl(b
             ? `${b}/api/anime/translate-vtt?url=${encodeURIComponent(proxyUrl)}&from=en&to=ar`
             : enTrack.url);
         }
+        /* — مسار الإنجليزية المباشرة — */
+        if (enTrack?.url) {
+          setGlobalEnSubUrl(b
+            ? `${b}/api/anime/proxy-text?url=${encodeURIComponent(enTrack.url)}`
+            : enTrack.url);
+        }
+        /* إذا لم تتوفر ترجمة عربية مباشرة، اضبط اللغة على الإنجليزية افتراضياً */
+        if (!arTrack?.url && enTrack?.url) setSubLang("en");
       })
       .catch(() => {});
     return () => controller.abort();
@@ -387,8 +397,7 @@ export default function AnimationWatchScreen() {
               setSources(prev => {
                 const next = [...prev, src];
                 const isGoodSrc = isDirectPlayable(src);
-                const isWebCompatible = Platform.OS !== "web" || src.directType !== "hls";
-                if (!isGoodSrc || !isWebCompatible || autoPlayFiredRef.current) return next;
+                if (!isGoodSrc || autoPlayFiredRef.current) return next;
 
                 /* شغّل أول مصدر جيد يصل فوراً بدون انتظار */
                 autoPlayFiredRef.current = true;
@@ -454,12 +463,7 @@ export default function AnimationWatchScreen() {
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
-    /* On web: HLS not supported by expo-video → route to embed screen */
-    if (Platform.OS === "web" && src.directType === "hls") {
-      setScreen("embed");
-    } else {
-      setScreen(isDirectPlayable(src) ? "native" : "embed");
-    }
+    setScreen(isDirectPlayable(src) ? "native" : "embed");
   }, []);
 
   /* ── Group sources by quality ── */
@@ -487,18 +491,16 @@ export default function AnimationWatchScreen() {
   /* Build RiftPlayer sources from directSrcs */
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
-    const srcs = Platform.OS === "web"
-      ? directSrcs.filter(s => s.directType !== "hls")
-      : directSrcs;
-    return srcs.map(s => ({
+    const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
+    return directSrcs.map(s => ({
       url: getPlayUrl(s),
       label: s.label || "مصدر",
       quality: getSrcQuality(s),
       subtitleUrl: s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
-        : globalSubUrl,
+        : activeSubUrl,
     })).filter(s => s.url);
-  }, [directSrcs, globalSubUrl]);
+  }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
@@ -742,6 +744,27 @@ export default function AnimationWatchScreen() {
           <Ionicons name="chevron-forward" size={13} color="rgba(139,92,246,0.5)" />
         </Pressable>
 
+        {/* Subtitle language toggle — only shown when tracks are available */}
+        {(globalArSubUrl || globalEnSubUrl) && (
+          <View style={w.subLangRow}>
+            <Ionicons name="text" size={13} color="rgba(255,255,255,0.45)" />
+            <Text style={w.subLangLabel}>الترجمة</Text>
+            {globalArSubUrl && (
+              <Pressable onPress={() => setSubLang("ar")} style={[w.subLangBtn, subLang === "ar" && w.subLangBtnActive]}>
+                <Text style={[w.subLangText, subLang === "ar" && w.subLangTextActive]}>عربي</Text>
+              </Pressable>
+            )}
+            {globalEnSubUrl && (
+              <Pressable onPress={() => setSubLang("en")} style={[w.subLangBtn, subLang === "en" && w.subLangBtnActive]}>
+                <Text style={[w.subLangText, subLang === "en" && w.subLangTextActive]}>English</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={() => setSubLang("off")} style={[w.subLangBtn, subLang === "off" && w.subLangBtnActive]}>
+              <Text style={[w.subLangText, subLang === "off" && w.subLangTextActive]}>إيقاف</Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* Sources — grouped by quality */}
         {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(tier => {
           const srcs = grouped[tier];
@@ -902,4 +925,12 @@ const w = StyleSheet.create({
 
   searchingWrap: { alignItems: "center", gap: 14, paddingVertical: 40 },
   searchingText: { fontSize: 12, color: "rgba(255,255,255,0.32)", fontFamily: "Cairo_400Regular", textAlign: "center" },
+
+  /* Subtitle language toggle */
+  subLangRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(14,12,28,0.80)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 14, paddingVertical: 10 },
+  subLangLabel: { color: "rgba(255,255,255,0.50)", fontFamily: "Cairo_700Bold", fontSize: 12, marginEnd: 4, flex: 1 },
+  subLangBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  subLangBtnActive: { backgroundColor: "rgba(139,92,246,0.25)", borderColor: "rgba(139,92,246,0.60)" },
+  subLangText: { color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_700Bold", fontSize: 12 },
+  subLangTextActive: { color: "#c4b5fd" },
 });
