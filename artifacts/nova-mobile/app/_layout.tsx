@@ -16,11 +16,13 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
 
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
-if (!I18nManager.isRTL) {
-  I18nManager.forceRTL(true);
-}
+try {
+  if (!I18nManager.isRTL) {
+    I18nManager.forceRTL(true);
+  }
+} catch (_) {}
 
 const queryClient = new QueryClient({
   defaultOptions: {

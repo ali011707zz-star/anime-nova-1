@@ -9,7 +9,7 @@
     "scheme": "nova-mobile",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#09090B",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/images/icon.png",
       "resizeMode": "contain",
@@ -61,7 +61,6 @@
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true,
       "baseUrl": "/nova-mobile"
     },
     "extra": {
