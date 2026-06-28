@@ -3105,6 +3105,16 @@ export default function WatchPage() {
   /* ── auto-play enabled immediately ── */
   useEffect(() => { setAutoPlayReady(true); }, []);
 
+  /* ── Auto-fetch ALL scrapers on mount ── */
+  useEffect(() => {
+    if (autoFetchedRef.current) return;
+    autoFetchedRef.current = true;
+    SCRAPER_DEFS.forEach((def, i) => {
+      setTimeout(() => handleFetchSite(def.site), i * 80);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* ── Auto-play: fire on first available source of any quality ── */
   useEffect(() => {
     if (autoPlayedRef.current) return;
