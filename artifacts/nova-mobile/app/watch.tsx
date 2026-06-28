@@ -193,17 +193,24 @@ function ScraperCard({ def, status, onTap }: {
           def.isArabic ? { color: "#86efac" } : def.isEn ? { color: "#93c5fd" } : { color: "#c4b5fd" }
         ]}>{def.tag}</Text>
       </View>
-      {/* Name + desc */}
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={d.scraperName} numberOfLines={1}>{def.name}</Text>
-        <Text style={d.scraperDesc} numberOfLines={1}>{def.desc}</Text>
-      </View>
+      {/* Name + desc — مخفيان عند الفشل */}
+      {!isFailed && (
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={d.scraperName} numberOfLines={1}>{def.name}</Text>
+          <Text style={d.scraperDesc} numberOfLines={1}>{def.desc}</Text>
+        </View>
+      )}
       {/* Status */}
-      <View style={{ alignItems: "center", justifyContent: "center", width: 36 }}>
-        {isLoading ? <SpinRing size={22} /> : isFailed
-          ? <View style={d.scraperFailIcon}><Ionicons name="close" size={12} color="rgba(239,68,68,0.85)" /></View>
-          : <View style={d.scraperPlayBtn}><Ionicons name="play" size={11} color="#fff" /></View>}
-      </View>
+      {isFailed ? (
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+          <Text style={{ fontSize: 11, fontFamily: "Cairo_400Regular", color: "rgba(239,68,68,0.6)" }}>فشل · اضغط للمحاولة مجدداً</Text>
+          <View style={d.scraperFailIcon}><Ionicons name="refresh" size={12} color="rgba(239,68,68,0.85)" /></View>
+        </View>
+      ) : (
+        <View style={{ alignItems: "center", justifyContent: "center", width: 36 }}>
+          {isLoading ? <SpinRing size={22} /> : <View style={d.scraperPlayBtn}><Ionicons name="play" size={11} color="#fff" /></View>}
+        </View>
+      )}
     </Pressable>
   );
 }

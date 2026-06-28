@@ -46,26 +46,37 @@ async function getStoredToken(): Promise<string | null> {
 }
 
 async function fetchFreshToken(): Promise<string | null> {
-  try {
-    const res = await fetch(`${getBaseUrl()}/api/auth/anon-token`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Nova-Client": CLIENT_ID,
-        "User-Agent": APP_UA,
-      },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.token || !data.exp) return null;
-    _cachedToken = data.token;
-    _cachedExp = data.exp;
-    await secureSet(TOKEN_KEY, data.token);
-    await secureSet(TOKEN_EXP_KEY, data.exp.toString());
-    return data.token;
-  } catch {
-    return null;
+  const MAX_RETRIES = 3;
+  const TIMEOUTS = [8000, 12000, 20000]; // يطول بعد كل محاولة (لإيقاظ Orkestr)
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUTS[attempt]);
+      const res = await fetch(`${getBaseUrl()}/api/auth/anon-token`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Nova-Client": CLIENT_ID,
+          "User-Agent": APP_UA,
+        },
+      });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!data.token || !data.exp) continue;
+      _cachedToken = data.token;
+      _cachedExp = data.exp;
+      await secureSet(TOKEN_KEY, data.token);
+      await secureSet(TOKEN_EXP_KEY, data.exp.toString());
+      return data.token;
+    } catch (e: any) {
+      if (attempt < MAX_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    }
   }
+  return null;
 }
 
 export async function getAuthToken(): Promise<string | null> {
