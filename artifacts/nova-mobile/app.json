@@ -50,7 +50,14 @@
       "expo-font",
       "expo-web-browser",
       "expo-video",
-      "expo-screen-orientation"
+      "expo-screen-orientation",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "تسمح هذه الأذونات للتطبيق بالوصول إلى صورك.",
+          "cameraPermission": "تسمح هذه الأذونات للتطبيق باستخدام الكاميرا."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
