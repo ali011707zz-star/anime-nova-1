@@ -243,11 +243,14 @@ export default function WatchScreen() {
     const url = `${base}/api/anime/sources-stream?${params}`;
     const freshSrcs: Src[] = [];
 
+    /* على web: استخدم native browser fetch (يدعم streaming SSE)
+       على native: استخدم expoFetch (يدعم ReadableStream على Android/iOS) */
+    const fetcher = Platform.OS === "web" ? fetch : expoFetch;
     try {
-      const response = await expoFetch(url, {
+      const response = await (fetcher as typeof fetch)(url, {
         signal: abortRef.current.signal,
         headers: { Accept: "text/event-stream" },
-      }) as unknown as Response;
+      });
 
       if (!response.ok) {
         setLoading(false);
@@ -306,10 +309,13 @@ export default function WatchScreen() {
 
             setSources(prev => {
               const next = [...prev, src];
-              /* شغّل أول مصدر مباشر يصل فوراً */
+              /* انتقل للـ picker فور وصول أول مصدر */
+              if (!autoPlayFiredRef.current) {
+                setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+              }
+              /* شغّل أول مصدر جيد تلقائياً على native فقط */
               const isGood = isDirectPlayable(src);
-              const isWebOk = Platform.OS !== "web" || src.directType !== "hls";
-              if (isGood && isWebOk && !autoPlayFiredRef.current) {
+              if (isGood && Platform.OS !== "web" && !autoPlayFiredRef.current) {
                 autoPlayFiredRef.current = true;
                 setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
               }
@@ -372,8 +378,9 @@ export default function WatchScreen() {
   const playSrc = useCallback((src: Src) => {
     setPlayingSrc(src);
     if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: coverUrl, updatedAt: Date.now() });
-    if (Platform.OS === "web" && src.directType === "hls") {
-      setScreen("embed");
+    /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
+    if (Platform.OS === "web") {
+      setScreen(isEmbedSrc(src) ? "embed" : "native");
     } else {
       setScreen(isDirectPlayable(src) ? "native" : "embed");
     }
@@ -410,9 +417,7 @@ export default function WatchScreen() {
   /* ── RiftPlayer sources ── */
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
-    const srcs = Platform.OS === "web"
-      ? directSrcs.filter(s => s.directType !== "hls")
-      : directSrcs;
+    const srcs = directSrcs; // على web أيضاً نمرر HLS — expo-video يدعمه عبر MSE
     return srcs.map(s => ({
       url: getPlayUrl(s),
       label: `سيرفر · ${getSiteTag(s.site || "")}`,
