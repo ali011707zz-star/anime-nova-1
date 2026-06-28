@@ -3131,10 +3131,8 @@ export default function WatchPage() {
         allSrcs.push(s);
       }
     }
-    /* لا نُشغّل تلقائياً إذا كان المصدر الوحيد هو _resume (قد يكون منتهياً) —
-       ننتظر وصول مصدر حقيقي من أحد المكاشطات */
-    const hasRealSrc = allSrcs.some(s => s.site !== "_resume");
-    if (!hasRealSrc) return;
+    /* إذا كان المصدر الوحيد هو _resume، شغّله فوراً (تسريع الفتح بدون انتظار المكاشطات).
+       إذا فشل الرابط المحفوظ، يعالجه المشغّل داخلياً ويتنقل للمصادر الأخرى. */
 
     if (allSrcs.length > 0) {
       autoPlayedRef.current = true;
