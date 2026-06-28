@@ -2,6 +2,7 @@
   "expo": {
     "name": "Nova Anime",
     "slug": "nova-mobile",
+    "owner": "ali011707zz",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
