@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
+import { secureFetch } from "@/utils/secureApi";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
@@ -159,8 +160,7 @@ function SourceLoadingScreen({ cover, title, ep, siteName, onCancel }: {
         <View style={{ alignItems: "center", gap: 12 }}>
           <SpinRing />
           <View style={{ alignItems: "center", gap: 3 }}>
-            <Text style={{ fontSize: 12, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>جاري تجهيز الحلقة عبر</Text>
-            <Text style={{ fontSize: 16, fontFamily: "Cairo_800ExtraBold", color: "#c4b5fd", textAlign: "center" }}>{siteName}</Text>
+            <Text style={{ fontSize: 14, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.55)", textAlign: "center" }}>جاري تجهيز الحلقة...</Text>
           </View>
           <Pressable onPress={onCancel} style={{ paddingHorizontal: 18, paddingVertical: 9, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" }}>
             <Text style={{ fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" }}>إلغاء والعودة للمصادر</Text>
@@ -412,7 +412,7 @@ export default function WatchScreen() {
           format: format || "", year: year || "",
           episodes: episodes || "", native: native || "",
         });
-        const res = await fetch(`${base}/api/anime/fetch-source?${params}`, {
+        const res = await secureFetch(`${base}/api/anime/fetch-source?${params}`, {
           signal: abortFetchRef.current.signal,
           headers: { Accept: "application/json" },
         });
