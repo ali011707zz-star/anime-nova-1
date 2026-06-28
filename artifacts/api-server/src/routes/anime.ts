@@ -7646,6 +7646,7 @@ interface WitEntry {
 let _witDb: Map<string, WitEntry> | null = null;
 let _witDbFetchedAt = 0;
 let _witDbLoading = false;
+let _witDbLoadingPromise: Promise<Map<string, WitEntry> | null> | null = null;
 const WIT_DB_TTL = 24 * 3_600_000;
 // Hosts we can extract video from (streamwish-family or known parsers)
 const WIT_EXTRACTABLE_HOSTS = [
@@ -7655,8 +7656,10 @@ const WIT_EXTRACTABLE_HOSTS = [
 async function fetchWitanimeDB(): Promise<Map<string, WitEntry> | null> {
   const now = Date.now();
   if (_witDb && now - _witDbFetchedAt < WIT_DB_TTL) return _witDb;
-  if (_witDbLoading) return _witDb; // already loading
+  /* إذا كان التحميل جارياً، انتظر نفس الـ promise (بدل إرجاع null فوراً) */
+  if (_witDbLoadingPromise) return _witDbLoadingPromise;
   _witDbLoading = true;
+  _witDbLoadingPromise = (async () => {
   try {
     // 1. Get latest release asset URL from GitHub API
     const relR = await fetch(
@@ -7716,7 +7719,10 @@ async function fetchWitanimeDB(): Promise<Map<string, WitEntry> | null> {
     return _witDb; // return stale cache if available
   } finally {
     _witDbLoading = false;
+    _witDbLoadingPromise = null;
   }
+  })();
+  return _witDbLoadingPromise;
 }
 
 // Cache: anilistId → malId (short TTL, arm.haglund.dev is fast)

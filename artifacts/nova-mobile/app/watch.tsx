@@ -414,10 +414,10 @@ export default function WatchScreen() {
     return { directSrcs: direct, embedSrcs: embeds };
   }, [sources]);
 
-  /* ── RiftPlayer sources ── */
+  /* ── RiftPlayer sources (live, used for picker) ── */
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
-    const srcs = directSrcs; // على web أيضاً نمرر HLS — expo-video يدعمه عبر MSE
+    const srcs = directSrcs;
     return srcs.map(s => ({
       url: getPlayUrl(s),
       label: `سيرفر · ${getSiteTag(s.site || "")}`,
@@ -429,6 +429,23 @@ export default function WatchScreen() {
       skipOutro: s.skipOutro,
     })).filter(s => s.url);
   }, [directSrcs, globalSubUrl]);
+
+  /* ── Frozen sources: تُجمَّد مرة واحدة عند بدء التشغيل ولا تتغير لاحقاً.
+     هذا يمنع إعادة تهيئة expo-video عند وصول مصادر جديدة عبر SSE أثناء التشغيل. ── */
+  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
+  const frozenRef = useRef(false);
+
+  useEffect(() => {
+    if (screen === "native" && !frozenRef.current && riftSources.length > 0) {
+      frozenRef.current = true;
+      setFrozenSources([...riftSources]);
+    }
+    if (screen !== "native") {
+      frozenRef.current = false;
+      /* لا نمسح frozenSources فوراً حتى لا يومض الشاشة عند الرجوع */
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, riftSources]);
 
   /* ── Grouped by quality for picker ── */
   const grouped = useMemo<Record<Quality, Src[]>>(() => ({
@@ -468,11 +485,12 @@ export default function WatchScreen() {
   }
 
   /* ══════════════ RIFT PLAYER ══════════════ */
-  if (screen === "native" && riftSources.length > 0) {
-    const startIdx = Math.max(0, riftSources.findIndex(s => playingSrc && s.url === getPlayUrl(playingSrc)));
+  const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
+  if (screen === "native" && playerSources.length > 0) {
+    const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === getPlayUrl(playingSrc)));
     return (
       <RiftPlayer
-        sources={riftSources}
+        sources={playerSources}
         initialSourceIndex={startIdx}
         title={displayTitle}
         episode={epNum}

@@ -571,9 +571,14 @@ export function RiftPlayer({
     if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
     if (sources.length <= 1) { setIsAutoCycling(false); return; }
     consecutiveErrorsRef.current += 1;
-    if (consecutiveErrorsRef.current > sources.length) { setIsAutoCycling(false); return; } // all tried, stop cycling
+    /* لا تدور في حلقة — فقط جرّب المصادر التالية (بدون wrap-around) */
+    const nextIdx = srcIdx + 1;
+    if (nextIdx >= sources.length || consecutiveErrorsRef.current > sources.length) {
+      setIsAutoCycling(false); // كل المصادر جُرِّبت، أوقف الدوران
+      return;
+    }
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
-    const t = setTimeout(() => switchSource((srcIdx + 1) % sources.length), 1200);
+    const t = setTimeout(() => switchSource(nextIdx), 1200);
     return () => clearTimeout(t);
   }, [error, srcIdx, sources.length]); // eslint-disable-line
 
