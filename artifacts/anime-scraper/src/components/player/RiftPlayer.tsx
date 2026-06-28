@@ -73,9 +73,9 @@ function getHlsBufferConfig() {
     const slow   = dl < 1   || eff === "2g"  || eff === "slow-2g";
     const medium = !slow && (dl < 3.5 || eff === "3g");
     return {
-      maxBufferLength:       slow ? 12  : medium ? 25  : 60,
-      maxMaxBufferLength:    slow ? 60  : medium ? 120 : 300,
-      backBufferLength:      isMobile ? (slow ? 8  : 15)  : 60,
+      maxBufferLength:       slow ? 8   : medium ? 15  : 20,
+      maxMaxBufferLength:    slow ? 40  : medium ? 80  : 150,
+      backBufferLength:      isMobile ? (slow ? 5  : 10)  : 30,
       maxBufferSize:         (isMobile ? 60 : 160) * 1024 * 1024,
       maxStarvationDelay:    slow ? 15  : 8,
       maxLoadingDelay:       slow ? 15  : 8,
