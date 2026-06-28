@@ -42,3 +42,45 @@ Custom email/password auth with verification codes, plus Google and GitHub OAuth
 
 - Use pnpm (not npm or yarn) — enforced by preinstall script
 - Arabic RTL UI — the app is designed for Arabic-speaking users
+
+## Nova Mobile (Expo APK) — Current Status
+
+**Project**: `artifacts/nova-mobile/` — Expo SDK 52 React Native app (Arabic anime streaming)
+
+**EAS Config**:
+- Project ID: `07296477-c5e8-4a47-a804-95f28b46ef7b`
+- Owner: `ali011707s-team`
+- Backend URL: `https://anime-nova.orkestr.run` (Orkestr EU relay)
+- Build profile: `preview` (APK, internal distribution)
+
+**Crash fixes applied (build 3+)**:
+- `newArchEnabled: false` in app.json (New Architecture was crashing on launch)
+- `reactCompiler: true` removed from experiments
+- `SplashScreen.preventAutoHideAsync().catch(() => {})` — silenced SplashScreen error
+- RTL force wrapped in try/catch in `_layout.tsx`
+
+**Dependencies (cleaned — removed crashing native packages)**:
+- expo-blur, expo-haptics, expo-image, expo-image-picker, expo-linear-gradient
+- expo-router, expo-screen-orientation, expo-video
+- react-native-gesture-handler, react-native-safe-area-context
+- react-native-screens, react-native-webview, expo-secure-store
+- **Removed**: expo-glass-effect, expo-location, react-native-reanimated, react-native-worklets, react-native-svg, expo-symbols
+
+**Key files**:
+- `app/_layout.tsx` — root layout (RTL, fonts, auth)
+- `app/watch.tsx` — episode playback (lazy-loading system)
+- `app/(tabs)/index.tsx` — home screen
+- `components/RiftPlayer.tsx` — native video player
+- `eas.json` — build config
+- `app.json` — Expo config
+
+**Episode Playback System (lazy-loading)**:
+- Opens picker immediately — NO SSE on launch
+- User taps scraper → calls `/api/anime/fetch-source?site=X` (single scraper)
+- Shows "جاري تجهيز الحلقة عبر [site]" loading screen
+- On success → quality picker (if multiple) or auto-play (if one quality)
+- On failure → auto-fallback to next scraper in FALLBACK_ORDER
+- Results cached 5 min in AsyncStorage per (anime, ep, site)
+
+**Build command**: `cd artifacts/nova-mobile && eas build --platform android --profile preview`
+**Debug**: `adb logcat | grep -E "FATAL|crash|nova|expo"`

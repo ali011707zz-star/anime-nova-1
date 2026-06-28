@@ -2738,8 +2738,8 @@ export default function WatchPage() {
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey,      setPlayKey]      = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
-  // showPicker: false on first load (shows loading screen), true when user returns from player
-  const [showPicker,   setShowPicker]   = useState(false);
+  // showPicker: true — show picker immediately (lazy-load system)
+  const [showPicker,   setShowPicker]   = useState(true);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
@@ -3083,102 +3083,25 @@ export default function WatchPage() {
     }
   }
 
-  /* ── Auto-fetch: SSE sources-stream يشغّل كل المصادر بالتوازي في اتصال واحد ── */
+  /* ── Quick-resume: حقن آخر مصدر عند فتح الصفحة مباشرة ── */
   useEffect(() => {
-    if (autoFetchedRef.current) return;
-    if (!titleParam) return;
-    autoFetchedRef.current = true;
-
-    /* ── Quick-resume: حقن آخر مصدر فوراً إذا كان المستخدم يتابع من حيث توقف ── */
-    if (animeId) {
-      const savedProgress = parseFloat(localStorage.getItem(`wp-${animeId}-${ep}`) || "0");
-      if (savedProgress > 30) {
-        const lastSrc = loadLastSrc(animeId, ep);
-        if (lastSrc && !isIframeUrl(lastSrc.url)) {
-          const resumeSrc: FetchedSrc = {
-            url: lastSrc.url,
-            directUrl: lastSrc.url,
-            qualityRank: lastSrc.qualityRank,
-            site: "_resume",
-            name: "آخر مصدر",
-          };
-          setSlotSources(prev => ({ ...prev, _resume: [resumeSrc] }));
-          setSlotStatus(prev => ({ ...prev, _resume: "ready" }));
-        }
+    if (!animeId || !titleParam) return;
+    const savedProgress = parseFloat(localStorage.getItem(`wp-${animeId}-${ep}`) || "0");
+    if (savedProgress > 30) {
+      const lastSrc = loadLastSrc(animeId, ep);
+      if (lastSrc && !isIframeUrl(lastSrc.url)) {
+        const resumeSrc: FetchedSrc = {
+          url: lastSrc.url, directUrl: lastSrc.url,
+          qualityRank: lastSrc.qualityRank, site: "_resume", name: "آخر مصدر",
+        };
+        setSlotSources(prev => ({ ...prev, _resume: [resumeSrc] }));
+        setSlotStatus(prev => ({ ...prev, _resume: "ready" }));
       }
     }
-
-    /* ── ضع كل المصادر في حالة "fetching" فوراً ── */
-    setSlotStatus(prev => {
-      const next = { ...prev };
-      SCRAPER_DEFS.forEach(d => { next[d.site] = "fetching"; });
-      return next;
-    });
-
-    /* ── تجميع المصادر لكل موقع ── */
-    const accumulated: Record<string, FetchedSrc[]> = {};
-
-    const markAllDone = () => {
-      setSlotStatus(prev => {
-        const next = { ...prev };
-        SCRAPER_DEFS.forEach(d => {
-          if (next[d.site] === "fetching") next[d.site] = "failed";
-        });
-        return next;
-      });
-    };
-
-    const params = new URLSearchParams({
-      title:   titleParam,
-      english: englishParam || "",
-      ep:      String(ep),
-      anime:   String(animeId || 0),
-      format:  sp.get("format") || "",
-      year:    String(anime?.seasonYear || ""),
-      episodes: String(anime?.episodes || ""),
-      native:  anime?.title?.native || "",
-    });
-
-    /* ── اتصال SSE واحد — كل المصادر تأتي منه تلقائياً ── */
-    const evtSrc = new EventSource(`/api/anime/sources-stream?${params}`);
-
-    evtSrc.onmessage = (e: MessageEvent) => {
-      const raw: string = e.data;
-      if (raw === "[DONE]") {
-        evtSrc.close();
-        markAllDone();
-        return;
-      }
-      try {
-        const src = JSON.parse(raw) as FetchedSrc;
-        if (!src.site) return;
-        const site = src.site;
-        if (!accumulated[site]) accumulated[site] = [];
-        accumulated[site].push(src);
-        setSlotSources(prev => ({ ...prev, [site]: accumulated[site] }));
-        setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-        // ── ربط skipIntro/skipOutro من المصدر مع skipTimes ──
-        if (src.skipIntro || src.skipOutro) {
-          setSkipTimes(prev => {
-            const next: SkipTimes = { ...prev };
-            if (!prev.op && src.skipIntro) next.op = src.skipIntro;
-            if (!prev.ed && src.skipOutro) next.ed = src.skipOutro;
-            return next;
-          });
-        }
-      } catch {}
-    };
-
-    evtSrc.onerror = () => {
-      evtSrc.close();
-      markAllDone();
-    };
-
-    return () => { evtSrc.close(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── auto-play ready immediately — no artificial delay ── */
+  /* ── auto-play enabled immediately ── */
   useEffect(() => { setAutoPlayReady(true); }, []);
 
   /* ── Auto-play: fire on first available source of any quality ── */
