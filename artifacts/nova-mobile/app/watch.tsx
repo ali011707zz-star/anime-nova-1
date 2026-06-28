@@ -252,9 +252,10 @@ export default function WatchScreen() {
     outro?: { start: number; end: number };
   } | null>(null);
 
-  const triedSitesRef = useRef<Set<string>>(new Set());
-  const lastTimeRef   = useRef(0);
-  const abortFetchRef = useRef<AbortController | null>(null);
+  const triedSitesRef  = useRef<Set<string>>(new Set());
+  const lastTimeRef    = useRef(0);
+  const abortFetchRef  = useRef<AbortController | null>(null);
+  const autoFetchedRef = useRef(false);
 
   const epNum       = parseInt(ep || "1");
   const titleStr    = decodeURIComponent(title || "");
@@ -321,6 +322,16 @@ export default function WatchScreen() {
     })();
     return () => controller.abort();
   }, [anime, ep]); // eslint-disable-line
+
+  /* ── Auto-fetch first site on mount (no manual tap needed) ── */
+  useEffect(() => {
+    if (autoFetchedRef.current) return;
+    autoFetchedRef.current = true;
+    if (FALLBACK_ORDER.length > 0) {
+      fetchSingleSource(FALLBACK_ORDER[0]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── Screen orientation ── */
   useEffect(() => {
