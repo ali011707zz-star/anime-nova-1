@@ -25,7 +25,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "https://anime-nova.orkestr.run"
+        "EXPO_PUBLIC_DOMAIN": "https://anime-nova.orkestr.run",
+        "EXPO_PUBLIC_API_URL": "https://anime-nova.orkestr.run"
       }
     }
   }

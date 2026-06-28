@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "Nova Anime",
-    "slug": "nova-mobile",
-    "owner": "ali011707zz",
+    "slug": "anime-nova-",
+    "owner": "ali011707s-team",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
@@ -56,6 +56,11 @@
       "typedRoutes": true,
       "reactCompiler": true,
       "baseUrl": "/nova-mobile"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "07296477-c5e8-4a47-a804-95f28b46ef7b"
+      }
     }
   }
 }
