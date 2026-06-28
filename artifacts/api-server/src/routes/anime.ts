@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { createHash, createDecipheriv } from "crypto";
+import { execSync } from "child_process";
+import { existsSync, writeFileSync, readFileSync, readdirSync } from "fs";
 import {
   makeSourceCacheKey,
   getFromSourceCache,
@@ -977,6 +979,7 @@ async function extractVideoDeep(
       if (url.includes("streamwish") || url.includes("wishembed") || url.includes("filemoon") ||
           url.includes("swdyu") || url.includes("awish") || url.includes("playerwish") ||
           url.includes("hlswish.com") || url.includes("vidspeed.org") ||
+          url.includes("luluvdo.com") || url.includes("darkibox.com") || url.includes("hydracker.com") ||
           url.includes("1vid.xyz") || url.includes("1vid1shar.space") ||
           url.includes("uqload.is") || url.includes("uqload.co") ||
           url.includes("voe.sx") || url.includes("vidoza.net") ||
@@ -7622,6 +7625,180 @@ async function getVidFastAnimeSources(title: string, english: string | null, ep:
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  WITANIME-DB — Arabic dubbed content via GitHub releases ZIP
+//  Repo: github.com/mhmod3/WITanime-DB (daily updates, 2185+ anime)
+//  Hosts: hlswish (streamwish), luluvdo, darkibox → all extractable
+//  Match: AniList ID → MAL ID (ARM API) → find entry by mal_id
+// ════════════════════════════════════════════════════════════════════
+
+interface WitEpisode {
+  streaming_links: Array<{ url: string; quality: string }>;
+  downloading_links: Array<{ url: string; quality: string }>;
+}
+interface WitEntry {
+  animeName: string;
+  mal_id: string;
+  anime_url: string;
+  type: string;
+  episodes: Record<string, WitEpisode>;
+}
+
+let _witDb: Map<string, WitEntry> | null = null;
+let _witDbFetchedAt = 0;
+let _witDbLoading = false;
+const WIT_DB_TTL = 24 * 3_600_000;
+// Hosts we can extract video from (streamwish-family or known parsers)
+const WIT_EXTRACTABLE_HOSTS = [
+  "hlswish.com", "luluvdo.com", "darkibox.com", "hydracker.com", "mp4upload.com",
+];
+
+async function fetchWitanimeDB(): Promise<Map<string, WitEntry> | null> {
+  const now = Date.now();
+  if (_witDb && now - _witDbFetchedAt < WIT_DB_TTL) return _witDb;
+  if (_witDbLoading) return _witDb; // already loading
+  _witDbLoading = true;
+  try {
+    // 1. Get latest release asset URL from GitHub API
+    const relR = await fetch(
+      "https://api.github.com/repos/mhmod3/WITanime-DB/releases/latest",
+      {
+        headers: { Accept: "application/vnd.github.v3+json", "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!relR.ok) return _witDb;
+    const rel = await relR.json() as { assets: Array<{ browser_download_url: string }> };
+    const zipUrl = rel.assets?.[0]?.browser_download_url;
+    if (!zipUrl) return _witDb;
+
+    // 2. Download ZIP (~5MB)
+    const zipR = await fetch(zipUrl, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(40_000),
+    });
+    if (!zipR.ok) return _witDb;
+    const zipBuf = Buffer.from(await zipR.arrayBuffer());
+
+    // 3. Save to /tmp and extract using system unzip
+    const ZIP_PATH   = "/tmp/witanime_db_latest.zip";
+    const EXTRACT_DIR = "/tmp/witanime_db_ext";
+    writeFileSync(ZIP_PATH, zipBuf);
+    execSync(`rm -rf "${EXTRACT_DIR}" && unzip -q "${ZIP_PATH}" -d "${EXTRACT_DIR}"`, { timeout: 30_000 });
+
+    // 4. Build MAL ID → entry map
+    const db = new Map<string, WitEntry>();
+    const dataDir = `${EXTRACT_DIR}/data`;
+    if (existsSync(dataDir)) {
+      for (const fname of readdirSync(dataDir)) {
+        if (!fname.endsWith(".json")) continue;
+        try {
+          const raw = JSON.parse(readFileSync(`${dataDir}/${fname}`, "utf-8"));
+          const animeName = Object.keys(raw)[0];
+          if (!animeName) continue;
+          const info = raw[animeName];
+          const malId = String(info.mal_id ?? "");
+          if (!malId || malId === "undefined") continue;
+          const episodes: Record<string, WitEpisode> = {};
+          for (const [k, v] of Object.entries(info)) {
+            if (/^\d+$/.test(k)) episodes[k] = v as WitEpisode;
+          }
+          db.set(malId, { animeName, mal_id: malId, anime_url: info.anime_url ?? "", type: info.type ?? "", episodes });
+        } catch { /* skip malformed */ }
+      }
+    }
+
+    _witDb = db;
+    _witDbFetchedAt = Date.now();
+    console.log(`[WITanimeDB] Loaded ${db.size} entries from ${zipUrl.split("/").pop()}`);
+    return _witDb;
+  } catch (e: any) {
+    console.error("[WITanimeDB] load failed:", e?.message);
+    return _witDb; // return stale cache if available
+  } finally {
+    _witDbLoading = false;
+  }
+}
+
+// Cache: anilistId → malId (short TTL, arm.haglund.dev is fast)
+const _witMalCache = new Map<number, string>();
+
+async function getWitanimeDBSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+  try {
+    // 1. AniList ID → MAL ID
+    let malId = _witMalCache.get(anilistId);
+    if (!malId) {
+      const armR = await fetch(
+        `https://arm.haglund.dev/api/v2/ids?source=anilist&id=${anilistId}`,
+        { signal: AbortSignal.timeout(8_000) },
+      );
+      if (armR.ok) {
+        const armData = await armR.json() as { myanimelist?: number };
+        if (armData.myanimelist) {
+          malId = String(armData.myanimelist);
+          _witMalCache.set(anilistId, malId);
+        }
+      }
+    }
+    if (!malId) return [];
+
+    // 2. Look up in WITanime-DB
+    const db = await fetchWitanimeDB();
+    if (!db) return [];
+    const entry = db.get(malId);
+    if (!entry) return [];
+    const epData = entry.episodes[String(ep)];
+    if (!epData) return [];
+
+    const streamLinks = epData.streaming_links ?? [];
+    if (!streamLinks.length) return [];
+
+    // 3. Try each extractable link
+    // Extract all links in parallel (max 10s each)
+    const results = await Promise.allSettled(
+      streamLinks
+        .filter(link => link.url && WIT_EXTRACTABLE_HOSTS.some(h => link.url.includes(h)))
+        .slice(0, 4)
+        .map(async link => {
+          const embedUrl = link.url;
+          const ext = await Promise.race([
+            extractVideoDeep(embedUrl, "https://witanime.you/"),
+            new Promise<null>(r => setTimeout(() => r(null), 10_000)),
+          ]);
+          if (!ext) return null;
+          let hostLabel: string;
+          try { hostLabel = new URL(embedUrl).hostname.replace(/^www\./, ""); } catch { hostLabel = "witanime"; }
+          const witRef = encodeURIComponent("https://witanime.you/");
+          const directUrl = ext.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(ext.url)}&ref=${witRef}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(ext.url)}&ref=${witRef}`;
+          return {
+            name: `ويتانيم · ${hostLabel} · ${link.quality || "FHD"} · مدبلج`,
+            url: ext.url,
+            quality: link.quality || "FHD",
+            qualityRank: 13,
+            site: "witanime_db",
+            directUrl,
+            directType: ext.type,
+          } as UnifiedSource;
+        })
+    );
+    const sources = results
+      .filter((r): r is PromiseFulfilledResult<UnifiedSource | null> => r.status === "fulfilled")
+      .map(r => r.value)
+      .filter((s): s is UnifiedSource => s !== null);
+    return sources;
+  } catch { return []; }
+}
+
+// Kick off DB download in background on first server start (non-blocking)
+setImmediate(() => {
+  fetchWitanimeDB().catch(() => {});
+});
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -7840,6 +8017,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
       // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
       scrapeCached("vidfast",       () => getVidFastAnimeSources(title, english, ep, anilistId),  false, 22000),
+      // ── WITanime-DB — محتوى عربي مدبلج (hlswish/luluvdo/darkibox) ─────
+      scrapeCached("witanime_db",  () => getWitanimeDBSources(title, english, ep, anilistId), false, 25000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
@@ -7963,6 +8142,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
+      case "witanime_db":   await runExtract(await race(getWitanimeDBSources(title, english, ep, anilistId), 25_000, [])); break;
       default: break;
     }
 
