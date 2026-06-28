@@ -2739,8 +2739,8 @@ export default function WatchPage() {
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey,      setPlayKey]      = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
-  // showPicker: true — show picker immediately (lazy-load system)
-  const [showPicker,   setShowPicker]   = useState(true);
+  // showPicker: false on initial load (auto-fetch + auto-play), true only when coming back from player
+  const [showPicker,   setShowPicker]   = useState(false);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
@@ -3034,8 +3034,8 @@ export default function WatchPage() {
       setShowPicker(true);
       setPhase("picker");
     } else {
-      /* From picker → go back to anime detail page */
-      navigate(animeId ? `/anime/${animeId}` : "/");
+      /* From picker → go back to episodes list page */
+      navigate(animeId ? `/episodes/${animeId}` : "/");
     }
   }
 
