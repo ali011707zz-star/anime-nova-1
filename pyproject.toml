@@ -11,5 +11,6 @@ dependencies = [
     "flask-sqlalchemy>=3.1.1",
     "gunicorn>=26.0.0",
     "hopx-ai>=0.5.0",
+    "orkestr>=0.1.4",
     "psycopg2-binary>=2.9.12",
 ]
