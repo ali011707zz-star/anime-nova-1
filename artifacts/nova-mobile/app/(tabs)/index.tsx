@@ -24,6 +24,7 @@ import {
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
+import CommentsSheet from "@/components/CommentsSheet";
 
 const TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8";
 
@@ -45,6 +46,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { watchHistory } = useApp();
   const [showDrawer, setShowDrawer] = useState(false);
+  const [newsComment, setNewsComment] = useState<{ animeId: number; ep: number; title: string } | null>(null);
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { season, year } = getCurrentSeason();
@@ -501,10 +503,13 @@ export default function HomeScreen() {
                                 <Text style={newsCardStyles.metaText}>{views} مشاهدة</Text>
                               </View>
                               <Text style={newsCardStyles.metaDot}>·</Text>
-                              <View style={newsCardStyles.metaItem}>
-                                <Ionicons name="chatbubble-outline" size={11} color="rgba(255,255,255,0.4)" />
-                                <Text style={newsCardStyles.metaText}>0</Text>
-                              </View>
+                              <Pressable
+                                onPress={(e) => { e.stopPropagation(); setNewsComment({ animeId: ep.anilistId, ep: ep.episode, title: ep.title }); }}
+                                style={newsCardStyles.metaItem}
+                              >
+                                <Ionicons name="chatbubble-outline" size={11} color="#a78bfa" />
+                                <Text style={[newsCardStyles.metaText, { color: "#a78bfa" }]}>تعليق</Text>
+                              </Pressable>
                               <Text style={newsCardStyles.metaDot}>·</Text>
                               <View style={newsCardStyles.metaItem}>
                                 <Ionicons name="time-outline" size={11} color="rgba(255,255,255,0.4)" />
@@ -532,6 +537,15 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
       <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />
+      {newsComment && (
+        <CommentsSheet
+          visible={!!newsComment}
+          onClose={() => setNewsComment(null)}
+          animeId={newsComment.animeId}
+          episodeNumber={newsComment.ep}
+          title={newsComment.title}
+        />
+      )}
     </View>
   );
 }
