@@ -139,13 +139,16 @@ CREATE TABLE IF NOT EXISTS source_cache (
   cache_key  TEXT PRIMARY KEY,
   sources    JSONB NOT NULL DEFAULT '[]',
   site       TEXT,
+  fetched_at BIGINT,
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS subtitle_cache (
   cache_key  TEXT PRIMARY KEY,
-  vtt        TEXT NOT NULL,
+  vtt        TEXT,
+  cues       JSONB,
+  fetched_at BIGINT,
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -311,12 +314,15 @@ CREATE TABLE IF NOT EXISTS source_cache (
   cache_key  TEXT PRIMARY KEY,
   sources    JSONB NOT NULL DEFAULT '[]',
   site       TEXT,
+  fetched_at BIGINT,
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE IF NOT EXISTS subtitle_cache (
   cache_key  TEXT PRIMARY KEY,
-  vtt        TEXT NOT NULL,
+  vtt        TEXT,
+  cues       JSONB,
+  fetched_at BIGINT,
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );

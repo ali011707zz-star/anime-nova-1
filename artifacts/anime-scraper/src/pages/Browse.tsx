@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "wouter";
 import { Search, Star, Loader2, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { API_BASE } from "@/lib/apiBase";
 
 /* AniList cover IDs that reliably have banner images */
 const GENRES: { ar: string; en: string; color: string; animeId: number; adult?: boolean }[] = [
@@ -103,7 +104,7 @@ export default function Browse() {
   const [selectedFormat, setSelectedFormat] = useState(_sp.get("format") || "");
   const [selectedYear, setSelectedYear] = useState<number | "">(_sp.get("year") ? Number(_sp.get("year")) : "");
   const [selectedSeason, setSelectedSeason] = useState(_sp.get("season") || "");
-  const [showGenreGrid, setShowGenreGrid] = useState(!_sp.get("genre") && !_sp.get("format") && !_sp.get("year"));
+  const [showGenreGrid, setShowGenreGrid] = useState(false);
   const [animeList, setAnimeList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -135,7 +136,7 @@ export default function Browse() {
   useEffect(() => {
     setPage(1); setAnimeList([]);
     loadAnime(selectedGenre, selectedFormat, selectedYear, 1, false, selectedSeason);
-    setShowGenreGrid(!selectedGenre && !selectedFormat && !selectedYear && !selectedSeason);
+    if (selectedGenre || selectedFormat || selectedYear || selectedSeason) setShowGenreGrid(false);
   }, [selectedGenre, selectedFormat, selectedYear, selectedSeason]);
 
   useEffect(() => {
@@ -173,8 +174,12 @@ export default function Browse() {
               : selectedYear ? `أنمي ${selectedYear}`
               : "مكتبة الأنمي"}
           </h1>
+          <button onClick={() => setShowGenreGrid(p => !p)}
+            className={`text-[10px] px-2.5 py-1.5 rounded-lg font-['Cairo'] active:scale-95 border transition-colors ${showGenreGrid ? "bg-primary/20 text-primary border-primary/30" : "bg-white/6 text-white/40 border-white/8"}`}>
+            تصنيفات
+          </button>
           {hasFilter && (
-            <button onClick={() => { setSelectedGenre(""); setSelectedFormat(""); setSelectedYear(""); setSelectedSeason(""); setShowGenreGrid(true); }}
+            <button onClick={() => { setSelectedGenre(""); setSelectedFormat(""); setSelectedYear(""); setSelectedSeason(""); }}
               className="text-[10px] text-white/40 bg-white/6 border border-white/8 px-2.5 py-1.5 rounded-lg font-['Cairo'] active:scale-95">
               × مسح
             </button>
