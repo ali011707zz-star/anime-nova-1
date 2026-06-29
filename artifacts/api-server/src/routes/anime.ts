@@ -3177,13 +3177,31 @@ async function searchRistoAnime(title: string, english: string | null): Promise<
 
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
-      const html = await cfProxyPost(
-        `${RISTO_AJAX}/Searching.php`,
-        `search=${encodeURIComponent(q as string)}`,
-        "application/x-www-form-urlencoded",
-        `${RISTO_BASE}/`,
-        8000,
-      );
+      // ristoanime.me AJAX works directly from Replit IPs (confirmed 2026-06)
+      // Try direct fetch first (faster), fall back to cfProxyPost if blocked
+      let html: string | null = null;
+      try {
+        const direct = await fetch(`${RISTO_AJAX}/Searching.php`, {
+          method: "POST",
+          headers: {
+            ...RISTO_HDRS,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          body: `search=${encodeURIComponent(q as string)}`,
+          signal: AbortSignal.timeout(7000),
+        });
+        if (direct.ok) html = await direct.text();
+      } catch { /* fall through */ }
+      if (!html || isCloudflareBlock(html) || html.length < 50) {
+        html = await cfProxyPost(
+          `${RISTO_AJAX}/Searching.php`,
+          `search=${encodeURIComponent(q as string)}`,
+          "application/x-www-form-urlencoded",
+          `${RISTO_BASE}/`,
+          8000,
+        );
+      }
       if (!html || isCloudflareBlock(html) || html.length < 50) continue;
 
       const seriesUrls: Array<{ url: string; score: number }> = [];
@@ -3225,8 +3243,16 @@ async function getRistoAnimeSources(
     const seriesUrl = await searchRistoAnime(title, english);
     if (!seriesUrl) return [];
 
-    // Fetch series page via Orkestr EU relay (bypasses Cloudflare)
-    const seriesHtml = (await orkestGet(seriesUrl, `${RISTO_BASE}/`, 12000)) ?? await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000);
+    // ristoanime.me is accessible directly from Replit (confirmed 2026-06)
+    // Try direct fetch first; fall back to Orkestr/cfProxy if blocked
+    let seriesHtml: string | null = null;
+    try {
+      const dr = await fetch(seriesUrl, { headers: RISTO_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow" });
+      if (dr.ok) seriesHtml = await dr.text();
+    } catch { /* fall through */ }
+    if (!seriesHtml || isCloudflareBlock(seriesHtml)) {
+      seriesHtml = (await orkestGet(seriesUrl, `${RISTO_BASE}/`, 12000)) ?? await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000);
+    }
     if (!seriesHtml || isCloudflareBlock(seriesHtml)) return [];
 
     const postIdM = seriesHtml.match(/post_id:\s*'(\d+)'/);
@@ -3293,7 +3319,14 @@ async function getRistoAnimeSources(
 
     // Fetch episode page with ?watch=1 → server list is only in this variant
     const watchEpUrl = epUrl + (epUrl.includes("?") ? "&" : "?") + "watch=1";
-    const epHtml = (await orkestGet(watchEpUrl, seriesUrl, 12000)) ?? await cfProxyGet(watchEpUrl, seriesUrl, 10000);
+    let epHtml: string | null = null;
+    try {
+      const edr = await fetch(watchEpUrl, { headers: RISTO_HDRS, signal: AbortSignal.timeout(10000), redirect: "follow" });
+      if (edr.ok) epHtml = await edr.text();
+    } catch { /* fall through */ }
+    if (!epHtml || isCloudflareBlock(epHtml)) {
+      epHtml = (await orkestGet(watchEpUrl, seriesUrl, 12000)) ?? await cfProxyGet(watchEpUrl, seriesUrl, 10000);
+    }
     if (!epHtml || isCloudflareBlock(epHtml)) return [];
 
     const watchUrls: string[] = [];
@@ -7304,28 +7337,40 @@ async function fetchAnimeTmdbId(english: string | null, romaji: string, anilistI
   return null;
 }
 
+// ── In-process cache for kawaii sub lookups (5-min TTL) ──
+// Prevents triple kawaii API calls per episode (once from getKawaiiAnimeSources + twice from getKawaiiSubForSource for Videasy+VidLink)
+const _kawaiiSubCache = new Map<string, { val: string | undefined; ts: number }>();
+const KAWAII_SUB_TTL = 5 * 60 * 1000;
+
 // ── Helper: kawaii subtitle للمصادر الأخرى (عربي مباشر أو إنجليزي→عربي) ──
 async function getKawaiiSubForSource(anilistId: number | undefined, ep: number): Promise<string | undefined> {
   if (!anilistId) return undefined;
+  const cKey = `${anilistId}:${ep}`;
+  const hit = _kawaiiSubCache.get(cKey);
+  if (hit && Date.now() - hit.ts < KAWAII_SUB_TTL) return hit.val;
   try {
     const r = await fetch(`${KAWAII_BASE}/api/watch?anilistId=${anilistId}&ep=${ep}`, {
       headers: { ...BASE_HDRS, Accept: "application/json", Referer: KAWAII_BASE + "/" },
       signal: AbortSignal.timeout(6000),
     });
-    if (!r.ok) return undefined;
+    if (!r.ok) { _kawaiiSubCache.set(cKey, { val: undefined, ts: Date.now() }); return undefined; }
     const data = await r.json() as { subtitles?: Array<{ url: string; lang?: string }> };
     const subs = data.subtitles ?? [];
     // الأولوية: عربي مباشر → إنجليزي مترجم
     const arSub = subs.find(s => (s.lang || "").toLowerCase().includes("arabic") || (s.lang || "").toLowerCase() === "ar");
+    let result: string | undefined;
     if (arSub?.url) {
-      // عربي مباشر — مرّره عبر proxy-text لتجاوز CORS
-      return `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}`;
+      result = `/api/anime/proxy-text?url=${encodeURIComponent(arSub.url)}`;
+    } else {
+      const enSub = subs.find(s => (s.lang || "").toLowerCase().includes("english") || (s.lang || "").toLowerCase() === "en");
+      if (enSub?.url) {
+        const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(enSub.url)}`;
+        result = `/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;
+      }
     }
-    const enSub = subs.find(s => (s.lang || "").toLowerCase().includes("english") || (s.lang || "").toLowerCase() === "en");
-    if (!enSub?.url) return undefined;
-    const proxied = `/api/anime/proxy-text?url=${encodeURIComponent(enSub.url)}`;
-    return `/api/anime/translate-vtt?url=${encodeURIComponent(proxied)}&from=en&to=ar`;
-  } catch { return undefined; }
+    _kawaiiSubCache.set(cKey, { val: result, ts: Date.now() });
+    return result;
+  } catch { _kawaiiSubCache.set(cKey, { val: undefined, ts: Date.now() }); return undefined; }
 }
 
 // ── Videasy anime sources (api.videasy.to, TMDB-native multi-quality HLS) ──
@@ -8149,7 +8194,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
-      case "witanime_db":   await runExtract(await race(getWitanimeDBSources(title, english, ep, anilistId), 25_000, [])); break;
+      // witanime_db: removed
       default: break;
     }
 

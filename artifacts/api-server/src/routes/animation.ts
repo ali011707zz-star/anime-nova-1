@@ -189,9 +189,11 @@ async function tmdb(path: string, ttl = TMDB_TTL_BROWSE): Promise<any> {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  ARABSEED (m.asd.ink) — Arabic dubbed/subbed content
+//  ARABSEED (a.asd.ink) — Arabic dubbed/subbed content
+//  a.asd.ink WP REST + episode pages work directly from Replit (confirmed 2026-06)
+//  arabseed.ink → 302 → a.asd.ink; m.asd.ink → 302 (dead from Replit)
 // ═══════════════════════════════════════════════════════════════════
-const AS_BASE = "https://m.asd.ink";
+const AS_BASE = "https://a.asd.ink";
 
 function asDecode(raw: string): string {
   return raw.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
@@ -281,20 +283,14 @@ async function cfOrOrkestPost(url: string): Promise<string> {
 
 async function asFetchPosts(params: string): Promise<Array<{ id: number; link: string; title: { rendered: string } }>> {
   try {
+    // arabseed.ink WP REST works directly from Replit IPs (confirmed 2026-06)
     const url = `${AS_BASE}/wp-json/wp/v2/posts?${params}&_fields=id,link,title`;
-    let text: string;
-    try {
-      // ArabSeed WP REST يرجع [] للطلبات المباشرة من Replit IPs — نستخدم CF proxy
-      text = await cfProxyGet(url);
-    } catch {
-      // fallback للطلب المباشر
-      const r = await fetch(url, {
-        headers: { "User-Agent": UA, Accept: "application/json" },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!r.ok) return [];
-      text = await r.text();
-    }
+    const r = await fetch(url, {
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return [];
+    const text = await r.text();
     if (!text.trim().startsWith("[")) return [];
     return JSON.parse(text) as Array<{ id: number; link: string; title: { rendered: string } }>;
   } catch { return []; }
@@ -2653,42 +2649,68 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }
           if (!epUrl) return;
 
+          // a.asd.ink (episode pages) works directly from Replit (confirmed 2026-06)
+          const epOrigin = new URL(epUrl).origin; // https://a.asd.ink
           const AS_HDRS: Record<string, string> = {
-            "User-Agent": UA, "Referer": `${AS_BASE}/`, "Origin": AS_BASE,
+            "User-Agent": UA,
+            "Referer": epUrl,
+            "Origin": epOrigin,
           };
 
-          const epHtml = await cfGet(epUrl, `${AS_BASE}/`);
+          // Direct fetch — a.asd.ink is accessible without CF proxy from Replit
+          const epResp = await fetch(epUrl, {
+            headers: { "User-Agent": UA, "Referer": `${AS_BASE}/` },
+            signal: AbortSignal.timeout(10_000),
+            redirect: "follow",
+          }).catch(() => null);
+          if (!epResp?.ok) return;
+          const epHtml = await epResp.text();
           if (!epHtml) return;
 
-          const postIdM = epHtml.match(/var\s+post_id\s*=\s*['"]?(\d+)/i) || epHtml.match(/data-post[_-]id=["'](\d+)/i);
-          const nonceM  = epHtml.match(/var\s+nonce\s*=\s*["']([a-f0-9]+)["']/i) || epHtml.match(/nonce["']\s*:\s*["']([a-f0-9]+)["']/i);
+          // psot_id: object__info = {'psot_id': '12345'} or psot_id: "12345"
+          const postIdM = epHtml.match(/psot_id['"]?\s*[:']\s*['"](\d+)['"]/i)
+            || epHtml.match(/var\s+post_id\s*=\s*['"]?(\d+)/i)
+            || epHtml.match(/data-post[_-]id=["'](\d+)/i);
+          const csrfM = epHtml.match(/csrf[_]{1,2}token['"]?\s*[:']\s*["']([a-zA-Z0-9_/-]{4,80})["']/i);
           if (!postIdM) return;
-          const postId = postIdM[1];
-          const nonce  = nonceM?.[1] || "";
+          const psotId = postIdM[1];
+          const csrf   = csrfM?.[1] || "";
 
-          const qResp = await fetch(`${AS_BASE}/wp-admin/admin-ajax.php`, {
-            method: "POST",
-            headers: { ...AS_HDRS, "Content-Type": "application/x-www-form-urlencoded" },
-            body: `action=get__quality__servers&post_id=${postId}&nonce=${nonce}`,
-            signal: AbortSignal.timeout(8_000),
-          }).catch(() => null);
-          if (!qResp?.ok) return;
-          const qHtml = await qResp.text();
+          // POST /get__quality__servers/ → server list
+          let serverIndices: number[] = [];
+          let firstEmbedUrl = "";
+          try {
+            const qRes = await fetch(`${epOrigin}/get__quality__servers/`, {
+              method: "POST",
+              headers: { ...AS_HDRS, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest" },
+              body: new URLSearchParams({ post_id: psotId, quality: "1080", csrf_token: csrf }).toString(),
+              signal: AbortSignal.timeout(9_000),
+            });
+            if (qRes.ok) {
+              const qData = await qRes.json() as { html?: string; server?: string };
+              firstEmbedUrl = qData.server || "";
+              for (const m of (qData.html || "").matchAll(/data-server=["'](\d+)["']/gi)) {
+                const idx = parseInt(m[1], 10);
+                if (!serverIndices.includes(idx)) serverIndices.push(idx);
+              }
+            }
+          } catch { /* fallback to default indices */ }
+          if (!serverIndices.length) serverIndices = [0, 1, 2, 3];
 
-          const serverCount = (qHtml.match(/class="[^"]*btn[^"]*server/gi) || []).length || 3;
-          await Promise.allSettled(Array.from({ length: serverCount }, (_, idx) => (async () => {
+          await Promise.allSettled(serverIndices.slice(0, 4).map(async (serverIdx) => {
             try {
-              const sResp = await fetch(`${AS_BASE}/wp-admin/admin-ajax.php`, {
+              const sRes = await fetch(`${epOrigin}/get__watch__server/`, {
                 method: "POST",
-                headers: { ...AS_HDRS, "Content-Type": "application/x-www-form-urlencoded" },
-                body: `action=get__watch__server&post_id=${postId}&server_id=${idx + 1}&nonce=${nonce}`,
-                signal: AbortSignal.timeout(8_000),
+                headers: { ...AS_HDRS, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest" },
+                body: new URLSearchParams({ post_id: psotId, quality: "1080", server: String(serverIdx), csrf_token: csrf }).toString(),
+                signal: AbortSignal.timeout(9_000),
               });
-              if (!sResp.ok) return;
-              const sData = await sResp.json() as any;
-              const embedUrl: string = sData?.embed_url || sData?.url || sData?.link || "";
+              if (!sRes.ok) return;
+              const sData = await sRes.json() as { type?: string; server?: string };
+              const embedUrl: string = sData.server || (serverIdx === 0 ? firstEmbedUrl : "");
               if (!embedUrl?.startsWith("http")) return;
-              const srvLabel = `ArabSeed · سيرفر ${idx + 1}`;
+              if (embedUrl.includes("luluvid")) return;
+              const srvLabel = `ArabSeed · سيرفر ${serverIdx + 1}`;
               const extracted = await callExtractApi(embedUrl);
               if (extracted?.directUrl) {
                 const d = extracted.directUrl;
@@ -2697,7 +2719,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 sendSource(embedUrl, srvLabel, d, proxied);
               }
             } catch { /* skip */ }
-          })()));
+          }));
         } catch { /* silent */ }
       }),
 
