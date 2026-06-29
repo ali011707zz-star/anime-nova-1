@@ -558,12 +558,27 @@ export function RiftPlayer({
       setBuffering(false);
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
-      if (e.status === "loading")        { setBuffering(true); }
-      else if (e.status === "readyToPlay") { setBuffering(false); setError(false); try { player.play(); } catch {} }
-      else if (e.status === "error")     { setError(true); setBuffering(false); }
+      if (e.status === "loading") { setBuffering(true); }
+      else if (e.status === "readyToPlay") {
+        setBuffering(false);
+        setError(false);
+        /* ── Restore position on readyToPlay (server-switch or initial resume) ──
+           Doing this here (not in the polling timer) ensures we only seek AFTER
+           the new stream is actually buffered, preventing conflicts with loading. */
+        const swPos = switchPosRef.current;
+        const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
+        const restorePos = swPos > 5 ? swPos : initPos;
+        if (!resumedRef.current && restorePos > 5) {
+          resumedRef.current = true;
+          switchPosRef.current = 0;
+          try { player.currentTime = restorePos; } catch {}
+        }
+        try { player.play(); } catch {}
+      }
+      else if (e.status === "error") { setError(true); setBuffering(false); }
     });
     return () => { sub1.remove(); sub2.remove(); };
-  }, [player]);
+  }, [player, initialPosition]); // eslint-disable-line
 
   /* ─── Auto-advance on error ─── */
   const consecutiveErrorsRef = useRef(0);
@@ -593,14 +608,6 @@ export function RiftPlayer({
         positionRef.current = pos;
         durationRef.current = dur;
         if (dur > 0 && onProgress) onProgress(pos, dur);
-        /* ── Restore position: either after server-switch or initial load ── */
-        const restorePos = switchPosRef.current > 5 ? switchPosRef.current
-                         : (initialPosition && initialPosition > 5) ? initialPosition : 0;
-        if (!resumedRef.current && restorePos > 5 && dur > 30) {
-          resumedRef.current = true;
-          switchPosRef.current = 0;
-          try { player.currentTime = restorePos; } catch {}
-        }
         if (dur > 0 && pos >= dur - 0.5) {
           setIsEnded(true);
           setIsPlaying(false);
@@ -613,7 +620,7 @@ export function RiftPlayer({
       } catch {}
     }, 500);
     return () => { if (progressTimer.current) clearInterval(progressTimer.current); };
-  }, [player, onProgress, initialPosition]); // eslint-disable-line
+  }, [player, onProgress]); // eslint-disable-line
 
   /* ─── Subtitle cue lookup via rAF ─── */
   /* Vidstack technique: pre-sort once → binary search O(log n) at 60fps */
@@ -1053,8 +1060,7 @@ export function RiftPlayer({
     setWhisperLang("");
     try {
       player.replace(newSrc.url);
-      /* Some expo-video versions need an explicit play() after replace */
-      setTimeout(() => { try { player.play(); } catch {} }, 80);
+      /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
     } catch {}
   }, [player, sources]);
 

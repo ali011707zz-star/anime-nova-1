@@ -371,13 +371,15 @@ export default function WatchScreen() {
     setSources([]);
     seenKeys.current.clear();
     setScreen("loading");
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${auto ? "&autoplay=1" : ""}`);
+    const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${auto ? "&autoplay=1" : ""}`);
   }
 
   /* ── Play a source ── */
   const playSrc = useCallback((src: Src) => {
     setPlayingSrc(src);
-    if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: coverUrl, updatedAt: Date.now() });
+    const thumb = coverUrl || (anime ? `https://img.anili.st/media/${anime}` : "");
+    if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: thumb, updatedAt: Date.now() });
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
     if (Platform.OS === "web") {
       setScreen(isEmbedSrc(src) ? "embed" : "native");
@@ -503,7 +505,7 @@ export default function WatchScreen() {
         onProgress={(pos, dur) => {
           lastTimeRef.current = pos;
           if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => { });
-          if (dur > 0 && anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: coverUrl, position: pos, duration: dur, updatedAt: Date.now() });
+          if (dur > 0 && anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: coverUrl || (anime ? `https://img.anili.st/media/${anime}` : ""), position: pos, duration: dur, updatedAt: Date.now() });
         }}
         onNextEpisode={() => goEp(epNum + 1, true)}
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
