@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "wouter";
 import { BookMarked, History, Trash2, Play, Clock, ChevronRight, Home, Star, PlayCircle, Heart, Clapperboard, Search as SearchIcon, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
@@ -97,9 +97,15 @@ export default function Library() {
   const [sortBy, setSortBy] = useState<"name" | "date" | "score">("date");
   const [searchQuery, setSearchQuery] = useState("");
   const [favChars, setFavChars] = useState<any[]>(() => loadFavChars());
+  const [savedVisible, setSavedVisible] = useState(12);
+  const savedLoaderRef = useRef<HTMLDivElement | null>(null);
 
   /* ── Refresh favChars from localStorage on every mount ── */
   useEffect(() => { setFavChars(loadFavChars()); }, []);
+
+  /* ── Reset visible count when filter/search changes ── */
+  useEffect(() => { setSavedVisible(12); }, [sortBy, searchQuery]);
+
 
   const loadData = useCallback(async () => {
     const hist = await loadWatchHistory(user?.id ?? null);
@@ -201,6 +207,19 @@ export default function Library() {
   }, [savedAnime, sortBy, sq]);
 
   const sortedSaved = filteredSaved;
+
+  /* ── Infinite scroll for saved tab (declared AFTER sortedSaved) ── */
+  useEffect(() => {
+    if (tab !== "saved" || savedVisible >= sortedSaved.length) return;
+    if (!savedLoaderRef.current) return;
+    const obs = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        setSavedVisible(v => v + 12);
+      }
+    }, { threshold: 0.1 });
+    obs.observe(savedLoaderRef.current);
+    return () => obs.disconnect();
+  }, [tab, savedVisible, sortedSaved.length]);
 
   const tabCount = {
     continue: continueItems.length,
@@ -564,8 +583,9 @@ export default function Library() {
                 </Link>
               </div>
             ) : (
+              <>
               <div className="grid grid-cols-3 gap-2.5">
-                {sortedSaved.map((anime, i) => {
+                {sortedSaved.slice(0, savedVisible).map((anime, i) => {
                   const status = STATUS_LABEL[anime.status] || { ar: anime.status, cls: "bg-zinc-600 text-white" };
                   const year = anime.startDate?.year;
                   const format = FORMAT_LABEL[anime.format] || anime.format || "أنمي";
@@ -633,6 +653,16 @@ export default function Library() {
                   );
                 })}
               </div>
+              {/* Infinite scroll sentinel */}
+              {savedVisible < sortedSaved.length && (
+                <div ref={savedLoaderRef} className="flex justify-center py-6">
+                  <div className="w-5 h-5 border-2 border-white/15 border-t-primary rounded-full animate-spin" />
+                </div>
+              )}
+              {savedVisible >= sortedSaved.length && sortedSaved.length > 0 && (
+                <p className="text-center text-white/15 text-[10px] font-['Cairo'] mt-6 pb-2">تم عرض كل الأنمي المحفوظة</p>
+              )}
+              </>
             )}
           </motion.div>
         )}
