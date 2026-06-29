@@ -176,7 +176,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "videasy_anim",  name: "Videasy",       desc: "TMDB · HLS · ترجمة عربية", tag: "VE", audioLang: "en" },
   { site: "vidlink_anim",  name: "VidLink",       desc: "TMDB · HLS · ترجمة عربية", tag: "VL", audioLang: "en" },
   { site: "lordflix_anim", name: "LordFlix",      desc: "TMDB · HLS · ترجمة عربية", tag: "LF", audioLang: "en" },
-  { site: "vyla_anim",     name: "Vyla",          desc: "TMDB · HLS · ترجمة عربية", tag: "VY", audioLang: "en" },
+  // vyla_anim: DEAD (missourimonster-vyla.hf.space returns 404 — 2026-06)
   { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
 ];
 
