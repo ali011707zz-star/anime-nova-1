@@ -182,7 +182,8 @@ export default function EpisodeListScreen() {
     const epTitleRaw = epInfo?.title_romanji || epInfo?.title || "";
     const et = epTitleRaw ? `&etitle=${encodeURIComponent(epTitleRaw)}` : "";
     const totalParam = total > 0 ? `&totalEps=${total}` : "";
-    router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}`);
+    const coverParam = anime?.coverImage?.large ? `&cover=${encodeURIComponent(anime.coverImage.extraLarge || anime.coverImage.large)}` : "";
+    router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}${coverParam}`);
   }
 
   function openComments(n: number) {

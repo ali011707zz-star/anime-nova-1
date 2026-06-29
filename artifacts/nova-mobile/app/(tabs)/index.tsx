@@ -233,10 +233,10 @@ export default function HomeScreen() {
               {recentHistory.map((h) => (
                 <Pressable
                   key={`${h.animeId}-${h.ep}`}
-                  onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}`)}
+                  onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.thumbnail ? `&cover=${encodeURIComponent(h.thumbnail)}` : ""}`)}
                   style={[styles.historyCard, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
-                  <Image source={{ uri: h.thumbnail }} style={styles.historyImg} contentFit="cover" />
+                  <Image source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }} style={styles.historyImg} contentFit="cover" />
                   <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.historyGrad}>
                     <Text style={styles.historyEp}>حلقة {h.ep}</Text>
                     <Text style={styles.historyTitle} numberOfLines={1}>{h.english || h.title}</Text>
