@@ -419,12 +419,12 @@ export default function RiftPlayer({
   }, []);
   const showControls = useCallback(() => { setShowCtrl(true); schedHide(); }, [schedHide]);
 
-  /* ── fail ── */
-  const fireOnFail = useCallback(() => {
+  /* ── fail ──
+     force=true → يتجاوز حارس hasPlayedSuccessRef (للأخطاء الحرجة الحقيقية)
+     force=false (افتراضي) → لا يبدّل السيرفر إن كان الفيديو يشتغل >20ث بنجاح */
+  const fireOnFail = useCallback((force = false) => {
     if (failFired.current) return;
-    /* إذا كان الفيديو يعمل بنجاح (>20 ثانية) → لا نبدّل السيرفر تلقائياً.
-       نترك HLS.js يتعامل مع الخطأ داخلياً لأنه على الأرجح خطأ مؤقت. */
-    if (hasPlayedSuccessRef.current) return;
+    if (hasPlayedSuccessRef.current && !force) return;
     failFired.current = true;
     setLoading(true); setBuffering(false); setError(null);
     if (failTimer.current) clearTimeout(failTimer.current);
@@ -581,21 +581,24 @@ export default function RiftPlayer({
           return;
         }
         if (d.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          // Try once to recover — if recovery itself fails, HLS fires another fatal → force-switch
           hls.recoverMediaError();
         } else if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          // Retry network errors with exponential backoff before failing
+          // Retry network errors with exponential backoff before force-switching
           const attempts = (hls as any)._netRetry = ((hls as any)._netRetry || 0) + 1;
           if (attempts <= 5) {
             setTimeout(() => { if (hlsRef.current === hls) hls.startLoad(); }, 1000 * attempts);
-          } else { fireOnFail(); }
+          } else { fireOnFail(true); } // force=true — تبديل السيرفر حتى لو نجح >20ث
         } else {
-          fireOnFail();
+          fireOnFail(true); // force=true — خطأ حرج غير شبكي
         }
       });
     } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+      // Safari native HLS — no HLS.js available
       v.src = m3u8;
       v.addEventListener("loadedmetadata", () => { setLoading(false); v.play().catch(() => {}); }, { once: true });
-      v.addEventListener("error", () => setError("فشل التشغيل"), { once: true });
+      // Safari: call fireOnFail(true) so server-switching works (not just setError)
+      v.addEventListener("error", () => { if (!failFired.current) fireOnFail(true); }, { once: true });
     } else {
       setError("المتصفح لا يدعم HLS"); setLoading(false);
     }
@@ -701,6 +704,32 @@ export default function RiftPlayer({
     }, 8000);
     return () => clearTimeout(t);
   }, [playing]);
+
+  /* ── Stall watchdog: if video is playing but currentTime doesn't advance for 15s → force-switch ──
+     يعالج حالة التوقف الصامت (CDN يُرجع بيانات فارغة أو stream ينقطع بدون إشعار HLS.js) */
+  useEffect(() => {
+    if (!playing) return;
+    let lastTime = -1;
+    let stalledFor = 0;
+    const CHECK_INTERVAL = 3000; // فحص كل 3 ثوانٍ
+    const STALL_THRESHOLD = 15;   // حد التوقف = 15 ثانية
+    const t = setInterval(() => {
+      const v = videoRef.current;
+      if (!v || v.paused || v.ended || v.readyState < 3) { stalledFor = 0; return; }
+      if (v.currentTime === lastTime) {
+        stalledFor += CHECK_INTERVAL / 1000;
+        if (stalledFor >= STALL_THRESHOLD) {
+          console.warn(`[Nova Player] stall watchdog: currentTime stuck at ${v.currentTime}s for ${stalledFor}s → force-switch`);
+          clearInterval(t);
+          fireOnFail(true);
+        }
+      } else {
+        lastTime = v.currentTime;
+        stalledFor = 0;
+      }
+    }, CHECK_INTERVAL);
+    return () => clearInterval(t);
+  }, [playing, fireOnFail]);
 
   /* ── autoPlay countdown when episode ends ── */
   useEffect(() => {

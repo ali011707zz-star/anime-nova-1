@@ -1,3 +1,4 @@
+- [Player server-switch fixes 2026-06](player-serverswitch-fixes.md) — fireOnFail(force=true) bypasses hasPlayedSuccessRef for fatal HLS errors; stall watchdog fires force-switch after 15s stuck currentTime; kawaiiSubUrl race fixed with playerSrcSiteRef; mobile subOn cleared when new source has no subtitleUrl
 - [آخر الأخبار news section](news-section.md) — MAL RSS (200 from Replit); /api/news route; Nova Mobile 4th tab; comments via tmdbId="news-{id}"; ANN=403 from Replit
 - [FaselHD + EgyDead fix 2026](faselhd-fix-2026.md) — FaselHD: domain=fasel-hd.cam, GitHub JSON slug lookup, episode pages not CF-blocked; EgyDead re-enabled via Orkestr, servers still AJAX-only
 - [EgyDead scraper](egydead-scraper.md) — CF blocks cfProxy+Replit IPs; use orkestDirectGet(); search→episode slug→construct URL; servers AJAX-only (no static sources); added to animation.ts

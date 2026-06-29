@@ -2767,6 +2767,8 @@ export default function WatchPage() {
   const [playerDlUrl,  setPlayerDlUrl]  = useState<string | undefined>(undefined);
   const [playerSubUrl, setPlayerSubUrl] = useState<string | undefined>(undefined);
   const [playerSrcSite, setPlayerSrcSite] = useState<string>("");
+  /* ref لتتبع الموقع الحالي خارج نطاق الـ closure (يُحدَّث فوراً) */
+  const playerSrcSiteRef = useRef<string>("");
   const [kawaiiSubUrl, setKawaiiSubUrl] = useState<string | undefined>(undefined);
 
   const autoFetchedRef    = useRef(false);
@@ -2863,7 +2865,9 @@ export default function WatchPage() {
           : (data.englishSubUrl
               ? `/api/anime/translate-vtt?url=${encodeURIComponent(data.englishSubUrl)}&from=en&to=ar`
               : undefined);
-        if (subUrl) setKawaiiSubUrl(subUrl);
+        /* إصلاح race condition: إذا كان المصدر الحالي عربياً → لا نضع kawaiiSubUrl
+           (تجنّب تداخل الترجمة الخارجية مع الترجمة المضمّنة في الفيديو) */
+        if (subUrl && !ARABIC_SITES.has(playerSrcSiteRef.current)) setKawaiiSubUrl(subUrl);
         // Skip times: only fill gaps not already covered by aniskip/baha
         if (data.intro || data.outro) {
           setSkipTimes(prev => {
@@ -3174,6 +3178,7 @@ export default function WatchPage() {
       const firstSkipSub = ARABIC_SITES.has(firstSrc.site || "");
       setPlayerSubUrl(firstSkipSub ? undefined : (firstSrc.subtitleUrl || undefined));
       if (firstSkipSub) setKawaiiSubUrl(undefined);
+      playerSrcSiteRef.current = firstSrc.site || "";
       setPlayerSrcSite(firstSrc.site || "");
       setPlayerServers(srvMap);
       setQuality(clickedTier);
@@ -3290,6 +3295,7 @@ export default function WatchPage() {
     // مصادر عربية: امسح kawaiiSubUrl أيضاً لمنع تداخل الترجمة
     if (skipExternalSub) setKawaiiSubUrl(undefined);
     // subtitle state resets automatically when EpisodePlayer remounts with new key
+    playerSrcSiteRef.current = src.site || "";
     setPlayerSrcSite(src.site || "");
     setPlayerServers(servers);
     setQuality(clickedTier);
