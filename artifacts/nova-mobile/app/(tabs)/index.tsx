@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { Image } from "expo-image";
+import { Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useEffect } from "react";
 import {
@@ -238,7 +238,7 @@ export default function HomeScreen() {
                   onPress={() => router.push(`/watch?anime=${h.animeId}&ep=${h.ep}&title=${encodeURIComponent(h.title)}&english=${encodeURIComponent(h.english)}${h.thumbnail ? `&cover=${encodeURIComponent(h.thumbnail)}` : ""}`)}
                   style={[styles.historyCard, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
-                  <Image source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }} style={styles.historyImg} contentFit="cover" />
+                  <Image source={{ uri: h.thumbnail || `https://img.anili.st/media/${h.animeId}` }} style={styles.historyImg} resizeMode="cover" />
                   <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={styles.historyGrad}>
                     <Text style={styles.historyEp}>حلقة {h.ep}</Text>
                     <Text style={styles.historyTitle} numberOfLines={1}>{h.english || h.title}</Text>
@@ -277,7 +277,7 @@ export default function HomeScreen() {
                   onPress={() => router.push(`/watch?anilistId=${ep.media.id}&ep=${ep.episode}&title=${encodeURIComponent(ep.media.title.romaji)}&english=${encodeURIComponent(ep.media.title.english || ep.media.title.romaji)}&cover=${encodeURIComponent(ep.media.coverImage.large)}` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
-                  <Image source={{ uri: ep.media.coverImage.large }} style={todayEpStyles.img} contentFit="cover" />
+                  <Image source={{ uri: ep.media.coverImage.large }} style={todayEpStyles.img} resizeMode="cover" />
                   <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
                     <Text style={todayEpStyles.ep}>حلقة {ep.episode}</Text>
                     <Text style={todayEpStyles.title} numberOfLines={2}>{ep.media.title.english || ep.media.title.romaji}</Text>
@@ -358,7 +358,7 @@ export default function HomeScreen() {
                           style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                         >
                           {poster ? (
-                            <Image source={{ uri: poster }} style={todayStyles.img} contentFit="cover" />
+                            <Image source={{ uri: poster }} style={todayStyles.img} resizeMode="cover" />
                           ) : (
                             <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
                               <Ionicons name="film" size={28} color="rgba(255,255,255,0.2)" />
@@ -435,7 +435,7 @@ export default function HomeScreen() {
                         style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                       >
                         {item.poster ? (
-                          <Image source={{ uri: item.poster }} style={todayStyles.img} contentFit="cover" />
+                          <Image source={{ uri: item.poster }} style={todayStyles.img} resizeMode="cover" />
                         ) : (
                           <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
                             <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
@@ -522,7 +522,7 @@ export default function HomeScreen() {
                             <Image
                               source={{ uri: ep.poster || ep.anilistPoster }}
                               style={newsCardStyles.thumb}
-                              contentFit="cover"
+                              resizeMode="cover"
                             />
                           </View>
                         </Pressable>

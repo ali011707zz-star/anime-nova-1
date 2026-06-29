@@ -1,4 +1,3 @@
-import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
@@ -44,10 +43,7 @@ export default function TabLayout() {
           height: isWeb ? 84 : 60,
           paddingBottom: isWeb ? 34 : 0,
         },
-        tabBarBackground: () =>
-          isIOS ? (
-            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-          ) : null,
+        tabBarBackground: () => null,
       }}
     >
       <Tabs.Screen

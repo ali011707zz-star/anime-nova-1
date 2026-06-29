@@ -1,6 +1,6 @@
 import { AnilistMedia } from "@/utils/anilist";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { Image } from "react-native";
 import { useRouter } from "expo-router";
 import React from "react";
 import { Dimensions, Platform, Pressable, StyleSheet, Text, View } from "react-native";
@@ -33,7 +33,7 @@ export function AnimeCard({ anime, size = "sm", progress, showProgress }: Props)
         <Image
           source={{ uri: anime.coverImage.extraLarge || anime.coverImage.large }}
           style={[styles.image, { borderRadius: colors.radius - 4 }]}
-          contentFit="cover"
+          resizeMode="cover"
           transition={300}
         />
         {anime.averageScore && (

@@ -5,7 +5,6 @@
  * سحب شريط + إيماءات + تخطي + سرعة + وضع عرض
  */
 import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
@@ -794,7 +793,7 @@ export function RiftPlayer({
   /* ─── Flip screen — rotate 180° using CSS transform (no surface recreation = no black flash) ─── */
   const flipScreen = useCallback(() => {
     setIsFlipped(f => !f);
-    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+    
   }, []);
 
   /* ─── Screenshot ─── */
@@ -802,7 +801,7 @@ export function RiftPlayer({
   const takeScreenshot = useCallback(async () => {
     setScreenshotFlash(true);
     setTimeout(() => setScreenshotFlash(false), 600);
-    try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch {}
+    
     if (Platform.OS === "web") return; // web browsers block video frame capture
     try {
       const VS = await import("react-native-view-shot" as any);
@@ -1106,7 +1105,7 @@ export function RiftPlayer({
     setDblTap({ side, id: Date.now() });
     anim.setValue(0);
     Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }).start(() => setDblTap(null));
-    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+    
     seek(side === "R" ? positionRef.current + seekDurationRef.current : positionRef.current - seekDurationRef.current);
   }, [seek, dblTapLeft, dblTapRight]);
 
@@ -1251,7 +1250,7 @@ export function RiftPlayer({
     prevSpeedRef.current = speed;
     setLongPressSpeed(true);
     try { player.playbackRate = 2; } catch {}
-    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
+    
     fadeIn();
   }, [speed, player, fadeIn]);
 

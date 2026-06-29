@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { Image } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
@@ -198,7 +198,7 @@ export default function LibraryScreen() {
         <Image
           source={item.thumbnail ? { uri: item.thumbnail } : undefined}
           style={[s.historyImg, { backgroundColor: "#1C1C22" }]}
-          contentFit="cover"
+          resizeMode="cover"
         />
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.55)"]} style={StyleSheet.absoluteFill} />
         <View style={s.playOverlay}>
@@ -353,7 +353,7 @@ export default function LibraryScreen() {
                 <Image
                   source={item.thumbnail ? { uri: item.thumbnail } : undefined}
                   style={[s.favImg, { backgroundColor: "#1C1C22" }]}
-                  contentFit="cover"
+                  resizeMode="cover"
                 />
                 <Pressable
                   onPress={() => toggleFavorite(item)}
@@ -397,7 +397,7 @@ export default function LibraryScreen() {
                 <Image
                   source={item.image ? { uri: item.image } : undefined}
                   style={[s.charImg, { backgroundColor: "#1C1C22" }]}
-                  contentFit="cover"
+                  resizeMode="cover"
                 />
                 <Pressable
                   onPress={() => removeChar(item.id)}
