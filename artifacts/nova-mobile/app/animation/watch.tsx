@@ -492,14 +492,21 @@ export default function AnimationWatchScreen() {
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
-    return directSrcs.map(s => ({
-      url: getPlayUrl(s),
-      label: s.label || "مصدر",
-      quality: getSrcQuality(s),
-      subtitleUrl: s.subtitleUrl
+    return directSrcs.map(s => {
+      const resolvedSubUrl = s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
-        : activeSubUrl,
-    })).filter(s => s.url);
+        : activeSubUrl;
+      // Mark as isArabic so RiftPlayer uses the pre-resolved subtitle URL as-is
+      // without attempting to re-translate it (the URLs are already Arabic)
+      const isArabic = subLang === "ar" && !!resolvedSubUrl;
+      return {
+        url: getPlayUrl(s),
+        label: s.label || "مصدر",
+        quality: getSrcQuality(s),
+        subtitleUrl: resolvedSubUrl,
+        isArabic,
+      };
+    }).filter(s => s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);
 
   /* ── Handle back ── */

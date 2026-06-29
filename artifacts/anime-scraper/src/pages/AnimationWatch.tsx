@@ -1460,6 +1460,14 @@ function getAnimTag(label: string): string {
   if (l.startsWith("kawaii"))     return "KW";
   if (l.startsWith("animephoenix") || l.startsWith("phoenix")) return "PH";
   if (l.startsWith("animehub"))   return "AH";
+  if (l.startsWith("streamguide")) return "SG";
+  if (l.startsWith("hexa"))       return "HX";
+  if (l.startsWith("aether"))     return "AE";
+  if (l.startsWith("vidcore"))    return "VC";
+  if (l.startsWith("aw·"))        return "AW";
+  if (l.startsWith("fasel"))      return "FH";
+  if (l.startsWith("mycima"))     return "MY";
+  if (l.startsWith("topcin"))     return "TC";
   const word = label.replace(/[^a-zA-Zأ-ي]/g, "").slice(0, 2).toUpperCase();
   return word || "??";
 }

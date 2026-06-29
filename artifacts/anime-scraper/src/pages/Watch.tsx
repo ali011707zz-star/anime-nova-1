@@ -2925,7 +2925,7 @@ export default function WatchPage() {
         const d = j.data?.Media;
         if (d) {
           setAnime(d);
-          saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.large || "", ep, d.episodes || 0, userId);
+          saveHistory(animeId, d.title?.english || d.title?.romaji || "", d.coverImage?.extraLarge || d.coverImage?.large || d.coverImage?.medium || coverParam || "", ep, d.episodes || 0, userId);
           /* ── cache MAL ID for next visit (instant aniskip) ── */
           if (d.idMal) { try { localStorage.setItem(`malid-${animeId}`, String(d.idMal)); } catch {} }
 
