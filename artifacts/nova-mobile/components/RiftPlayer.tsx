@@ -489,7 +489,10 @@ export function RiftPlayer({
   const orientLockRef     = useRef<"left" | "right">("left");
 
   /* ─── expo-video player ─── */
-  const player = useVideoPlayer(currentSrc?.url || "", (p) => {
+  /* نستخدم ref ثابت للـ URL الأولي حتى لا يُعيد useVideoPlayer
+     تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط) */
+  const _initUrlRef = useRef(sources[initialSourceIndex ?? 0]?.url || "");
+  const player = useVideoPlayer(_initUrlRef.current, (p) => {
     p.loop = false;
     p.volume = 1;
     p.play();
