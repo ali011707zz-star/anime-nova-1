@@ -125,7 +125,7 @@ export default function HomeScreen() {
   useEffect(() => {
     fetch(`${BASE_URL}/api/dubbed/catalog?page=1`)
       .then(r => r.json())
-      .then(d => setDubbedSeries((d.series || []).slice(0, 14)))
+      .then(d => setDubbedSeries((d.results || d.items || d.series || []).slice(0, 14)))
       .catch(() => {});
   }, []);
 
@@ -353,7 +353,7 @@ export default function HomeScreen() {
                       <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
                     </View>
                     <Pressable style={styles.seeAllBtn} onPress={() => router.push("/dubbed" as any)}>
-                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض المزيد</Text>
+                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض الكل</Text>
                       <Ionicons name="chevron-back" size={13} color={colors.primary} />
                     </Pressable>
                   </View>
