@@ -352,8 +352,8 @@ export default function HomeScreen() {
                       <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
                       <Text style={[styles.sectionTitle, { color: colors.text }]}>🎬 كرتون مدبلج عربي</Text>
                     </View>
-                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/(tabs)/dubbed" as any)}>
-                      <Text style={[styles.seeAllText, { color: colors.primary }]}>الكل</Text>
+                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/dubbed" as any)}>
+                      <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض المزيد</Text>
                       <Ionicons name="chevron-back" size={13} color={colors.primary} />
                     </Pressable>
                   </View>
