@@ -9,7 +9,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import WebView from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
@@ -202,7 +201,7 @@ export default function AnimeDetailScreen() {
       setFavCharIds(prev => new Set([...prev, char.id]));
     }
     await AsyncStorage.setItem("fav-characters", JSON.stringify(updated));
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
   }, []);
 
   useEffect(() => {
@@ -254,7 +253,7 @@ export default function AnimeDetailScreen() {
 
   const handleFavorite = useCallback(async () => {
     if (!anime) return;
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
     await toggleFavorite({
       id: anime.id,
       title: anime.title.romaji,

@@ -18,7 +18,10 @@ import { AppProvider } from "@/context/AppContext";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
+// RTL: نُفعّل مرة واحدة فقط عند أول تشغيل
+// لا نستخدم Updates.reloadAsync() هنا لأنها تُسبب crash loop
 try {
+  I18nManager.allowRTL(true);
   if (!I18nManager.isRTL) {
     I18nManager.forceRTL(true);
   }

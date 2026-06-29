@@ -1,6 +1,6 @@
 import { AnilistMedia } from "@/utils/anilist";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { Image } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -58,7 +58,7 @@ export function HeroSection({ items }: Props) {
               <Image
                 source={{ uri: anime.bannerImage || anime.coverImage.extraLarge || anime.coverImage.large }}
                 style={StyleSheet.absoluteFill}
-                contentFit="cover"
+                resizeMode="cover"
                 transition={400}
               />
               <LinearGradient

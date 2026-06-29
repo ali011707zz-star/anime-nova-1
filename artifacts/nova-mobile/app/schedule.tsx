@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { Image } from "react-native";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -119,7 +119,7 @@ export default function ScheduleScreen() {
               <Image
                 source={{ uri: item.media.coverImage.large }}
                 style={styles.scheduleImg}
-                contentFit="cover"
+                resizeMode="cover"
               />
               <View style={styles.scheduleInfo}>
                 <Text style={[styles.scheduleTitle, { color: colors.text }]} numberOfLines={2}>
