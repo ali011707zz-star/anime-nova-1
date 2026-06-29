@@ -432,24 +432,19 @@ export default function WatchScreen() {
     })).filter(s => s.url);
   }, [directSrcs, globalSubUrl]);
 
-  /* ── Frozen sources: تُجمَّد مرة واحدة عند بدء التشغيل ولا تتغير لاحقاً.
-     هذا يمنع إعادة تهيئة expo-video عند وصول مصادر جديدة عبر SSE أثناء التشغيل. ── */
+  /* ── Frozen sources: تُجمَّد لحظة اختيار المستخدم للمصدر ولا تتغير أثناء التشغيل.
+     هذا يمنع تغيير مصفوفة sources في RiftPlayer بسبب وصول مصادر SSE جديدة.
+     الإصلاح: نحفظ riftSources في ref حتى نقرأه داخل playSrc بدون إضافته للـ deps ── */
   const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
-  const frozenRef = useRef(false);
+  const riftSourcesRef = useRef<PlayerSource[]>([]);
+  useEffect(() => { riftSourcesRef.current = riftSources; }, [riftSources]);
 
+  /* مسح frozenSources عند الخروج من المشغّل (picker/embed/loading) */
   useEffect(() => {
-    if (screen === "native" && !frozenRef.current && riftSources.length > 0) {
-      frozenRef.current = true;
-      setFrozenSources([...riftSources]);
-    }
     if (screen !== "native") {
-      frozenRef.current = false;
-      /* نمسح frozenSources عند الخروج من المشغّل حتى يستخدم
-         riftSources الجديد (مع كل المصادر) عند العودة واختيار مصدر آخر */
       setFrozenSources([]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, riftSources]);
+  }, [screen]);
 
   /* ── Grouped by quality for picker ── */
   const grouped = useMemo<Record<Quality, Src[]>>(() => ({
