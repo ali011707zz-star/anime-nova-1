@@ -54,12 +54,15 @@ function buildQuery(genre: string, format: string, year: number | "", page: numb
   /* AniList يحتاج seasonYear عند تصفية الموسم — إذا لم يختر المستخدم عاماً نستخدم العام الحالي */
   const effectiveYear = year || (season ? CUR_YEAR : "");
   const yf = effectiveYear ? `, seasonYear: ${effectiveYear}` : "";
-  const sf = season ? `, season: ${season}` : "";
+  /* الأفلام ليس لها موسم في AniList */
+  const sf = (season && format !== "MOVIE") ? `, season: ${season}` : "";
+  /* الأفلام غالباً ليست يابانية فقط — نزيل القيد للحصول على نتائج أكثر */
+  const countryFilter = format === "MOVIE" ? "" : `, countryOfOrigin: "JP"`;
   const notIn = genre === "Ecchi" ? `["Hentai"]` : `["Ecchi", "Hentai"]`;
   return `query {
   Page(page: ${page}, perPage: 24) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", isAdult: false, genre_not_in: ${notIn}${gf}${ff}${yf}${sf}) {
+    media(type: ANIME, sort: POPULARITY_DESC${countryFilter}, isAdult: false, genre_not_in: ${notIn}${gf}${ff}${yf}${sf}) {
       id title { romaji } coverImage { large } averageScore episodes format status
     }
   }
@@ -114,6 +117,7 @@ export default function Browse() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loaderRef   = useRef<HTMLDivElement | null>(null);
 
   const fetch$ = async (query: string) => {
     const r = await fetch(API_BASE + "/api/anime/anilist", {
@@ -156,6 +160,18 @@ export default function Browse() {
     setPage(next);
     loadAnime(selectedGenre, selectedFormat, selectedYear, next, true, selectedSeason);
   };
+
+  /* ── Infinite scroll ── */
+  useEffect(() => {
+    if (!loaderRef.current) return;
+    const obs = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loading && !loadingMore && !searchQ.trim()) {
+        loadMore();
+      }
+    }, { threshold: 0.1 });
+    obs.observe(loaderRef.current);
+    return () => obs.disconnect();
+  }, [hasMore, loading, loadingMore, searchQ, page, selectedGenre, selectedFormat, selectedYear, selectedSeason]);
 
   const displayList = searchQ.trim() ? searchResults : animeList;
   const currentGenreLabel = GENRES.find(g => g.en === selectedGenre)?.ar || "";
@@ -318,11 +334,10 @@ export default function Browse() {
             </motion.div>
           </AnimatePresence>
         )}
-        {hasMore && !searchQ.trim() && !loading && (
-          <button onClick={loadMore} disabled={loadingMore}
-            className="w-full mt-5 py-3.5 bg-[#18181B] border border-white/8 rounded-2xl text-sm font-black flex items-center justify-center gap-2 text-white/50 font-['Cairo'] active:scale-98 disabled:opacity-40">
-            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ChevronDown className="w-4 h-4" /> تحميل المزيد</>}
-          </button>
+        {!searchQ.trim() && (
+          <div ref={loaderRef} className="h-16 flex items-center justify-center mt-2">
+            {(loading || loadingMore) && <Loader2 className="w-5 h-5 text-primary animate-spin" />}
+          </div>
         )}
       </div>
     </main>
