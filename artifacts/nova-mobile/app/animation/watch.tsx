@@ -399,9 +399,16 @@ export default function AnimationWatchScreen() {
                 const isGoodSrc = isDirectPlayable(src);
                 if (!isGoodSrc || autoPlayFiredRef.current) return next;
 
-                /* شغّل أول مصدر جيد يصل فوراً بدون انتظار */
+                /* انتظر 3 ثوان لتوفر مصادر أجود قبل التشغيل التلقائي */
                 autoPlayFiredRef.current = true;
-                setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
+                setTimeout(() => {
+                  setSources(latest => {
+                    const best = latest.find(s => isDirectPlayable(s)) ?? src;
+                    setPlayingSrc(best);
+                    setScreen("native");
+                    return latest;
+                  });
+                }, 3000);
                 return next;
               });
 
@@ -492,16 +499,17 @@ export default function AnimationWatchScreen() {
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
+    const NO_SUB_PREFIXES = ["aflaam", "ArabSeed", "arabseed"];
     return directSrcs.map(s => {
-      const resolvedSubUrl = s.subtitleUrl
+      const lbl = s.label || "";
+      const wantsNoSub = NO_SUB_PREFIXES.some(p => lbl.toLowerCase().startsWith(p.toLowerCase()));
+      const resolvedSubUrl = wantsNoSub ? undefined : (s.subtitleUrl
         ? resolveUrl(s.subtitleUrl, base)
-        : activeSubUrl;
-      // Mark as isArabic so RiftPlayer uses the pre-resolved subtitle URL as-is
-      // without attempting to re-translate it (the URLs are already Arabic)
+        : activeSubUrl);
       const isArabic = subLang === "ar" && !!resolvedSubUrl;
       return {
         url: getPlayUrl(s),
-        label: s.label || "مصدر",
+        label: lbl || "مصدر",
         quality: getSrcQuality(s),
         subtitleUrl: resolvedSubUrl,
         isArabic,

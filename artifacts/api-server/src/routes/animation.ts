@@ -736,56 +736,19 @@ router.get("/animation/trending", async (req: Request, res: Response) => {
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
 
-// ── StarDima endpoints (legacy) ───────────────────────────────────────────────
+// ── StarDima endpoints (REMOVED — مصدر StarDima محذوف) ───────────────────────
 
-router.get("/animation/stardima-search", async (req: Request, res: Response) => {
-  try {
-    const q = String(req.query.q || "");
-    if (!q) { res.status(400).json({ error: "q required" }); return; }
-    const html  = await cfGet(`${SD_BASE}/?s=${encodeURIComponent(q)}`, SD_BASE + "/");
-    const shows = parseSDShows(html).slice(0, 12);
-    shows.sort((a, b) => titleSim(b.title, q) - titleSim(a.title, q));
-    res.json({ shows });
-  } catch (e) { res.status(502).json({ error: String(e), shows: [] }); }
+router.get("/animation/stardima-search", (_req: Request, res: Response) => {
+  res.status(410).json({ shows: [], error: "StarDima removed" });
 });
 
-router.get("/animation/stardima-series", async (req: Request, res: Response) => {
-  try {
-    const slug = String(req.query.slug || "");
-    if (!slug) { res.status(400).json({ error: "slug required" }); return; }
-    const html     = await cfGet(`${SD_BASE}/tvshows/${encodeURI(slug)}/`, SD_BASE + "/");
-    const title    = (html.match(/property="og:title"\s+content="([^"]+)"/) || [])[1] || slug;
-    const poster   = (html.match(/property="og:image"\s+content="([^"]+)"/) || [])[1] || "";
-    const desc     = (html.match(/class="description[^"]*"[^>]*>\s*([\s\S]{0,400})/) || [])[1]
-                      ?.replace(/<[^>]+>/g, "").trim() || "";
-    const seasons: { slug: string; title: string }[] = [];
-    const sRe = /href="https:\/\/watch\.stardima\.com\/watch\/seasons\/([^"]+)"[^>]*>([^<]+)</g;
-    let m: RegExpExecArray | null;
-    while ((m = sRe.exec(html)) !== null) {
-      seasons.push({ slug: decodeURIComponent(m[1]).replace(/\/$/, ""), title: m[2].trim() });
-    }
-    const episodes = parseSDEpisodes(html);
-    res.json({ title, poster, desc, seasons, episodes });
-  } catch (e) { res.status(502).json({ error: String(e) }); }
+router.get("/animation/stardima-series", (_req: Request, res: Response) => {
+  res.status(410).json({ error: "StarDima removed" });
 });
 
-router.get("/animation/stardima-episode", async (req: Request, res: Response) => {
-  try {
-    const slug = String(req.query.slug || "");
-    if (!slug) { res.status(400).json({ error: "slug required" }); return; }
-    const html   = await cfGet(`${SD_BASE}/episodes/${encodeURI(slug)}/`, SD_BASE + "/");
-    const postId = parsePostId(html);
-    const nonce  = parseNonce(html);
-    const iframeUrls = parseIframes(html, ["stardima", "google", "histats", "rdparena"]);
-    const sources: { url: string; label: string; num: number }[] = [];
-    if (postId) {
-      const urls = await sdDoopPlayerAjax(postId, nonce, slug);
-      urls.forEach((url, i) => sources.push({ url, label: `StarDima · سيرفر ${i + 1}`, num: i + 1 }));
-    }
-    res.json({ postId, iframes: iframeUrls, sources });
-  } catch (e) {
-    res.status(502).json({ error: String(e), iframes: [], sources: [] });
-  }
+router.get("/animation/stardima-episode", (_req: Request, res: Response) => {
+  res.status(410).json({ iframes: [], sources: [], error: "StarDima removed" });
+  void 0;
 });
 
 // ── Shared HLS / MP4 extractor for embed pages ────────────────────────────────
@@ -2715,8 +2678,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               if (extracted?.directUrl) {
                 const d = extracted.directUrl;
                 const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
-                const proxied = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : wrapMp4(d, embedUrl);
-                sendSource(embedUrl, srvLabel, d, proxied);
+                const proxied = d.startsWith("/") ? d : (isHls ? wrapHls(d, embedUrl) : wrapMp4(d, embedUrl));
+                sendSource(proxied, srvLabel, d, proxied);
               }
             } catch { /* skip */ }
           }));
@@ -2824,9 +2787,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 //   browser → hls-proxy (server, correct Referer) → CDN → returns m3u8 ✓
                 //   segment URLs rewritten to seg-proxy (same Referer) → CDN → segments ✓
                 const hlsProxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
-                // Probe before sending — skip dead/expired CDN streams (fixes CDN 4K issue)
-                const veaProbeOk = await probeHlsProxy(hlsProxied);
-                if (!veaProbeOk) continue;
                 sendSource(
                   hlsProxied, label, hlsProxied, hlsProxied,
                   araSub?.url ? { subtitleUrl: araSub.url } : undefined,
