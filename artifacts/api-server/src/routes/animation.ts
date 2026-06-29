@@ -2913,107 +2913,260 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // (متاح في قسم الأنمي عبر /api/anime/fetch-source?site=animeify)
       Promise.resolve(),
 
-      // ── FaselHD (faselhds.biz / faselhd.club) — أفلام ومسلسلات عربية مترجمة ────
-      // CF-protected: يجرب cfProxyGet أولاً ثم يعود لـ Orkestr (EU IP) كـ fallback
+      // ── FaselHD (www.fasel-hd.cam) — أنمي ومسلسلات مترجمة عربي ─────────────────
+      // الاستراتيجية: GitHub pre-scraped JSON → slug → صفحة الحلقة مباشرة (غير محجوبة بـ CF)
+      // صفحات الحلقات على fasel-hd.cam مفتوحة مباشرة من Replit (200 OK بدون proxy)
+      // video_player يستخدم data-src لا src (lazy load)
       scrapeAnimCached("faselhd", async () => {
-        const FASEL_BASE = "https://www.faselhds.biz";
-        const FASEL_ALT  = "https://faselhd.club";
-        const q = encodeURIComponent(title);
+        const FASEL_BASE   = "https://www.fasel-hd.cam";
+        const GITHUB_BASE  = "https://raw.githubusercontent.com/Ahmd3301/faselhd-db/main/output";
+        // %d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9 = "الحلقة" مُرمَّزة بشكل URL (lowercase لتطابق روابط الموقع)
+        const EP_AR_ENC    = "%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9";
+        const isCfBlocked  = (h: string) =>
+          h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 500;
+
         send("status", { msg: "FaselHD: جاري البحث…" });
-
-        const isCfBlocked = (html: string) =>
-          html.includes("Just a moment") || html.includes("cf-browser-verification") || html.length < 500;
-
         try {
-          // Step 1: Search (cfProxyGet → Orkestr fallback)
-          let html = "";
-          for (const base of [FASEL_BASE, FASEL_ALT]) {
+          // ── الخطوة 1: البحث عن slug عبر GitHub JSON (تجنب CF على search) ──────
+          // anime.json = 1864 أنمي | anime-movies.json = 391 فيلم أنمي
+          let encodedSlug: string | null = null;  // الجزء الأخير من URL (محتفظ بترميز الموقع)
+          const jsonFiles = type === "movie"
+            ? ["anime-movies.json", "movies.json"]
+            : ["anime.json"];
+
+          // bestLink = الرابط الكامل لصفحة المسلسل/الفيلم (محفوظ مع path الصحيح)
+          let bestLink: string | null = null;
+
+          for (const jsonFile of jsonFiles) {
             try {
-              html = await cfOrOrkestGet(`${base}/?s=${q}`);
-              if (!isCfBlocked(html)) break;
-              html = "";
-            } catch { /* try alt */ }
+              const jr = await fetch(`${GITHUB_BASE}/${jsonFile}`, {
+                signal: AbortSignal.timeout(12_000),
+              });
+              if (!jr.ok) continue;
+              const jdata = await jr.json() as { items: Array<{ slug: string; name: string; link: string }> };
+              if (!Array.isArray(jdata.items)) continue;
+
+              // حماية: لا نستخدم enTitlePrefetched إذا كان فارغاً (يعطي مطابقة خاطئة)
+              const scores = jdata.items.map(item => {
+                let sc = titleSim(title, item.name);
+                if (enTitlePrefetched) sc = Math.max(sc, titleSim(enTitlePrefetched, item.name));
+                return { link: item.link || "", name: item.name || "", sc };
+              });
+              const best = scores.filter(x => x.sc > 0.42).sort((a, b) => b.sc - a.sc)[0];
+              if (best?.link) { bestLink = best.link; break; }
+            } catch { /* جرب الملف التالي */ }
           }
-          if (!html || isCfBlocked(html)) return;
 
-          // Step 2: Parse results — div#postList div.postDiv a
-          const results: Array<{ url: string; ttl: string }> = [];
-          const itemRe = /<div[^>]+class="[^"]*postDiv[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>[\s\S]*?img[^>]+alt="([^"]*)"[\s\S]*?<\/a>/g;
-          let m: RegExpExecArray | null;
-          while ((m = itemRe.exec(html))) {
-            results.push({ url: m[1], ttl: m[2].trim() });
-          }
-          if (!results.length) return;
-
-          // Step 3: Best match
-          const best = results
-            .map(r => ({ ...r, sc: Math.max(titleSim(title, r.ttl), titleSim(enTitlePrefetched, r.ttl)) }))
-            .filter(r => r.sc > 0.38)
-            .sort((a, b) => b.sc - a.sc)[0];
-          if (!best) return;
-
-          // Step 4: Load content page
-          let pageHtml = "";
-          try { pageHtml = await cfOrOrkestGet(best.url); } catch { return; }
-          if (isCfBlocked(pageHtml)) return;
-
-          const isMoviePage = !/<div[^>]+class="[^"]*epAll[^"]*"/.test(pageHtml);
-
-          if (isMoviePage || type === "movie") {
-            // Movie: download link page → POST → direct MP4
-            const dlM = pageHtml.match(/class="downloadLinks"[\s\S]*?<a\s+href="([^"]+)"/);
-            if (!dlM) {
-              // Try iframe player
-              const ifrM = pageHtml.match(/iframe[^>]+name="player_iframe"[^>]+src="([^"]+)"/);
-              if (ifrM) await sendExtracted(ifrM[1], "FaselHD");
-              return;
-            }
+          // ── fallback: بحث مباشر على الموقع عبر cfProxy (إذا فشل GitHub) ───────
+          if (!bestLink) {
             try {
-              const dlHtml = await cfOrOrkestPost(dlM[1]);
-              const directM = dlHtml.match(/class="dl-link[^"]*"[^>]*href="([^"]+)"/);
-              if (!directM) return;
-              const directUrl = directM[1];
-              if (directUrl.includes(".mp4") || directUrl.includes("download")) {
-                const proxied = wrapMp4(directUrl, FASEL_BASE + "/");
-                sendSource(proxied, "FaselHD · تحميل مباشر", directUrl, proxied);
+              const sHtml = await cfOrOrkestGet(
+                `${FASEL_BASE}/?s=${encodeURIComponent(title)}`
+              );
+              if (!isCfBlocked(sHtml)) {
+                const itemRe = /<div[^>]+class="[^"]*postDiv[^"]*"[^>]*>[\s\S]*?href="([^"]+)"[\s\S]*?alt="([^"]+)"/g;
+                const res: Array<{ url: string; ttl: string }> = [];
+                let m2: RegExpExecArray | null;
+                while ((m2 = itemRe.exec(sHtml))) res.push({ url: m2[1], ttl: m2[2] });
+                const fb = res
+                  .map(r => {
+                    let sc = titleSim(title, r.ttl);
+                    if (enTitlePrefetched) sc = Math.max(sc, titleSim(enTitlePrefetched, r.ttl));
+                    return { ...r, sc };
+                  })
+                  .filter(r => r.sc > 0.42).sort((a, b) => b.sc - a.sc)[0];
+                if (fb?.url) bestLink = fb.url;
               }
             } catch { /* silent */ }
+          }
+          if (!bestLink) return;
+
+          // استخراج الجزء الأخير من الرابط (URL-encoded، محفوظ مع ترميز الموقع)
+          const slugM = bestLink.match(/\/([^/?#]+)\/?$/);
+          if (!slugM) return;
+          encodedSlug = slugM[1];
+
+          // ── الخطوة 2: بناء رابط الصفحة المستهدفة ─────────────────────────────
+          let targetUrl: string;
+          if (type === "movie") {
+            // للأفلام: استخدام bestLink مباشرة (يحتوي المسار الصحيح /anime-movies/... أو /anime/...)
+            targetUrl = bestLink;
           } else {
-            // Series: find episode N in div.epAll
-            const epRe = /<div[^>]+class="[^"]*epAll[^"]*"[\s\S]*?(<a[^>]+href="([^"]+)"[^>]*>\s*(?:حلقة\s*)?(\d+)\s*<\/a>)/g;
-            while ((m = epRe.exec(pageHtml))) {
-              const num = parseInt(m[3]) || 0;
-              if (num !== epNum) continue;
-              let epHtml = "";
-              try { epHtml = await cfOrOrkestGet(m[2]); } catch { break; }
-              if (isCfBlocked(epHtml)) break;
-              const dlM2 = epHtml.match(/class="downloadLinks"[\s\S]*?<a\s+href="([^"]+)"/);
-              if (dlM2) {
-                try {
-                  const dlHtml = await cfOrOrkestPost(dlM2[1]);
-                  const directM = dlHtml.match(/class="dl-link[^"]*"[^>]*href="([^"]+)"/);
-                  if (directM?.length) {
-                    const directUrl = directM[1];
-                    if (directUrl.includes(".mp4")) {
-                      const proxied = wrapMp4(directUrl, FASEL_BASE + "/");
-                      sendSource(proxied, `FaselHD · حلقة ${epNum}`, directUrl, proxied);
-                    }
-                  }
-                } catch { /* silent */ }
+            // للمسلسلات: أولاً نجرب الرابط المبني مباشرة، وكـ fallback نجلب صفحة السيريال
+            targetUrl = `${FASEL_BASE}/anime-episodes/${encodedSlug}-${EP_AR_ENC}-${epNum}`;
+          }
+
+          // ── الخطوة 3: جلب الصفحة مباشرة (غير محجوبة بـ CF من Replit) ──────────
+          const faselHeaders = {
+            "User-Agent"     : UA,
+            "Accept-Language": "ar-AR,ar;q=0.9,en;q=0.8",
+            "Referer"        : FASEL_BASE + "/",
+          };
+          let pageHtml = "";
+          try {
+            const pr = await fetch(targetUrl, {
+              headers: faselHeaders,
+              signal: AbortSignal.timeout(12_000),
+            });
+            if (pr.ok) pageHtml = await pr.text();
+          } catch { /* silent */ }
+
+          // إذا فشل الجلب المباشر، جرب cfProxy كـ fallback
+          if (!pageHtml || isCfBlocked(pageHtml)) {
+            try { pageHtml = await cfOrOrkestGet(targetUrl); } catch { /* silent */ }
+          }
+
+          // fallback لصفحات الحلقات: إذا فشل الرابط المبني مباشرة، اجلب صفحة السيريال واستخرج الرابط الفعلي
+          if (type !== "movie" && (!pageHtml || isCfBlocked(pageHtml))) {
+            try {
+              const seriesUrl = bestLink!;
+              let seriesHtml = "";
+              try {
+                const sr = await fetch(seriesUrl, { headers: faselHeaders, signal: AbortSignal.timeout(12_000) });
+                if (sr.ok) seriesHtml = await sr.text();
+              } catch { /* silent */ }
+              if (!seriesHtml || isCfBlocked(seriesHtml)) {
+                seriesHtml = await cfOrOrkestGet(seriesUrl);
               }
-              const ifrM = epHtml.match(/iframe[^>]+name="player_iframe"[^>]+src="([^"]+)"/);
-              if (ifrM) await sendExtracted(ifrM[1], `FaselHD · ح${epNum}`);
-              break;
-            }
+              if (seriesHtml && !isCfBlocked(seriesHtml)) {
+                // استخراج روابط الحلقات من div.epAll — الرابط يحتوي الحلقة في نهايته (-{N})
+                const epLinkRe = /href="(https?:\/\/www\.fasel-hd\.cam\/anime-episodes\/[^"]+)"/g;
+                let em: RegExpExecArray | null;
+                while ((em = epLinkRe.exec(seriesHtml))) {
+                  const epLink = em[1];
+                  // استخراج رقم الحلقة من نهاية الرابط
+                  const numM = epLink.match(/-(\d+)\/?$/);
+                  if (numM && parseInt(numM[1]) === epNum) {
+                    const epr = await fetch(epLink, { headers: faselHeaders, signal: AbortSignal.timeout(12_000) });
+                    if (epr.ok) { pageHtml = await epr.text(); targetUrl = epLink; }
+                    break;
+                  }
+                }
+              }
+            } catch { /* silent */ }
+          }
+
+          if (!pageHtml || isCfBlocked(pageHtml)) return;
+
+          // ── الخطوة 4: استخراج player_iframe (data-src) ─────────────────────────
+          // الموقع يستخدم lazy loading: data-src لا src
+          const ifrM = pageHtml.match(/name="player_iframe"[^>]+data-src="([^"]+)"/);
+          if (ifrM) {
+            const playerUrl = ifrM[1];
+            // جلب صفحة video_player مباشرة (غير محجوبة كذلك)
+            try {
+              const vpr = await fetch(playerUrl, {
+                headers: { ...faselHeaders, Referer: targetUrl },
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (vpr.ok) {
+                const vpHtml = await vpr.text();
+                // البحث عن روابط HLS/MP4 مباشرة في HTML قبل التشفير
+                const m3u8 = vpHtml.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*?)["']/);
+                if (m3u8) {
+                  const proxied = wrapHls(m3u8[1], playerUrl);
+                  sendSource(proxied, "FaselHD · HLS", m3u8[1], proxied);
+                }
+                const mp4 = vpHtml.match(/["'](https?:\/\/[^"']+\.mp4[^"']*?)["']/);
+                if (mp4) {
+                  const proxied = wrapMp4(mp4[1], playerUrl);
+                  sendSource(proxied, "FaselHD · MP4", mp4[1], proxied);
+                }
+              }
+            } catch { /* silent */ }
+          }
+
+          // ── الخطوة 5: روابط التحميل (downloadLinks) → جرب عبر cfProxy ─────────
+          const dlM = pageHtml.match(/class="downloadLinks"[\s\S]{0,1000}?<a[^>]+href="(https?:\/\/[^"]+)"/);
+          if (dlM) {
+            try {
+              const dlHtml = await cfProxyGet(dlM[1]);
+              if (!isCfBlocked(dlHtml)) {
+                const dlM3u8 = dlHtml.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*?)["']/);
+                const dlMp4  = dlHtml.match(/["'](https?:\/\/[^"']+\.mp4[^"']*?)["']/);
+                if (dlM3u8) {
+                  const proxied = wrapHls(dlM3u8[1], dlM[1]);
+                  sendSource(proxied, "FaselHD · تحميل HLS", dlM3u8[1], proxied);
+                } else if (dlMp4) {
+                  const proxied = wrapMp4(dlMp4[1], dlM[1]);
+                  sendSource(proxied, "FaselHD · تحميل MP4", dlMp4[1], proxied);
+                }
+              }
+            } catch { /* silent */ }
           }
         } catch { /* silent */ }
       }),
 
-      // ── EgyDead (tv9.egydead.live) — DISABLED ────────────────────────────────────
-      // Servers محملة عبر JS AJAX فقط — لا روابط ثابتة في HTML
-      // CF يحجب Replit+cfProxy كلياً → الكود يستخدم orkestDirectGet
-      // الكود كاملاً محفوظ في egydead-scraper.md و git history
-      Promise.resolve(),
+      // ── EgyDead (tv9.egydead.live) — قسم الأنمي العربي ──────────────────────────
+      // الوضع: صفحة الحلقة قابلة للوصول عبر Orkestr (EU IP، غير CF-محجوبة من Orkestr)
+      // القيد: روابط السيرفرات (data-link) محملة عبر JS فقط — لا توجد في HTML الثابت
+      // المحاولة: استخراج أي iframe/رابط src/data-link مباشرة من الـ HTML
+      scrapeAnimCached("egydead", async () => {
+        const ED_BASE = "https://tv9.egydead.live";
+        send("status", { msg: "EgyDead: جاري البحث…" });
+        try {
+          // الخطوة 1: البحث عن الحلقة (صفحات الحلقات مرتبة بالرابط /episode/{slug}-e{N}/)
+          const q = encodeURIComponent(title);
+          const searchHtml = await orkestDirectGet(
+            `${ED_BASE}/?s=${q}`, 15_000
+          );
+
+          // استخراج نتائج البحث (li.movieItem)
+          const itemRe = /<li[^>]+class="[^"]*movieItem[^"]*"[\s\S]*?href="([^"]+)"[\s\S]*?class="[^"]*BottomTitle[^"]*"[^>]*>([^<]+)</g;
+          const results: Array<{ url: string; ttl: string }> = [];
+          let srm: RegExpExecArray | null;
+          while ((srm = itemRe.exec(searchHtml))) {
+            results.push({ url: srm[1], ttl: srm[2].trim() });
+          }
+          if (!results.length) return;
+
+          // أفضل تطابق — حماية: لا نستخدم enTitlePrefetched الفارغ (يعطي مطابقة خاطئة)
+          const best = results
+            .map(r => {
+              let sc = titleSim(title, r.ttl);
+              if (enTitlePrefetched) sc = Math.max(sc, titleSim(enTitlePrefetched, r.ttl));
+              return { ...r, sc };
+            })
+            .filter(r => r.sc > 0.4)
+            .sort((a, b) => b.sc - a.sc)[0];
+          if (!best) return;
+
+          // استخراج slug من رابط الحلقة: /episode/{animeslug}-e{N}/
+          const slugM = best.url.match(/\/episode\/([^/]+)-e\d+/);
+          const animeSlug = slugM ? slugM[1] : null;
+          if (!animeSlug) return;
+
+          // الخطوة 2: بناء رابط الحلقة المطلوبة
+          const epVariants = [
+            `${ED_BASE}/episode/${animeSlug}-e${epNum}/`,
+            `${ED_BASE}/episode/${animeSlug}-e${String(epNum).padStart(2, "0")}/`,
+            `${ED_BASE}/episode/${animeSlug}-e${epNum}-1/`,
+          ];
+
+          for (const epUrl of epVariants) {
+            try {
+              const epHtml = await orkestDirectGet(epUrl, 12_000);
+
+              // البحث عن data-link في li.serversList (إن وُجد في HTML)
+              const dataLinks = [...epHtml.matchAll(/data-link=["']([^"']+)["']/g)].map(m => m[1]);
+              for (const dl of dataLinks) {
+                await sendExtracted(dl, `EgyDead · ${animeSlug}`);
+              }
+
+              // البحث عن iframe src مباشرة (ليس data-src)
+              const iframes = [...epHtml.matchAll(/<iframe[^>]+src=["']([^"']+)["']/g)].map(m => m[1]);
+              for (const ifr of iframes) {
+                if (!ifr.includes("youtube") && !ifr.includes("google")) {
+                  await sendExtracted(ifr, `EgyDead · embed`);
+                }
+              }
+
+              // إذا وجدنا شيئاً، انتهينا
+              if (dataLinks.length || iframes.some(i => !i.includes("youtube"))) break;
+            } catch { continue; }
+          }
+        } catch { /* silent — CF أو timeout */ }
+      }),
 
       // ── Aether / Nebula (nebula.aether.cx) — TMDB-native، CDN مفتوح ────────
       // nebula.aether.cx/movie/{id} → {stream_url:"..."} مباشرة بدون proxy
