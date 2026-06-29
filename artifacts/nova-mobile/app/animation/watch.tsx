@@ -759,26 +759,6 @@ export default function AnimationWatchScreen() {
           <Ionicons name="chevron-forward" size={13} color="rgba(139,92,246,0.5)" />
         </Pressable>
 
-        {/* Subtitle language toggle — only shown when tracks are available */}
-        {(globalArSubUrl || globalEnSubUrl) && (
-          <View style={w.subLangRow}>
-            <Ionicons name="text" size={13} color="rgba(255,255,255,0.45)" />
-            <Text style={w.subLangLabel}>الترجمة</Text>
-            {globalArSubUrl && (
-              <Pressable onPress={() => setSubLang("ar")} style={[w.subLangBtn, subLang === "ar" && w.subLangBtnActive]}>
-                <Text style={[w.subLangText, subLang === "ar" && w.subLangTextActive]}>عربي</Text>
-              </Pressable>
-            )}
-            {globalEnSubUrl && (
-              <Pressable onPress={() => setSubLang("en")} style={[w.subLangBtn, subLang === "en" && w.subLangBtnActive]}>
-                <Text style={[w.subLangText, subLang === "en" && w.subLangTextActive]}>English</Text>
-              </Pressable>
-            )}
-            <Pressable onPress={() => setSubLang("off")} style={[w.subLangBtn, subLang === "off" && w.subLangBtnActive]}>
-              <Text style={[w.subLangText, subLang === "off" && w.subLangTextActive]}>إيقاف</Text>
-            </Pressable>
-          </View>
-        )}
 
         {/* Sources — grouped by quality */}
         {(["1080p FHD", "720p HD", "360p SD"] as Quality[]).map(tier => {
