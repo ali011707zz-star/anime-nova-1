@@ -339,7 +339,7 @@ async function orkestGet(
         `${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`,
         { headers: orkestHeaders, signal: AbortSignal.timeout(12_000) },
       );
-      _orkestAlive = h.ok;
+      _orkestAlive = h.ok || h.status === 301 || h.status === 302;
     } catch { _orkestAlive = false; }
     _orkestCheckedAt = Date.now();
   }
@@ -359,7 +359,7 @@ async function orkestGet(
 // Wake-up ping عند إقلاع السيرفر (غير مُعيق — يستيقظ الخادم الخارجي مسبقاً)
 fetch(`${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`, {
   signal: AbortSignal.timeout(15_000),
-}).then(r => { _orkestAlive = r.ok; _orkestCheckedAt = Date.now(); })
+}).then(r => { _orkestAlive = r.ok || r.status === 301 || r.status === 302; _orkestCheckedAt = Date.now(); })
   .catch(() => { _orkestAlive = false; _orkestCheckedAt = Date.now(); });
 
 // ════════════════════════════════════════════════════════════════════
@@ -7851,6 +7851,218 @@ setImmediate(() => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+//  FASELHD-DB — GitHub JSON catalog + Orkestr relay for pages
+//  Repo: github.com/Ahmd3301/faselhd-db (auto-updated, 1864+ anime)
+//  Base: www.fasel-hd.cam — CF-protected (403 from Replit direct)
+//  Access: Orkestr EU relay (200 OK, HTML 107KB+)
+//  Catalog: GitHub raw JSON (no auth, no CF, instant)
+//  Video: download links from episode page → parseVideoUrl via Orkestr
+// ════════════════════════════════════════════════════════════════════
+
+const FASELHD_DB_RAW  = "https://raw.githubusercontent.com/Ahmd3301/faselhd-db/main/output";
+const FASELHD_DB_BASE = "https://www.fasel-hd.cam";
+
+// In-memory cache for GitHub JSON sections (30-min TTL)
+const _faselhdDbCache = new Map<string, { ts: number; items: any[] }>();
+const FASELHD_DB_TTL  = 30 * 60_000;
+const _faselhdDbPending = new Map<string, Promise<any[]>>();
+
+async function faselhdDbFetchSection(section: string): Promise<any[]> {
+  const now    = Date.now();
+  const cached = _faselhdDbCache.get(section);
+  if (cached && now - cached.ts < FASELHD_DB_TTL) return cached.items;
+
+  // Deduplicate concurrent fetches for the same section
+  const pending = _faselhdDbPending.get(section);
+  if (pending) return pending;
+
+  const promise: Promise<any[]> = (async () => {
+    try {
+      const r = await fetch(`${FASELHD_DB_RAW}/${section}.json`, {
+        headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
+        signal:  AbortSignal.timeout(25_000),
+      });
+      if (!r.ok) return cached?.items ?? [];
+      const data = await r.json() as { items: any[] };
+      const items = data.items ?? [];
+      _faselhdDbCache.set(section, { ts: Date.now(), items });
+      console.log(`[FaselhdDB] cached ${items.length} items for section "${section}"`);
+      return items;
+    } catch (e: any) {
+      console.warn(`[FaselhdDB] fetch ${section} failed:`, e?.message);
+      return cached?.items ?? [];
+    } finally {
+      _faselhdDbPending.delete(section);
+    }
+  })();
+  _faselhdDbPending.set(section, promise);
+  return promise;
+}
+
+/**
+ * Strip common Arabic prefixes and season suffixes from FaselHD item names
+ * so they can be compared to AniList romaji/english titles.
+ * "انمي Naruto: Shippuuden الموسم الثالث" → "Naruto: Shippuuden"
+ */
+function faselhdStripName(name: string): string {
+  return name
+    .replace(/^(?:انمي|أنمي|اونا|فيلم|أنمى)\s+/u, "")
+    .replace(/\s+(?:الموسم|الجزء)\s+\S+.*$/u, "")
+    .trim();
+}
+
+async function getFaselhdDbSources(
+  title: string, english: string | null, ep: number, isMovie?: boolean,
+): Promise<UnifiedSource[]> {
+  const out: UnifiedSource[] = [];
+  try {
+    // 1. Determine which GitHub JSON sections to search
+    const sections = isMovie ? ["anime-movies"] : ["anime"];
+
+    // 2. Fetch (cached) GitHub JSON
+    const allItems: any[] = [];
+    for (const sec of sections) {
+      const items = await faselhdDbFetchSection(sec);
+      allItems.push(...items);
+    }
+    if (!allItems.length) return out;
+
+    // 3. Title-match: romaji / english vs item name (after stripping Arabic prefix)
+    const q1 = normalize(english || title || "");
+    const q2 = normalize(title || "");
+    const scored = allItems.map(item => {
+      const clean  = faselhdStripName(item.name || "");
+      const slug   = (item.slug || "").replace(/-/g, " ");
+      const sc = Math.max(
+        similarity(q1, normalize(clean)),
+        similarity(q2, normalize(clean)),
+        asciiSimilarity(slug, q1),
+        asciiSimilarity(slug, q2),
+      );
+      return { ...item, _sc: sc };
+    })
+    .filter(x => x._sc > 0.42)
+    .sort((a, b) => b._sc - a._sc);
+
+    if (!scored.length) return out;
+    const best = scored[0];
+    console.log(`[FaselhdDB] best match: "${best.name}" (score ${best._sc.toFixed(2)}) → ${best.link}`);
+
+    // 4. Fetch series/movie page via Orkestr
+    const pageHtml = await orkestGet(best.link, `${FASELHD_DB_BASE}/`, 22_000);
+    if (!pageHtml || pageHtml.length < 1000) return out;
+    if (pageHtml.includes("Just a moment") || pageHtml.includes("cf-browser-verification")) return out;
+
+    let epHtml: string | null;
+
+    if (isMovie) {
+      // Movie: the series page IS the content page
+      epHtml = pageHtml;
+    } else {
+      // 5a. Parse epAll div for episode links
+      //     Pattern: href="https://www.fasel-hd.cam/anime-episodes/slug-الحلقة-ID">الحلقة N</a>
+      const epLinks: Array<{ url: string; num: number }> = [];
+      const epRe = /href="(https:\/\/www\.fasel-hd\.cam\/anime-episodes\/[^"]+)"[^>]*>\s*الحلقة\s*(\d+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = epRe.exec(pageHtml)) !== null) {
+        epLinks.push({ url: m[1], num: parseInt(m[2]) });
+      }
+
+      if (!epLinks.length) {
+        console.warn(`[FaselhdDB] no episode links found on ${best.link}`);
+        return out;
+      }
+
+      const target = epLinks.find(e => e.num === ep);
+      if (!target) {
+        console.warn(`[FaselhdDB] ep ${ep} not found (found: ${epLinks.map(e=>e.num).join(",")})`);
+        return out;
+      }
+
+      // 5b. Fetch episode page via Orkestr
+      epHtml = await orkestGet(target.url, best.link, 22_000);
+      if (!epHtml || epHtml.length < 1000) return out;
+    }
+
+    // 6. Extract all download link hrefs from the episode page
+    const dlLinks: string[] = [];
+    const dlRe = /class="downloadLinks[^"]*"[\s\S]*?<a\s+href="([^"]{10,})"[^>]*>/g;
+    let dlM: RegExpExecArray | null;
+    while ((dlM = dlRe.exec(epHtml!)) !== null) {
+      dlLinks.push(dlM[1]);
+    }
+
+    // 7. Also try video_player token URLs via Orkestr
+    const playerTokens: string[] = [];
+    const tokenRe = /video_player\?player_token=([^"'&\s]{20,})/g;
+    let tkM: RegExpExecArray | null;
+    while ((tkM = tokenRe.exec(epHtml!)) !== null) {
+      playerTokens.push(`${FASELHD_DB_BASE}/video_player?player_token=${tkM[1]}`);
+    }
+
+    // 8. Try download links: fetch via Orkestr → parse for direct video
+    const dlAttempts = dlLinks.slice(0, 4).map(async (dlUrl): Promise<UnifiedSource | null> => {
+      try {
+        const dlHtml = await orkestGet(dlUrl, best.link, 12_000);
+        if (!dlHtml || dlHtml.length < 100) return null;
+        const video = parseVideoUrl(dlHtml);
+        if (!video || !video.url.startsWith("http")) return null;
+        const faRef = encodeURIComponent(dlUrl);
+        const directUrl = video.type === "hls"
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(video.url)}&ref=${faRef}`
+          : `/api/anime/video-proxy?url=${encodeURIComponent(video.url)}&ref=${faRef}`;
+        return {
+          name: `FaselHD · ${isMovie ? "فيلم" : `ح${ep}`} · HD`,
+          url:  video.url,
+          quality: "HD",
+          qualityRank: 10,
+          site: "faselhd_db",
+          directUrl,
+          directType: video.type,
+        };
+      } catch { return null; }
+    });
+
+    // 9. Try video_player token pages: Orkestr fetch → parseVideoUrl
+    const playerAttempts = playerTokens.slice(0, 2).map(async (pUrl): Promise<UnifiedSource | null> => {
+      try {
+        const pHtml = await orkestGet(pUrl, best.link, 15_000);
+        if (!pHtml || pHtml.length < 100) return null;
+        const video = parseVideoUrl(pHtml);
+        if (!video || !video.url.startsWith("http")) return null;
+        const faRef = encodeURIComponent(pUrl);
+        const directUrl = video.type === "hls"
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(video.url)}&ref=${faRef}`
+          : `/api/anime/video-proxy?url=${encodeURIComponent(video.url)}&ref=${faRef}`;
+        return {
+          name: `FaselHD · ${isMovie ? "فيلم" : `ح${ep}`} · JW`,
+          url:  video.url,
+          quality: "HD",
+          qualityRank: 9,
+          site: "faselhd_db",
+          directUrl,
+          directType: video.type,
+        };
+      } catch { return null; }
+    });
+
+    const settled = await Promise.allSettled([...dlAttempts, ...playerAttempts]);
+    for (const r of settled) {
+      if (r.status === "fulfilled" && r.value) out.push(r.value);
+    }
+
+  } catch (e: any) {
+    console.warn("[FaselhdDB]", e?.message);
+  }
+  return out;
+}
+
+// Pre-warm the anime section cache on startup (non-blocking)
+setImmediate(() => {
+  faselhdDbFetchSection("anime").catch(() => {});
+});
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -8071,6 +8283,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("vidfast",       () => getVidFastAnimeSources(title, english, ep, anilistId),  false, 22000),
       // ── WITanime-DB — محتوى عربي مدبلج (hlswish/luluvdo/darkibox) ─────
       // scrapeCached("witanime_db",  () => getWitanimeDBSources(title, english, ep, anilistId), false, 25000), // مخفي مؤقتاً
+      // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
+      scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
@@ -8195,6 +8409,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       // witanime_db: removed
+      case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       default: break;
     }
 
