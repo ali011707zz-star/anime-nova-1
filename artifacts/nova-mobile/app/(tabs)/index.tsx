@@ -272,7 +272,7 @@ export default function HomeScreen() {
               {todayEps.map((ep) => (
                 <Pressable
                   key={`${ep.media.id}-${ep.episode}`}
-                  onPress={() => router.push(`/anime/${ep.media.id}?title=${encodeURIComponent(ep.media.title.romaji)}&english=${encodeURIComponent(ep.media.title.english || ep.media.title.romaji)}` as any)}
+                  onPress={() => router.push(`/watch?anilistId=${ep.media.id}&ep=${ep.episode}&title=${encodeURIComponent(ep.media.title.romaji)}&english=${encodeURIComponent(ep.media.title.english || ep.media.title.romaji)}&cover=${encodeURIComponent(ep.media.coverImage.large)}` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
                   <Image source={{ uri: ep.media.coverImage.large }} style={todayEpStyles.img} contentFit="cover" />

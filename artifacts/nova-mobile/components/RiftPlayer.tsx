@@ -505,7 +505,7 @@ export function RiftPlayer({
         waitsToMinimizeStalling: false,     // iOS: ابدأ فوراً بدون انتظار
         minBufferMs: 1000,                  // Android: ابدأ بعد 1ث فقط (أسرع)
         maxBufferMs: 30000,                 // Android: احتفظ بـ30ث في الذاكرة
-        bufferForPlaybackMs: 400,           // Android: ابدأ بعد 0.4ث (أسرع بدء)
+        bufferForPlaybackMs: 150,           // Android: ابدأ بعد 0.15ث (أسرع بدء)
         bufferForPlaybackAfterRebufferMs: 1200, // Android: استأنف بعد 1.2ث
       };
     } catch {}
