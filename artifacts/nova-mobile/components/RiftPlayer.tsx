@@ -654,7 +654,13 @@ export function RiftPlayer({
   */
   useEffect(() => {
     const rawUrl = currentSrc?.subtitleUrl;
-    if (!rawUrl) { setLoadedCues([]); return; }
+    if (!rawUrl) {
+      setLoadedCues([]);
+      /* إيقاف الترجمة تلقائياً عند التبديل لمصدر بلا subtitle —
+         يمنع ظهور نص فارغ أو ترجمة قديمة من المصدر السابق */
+      setSubOn(false);
+      return;
+    }
 
     /* ── حساب الـ URL الإنجليزي الخام (قبل أي ترجمة) ── */
     const base = getBaseUrl();
