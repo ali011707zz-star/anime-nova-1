@@ -957,6 +957,7 @@ function ScraperPicker({
   const isNextDisabled = totalEps < 900
     ? ep >= totalEps
     : nextAiringEp ? ep >= nextAiringEp - 1 : false;
+  const isMovie = anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT";
 
   /* Flatten + filter + deduplicate all fetched sources — memoised to avoid re-work on every SSE tick */
   const { displaySources, embedFallbacks } = useMemo(() => {
@@ -1027,16 +1028,20 @@ function ScraperPicker({
           <ChevronRight className="w-5 h-5 text-white" />
         </button>
         <div className="flex items-center gap-2">
-          <button onClick={onPrevEp} disabled={ep <= 1}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
-            style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(10px)", color: "rgba(255,255,255,0.65)" }}>
-            <ChevronRight className="w-3.5 h-3.5" />السابقة
-          </button>
-          <button onClick={onNextEp} disabled={isNextDisabled}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
-            style={{ background: "rgba(109,40,217,0.55)", border: "1px solid rgba(139,92,246,0.38)", backdropFilter: "blur(10px)", color: "rgba(196,181,253,0.92)" }}>
-            التالية<ChevronLeft className="w-3.5 h-3.5" />
-          </button>
+          {!isMovie && (
+            <button onClick={onPrevEp} disabled={ep <= 1}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
+              style={{ background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(10px)", color: "rgba(255,255,255,0.65)" }}>
+              <ChevronRight className="w-3.5 h-3.5" />السابقة
+            </button>
+          )}
+          {!isMovie && (
+            <button onClick={onNextEp} disabled={isNextDisabled}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold font-['Cairo'] active:scale-90 disabled:opacity-20 transition-all"
+              style={{ background: "rgba(109,40,217,0.55)", border: "1px solid rgba(139,92,246,0.38)", backdropFilter: "blur(10px)", color: "rgba(196,181,253,0.92)" }}>
+              التالية<ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1479,6 +1484,7 @@ function EpisodePlayer({
   title, epTitle, cover, ep, totalEps, animeTitle, animeId,
   userId,
   initialServer, downloadUrl, subtitleUrl, subtitleSite, skipTimes, hideSubtitle,
+  isMovie,
   onBack, onNextEp, onPrevEp, onEpisodeSelect, onChangeQuality, onTierExhausted,
 }: {
   servers: string[]; quality: Quality; allServers: Record<Quality, string[]>;
@@ -1487,6 +1493,7 @@ function EpisodePlayer({
   userId?: string | null;
   initialServer?: number; downloadUrl?: string; subtitleUrl?: string; subtitleSite?: string; skipTimes?: SkipTimes;
   hideSubtitle?: boolean;
+  isMovie?: boolean;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
   onEpisodeSelect?: (ep: number) => void;
   onChangeQuality: (q: Quality) => void;
@@ -2317,13 +2324,15 @@ function EpisodePlayer({
       </div>
 
       {/* Next ep */}
-      <button
-        onClick={onNextEp}
-        disabled={totalEps < 900 && ep >= totalEps}
-        className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0 flex-row-reverse"
-        style={{ color: "rgba(255,255,255,0.42)", opacity: (totalEps < 900 && ep >= totalEps) ? 0.18 : 1 }}>
-        <ChevronLeft className="w-4 h-4" />التالية
-      </button>
+      {!isMovie && (
+        <button
+          onClick={onNextEp}
+          disabled={totalEps < 900 && ep >= totalEps}
+          className="flex items-center gap-1 text-[12px] font-bold font-['Cairo'] active:scale-95 transition-all shrink-0 flex-row-reverse"
+          style={{ color: "rgba(255,255,255,0.42)", opacity: (totalEps < 900 && ep >= totalEps) ? 0.18 : 1 }}>
+          <ChevronLeft className="w-4 h-4" />التالية
+        </button>
+      )}
     </div>
   );
 
@@ -3022,6 +3031,7 @@ export default function WatchPage() {
     /* Navigate via wouter — WatchWrapper adds key={search} so Watch remounts with fresh params */
     const goParams: Record<string, string> = { anime: String(animeId), ep: String(n), title: titleParam, english: englishParam, cover };
     if (totalEps > 0 && totalEps < 990) goParams.totalEps = String(totalEps);
+    if (anime?.format) goParams.format = anime.format;
     navigate(`/watch?${new URLSearchParams(goParams)}`);
   }
 
@@ -3440,6 +3450,7 @@ export default function WatchPage() {
           animeTitle={animeTitle}
           animeId={animeId}
           cover={cover} ep={ep} totalEps={totalEps}
+          isMovie={anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT"}
           downloadUrl={playerDlUrl}
           subtitleUrl={playerSubUrl || kawaiiSubUrl}
           subtitleSite={playerSrcSite}
