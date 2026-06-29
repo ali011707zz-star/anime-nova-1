@@ -1,3 +1,4 @@
+- [آخر الأخبار news section](news-section.md) — MAL RSS (200 from Replit); /api/news route; Nova Mobile 4th tab; comments via tmdbId="news-{id}"; ANN=403 from Replit
 - [EgyDead scraper](egydead-scraper.md) — CF blocks cfProxy+Replit IPs; use orkestDirectGet(); search→episode slug→construct URL; servers AJAX-only (no static sources); added to animation.ts
 - [MiruroAPI/hop KickAssAnime research](miruro-hop-research.md) — pipe episodes=200 OK; pipe sources=444 (CF blocks Replit); kaa.lt /api/episode/{hash}=200 returns vidco.pro embed; vidco.pro=CF-blocked; hop NOT integrable server-side from Replit
 - [cinepro-core future](cinepro-future.md) — 50+ TMDB-native movie/TV sources; needs self-hosted Node.js 20+ instance; deploy on Render/Railway; add CINEPRO_URL env; good for animation section (English audio)
