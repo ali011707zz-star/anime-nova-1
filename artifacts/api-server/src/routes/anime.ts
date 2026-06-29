@@ -7128,15 +7128,35 @@ async function arabseedFindEpisodeUrl(q: string, ep: number): Promise<string | n
   return matchEp(targeted) ?? matchEp(asc) ?? matchEp(desc) ?? null;
 }
 
+/** Find a movie page URL on ArabSeed by title (no episode number required). */
+async function arabseedFindMovieUrl(q: string): Promise<string | null> {
+  const enc = encodeURIComponent(q);
+  const qWords = q.toLowerCase().replace(/[^\x20-\x7E]/g, " ").split(/\s+/).filter(w => w.length >= 3);
+
+  const posts = await arabseedFetchPosts(`search=${enc}&per_page=20`);
+  for (const post of posts) {
+    const pTitle = arabseedDecodeTitle(post.title?.rendered || "");
+    // Skip posts that are episodes (contain "الحلقة")
+    if (/الحلقة\s+\d+/.test(pTitle)) continue;
+    const pLow = pTitle.toLowerCase().replace(/[^\x20-\x7E]/g, " ");
+    const allMatch = qWords.length > 0 && qWords.every(w => pLow.includes(w));
+    const sim = titleSimilarity(q, pTitle);
+    if (allMatch || sim >= 0.42) return post.link;
+  }
+  return null;
+}
+
 async function getArabSeedSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, isMovie = false,
 ): Promise<UnifiedSource[]> {
   try {
     // Try English title first (most reliable), then romaji
     const queries = [english, title].filter((q): q is string => !!q && q.trim().length > 0);
     let epUrl: string | null = null;
     for (const q of queries) {
-      epUrl = await arabseedFindEpisodeUrl(q, ep);
+      epUrl = isMovie
+        ? await arabseedFindMovieUrl(q)
+        : await arabseedFindEpisodeUrl(q, ep);
       if (epUrl) break;
     }
     if (!epUrl) return [];
@@ -8254,7 +8274,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
-      scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep)),
+      scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep, isMovie)),
       scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep),   true, 22000),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
