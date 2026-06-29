@@ -134,7 +134,7 @@ function getSourceTier(src: Source): QualityTier {
       lbl.includes("Smashy") || lbl.includes("multiembed") ||
       lbl.includes("Najm") || lbl.startsWith("VidSrc VIP") ||
       lbl.startsWith("Wecima") || lbl.startsWith("TopCinema") ||
-      lbl.startsWith("Moviz") || lbl.startsWith("StarDima") ||
+      lbl.startsWith("Moviz") ||
       lbl.startsWith("aflaam") || lbl.startsWith("LordFlix") ||
       lbl.startsWith("ArabSeed") || lbl.startsWith("SeePanal")
     ) return "1080p FHD";
@@ -253,7 +253,11 @@ export default function AnimationWatch() {
   const playSource = useCallback((src: Source) => {
     setSelSrc(src);
     setStep("playing");
-  }, []);
+    const lbl = (src.label || "").toLowerCase();
+    if (lbl.startsWith("aflaam") || lbl.startsWith("arabseed")) {
+      setSubCues([]); setSubStatus("off");
+    }
+  }, []); // eslint-disable-line
 
   /* ── playNext: retry direct URL once, then auto-cascade to next OK source ── */
   const playNext = useCallback(() => {
@@ -1443,7 +1447,7 @@ function getAnimTag(label: string): string {
   if (l.startsWith("vidlink"))    return "VL";
   if (l.startsWith("lordflix"))   return "LF";
   if (l.startsWith("starcima"))   return "SC";
-  if (l.startsWith("stardima"))   return "SD";
+  if (l.startsWith("stardima"))   return "??"; // StarDima removed
   if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "MG";
   if (l.includes("ميغا") || l.startsWith("mega"))     return "MG";
   if (l.startsWith("aflaam"))     return "AF";
