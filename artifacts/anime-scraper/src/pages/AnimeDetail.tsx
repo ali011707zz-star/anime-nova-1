@@ -9,6 +9,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
 import CommentsSheet from "@/components/CommentsSheet";
+import { saveAnime, unsaveAnime } from "@/lib/db";
 
 const ADULT_WARN = "قد يحتوي هذا الأنمي على مشاهد جنسية أو عنف أو مشاهد للبالغين فقط وغير مناسبة للأطفال أو المشاهدة العائلية.\n\nينصح بمراعاة المشاهدين";
 
@@ -274,10 +275,17 @@ export default function AnimeDetail() {
 
   // ── Actions ──
   const toggleSave = () => {
-    const list: number[] = JSON.parse(localStorage.getItem("savedAnime") || "[]");
     const id = parseInt(params.id!);
-    const upd = saved ? list.filter(i => i !== id) : [...list, id];
-    localStorage.setItem("savedAnime", JSON.stringify(upd));
+    if (saved) {
+      unsaveAnime(user?.id ?? null, id);
+    } else {
+      saveAnime(
+        user?.id ?? null,
+        id,
+        anime?.title?.romaji ?? anime?.title?.english ?? undefined,
+        anime?.coverImage?.large ?? undefined,
+      );
+    }
     setSaved(!saved);
   };
 

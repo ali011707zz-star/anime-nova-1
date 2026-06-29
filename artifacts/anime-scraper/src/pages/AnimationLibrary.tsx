@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { Link, useLocation } from "wouter";
 import { Search, Film, Star, ChevronDown, Loader2, SlidersHorizontal, X, Calendar, Flame, Award } from "lucide-react";
@@ -87,6 +87,7 @@ export default function AnimationLibrary() {
 
   const searchRef   = useRef<HTMLInputElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loaderRef   = useRef<HTMLDivElement | null>(null);
 
   const genres = type === "movie" ? MOVIE_GENRES : TV_GENRES;
   const sortOptions = type === "movie" ? SORT_OPTIONS : SORT_OPTIONS_TV;
@@ -138,6 +139,18 @@ export default function AnimationLibrary() {
     setItems([]); setPage(1); setHasMore(true); setLoading(false);
     load(type, genre, sort, year, 1, gen);
   }, [type, genre, sort, year]);
+
+  /* ── Infinite scroll observer ── */
+  useEffect(() => {
+    if (!loaderRef.current) return;
+    const obs = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loading) {
+        load(type, genre, sort, year, page + 1, genRef.current);
+      }
+    }, { threshold: 0.1 });
+    obs.observe(loaderRef.current);
+    return () => obs.disconnect();
+  }, [hasMore, loading, page, type, genre, sort, year, load]);
 
   useEffect(() => {
     if (!searchQ.trim()) { setSearchResults([]); return; }
@@ -490,14 +503,10 @@ export default function AnimationLibrary() {
               ))}
             </div>
 
+            {/* Infinite scroll sentinel */}
             {hasMore && (
-              <div className="mt-8 flex justify-center">
-                <button onClick={() => load(type, genre, sort, year, page + 1, genRef.current)} disabled={loading}
-                  className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-black text-white/60 font-['Cairo'] active:scale-95 transition-transform disabled:opacity-50"
-                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}>
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronDown className="w-4 h-4" />}
-                  تحميل المزيد
-                </button>
+              <div ref={loaderRef} className="flex justify-center py-8">
+                {loading && <Loader2 className="w-5 h-5 animate-spin text-white/30" />}
               </div>
             )}
             {!hasMore && items.length > 0 && (
