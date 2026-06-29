@@ -710,6 +710,11 @@ export function RiftPlayer({
 
       if (cancelled) return;
 
+      /* تأخير قصير قبل جلب الترجمة من الشبكة حتى يبدأ الفيديو أولاً
+         (بعد كلا الكاش — in-memory + AsyncStorage — للحفاظ على سرعتهما) */
+      await new Promise<void>(r => setTimeout(r, 280));
+      if (cancelled) return;
+
       if (url.includes("translate-vtt")) {
         // 🌊 متدفق: ترجمة عربية chunk by chunk عبر SSE
         setSubLoading(true);
@@ -759,7 +764,7 @@ export function RiftPlayer({
     })();
 
     return () => { cancelled = true; streamAbort.abort(); setSubLoading(false); };
-  }, [currentSrc?.subtitleUrl, anilistId, episode, subLang]); // eslint-disable-line
+  }, [currentSrc?.subtitleUrl, srcIdx, anilistId, episode, subLang]); // eslint-disable-line
 
   /* ─── Auto-enable subtitles when source provides a subtitle URL ─── */
   useEffect(() => {

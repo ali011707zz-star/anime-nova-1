@@ -442,7 +442,9 @@ export default function WatchScreen() {
     }
     if (screen !== "native") {
       frozenRef.current = false;
-      /* لا نمسح frozenSources فوراً حتى لا يومض الشاشة عند الرجوع */
+      /* نمسح frozenSources عند الخروج من المشغّل حتى يستخدم
+         riftSources الجديد (مع كل المصادر) عند العودة واختيار مصدر آخر */
+      setFrozenSources([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, riftSources]);
