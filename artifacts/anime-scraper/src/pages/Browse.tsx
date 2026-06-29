@@ -50,8 +50,10 @@ const YEARS = Array.from({ length: CUR_YEAR - 1989 }, (_, i) => CUR_YEAR - i);
 function buildQuery(genre: string, format: string, year: number | "", page: number, season = "") {
   const gf = genre  ? `, genre: "${genre}"` : "";
   const ff = format ? `, format: ${format}` : `, format_in: [TV, MOVIE, OVA, ONA]`;
-  const yf = year   ? `, seasonYear: ${year}` : "";
-  const sf = season && year ? `, season: ${season}` : "";
+  /* AniList يحتاج seasonYear عند تصفية الموسم — إذا لم يختر المستخدم عاماً نستخدم العام الحالي */
+  const effectiveYear = year || (season ? CUR_YEAR : "");
+  const yf = effectiveYear ? `, seasonYear: ${effectiveYear}` : "";
+  const sf = season ? `, season: ${season}` : "";
   const notIn = genre === "Ecchi" ? `["Hentai"]` : `["Ecchi", "Hentai"]`;
   return `query {
   Page(page: ${page}, perPage: 24) {

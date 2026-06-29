@@ -98,6 +98,9 @@ export default function Library() {
   const [searchQuery, setSearchQuery] = useState("");
   const [favChars, setFavChars] = useState<any[]>(() => loadFavChars());
 
+  /* ── Refresh favChars from localStorage on every mount ── */
+  useEffect(() => { setFavChars(loadFavChars()); }, []);
+
   const loadData = useCallback(async () => {
     const hist = await loadWatchHistory(user?.id ?? null);
     setHistory(hist);
