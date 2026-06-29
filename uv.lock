@@ -1142,6 +1142,18 @@ wheels = [
 ]
 
 [[package]]
+name = "orkestr"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e8/7b/0dc7b919d64ebfe24dea393b5c7d96bf36746ae46946e2fc6a744dd4512d/orkestr-0.1.4.tar.gz", hash = "sha256:a1d9b8406422331fceaf9989358ec6e2b9aedf8f92d4517f01438469d6ea48e2", size = 25909, upload-time = "2026-06-18T18:28:00.825Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/46/d8a18b76dedaeb996ebf699b125c93c1499643394eab01f008c413db8145/orkestr-0.1.4-py3-none-any.whl", hash = "sha256:b4fdd82cc2ba9a5b7ca4f8054bcce4279155915652b09a522ef283e3b1bf41c6", size = 19310, upload-time = "2026-06-18T18:27:59.266Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1530,6 +1542,7 @@ dependencies = [
     { name = "flask-sqlalchemy" },
     { name = "gunicorn" },
     { name = "hopx-ai" },
+    { name = "orkestr" },
     { name = "psycopg2-binary" },
 ]
 
@@ -1542,6 +1555,7 @@ requires-dist = [
     { name = "flask-sqlalchemy", specifier = ">=3.1.1" },
     { name = "gunicorn", specifier = ">=26.0.0" },
     { name = "hopx-ai", specifier = ">=0.5.0" },
+    { name = "orkestr", specifier = ">=0.1.4" },
     { name = "psycopg2-binary", specifier = ">=2.9.12" },
 ]
 
