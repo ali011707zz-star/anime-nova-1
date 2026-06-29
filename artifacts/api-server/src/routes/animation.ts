@@ -2089,8 +2089,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const apiUrl  = `https://pixeldrain.com/api/file/${pdId}`;
               const proxied = wrapMp4(apiUrl, "https://pixeldrain.com/");
               sendSource(proxied, label, proxied, proxied);
-            } else if (srvName === "ST") {
-              // Streamtape — محجوب/متغير الـ obfuscation → متجاهَل
             } else if (srvName === "VT") {
               try {
                 const extracted = await callExtractApi(link);
@@ -2224,9 +2222,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const apiUrl  = `https://pixeldrain.com/api/file/${pdId}`;
               const proxied = wrapMp4(apiUrl, "https://pixeldrain.com/");
               sendSource(proxied, label, proxied, proxied);
-
-            } else if (srvName === "ST") {
-              // Streamtape — محجوب/متغير الـ obfuscation → متجاهَل
 
             } else if (srvName === "VT") {
               // VidTube → استخراج عبر callExtractApi (extractVideoDeep)
