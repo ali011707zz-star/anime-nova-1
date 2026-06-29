@@ -1,15 +1,18 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import path from "path";
+import http from "http";
 import { fileURLToPath } from "url";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import userdataRouter from "./routes/userdata.js";
 import commentsRouter from "./routes/comments.js";
 import adminRouter from "./routes/admin.js";
+import dbRelayRouter from "./routes/dbRelay.js";
 import reportRouter from "./routes/report.js";
 import telegramRouter from "./routes/telegram.js";
 import authTokenRouter from "./routes/authToken.js";
+import newsRouter from "./routes/news.js";
 import { logger } from "./lib/logger";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 import { validateAnonToken, checkRateLimit } from "./lib/security.js";
@@ -88,11 +91,31 @@ export async function createApp(): Promise<Express> {
   });
 
   app.use("/api", router);
+  app.use("/api", newsRouter);
   app.use("/api", userdataRouter);
   app.use("/api", commentsRouter);
   app.use("/api", adminRouter);
+  app.use("/api", dbRelayRouter);
   app.use(reportRouter);
   app.use(telegramRouter);
+
+  // ── Proxy /nova-mobile/* → port 3000 (Nova Mobile static server) ──
+  app.use("/nova-mobile", (req, res) => {
+    const qs = req.url.includes("?") ? req.url.substring(req.url.indexOf("?")) : "";
+    const target = `http://127.0.0.1:3000/nova-mobile${req.path}${qs}`;
+    const proxyReq = http.request(
+      target,
+      { method: req.method, headers: { ...req.headers, host: "127.0.0.1:3000" } },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode!, proxyRes.headers as any);
+        proxyRes.pipe(res, { end: true });
+      }
+    );
+    proxyReq.on("error", () => {
+      if (!res.headersSent) res.status(502).send("Nova Mobile غير متاح حالياً");
+    });
+    req.pipe(proxyReq, { end: true });
+  });
 
   // Serve built frontend in production
   const frontendDist = path.resolve(__dirname, "../../anime-scraper/dist/public");
