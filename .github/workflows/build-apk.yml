@@ -28,7 +28,7 @@ jobs:
           run_install: false
 
       - name: Install monorepo dependencies
-        run: pnpm install --filter @workspace/nova-mobile...
+        run: pnpm install --filter @workspace/nova-mobile... --no-frozen-lockfile
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8
