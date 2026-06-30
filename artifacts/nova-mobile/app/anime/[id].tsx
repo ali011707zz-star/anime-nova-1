@@ -330,9 +330,11 @@ export default function AnimeDetailScreen() {
             <Image source={{ uri: anime.coverImage.extraLarge || anime.coverImage.large }} style={d.cover} />
           ) : null}
           <View style={d.infoText}>
-            <Text style={d.titleMain} numberOfLines={2}>{anime.title?.romaji}</Text>
-            {anime.title?.native && (
-              <Text style={d.titleNative} numberOfLines={1}>{anime.title.native}</Text>
+            <Text style={d.titleMain} numberOfLines={2}>
+              {anime.title?.english || anime.title?.romaji}
+            </Text>
+            {anime.title?.romaji && anime.title?.english && (
+              <Text style={d.titleNative} numberOfLines={1}>{anime.title.romaji}</Text>
             )}
             <View style={d.badgeRow}>
               {anime.format && (
@@ -596,7 +598,7 @@ export default function AnimeDetailScreen() {
                           </View>
                         ) : null}
                       </View>
-                      <Text style={d.relTitle} numberOfLines={2}>{n.title?.romaji}</Text>
+                      <Text style={d.relTitle} numberOfLines={2}>{n.title?.english || n.title?.romaji}</Text>
                     </Pressable>
                   );
                 })}
@@ -628,7 +630,7 @@ export default function AnimeDetailScreen() {
                           </View>
                         ) : null}
                       </View>
-                      <Text style={d.simTitle} numberOfLines={2}>{rec.title.romaji}</Text>
+                      <Text style={d.simTitle} numberOfLines={2}>{rec.title?.english || rec.title?.romaji}</Text>
                     </Pressable>
                   );
                 })}
