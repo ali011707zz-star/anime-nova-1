@@ -9,7 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { I18nManager, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -19,7 +19,6 @@ import { AppProvider } from "@/context/AppContext";
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // RTL: نُفعّل مرة واحدة فقط عند أول تشغيل
-// لا نستخدم Updates.reloadAsync() هنا لأنها تُسبب crash loop
 try {
   I18nManager.allowRTL(true);
   if (!I18nManager.isRTL) {
@@ -65,13 +64,23 @@ export default function RootLayout() {
     ...Ionicons.font,
   });
 
+  // إجبار إخفاء الـ splash بعد 3.5 ثانية حتى لو فشل تحميل الخطوط
+  const [forceShow, setForceShow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setForceShow(true);
+      SplashScreen.hideAsync().catch(() => {});
+    }, 3500);
+    return () => clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
+      SplashScreen.hideAsync().catch(() => {});
     }
   }, [fontsLoaded, fontError]);
 
-  if (!fontsLoaded && !fontError) return null;
+  if (!fontsLoaded && !fontError && !forceShow) return null;
 
   return (
     <SafeAreaProvider>

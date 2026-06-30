@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
+import { secureStreamFetch } from "@/utils/secureApi";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
@@ -243,9 +244,8 @@ export default function WatchScreen() {
     const freshSrcs: Src[] = [];
 
     try {
-      const response = await fetch(url, {
-        signal: abortRef.current.signal,
-        headers: { Accept: "text/event-stream" },
+      const response = await secureStreamFetch(url, {
+        signal: abortRef.current.signal as any,
       });
 
       if (!response.ok) {
