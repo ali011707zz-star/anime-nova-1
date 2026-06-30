@@ -11,7 +11,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBaseUrl } from "@/utils/api";
-import { fetch as expoFetch } from "expo/fetch";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -356,10 +355,10 @@ export default function AnimationWatchScreen() {
     const freshSrcs: AnimSrc[] = []; // تتبع المصادر الجديدة من SSE لحفظها
 
     try {
-      const response = await expoFetch(url, {
+      const response = await fetch(url, {
         signal: abortRef.current.signal,
         headers: { Accept: "text/event-stream" },
-      }) as unknown as Response;
+      });
       if (!response.ok) {
         setLoading(false);
         setScreen(s => s === "loading" ? "picker" : s);
