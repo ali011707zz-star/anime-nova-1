@@ -10,7 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { I18nManager } from "react-native";
+import { I18nManager, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -39,8 +39,8 @@ function RootLayoutNav() {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: "#09090B" },
-        animation: "fade",
-        animationDuration: 180,
+        animation: Platform.OS === "android" ? "fade_from_bottom" : "fade",
+        animationDuration: Platform.OS === "android" ? 120 : 180,
       }}
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
