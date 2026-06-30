@@ -3196,67 +3196,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── StreamGuide (streamguide.cfd) — TMDB-native، 23 خادم HLS ────────────
-      // URL format: /{ServerName}/movie/{id}?verify=false → providers[].sources[].url
-      // Confirmed working: Crius, Theia return HLS at /x/... CDN
-      scrapeAnimCached("streamguide", async () => {
-        if (!tmdbId) return;
-        try {
-          send("status", { msg: "StreamGuide: جاري الاستخراج…" });
-          const SG_BASE = "https://streamguide.cfd";
-          const SG_HDRS = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-            "Origin": SG_BASE,
-            "Referer": SG_BASE + "/",
-          };
-          const HONEYPOT = new Set(["nomorflix.icu", "www.nomorflix.icu"]);
-          const SG_SERVERS = ["Crius", "Theia", "Apollo", "Zeus", "Hades"];
-
-          type SgSource = { url: string; type?: string; quality?: string; language?: string };
-          type SgResp = { providers?: Array<{ sources?: SgSource[] }> };
-
-          const buildUrl = (srv: string) => type === "movie"
-            ? `${SG_BASE}/${srv}/movie/${tmdbId}?verify=false`
-            : `${SG_BASE}/${srv}/tv/${tmdbId}/${season}/${epNum}?verify=false`;
-
-          // Try servers in parallel, take first valid result
-          const results = await Promise.allSettled(
-            SG_SERVERS.map(srv =>
-              fetch(buildUrl(srv), { headers: SG_HDRS, signal: AbortSignal.timeout(12_000) })
-                .then(r => r.ok ? r.json() as Promise<SgResp> : Promise.reject(new Error(`HTTP ${r.status}`)))
-            )
-          );
-
-          const allSources: SgSource[] = [];
-          for (const res of results) {
-            if (res.status !== "fulfilled") continue;
-            const data = res.value as SgResp;
-            const srcs = (data?.providers || [])
-              .flatMap(p => p.sources || [])
-              .filter((s: SgSource) => {
-                if (!s?.url) return false;
-                try { return !HONEYPOT.has(new URL(s.url).hostname); } catch { return false; }
-              })
-              .filter((s: SgSource) =>
-                s.type === "hls" || s.url.includes(".m3u8") || s.url.includes("/x/"),
-              );
-            allSources.push(...srcs);
-            if (allSources.length >= 3) break;
-          }
-
-          let sent = 0;
-          for (const src of allSources.slice(0, 5)) {
-            const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(SG_BASE + "/")}`;
-            const probeOk = await probeHlsProxy(proxied);
-            if (!probeOk) continue;
-            const qual = src.quality || "HLS";
-            sendSource(proxied, `StreamGuide · ${qual}`, proxied, proxied);
-            if (++sent >= 2) break;
-          }
-        } catch { /* silent */ }
-      }),
-
       // ── Hexa (hexa.su / flixer.su) — TMDB-native HLS متعدد السيرفرات ──────────
       // CDN: nxt.cfw69.workers.dev — CORS * — يعمل من Replit مباشرة
       // cooldown: enc-dec.app/api/enc-hexa يعيد 500 مع "Next retry: N minutes"
