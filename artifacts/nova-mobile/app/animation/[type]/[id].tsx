@@ -422,7 +422,7 @@ export default function AnimationDetailScreen() {
         {trailerKey ? (
           <WebView
             source={{
-              uri: `https://www.youtube.com/embed/${trailerKey}?autoplay=1&rel=0&fs=1&playsinline=1&modestbranding=1&enablejsapi=1`,
+              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>*{margin:0;padding:0;background:#000;}html,body{width:100%;height:100%;overflow:hidden;display:flex;align-items:center;justify-content:center;}iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0;}</style></head><body><iframe src="https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1" allow="autoplay;fullscreen;picture-in-picture" allowfullscreen></iframe></body></html>`,
             }}
             style={{ flex: 1 }}
             allowsFullscreenVideo

@@ -626,8 +626,8 @@ export default function AnimationWatchScreen() {
     if (Platform.OS === "web") {
       return (
         <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
-          <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, left: 12 }]}>
-            <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+            <Ionicons name="arrow-forward" size={18} color="#fff" />
           </Pressable>
           <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
@@ -670,7 +670,7 @@ export default function AnimationWatchScreen() {
           pointerEvents="box-none"
         >
           <Pressable onPress={() => setScreen("picker")} style={w.videoBackBtn}>
-            <Ionicons name="arrow-back" size={18} color="#fff" />
+            <Ionicons name="arrow-forward" size={18} color="#fff" />
           </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={w.videoTitle} numberOfLines={1}>{titleStr}</Text>
@@ -718,7 +718,7 @@ export default function AnimationWatchScreen() {
         </View>
         {/* Right: back button (always same position) */}
         <Pressable onPress={handleBack} style={w.headerBack}>
-          <Ionicons name="arrow-back" size={17} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="arrow-forward" size={17} color="rgba(255,255,255,0.75)" />
         </Pressable>
       </View>
 
