@@ -6,10 +6,15 @@ on:
     paths:
       - 'artifacts/nova-mobile/**'
   workflow_dispatch:
+    inputs:
+      backend_domain:
+        description: 'Backend API domain (e.g. https://yourapp.replit.app)'
+        required: false
+        default: 'https://anime-nova.orkestr.run'
 
 jobs:
   build:
-    name: Build APK (Local Gradle)
+    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
@@ -39,25 +44,34 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Generate Android native project (prebuild)
+      - name: Generate Android native project (expo prebuild)
         working-directory: artifacts/nova-mobile
         run: npx expo prebuild --platform android --clean
         env:
-          EXPO_PUBLIC_DOMAIN: https://anime-nova.orkestr.run
+          EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://anime-nova.orkestr.run' }}
 
       - name: Make Gradlew executable
         working-directory: artifacts/nova-mobile/android
         run: chmod +x gradlew
 
-      - name: Build release APK
+      - name: Build debug APK (signed with debug key — installable)
         working-directory: artifacts/nova-mobile/android
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./gradlew assembleDebug --no-daemon
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.parallel=true"
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: anime-nova-release-apk
-          path: artifacts/nova-mobile/android/app/build/outputs/apk/release/app-release*.apk
+          name: anime-nova-debug-apk
+          path: artifacts/nova-mobile/android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+
+      - name: Print APK info
+        run: |
+          APK="artifacts/nova-mobile/android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ -f "$APK" ]; then
+            echo "✅ APK built successfully: $(du -sh $APK | cut -f1)"
+          else
+            echo "❌ APK not found"
+          fi
