@@ -15,18 +15,15 @@ let _cfProxyAlive: boolean | null = null;
 let _cfProxyCheckedAt = 0;
 
 function isCfBlock(html: string): boolean {
-  return !html || html.length < 300
+    return !html || html.length < 300
     || html.includes("Just a moment")
     || html.includes("cf-browser-verification")
-    || html.includes("Attention Required");
-}
+    || html.includes("Attention Required!");
+} // <-- هذا هو القوس الذي حُذف بالخطأ، قم بإعادته هنا
 
-<<<<<<< HEAD
 const MOBILE_UA =
-  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36";
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.6367.82 Mobile Safari/537.36";
 
-=======
->>>>>>> 366570a (Fix issues with dubbed content loading and improve navigation performance)
 async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<string | null> {
   const now = Date.now();
   if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
@@ -53,6 +50,7 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
   }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   // 2. Try direct fetch with desktop UA
   try {
     const r = await fetch(url, {
@@ -70,6 +68,19 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     const r = await fetch(url, {
       headers: { "User-Agent": BROWSER_UA, Referer: referer || url, Accept: "text/html,*/*" },
 >>>>>>> 366570a (Fix issues with dubbed content loading and improve navigation performance)
+=======
+  // 2. Try direct fetch with desktop UA
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: referer || url,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+      },
+>>>>>>> 296d0fb (Update app to fix display issues and improve content loading)
       signal: AbortSignal.timeout(Math.min(timeoutMs, 12000)),
     });
     if (r.ok) {
@@ -78,6 +89,7 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     }
   } catch { /* fall through */ }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
   // 3. Try with mobile UA (CF sometimes lets mobile through)
   try {
@@ -96,6 +108,19 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     const orkUrl = `${ORKESTR_BASE}/api/anime/proxy-text?url=${encodeURIComponent(url)}`;
     const r = await fetch(orkUrl, { signal: AbortSignal.timeout(timeoutMs + 5000) });
 >>>>>>> 366570a (Fix issues with dubbed content loading and improve navigation performance)
+=======
+  // 3. Try with mobile UA (CF sometimes lets mobile through)
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": MOBILE_UA,
+        Referer: referer || url,
+        Accept: "text/html,*/*;q=0.9",
+        "Accept-Language": "ar-SA,ar;q=0.9",
+      },
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 10000)),
+    });
+>>>>>>> 296d0fb (Update app to fix display issues and improve content loading)
     if (r.ok) {
       const html = await r.text();
       if (!isCfBlock(html)) return html;
