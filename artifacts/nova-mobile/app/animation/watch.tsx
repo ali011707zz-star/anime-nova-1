@@ -213,6 +213,8 @@ export default function AnimationWatchScreen() {
   const [globalArSubUrl, setGlobalArSubUrl] = useState<string | undefined>();
   const [globalEnSubUrl, setGlobalEnSubUrl] = useState<string | undefined>();
   const [subLang, setSubLang] = useState<"ar" | "en" | "off">("ar");
+  /* تُقرأ من الإعدادات عند التهيئة */
+  const subPrefLoadedRef = useRef(false);
 
   const abortRef         = useRef<AbortController | null>(null);
   const lastSaveTs       = useRef(0);
@@ -231,6 +233,10 @@ export default function AnimationWatchScreen() {
   useEffect(() => {
     AsyncStorage.getItem(progressKey).then(v => {
       if (v) setResumeTime(parseFloat(v) || 0);
+    });
+    /* احترام إعداد الترجمة من الإعدادات */
+    AsyncStorage.getItem("pref-anim-sub").then(v => {
+      if (v === "false") setSubLang("off");
     });
 
     /* فحص الكاش المحلي للمصادر — يتيح الفتح الفوري */
@@ -499,7 +505,7 @@ export default function AnimationWatchScreen() {
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const activeSubUrl = subLang === "ar" ? globalArSubUrl : subLang === "en" ? globalEnSubUrl : undefined;
-    const NO_SUB_PREFIXES = ["aflaam", "ArabSeed", "arabseed"];
+    const NO_SUB_PREFIXES = ["aflaam", "ArabSeed", "arabseed", "SeePanal", "seepanel", "seepan"];
     return directSrcs.map(s => {
       const lbl = s.label || "";
       const wantsNoSub = NO_SUB_PREFIXES.some(p => lbl.toLowerCase().startsWith(p.toLowerCase()));

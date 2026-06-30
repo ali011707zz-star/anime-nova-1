@@ -3130,7 +3130,7 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Auto-play: fire on first available source of any quality ── */
+  /* ── Auto-open picker: فور وصول أول مصدر يُظهر الـ picker فوراً بدلاً من التشغيل التلقائي ── */
   useEffect(() => {
     if (autoPlayedRef.current) return;
     if (!autoPlayReady) return;
@@ -3146,48 +3146,31 @@ export default function WatchPage() {
         allSrcs.push(s);
       }
     }
-    /* إذا كان المصدر الوحيد هو _resume، شغّله فوراً (تسريع الفتح بدون انتظار المكاشطات).
-       إذا فشل الرابط المحفوظ، يعالجه المشغّل داخلياً ويتنقل للمصادر الأخرى. */
 
     if (allSrcs.length > 0) {
       autoPlayedRef.current = true;
-      /* أولوية التشغيل التلقائي: AF → AW → KW → AS → AL → OK → باقي المصادر */
-      const SITE_AUTO_PRI: Record<string, number> = {
-        animeify: 6, animewitcher: 5, kawaii: 4, arabseed: 3,
-        animephoenix: 2, animelek: 2, okanime: 1,
-      };
-      allSrcs.sort((a, b) => {
-        const pa = SITE_AUTO_PRI[a.site || ""] ?? 0;
-        const pb = SITE_AUTO_PRI[b.site || ""] ?? 0;
-        if (pa !== pb) return pb - pa;
-        return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
-      });
-      const firstSrc   = allSrcs[0];
-      const clickedUrl = firstSrc.directUrl || firstSrc.url;
-      const clickedTier = getSrcQualityTier(firstSrc);
-      const srvMap: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
-      srvMap[clickedTier].push(clickedUrl);
-      for (const s of allSrcs) {
-        const u = s.directUrl || s.url;
-        if (!u || u === clickedUrl) continue;
-        const tier = getSrcQualityTier(s);
-        if (!srvMap[tier].includes(u)) srvMap[tier].push(u);
+      /* _resume: شغّله مباشرة (رابط محفوظ سابقاً — سريع وموثوق) */
+      const resumeSrc = allSrcs.find(s => s.site === "_resume");
+      if (resumeSrc && allSrcs.length === 1) {
+        const clickedUrl = resumeSrc.directUrl || resumeSrc.url;
+        const clickedTier = getSrcQualityTier(resumeSrc);
+        const srvMap: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
+        srvMap[clickedTier].push(clickedUrl);
+        setPlayerDlUrl(undefined);
+        const skipSub = ARABIC_SITES.has(resumeSrc.site || "");
+        setPlayerSubUrl(skipSub ? undefined : (resumeSrc.subtitleUrl || undefined));
+        if (skipSub) setKawaiiSubUrl(undefined);
+        playerSrcSiteRef.current = resumeSrc.site || "";
+        setPlayerSrcSite(resumeSrc.site || "");
+        setPlayerServers(srvMap);
+        setQuality(clickedTier);
+        setInitialSrv(0);
+        setPlayKey(k => k + 1);
+        setPhase("player");
+        return;
       }
-      setPlayerDlUrl(undefined);
-      // مصادر عربية: لا ترجمة خارجية (نعتمد على إعدادات المزود)
-      const firstSkipSub = ARABIC_SITES.has(firstSrc.site || "");
-      setPlayerSubUrl(firstSkipSub ? undefined : (firstSrc.subtitleUrl || undefined));
-      if (firstSkipSub) setKawaiiSubUrl(undefined);
-      playerSrcSiteRef.current = firstSrc.site || "";
-      setPlayerSrcSite(firstSrc.site || "");
-      setPlayerServers(srvMap);
-      setQuality(clickedTier);
-      setInitialSrv(0);
-      /* playKey++ يضمن إعادة تهيئة EpisodePlayer حتى لو تشابه المفتاح السابق */
-      setPlayKey(k => k + 1);
-      /* Save for quick-resume (skip _resume + skip embed URLs to avoid iframe flicker on next visit) */
-      if (animeId && firstSrc.site !== "_resume" && !isIframeUrl(clickedUrl)) saveLastSrc(animeId, ep, clickedUrl, firstSrc.qualityRank ?? 0);
-      setPhase("player");
+      /* لجميع المصادر الأخرى: أظهر الـ picker فوراً ليختار المستخدم */
+      setShowPicker(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotSources, phase, autoPlayReady]);

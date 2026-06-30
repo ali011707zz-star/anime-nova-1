@@ -128,8 +128,8 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
     alignItems: "center", justifyContent: "center",
   },
-  headerTitle: { color: "#fff", fontSize: 13, fontWeight: "700", fontFamily: "Cairo_700Bold" },
-  headerSub: { color: "rgba(255,255,255,0.4)", fontSize: 11, fontFamily: "Cairo_400Regular" },
+  headerTitle: { color: "#fff", fontSize: 13, fontWeight: "700", fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
+  headerSub: { color: "rgba(255,255,255,0.4)", fontSize: 11, fontFamily: "Cairo_400Regular", textAlign: "right" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 24 },
   loadingText: { color: "rgba(255,255,255,0.5)", fontFamily: "Cairo_400Regular" },
   errorIcon: {
