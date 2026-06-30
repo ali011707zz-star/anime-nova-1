@@ -309,16 +309,8 @@ export default function WatchScreen() {
 
             setSources(prev => {
               const next = [...prev, src];
-              /* انتقل للـ picker فور وصول أول مصدر */
-              if (!autoPlayFiredRef.current) {
-                setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
-              }
-              /* شغّل أول مصدر جيد تلقائياً */
-              const isGood = isDirectPlayable(src);
-              if (isGood && !autoPlayFiredRef.current) {
-                autoPlayFiredRef.current = true;
-                setTimeout(() => { setPlayingSrc(src); setScreen("native"); }, 0);
-              }
+              /* انتقل للـ picker فور وصول أول مصدر — بدون تشغيل تلقائي */
+              setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
               return next;
             });
           } catch { }

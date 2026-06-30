@@ -202,6 +202,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1, color: "#fff", fontSize: 15,
     fontWeight: "800", fontFamily: "Cairo_700Bold",
+    textAlign: "right", writingDirection: "rtl",
   },
   heroRow: { flexDirection: "row", gap: 14, padding: 16 },
   poster: {
@@ -211,7 +212,7 @@ const styles = StyleSheet.create({
   },
   posterPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
   heroInfo: { flex: 1, paddingTop: 4, gap: 8 },
-  heroTitle: { color: "#fff", fontSize: 16, fontWeight: "900", fontFamily: "Cairo_700Bold" },
+  heroTitle: { color: "#fff", fontSize: 16, fontWeight: "900", fontFamily: "Cairo_700Bold", textAlign: "right", writingDirection: "rtl" },
   badge: {
     alignSelf: "flex-start",
     paddingHorizontal: 10, paddingVertical: 3,
