@@ -9,13 +9,15 @@ function toAbsUrl(domain: string): string {
   return `https://${domain}`;
 }
 
+const PRODUCTION_SERVER = "https://anime-nova.orkestr.run";
+
 /**
  * Returns the base URL for API calls — portable across all environments.
  * Priority:
- * 1. EXPO_PUBLIC_DOMAIN env var (production / deployed build)
- * 2. window.location.origin when running on web (Replit preview or production web)
+ * 1. EXPO_PUBLIC_DOMAIN env var (EAS build / GitHub Actions)
+ * 2. window.location.origin when running on web (Replit preview)
  * 3. EXPO_PUBLIC_REPLIT_DEV_DOMAIN (injected by Replit native dev)
- * 4. http://localhost:8080 — explicit fallback for local native dev
+ * 4. Production server — NEVER localhost on a real device
  */
 export function getBaseUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
@@ -25,10 +27,9 @@ export function getBaseUrl(): string {
     return window.location.origin;
   }
 
-  // بيئة Replit native dev
   const replitDomain = process.env.EXPO_PUBLIC_REPLIT_DEV_DOMAIN;
   if (replitDomain) return toAbsUrl(replitDomain);
 
-  // fallback لـ local dev (جهاز + Metro bundler محلي)
-  return "http://localhost:5000";
+  // على الأجهزة الحقيقية: دائماً السيرفر الإنتاجي، لا localhost
+  return PRODUCTION_SERVER;
 }
