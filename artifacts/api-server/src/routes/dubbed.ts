@@ -6,6 +6,7 @@ const router = Router();
 const SC_BASE = "https://starcima.com";
 const AT_BASE = "https://www.arabic-toons.com";
 const CF_PROXY_BASE = "http://localhost:8000";
+const ORKESTR_BASE = process.env.ORKESTR_RELAY_URL || process.env.ORKESTR_URL || "https://anime-nova.orkestr.run";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -13,7 +14,14 @@ const BROWSER_UA =
 let _cfProxyAlive: boolean | null = null;
 let _cfProxyCheckedAt = 0;
 
-async function cfGet(url: string, referer?: string, timeoutMs = 15000): Promise<string | null> {
+function isCfBlock(html: string): boolean {
+  return !html || html.length < 300
+    || html.includes("Just a moment")
+    || html.includes("cf-browser-verification")
+    || html.includes("Attention Required");
+}
+
+async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<string | null> {
   const now = Date.now();
   if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
     try {
@@ -22,23 +30,45 @@ async function cfGet(url: string, referer?: string, timeoutMs = 15000): Promise<
     } catch { _cfProxyAlive = false; }
     _cfProxyCheckedAt = now;
   }
-  if (!_cfProxyAlive) {
+
+  // 1. Try CF proxy (localhost:8000) if alive
+  if (_cfProxyAlive) {
     try {
-      const r = await fetch(url, {
-        headers: { "User-Agent": BROWSER_UA, Referer: referer || url, Accept: "text/html,*/*" },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      return r.ok ? r.text() : null;
-    } catch { return null; }
+      const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
+      proxyUrl.searchParams.set("url", url);
+      if (referer) proxyUrl.searchParams.set("ref", referer);
+      proxyUrl.searchParams.set("timeout", String(Math.floor(timeoutMs / 1000)));
+      const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(timeoutMs + 3000) });
+      if (r.ok) {
+        const html = await r.text();
+        if (!isCfBlock(html)) return html;
+      }
+    } catch { /* fall through */ }
   }
+
+  // 2. Try direct fetch (works if Replit IP is not blocked)
   try {
-    const proxyUrl = new URL(`${CF_PROXY_BASE}/fetch`);
-    proxyUrl.searchParams.set("url", url);
-    if (referer) proxyUrl.searchParams.set("ref", referer);
-    proxyUrl.searchParams.set("timeout", String(Math.floor(timeoutMs / 1000)));
-    const r = await fetch(proxyUrl.toString(), { signal: AbortSignal.timeout(timeoutMs + 3000) });
-    return r.ok ? r.text() : null;
-  } catch { return null; }
+    const r = await fetch(url, {
+      headers: { "User-Agent": BROWSER_UA, Referer: referer || url, Accept: "text/html,*/*" },
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 12000)),
+    });
+    if (r.ok) {
+      const html = await r.text();
+      if (!isCfBlock(html)) return html;
+    }
+  } catch { /* fall through */ }
+
+  // 3. Orkestr relay (EU IP — bypasses Replit IP blocks and CF challenges)
+  try {
+    const orkUrl = `${ORKESTR_BASE}/api/anime/proxy-text?url=${encodeURIComponent(url)}`;
+    const r = await fetch(orkUrl, { signal: AbortSignal.timeout(timeoutMs + 5000) });
+    if (r.ok) {
+      const html = await r.text();
+      if (!isCfBlock(html)) return html;
+    }
+  } catch { /* fall through */ }
+
+  return null;
 }
 
 // ── L1 cache for catalog pages ──
