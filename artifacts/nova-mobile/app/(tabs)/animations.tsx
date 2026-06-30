@@ -91,7 +91,7 @@ export default function AnimationsScreen() {
     const base = getBaseUrl();
     fetch(`${base}/api/dubbed/catalog?page=1`)
       .then(r => r.json())
-      .then(d => setDubbedSeries((d.series || []).slice(0, 14)))
+      .then(d => setDubbedSeries((d.results || d.series || d.items || []).slice(0, 14)))
       .catch(() => {});
   }, []);
 
