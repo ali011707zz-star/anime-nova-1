@@ -21,9 +21,12 @@ function isCfBlock(html: string): boolean {
     || html.includes("Attention Required");
 }
 
+<<<<<<< HEAD
 const MOBILE_UA =
   "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36";
 
+=======
+>>>>>>> 366570a (Fix issues with dubbed content loading and improve navigation performance)
 async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<string | null> {
   const now = Date.now();
   if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
@@ -49,6 +52,7 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     } catch { /* fall through */ }
   }
 
+<<<<<<< HEAD
   // 2. Try direct fetch with desktop UA
   try {
     const r = await fetch(url, {
@@ -60,6 +64,12 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
         "Accept-Encoding": "gzip, deflate, br",
         "Cache-Control": "no-cache",
       },
+=======
+  // 2. Try direct fetch (works if Replit IP is not blocked)
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": BROWSER_UA, Referer: referer || url, Accept: "text/html,*/*" },
+>>>>>>> 366570a (Fix issues with dubbed content loading and improve navigation performance)
       signal: AbortSignal.timeout(Math.min(timeoutMs, 12000)),
     });
     if (r.ok) {
@@ -68,6 +78,7 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     }
   } catch { /* fall through */ }
 
+<<<<<<< HEAD
   // 3. Try with mobile UA (CF sometimes lets mobile through)
   try {
     const r = await fetch(url, {
@@ -79,6 +90,12 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
       },
       signal: AbortSignal.timeout(Math.min(timeoutMs, 10000)),
     });
+=======
+  // 3. Orkestr relay (EU IP — bypasses Replit IP blocks and CF challenges)
+  try {
+    const orkUrl = `${ORKESTR_BASE}/api/anime/proxy-text?url=${encodeURIComponent(url)}`;
+    const r = await fetch(orkUrl, { signal: AbortSignal.timeout(timeoutMs + 5000) });
+>>>>>>> 366570a (Fix issues with dubbed content loading and improve navigation performance)
     if (r.ok) {
       const html = await r.text();
       if (!isCfBlock(html)) return html;
