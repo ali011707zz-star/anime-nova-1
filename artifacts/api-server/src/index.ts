@@ -18,10 +18,6 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
   console.log("[bootstrap] ✅ Supabase متصل مباشرة عبر متغيرات البيئة");
 }
 
-// ── تشغيل migration على Supabase ──
-const { runSupabaseMigration } = await import("./lib/supabaseMigrate.js");
-await runSupabaseMigration();
-
 // ── تحميل التطبيق ──
 const { createApp }          = await import("./app.js");
 const { logger }             = await import("./lib/logger.js");
@@ -39,11 +35,19 @@ app.listen(port, host, (err) => {
 
   logger.info({ port }, "Server listening");
 
+  // ── تشغيل migration بعد بدء الاستماع (لا يُعيق فتح المنفذ) ──
+  (async () => {
+    try {
+      const { runSupabaseMigration } = await import("./lib/supabaseMigrate.js");
+      await runSupabaseMigration();
+    } catch (e: any) {
+      console.warn("[bootstrap] ⚠️ فشل migration:", e.message);
+    }
+  })();
+
   initEmailService().catch(() => {});
 
   // ── مزامنة ENV ↔ DB عند كل startup ──────────────────────────────────────
-  // اتجاه 1: ENV → DB  (تثبيت القيم الجديدة)
-  // اتجاه 2: DB → ENV  (استعادة القيم المحفوظة إن لم تكن في ENV)
   (async () => {
     try {
       const { setDbConfig, getDbConfig } = await import("./lib/dbConfig.js");
@@ -92,7 +96,6 @@ app.listen(port, host, (err) => {
   const smtpUser   = process.env.SMTP_USER;
   const smtpPass   = process.env.SMTP_PASS;
   if (orkestrUrl && smtpUser && smtpPass) {
-    // جرب smtp-env-patch أولاً (كود جديد)، ثم smtp-config كـ fallback (كود قديم)
     fetch(`${orkestrUrl}/api/admin/smtp-env-patch`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
@@ -100,7 +103,6 @@ app.listen(port, host, (err) => {
     }).then(r => r.ok ? r.json() : Promise.reject(r.status)).then((d: any) => {
       if (d.ok) console.log("[smtp-sync] ✅ Orkestr smtp-env-patch →", d.smtp_user);
     }).catch(() => {
-      // fallback: جرب smtp-config (يحفظ في DB — يعمل بعد نشر الكود الجديد)
       fetch(`${orkestrUrl}/api/admin/smtp-config`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-relay-secret": appSecret },
