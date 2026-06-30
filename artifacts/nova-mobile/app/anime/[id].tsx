@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
+import { secureFetch } from "@/utils/secureApi";
 
 const { width: W } = Dimensions.get("window");
 
@@ -173,6 +174,7 @@ export default function AnimeDetailScreen() {
   const [saved, setSaved] = useState(false);
   const [warnDismissed, setWarnDismissed] = useState(false);
   const [descAr, setDescAr] = useState<string | null>(null);
+  const [descLoading, setDescLoading] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [favCharIds, setFavCharIds] = useState<Set<number>>(new Set());
 
