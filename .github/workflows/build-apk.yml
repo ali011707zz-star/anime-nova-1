@@ -1,0 +1,44 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'artifacts/nova-mobile/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK (EAS)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: artifacts/nova-mobile
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: artifacts/nova-mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build APK
+        run: eas build --platform android --profile preview --non-interactive --no-wait
+
+      - name: Print build URL
+        run: |
+          echo "✅ Build submitted to EAS!"
+          echo "Track your build at: https://expo.dev/accounts/ali011707s-team/projects/anime-nova-/builds"
