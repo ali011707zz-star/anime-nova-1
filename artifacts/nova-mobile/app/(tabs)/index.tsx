@@ -53,9 +53,9 @@ export default function HomeScreen() {
   /* TMDB animation movies */
   const [animMovies, setAnimMovies] = useState<TmdbMovie[]>([]);
   useEffect(() => {
-    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=ar&with_genres=16&with_original_language=ja&with_origin_country=JP&include_adult=false&sort_by=popularity.desc&page=1`)
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=ar&with_genres=16&without_original_language=ja&include_adult=false&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
-      .then(d => setAnimMovies((d.results || []).filter((m: any) => m.original_language === 'ja').slice(0, 12)))
+      .then(d => setAnimMovies((d.results || []).slice(0, 12)))
       .catch(() => {});
   }, []);
 
@@ -358,24 +358,33 @@ export default function HomeScreen() {
                     </Pressable>
                   </View>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-                    {dubbedSeries.map((item: any, idx: number) => (
-                      <Pressable
-                        key={item.id || idx}
-                        onPress={() => router.push({ pathname: "/dubbed/[seriesId]" as any, params: { seriesId: item.id, title: item.title } })}
-                        style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-                      >
-                        {item.poster ? (
-                          <Image source={{ uri: item.poster }} style={todayStyles.img} resizeMode="cover" />
-                        ) : (
-                          <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
-                            <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
-                          </View>
-                        )}
-                        <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
-                          <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
-                        </LinearGradient>
-                      </Pressable>
-                    ))}
+                    {dubbedSeries.map((item: any, idx: number) => {
+                      const rawImg = item.image || item.poster || "";
+                      const imgUri = rawImg
+                        ? rawImg.startsWith("http") ? rawImg : `${BASE_URL}${rawImg}`
+                        : null;
+                      return (
+                        <Pressable
+                          key={item.key || item.id || idx}
+                          onPress={() => {
+                            const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
+                            router.push({ pathname: "/dubbed/[seriesId]" as any, params: { seriesId: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
+                          }}
+                          style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        >
+                          {imgUri ? (
+                            <Image source={{ uri: imgUri }} style={todayStyles.img} resizeMode="cover" />
+                          ) : (
+                            <View style={[todayStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                              <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                            </View>
+                          )}
+                          <LinearGradient colors={["transparent", "rgba(0,0,0,0.92)"]} style={todayStyles.grad}>
+                            <Text style={todayStyles.title} numberOfLines={2}>{item.title}</Text>
+                          </LinearGradient>
+                        </Pressable>
+                      );
+                    })}
                   </ScrollView>
                 </View>
               )}

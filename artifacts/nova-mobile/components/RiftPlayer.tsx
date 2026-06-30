@@ -595,7 +595,7 @@ export function RiftPlayer({
       return;
     }
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
-    const t = setTimeout(() => switchSource(nextIdx), 5000);
+    const t = setTimeout(() => switchSource(nextIdx), 1500);
     return () => clearTimeout(t);
   }, [error, srcIdx, sources.length]); // eslint-disable-line
 
