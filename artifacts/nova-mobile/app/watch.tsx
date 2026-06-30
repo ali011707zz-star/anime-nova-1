@@ -12,7 +12,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { fetch as expoFetch } from "expo/fetch";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
@@ -243,11 +242,8 @@ export default function WatchScreen() {
     const url = `${base}/api/anime/sources-stream?${params}`;
     const freshSrcs: Src[] = [];
 
-    /* على web: استخدم native browser fetch (يدعم streaming SSE)
-       على native: استخدم expoFetch (يدعم ReadableStream على Android/iOS) */
-    const fetcher = Platform.OS === "web" ? fetch : expoFetch;
     try {
-      const response = await (fetcher as typeof fetch)(url, {
+      const response = await fetch(url, {
         signal: abortRef.current.signal,
         headers: { Accept: "text/event-stream" },
       });
