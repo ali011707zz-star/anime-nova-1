@@ -372,8 +372,12 @@ export default function AnimationsScreen() {
                 onPress={() => router.push({ pathname: "/dubbed/[seriesId]" as any, params: { seriesId: item.id, title: item.title } })}
                 style={s.dubbedCard}
               >
-                {item.poster ? (
-                  <Image source={{ uri: item.poster }} style={s.dubbedImg} resizeMode="cover" />
+                {(item.image || item.poster) ? (
+                  <Image
+                    source={{ uri: item.image ? `${getBaseUrl()}${item.image}` : item.poster }}
+                    style={s.dubbedImg}
+                    resizeMode="cover"
+                  />
                 ) : (
                   <View style={[s.dubbedImg, { backgroundColor: "rgba(139,92,246,0.08)", alignItems: "center", justifyContent: "center" }]}>
                     <Ionicons name="tv" size={22} color="rgba(255,255,255,0.2)" />
