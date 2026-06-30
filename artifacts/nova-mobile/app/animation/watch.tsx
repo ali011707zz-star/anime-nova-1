@@ -134,6 +134,7 @@ function getAnimTag(label: string): string {
   if (l.startsWith("lordflix"))    return "LF";
   if (l.startsWith("starcima"))    return "SC";
   if (l.startsWith("stardima"))    return "SD";
+  if (l.startsWith("mycima") || l.startsWith("ماي سيما") || l.startsWith("maycima")) return "MC";
   if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "MG";
   if (l.includes("ميغا") || l.startsWith("mega"))        return "MG";
   if (l.startsWith("aflaam"))      return "AF";

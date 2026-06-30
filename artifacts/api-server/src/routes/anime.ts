@@ -3255,7 +3255,7 @@ async function getRistoAnimeSources(
     }
     if (!seriesHtml || isCloudflareBlock(seriesHtml)) return [];
 
-    const postIdM = seriesHtml.match(/post_id:\s*'(\d+)'/);
+    const postIdM = seriesHtml.match(/post_id:\s*['"](\d+)['"]/);   // single OR double quotes
     if (!postIdM) return [];
     const postId = postIdM[1];
 
@@ -3689,12 +3689,15 @@ async function getAnime4up2Sources(
   // Each request has a 7s timeout (previously 20s), so parallel runs cost at most 7s.
   const fastCandidates: string[] = [];
   const seenSlugs = new Set<string>();
+  const A4UP2_ALT = "https://w1.anime4up.rest";           // نطاق بديل — نفس المحتوى
   for (const q of [english, title].filter(Boolean) as string[]) {
     const slug = toSlug(q as string);
     if (!slug || seenSlugs.has(slug)) continue;
     seenSlugs.add(slug);
-    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr)}/`);
-    fastCandidates.push(`${A4UP2_BASE}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجمة")}/`);
+    for (const base of [A4UP2_BASE, A4UP2_ALT]) {
+      fastCandidates.push(`${base}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr)}/`);
+      fastCandidates.push(`${base}/episode/${encodeURIComponent(slug + "-الحلقة-" + epStr + "-مترجمة")}/`);
+    }
   }
 
   // Try fast candidates in parallel (7s timeout each)
