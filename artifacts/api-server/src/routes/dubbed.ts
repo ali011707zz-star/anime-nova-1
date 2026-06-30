@@ -21,6 +21,9 @@ function isCfBlock(html: string): boolean {
     || html.includes("Attention Required");
 }
 
+const MOBILE_UA =
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36";
+
 async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<string | null> {
   const now = Date.now();
   if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
@@ -46,10 +49,17 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     } catch { /* fall through */ }
   }
 
-  // 2. Try direct fetch (works if Replit IP is not blocked)
+  // 2. Try direct fetch with desktop UA
   try {
     const r = await fetch(url, {
-      headers: { "User-Agent": BROWSER_UA, Referer: referer || url, Accept: "text/html,*/*" },
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: referer || url,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+      },
       signal: AbortSignal.timeout(Math.min(timeoutMs, 12000)),
     });
     if (r.ok) {
@@ -58,10 +68,17 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     }
   } catch { /* fall through */ }
 
-  // 3. Orkestr relay (EU IP — bypasses Replit IP blocks and CF challenges)
+  // 3. Try with mobile UA (CF sometimes lets mobile through)
   try {
-    const orkUrl = `${ORKESTR_BASE}/api/anime/proxy-text?url=${encodeURIComponent(url)}`;
-    const r = await fetch(orkUrl, { signal: AbortSignal.timeout(timeoutMs + 5000) });
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": MOBILE_UA,
+        Referer: referer || url,
+        Accept: "text/html,*/*;q=0.9",
+        "Accept-Language": "ar-SA,ar;q=0.9",
+      },
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 10000)),
+    });
     if (r.ok) {
       const html = await r.text();
       if (!isCfBlock(html)) return html;
