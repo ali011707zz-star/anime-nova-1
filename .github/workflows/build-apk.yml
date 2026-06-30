@@ -11,9 +11,6 @@ jobs:
   build:
     name: Build APK (EAS)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: artifacts/nova-mobile
 
     steps:
       - name: Checkout repository
@@ -24,8 +21,14 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install monorepo dependencies
+        run: pnpm install --filter @workspace/nova-mobile...
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8
@@ -34,9 +37,10 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build APK
+        working-directory: artifacts/nova-mobile
         run: eas build --platform android --profile preview --non-interactive --no-wait
 
       - name: Print build URL
         run: |
-          echo "✅ Build submitted to EAS!"
-          echo "Track your build at: https://expo.dev/accounts/ali011707s-team/projects/anime-nova-/builds"
+          echo "✅ Build submitted!"
+          echo "https://expo.dev/accounts/ali011707s-team/projects/anime-nova-/builds"
