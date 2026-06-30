@@ -49,8 +49,6 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     } catch { /* fall through */ }
   }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   // 2. Try direct fetch with desktop UA
   try {
     const r = await fetch(url, {
@@ -62,25 +60,6 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
         "Accept-Encoding": "gzip, deflate, br",
         "Cache-Control": "no-cache",
       },
-=======
-  // 2. Try direct fetch (works if Replit IP is not blocked)
-  try {
-    const r = await fetch(url, {
-      headers: { "User-Agent": BROWSER_UA, Referer: referer || url, Accept: "text/html,*/*" },
->>>>>>> 366570a (Fix issues with dubbed content loading and improve navigation performance)
-=======
-  // 2. Try direct fetch with desktop UA
-  try {
-    const r = await fetch(url, {
-      headers: {
-        "User-Agent": BROWSER_UA,
-        Referer: referer || url,
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-      },
->>>>>>> 296d0fb (Update app to fix display issues and improve content loading)
       signal: AbortSignal.timeout(Math.min(timeoutMs, 12000)),
     });
     if (r.ok) {
@@ -89,8 +68,6 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
     }
   } catch { /* fall through */ }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
   // 3. Try with mobile UA (CF sometimes lets mobile through)
   try {
     const r = await fetch(url, {
@@ -102,25 +79,6 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
       },
       signal: AbortSignal.timeout(Math.min(timeoutMs, 10000)),
     });
-=======
-  // 3. Orkestr relay (EU IP — bypasses Replit IP blocks and CF challenges)
-  try {
-    const orkUrl = `${ORKESTR_BASE}/api/anime/proxy-text?url=${encodeURIComponent(url)}`;
-    const r = await fetch(orkUrl, { signal: AbortSignal.timeout(timeoutMs + 5000) });
->>>>>>> 366570a (Fix issues with dubbed content loading and improve navigation performance)
-=======
-  // 3. Try with mobile UA (CF sometimes lets mobile through)
-  try {
-    const r = await fetch(url, {
-      headers: {
-        "User-Agent": MOBILE_UA,
-        Referer: referer || url,
-        Accept: "text/html,*/*;q=0.9",
-        "Accept-Language": "ar-SA,ar;q=0.9",
-      },
-      signal: AbortSignal.timeout(Math.min(timeoutMs, 10000)),
-    });
->>>>>>> 296d0fb (Update app to fix display issues and improve content loading)
     if (r.ok) {
       const html = await r.text();
       if (!isCfBlock(html)) return html;
