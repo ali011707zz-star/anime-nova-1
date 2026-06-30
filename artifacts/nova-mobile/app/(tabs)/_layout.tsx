@@ -14,7 +14,7 @@ type TabIconProps = {
 function TabIcon({ name, label, color, focused }: TabIconProps) {
   return (
     <View style={styles.tabItem}>
-      <Ionicons name={name} size={22} color={color} />
+      <Ionicons name={name} size={20} color={color} />
       <Text style={[styles.tabLabel, { color, fontWeight: focused ? "700" : "400" }]}>
         {label}
       </Text>
@@ -40,8 +40,9 @@ export default function TabLayout() {
           borderTopWidth: 1,
           borderTopColor: colors.border,
           elevation: 0,
-          height: isWeb ? 84 : 60,
-          paddingBottom: isWeb ? 34 : 0,
+          height: isWeb ? 84 : 58,
+          paddingBottom: isWeb ? 34 : 4,
+          paddingTop: 4,
         },
         tabBarBackground: () => null,
       }}
@@ -105,6 +106,6 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  tabItem: { alignItems: "center", justifyContent: "center", gap: 2, paddingTop: 6 },
-  tabLabel: { fontSize: 9, fontFamily: "Cairo_600SemiBold" },
+  tabItem: { alignItems: "center", justifyContent: "center", gap: 1 },
+  tabLabel: { fontSize: 8, fontFamily: "Cairo_600SemiBold", lineHeight: 10, includeFontPadding: false },
 });
