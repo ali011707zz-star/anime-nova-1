@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build APK (EAS)
+    name: Build APK (Local Gradle)
     runs-on: ubuntu-latest
 
     steps:
@@ -30,17 +30,37 @@ jobs:
       - name: Install monorepo dependencies
         run: pnpm install --filter @workspace/nova-mobile... --no-frozen-lockfile
 
-      - name: Setup EAS
-        uses: expo/expo-github-action@v8
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          distribution: temurin
+          java-version: '17'
 
-      - name: Build APK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Expo CLI
+        run: npm install -g expo-cli @expo/cli
+
+      - name: Generate Android native project (prebuild)
         working-directory: artifacts/nova-mobile
-        run: eas build --platform android --profile preview --non-interactive --no-wait
+        run: npx expo prebuild --platform android --clean --no-install
+        env:
+          EXPO_PUBLIC_DOMAIN: https://anime-nova.orkestr.run
 
-      - name: Print build URL
-        run: |
-          echo "✅ Build submitted!"
-          echo "https://expo.dev/accounts/ali011707s-team/projects/anime-nova-/builds"
+      - name: Make Gradlew executable
+        working-directory: artifacts/nova-mobile/android
+        run: chmod +x gradlew
+
+      - name: Build release APK
+        working-directory: artifacts/nova-mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.parallel=true"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: anime-nova-release-apk
+          path: artifacts/nova-mobile/android/app/build/outputs/apk/release/app-release*.apk
+          retention-days: 14
