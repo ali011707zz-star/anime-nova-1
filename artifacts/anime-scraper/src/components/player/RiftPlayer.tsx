@@ -586,7 +586,7 @@ export default function RiftPlayer({
         } else if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
           // Retry network errors with exponential backoff before force-switching
           const attempts = (hls as any)._netRetry = ((hls as any)._netRetry || 0) + 1;
-          if (attempts <= 5) {
+          if (attempts <= 2) {
             setTimeout(() => { if (hlsRef.current === hls) hls.startLoad(); }, 1000 * attempts);
           } else { fireOnFail(true); } // force=true — تبديل السيرفر حتى لو نجح >20ث
         } else {
@@ -712,7 +712,7 @@ export default function RiftPlayer({
     let lastTime = -1;
     let stalledFor = 0;
     const CHECK_INTERVAL = 3000; // فحص كل 3 ثوانٍ
-    const STALL_THRESHOLD = 15;   // حد التوقف = 15 ثانية
+    const STALL_THRESHOLD = 8;    // حد التوقف = 8 ثوانٍ
     const t = setInterval(() => {
       const v = videoRef.current;
       if (!v || v.paused || v.ended || v.readyState < 3) { stalledFor = 0; return; }
