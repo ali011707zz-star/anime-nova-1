@@ -47,7 +47,7 @@ async function getStoredToken(): Promise<string | null> {
 
 async function fetchFreshToken(): Promise<string | null> {
   const MAX_RETRIES = 3;
-  const TIMEOUTS = [8000, 12000, 20000]; // يطول بعد كل محاولة (لإيقاظ Orkestr)
+  const TIMEOUTS = [4000, 7000, 12000]; // مهلة أقصر — Orkestr يستجيب في < 1 ث عادةً
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const controller = new AbortController();
@@ -72,7 +72,7 @@ async function fetchFreshToken(): Promise<string | null> {
       return data.token;
     } catch (e: any) {
       if (attempt < MAX_RETRIES - 1) {
-        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
       }
     }
   }

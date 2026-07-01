@@ -1595,72 +1595,101 @@ export function RiftPlayer({
           pointerEvents="box-none"
         >
           {/* ════ TOP BAR ════ */}
-          <LinearGradient
-            colors={["rgba(0,0,0,0.82)", "transparent"]}
-            style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
-          >
-            {/* معلومات الأنمي — يسار */}
-            <View style={s.topInfoWrap}>
-              {title ? (
-                <Text style={s.topInfoTitle} numberOfLines={1}>{title}</Text>
-              ) : null}
-              <View style={s.topInfoRow}>
-                {episode != null && (
-                  <View style={s.topEpBadge}>
-                    <Text style={s.topEpText}>الحلقة {episode}</Text>
-                  </View>
-                )}
-                {currentSrc?.quality ? (
-                  <View style={s.topQualityBadge}>
-                    <Text style={s.topQualityText}>{currentSrc.quality}</Text>
+          {(() => {
+            // في RTL الأصلي (هاتف عربي): flexDirection:"row" يعرض من اليمين لليسار تلقائياً
+            // الأول في DOM → يظهر على اليمين، الأخير → على اليسار
+            // نحل الترتيب فقط (لا نغير flexDirection)
+            const nativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
+            const infoBlock = (
+              <View style={s.topInfoWrap}>
+                {title ? (
+                  <Text style={s.topInfoTitle} numberOfLines={1}>{title}</Text>
+                ) : null}
+                <View style={s.topInfoRow}>
+                  {episode != null && (
+                    <View style={s.topEpBadge}>
+                      <Text style={s.topEpText}>الحلقة {episode}</Text>
+                    </View>
+                  )}
+                  {currentSrc?.quality ? (
+                    <View style={s.topQualityBadge}>
+                      <Text style={s.topQualityText}>{currentSrc.quality}</Text>
+                    </View>
+                  ) : null}
+                </View>
+                {episodeTitle ? (
+                  <Text style={s.topEpTitle} numberOfLines={1}>{episodeTitle}</Text>
+                ) : null}
+                {autoSubSource ? (
+                  <View style={s.autoSubBadge}>
+                    <Text style={s.autoSubBadgeText}>✦ ترجمة {autoSubSource === "jimaku" ? "Jimaku" : autoSubSource === "animetosho" ? "Animetosho" : "تلقائية"}</Text>
                   </View>
                 ) : null}
               </View>
-              {episodeTitle ? (
-                <Text style={s.topEpTitle} numberOfLines={1}>{episodeTitle}</Text>
-              ) : null}
-              {autoSubSource ? (
-                <View style={s.autoSubBadge}>
-                  <Text style={s.autoSubBadgeText}>✦ ترجمة {autoSubSource === "jimaku" ? "Jimaku" : autoSubSource === "animetosho" ? "Animetosho" : "تلقائية"}</Text>
-                </View>
-              ) : null}
-            </View>
-
-            {/* أزرار اليمين: لقطة + ترجمة + تدوير + إغلاق */}
-            <View style={s.topRightRow}>
-              <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
-                <Ionicons name="camera-outline" size={18} color="rgba(255,255,255,0.85)" />
-              </Pressable>
-              {!currentSrc?.isArabic && (
-                <Pressable
-                  onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
-                  style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
-                  hitSlop={10}
-                >
-                  <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
+            );
+            // في RTL: زر الإغلاق أول (يظهر أقصى اليمين) ← الصحيح للعربية
+            // في LTR: زر الإغلاق آخر (يظهر أقصى اليمين) ← الصحيح للـ web
+            const btnsBlock = nativeRTL ? (
+              <View style={s.topRightRow}>
+                <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
+                  <Ionicons name="close" size={17} color="rgba(239,68,68,0.90)" />
                 </Pressable>
-              )}
-              {/* زر تبديل الاتجاه: عمودي / أفقي */}
-              <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
-                <Ionicons
-                  name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
-                  size={18}
-                  color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
-                />
-              </Pressable>
-              {/* زر قلب الشاشة 180° */}
-              <Pressable onPress={flipScreen} style={[s.topRotateBtn, isFlipped && s.topRotateBtnActive]} hitSlop={10}>
-                <Ionicons name="repeat-outline" size={16} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
-                <Text style={[s.topRotateLabel, isFlipped && s.topRotateLabelActive]}>
-                  {isFlipped ? "↺" : "↻"}
-                </Text>
-              </Pressable>
-              {/* زر الإغلاق فقط (بدون سهم رجوع) */}
-              <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
-                <Ionicons name="close" size={20} color="rgba(239,68,68,0.90)" />
-              </Pressable>
-            </View>
-          </LinearGradient>
+                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                  <Ionicons
+                    name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
+                    size={15}
+                    color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
+                  />
+                </Pressable>
+                {!currentSrc?.isArabic && (
+                  <Pressable
+                    onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
+                    style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
+                    hitSlop={10}
+                  >
+                    <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
+                  </Pressable>
+                )}
+                <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
+                  <Ionicons name="camera-outline" size={15} color="rgba(255,255,255,0.85)" />
+                </Pressable>
+              </View>
+            ) : (
+              <View style={s.topRightRow}>
+                <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
+                  <Ionicons name="camera-outline" size={15} color="rgba(255,255,255,0.85)" />
+                </Pressable>
+                {!currentSrc?.isArabic && (
+                  <Pressable
+                    onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
+                    style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
+                    hitSlop={10}
+                  >
+                    <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
+                  </Pressable>
+                )}
+                <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                  <Ionicons
+                    name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
+                    size={15}
+                    color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
+                  />
+                </Pressable>
+                <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
+                  <Ionicons name="close" size={17} color="rgba(239,68,68,0.90)" />
+                </Pressable>
+              </View>
+            );
+            return (
+              <LinearGradient
+                colors={["rgba(0,0,0,0.82)", "transparent"]}
+                style={[s.topBar, { paddingTop: Platform.OS === "web" ? 12 : insets.top + 6 }]}
+              >
+                {/* RTL: مجموعة الأزرار أولاً (تظهر يميناً)، معلومات ثانياً (تظهر يساراً) */}
+                {nativeRTL ? <>{btnsBlock}{infoBlock}</> : <>{infoBlock}{btnsBlock}</>}
+              </LinearGradient>
+            );
+          })()}
 
           {/* ════ CENTER ════ */}
           <View style={s.centerOverlay} pointerEvents="box-none">
@@ -2287,37 +2316,37 @@ const s = StyleSheet.create({
 
   /* ── Top bar ── */
   topBar: {
-    paddingHorizontal: 14, paddingBottom: 18,
+    paddingHorizontal: 10, paddingBottom: 12,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
   /* معلومات الأنمي في الجهة اليسرى */
   topInfoWrap: {
-    flex: 1, gap: 4, marginRight: 8,
+    flex: 1, gap: 2, marginRight: 6,
   },
   topInfoTitle: {
-    color: "rgba(255,255,255,0.90)", fontSize: 13, fontFamily: "Cairo_700Bold",
+    color: "rgba(255,255,255,0.90)", fontSize: 11, fontFamily: "Cairo_700Bold",
     textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 6, textShadowOffset: { width: 0, height: 1 },
   },
   topInfoRow: {
-    flexDirection: "row", alignItems: "center", gap: 6,
+    flexDirection: "row", alignItems: "center", gap: 4,
   },
   topEpBadge: {
-    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8,
+    paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6,
     backgroundColor: "rgba(139,92,246,0.25)", borderWidth: 1, borderColor: "rgba(167,139,250,0.40)",
   },
   topEpText: {
-    color: "rgba(221,214,254,0.95)", fontSize: 10, fontFamily: "Cairo_700Bold",
+    color: "rgba(221,214,254,0.95)", fontSize: 9, fontFamily: "Cairo_700Bold",
   },
   topQualityBadge: {
-    paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8,
+    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6,
     backgroundColor: "rgba(251,191,36,0.15)", borderWidth: 1, borderColor: "rgba(251,191,36,0.35)",
   },
   topQualityText: {
-    color: "rgba(253,224,71,0.90)", fontSize: 10, fontFamily: "Cairo_700Bold",
+    color: "rgba(253,224,71,0.90)", fontSize: 9, fontFamily: "Cairo_700Bold",
   },
   topEpTitle: {
-    color: "rgba(255,255,255,0.65)", fontSize: 10, fontFamily: "Cairo_400Regular",
-    marginTop: 3, maxWidth: 200,
+    color: "rgba(255,255,255,0.65)", fontSize: 9, fontFamily: "Cairo_400Regular",
+    marginTop: 2, maxWidth: 200,
     textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 },
   },
   autoSubBadge: {
@@ -2328,28 +2357,28 @@ const s = StyleSheet.create({
   autoSubBadgeText: {
     color: "rgba(196,181,253,0.85)", fontSize: 9, fontFamily: "Cairo_600SemiBold",
   },
-  topRightRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  topRightRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   topIconBtn: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 30, height: 30, borderRadius: 15,
     backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)",
     alignItems: "center", justifyContent: "center",
   },
   topIconBtnActive: { backgroundColor: "rgba(139,92,246,0.30)", borderColor: "rgba(167,139,250,0.55)" },
-  /* زر تدوير الشاشة — pill يجمع أيقونة + نص */
+  /* زر تدوير الشاشة — pill يجمع أيقونة */
   topRotateBtn: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 18,
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 8, paddingVertical: 5, borderRadius: 15,
     backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
   },
   topRotateBtnActive: {
     backgroundColor: "rgba(139,92,246,0.28)", borderColor: "rgba(167,139,250,0.55)",
   },
   topRotateLabel: {
-    color: "rgba(255,255,255,0.80)", fontSize: 10, fontFamily: "Cairo_700Bold",
+    color: "rgba(255,255,255,0.80)", fontSize: 9, fontFamily: "Cairo_700Bold",
   },
   topRotateLabelActive: { color: "#c4b5fd" },
   topCloseBtn: {
-    width: 38, height: 38, borderRadius: 19,
+    width: 32, height: 32, borderRadius: 16,
     backgroundColor: "rgba(239,68,68,0.14)", borderWidth: 1.5, borderColor: "rgba(239,68,68,0.40)",
     alignItems: "center", justifyContent: "center",
   },
