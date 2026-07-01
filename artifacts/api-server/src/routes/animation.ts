@@ -2745,7 +2745,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             "Referer": "https://player.videasy.to/",
             "Origin": "https://player.videasy.to",
           };
-          // mb-flix = primary English; cdn = high-quality (4K)
+          // FMHY-Indexers v0.4 — Neon(mb-flix) + Yoru(cdn) — بدون ترجمة مدمجة
           const servers = ["mb-flix", "cdn"];
           await Promise.allSettled(servers.map(async (server) => {
             try {
@@ -2833,6 +2833,29 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             vlProxy, "VidLink · HLS", hlsUrl, vlProxy,
             araCap?.url ? { subtitleUrl: araCap.url } : undefined,
           );
+        } catch { /* silent */ }
+      }),
+
+      // ── MX Player (mxplayer.in) — licensed anime/animation — بدون ترجمة مدمجة ──
+      // روابط HLS/DASH خام فقط، بدون أي معالجة للترجمة.
+      scrapeAnimCached("mxplayer_anim", async () => {
+        try {
+          const q = (enTitlePrefetched || title || "").trim();
+          if (!q) return;
+          const mxpPort = process.env.MXP_SERVICE_PORT || "8002";
+          const ep = type === "movie" ? 1 : epNum;
+          const mxpUrl = `http://localhost:${mxpPort}/search?q=${encodeURIComponent(q)}&ep=${ep}`;
+          const r = await fetch(mxpUrl, { signal: AbortSignal.timeout(15_000) });
+          if (!r.ok) return;
+          const data = await r.json() as { sources?: Array<{ url: string; type?: string; label?: string; quality?: string }> };
+          for (const src of (data.sources || [])) {
+            if (!src.url) continue;
+            const isHls = src.type === "hls" || src.url.includes(".m3u8");
+            const proxied = isHls
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://www.mxplayer.in/")}`
+              : src.url;
+            sendSource(proxied, src.label || `MXPlayer · ${src.quality || "HD"}`, proxied, proxied);
+          }
         } catch { /* silent */ }
       }),
 
