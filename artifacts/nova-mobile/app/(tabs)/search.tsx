@@ -83,7 +83,7 @@ const GENRES_AR: Record<string,string> = {
 const FORMAT_AR: Record<string,string> = {
   TV:"مسلسل",MOVIE:"فيلم",OVA:"OVA",ONA:"ONA",SPECIAL:"خاص",MUSIC:"موسيقى",
 };
-const BLOCKED_GENRES = new Set<string>();
+const BLOCKED_GENRES = new Set<string>(["Hentai", "Ecchi"]);
 
 /* ── Arabic transliteration ── */
 const AR_TO_EN: Record<string,string> = {
@@ -108,7 +108,7 @@ function buildSearchQuery(sort: string, format: string, status: string, genre: s
   const sortArr = sort ? `[SEARCH_MATCH, ${sort}]` : "[SEARCH_MATCH, POPULARITY_DESC]";
   return `query ($search: String, $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
+    media(search: $search, type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: ${sortArr}${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
@@ -118,7 +118,7 @@ function buildSearchQuery(sort: string, format: string, status: string, genre: s
 function buildBrowseQuery(sort: string, format: string, status: string, genre: string, season: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
+    media(type: ANIME, isAdult: false, genre_not_in: ["Hentai","Ecchi"], sort: [${sort || "POPULARITY_DESC"}]${format ? `, format: ${format}` : ""}${status ? `, status: ${status}` : ""}${genre ? `, genre: "${genre}"` : ""}${season ? `, season: ${season}` : ""}) {
       id title { romaji english } coverImage { large } averageScore episodes format status startDate { year } genres
     }
   }
@@ -311,7 +311,7 @@ export default function SearchScreen() {
         <View style={s.header}>
           {/* Search bar */}
           <View style={s.searchBar}>
-            <Ionicons name="search" size={18} color="rgba(255,255,255,0.3)" />
+            <Ionicons name="search" size={15} color="rgba(255,255,255,0.3)" />
             <TextInput
               ref={inputRef}
               value={query}
@@ -323,14 +323,9 @@ export default function SearchScreen() {
             />
             {query ? (
               <Pressable onPress={() => { setQuery(""); inputRef.current?.focus(); }}>
-                <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.35)" />
+                <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.35)" />
               </Pressable>
-            ) : (
-              <Pressable onPress={pickImageForTrace} hitSlop={8}
-                style={{ padding: 2 }}>
-                <Ionicons name="camera-outline" size={20} color="rgba(196,181,253,0.6)" />
-              </Pressable>
-            )}
+            ) : null}
           </View>
 
           {/* Filter toggle + sort pills */}
@@ -338,7 +333,7 @@ export default function SearchScreen() {
             <Pressable
               onPress={() => setShowFilters(f => !f)}
               style={[s.filterToggle, (showFilters || activeFilterCount > 0) && s.filterToggleActive]}>
-              <Ionicons name="options" size={14} color={showFilters || activeFilterCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.45)"} />
+              <Ionicons name="options" size={12} color={showFilters || activeFilterCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.45)"} />
               <Text style={[s.filterToggleText, (showFilters || activeFilterCount > 0) && s.filterToggleTextActive]}>
                 فلاتر
               </Text>
@@ -369,7 +364,7 @@ export default function SearchScreen() {
               {SEASON_OPTIONS.map(opt => (
                 <Pressable key={opt.value} onPress={() => setSeason(opt.value)}
                   style={[s.seasonChip, season === opt.value && s.seasonChipActive]}>
-                  <Text style={{ fontSize: 12 }}>{opt.emoji}</Text>
+                  <Text style={{ fontSize: 10 }}>{opt.emoji}</Text>
                   <Text style={[s.seasonChipText, season === opt.value && s.seasonChipTextActive]}>{opt.label}</Text>
                 </Pressable>
               ))}
@@ -622,29 +617,29 @@ const sm = StyleSheet.create({
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0A0A0F" },
   header: { backgroundColor: "#0A0A0F", borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)", paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 },
-  searchBar: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#18181B", borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 8 },
-  searchInput: { flex: 1, color: "#fff", fontSize: 14, fontFamily: "Cairo_700Bold", textAlign: "right" },
-  filterRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  filterToggle: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#18181B", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", marginBottom: 6 },
+  searchInput: { flex: 1, color: "#fff", fontSize: 13, fontFamily: "Cairo_700Bold", textAlign: "right" },
+  filterRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
+  filterToggle: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
   filterToggleActive: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
-  filterToggleText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  filterToggleText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
   filterToggleTextActive: { color: "#c4b5fd" },
-  filterCount: { width: 16, height: 16, borderRadius: 8, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" },
-  filterCountText: { fontSize: 9, color: "#fff", fontFamily: "Cairo_700Bold" },
-  sortPill: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  filterCount: { width: 14, height: 14, borderRadius: 7, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" },
+  filterCountText: { fontSize: 8, color: "#fff", fontFamily: "Cairo_700Bold" },
+  sortPill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
   sortPillActive: { backgroundColor: "#8B5CF6", borderColor: "#8B5CF6" },
-  sortPillText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  sortPillText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
   sortPillTextActive: { color: "#fff" },
-  seasonRow: { marginBottom: 6 },
-  seasonChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  seasonRow: { marginBottom: 5 },
+  seasonChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
   seasonChipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
-  seasonChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.40)" },
+  seasonChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.40)" },
   seasonChipTextActive: { color: "#8B5CF6" },
-  filterPanel: { backgroundColor: "#0A0A0F", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.05)", paddingTop: 12, paddingBottom: 8 },
-  filterLabel: { fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_700Bold", marginBottom: 8 },
-  filterChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
+  filterPanel: { backgroundColor: "#0A0A0F", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.05)", paddingTop: 10, paddingBottom: 6 },
+  filterLabel: { fontSize: 9, color: "rgba(255,255,255,0.25)", fontFamily: "Cairo_700Bold", marginBottom: 6 },
+  filterChip: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, backgroundColor: "#18181B", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" },
   filterChipActive: { backgroundColor: "rgba(139,92,246,0.2)", borderColor: "rgba(139,92,246,0.4)" },
-  filterChipText: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
+  filterChipText: { fontSize: 10, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.45)" },
   filterChipTextActive: { color: "#c4b5fd" },
   historyHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   historyTitle: { fontSize: 11, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.30)" },

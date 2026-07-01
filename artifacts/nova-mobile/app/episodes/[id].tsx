@@ -92,7 +92,7 @@ function EpisodeRow({
         onPress={e => { onComment(n); }}
         style={ep_s.commentBtn}
       >
-        <Ionicons name="chatbubble-ellipses" size={13} color={commentCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.2)"} />
+        <Ionicons name="chatbubble-ellipses" size={11} color={commentCount > 0 ? "#c4b5fd" : "rgba(255,255,255,0.2)"} />
         {commentCount > 0 && (
           <Text style={ep_s.commentCount}>{commentCount}</Text>
         )}
@@ -103,7 +103,7 @@ function EpisodeRow({
         onPress={e => { onToggleWatched(n); }}
         style={[ep_s.eyeBtn, watched && ep_s.eyeBtnWatched]}
       >
-        <Ionicons name={watched ? "eye" : "eye-off"} size={14} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
+        <Ionicons name={watched ? "eye" : "eye-off"} size={12} color={watched ? "#8B5CF6" : "rgba(255,255,255,0.2)"} />
       </Pressable>
     </Pressable>
   );
@@ -395,24 +395,24 @@ const ep_s = StyleSheet.create({
   watchFromBtnText: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#8B5CF6" },
   row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
   rowWatched: { backgroundColor: "rgba(139,92,246,0.03)", borderBottomColor: "rgba(139,92,246,0.08)" },
-  thumbWrap: { width: 86, height: 49, borderRadius: 10, overflow: "hidden", backgroundColor: "#1C1C22", position: "relative" },
+  thumbWrap: { width: 72, height: 41, borderRadius: 8, overflow: "hidden", backgroundColor: "#1C1C22", position: "relative" },
   thumb: { width: "100%", height: "100%" },
   thumbFallback: { backgroundColor: "rgba(139,92,246,0.1)" },
-  durText: { position: "absolute", bottom: 4, left: 4, fontSize: 7, color: "#fff", backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1, fontWeight: "900" },
-  watchedBorder: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderWidth: 2, borderColor: "rgba(139,92,246,0.4)", borderRadius: 10 },
+  durText: { position: "absolute", bottom: 3, left: 3, fontSize: 6, color: "#fff", backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 3, paddingHorizontal: 2, paddingVertical: 1, fontWeight: "900" },
+  watchedBorder: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderWidth: 2, borderColor: "rgba(139,92,246,0.4)", borderRadius: 8 },
   info: { flex: 1 },
-  epNum: { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
+  epNum: { fontSize: 11, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.9)" },
   commentBtn: {
-    width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.15)",
     position: "relative",
   },
   commentCount: {
     position: "absolute", top: -4, right: -4,
-    minWidth: 14, height: 14, backgroundColor: "#8B5CF6", borderRadius: 7,
-    fontSize: 7, color: "#fff", fontFamily: "Cairo_700Bold",
-    textAlign: "center", lineHeight: 14, paddingHorizontal: 2,
+    minWidth: 12, height: 12, backgroundColor: "#8B5CF6", borderRadius: 6,
+    fontSize: 6, color: "#fff", fontFamily: "Cairo_700Bold",
+    textAlign: "center", lineHeight: 12, paddingHorizontal: 2,
   },
-  eyeBtn: { width: 30, height: 30, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  eyeBtn: { width: 27, height: 27, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   eyeBtnWatched: { backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.3)" },
 });

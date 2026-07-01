@@ -1698,11 +1698,14 @@ export function RiftPlayer({
             {isPortrait ? (
               /* وضع عمودي: أزرار التخطي + التشغيل */
               <View style={s.centerPortraitRow}>
-                <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
-                  <Ionicons name="play-back" size={24} color="#fff" />
+                {/* زر التخطي للخلف — "10" تحت الدائرة لمحاذاة دقيقة مع زر التشغيل */}
+                <View style={{ alignItems: "center", gap: 4 }}>
+                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.centerSeekBtn} hitSlop={14}>
+                    <Ionicons name="play-back" size={24} color="#fff" />
+                  </Pressable>
                   <Text style={s.centerSeekLabel}>10</Text>
-                </Pressable>
-                {/* زر المنتصف: يظهر فقط عند الإيقاف أو التحميل — عند التشغيل الشريط السفلي يكفي */}
+                </View>
+                {/* زر المنتصف: يظهر فقط عند الإيقاف أو التحميل */}
                 <View style={{ alignItems: "center", justifyContent: "center" }}>
                   {!isPlaying && !buffering && <PulseRing />}
                   {(!isPlaying || buffering) && (
@@ -1713,10 +1716,13 @@ export function RiftPlayer({
                     </Pressable>
                   )}
                 </View>
-                <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
-                  <Ionicons name="play-forward" size={24} color="#fff" />
+                {/* زر التخطي للأمام */}
+                <View style={{ alignItems: "center", gap: 4 }}>
+                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
+                    <Ionicons name="play-forward" size={24} color="#fff" />
+                  </Pressable>
                   <Text style={s.centerSeekLabel}>10</Text>
-                </Pressable>
+                </View>
               </View>
             ) : (
               /* وضع أفقي: التشغيل فقط في المنتصف */
@@ -1859,22 +1865,26 @@ export function RiftPlayer({
                 </View>
               </View>
 
-              {/* وسط: تخطي + تشغيل (وضع أفقي فقط) */}
+              {/* وسط: تخطي + تشغيل (وضع أفقي فقط) — "10" خارج الدائرة للمحاذاة الصحيحة */}
               <View style={s.bottomCenter}>
                 {!isPortrait && (
-                  <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                    <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
+                  <View style={{ alignItems: "center", gap: 2 }}>
+                    <Pressable onPress={() => seek(positionRef.current - 10)} style={s.seekCtrlBtn} hitSlop={10}>
+                      <Ionicons name="play-back" size={17} color="rgba(255,255,255,0.90)" />
+                    </Pressable>
                     <Text style={s.seekCtrlLabel}>10</Text>
-                  </Pressable>
+                  </View>
                 )}
                 <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
                   <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { marginLeft: 3 }} />
                 </Pressable>
                 {!isPortrait && (
-                  <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
-                    <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
+                  <View style={{ alignItems: "center", gap: 2 }}>
+                    <Pressable onPress={() => seek(positionRef.current + 10)} style={s.seekCtrlBtn} hitSlop={10}>
+                      <Ionicons name="play-forward" size={17} color="rgba(255,255,255,0.90)" />
+                    </Pressable>
                     <Text style={s.seekCtrlLabel}>10</Text>
-                  </Pressable>
+                  </View>
                 )}
               </View>
 
