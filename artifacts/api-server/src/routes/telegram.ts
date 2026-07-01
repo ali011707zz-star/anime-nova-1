@@ -7,6 +7,7 @@
 import { Router, type Request, type Response } from "express";
 import { sbInsert, sbSelect } from "../lib/supabaseClient.js";
 import { getEnvOrDb } from "../lib/dbConfig.js";
+import { saveNotification } from "./notifications.js";
 
 const router = Router();
 
@@ -91,16 +92,28 @@ export async function notifyNewEpisode(
   anilistId: number,
   title: string,
   ep: number,
+  posterUrl?: string,
 ) {
   const key = `${anilistId}:${ep}`;
   if (notifiedEpisodes.has(key)) return; // لا تُرسل مرتين
   notifiedEpisodes.add(key);
 
+  // حفظ الإشعار في قاعدة البيانات (داخل التطبيق)
+  await saveNotification({
+    type: "anime_episode",
+    title,
+    body: `الحلقة ${ep} متاحة الآن`,
+    image_url: posterUrl ?? (await fetchAnimePoster(anilistId)) ?? undefined,
+    link_path: `/watch?id=${anilistId}&ep=${ep}`,
+    anime_id: anilistId,
+    episode_num: ep,
+  }).catch(() => {});
+
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
   const tok = await getToken();
   if (!channelId || !tok) return;
 
-  const poster  = await fetchAnimePoster(anilistId);
+  const poster  = posterUrl ?? await fetchAnimePoster(anilistId);
   const caption =
     `🌸 <b>حلقة جديدة وصلت!</b>\n\n` +
     `✨ <b>${title}</b>\n` +
@@ -307,6 +320,20 @@ async function runSchedulerCycle(): Promise<void> {
 
     const poster  = media.coverImage?.extraLarge || media.coverImage?.large || null;
     const caption = buildCaption(media, ep);
+    const title   = media.title?.english || media.title?.romaji || "أنمي";
+    const titleAr = media.title?.native || title;
+
+    // حفظ الإشعار داخل التطبيق
+    await saveNotification({
+      type: "anime_episode",
+      title,
+      title_ar: titleAr,
+      body: `الحلقة ${ep} متاحة الآن`,
+      image_url: poster ?? undefined,
+      link_path: `/watch?id=${anilistId}&ep=${ep}`,
+      anime_id: anilistId,
+      episode_num: ep,
+    }).catch(() => {});
 
     if (poster) {
       await sendChannelPhoto(poster, caption);
@@ -318,7 +345,6 @@ async function runSchedulerCycle(): Promise<void> {
     sent++;
     schedulerSentToday++;
 
-    const title = media.title?.english || media.title?.romaji || "أنمي";
     console.log(`[scheduler] ✅ أُرسل → ${title} ح${ep}`);
 
     // تأخير بسيط بين الرسائل لتجنب flood limit

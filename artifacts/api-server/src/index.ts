@@ -23,6 +23,7 @@ const { createApp }          = await import("./app.js");
 const { logger }             = await import("./lib/logger.js");
 const { initEmailService }   = await import("./auth/emailService.js");
 const { registerTelegramWebhook, startEpisodeScheduler } = await import("./routes/telegram.js");
+const { startAnimationNotificationScheduler } = await import("./routes/notifications.js");
 
 const app  = await createApp();
 const host = "0.0.0.0";
@@ -127,5 +128,8 @@ app.listen(port, host, (err) => {
   } else {
     console.log("[telegram] ℹ️ TELEGRAM_SCHEDULER_ENABLED=false — الـ scheduler معطَّل");
   }
+
+  // تشغيل scheduler الأنيميشن دائماً (لا يحتاج Telegram token)
+  startAnimationNotificationScheduler();
 
 });

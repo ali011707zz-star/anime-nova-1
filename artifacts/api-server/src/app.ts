@@ -13,6 +13,7 @@ import reportRouter from "./routes/report.js";
 import telegramRouter from "./routes/telegram.js";
 import authTokenRouter from "./routes/authToken.js";
 import newsRouter from "./routes/news.js";
+import notificationsRouter from "./routes/notifications.js";
 import { logger } from "./lib/logger";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
 import { validateAnonToken, checkRateLimit } from "./lib/security.js";
@@ -92,6 +93,7 @@ export async function createApp(): Promise<Express> {
 
   app.use("/api", router);
   app.use("/api", newsRouter);
+  app.use("/api", notificationsRouter);
   app.use("/api", userdataRouter);
   app.use("/api", commentsRouter);
   app.use("/api", adminRouter);

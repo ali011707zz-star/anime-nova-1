@@ -1,6 +1,7 @@
 import { useLocation } from "wouter";
-import { Bell, LogIn } from "lucide-react";
+import { LogIn } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { NotificationPanel } from "./NotificationPanel";
 
 const AVATAR_COLORS: [string, string][] = [
   ["#7C3AED", "#4C1D95"],
@@ -48,10 +49,7 @@ export function Header({ onMenuClick }: HeaderProps) {
 
       {/* LEFT: Bell + Profile */}
       <div className="flex items-center gap-1">
-        <button className="relative w-8 h-8 flex items-center justify-center rounded-xl hover:bg-white/8 text-white/50 hover:text-white transition-all">
-          <Bell className="w-4 h-4" />
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-primary rounded-full" />
-        </button>
+        <NotificationPanel />
 
         {user ? (
           <button
