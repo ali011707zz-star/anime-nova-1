@@ -84,7 +84,8 @@ function isDirectPlayable(s: Src): boolean {
 function isEmbedSrc(s: Src): boolean {
   if (!s.isEmbed) return false;
   const url = (s.directUrl || s.url || "").toLowerCase();
-  return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
+  if (url.includes("vidmoly")) return false;
+  return url.includes("mega.nz") || url.includes("mega.co.nz");
 }
 function getPlayUrl(s: Src): string {
   return s.directUrl || s.url || "";
@@ -182,6 +183,12 @@ export default function WatchScreen() {
   const lastTimeRef       = useRef(0);
   const autoPlayFiredRef  = useRef(false);
   const hasCachedRef      = useRef(false);
+  const isMountedRef      = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   const progressKey    = `progress-${anime}-${epNum}`;
   const srcCacheKey    = anime ? `anime-srcs-${anime}-e${epNum}` : null;
@@ -248,6 +255,7 @@ export default function WatchScreen() {
       });
 
       if (!response.ok) {
+        if (!isMountedRef.current) return;
         setLoading(false);
         setScreen(s => s === "loading" ? "picker" : s);
         return;
@@ -261,6 +269,7 @@ export default function WatchScreen() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (!isMountedRef.current) { try { reader.cancel(); } catch {} break; }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
@@ -271,6 +280,7 @@ export default function WatchScreen() {
 
           /* [DONE] signal — not JSON */
           if (raw === "[DONE]") {
+            if (!isMountedRef.current) break;
             setLoading(false);
             if (freshSrcs.length > 0 && srcCacheKey) {
               AsyncStorage.setItem(srcCacheKey, JSON.stringify({ sources: freshSrcs, ts: Date.now() })).catch(() => { });
@@ -285,6 +295,7 @@ export default function WatchScreen() {
           try {
             const data = JSON.parse(raw);
             if (data?.type === "done") {
+              if (!isMountedRef.current) break;
               setLoading(false);
               setSources(prev => { if (prev.length === 0) setTimeout(() => setScreen("picker"), 0); return prev; });
               continue;
@@ -292,6 +303,7 @@ export default function WatchScreen() {
 
             /* source event */
             if (!data.url && !data.directUrl) continue;
+            if (!isMountedRef.current) break;
             const src: Src = {
               ...data,
               directUrl: resolveUrl(data.directUrl, base),
@@ -303,38 +315,42 @@ export default function WatchScreen() {
             freshSrcs.push(src);
 
             setSources(prev => {
+              if (!isMountedRef.current) return prev;
               const next = [...prev, src];
               const isGoodSrc = isDirectPlayable(src);
               if (!isGoodSrc || autoPlayFiredRef.current) {
                 setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 return next;
               }
-              /* التشغيل التلقائي: انتظر 3 ثوان لتوفر مصادر أجود */
+              /* التشغيل التلقائي: انتظر ثانية لتوفر مصادر أجود */
               autoPlayFiredRef.current = true;
               setTimeout(() => {
+                if (!isMountedRef.current) return;
                 setSources(latest => {
                   const best = latest.find(s => isDirectPlayable(s)) ?? src;
                   setPlayingSrc(best);
                   setScreen("native");
                   return latest;
                 });
-              }, 3000);
+              }, 1000);
               return next;
             });
           } catch { }
         }
       }
     } catch (e: any) {
-      if (e?.name !== "AbortError") {
+      if (e?.name !== "AbortError" && isMountedRef.current) {
         setLoading(false);
         setScreen(s => s === "loading" ? "picker" : s);
       }
     } finally {
-      setLoading(false);
-      setSources(prev => {
-        if (prev.length === 0) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
-        return prev;
-      });
+      if (isMountedRef.current) {
+        setLoading(false);
+        setSources(prev => {
+          if (prev.length === 0) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+          return prev;
+        });
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, format, year, episodes, native]);
@@ -426,7 +442,7 @@ export default function WatchScreen() {
       quality: getSrcQuality(s),
       subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
       isArabic: ["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher"].includes(s.site || ""),
-      wantsSmartSub: false,
+      wantsSmartSub: !["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher"].includes(s.site || ""),
       skipIntro: s.skipIntro,
       skipOutro: s.skipOutro,
     })).filter(s => s.url);
@@ -493,6 +509,7 @@ export default function WatchScreen() {
         initialSourceIndex={startIdx}
         title={displayTitle}
         episode={epNum}
+        anilistId={anime ? parseInt(anime) : undefined}
         episodeTitle={etitle ? decodeURIComponent(etitle) : undefined}
         initialPosition={resumeTime}
         totalEps={totalEpsCount}
