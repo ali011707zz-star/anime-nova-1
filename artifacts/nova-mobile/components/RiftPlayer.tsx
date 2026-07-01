@@ -729,9 +729,6 @@ export function RiftPlayer({
 
       if (cancelled) return;
 
-      /* تأخير قصير قبل جلب الترجمة من الشبكة حتى يبدأ الفيديو أولاً
-         (بعد كلا الكاش — in-memory + AsyncStorage — للحفاظ على سرعتهما) */
-      await new Promise<void>(r => setTimeout(r, 280));
       if (cancelled) return;
 
       if (url.includes("translate-vtt")) {

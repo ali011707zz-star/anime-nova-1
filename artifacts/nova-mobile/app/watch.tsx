@@ -566,10 +566,10 @@ export default function WatchScreen() {
       <View style={{ flex: 1, backgroundColor: "#000" }}>
         <WebView source={{ uri: embedUrl }} style={{ flex: 1 }} allowsFullscreenVideo allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false} javaScriptEnabled domStorageEnabled />
         <View style={[d.embedTopRow, { paddingTop: topPad + 4 }]}>
-          <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.playerBackBtn}>
-            <Ionicons name="arrow-forward" size={18} color="#fff" />
-          </Pressable>
           <Text style={[d.playerTitle, { flex: 1 }]} numberOfLines={1}>{displayTitle}</Text>
+          <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.playerBackBtn}>
+            <Ionicons name="arrow-back" size={18} color="#fff" />
+          </Pressable>
         </View>
       </View>
     );
