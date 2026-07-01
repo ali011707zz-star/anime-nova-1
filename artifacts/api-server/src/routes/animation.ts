@@ -2372,6 +2372,25 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
+      // ── Nebula (nebula.aether.cx) — أفلام + مسلسلات (Icefy fallback CDN) ────────
+      // API: GET /movie/{tmdbId}?ser=tik  →  {"stream_url":"https://...m3u8"}
+      // API: GET /tv/{tmdbId}/{s}/{e}?ser=tik  →  {"stream_url":"..."}
+      scrapeAnimCached("nebula", async () => {
+        if (!tmdbId) return;
+        try {
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+          send("status", { msg: "Nebula: جاري الاستخراج…" });
+          const apiUrl = type === "movie"
+            ? `https://nebula.aether.cx/movie/${tmdbId}?ser=tik`
+            : `https://nebula.aether.cx/tv/${tmdbId}/${season}/${epNum}?ser=tik`;
+          const raw = await orkestDirectGet(apiUrl, 12_000);
+          const data = JSON.parse(raw) as { stream_url?: string };
+          if (!data.stream_url) return;
+          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(data.stream_url)}&ref=${encodeURIComponent("https://nebula.aether.cx/")}`;
+          sendSource(proxied, "Nebula · HD", data.stream_url, proxied);
+        } catch { /* silent */ }
+      }),
+
       // ── anime-day.com — أنمي داي (كرتون غربي/أنمي صيني) ────────────────────
       scrapeAnimCached("animeday_anim", async () => {
         if (!title) return;
@@ -2861,7 +2880,35 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
       // LordFlix: محذوف — Cloudflare browser-challenge يمنع استخراج البيانات
 
-      // VixSrc (vixsrc.to) — محذوف: Next.js SPA، الـ API يعيد 404 من السيرفر (client-side only)
+      // ── VixSrc (vixsrc.to) — أفلام فقط (API يعيد فارغاً للمسلسلات) ──────────────
+      // API: GET /api/movie/{tmdbId} → {src: "/embed/{id}?token=...&expires=..."}
+      // ثم: fetch embed HTML → extract playlist URL + token → build master m3u8
+      scrapeAnimCached("vixsrc", async () => {
+        if (!tmdbId) return;
+        if (type !== "movie") return;
+        try {
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+          const VIXSRC_BASE = "https://vixsrc.to";
+          send("status", { msg: "VixSrc: جاري الاستخراج…" });
+          // Step 1: Get embed URL with token/expires from API
+          const apiRaw = await orkestDirectGet(`${VIXSRC_BASE}/api/movie/${tmdbId}`, 10_000);
+          const apiData = JSON.parse(apiRaw) as { src?: string };
+          if (!apiData?.src) return;
+          const embedUrl = apiData.src.startsWith("http") ? apiData.src : `${VIXSRC_BASE}${apiData.src}`;
+          // Step 2: Fetch embed page to extract playlist URL + token
+          const embedHtml = await orkestDirectGet(embedUrl, 12_000);
+          if (!embedHtml) return;
+          const token    = embedHtml.match(/token["']\s*:\s*["']([^"']+)/)?.[1];
+          const expires  = embedHtml.match(/expires["']\s*:\s*["']([^"']+)/)?.[1];
+          const playlist = embedHtml.match(/url\s*:\s*["']([^"']{10,}\.m3u8[^"']*)/)?.[1]
+                        || embedHtml.match(/file\s*:\s*["']([^"']{10,}\.m3u8[^"']*)/)?.[1];
+          if (!token || !expires || !playlist) return;
+          const sep = playlist.includes("?") ? "&" : "?";
+          const masterUrl = `${playlist}${sep}token=${token}&expires=${expires}&h=1&lang=en`;
+          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(masterUrl)}&ref=${encodeURIComponent(`${VIXSRC_BASE}/`)}`;
+          sendSource(proxied, "VixSrc · FHD", masterUrl, proxied);
+        } catch { /* silent */ }
+      }),
 
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
       // ── MyCima / WeCima — أفلام وكرتون مترجم ──────────────────────────────
