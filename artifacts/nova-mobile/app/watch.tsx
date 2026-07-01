@@ -124,14 +124,13 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
   return (
     <Pressable onPress={() => onPlay(src)} style={d.srcRow}>
       <View style={[d.srcIcon, { backgroundColor: qs.badge, borderColor: qs.border }]}>
-        <Ionicons name="play-circle" size={14} color={qs.text} />
+        <Ionicons name="play-circle" size={11} color={qs.text} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <Text style={d.srcNum}>سيرفر {idx + 1}</Text>
           <View style={d.srcTag}><Text style={d.srcTagText}>{tag}</Text></View>
           {hasSub && <View style={d.srcSubBadge}><Text style={d.srcSubText}>ترجمة</Text></View>}
-          {isHls && <View style={d.srcHlsBadge}><Text style={d.srcHlsText}>HLS</Text></View>}
         </View>
       </View>
       <View style={d.srcRight}>
@@ -356,7 +355,7 @@ export default function WatchScreen() {
     if (screen === "loading" || screen === "picker") {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => { });
     } else if (screen === "embed") {
-      ScreenOrientation.unlockAsync().catch(() => { });
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT).catch(() => { });
     }
   }, [screen]);
 
@@ -726,8 +725,8 @@ const d = StyleSheet.create({
   srcSection:    { borderRadius: 16, overflow: "hidden", backgroundColor: "rgba(14,12,24,0.92)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)" },
 
   /* Source row: "Server N · KW" */
-  srcRow:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 13, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.05)" },
-  srcIcon:       { width: 38, height: 38, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  srcRow:        { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 8, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.05)" },
+  srcIcon:       { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   srcNum:        { fontSize: 13, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.92)" },
   srcTag:        { backgroundColor: "rgba(139,92,246,0.18)", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: "rgba(139,92,246,0.30)" },
   srcTagText:    { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.90)", fontVariant: ["tabular-nums"] },
