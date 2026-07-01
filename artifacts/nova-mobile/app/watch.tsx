@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { secureStreamFetch } from "@/utils/secureApi";
+import { secureFetch } from "@/utils/secureApi";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
@@ -95,6 +95,20 @@ function resolveUrl(url: string | undefined, base: string): string {
   if (url.startsWith("/")) return base + url;
   return url;
 }
+
+/* ── قائمة المصادر (خارج الـ component لتجنب إعادة الإنشاء) ── */
+const ANIME_SITES = [
+  // مصادر سريعة (ياباني مترجم / إنجليزي)
+  "anineko", "anikoto", "hianime", "videasy_anim", "vidlink_anim",
+  "kawaii", "animewitcher", "mitanime", "vidfast", "anikototv", "animekai",
+  // مصادر عربية (تحتاج extraction)
+  "shahiid", "animelek", "animedar", "okanime", "ristoanime",
+  "animeify", "animeday", "arabseed", "anime4up2",
+  "mycima", "topcinemaa", "animephoenix",
+  // قاعدة بيانات FaselHD
+  "faselhd_db",
+] as const;
+const SITE_TIMEOUT_MS = 28_000;
 
 /* ── Spinning loader ── */
 function SpinRing({ size = 36 }: { size?: number }) {
@@ -221,7 +235,7 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progressKey, srcCacheKey]);
 
-  /* ── SSE fetch ── */
+  /* ── Parallel per-source HTTP fetch (يحل محل SSE تماماً) ── */
   const fetchSources = useCallback(async () => {
     if (!anime) return;
     autoPlayFiredRef.current = false;
@@ -235,9 +249,10 @@ export default function WatchScreen() {
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    const mainSignal = abortRef.current.signal;
 
     const base = getBaseUrl();
-    const params = new URLSearchParams({
+    const qs = new URLSearchParams({
       anime: anime || "0",
       ep: String(epNum),
       title: titleStr,
@@ -247,114 +262,91 @@ export default function WatchScreen() {
       episodes: episodes || "",
       native: native || "",
     });
-    const url = `${base}/api/anime/sources-stream?${params}`;
-    const freshSrcs: Src[] = [];
 
-    try {
-      const response = await secureStreamFetch(url, {
-        signal: abortRef.current.signal as any,
-      });
+    const allFresh: Src[] = [];
 
-      if (!response.ok) {
-        if (!isMountedRef.current) return;
-        setLoading(false);
-        setScreen(s => s === "loading" ? "picker" : s);
-        return;
-      }
-      if (!response.body) throw new Error("No body");
+    /* جلب مصدر واحد — يُستدعى بالتوازي لكل site */
+    const fetchOneSite = async (site: string) => {
+      /* مهلة مستقلة لكل مصدر مع ربطها بـ abort الرئيسي */
+      const siteCtrl = new AbortController();
+      const tid = setTimeout(() => siteCtrl.abort(), SITE_TIMEOUT_MS);
+      const onMainAbort = () => siteCtrl.abort();
+      mainSignal.addEventListener("abort", onMainAbort, { once: true });
 
-      const reader  = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      try {
+        const res = await secureFetch(
+          `${base}/api/anime/fetch-source?site=${site}&${qs}`,
+          { signal: siteCtrl.signal }
+        );
+        clearTimeout(tid);
+        mainSignal.removeEventListener("abort", onMainAbort);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!isMountedRef.current) { try { reader.cancel(); } catch {} break; }
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        if (!res.ok || !isMountedRef.current) return;
+        const data = await res.json();
+        const rawSrcs: Src[] = data.sources || [];
+        if (!rawSrcs.length) return;
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const raw = line.slice(6).trim();
-
-          /* [DONE] signal — not JSON */
-          if (raw === "[DONE]") {
-            if (!isMountedRef.current) break;
-            setLoading(false);
-            if (freshSrcs.length > 0 && srcCacheKey) {
-              AsyncStorage.setItem(srcCacheKey, JSON.stringify({ sources: freshSrcs, ts: Date.now() })).catch(() => { });
-            }
-            setSources(prev => {
-              if (prev.length === 0) setTimeout(() => setScreen("picker"), 0);
-              return prev;
-            });
-            continue;
-          }
-
-          try {
-            const data = JSON.parse(raw);
-            if (data?.type === "done") {
-              if (!isMountedRef.current) break;
-              setLoading(false);
-              setSources(prev => { if (prev.length === 0) setTimeout(() => setScreen("picker"), 0); return prev; });
-              continue;
-            }
-
-            /* source event */
-            if (!data.url && !data.directUrl) continue;
-            if (!isMountedRef.current) break;
-            const src: Src = {
-              ...data,
-              directUrl: resolveUrl(data.directUrl, base),
-              url: resolveUrl(data.url, base),
-            };
-            const key = getPlayUrl(src);
-            if (!key || seenKeys.current.has(key)) continue;
+        /* فلتر التكرار وإصلاح URLs النسبية */
+        const newSrcs = rawSrcs
+          .map((s): Src => ({
+            ...s,
+            site: s.site || site,
+            directUrl: resolveUrl(s.directUrl, base),
+            url: resolveUrl(s.url, base),
+          }))
+          .filter(s => {
+            const key = getPlayUrl(s);
+            if (!key || seenKeys.current.has(key)) return false;
             seenKeys.current.add(key);
-            freshSrcs.push(src);
+            return true;
+          });
 
-            setSources(prev => {
-              if (!isMountedRef.current) return prev;
-              const next = [...prev, src];
-              const isGoodSrc = isDirectPlayable(src);
-              if (!isGoodSrc || autoPlayFiredRef.current) {
-                setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
-                return next;
-              }
-              /* التشغيل التلقائي: انتظر ثانية لتوفر مصادر أجود */
-              autoPlayFiredRef.current = true;
-              setTimeout(() => {
-                if (!isMountedRef.current) return;
-                setSources(latest => {
-                  const best = latest.find(s => isDirectPlayable(s)) ?? src;
-                  setPlayingSrc(best);
-                  setScreen("native");
-                  return latest;
-                });
-              }, 1000);
-              return next;
-            });
-          } catch { }
-        }
-      }
-    } catch (e: any) {
-      if (e?.name !== "AbortError" && isMountedRef.current) {
-        setLoading(false);
+        if (!newSrcs.length || !isMountedRef.current) return;
+        allFresh.push(...newSrcs);
+
+        /* أظهر الـ picker فور وصول أي مصدر */
         setScreen(s => s === "loading" ? "picker" : s);
+        setSources(prev => [...prev, ...newSrcs]);
+
+        /* تشغيل تلقائي على أول مصدر قابل للتشغيل المباشر */
+        if (!autoPlayFiredRef.current) {
+          const good = newSrcs.find(isDirectPlayable);
+          if (good) {
+            autoPlayFiredRef.current = true;
+            setTimeout(() => {
+              if (!isMountedRef.current) return;
+              setSources(latest => {
+                const best = latest.find(s => isDirectPlayable(s)) ?? good;
+                setPlayingSrc(best);
+                setScreen("native");
+                return latest;
+              });
+            }, 1200);
+          }
+        }
+      } catch (e: any) {
+        clearTimeout(tid);
+        mainSignal.removeEventListener("abort", onMainAbort);
+        /* تجاهل AbortError — مصادر أخرى لا تزال تعمل */
       }
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-        setSources(prev => {
-          if (prev.length === 0) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
-          return prev;
-        });
-      }
+    };
+
+    /* شغّل جميع المصادر بالتوازي الكامل */
+    await Promise.allSettled(ANIME_SITES.map(site => fetchOneSite(site)));
+
+    if (!isMountedRef.current) return;
+    setLoading(false);
+    setScreen(s => s === "loading" ? "picker" : s);
+
+    /* احفظ الكاش من مجموع المصادر الناجحة */
+    if (srcCacheKey && allFresh.length) {
+      AsyncStorage.setItem(
+        srcCacheKey,
+        JSON.stringify({ sources: allFresh, ts: Date.now() })
+      ).catch(() => {});
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum, titleStr, englishStr, format, year, episodes, native]);
+  }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, srcCacheKey]);
 
   useEffect(() => {
     fetchSources();
