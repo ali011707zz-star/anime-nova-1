@@ -36,8 +36,8 @@ COPY --from=builder /runtime-modules/node_modules/     ./node_modules/
 COPY scripts/cf_proxy.py ./scripts/cf_proxy.py
 COPY artifacts/api-server/src/data/ ./artifacts/api-server/dist/data/
 
-COPY koyeb-start.sh ./start.sh
+COPY vps-start.sh ./start.sh
 RUN chmod +x ./start.sh
 
-EXPOSE 5000
+EXPOSE 8080
 CMD ["./start.sh"]
