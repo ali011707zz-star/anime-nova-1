@@ -833,10 +833,11 @@ export default function AnimeDetail() {
             </div>
             {/* YouTube iframe fills full screen */}
             <iframe
-              src={`https://www.youtube.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=0`}
+              src={`https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&rel=0&fs=1&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`}
               className="w-full flex-1"
-              allow="autoplay; fullscreen; picture-in-picture"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
               style={{ border: "none" }}
             />
           </motion.div>

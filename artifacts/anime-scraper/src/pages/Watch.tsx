@@ -540,6 +540,10 @@ function _streamVttTranslation(
 
 /* ══════════════════════════════════ LOADING SCREEN ══════════ */
 function LoadingScreen({ cover, title, ep }: { cover: string; title: string; ep: number }) {
+  useEffect(() => {
+    try { (screen.orientation as any).lock?.("portrait").catch(() => {}); } catch {}
+    return () => { try { (screen.orientation as any).unlock?.(); } catch {} };
+  }, []);
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-[#07070d]" dir="rtl">
       {/* Full-screen blurred backdrop */}
@@ -3347,7 +3351,9 @@ export default function WatchPage() {
 
     /* Initial load: show a beautiful loading screen while scrapers run */
     return (
-      <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl">
+      <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl"
+        ref={el => { if (el) { try { (screen.orientation as any).lock?.("portrait").catch(() => {}); } catch {} } }}
+      >
         {/* Blurred bg */}
         {cover && (
           <div className="absolute inset-0">
