@@ -401,9 +401,9 @@ export function RiftPlayer({
   const prevSpeedRef                  = useRef(1);
 
   /* ─── Volume / Brightness ─── */
-  const [volume, setVolume]           = useState(1);
+  const [volume, setVolume]           = useState(2);   // يبدأ بـ 200%
   const [brightness, setBrightness]   = useState(0);
-  const volumeRef                     = useRef(1);
+  const volumeRef                     = useRef(2);
   const brightnessRef                 = useRef(0);
 
   /* ─── Gesture feedback ─── */
@@ -788,8 +788,8 @@ export function RiftPlayer({
 
   /* ─── Screen orientation lock to landscape ─── */
   useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT)
-      .then(() => { orientLockRef.current = "left"; })
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT)
+      .then(() => { orientLockRef.current = "right"; })
       .catch(() => {});
     return () => {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
@@ -805,7 +805,7 @@ export function RiftPlayer({
   const togglePortrait = useCallback(async () => {
     try {
       if (isPortrait) {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
       } else {
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
       }
@@ -850,11 +850,14 @@ export function RiftPlayer({
     return () => sub.remove();
   }, []);
 
-  /* ─── Mute sync ─── */
+  /* ─── Mute sync + initial 200% volume ─── */
   useEffect(() => {
     try {
       if (isMuted) { prevVolRef.current = volumeRef.current; player.volume = 0; }
-      else { player.volume = Math.min(1, prevVolRef.current || 1); }
+      else {
+        /* حجم الجهاز دائماً 1 (أقصى حد للهاردوير) — الـ 200% هي مؤشر UI فقط */
+        player.volume = 1;
+      }
     } catch {}
   }, [isMuted, player]);
 
@@ -1254,12 +1257,12 @@ export function RiftPlayer({
         tapTimer.current = null;
         lastTap.current = null;
         if (showControls) {
-          Animated.timing(controlsOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setShowControls(false));
+          Animated.timing(controlsOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setShowControls(false));
           if (hideTimer.current) clearTimeout(hideTimer.current);
         } else {
           fadeIn();
         }
-      }, 250);
+      }, 180);
     }
   }, [isLocked, showControls, triggerDblTap, fadeIn]);
 
@@ -1757,9 +1760,10 @@ export function RiftPlayer({
             )}
 
             {/* الوقت — دائماً LTR: الوقت الحالي يسار، المدة الكلية يمين */}
-            <View style={[s.timeRow, { direction: "ltr" as any }]}>
-              <Text style={s.timeText}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, { opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+            {/* نستخدم absolute positioning لضمان اليسار/اليمين الفعلي بغض النظر عن RTL الجهاز */}
+            <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
+              <Text style={[s.timeText, { position: "absolute", left: 0 }]}>{fmtTime(position)}</Text>
+              <Text style={[s.timeText, { position: "absolute", right: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
             {/* شريط التقدم — LTR دائماً: يسار=بداية، يمين=نهاية */}
@@ -2324,28 +2328,29 @@ const s = StyleSheet.create({
   },
   /* معلومات الأنمي في الجهة اليسرى */
   topInfoWrap: {
-    flex: 1, gap: 2, marginRight: 6,
+    flex: 1, flexDirection: "column", gap: 5, marginRight: 6,
+    alignItems: "flex-start",
   },
   topInfoTitle: {
-    color: "rgba(255,255,255,0.90)", fontSize: 11, fontFamily: "Cairo_700Bold",
+    color: "rgba(255,255,255,0.92)", fontSize: 12, fontFamily: "Cairo_700Bold",
     textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 6, textShadowOffset: { width: 0, height: 1 },
   },
   topInfoRow: {
-    flexDirection: "row", alignItems: "center", gap: 4,
+    flexDirection: "row", alignItems: "center", gap: 5, flexWrap: "nowrap",
   },
   topEpBadge: {
-    paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6,
-    backgroundColor: "rgba(139,92,246,0.25)", borderWidth: 1, borderColor: "rgba(167,139,250,0.40)",
+    paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5,
+    backgroundColor: "rgba(139,92,246,0.28)", borderWidth: 1, borderColor: "rgba(167,139,250,0.45)",
   },
   topEpText: {
-    color: "rgba(221,214,254,0.95)", fontSize: 9, fontFamily: "Cairo_700Bold",
+    color: "rgba(221,214,254,0.95)", fontSize: 8, fontFamily: "Cairo_700Bold", letterSpacing: 0.2,
   },
   topQualityBadge: {
-    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 6,
-    backgroundColor: "rgba(251,191,36,0.15)", borderWidth: 1, borderColor: "rgba(251,191,36,0.35)",
+    paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5,
+    backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1, borderColor: "rgba(251,191,36,0.40)",
   },
   topQualityText: {
-    color: "rgba(253,224,71,0.90)", fontSize: 9, fontFamily: "Cairo_700Bold",
+    color: "rgba(253,224,71,0.90)", fontSize: 8, fontFamily: "Cairo_700Bold", letterSpacing: 0.2,
   },
   topEpTitle: {
     color: "rgba(255,255,255,0.65)", fontSize: 9, fontFamily: "Cairo_400Regular",
