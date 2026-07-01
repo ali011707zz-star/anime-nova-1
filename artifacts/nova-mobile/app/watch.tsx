@@ -96,11 +96,13 @@ function resolveUrl(url: string | undefined, base: string): string {
   return url;
 }
 
-/* ── قائمة المصادر (خارج الـ component لتجنب إعادة الإنشاء) ── */
+/* ── قائمة المصادر (kawaii أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 const ANIME_SITES = [
+  // kawaii أولاً لضمان التشغيل الفوري
+  "kawaii",
   // مصادر سريعة (ياباني مترجم / إنجليزي)
   "anineko", "anikoto", "hianime", "videasy_anim", "vidlink_anim",
-  "kawaii", "animewitcher", "mitanime", "vidfast", "anikototv", "animekai",
+  "animewitcher", "mitanime", "vidfast", "anikototv", "animekai",
   // مصادر عربية (تحتاج extraction)
   "shahiid", "animelek", "animedar", "okanime", "ristoanime",
   "animeify", "animeday", "arabseed", "anime4up2",
@@ -192,6 +194,7 @@ export default function WatchScreen() {
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
+  const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
 
   const abortRef          = useRef<AbortController | null>(null);
   const seenKeys          = useRef(new Set<string>());
@@ -199,6 +202,18 @@ export default function WatchScreen() {
   const autoPlayFiredRef  = useRef(false);
   const hasCachedRef      = useRef(false);
   const isMountedRef      = useRef(true);
+
+  /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
+  useEffect(() => {
+    if (!etitle) return;
+    const raw = decodeURIComponent(etitle);
+    if (!raw || /[\u0600-\u06FF]/.test(raw)) { setArEpTitle(raw); return; }
+    const base = getBaseUrl();
+    secureFetch(`${base}/api/anime/translate?text=${encodeURIComponent(raw)}&from=en&to=ar`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: any) => { if (d?.translated) setArEpTitle(d.translated); })
+      .catch(() => {});
+  }, [etitle]); // eslint-disable-line
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -304,27 +319,23 @@ export default function WatchScreen() {
         if (!newSrcs.length || !isMountedRef.current) return;
         allFresh.push(...newSrcs);
 
-        /* أظهر الـ picker فور وصول أي مصدر */
-        setScreen(s => s === "loading" ? "picker" : s);
         setSources(prev => [...prev, ...newSrcs]);
 
-        /* تشغيل تلقائي — يفضّل KW (kawaii) كمصدر افتراضي */
+        /* تشغيل تلقائي مباشر — يتجاوز صفحة الـ picker تماماً */
         if (!autoPlayFiredRef.current) {
           const good = newSrcs.find(isDirectPlayable);
           if (good) {
             autoPlayFiredRef.current = true;
-            setTimeout(() => {
-              if (!isMountedRef.current) return;
-              setSources(latest => {
-                const best =
-                  latest.find(s => isDirectPlayable(s) && s.site === "kawaii") ??
-                  latest.find(s => isDirectPlayable(s)) ??
-                  good;
-                setPlayingSrc(best);
-                setScreen("native");
-                return latest;
-              });
-            }, 1200);
+            /* يفضّل KW من المصادر الواردة الآن — تشغيل فوري بدون تأخير */
+            const best =
+              newSrcs.find(s => isDirectPlayable(s) && s.site === "kawaii") ??
+              good;
+            if (!isMountedRef.current) return;
+            setPlayingSrc(best);
+            setScreen("native");
+          } else {
+            /* embed فقط — أظهر الـ picker */
+            setScreen(s => s === "loading" ? "picker" : s);
           }
         }
       } catch (e: any) {
@@ -507,7 +518,7 @@ export default function WatchScreen() {
         title={displayTitle}
         episode={epNum}
         anilistId={anime ? parseInt(anime) : undefined}
-        episodeTitle={etitle ? decodeURIComponent(etitle) : undefined}
+        episodeTitle={arEpTitle ?? (etitle ? decodeURIComponent(etitle) : undefined)}
         initialPosition={resumeTime}
         totalEps={totalEpsCount}
         onBack={() => { saveProgress(); setScreen("picker"); }}
