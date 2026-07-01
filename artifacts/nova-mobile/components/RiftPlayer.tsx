@@ -477,6 +477,7 @@ export function RiftPlayer({
   const barRef            = useRef<View>(null);
   const barWidth          = useRef(1);
   const barPageX          = useRef(0); // absolute X of bar's left edge on screen (for reliable seek)
+  const lastMoveX         = useRef(0); // last known absolute X during drag (fallback for release on Android)
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
   const durationRef       = useRef(0);
@@ -1211,20 +1212,31 @@ export function RiftPlayer({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
-        /* حفظ الموضع المطلق لبداية الشريط (pageX - locationX = الحافة اليسرى للشريط) */
-        barPageX.current = e.nativeEvent.pageX - e.nativeEvent.locationX;
-        const pct = _calcPctFromAbsolute(e.nativeEvent.pageX);
+        /* على Android RTL يكون locationX غير موثوق (قد يُحسب من الحافة اليمنى أو يساوي صفراً).
+           نستخدم measureInWindow لتحديث barPageX بشكل موثوق، مع fallback فوري من آخر قيمة محفوظة. */
+        const grantPageX = e.nativeEvent.pageX;
+        lastMoveX.current = grantPageX;
         setIsDragging(true);
-        setDragPct(Math.max(0, Math.min(1, pct)));
+        // Immediate feedback using pre-measured barPageX (set from last onLayout → measureInWindow)
+        setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
+        // Refresh measurement asynchronously (corrects if layout shifted since last onLayout)
+        barRef.current?.measureInWindow((px, _py, pw) => {
+          if (px >= 0) barPageX.current = px;
+          if (pw > 1)  barWidth.current  = pw;
+          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
+        });
       },
       onPanResponderMove: (_, gs) => {
         /* gs.moveX = الإحداثي المطلق للإصبع على الشاشة — موثوق على iOS وAndroid */
-        const pct = _calcPctFromAbsolute(gs.moveX);
+        const x = gs.moveX;
+        if (x > 0) lastMoveX.current = x;
+        const pct = _calcPctFromAbsolute(x > 0 ? x : lastMoveX.current);
         setDragPct(Math.max(0, Math.min(1, pct)));
       },
       onPanResponderRelease: (_, gs) => {
-        const pct = _calcPctFromAbsolute(gs.moveX);
-        const safePct = Math.max(0, Math.min(1, pct));
+        /* gs.moveX على بعض إصدارات Android يساوي 0 عند الرفع — نستخدم lastMoveX كـ fallback */
+        const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
+        const safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
         setIsDragging(false);
         seekRef.current(safePct * durationRef.current);
       },
@@ -1796,7 +1808,12 @@ export function RiftPlayer({
                 <View
                   ref={barRef}
                   style={[s.progressWrap, isDragging && s.progressWrapDragging]}
-                  onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
+                  onLayout={(e) => {
+                    barWidth.current = e.nativeEvent.layout.width || 1;
+                    /* measureInWindow يعطي الإحداثي المطلق (pageX) بشكل موثوق على Android RTL
+                       بدلاً من الاعتماد على locationX داخل PanResponder */
+                    barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
+                  }}
                   {...seekBarPan.panHandlers}
                 >
                   <View style={s.progressBg} />

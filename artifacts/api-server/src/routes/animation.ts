@@ -2887,7 +2887,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const u = src.directUrl || src.url;
             if (!u) continue;
             const proxied = u.startsWith("/api/") ? u
-              : u.includes(".m3u8") ? wrapHls(u, "https://mycima.gives/")
+              : u.includes(".m3u8") ? wrapHls(u, "https://mycima.gripe/")
               : u;
             sendSource(proxied, `MyCima · ${src.name || "Arabic Dubbed"}`, proxied, proxied);
           }
@@ -3071,15 +3071,21 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const ifrM = pageHtml.match(/name="player_iframe"[^>]+data-src="([^"]+)"/);
           if (ifrM) {
             const playerUrl = ifrM[1];
-            // جلب صفحة video_player مباشرة (غير محجوبة كذلك)
+            // جلب صفحة video_player — أولاً مباشر، وإذا حُجب نستخدم cfProxyGet
             try {
-              const vpr = await fetch(playerUrl, {
-                headers: { ...faselHeaders, Referer: targetUrl },
-                signal: AbortSignal.timeout(10_000),
-              });
-              if (vpr.ok) {
-                const vpHtml = await vpr.text();
-                // البحث عن روابط HLS/MP4 مباشرة في HTML قبل التشفير
+              let vpHtml = "";
+              try {
+                const vpr = await fetch(playerUrl, {
+                  headers: { ...faselHeaders, Referer: targetUrl },
+                  signal: AbortSignal.timeout(10_000),
+                });
+                if (vpr.ok) vpHtml = await vpr.text();
+              } catch { /* silent */ }
+              if (!vpHtml || isCfBlocked(vpHtml)) {
+                vpHtml = await cfProxyGet(playerUrl);
+              }
+              if (vpHtml) {
+                // البحث عن روابط HLS/MP4 مباشرة في HTML
                 const m3u8 = vpHtml.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*?)["']/);
                 if (m3u8) {
                   const proxied = wrapHls(m3u8[1], playerUrl);
