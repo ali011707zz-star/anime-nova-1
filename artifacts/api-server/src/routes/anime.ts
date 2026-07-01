@@ -3788,7 +3788,7 @@ async function getAnime4up2Sources(
 //  ماي سيما: أنمي مترجم + أفلام + كرتون مدبلج
 //  Approach: WP-JSON search → episode post → data-watch servers → extractVideoDeep
 // ════════════════════════════════════════════════════════════════════
-const MYCIMA_BASE = "https://mycima.gives";
+const MYCIMA_BASE = "https://mycima.gripe";
 
 const mycimaSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
@@ -8024,8 +8024,8 @@ async function getFaselhdDbSources(
     const best = scored[0];
     console.log(`[FaselhdDB] best match: "${best.name}" (score ${best._sc.toFixed(2)}) → ${best.link}`);
 
-    // 4. Fetch series/movie page via Orkestr
-    const pageHtml = await orkestGet(best.link, `${FASELHD_DB_BASE}/`, 22_000);
+    // 4. Fetch series/movie page via CF proxy (curl_cffi chrome136 — fasel-hd.cam is accessible)
+    const pageHtml = await cfProxyGet(best.link, `${FASELHD_DB_BASE}/`, 22_000);
     if (!pageHtml || pageHtml.length < 1000) return out;
     if (pageHtml.includes("Just a moment") || pageHtml.includes("cf-browser-verification")) return out;
 
@@ -8055,8 +8055,8 @@ async function getFaselhdDbSources(
         return out;
       }
 
-      // 5b. Fetch episode page via Orkestr
-      epHtml = await orkestGet(target.url, best.link, 22_000);
+      // 5b. Fetch episode page via CF proxy
+      epHtml = await cfProxyGet(target.url, best.link, 22_000);
       if (!epHtml || epHtml.length < 1000) return out;
     }
 
@@ -8076,10 +8076,10 @@ async function getFaselhdDbSources(
       playerTokens.push(`${FASELHD_DB_BASE}/video_player?player_token=${tkM[1]}`);
     }
 
-    // 8. Try download links: fetch via Orkestr → parse for direct video
+    // 8. Try download links: fetch via CF proxy → parse for direct video
     const dlAttempts = dlLinks.slice(0, 4).map(async (dlUrl): Promise<UnifiedSource | null> => {
       try {
-        const dlHtml = await orkestGet(dlUrl, best.link, 12_000);
+        const dlHtml = await cfProxyGet(dlUrl, best.link, 12_000);
         if (!dlHtml || dlHtml.length < 100) return null;
         const video = parseVideoUrl(dlHtml);
         if (!video || !video.url.startsWith("http")) return null;
@@ -8099,10 +8099,10 @@ async function getFaselhdDbSources(
       } catch { return null; }
     });
 
-    // 9. Try video_player token pages: Orkestr fetch → parseVideoUrl
+    // 9. Try video_player token pages: CF proxy fetch → parseVideoUrl
     const playerAttempts = playerTokens.slice(0, 2).map(async (pUrl): Promise<UnifiedSource | null> => {
       try {
-        const pHtml = await orkestGet(pUrl, best.link, 15_000);
+        const pHtml = await cfProxyGet(pUrl, best.link, 15_000);
         if (!pHtml || pHtml.length < 100) return null;
         const video = parseVideoUrl(pHtml);
         if (!video || !video.url.startsWith("http")) return null;
@@ -8362,11 +8362,12 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("witanime_db",  () => getWitanimeDBSources(title, english, ep, anilistId), false, 25000), // مخفي مؤقتاً
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
       scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
+      scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep),           true, 20000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
       // anime3rb:     CF IP block حقيقي، curl_cffi لا تنفع
-      // animetime:    جميع روابط CDN ميتة
+      // animetime CDN (vidhls.com) يعمل لبعض الأنمي (200) — مُعاد تفعيله 2026-07-01
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
       // allmanga:     clock.json→500, fast4speed→401
@@ -8488,6 +8489,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       // witanime_db: removed
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
+      case "animetime":    (await race(getAnimeTimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
