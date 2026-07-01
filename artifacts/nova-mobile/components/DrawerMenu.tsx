@@ -256,7 +256,7 @@ const s = StyleSheet.create({
   logoText: { fontSize: 17, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
   logoSub: { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.3)", marginTop: -2 },
   closeBtn: {
-    marginLeft: "auto",
+    marginStart: "auto" as any,
     width: 32, height: 32, borderRadius: 16,
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.05)",
