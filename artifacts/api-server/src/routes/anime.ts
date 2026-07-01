@@ -7408,6 +7408,7 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
     "Referer": "https://player.videasy.to/",
     "Origin": "https://player.videasy.to",
   };
+  // FMHY-Indexers v0.4 — Neon(mb-flix) + Yoru(cdn) — بدون ترجمة مدمجة
   await Promise.allSettled(["mb-flix", "cdn"].map(async (server) => {
     try {
       const params = `title=${encTitle}&mediaType=tv&year=&tmdbId=${tmdbId}&imdbId=&episodeId=${ep}&seasonId=1`;
@@ -7449,6 +7450,48 @@ async function getVideasyAnimeSources(title: string, english: string | null, ep:
     } catch { /* silent per server */ }
   }));
   return sources;
+}
+
+// ── MX Player sources (mxplayer.in — licensed anime/animation) ──────────────
+// بدون ترجمة مدمجة: نعيد روابط HLS/DASH الخام فقط، بدون أي معالجة للترجمة.
+// يتصل بـ mxplayer_service.py (Flask) على منفذ MXP_SERVICE_PORT (8002 افتراضياً).
+const _mxpSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const MXP_TTL = 2 * 3_600_000; // 2 hours
+
+async function getMXPlayerSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  const q  = (english || title).trim();
+  const ck = `mxp:${q.toLowerCase()}:${ep}`;
+  const hit = _mxpSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < MXP_TTL) return hit.sources;
+
+  try {
+    const mxpPort = process.env.MXP_SERVICE_PORT || "8002";
+    const url = `http://localhost:${mxpPort}/search?q=${encodeURIComponent(q)}&ep=${ep}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!r.ok) { _mxpSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
+    const data = await r.json() as { sources?: Array<{ url: string; type?: string; label?: string; quality?: string }> };
+    const raw = data.sources || [];
+    const sources: UnifiedSource[] = raw.map((s: any) => {
+      const isHls = s.type === "hls" || (s.url || "").includes(".m3u8");
+      const proxied = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${encodeURIComponent("https://www.mxplayer.in/")}`
+        : s.url;
+      return {
+        name:        s.label || `MXPlayer · ${s.quality || "HD"}`,
+        url:         proxied,
+        quality:     s.quality || "HD",
+        qualityRank: 8,
+        site:        "mxplayer",
+        directUrl:   proxied,
+        directType:  isHls ? "hls" as const : undefined,
+      };
+    });
+    _mxpSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch {
+    _mxpSrcCache.set(ck, { sources: [], ts: Date.now() });
+    return [];
+  }
 }
 
 // ── VidLink via enc-dec.app (TMDB-native, auth-token IP-tied → hls-proxy) ──
@@ -8301,6 +8344,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
       scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep, anilistId),  false),
       scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep, anilistId),  false),
+      scrapeCached("mxplayer",      () => getMXPlayerSources(title, english, ep),                 false),
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
       // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
       scrapeCached("vidfast",       () => getVidFastAnimeSources(title, english, ep, anilistId),  false, 22000),
@@ -8428,6 +8472,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "starcima_anim": محذوف — يرسل صوتاً هندياً في قسم الأنمي
       case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
       case "vidlink_anim":  (await race(getVidLinkAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "mxplayer":      (await race(getMXPlayerSources(title, english, ep),      15_000, [])).forEach(collectSrc); break;
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;

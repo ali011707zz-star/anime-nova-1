@@ -1,1 +1,2 @@
 - [Anime NOVA startup fix](anime-nova-startup.md) — DB migration must run AFTER server starts listening, not before, or the workflow port-open timeout fails.
+- [MXPlayer service search approach](mxplayer-search.md) — use /search/result (not /search/suggest); tvshow needs season→episode chain; CDN prefix is isa-1.mxplay.com.

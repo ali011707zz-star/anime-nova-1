@@ -169,29 +169,49 @@ class MyAnimeScraper extends BaseScraper {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Anime4up.info SCRAPER
+// Anime4up.cam SCRAPER  (تم إصلاحه — النطاق الجديد + data-watch)
+// البنية: /?search_param=animes&s={query} → /anime/{slug}/
+//         /episode/{slug}-الحلقة-{N}/  → <li data-watch="URL">
 // ════════════════════════════════════════════════════════════════
 
 class Anime4upScraper extends BaseScraper {
+  private readonly A4UP_BASE = 'https://anime4up.cam';
+  private readonly A4UP_ALT  = 'https://w1.anime4up.rest';
+
   constructor() {
-    super('https://anime4up.info', 'Anime4up');
+    super('https://anime4up.cam', 'Anime4up');
+    // Override axios to add required headers for anime4up.cam
+    this.axios = axios.create({
+      baseURL: this.A4UP_BASE,
+      timeout: 12000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': 'https://anime4up.cam/',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
+      },
+    });
   }
 
   async searchAnime(query: string): Promise<any[]> {
     try {
-      const response = await this.axios.get('/search', {
-        params: { keyword: query },
+      const response = await this.axios.get('/', {
+        params: { search_param: 'animes', s: query },
       });
       const $ = cheerio.load(response.data);
       const results: any[] = [];
 
-      $('[data-anime-id]').each((_, el) => {
+      // البنية المؤكدة: <a href="URL" class="overlay" aria-label="Title">
+      $('a.overlay[aria-label]').each((_, el) => {
         const $el = $(el);
+        const href = $el.attr('href') || '';
+        if (!href.includes('/anime/')) return;
+        const slug = href.replace(this.A4UP_BASE + '/anime/', '').replace(/\/$/, '');
         results.push({
-          id: $el.attr('data-anime-id'),
-          title: $el.find('.anime-name').text(),
-          image: $el.find('img').attr('src'),
-          url: $el.attr('href'),
+          id: slug,
+          title: $el.attr('aria-label') || slug,
+          image: $el.closest('.anime-card, .card').find('img').attr('src') || '',
+          url: href,
         });
       });
 
@@ -204,43 +224,81 @@ class Anime4upScraper extends BaseScraper {
 
   async getEpisodes(animeId: string): Promise<AnimeEpisode[]> {
     try {
-      const response = await this.axios.get(`/anime/${animeId}`);
-      const $ = cheerio.load(response.data);
-      const episodes: AnimeEpisode[] = [];
+      // جلب صفحة السلسلة للحصول على روابط الحلقات
+      const seriesRes = await this.axios.get(`/anime/${animeId}/`);
+      const $ = cheerio.load(seriesRes.data);
+      const epLinks: string[] = [];
 
-      $('.episode-card').each((_, el) => {
-        const $el = $(el);
-        const epNum = parseInt($el.find('.ep-num').text()) || 0;
-        const videoLinks: VideoLink[] = [];
-
-        $el.find('.server-link').each((__, linkEl) => {
-          const $link = $(linkEl);
-          const quality = $link.find('.quality-badge').text() || 'SD';
-          videoLinks.push({
-            server: 'Anime4up',
-            name: `Anime4up - ${quality}`,
-            url: $link.attr('data-url') || $link.attr('href') || '',
-            quality: this.normalizeQuality(quality),
-            qualityRank: this.getQualityRank(quality),
-            isDirect: false,
-            source: this.baseUrl,
-          });
-        });
-
-        if (videoLinks.length > 0) {
-          episodes.push({
-            episode: epNum,
-            title: $el.find('.ep-title').text() || undefined,
-            videoLinks,
-          });
-        }
+      // جمع روابط الحلقات من صفحة السلسلة
+      $(`a[href*="${this.A4UP_BASE}/episode/"], a[href*="${this.A4UP_ALT}/episode/"]`).each((_, el) => {
+        const href = $(el).attr('href') || '';
+        if (!epLinks.includes(href)) epLinks.push(href);
       });
 
-      return episodes;
+      if (!epLinks.length) return [];
+
+      // استخراج بادئة الـ slug من أول رابط حلقة
+      const firstDecoded = decodeURIComponent(epLinks[0]);
+      const prefixMatch = firstDecoded.match(/\/episode\/([\s\S]+?)الحلقة-\d+/);
+      if (!prefixMatch) return [];
+      const slugPrefix = prefixMatch[1];
+
+      // دالة لجلب مصادر حلقة واحدة
+      const fetchEpSources = async (epNum: number): Promise<VideoLink[]> => {
+        const epUrl = `${this.A4UP_BASE}/episode/${encodeURIComponent(slugPrefix + 'الحلقة-' + epNum)}/`;
+        try {
+          const epRes = await this.axios.get(epUrl);
+          return this.parseDataWatch(epRes.data, epNum);
+        } catch { return []; }
+      };
+
+      // بناء قائمة الحلقات من الروابط الموجودة
+      const episodes: AnimeEpisode[] = [];
+      const seenEps = new Set<number>();
+
+      for (const link of epLinks) {
+        const decoded = decodeURIComponent(link);
+        const epMatch = decoded.match(/الحلقة-(\d+)/);
+        if (!epMatch) continue;
+        const epNum = parseInt(epMatch[1]);
+        if (seenEps.has(epNum)) continue;
+        seenEps.add(epNum);
+
+        const videoLinks = await fetchEpSources(epNum);
+        if (videoLinks.length > 0) {
+          episodes.push({ episode: epNum, videoLinks });
+        }
+      }
+
+      return episodes.sort((a, b) => a.episode - b.episode);
     } catch (error) {
       console.error('[Anime4up] Get episodes error:', error);
       return [];
     }
+  }
+
+  // مُحلِّل data-watch — البنية المؤكدة: <li data-watch="URL"><a>Label</a></li>
+  private parseDataWatch(html: string, epNum: number): VideoLink[] {
+    const videoLinks: VideoLink[] = [];
+    const seenUrls = new Set<string>();
+    const re = /<li[^>]*\sdata-watch=["'](https?:\/\/[^"']{5,})["'][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/gi;
+    let i = 0;
+    for (const m of html.matchAll(re)) {
+      const url = m[1].trim();
+      if (seenUrls.has(url)) continue;
+      seenUrls.add(url);
+      const label = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+      videoLinks.push({
+        server: 'Anime4up',
+        name: `Anime4up · ${label || 'سيرفر ' + (++i)}`,
+        url,
+        quality: 'SD',
+        qualityRank: this.getQualityRank('HD'),
+        isDirect: false,
+        source: this.A4UP_BASE,
+      });
+    }
+    return videoLinks;
   }
 
   private normalizeQuality(
