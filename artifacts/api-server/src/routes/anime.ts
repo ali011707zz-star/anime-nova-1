@@ -363,6 +363,37 @@ fetch(`${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`, {
   .catch(() => { _orkestAlive = false; _orkestCheckedAt = Date.now(); });
 
 // ════════════════════════════════════════════════════════════════════
+//  scraperApiGet — جلب HTML عبر ScraperAPI (residential proxy pool)
+//  يُستخدم كـ fallback أخير للمواقع المحجوبة من Replit وOrkestr
+//  يتطلب: SCRAPERAPI_KEY في env vars
+// ════════════════════════════════════════════════════════════════════
+const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY || "";
+
+async function scraperApiGet(
+  url: string,
+  timeoutMs = 30000,
+): Promise<string | null> {
+  if (!SCRAPERAPI_KEY) return null;
+  try {
+    const apiUrl = new URL("https://api.scraperapi.com/");
+    apiUrl.searchParams.set("api_key", SCRAPERAPI_KEY);
+    apiUrl.searchParams.set("url", url);
+    apiUrl.searchParams.set("render", "false");
+    const r = await fetch(apiUrl.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) {
+      console.warn(`[scraperapi] ${r.status} for ${url}`);
+      return null;
+    }
+    const text = await r.text();
+    if (isCloudflareBlock(text)) return null;
+    return text.length > 50 ? text : null;
+  } catch (e: any) {
+    console.warn(`[scraperapi] error: ${e.message}`);
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  UTILITIES
 // ════════════════════════════════════════════════════════════════════
 
@@ -3261,7 +3292,9 @@ async function getRistoAnimeSources(
       if (dr.ok) seriesHtml = await dr.text();
     } catch { /* fall through */ }
     if (!seriesHtml || isCloudflareBlock(seriesHtml)) {
-      seriesHtml = (await orkestGet(seriesUrl, `${RISTO_BASE}/`, 12000)) ?? await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000);
+      seriesHtml = (await orkestGet(seriesUrl, `${RISTO_BASE}/`, 12000))
+        ?? await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000)
+        ?? await scraperApiGet(seriesUrl);
     }
     if (!seriesHtml || isCloudflareBlock(seriesHtml)) return [];
 
@@ -3335,7 +3368,9 @@ async function getRistoAnimeSources(
       if (edr.ok) epHtml = await edr.text();
     } catch { /* fall through */ }
     if (!epHtml || isCloudflareBlock(epHtml)) {
-      epHtml = (await orkestGet(watchEpUrl, seriesUrl, 12000)) ?? await cfProxyGet(watchEpUrl, seriesUrl, 10000);
+      epHtml = (await orkestGet(watchEpUrl, seriesUrl, 12000))
+        ?? await cfProxyGet(watchEpUrl, seriesUrl, 10000)
+        ?? await scraperApiGet(watchEpUrl);
     }
     if (!epHtml || isCloudflareBlock(epHtml)) return [];
 
@@ -4506,8 +4541,9 @@ async function searchWitanime(query: string): Promise<string | null> {
     }
   } catch {}
 
-  // Fallback: GET search page via CF bypass
-  const html = await cfGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`);
+  // Fallback: GET search page via CF bypass, then ScraperAPI
+  const html = await cfGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`)
+    ?? await scraperApiGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`);
   if (!html) return null;
   const re = /href="(https?:\/\/witanime\.life\/anime\/([^/"]+)\/?)"/gi;
   const candidates: Array<{ url: string; score: number }> = [];
@@ -4536,7 +4572,7 @@ function findBestLink(
 
 /** Extract episode URL from a witanime series page */
 async function findWitaEpisodeUrl(seriesUrl: string, ep: number): Promise<string | null> {
-  const html = await cfGet(seriesUrl);
+  const html = await cfGet(seriesUrl) ?? await scraperApiGet(seriesUrl);
   if (!html) return null;
   // Episode links: /ep/{slug}-N/ or /episode/{slug}-episode-N/ or /watch/{slug}/N/
   const patterns = [
@@ -4559,7 +4595,7 @@ async function findWitaEpisodeUrl(seriesUrl: string, ep: number): Promise<string
 
 /** Fetch server embed URLs from a witanime episode page (various WP theme patterns) */
 async function fetchWitaServerUrls(epUrl: string): Promise<string[]> {
-  const html = await cfGet(epUrl);
+  const html = await cfGet(epUrl) ?? await scraperApiGet(epUrl);
   if (!html) return [];
   const urls: string[] = [];
   const seen = new Set<string>();
