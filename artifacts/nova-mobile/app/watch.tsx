@@ -151,24 +151,25 @@ function SrcRow({ src, idx, onPlay }: { src: Src; idx: number; onPlay: (s: Src) 
 export default function WatchScreen() {
   const {
     anime, ep, title, english, format, etitle,
-    totalEps: totalEpsParam, year, episodes, native,
+    totalEps: totalEpsParam, year, episodes, native, titleAr,
   } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string;
     format?: string; etitle?: string; totalEps?: string;
-    year?: string; episodes?: string; native?: string;
+    year?: string; episodes?: string; native?: string; titleAr?: string;
   }>();
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
   const { addToHistory } = useApp();
   const topPad   = insets.top > 0 ? insets.top : (Platform.OS === "ios" ? 44 : 24);
 
-  const titleStr   = title   ? decodeURIComponent(title)   : "";
-  const englishStr = english ? decodeURIComponent(english) : "";
+  const titleStr    = title   ? decodeURIComponent(title)   : "";
+  const englishStr  = english ? decodeURIComponent(english) : "";
+  const titleArStr  = titleAr ? decodeURIComponent(titleAr) : "";
   const epNum      = parseInt(ep || "1", 10) || 1;
   const cover      = useLocalSearchParams<{ cover?: string }>().cover;
   const coverUrl   = cover ? decodeURIComponent(cover) : "";
   const totalEpsCount = totalEpsParam ? parseInt(totalEpsParam) || undefined : undefined;
-  const displayTitle = englishStr || titleStr;
+  const displayTitle = titleArStr || englishStr || titleStr;
 
   /* ── State ── */
   const [screen,      setScreen]      = useState<Screen>("loading");
@@ -388,7 +389,8 @@ export default function WatchScreen() {
     seenKeys.current.clear();
     setScreen("loading");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
-    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${auto ? "&autoplay=1" : ""}`);
+    const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
+    router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${auto ? "&autoplay=1" : ""}`);
   }
 
   /* ── Play a source ── */

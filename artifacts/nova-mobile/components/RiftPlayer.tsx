@@ -1631,6 +1631,19 @@ export function RiftPlayer({
             );
             // في RTL: زر الإغلاق أول (يظهر أقصى اليمين) ← الصحيح للعربية
             // في LTR: زر الإغلاق آخر (يظهر أقصى اليمين) ← الصحيح للـ web
+            const ccBtn = (
+              <Pressable
+                onPress={() => setShowSubPanel(true)}
+                style={[s.topIconBtn, s.topCCBtn, subOn && s.topCCBtnActive]}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name="logo-closed-captioning"
+                  size={15}
+                  color={subOn ? "#c4b5fd" : "rgba(255,255,255,0.75)"}
+                />
+              </Pressable>
+            );
             const btnsBlock = nativeRTL ? (
               <View style={s.topRightRow}>
                 <Pressable onPress={handleBack} style={s.topCloseBtn} hitSlop={10}>
@@ -1643,6 +1656,7 @@ export function RiftPlayer({
                     color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
                   />
                 </Pressable>
+                {ccBtn}
                 <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
                   <Ionicons name="camera-outline" size={15} color="rgba(255,255,255,0.85)" />
                 </Pressable>
@@ -1652,6 +1666,7 @@ export function RiftPlayer({
                 <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
                   <Ionicons name="camera-outline" size={15} color="rgba(255,255,255,0.85)" />
                 </Pressable>
+                {ccBtn}
                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
