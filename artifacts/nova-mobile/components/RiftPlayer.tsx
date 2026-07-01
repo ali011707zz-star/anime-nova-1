@@ -1194,10 +1194,12 @@ export function RiftPlayer({
   ).current;
 
   /* ─── Seekbar drag PanResponder ─── */
-  /* شريط التقدم يسير دائماً من اليسار إلى اليمين (LTR) بغض النظر عن لغة الجهاز،
-     وهو المعيار العالمي لمشغلات الفيديو (YouTube/Netflix/VLC...) */
+  /* شريط التقدم يسير من اليسار إلى اليمين (LTR) — المعيار العالمي لمشغلات الفيديو.
+     في RTL يُعكس locationX حتى يتطابق الضغط مع الموضع الصحيح على الشريط. */
+  const _nRTL = Platform.OS !== "web" && I18nManager.isRTL;
   const _calcPct = (x: number): number => {
-    return Math.min(1, Math.max(0, x) / Math.max(1, barWidth.current));
+    const raw = Math.min(1, Math.max(0, x) / Math.max(1, barWidth.current));
+    return _nRTL ? 1 - raw : raw;
   };
   const seekBarPan = useRef(
     PanResponder.create({
@@ -1606,11 +1608,11 @@ export function RiftPlayer({
             // نحل الترتيب فقط (لا نغير flexDirection)
             const nativeRTL = Platform.OS !== "web" && I18nManager.isRTL;
             const infoBlock = (
-              <View style={s.topInfoWrap}>
+              <View style={[s.topInfoWrap, nativeRTL && { alignItems: "flex-end" }]}>
                 {title ? (
                   <Text style={s.topInfoTitle} numberOfLines={1}>{title}</Text>
                 ) : null}
-                <View style={s.topInfoRow}>
+                <View style={[s.topInfoRow, nativeRTL && { flexDirection: "row-reverse" }]}>
                   {episode != null && (
                     <View style={s.topEpBadge}>
                       <Text style={s.topEpText}>الحلقة {episode}</Text>
@@ -1626,7 +1628,7 @@ export function RiftPlayer({
                   <Text style={s.topEpTitle} numberOfLines={1}>{episodeTitle}</Text>
                 ) : null}
                 {autoSubSource ? (
-                  <View style={s.autoSubBadge}>
+                  <View style={[s.autoSubBadge, nativeRTL && { alignSelf: "flex-end" }]}>
                     <Text style={s.autoSubBadgeText}>✦ ترجمة {autoSubSource === "jimaku" ? "Jimaku" : autoSubSource === "animetosho" ? "Animetosho" : "تلقائية"}</Text>
                   </View>
                 ) : null}
@@ -1765,16 +1767,16 @@ export function RiftPlayer({
               </View>
             )}
 
-            {/* الوقت — دائماً LTR: الوقت الحالي يسار، المدة الكلية يمين */}
-            {/* نستخدم absolute positioning لضمان اليسار/اليمين الفعلي بغض النظر عن RTL الجهاز */}
+            {/* الوقت — الوقت الحالي أقصى اليسار، المدة الكلية أقصى اليمين */}
+            {/* في RTL يُعكس left/right لأن Yoga يتبادلهما في وضع RTL */}
             <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
-              <Text style={[s.timeText, { position: "absolute", left: 0 }]}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, { position: "absolute", right: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+              <Text style={[s.timeText, _nRTL ? { position: "absolute", right: 0 } : { position: "absolute", left: 0 }]}>{fmtTime(position)}</Text>
+              <Text style={[s.timeText, _nRTL ? { position: "absolute", left: 0, opacity: 0.45 } : { position: "absolute", right: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
-            {/* شريط التقدم — LTR دائماً: يسار=بداية، يمين=نهاية */}
+            {/* شريط التقدم — يسار=بداية، يمين=نهاية (مع تعويض RTL تلقائياً) */}
             {(() => {
-              const isRTL = false; /* نجبر LTR للمشغّل بغض النظر عن لغة الجهاز */
+              const isRTL = _nRTL; /* نتبع لغة الجهاز لتوافق Yoga RTL */
               const fillPct = Math.min((isDragging ? dragPct : progress) * 100, 100);
               const thumbPct = fillPct;
               const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
@@ -2336,35 +2338,35 @@ const s = StyleSheet.create({
     paddingHorizontal: 10, paddingBottom: 12,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
-  /* معلومات الأنمي في الجهة اليسرى */
+  /* معلومات الأنمي — أقصى اليسار العلوي، حجم صغير لعدم التداخل */
   topInfoWrap: {
-    flex: 1, flexDirection: "column", gap: 5, marginRight: 6,
+    flexShrink: 1, maxWidth: "58%", flexDirection: "column", gap: 2, marginRight: 4,
     alignItems: "flex-start",
   },
   topInfoTitle: {
-    color: "rgba(255,255,255,0.92)", fontSize: 12, fontFamily: "Cairo_700Bold",
-    textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 6, textShadowOffset: { width: 0, height: 1 },
+    color: "rgba(255,255,255,0.90)", fontSize: 10, fontFamily: "Cairo_700Bold",
+    textShadowColor: "rgba(0,0,0,0.85)", textShadowRadius: 5, textShadowOffset: { width: 0, height: 1 },
   },
   topInfoRow: {
-    flexDirection: "row", alignItems: "center", gap: 5, flexWrap: "nowrap",
+    flexDirection: "row", alignItems: "center", gap: 4, flexWrap: "nowrap",
   },
   topEpBadge: {
-    paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5,
-    backgroundColor: "rgba(139,92,246,0.28)", borderWidth: 1, borderColor: "rgba(167,139,250,0.45)",
+    paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4,
+    backgroundColor: "rgba(139,92,246,0.30)", borderWidth: 1, borderColor: "rgba(167,139,250,0.45)",
   },
   topEpText: {
-    color: "rgba(221,214,254,0.95)", fontSize: 8, fontFamily: "Cairo_700Bold", letterSpacing: 0.2,
+    color: "rgba(221,214,254,0.95)", fontSize: 7, fontFamily: "Cairo_700Bold", letterSpacing: 0.1,
   },
   topQualityBadge: {
-    paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5,
+    paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4,
     backgroundColor: "rgba(251,191,36,0.18)", borderWidth: 1, borderColor: "rgba(251,191,36,0.40)",
   },
   topQualityText: {
-    color: "rgba(253,224,71,0.90)", fontSize: 8, fontFamily: "Cairo_700Bold", letterSpacing: 0.2,
+    color: "rgba(253,224,71,0.90)", fontSize: 7, fontFamily: "Cairo_700Bold", letterSpacing: 0.1,
   },
   topEpTitle: {
-    color: "rgba(255,255,255,0.65)", fontSize: 9, fontFamily: "Cairo_400Regular",
-    marginTop: 2, maxWidth: 200,
+    color: "rgba(255,255,255,0.60)", fontSize: 8, fontFamily: "Cairo_400Regular",
+    maxWidth: 180,
     textShadowColor: "rgba(0,0,0,0.80)", textShadowRadius: 4, textShadowOffset: { width: 0, height: 1 },
   },
   autoSubBadge: {

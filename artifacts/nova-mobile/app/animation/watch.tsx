@@ -263,9 +263,12 @@ export default function AnimationWatchScreen() {
         setLoading(false);
         setScreen("picker");
 
-        /* شغّل أول مصدر مباشرة إذا كان مفعّل الـ autoplay */
+        /* شغّل تلقائياً — يفضّل VL (vidlink) كمصدر افتراضي للأنيميشن */
         if (autoplay) {
-          const first = resolved.find(s => isDirectPlayable(s));
+          const isVL = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("vidlink");
+          const first =
+            resolved.find(s => isDirectPlayable(s) && isVL(s)) ??
+            resolved.find(s => isDirectPlayable(s));
           if (first) {
             autoPlayFiredRef.current = true;
             setTimeout(() => { setPlayingSrc(first); setScreen("native"); }, 0);
@@ -405,11 +408,15 @@ export default function AnimationWatchScreen() {
                 const isGoodSrc = isDirectPlayable(src);
                 if (!isGoodSrc || autoPlayFiredRef.current) return next;
 
-                /* انتظر 3 ثوان لتوفر مصادر أجود قبل التشغيل التلقائي */
+                /* انتظر 3 ثوان لتوفر مصادر أجود — يفضّل VL (vidlink) */
                 autoPlayFiredRef.current = true;
                 setTimeout(() => {
                   setSources(latest => {
-                    const best = latest.find(s => isDirectPlayable(s)) ?? src;
+                    const isVL2 = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("vidlink");
+                    const best =
+                      latest.find(s => isDirectPlayable(s) && isVL2(s)) ??
+                      latest.find(s => isDirectPlayable(s)) ??
+                      src;
                     setPlayingSrc(best);
                     setScreen("native");
                     return latest;

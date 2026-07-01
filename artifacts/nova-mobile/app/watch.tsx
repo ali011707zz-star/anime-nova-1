@@ -308,7 +308,7 @@ export default function WatchScreen() {
         setScreen(s => s === "loading" ? "picker" : s);
         setSources(prev => [...prev, ...newSrcs]);
 
-        /* تشغيل تلقائي على أول مصدر قابل للتشغيل المباشر */
+        /* تشغيل تلقائي — يفضّل KW (kawaii) كمصدر افتراضي */
         if (!autoPlayFiredRef.current) {
           const good = newSrcs.find(isDirectPlayable);
           if (good) {
@@ -316,7 +316,10 @@ export default function WatchScreen() {
             setTimeout(() => {
               if (!isMountedRef.current) return;
               setSources(latest => {
-                const best = latest.find(s => isDirectPlayable(s)) ?? good;
+                const best =
+                  latest.find(s => isDirectPlayable(s) && s.site === "kawaii") ??
+                  latest.find(s => isDirectPlayable(s)) ??
+                  good;
                 setPlayingSrc(best);
                 setScreen("native");
                 return latest;
