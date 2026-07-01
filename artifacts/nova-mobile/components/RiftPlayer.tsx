@@ -476,6 +476,7 @@ export function RiftPlayer({
   const gestureStartVal   = useRef(0);
   const barRef            = useRef<View>(null);
   const barWidth          = useRef(1);
+  const barPageX          = useRef(0); // absolute X of bar's left edge on screen (for reliable seek)
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
   const durationRef       = useRef(0);
@@ -603,8 +604,10 @@ export function RiftPlayer({
   useEffect(() => {
     progressTimer.current = setInterval(() => {
       try {
-        const pos = player.currentTime || 0;
-        const dur = player.duration || 0;
+        const rawPos = player.currentTime;
+        const rawDur = player.duration;
+        const pos = (typeof rawPos === "number" && isFinite(rawPos) && rawPos >= 0) ? rawPos : 0;
+        const dur = (typeof rawDur === "number" && isFinite(rawDur) && rawDur > 0) ? rawDur : 0;
         setPosition(pos);
         setDuration(dur);
         positionRef.current = pos;
@@ -1195,10 +1198,12 @@ export function RiftPlayer({
 
   /* ─── Seekbar drag PanResponder ─── */
   /* شريط التقدم يسير من اليسار إلى اليمين (LTR) — المعيار العالمي لمشغلات الفيديو.
-     في RTL يُعكس locationX حتى يتطابق الضغط مع الموضع الصحيح على الشريط. */
+     نستخدم gestureState.moveX (إحداثي مطلق على الشاشة) بدلاً من locationX
+     لأن locationX على Android غير موثوق أثناء onPanResponderMove خارج حدود الـ View. */
   const _nRTL = Platform.OS !== "web" && I18nManager.isRTL;
-  const _calcPct = (x: number): number => {
-    const raw = Math.min(1, Math.max(0, x) / Math.max(1, barWidth.current));
+  const _calcPctFromAbsolute = (absoluteX: number): number => {
+    const localX = absoluteX - barPageX.current;
+    const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
     return _nRTL ? 1 - raw : raw;
   };
   const seekBarPan = useRef(
@@ -1206,18 +1211,22 @@ export function RiftPlayer({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
-        const pct = _calcPct(e.nativeEvent.locationX);
+        /* حفظ الموضع المطلق لبداية الشريط (pageX - locationX = الحافة اليسرى للشريط) */
+        barPageX.current = e.nativeEvent.pageX - e.nativeEvent.locationX;
+        const pct = _calcPctFromAbsolute(e.nativeEvent.pageX);
         setIsDragging(true);
-        setDragPct(pct);
+        setDragPct(Math.max(0, Math.min(1, pct)));
       },
-      onPanResponderMove: (e) => {
-        const pct = _calcPct(e.nativeEvent.locationX);
-        setDragPct(pct);
+      onPanResponderMove: (_, gs) => {
+        /* gs.moveX = الإحداثي المطلق للإصبع على الشاشة — موثوق على iOS وAndroid */
+        const pct = _calcPctFromAbsolute(gs.moveX);
+        setDragPct(Math.max(0, Math.min(1, pct)));
       },
-      onPanResponderRelease: (e) => {
-        const pct = _calcPct(e.nativeEvent.locationX);
+      onPanResponderRelease: (_, gs) => {
+        const pct = _calcPctFromAbsolute(gs.moveX);
+        const safePct = Math.max(0, Math.min(1, pct));
         setIsDragging(false);
-        seekRef.current(pct * durationRef.current);
+        seekRef.current(safePct * durationRef.current);
       },
     })
   ).current;
@@ -1284,7 +1293,9 @@ export function RiftPlayer({
   }, [longPressSpeed, player]);
 
   /* ─── Progress ─── */
-  const progress = duration > 0 ? Math.min(position / duration, 1) : 0;
+  const progress = (duration > 0 && isFinite(position) && isFinite(duration))
+    ? Math.min(Math.max(position / duration, 0), 1)
+    : 0;
 
   /* ─── Volume sync to player (clamp 0-1 for hardware, allow 0-2 for UI boost) ─── */
   useEffect(() => {
@@ -1714,7 +1725,7 @@ export function RiftPlayer({
                     <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
                       {buffering && !error
                         ? <ActivityIndicator size={32} color="#fff" />
-                        : <Ionicons name="play" size={36} color="#fff" style={{ marginLeft: 4 }} />}
+                        : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
                     </Pressable>
                   )}
                 </View>
@@ -1736,7 +1747,7 @@ export function RiftPlayer({
                     <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
                       {buffering && !error
                         ? <ActivityIndicator size={32} color="#fff" />
-                        : <Ionicons name="play" size={36} color="#fff" style={{ marginLeft: 4 }} />}
+                        : <Ionicons name="play" size={36} color="#fff" style={{ transform: [{ translateX: 3 }] }} />}
                     </Pressable>
                   )}
                 </View>
@@ -1777,7 +1788,8 @@ export function RiftPlayer({
             {/* شريط التقدم — يسار=بداية، يمين=نهاية (مع تعويض RTL تلقائياً) */}
             {(() => {
               const isRTL = _nRTL; /* نتبع لغة الجهاز لتوافق Yoga RTL */
-              const fillPct = Math.min((isDragging ? dragPct : progress) * 100, 100);
+              const rawFill = (isDragging ? dragPct : progress) * 100;
+              const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
               const thumbPct = fillPct;
               const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
               return (
@@ -1878,7 +1890,7 @@ export function RiftPlayer({
                   </View>
                 )}
                 <Pressable onPress={togglePlay} style={s.bottomPlayBtn} hitSlop={10}>
-                  <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { marginLeft: 3 }} />
+                  <Ionicons name={isPlaying ? "pause" : "play"} size={23} color="#fff" style={isPlaying ? undefined : { transform: [{ translateX: 2 }] }} />
                 </Pressable>
                 {!isPortrait && (
                   <View style={{ alignItems: "center", gap: 2 }}>

@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import { reloadAppAsync } from "expo";
 import React, { useState } from "react";
 import {
   Modal,
@@ -27,11 +26,13 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
 
   const handleRestart = async () => {
     try {
-      await reloadAppAsync();
-    } catch (restartError) {
-      console.error("Failed to restart app:", restartError);
-      resetError();
-    }
+      const expoModule = await import("expo");
+      if (typeof (expoModule as any).reloadAppAsync === "function") {
+        await (expoModule as any).reloadAppAsync();
+        return;
+      }
+    } catch {}
+    resetError();
   };
 
   const formatErrorDetails = (): string => {
