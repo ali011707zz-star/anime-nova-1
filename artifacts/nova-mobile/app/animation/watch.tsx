@@ -408,8 +408,9 @@ export default function AnimationWatchScreen() {
                 const isGoodSrc = isDirectPlayable(src);
                 if (!isGoodSrc || autoPlayFiredRef.current) return next;
 
-                /* انتظر 3 ثوان لتوفر مصادر أجود — يفضّل VL (vidlink) */
+                /* يفضّل VL (vidlink) — تشغيل فوري إن كان هو المصدر الأول، وإلا انتظر 800ms */
                 autoPlayFiredRef.current = true;
+                const isVLNow = (src.label || "").toLowerCase().startsWith("vidlink");
                 setTimeout(() => {
                   setSources(latest => {
                     const isVL2 = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("vidlink");
@@ -421,7 +422,7 @@ export default function AnimationWatchScreen() {
                     setScreen("native");
                     return latest;
                   });
-                }, 3000);
+                }, isVLNow ? 0 : 800);
                 return next;
               });
 

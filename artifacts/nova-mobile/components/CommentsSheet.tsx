@@ -123,7 +123,8 @@ export function CommentsSheet({ visible, onClose, animeId, tmdbId, episodeNumber
           id:          d.id || "",
           displayName: d.displayName || d.display_name || null,
           username:    d.username || null,
-          avatarUrl:   d.profileImageUrl || d.profile_image_custom || d.profile_image_url || null,
+          avatarUrl:   d.profileImageUrl || d.profile_image_custom || d.profile_image_url
+                       || d.profilePicture || d.picture || d.avatar || d.avatarUrl || null,
           avatarColor: d.avatarColor ?? 0,
         });
       }
