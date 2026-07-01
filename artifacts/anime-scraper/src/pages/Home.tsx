@@ -544,7 +544,7 @@ export default function Home() {
         <div
           ref={heroContainerRef}
           className="relative w-full overflow-hidden select-none"
-          style={{ height: "clamp(310px, 50dvh, 390px)" }}
+          style={{ height: "clamp(260px, 56vw, 340px)" }}
           onMouseMove={handleHeroMouseMove}
           onMouseLeave={handleHeroMouseLeave}
           onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
@@ -694,8 +694,8 @@ export default function Home() {
                   <div
                     className="relative overflow-hidden shadow-2xl bg-[#111]"
                     style={{
-                      width: "clamp(82px, 22vw, 120px)",
-                      height: "clamp(118px, 31vw, 172px)",
+                      width: "clamp(80px, 21vw, 112px)",
+                      height: "clamp(114px, 30vw, 160px)",
                       borderRadius: 14,
                       transform: `rotateX(${posterTilt.rx}deg) rotateY(${posterTilt.ry}deg)`,
                       transition: "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)",

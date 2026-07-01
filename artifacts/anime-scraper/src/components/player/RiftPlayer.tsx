@@ -1102,7 +1102,7 @@ export default function RiftPlayer({
   function subPositionStyle(pos: "top" | "center" | "bottom", ctrlVisible: boolean): React.CSSProperties {
     if (pos === "center") return { top: "50%", transform: "translateY(-50%)", bottom: "auto" };
     if (pos === "top")    return { top: ctrlVisible ? 90 : 20, bottom: "auto", transform: "none" };
-                          return { bottom: ctrlVisible ? 118 : 20, top: "auto", transform: "none" };
+                          return { bottom: ctrlVisible ? 130 : 60, top: "auto", transform: "none" };
   }
 
   return (
