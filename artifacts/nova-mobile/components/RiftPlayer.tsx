@@ -595,7 +595,7 @@ export function RiftPlayer({
       return;
     }
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
-    const t = setTimeout(() => switchSource(nextIdx), 1500);
+    const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
   }, [error, srcIdx, sources.length]); // eslint-disable-line
 
@@ -1191,24 +1191,26 @@ export function RiftPlayer({
   ).current;
 
   /* ─── Seekbar drag PanResponder ─── */
+  /* شريط التقدم يسير دائماً من اليسار إلى اليمين (LTR) بغض النظر عن لغة الجهاز،
+     وهو المعيار العالمي لمشغلات الفيديو (YouTube/Netflix/VLC...) */
+  const _calcPct = (x: number): number => {
+    return Math.min(1, Math.max(0, x) / Math.max(1, barWidth.current));
+  };
   const seekBarPan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
-        const x = Math.max(0, e.nativeEvent.locationX);
-        const pct = Math.min(1, x / Math.max(1, barWidth.current));
+        const pct = _calcPct(e.nativeEvent.locationX);
         setIsDragging(true);
         setDragPct(pct);
       },
       onPanResponderMove: (e) => {
-        const x = Math.max(0, e.nativeEvent.locationX);
-        const pct = Math.min(1, x / Math.max(1, barWidth.current));
+        const pct = _calcPct(e.nativeEvent.locationX);
         setDragPct(pct);
       },
       onPanResponderRelease: (e) => {
-        const x = Math.max(0, e.nativeEvent.locationX);
-        const pct = Math.min(1, x / Math.max(1, barWidth.current));
+        const pct = _calcPct(e.nativeEvent.locationX);
         setIsDragging(false);
         seekRef.current(pct * durationRef.current);
       },
@@ -1739,15 +1741,15 @@ export function RiftPlayer({
               </View>
             )}
 
-            {/* الوقت */}
-            <View style={s.timeRow}>
+            {/* الوقت — دائماً LTR: الوقت الحالي يسار، المدة الكلية يمين */}
+            <View style={[s.timeRow, { direction: "ltr" as any }]}>
               <Text style={s.timeText}>{fmtTime(position)}</Text>
               <Text style={[s.timeText, { opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
-            {/* شريط التقدم */}
+            {/* شريط التقدم — LTR دائماً: يسار=بداية، يمين=نهاية */}
             {(() => {
-              const isRTL = I18nManager.isRTL;
+              const isRTL = false; /* نجبر LTR للمشغّل بغض النظر عن لغة الجهاز */
               const fillPct = Math.min((isDragging ? dragPct : progress) * 100, 100);
               const thumbPct = fillPct;
               const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
