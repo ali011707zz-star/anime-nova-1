@@ -9,7 +9,7 @@ function toAbsUrl(domain: string): string {
   return `https://${domain}`;
 }
 
-const PRODUCTION_SERVER = "https://83a3277c-7035-4016-86d3-45dbce5c5779-00-wqzfwf9qe3nh.pike.replit.dev";
+const PRODUCTION_SERVER = "https://anime-nova.orkestr.run";
 
 /**
  * Returns the base URL for API calls — portable across all environments.
