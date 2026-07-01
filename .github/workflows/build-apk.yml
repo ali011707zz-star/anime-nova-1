@@ -73,18 +73,18 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m"
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
       - name: 📱 Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AnimeNova-v${{ github.run_number }}
-          path: artifacts/nova-mobile/android/app/build/outputs/apk/debug/*.apk
+          path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: ✅ APK Info
         run: |
-          APK=$(find artifacts/nova-mobile/android/app/build/outputs/apk -name "*.apk" | head -1)
+          APK=$(find artifacts/nova-mobile/android/app/build/outputs/apk/release -name "*.apk" | head -1)
           if [ -f "$APK" ]; then
             echo "✅ تم البناء بنجاح — الحجم: $(du -h "$APK" | cut -f1)"
           else
