@@ -305,8 +305,21 @@ export default function WatchScreen() {
 
             setSources(prev => {
               const next = [...prev, src];
-              /* انتقل للـ picker فور وصول أول مصدر — بدون تشغيل تلقائي */
-              setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+              const isGoodSrc = isDirectPlayable(src);
+              if (!isGoodSrc || autoPlayFiredRef.current) {
+                setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+                return next;
+              }
+              /* التشغيل التلقائي: انتظر 3 ثوان لتوفر مصادر أجود */
+              autoPlayFiredRef.current = true;
+              setTimeout(() => {
+                setSources(latest => {
+                  const best = latest.find(s => isDirectPlayable(s)) ?? src;
+                  setPlayingSrc(best);
+                  setScreen("native");
+                  return latest;
+                });
+              }, 3000);
               return next;
             });
           } catch { }

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "أنمي نوفا",
+    "name": "ANIME NOVA",
     "slug": "anime-nova-",
     "owner": "ali011707s-team",
     "version": "1.0.0",
@@ -33,7 +33,8 @@
         "backgroundColor": "#09090B"
       },
       "package": "com.nova.anime",
-      "backgroundColor": "#09090B"
+      "backgroundColor": "#09090B",
+      "usesCleartextTraffic": true
     },
     "web": {
       "bundler": "metro",

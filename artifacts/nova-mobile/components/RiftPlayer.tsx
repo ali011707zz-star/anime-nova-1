@@ -89,7 +89,7 @@ const SUB_POSITIONS = [
 const DEFAULT_SUB_SETTINGS: SubSettings = {
   fontSize: 16,
   color: "#ffffff",
-  bgOpacity: 0.45,
+  bgOpacity: 0,
   bold: false,
   position: "bottom",
 };
