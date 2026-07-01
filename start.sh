@@ -1,19 +1,23 @@
 #!/bin/bash
-# Start both the API server (port 8080) and Vite dev server (port 5000) together
+set -e
 
-# Kill any lingering processes on our ports
-fuser -k 8080/tcp 2>/dev/null || true
-fuser -k 5000/tcp 2>/dev/null || true
-sleep 1
+echo "[start.sh] Installing dependencies..."
+NODE_ENV=development pnpm install --no-frozen-lockfile 2>&1
 
-# Start the API backend in the background
+echo "[start.sh] Building API server..."
+NODE_ENV=development pnpm --filter @workspace/api-server run build 2>&1
+
+echo "[start.sh] Building frontend..."
+NODE_ENV=development pnpm --filter @workspace/anime-scraper run build 2>&1
+
+echo "[start.sh] Starting API server on port 8080..."
 PORT=8080 node --enable-source-maps artifacts/api-server/dist/index.mjs &
 API_PID=$!
 
-# Wait a moment for the API to initialize
-sleep 3
+echo "[start.sh] Waiting for API server..."
+sleep 4
 
-# Start the Vite frontend dev server in the foreground (port 5000 = webview)
+echo "[start.sh] Starting Vite dev server on port 5000..."
 PORT=5000 pnpm --filter @workspace/anime-scraper run dev
 
 # If frontend exits, kill backend too
