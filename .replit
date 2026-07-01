@@ -22,10 +22,6 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Backend API"
-
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -37,18 +33,6 @@ outputType = "webview"
 task = "shell.exec"
 args = "bash start.sh"
 waitForPort = 5000
-
-[[workflows.workflow]]
-name = "Backend API"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "PORT=8080 node --enable-source-maps artifacts/api-server/dist/index.mjs"
-waitForPort = 8080
 
 [agent]
 stack = "FLASK_VANILLA_JS"
