@@ -15,12 +15,18 @@ const ANIME_QUERY = `
 query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal title { romaji english }
+    synonyms
     coverImage { large extraLarge }
     bannerImage episodes duration status format
     nextAiringEpisode { episode }
     averageScore genres
   }
 }`;
+
+function extractArabicTitle(synonyms?: string[]): string {
+  if (!synonyms) return "";
+  return synonyms.find(s => /[\u0600-\u06FF]/.test(s)) || "";
+}
 
 const PAGE_SIZE = 100;
 
@@ -183,7 +189,9 @@ export default function EpisodeListScreen() {
     const et = epTitleRaw ? `&etitle=${encodeURIComponent(epTitleRaw)}` : "";
     const totalParam = total > 0 ? `&totalEps=${total}` : "";
     const coverParam = anime?.coverImage?.large ? `&cover=${encodeURIComponent(anime.coverImage.extraLarge || anime.coverImage.large)}` : "";
-    router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}${coverParam}`);
+    const arTitle = extractArabicTitle(anime?.synonyms);
+    const arParam = arTitle ? `&titleAr=${encodeURIComponent(arTitle)}` : "";
+    router.push(`/watch?anime=${id}&ep=${n}${t ? `&title=${t}` : ""}${eng ? `&english=${eng}` : ""}${fmt ? `&format=${fmt}` : ""}${et}${totalParam}${coverParam}${arParam}`);
   }
 
   function openComments(n: number) {

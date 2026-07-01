@@ -22,6 +22,7 @@ query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id idMal isAdult
     title { romaji english native }
+    synonyms
     coverImage { large extraLarge }
     bannerImage
     description
