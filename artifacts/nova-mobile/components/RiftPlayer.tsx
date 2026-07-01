@@ -11,7 +11,7 @@ import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, Animated, Dimensions, Easing, Platform,
+  ActivityIndicator, Animated, Dimensions, Easing, I18nManager, Platform,
   PanResponder, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -799,8 +799,18 @@ export function RiftPlayer({
   /* ─── Flip screen — rotate 180° using CSS transform (no surface recreation = no black flash) ─── */
   const flipScreen = useCallback(() => {
     setIsFlipped(f => !f);
-    
   }, []);
+
+  /* ─── Portrait / Landscape toggle ─── */
+  const togglePortrait = useCallback(async () => {
+    try {
+      if (isPortrait) {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+      } else {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      }
+    } catch {}
+  }, [isPortrait]);
 
   /* ─── Screenshot ─── */
   const rootViewRef = useRef<View>(null);
@@ -1630,7 +1640,15 @@ export function RiftPlayer({
                   <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
                 </Pressable>
               )}
-              {/* زر تدوير الشاشة ↻ */}
+              {/* زر تبديل الاتجاه: عمودي / أفقي */}
+              <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
+                <Ionicons
+                  name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
+                  size={18}
+                  color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
+                />
+              </Pressable>
+              {/* زر قلب الشاشة 180° */}
               <Pressable onPress={flipScreen} style={[s.topRotateBtn, isFlipped && s.topRotateBtnActive]} hitSlop={10}>
                 <Ionicons name="repeat-outline" size={16} color={isFlipped ? "#c4b5fd" : "rgba(255,255,255,0.85)"} />
                 <Text style={[s.topRotateLabel, isFlipped && s.topRotateLabelActive]}>
@@ -1713,28 +1731,63 @@ export function RiftPlayer({
             </View>
 
             {/* شريط التقدم */}
-            <View
-              ref={barRef}
-              style={[s.progressWrap, isDragging && s.progressWrapDragging]}
-              onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
-              {...seekBarPan.panHandlers}
-            >
-              <View style={s.progressBg} />
-              {bufferedPct > 0 && <View style={[s.bufferBar, { width: `${bufferedPct * 100}%` as any }]} />}
-              {markerPctIntro && <View style={[s.skipMarker, { left: `${markerPctIntro.start}%` as any, width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any }]} />}
-              {markerPctOutro && <View style={[s.skipMarker, { left: `${markerPctOutro.start}%` as any, width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any }]} />}
-              <LinearGradient
-                colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                style={[s.progressFill, { width: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }]}
-              />
-              <View style={[s.thumb, { left: `${Math.min((isDragging ? dragPct : progress) * 100, 100)}%` as any }, isDragging && s.thumbDragging]} />
-              {isDragging && (
-                <View style={[s.dragTooltip, { left: `${Math.max(4, Math.min(88, (isDragging ? dragPct : progress) * 100 - 6))}%` as any }]}>
-                  <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
+            {(() => {
+              const isRTL = I18nManager.isRTL;
+              const fillPct = Math.min((isDragging ? dragPct : progress) * 100, 100);
+              const thumbPct = fillPct;
+              const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
+              return (
+                <View
+                  ref={barRef}
+                  style={[s.progressWrap, isDragging && s.progressWrapDragging]}
+                  onLayout={(e) => { barWidth.current = e.nativeEvent.layout.width || 1; }}
+                  {...seekBarPan.panHandlers}
+                >
+                  <View style={s.progressBg} />
+                  {bufferedPct > 0 && (
+                    <View style={[s.bufferBar, isRTL
+                      ? { right: 0, width: `${bufferedPct * 100}%` as any }
+                      : { width: `${bufferedPct * 100}%` as any }
+                    ]} />
+                  )}
+                  {markerPctIntro && (
+                    <View style={[s.skipMarker, isRTL
+                      ? { right: `${markerPctIntro.start}%` as any, width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any }
+                      : { left: `${markerPctIntro.start}%` as any, width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any }
+                    ]} />
+                  )}
+                  {markerPctOutro && (
+                    <View style={[s.skipMarker, isRTL
+                      ? { right: `${markerPctOutro.start}%` as any, width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any }
+                      : { left: `${markerPctOutro.start}%` as any, width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any }
+                    ]} />
+                  )}
+                  <LinearGradient
+                    colors={isRTL ? ["#a78bfa", "#8B5CF6", "#6D28D9"] : ["#6D28D9", "#8B5CF6", "#a78bfa"]}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    style={[s.progressFill, isRTL
+                      ? { right: 0, left: undefined, width: `${fillPct}%` as any }
+                      : { width: `${fillPct}%` as any }
+                    ]}
+                  />
+                  <View style={[
+                    s.thumb,
+                    isRTL
+                      ? { right: `${thumbPct}%` as any, left: undefined, marginRight: -9, marginLeft: 0 }
+                      : { left: `${thumbPct}%` as any },
+                    isDragging && s.thumbDragging,
+                  ]} />
+                  {isDragging && (
+                    <View style={[s.dragTooltip, isRTL
+                      ? { right: `${tooltipPct}%` as any, left: undefined }
+                      : { left: `${tooltipPct}%` as any }
+                    ]}>
+                      <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
+              );
+            })()}
 
             {/* ── صف أزرار التحكم السفلي ── */}
             <View style={s.bottomCtrlRow}>
