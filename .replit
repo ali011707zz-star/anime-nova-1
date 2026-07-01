@@ -42,10 +42,12 @@ waitForPort = 5000
 name = "CF Proxy"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "console"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py"
-waitForPort = 8000
 
 [agent]
 stack = "FLASK_VANILLA_JS"
