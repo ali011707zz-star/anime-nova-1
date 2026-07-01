@@ -5,7 +5,7 @@ import {
   Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
+
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -85,15 +85,6 @@ export default function AnimationsScreen() {
   const [searchResults, setSearchResults] = useState<TmdbItem[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
-  const [dubbedSeries, setDubbedSeries] = useState<any[]>([]);
-
-  useEffect(() => {
-    const base = getBaseUrl();
-    fetch(`${base}/api/dubbed/catalog?page=1`)
-      .then(r => r.json())
-      .then(d => setDubbedSeries((d.results || d.series || d.items || []).slice(0, 14)))
-      .catch(() => {});
-  }, []);
 
   const genRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -352,45 +343,6 @@ export default function AnimationsScreen() {
         </View>
       )}
 
-      {/* ── كرتون مدبلج Section ── */}
-      {dubbedSeries.length > 0 && (
-        <View style={{ marginTop: 12, marginBottom: 4 }}>
-          <View style={s.dubbedHeader}>
-            <View style={s.dubbedLeft}>
-              <View style={[s.sectionDot, { backgroundColor: "#f59e0b" }]} />
-              <Text style={s.dubbedTitle}>🎬 كرتون مدبلج عربي</Text>
-            </View>
-            <Pressable onPress={() => router.push("/(tabs)/dubbed" as any)} style={s.seeAllBtn}>
-              <Text style={s.seeAllText}>عرض الكل</Text>
-              <Ionicons name="chevron-back" size={13} color="#8B5CF6" />
-            </Pressable>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 10, paddingBottom: 4 }}>
-            {dubbedSeries.map((item: any, idx: number) => (
-              <Pressable
-                key={item.id || idx}
-                onPress={() => router.push({ pathname: "/dubbed/[seriesId]" as any, params: { seriesId: item.id, title: item.title } })}
-                style={s.dubbedCard}
-              >
-                {(item.image || item.poster) ? (
-                  <Image
-                    source={{ uri: item.image ? `${getBaseUrl()}${item.image}` : item.poster }}
-                    style={s.dubbedImg}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={[s.dubbedImg, { backgroundColor: "rgba(139,92,246,0.08)", alignItems: "center", justifyContent: "center" }]}>
-                    <Ionicons name="tv" size={22} color="rgba(255,255,255,0.2)" />
-                  </View>
-                )}
-                <LinearGradient colors={["transparent", "rgba(0,0,0,0.9)"]} style={s.dubbedGrad}>
-                  <Text style={s.dubbedItemTitle} numberOfLines={2}>{item.title}</Text>
-                </LinearGradient>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      )}
 
       {/* ── Grid ── */}
       {items.length === 0 && loading ? (
