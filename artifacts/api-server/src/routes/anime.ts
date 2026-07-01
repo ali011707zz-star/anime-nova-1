@@ -10021,6 +10021,48 @@ const HLS_PROXY_HDRS = (ref: string, origin?: string) => ({
   "Connection": "keep-alive",
 });
 
+/**
+ * يُحلّل master M3U8 ويختار أفضل variant بـ H.264 (avc1).
+ * يُستخدم حين mobile=1 لضمان التوافق مع ExoPlayer على Android.
+ * يُعيد الـ URL المطلق للـ variant المختار، أو null إن لم يكن master playlist.
+ */
+function pickH264Variant(masterBody: string, masterUrl: string): string | null {
+  if (!masterBody.includes("#EXT-X-STREAM-INF")) return null; // ليس master playlist
+
+  const lines = masterBody.split("\n");
+  const variants: { codecs: string; bandwidth: number; url: string }[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line.startsWith("#EXT-X-STREAM-INF")) continue;
+    const urlLine = lines[i + 1]?.trim();
+    if (!urlLine || urlLine.startsWith("#")) continue;
+
+    const codecsMatch = line.match(/CODECS="([^"]+)"/i);
+    const bwMatch     = line.match(/BANDWIDTH=(\d+)/i);
+    const codecs      = codecsMatch?.[1] ?? "";
+    const bandwidth   = bwMatch ? parseInt(bwMatch[1]) : 0;
+
+    let absUrl: string;
+    try      { absUrl = new URL(urlLine).href; }
+    catch    { try { absUrl = new URL(urlLine, masterUrl).href; } catch { continue; } }
+
+    variants.push({ codecs, bandwidth, url: absUrl });
+  }
+
+  if (!variants.length) return null;
+
+  /* الأولوية: variants صريحة بـ avc1 أولاً، ثم variants بلا codec معروف،
+     لا نختار AV1/HEVC إلا كـ fallback أخير إذا لم يتوفر غيرها */
+  const explicit264  = variants.filter(v => v.codecs.toLowerCase().includes("avc1"));
+  const unknownCodec = variants.filter(v => !v.codecs);
+  const pool = explicit264.length > 0 ? explicit264
+             : unknownCodec.length > 0 ? unknownCodec
+             : variants; // fallback للكل إن لم يُوجد H.264 أو codec غير معروف
+  pool.sort((a, b) => b.bandwidth - a.bandwidth);  // الأعلى جودة أولاً
+  return pool[0].url;
+}
+
 function rewriteM3u8(manifest: string, baseUrl: string, _selfBase: string, ref: string): string {
   const base = new URL(baseUrl);
   const toProxy = (raw: string) => {
@@ -10062,30 +10104,35 @@ router.get("/anime/hls-proxy", async (req, res) => {
   try { origin = new URL(ref || url).origin; } catch {}
   if (!origin) try { origin = new URL(url).origin; } catch {}
   const cacheKey = `hls:${url}`;
+  const mobileMode = req.query.mobile === "1";
+  /* مفتاح الكاش يشمل وضع الموبايل حتى لا تُعاد نتيجة master playlist لطلب mobile=1 */
+  const effectiveCacheKey = mobileMode ? `hls-m:${url}` : cacheKey;
 
-  // ── L1: in-memory (binary body — instant) ──
-  const hit = cdnCache.get(cacheKey);
-  if (hit && isCdnCacheable(url) && Date.now() - hit.ts < CDN_CACHE_TTL) {
-    res.setHeader("Content-Type", hit.ct);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Cache", "HIT-L1");
-    res.send(hit.body);
-    return;
-  }
-
-  // ── L2: PostgreSQL — ينجو من restart ──
-  if (isCdnCacheable(url)) {
-    const pgHit = await cdnManifestGet(cacheKey);
-    if (pgHit) {
-      const buf = Buffer.from(pgHit.content);
-      cdnCache.set(cacheKey, { body: buf, ct: pgHit.ct, ts: Date.now() }); // أعِد تعبئة L1
-      res.setHeader("Content-Type", pgHit.ct);
+  /* ── L1: in-memory (لا يُقرأ إلا للكاش المناسب) ── */
+  if (!mobileMode) {
+    const hit = cdnCache.get(cacheKey);
+    if (hit && isCdnCacheable(url) && Date.now() - hit.ts < CDN_CACHE_TTL) {
+      res.setHeader("Content-Type", hit.ct);
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "no-store");
-      res.setHeader("X-Cache", "HIT-L2");
-      res.send(buf);
+      res.setHeader("X-Cache", "HIT-L1");
+      res.send(hit.body);
       return;
+    }
+
+    /* ── L2: PostgreSQL ── */
+    if (isCdnCacheable(url)) {
+      const pgHit = await cdnManifestGet(cacheKey);
+      if (pgHit) {
+        const buf = Buffer.from(pgHit.content);
+        cdnCache.set(cacheKey, { body: buf, ct: pgHit.ct, ts: Date.now() });
+        res.setHeader("Content-Type", pgHit.ct);
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("X-Cache", "HIT-L2");
+        res.send(buf);
+        return;
+      }
     }
   }
 
@@ -10095,15 +10142,44 @@ router.get("/anime/hls-proxy", async (req, res) => {
     const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
     const ct = r.headers.get("content-type") || "";
-    const body = await r.text();
+    const masterBody = await r.text();
     const proto = req.headers["x-forwarded-proto"] || "https";
     const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
     const selfBase = `${proto}://${host}`;
-    const rewritten = rewriteM3u8(body, baseForSegments, selfBase, ref || url);
+
+    /* ── mobile=1: اختر H.264 variant من master playlist ── */
+    if (mobileMode) {
+      const h264Url = pickH264Variant(masterBody, baseForSegments);
+      if (h264Url) {
+        try {
+          const vr = await fetch(h264Url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
+          if (vr.ok) {
+            const variantBody = await vr.text();
+            const rewritten = rewriteM3u8(variantBody, h264Url, selfBase, ref || url);
+            res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+            res.setHeader("Pragma", "no-cache");
+            res.send(rewritten);
+            return;
+          }
+        } catch { /* تابع بالـ master إن فشل جلب الـ variant */ }
+      }
+      /* الـ master ليس playlist متعدد variants أو فشل جلب الـ variant — أعِد master كما هو */
+      const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url);
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.send(rewritten);
+      return;
+    }
+
+    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url);
     const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
     if (isCdnCacheable(url)) {
-      cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
-      cdnManifestSet(cacheKey, rewritten, finalCt);                                           // L2
+      cdnCache.set(effectiveCacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
+      cdnManifestSet(effectiveCacheKey, rewritten, finalCt);                                           // L2
     }
     res.setHeader("Content-Type", finalCt);
     res.setHeader("Access-Control-Allow-Origin", "*");
