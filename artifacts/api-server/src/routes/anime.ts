@@ -963,15 +963,25 @@ async function extractVideoDeep(
     if (visited.has(url)) break;
     visited.add(url);
     try {
-      let origin = "";
-      try { origin = new URL(url).origin; } catch {}
-      const r = await fetch(url, {
-        headers: { "User-Agent": BROWSER_UA, Referer: ref, Origin: origin, Accept: "text/html,*/*;q=0.9", "Accept-Language": "ar,en;q=0.9" },
-        signal: AbortSignal.timeout(10000),
-        redirect: "follow",
-      });
-      if (!r.ok) break;
-      const html = await r.text();
+      let html: string;
+      // FileMoon و StreamWish و مشابهاتها تحجب Replit IP → نستخدم CF proxy (curl_cffi)
+      const needsCfProxy = url.includes("filemoon") || url.includes("streamwish") ||
+        url.includes("wishembed") || url.includes("swdyu") || url.includes("luluvdo");
+      if (needsCfProxy) {
+        const cfHtml = await cfProxyGet(url, ref, 14000);
+        if (!cfHtml) break;
+        html = cfHtml;
+      } else {
+        let origin = "";
+        try { origin = new URL(url).origin; } catch {}
+        const r = await fetch(url, {
+          headers: { "User-Agent": BROWSER_UA, Referer: ref, Origin: origin, Accept: "text/html,*/*;q=0.9", "Accept-Language": "ar,en;q=0.9" },
+          signal: AbortSignal.timeout(10000),
+          redirect: "follow",
+        });
+        if (!r.ok) break;
+        html = await r.text();
+      }
       if (isCloudflareBlock(html)) break;
       if (url.includes("streamtape.com") || url.includes("streamtape.net")) {
         const v = parseStreamtape(html); if (v) return v;
@@ -4175,7 +4185,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       }
     }
 
-    if (!best.item || best.score < 0.30) return [];
+    if (!best.item || best.score < 0.25) return [];
 
     const animeId: string = String(best.item.AnimeId);
     const animeType: string = best.item._type || "SERIES";
