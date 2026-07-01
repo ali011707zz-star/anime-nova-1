@@ -17,7 +17,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "https://anime-nova.orkestr.run"
+        "EXPO_PUBLIC_DOMAIN": "https://83a3277c-7035-4016-86d3-45dbce5c5779-00-wqzfwf9qe3nh.pike.replit.dev"
       }
     },
     "production": {
@@ -25,8 +25,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "https://anime-nova.orkestr.run",
-        "EXPO_PUBLIC_API_URL": "https://anime-nova.orkestr.run"
+        "EXPO_PUBLIC_DOMAIN": "https://83a3277c-7035-4016-86d3-45dbce5c5779-00-wqzfwf9qe3nh.pike.replit.dev",
+        "EXPO_PUBLIC_API_URL": "https://83a3277c-7035-4016-86d3-45dbce5c5779-00-wqzfwf9qe3nh.pike.replit.dev"
       }
     }
   }
