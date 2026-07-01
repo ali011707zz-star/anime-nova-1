@@ -792,7 +792,7 @@ export function RiftPlayer({
       .then(() => { orientLockRef.current = "left"; })
       .catch(() => {});
     return () => {
-      ScreenOrientation.unlockAsync().catch(() => {});
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     };
   }, []);
 
@@ -823,7 +823,7 @@ export function RiftPlayer({
       const VS = await import("react-native-view-shot" as any);
       const uri: string = await VS.captureRef(rootViewRef, { format: "jpg", quality: 0.9 });
       const ML = await import("expo-media-library" as any);
-      const perm = await ML.requestPermissionsAsync();
+      const perm = await ML.requestPermissionsAsync({ writeOnly: true });
       if (perm.status === "granted") await ML.saveToLibraryAsync(uri);
     } catch {}
   }, []);
@@ -1033,9 +1033,9 @@ export function RiftPlayer({
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
   }, []);
 
-  /* ─── Back: unlock orientation then go back ─── */
+  /* ─── Back: lock to portrait then go back ─── */
   const handleBack = useCallback(() => {
-    ScreenOrientation.unlockAsync().catch(() => {});
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     onBack();
   }, [onBack]);
 
@@ -1641,15 +1641,6 @@ export function RiftPlayer({
                     color={isPortrait ? "#c4b5fd" : "rgba(255,255,255,0.85)"}
                   />
                 </Pressable>
-                {!currentSrc?.isArabic && (
-                  <Pressable
-                    onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
-                    style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
-                    hitSlop={10}
-                  >
-                    <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
-                  </Pressable>
-                )}
                 <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
                   <Ionicons name="camera-outline" size={15} color="rgba(255,255,255,0.85)" />
                 </Pressable>
@@ -1659,15 +1650,6 @@ export function RiftPlayer({
                 <Pressable onPress={takeScreenshot} style={s.topIconBtn} hitSlop={10}>
                   <Ionicons name="camera-outline" size={15} color="rgba(255,255,255,0.85)" />
                 </Pressable>
-                {!currentSrc?.isArabic && (
-                  <Pressable
-                    onPress={() => { setShowSubPanel(v => !v); setShowSpeedMenu(false); setShowFitMenu(false); fadeIn(); }}
-                    style={[s.topIconBtn, s.topCCBtn, showSubPanel && s.topIconBtnActive, (subOn && loadedCues.length > 0) && s.topCCBtnActive]}
-                    hitSlop={10}
-                  >
-                    <Text style={[s.topCCText, (subOn && loadedCues.length > 0) && s.topCCTextActive]}>CC</Text>
-                  </Pressable>
-                )}
                 <Pressable onPress={togglePortrait} style={[s.topRotateBtn, isPortrait && s.topRotateBtnActive]} hitSlop={10}>
                   <Ionicons
                     name={isPortrait ? "phone-landscape-outline" : "phone-portrait-outline"}
@@ -1700,14 +1682,16 @@ export function RiftPlayer({
                   <Ionicons name="play-back" size={24} color="#fff" />
                   <Text style={s.centerSeekLabel}>10</Text>
                 </Pressable>
-                {/* PulseRing نبض فقط حول زر المنتصف عند الإيقاف */}
+                {/* زر المنتصف: يظهر فقط عند الإيقاف أو التحميل — عند التشغيل الشريط السفلي يكفي */}
                 <View style={{ alignItems: "center", justifyContent: "center" }}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                    {buffering && !error
-                      ? <ActivityIndicator size={32} color="#fff" />
-                      : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />}
-                  </Pressable>
+                  {(!isPlaying || buffering) && (
+                    <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                      {buffering && !error
+                        ? <ActivityIndicator size={32} color="#fff" />
+                        : <Ionicons name="play" size={36} color="#fff" style={{ marginLeft: 4 }} />}
+                    </Pressable>
+                  )}
                 </View>
                 <Pressable onPress={() => seek(positionRef.current + 10)} style={s.centerSeekBtn} hitSlop={14}>
                   <Ionicons name="play-forward" size={24} color="#fff" />
@@ -1717,14 +1701,16 @@ export function RiftPlayer({
             ) : (
               /* وضع أفقي: التشغيل فقط في المنتصف */
               <View style={s.centerLandscapeWrap}>
-                {/* PulseRing نبض فقط حول زر المنتصف عند الإيقاف */}
+                {/* زر المنتصف: يظهر فقط عند الإيقاف أو التحميل */}
                 <View style={{ alignItems: "center", justifyContent: "center" }}>
                   {!isPlaying && !buffering && <PulseRing />}
-                  <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
-                    {buffering && !error
-                      ? <ActivityIndicator size={32} color="#fff" />
-                      : <Ionicons name={isPlaying ? "pause" : "play"} size={36} color="#fff" style={isPlaying ? undefined : { marginLeft: 4 }} />}
-                  </Pressable>
+                  {(!isPlaying || buffering) && (
+                    <Pressable onPress={togglePlay} style={s.centerPlayBtn} hitSlop={16}>
+                      {buffering && !error
+                        ? <ActivityIndicator size={32} color="#fff" />
+                        : <Ionicons name="play" size={36} color="#fff" style={{ marginLeft: 4 }} />}
+                    </Pressable>
+                  )}
                 </View>
               </View>
             )}
