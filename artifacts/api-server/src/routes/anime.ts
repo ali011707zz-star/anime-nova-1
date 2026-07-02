@@ -3875,19 +3875,25 @@ async function getMyCimaSources(
   const epStr = String(ep);
   const toWpSearch = (s: string) => s.replace(/\s+/g, "+").replace(/[^\x20-\x7E+]/g, "").replace(/\s/g, "+");
 
-  const searchTerms: string[] = [];
+  // Build search terms — try Arabic "الحلقة N" format first (more precise for MyCima)
+  const searchTerms: Array<{ term: string; encoded: boolean }> = [];
   if (!isMovie) {
-    // Search by English title + episode number (no Arabic — avoids encoding issues)
-    if (english) searchTerms.push(toWpSearch(`${english} ${epStr}`));
-    searchTerms.push(toWpSearch(`${title} ${epStr}`));
+    // 1st try: Arabic episode term (most precise)
+    const asciiTitle = toWpSearch(english || title);
+    if (asciiTitle) searchTerms.push({ term: `${asciiTitle}+%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9+${epStr}`, encoded: true });
+    // 2nd try: English title + ep number
+    if (english) searchTerms.push({ term: toWpSearch(`${english} ${epStr}`), encoded: false });
+    searchTerms.push({ term: toWpSearch(`${title} ${epStr}`), encoded: false });
+    // 3rd try: just title (match any episode)
+    if (english) searchTerms.push({ term: toWpSearch(english), encoded: false });
   } else {
-    if (english) searchTerms.push(toWpSearch(english));
-    searchTerms.push(toWpSearch(title));
+    if (english) searchTerms.push({ term: toWpSearch(english), encoded: false });
+    searchTerms.push({ term: toWpSearch(title), encoded: false });
   }
 
   let postUrl: string | null = null;
-  for (const term of searchTerms) {
-    const apiUrl = `${MYCIMA_BASE}/wp-json/wp/v2/posts?search=${term}&per_page=8&_fields=id,link,title`;
+  for (const { term, encoded } of searchTerms) {
+    const apiUrl = `${MYCIMA_BASE}/wp-json/wp/v2/posts?search=${term}&per_page=10&_fields=id,link,title`;
     try {
       const resp = await cfProxyGet(apiUrl, undefined, 14000);
       if (!resp) continue;
@@ -3899,12 +3905,16 @@ async function getMyCimaSources(
         const pTitle = post.title?.rendered ?? "";
         const pTitleAscii = pTitle.replace(/[^\x20-\x7E]/g, " ").toLowerCase();
         if (!isMovie) {
-          // Match episode number in post title
-          if (new RegExp(`الحلقة[-\\s]*${epStr}(?:[^\\d]|$)`).test(pTitle)) {
-            postUrl = post.link; break;
-          }
+          // Match episode number in post title — Arabic numeral OR Western numeral
+          const epMatch =
+            new RegExp(`الحلقة[-\\s]*0*${epStr}(?:[^\\d]|$)`).test(pTitle) ||
+            new RegExp(`ep[-\\s]*0*${epStr}(?:[^\\d]|$)`, "i").test(pTitle);
+          // Also check ASCII title similarity
+          const asciiSearch = toWpSearch(english || title).toLowerCase().replace(/\+/g, " ");
+          const titleMatch = asciiSearch.split(" ").filter(w => w.length >= 3)
+            .every(w => pTitleAscii.includes(w));
+          if (epMatch && titleMatch) { postUrl = post.link; break; }
         } else {
-          // For movies: check if ALL significant words from the search title appear in the post title
           const queryWords = (english || title).toLowerCase()
             .replace(/[^\x20-\x7E]/g, " ").split(/\s+/).filter(w => w.length >= 3);
           const allMatch = queryWords.length > 0 && queryWords.every(w => pTitleAscii.includes(w));
@@ -10882,69 +10892,55 @@ router.get("/anime/new-episodes", async (req, res) => {
     }
     const unique = Array.from(byId.values()).slice(0, 20);
 
-    // 2️⃣ التحقق من توفر كل حلقة في AnimeWitcher بشكل متوازٍ
-    const results = await Promise.allSettled(unique.map(async (sched: any) => {
+    // 2️⃣ بناء قائمة AniList مباشرة (بدون انتظار AnimeWitcher)
+    const anilistItems = unique.map((sched: any) => ({
+      anilistId:    sched.media.id,
+      title:        sched.media.title?.romaji || sched.media.title?.english || "",
+      titleAr:      sched.media.title?.native || null,
+      episode:      sched.episode,
+      airingAt:     sched.airingAt,
+      poster:       sched.media.coverImage?.extraLarge || sched.media.coverImage?.large || null,
+      anilistPoster: sched.media.coverImage?.extraLarge || sched.media.coverImage?.large || null,
+      format:       sched.media.format || "TV",
+      popularity:   sched.media.popularity || 0,
+      averageScore: sched.media.averageScore || null,
+      genres:       (sched.media.genres || []).slice(0, 3),
+    })).filter(x => x.title).sort((a: any, b: any) => b.airingAt - a.airingAt);
+
+    // 3️⃣ التحقق من AnimeWitcher بشكل متوازٍ مع timeout قصير (اختياري — fallback لـ AniList)
+    const awTimeout = AbortSignal.timeout(6_000);
+    const awResults = await Promise.allSettled(unique.slice(0, 10).map(async (sched: any) => {
       const title = sched.media.title?.romaji || sched.media.title?.english || "";
       const ep    = sched.episode;
       if (!title) return null;
-
       try {
-        // بحث في AW
         const sr = await fetch(
           `${AW_HF_BASE}/api/search?q=${encodeURIComponent(title)}`,
-          {
-            headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
-            signal: AbortSignal.timeout(7_000),
-          }
+          { headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" }, signal: awTimeout }
         );
         if (!sr.ok) return null;
         const raw = await sr.json().catch(() => null);
         const hits: any[] = raw?.hits ?? (Array.isArray(raw) ? raw : []);
         if (!hits.length) return null;
-
-        const hit     = hits[0];
+        const hit = hits[0];
         const animeId = hit?.id || hit?.anime_id || "";
         if (!animeId) return null;
-
-        // بوستر AW أو AniList كاحتياط
-        const awPoster = hit?.poster || hit?.cover || null;
-
-        // التحقق من الحلقة
-        const er = await fetch(
-          `${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(String(animeId))}`,
-          {
-            headers: { "User-Agent": "NovaBot/1.0", Accept: "application/json" },
-            signal: AbortSignal.timeout(7_000),
-          }
-        );
-        if (!er.ok) return null;
-        const episodes: any[] = await er.json().catch(() => []);
-        const found = episodes.some((e: any) => {
-          const num = parseInt(String(e.episode_number ?? e.ep_num ?? e.number ?? "0"), 10);
-          return num === ep;
-        });
-        if (!found) return null;
-
-        return {
-          anilistId:    sched.media.id,
-          title,
-          titleAr:      sched.media.title?.native || null,
-          episode:      ep,
-          airingAt:     sched.airingAt,
-          poster:       awPoster || sched.media.coverImage?.extraLarge || sched.media.coverImage?.large || null,
-          anilistPoster: sched.media.coverImage?.extraLarge || sched.media.coverImage?.large || null,
-          format:       sched.media.format || "TV",
-          popularity:   sched.media.popularity || 0,
-          averageScore: sched.media.averageScore || null,
-          genres:       (sched.media.genres || []).slice(0, 3),
-        };
+        return { anilistId: sched.media.id, awPoster: hit?.poster || hit?.cover || null };
       } catch { return null; }
     }));
 
-    const confirmed = results
-      .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled" && r.value !== null)
-      .map(r => r.value)
-      .sort((a, b) => b.airingAt - a.airingAt);
+    // دمج بوستر AW مع بيانات AniList إذا توفّر
+    const awMap = new Map<number, string>();
+    awResults.forEach(r => {
+      if (r.status === "fulfilled" && r.value) {
+        const { anilistId, awPoster } = r.value;
+        if (awPoster) awMap.set(anilistId, awPoster);
+      }
+    });
+    const confirmed = anilistItems.map((item: any) => ({
+      ...item,
+      poster: awMap.get(item.anilistId) || item.poster,
+    }));
 
     if (confirmed.length > 0) {
       _awNewEpsCache.ts    = Date.now();
