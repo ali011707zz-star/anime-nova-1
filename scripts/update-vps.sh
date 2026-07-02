@@ -14,6 +14,7 @@ git pull origin main 2>/dev/null || git pull origin master
 pnpm install --prefer-offline --ignore-scripts 2>/dev/null || pnpm install --ignore-scripts
 
 pnpm --filter @workspace/api-server run build
+VITE_API_URL= NODE_ENV=production pnpm --filter @workspace/anime-scraper run build
 
 pm2 restart anime-nova-api
 

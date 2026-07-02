@@ -129,8 +129,14 @@ export async function notifyNewEpisode(
   console.log(`[telegram] ✅ تنبيه الحلقة أُرسل → ${title} ح${ep}`);
 }
 
+let _cachedAdminId = "";
+let _cachedAdminIdTs = 0;
 async function getAdminChatId(): Promise<string | null> {
-  return process.env.TELEGRAM_CHAT_ID || null;
+  const now = Date.now();
+  if (_cachedAdminId && now - _cachedAdminIdTs < 60_000) return _cachedAdminId;
+  const val = await getEnvOrDb("TELEGRAM_CHAT_ID", "telegram_chat_id");
+  if (val) { _cachedAdminId = val; _cachedAdminIdTs = now; }
+  return val || null;
 }
 
 /* ── AniList airing schedule query ────────────────────────────────────── */
@@ -360,20 +366,41 @@ async function runSchedulerCycle(): Promise<void> {
   }
 }
 
+/* ── إرسال تنبيه للأدمن (يُستخدم من app.ts لأخطاء 500) ──────────────── */
+
+export async function sendAdminAlert(text: string): Promise<void> {
+  try {
+    const adminId = await getAdminChatId();
+    if (!adminId) return;
+    await sendMessage(adminId, text);
+  } catch {
+    // silent — لا نريد أن يسبب إرسال التنبيه خطأ آخر
+  }
+}
+
 /* ── تشغيل الـ scheduler ───────────────────────────────────────────────── */
 
 export function startEpisodeScheduler(): void {
   if (schedulerRunning) return;
   schedulerRunning = true;
 
-  if (!process.env.TELEGRAM_CHANNEL_ID) {
-    console.warn("[scheduler] ⚠️ TELEGRAM_CHANNEL_ID غير موجود — الـ scheduler لن يعمل");
-    schedulerRunning = false;
-    return;
-  }
-
-  // نبدأ أول فحص بعد 10 ثوانٍ (يعطي وقتاً لـ getToken() لتحميل التوكن من DB)
+  // نبدأ بعد 15 ثانية لإتاحة وقت كافٍ لـ config-sync يسترجع TELEGRAM_CHANNEL_ID من DB
   setTimeout(async () => {
+    // استرجع channel ID من DB إن لم يكن في البيئة بعد
+    const channelId = process.env.TELEGRAM_CHANNEL_ID
+      || await getEnvOrDb("TELEGRAM_CHANNEL_ID", "telegram_channel_id");
+
+    if (!channelId) {
+      console.warn("[scheduler] ⚠️ TELEGRAM_CHANNEL_ID غير موجود في البيئة أو DB — الـ scheduler لن يعمل");
+      schedulerRunning = false;
+      return;
+    }
+
+    // اضبط في البيئة للاستخدام اللاحق
+    if (!process.env.TELEGRAM_CHANNEL_ID) {
+      process.env.TELEGRAM_CHANNEL_ID = channelId;
+    }
+
     const tok = await getToken();
     if (!tok) {
       console.warn("[scheduler] ⚠️ TELEGRAM_BOT_TOKEN غير موجود في البيئة أو DB — الـ scheduler لن يعمل");
@@ -385,7 +412,7 @@ export function startEpisodeScheduler(): void {
     schedulerTimer = setInterval(() => {
       runSchedulerCycle().catch(e => console.warn("[scheduler] cycle error:", e.message));
     }, INTERVAL_MS);
-  }, 10_000);
+  }, 15_000);
 }
 
 /* ── تسجيل الـ webhook ────────────────────────────────────────────────── */
