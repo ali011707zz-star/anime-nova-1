@@ -10236,16 +10236,29 @@ router.get("/anime/hls-proxy", async (req, res) => {
 });
 
 router.get("/anime/video-proxy", async (req, res) => {
-  const rawUrl = (req.query.url as string || "").trim();
-  let ref      = (req.query.ref as string || "").trim();
+  const rawUrl    = (req.query.url    as string || "").trim();
+  let ref         = (req.query.ref    as string || "").trim();
+  let originParam = (req.query.origin as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
   if (isEncrypted(url)) url = decryptParam(url);
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
+  if (originParam) try { originParam = decodeURIComponent(originParam); } catch { originParam = ""; }
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  let origin = ""; try { origin = new URL(url).origin; } catch {}
+  // Validate origin override: must be a well-formed http/https URL, never private/internal ranges
+  let validatedOrigin = "";
+  if (originParam) {
+    try {
+      const parsed = new URL(originParam);
+      const isInternal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(parsed.hostname);
+      if ((parsed.protocol === "http:" || parsed.protocol === "https:") && !isInternal) {
+        validatedOrigin = parsed.origin; // normalized form
+      }
+    } catch { /* invalid — ignore */ }
+  }
+  let origin = validatedOrigin; if (!origin) try { origin = new URL(url).origin; } catch {}
 
   const reqHeaders: Record<string, string> = {
     "User-Agent": BROWSER_UA,
