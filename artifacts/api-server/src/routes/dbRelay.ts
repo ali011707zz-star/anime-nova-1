@@ -9,11 +9,11 @@ const router = Router();
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
-const APP_SECRET   = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+import { checkAppSecret } from "../lib/security.js";
 
 function authOk(req: Request): boolean {
   const h = req.headers["x-relay-secret"] as string | undefined;
-  return h === APP_SECRET;
+  return checkAppSecret(h);
 }
 
 function sbHeaders(extra: Record<string, string> = {}) {

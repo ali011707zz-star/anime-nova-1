@@ -7,9 +7,36 @@ import {
 } from "crypto";
 
 // ── مفتاح السر (APP_SECRET env var) ──────────────────────────────────────────
+const DEFAULT_SECRET = "anime-nova-default-change-me-aabbccdd";
+
 function getSecret(): Buffer {
-  const raw = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
+  const raw = process.env.APP_SECRET || DEFAULT_SECRET;
+  if (raw === DEFAULT_SECRET) {
+    console.warn(
+      "[security] ⚠️ APP_SECRET يستخدم القيمة الافتراضية — خطر أمني! " +
+      "أضف APP_SECRET كـ environment variable بقيمة عشوائية طويلة."
+    );
+  }
   return Buffer.from(raw.padEnd(32, "0").slice(0, 32));
+}
+
+// تحقق من مطابقة APP_SECRET (يُستخدم في مسارات الأدمن)
+export function checkAppSecret(provided: string | undefined): boolean {
+  const secret = process.env.APP_SECRET;
+  // في الإنتاج: رفض كل الطلبات إذا لم يكن APP_SECRET مضبوطاً
+  if (!secret) {
+    console.warn("[security] ⛔ APP_SECRET غير مضبوط — رفض جميع طلبات relay");
+    return false;
+  }
+  if (!provided) return false;
+  // مقارنة timing-safe لمنع timing attacks
+  try {
+    const a = Buffer.from(provided.padEnd(64, " ").slice(0, 64));
+    const b = Buffer.from(secret.padEnd(64, " ").slice(0, 64));
+    return a.length === b.length && timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

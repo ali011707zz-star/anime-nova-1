@@ -28,6 +28,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export async function createApp(): Promise<Express> {
   const app: Express = express();
 
+  // ثق بـ Nginx كـ reverse proxy (لقراءة X-Forwarded-For بأمان)
+  app.set("trust proxy", 1);
+
   app.use(
     pinoHttp({
       logger,
@@ -41,7 +44,52 @@ export async function createApp(): Promise<Express> {
       },
     }),
   );
-  app.use(cors({ origin: true, credentials: true }));
+
+  // ── Security Headers (helmet-equivalent) ────────────────────────────────────
+  app.use((_req, res, next) => {
+    res.removeHeader("X-Powered-By");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    next();
+  });
+
+  // ── CORS — السماح للواجهة الأمامية وتطبيق الموبايل فقط ─────────────────────
+  const ALLOWED_ORIGINS = new Set([
+    process.env.FRONTEND_ORIGIN || "",
+    `https://${process.env.APP_DOMAIN || ""}`,
+    `http://${process.env.APP_DOMAIN || ""}`,
+    // Replit dev domains
+    process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "",
+    ...(process.env.REPLIT_DOMAINS?.split(",").map(d => `https://${d.trim()}`) ?? []),
+  ].filter(Boolean));
+
+  app.use(cors({
+    origin: (origin, cb) => {
+      // السماح للطلبات بدون origin (mobile apps, curl, server-to-server)
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+      // في التطوير: اسمح بأي localhost
+      if (process.env.NODE_ENV !== "production" && origin.includes("localhost")) return cb(null, true);
+      cb(new Error(`CORS: ${origin} غير مسموح`));
+    },
+    credentials: true,
+  }));
+
+  // ── Global Rate Limit — 300 طلب/دقيقة لكل IP (حماية من DDoS) ─────────────
+  app.use((req, res, next) => {
+    const ip =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() ||
+      req.socket.remoteAddress || "unknown";
+    if (!checkRateLimit(`global:${ip}`, 300, 60_000)) {
+      res.status(429).json({ error: "Too many requests. Please slow down." });
+      return;
+    }
+    next();
+  });
+
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
 
