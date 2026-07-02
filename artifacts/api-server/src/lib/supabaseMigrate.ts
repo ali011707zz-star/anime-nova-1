@@ -368,6 +368,22 @@ CREATE TABLE IF NOT EXISTS anime_meta_cache (
   ttl_seconds INTEGER DEFAULT 21600,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS notifications (
+  id          SERIAL PRIMARY KEY,
+  type        TEXT NOT NULL DEFAULT 'episode_new',
+  title       TEXT NOT NULL,
+  title_ar    TEXT,
+  body        TEXT,
+  image_url   TEXT,
+  link_path   TEXT,
+  anime_id    TEXT,
+  tmdb_id     INTEGER,
+  episode_num INTEGER,
+  is_read     BOOLEAN DEFAULT FALSE,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread  ON notifications(is_read) WHERE is_read = FALSE;
 `;
 
 /** يُنشئ الجداول مباشرةً في Replit PostgreSQL عند الـ startup */
