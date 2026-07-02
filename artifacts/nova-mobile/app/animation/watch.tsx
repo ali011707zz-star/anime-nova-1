@@ -150,6 +150,7 @@ function getAnimTag(label: string): string {
   if (l.startsWith("kawaii"))      return "KW";
   if (l.startsWith("animephoenix") || l.startsWith("phoenix")) return "PH";
   if (l.startsWith("animehub"))    return "AH";
+  if (l.startsWith("streamrip"))   return "SR";
   const word = label.replace(/[^a-zA-Z\u0621-\u064a]/g, "").slice(0, 2).toUpperCase();
   return word || "??";
 }

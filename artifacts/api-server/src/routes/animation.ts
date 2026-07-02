@@ -1830,6 +1830,39 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── 23. vidbinge → DISABLED (timeout from datacenter IPs) ───────────────
       Promise.resolve(),
 
+      // ── Streamrip — روابط MP4 مباشرة إنجليزية (MovieBox) ──────────────────────
+      (async () => {
+        if (!tmdbId) return;
+        try {
+          const SRIP = "https://streamrip-website-production.up.railway.app";
+          const SRIP_REF = "https://fmoviesunblocked.net/";
+          const SRIP_ORIGIN = "https://fmoviesunblocked.net";
+          const endpoint = type === "tv"
+            ? `${SRIP}/api/download/tv/${tmdbId}`
+            : `${SRIP}/api/download/movie/${tmdbId}`;
+          const r = await fetch(endpoint, { signal: AbortSignal.timeout(12_000) });
+          if (!r.ok) return;
+          const data: any = await r.json();
+          const downloads: any[] = data?.downloads || [];
+          // فلتر: إنجليزي فقط (MovieBox [English]) — يستبعد Hindi/Telugu/Norwegian
+          const english = downloads.filter((d: any) => {
+            const srv = (d.server || "").toLowerCase();
+            return srv.includes("english") &&
+              !srv.includes("hindi") &&
+              !srv.includes("telugu") &&
+              !srv.includes("norwegian") &&
+              typeof d.url === "string" && d.url.startsWith("http");
+          });
+          for (const dl of english) {
+            const q = Number(dl.quality) || 0;
+            if (q <= 0) continue; // skip invalid quality
+            const label = `Streamrip · ${q}p`;
+            const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(dl.url)}&ref=${encodeURIComponent(SRIP_REF)}&origin=${encodeURIComponent(SRIP_ORIGIN)}`;
+            sendSource(dl.url, label, dl.url, proxyUrl);
+          }
+        } catch { /* silent */ }
+      })(),
+
       // ── 16. 2embed.skin (TMDB-based, tries streamwish/filemoon extraction) ─────
       (async () => {
         try {
