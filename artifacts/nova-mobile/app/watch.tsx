@@ -116,8 +116,8 @@ const ANIME_SITES = [
   "shahiid", "animelek", "animedar", "okanime", "ristoanime",
   "animeify", "animeday", "arabseed", "anime4up2",
   "mycima", "topcinemaa", "animephoenix",
-  // قاعدة بيانات FaselHD
-  "faselhd_db",
+  // قاعدة بيانات FaselHD + AnimeTime
+  "faselhd_db", "animetime",
 ] as const;
 const SITE_TIMEOUT_MS = 28_000;
 
