@@ -4,6 +4,13 @@ import { getEmailUser } from "../auth/emailAuth.js";
 import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
 import { setDbConfig, clearDbConfigCache } from "../lib/dbConfig.js";
+import { checkAppSecret } from "../lib/security.js";
+
+// دالة مساعدة للتحقق من secret أو صلاحيات الأدمن
+async function hasRelayAccess(req: Request): Promise<boolean> {
+  const provided = (req.headers["x-relay-secret"] as string | undefined) || (req.query.s as string | undefined);
+  return checkAppSecret(provided) || (await isAdmin(req));
+}
 
 const router = Router();
 
@@ -16,11 +23,8 @@ async function isAdmin(req: Request): Promise<boolean> {
 
 /* GET /api/admin/env-relay — يُرجع SUPABASE + SMTP vars محمية بـ APP_SECRET */
 router.get("/admin/env-relay", async (req: Request, res: Response) => {
-  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
-  const provided  = (req.headers["x-relay-secret"] as string | undefined) || req.query.s;
-  if (provided !== appSecret) {
+  if (!(await hasRelayAccess(req)))
     return res.status(401).json({ error: "unauthorized" });
-  }
   return res.json({
     SUPABASE_URL:         process.env.SUPABASE_URL         || "",
     SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY || "",
@@ -35,8 +39,10 @@ router.get("/admin/env-relay", async (req: Request, res: Response) => {
 
 // ── SMTP Config ─────────────────────────────────────────────────────────────
 
-/* GET /api/admin/db-setup — يعرض SQL المطلوب لإنشاء الجداول */
-router.get("/admin/db-setup", async (_req: Request, res: Response) => {
+/* GET /api/admin/db-setup — يعرض SQL المطلوب لإنشاء الجداول (أدمن فقط) */
+router.get("/admin/db-setup", async (req: Request, res: Response) => {
+  if (!(await isAdmin(req)))
+    return res.status(401).json({ error: "غير مصرّح — مطلوب صلاحيات المدير" });
   const status = await getTableStatus();
   return res.json({
     tables: status,
@@ -46,8 +52,10 @@ router.get("/admin/db-setup", async (_req: Request, res: Response) => {
   });
 });
 
-/* تشخيص SMTP — يكشف الخطأ الحقيقي من Gmail */
-router.get("/admin/smtp-ping", async (_req: Request, res: Response) => {
+/* تشخيص SMTP — يكشف الخطأ الحقيقي من Gmail (أدمن فقط) */
+router.get("/admin/smtp-ping", async (req: Request, res: Response) => {
+  if (!(await isAdmin(req)))
+    return res.status(401).json({ error: "غير مصرّح — مطلوب صلاحيات المدير" });
   const { getDbConfig } = await import("../lib/dbConfig.js");
   const dbPass = await getDbConfig("smtp_pass");
   const dbUser = await getDbConfig("smtp_user");
@@ -102,9 +110,7 @@ router.get("/admin/smtp-ping", async (_req: Request, res: Response) => {
 
 /* تحديث SMTP في process.env مباشرة — محمي بـ APP_SECRET — يعمل بدون إعادة نشر */
 router.post("/admin/smtp-env-patch", async (req: Request, res: Response) => {
-  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
-  const provided = (req.headers["x-relay-secret"] as string | undefined) || (req.query.s as string | undefined);
-  if (provided !== appSecret) return res.status(401).json({ error: "unauthorized" });
+  if (!(await hasRelayAccess(req))) return res.status(401).json({ error: "unauthorized" });
 
   const { smtp_user, smtp_pass, smtp_host, smtp_port } = req.body || {};
   if (smtp_user) process.env.SMTP_USER = String(smtp_user);
@@ -120,9 +126,7 @@ router.post("/admin/smtp-env-patch", async (req: Request, res: Response) => {
 
 /* POST /api/admin/telegram-env-patch — تعيين TELEGRAM_BOT_TOKEN مباشرة في process.env + DB */
 router.post("/admin/telegram-env-patch", async (req: Request, res: Response) => {
-  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
-  const provided = (req.headers["x-relay-secret"] as string | undefined) || (req.query.s as string | undefined);
-  if (provided !== appSecret && !(await isAdmin(req)))
+  if (!(await hasRelayAccess(req)))
     return res.status(401).json({ error: "unauthorized" });
 
   const { telegram_bot_token, telegram_chat_id, telegram_channel_id } = req.body || {};
@@ -151,9 +155,7 @@ router.post("/admin/telegram-env-patch", async (req: Request, res: Response) => 
 
 /* GET /api/admin/telegram-status — حالة Telegram */
 router.get("/admin/telegram-status", async (req: Request, res: Response) => {
-  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
-  const provided = (req.headers["x-relay-secret"] as string | undefined) || (req.query.s as string | undefined);
-  if (provided !== appSecret && !(await isAdmin(req)))
+  if (!(await hasRelayAccess(req)))
     return res.status(401).json({ error: "unauthorized" });
 
   const { getEnvOrDb } = await import("../lib/dbConfig.js");
@@ -181,11 +183,7 @@ router.get("/admin/telegram-status", async (req: Request, res: Response) => {
 });
 
 router.post("/admin/smtp-config", async (req: Request, res: Response) => {
-  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
-  const relaySecret = (req.headers["x-relay-secret"] as string | undefined) || req.query.s;
-  const hasSecret = relaySecret === appSecret;
-
-  if (!hasSecret && !(await isAdmin(req)))
+  if (!(await hasRelayAccess(req)))
     return res.status(401).json({ error: "غير مصرّح — مطلوب صلاحيات المدير أو x-relay-secret" });
 
   const { smtp_pass, smtp_user, smtp_host, smtp_port } = req.body || {};
@@ -369,9 +367,8 @@ router.get("/admin/stats", async (req: Request, res: Response) => {
 // ── إعداد الأسرار من قاعدة البيانات (بدون Replit Secrets) ─────────────────
 // محمي بـ APP_SECRET فقط — لا يحتاج تسجيل دخول (للإعداد الأولي)
 router.post("/admin/setup", async (req: Request, res: Response) => {
-  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
-  const provided  = (req.headers["x-setup-secret"] as string | undefined) || req.body?.secret;
-  if (provided !== appSecret) {
+  const provided = (req.headers["x-setup-secret"] as string | undefined) || req.body?.secret;
+  if (!checkAppSecret(provided)) {
     return res.status(401).json({ error: "x-setup-secret غير صحيح" });
   }
 
@@ -434,9 +431,8 @@ router.post("/admin/setup", async (req: Request, res: Response) => {
 
 // ── عرض الإعدادات المحفوظة (بدون القيم الحساسة) ──────────────────────────
 router.get("/admin/setup/status", async (req: Request, res: Response) => {
-  const appSecret = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
-  const provided  = (req.headers["x-setup-secret"] as string | undefined) || req.query.secret;
-  if (provided !== appSecret) {
+  const provided = (req.headers["x-setup-secret"] as string | undefined) || (req.query.secret as string | undefined);
+  if (!checkAppSecret(provided)) {
     return res.status(401).json({ error: "x-setup-secret غير صحيح" });
   }
 

@@ -290,11 +290,8 @@ export function registerEmailAuthRoutes(app: Express): void {
   app.get("/api/auth/me", async (req: Request, res: Response) => {
     let userId = (req.session as any)?.userId;
 
-    /* fallback للتطبيق المحمول: X-Mobile-User-Id يُرسَل مع كل طلب */
-    if (!userId) {
-      const mobileId = req.headers["x-mobile-user-id"] as string | undefined;
-      if (mobileId) userId = mobileId;
-    }
+    /* ملاحظة: header X-Mobile-User-Id أُزيل — كان يسمح بانتحال هوية أي مستخدم.
+       التطبيق المحمول يجب أن يستخدم الجلسة (session cookie) بدلاً من ذلك. */
 
     if (!userId) return res.status(401).json({ error: "غير مصرّح" });
     try {
