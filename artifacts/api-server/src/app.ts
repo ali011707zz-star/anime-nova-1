@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import path from "path";
 import http from "http";
@@ -10,7 +10,7 @@ import commentsRouter from "./routes/comments.js";
 import adminRouter from "./routes/admin.js";
 import dbRelayRouter from "./routes/dbRelay.js";
 import reportRouter from "./routes/report.js";
-import telegramRouter from "./routes/telegram.js";
+import telegramRouter, { sendAdminAlert } from "./routes/telegram.js";
 import authTokenRouter from "./routes/authToken.js";
 import newsRouter from "./routes/news.js";
 import notificationsRouter from "./routes/notifications.js";
@@ -124,6 +124,21 @@ export async function createApp(): Promise<Express> {
   app.use(express.static(frontendDist));
   app.get("/{*path}", (_req, res) => {
     res.sendFile(path.join(frontendDist, "index.html"));
+  });
+
+  // ── Global error handler → يُرسل أخطاء 500 لـ Telegram ─────────────────
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const msg = err?.message || String(err);
+    logger.error({ err }, "Unhandled server error");
+
+    // أرسل للأدمن عبر Telegram (بدون انتظار)
+    sendAdminAlert(
+      `⚠️ <b>خطأ في الخادم</b>\n\n<code>${msg.slice(0, 300)}</code>`
+    ).catch(() => {});
+
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   return app;

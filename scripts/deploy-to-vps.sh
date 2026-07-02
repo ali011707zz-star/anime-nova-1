@@ -134,6 +134,9 @@ pnpm install --prefer-offline --ignore-scripts 2>/dev/null || pnpm install --ign
 log "بناء الخادم الخلفي..."
 pnpm --filter @workspace/api-server run build
 
+log "بناء الواجهة الأمامية..."
+VITE_API_URL= NODE_ENV=production pnpm --filter @workspace/anime-scraper run build
+
 # ── 9. إعداد PM2 ─────────────────────────────────────────────────────────
 log "إعداد PM2..."
 cat > "$APP_DIR/ecosystem.config.cjs" << ECOSEOF

@@ -1,4 +1,5 @@
 - [Anime NOVA startup fix](anime-nova-startup.md) — DB migration must run AFTER server starts listening, not before, or the workflow port-open timeout fails.
+- [VPS Deployment](vps-deployment.md) — خادم 95.182.93.105 Ubuntu 24.04; Telegram webhook uses self-signed cert uploaded to Telegram API; CHANNEL_ID in .env + DB; token DB-only via config-sync.
 - [MXPlayer service search approach](mxplayer-search.md) — use /search/result (not /search/suggest); tvshow needs season→episode chain; CDN prefix is isa-1.mxplay.com.
 - [ScraperAPI integration](scraperapi-integration.md) — scraperApiGet is the last-resort proxy fallback; key stored as SCRAPERAPI_KEY shared env var; integrated in 5 points across witanime + ristoanime scrapers.
 - [Streamrip integration](streamrip-integration.md) — MovieBox [English] MP4 source added to animation sources-stream; video-proxy supports optional &origin= override with validation.
