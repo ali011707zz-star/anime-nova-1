@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Nova Anime — معاينة GIFs</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a0f; color: #fff; font-family: 'Segoe UI', sans-serif; padding: 24px; }
+  h1 { text-align: center; font-size: 22px; color: #a78bfa; margin-bottom: 8px; }
+  p.sub { text-align: center; color: #6b7280; font-size: 13px; margin-bottom: 28px; }
+
+  /* ── Loading overlay mockup ── */
+  .player-mockup {
+    position: relative;
+    width: 100%;
+    max-width: 860px;
+    margin: 0 auto 40px;
+    background: #111;
+    border-radius: 16px;
+    overflow: hidden;
+    aspect-ratio: 16/9;
+    border: 1px solid #222;
+  }
+  .player-bg {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    opacity: 0.25;
+    position: absolute; inset: 0;
+  }
+  .player-overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px;
+  }
+  .gif-stage {
+    width: 160px; height: 160px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 3px solid #a78bfa;
+    box-shadow: 0 0 40px rgba(167,139,250,0.4);
+    background: #1a1a2e;
+  }
+  .gif-stage img { width: 100%; height: 100%; object-fit: cover; }
+  .loading-text {
+    font-size: 15px; color: #c4b5fd; letter-spacing: 2px; text-transform: uppercase;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .ep-title { font-size: 13px; color: #6b7280; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ── Category grid ── */
+  h2 { font-size: 16px; color: #9ca3af; margin: 32px 0 16px; border-bottom: 1px solid #1f2937; padding-bottom: 8px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    background: #111827;
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color .2s, transform .2s;
+  }
+  .card:hover, .card.active { border-color: #a78bfa; transform: scale(1.03); }
+  .card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+  .card .label {
+    padding: 6px 8px;
+    font-size: 12px; color: #9ca3af;
+    display: flex; justify-content: space-between;
+  }
+  .card .label span { color: #a78bfa; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>🎌 GIFs على شاشة "جاري التحميل"</h1>
+<p class="sub">اضغط على أي GIF لترى كيف يظهر في واجهة المشغّل</p>
+
+<!-- Player mockup -->
+<div class="player-mockup" id="mockup">
+  <img class="player-bg" src="https://s4.anilist.co/file/anilistcdn/media/anime/banner/16498-8jpFCOcDmneX.jpg" alt="">
+  <div class="player-overlay">
+    <div class="gif-stage">
+      <img id="active-gif" src="https://raw.githubusercontent.com/bre4d777/anime-gifs/master/dance/1.gif" alt="">
+    </div>
+    <div class="loading-text">جاري تحميل الحلقة...</div>
+    <div class="ep-title" id="ep-label">الحلقة 1 — هجوم العمالقة</div>
+  </div>
+</div>
+
+<!-- GIF Gallery -->
+<h2>📂 التصنيفات المتاحة — انقر لمعاينة</h2>
+<div class="grid" id="grid"></div>
+
+<script>
+const categories = [
+  { name: 'dance',     label: 'رقص',     count: 33 },
+  { name: 'happy',     label: 'سعادة',   count: 15 },
+  { name: 'celebrate', label: 'احتفال',  count: 0  },
+  { name: 'smile',     label: 'ابتسامة', count: 20 },
+  { name: 'hug',       label: 'عناق',    count: 40 },
+  { name: 'wave',      label: 'تلويح',   count: 22 },
+  { name: 'blush',     label: 'خجل',     count: 41 },
+  { name: 'shy',       label: 'حياء',    count: 17 },
+  { name: 'pat',       label: 'تربيت',   count: 27 },
+  { name: 'cry',       label: 'بكاء',    count: 46 },
+  { name: 'sad',       label: 'حزن',     count: 0  },
+  { name: 'run',       label: 'ركض',     count: 0  },
+  { name: 'sleep',     label: 'نوم',     count: 0  },
+  { name: 'laugh',     label: 'ضحك',     count: 0  },
+  { name: 'pout',      label: 'تذمر',    count: 0  },
+  { name: 'confused',  label: 'تشويش',   count: 0  },
+  { name: 'surprised', label: 'مفاجأة',  count: 0  },
+];
+
+const grid = document.getElementById('grid');
+const activeGif = document.getElementById('active-gif');
+
+// Pick random gif index 1-5
+const rand = (max) => Math.floor(Math.random() * Math.min(max || 5, 5)) + 1;
+
+categories.forEach((cat, i) => {
+  const url = `https://raw.githubusercontent.com/bre4d777/anime-gifs/master/${cat.name}/${rand(cat.count || 5)}.gif`;
+  const card = document.createElement('div');
+  card.className = 'card' + (i === 0 ? ' active' : '');
+  card.innerHTML = `
+    <img src="${url}" alt="${cat.name}" loading="lazy">
+    <div class="label">${cat.label} <span>#${cat.name}</span></div>
+  `;
+  card.onclick = () => {
+    document.querySelectorAll('.card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    activeGif.src = url;
+    document.getElementById('ep-label').textContent = `حالة: ${cat.label}`;
+  };
+  grid.appendChild(card);
+});
+</script>
+</body>
+</html>
