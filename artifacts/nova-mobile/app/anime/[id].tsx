@@ -509,7 +509,16 @@ export default function AnimeDetailScreen() {
           <View style={d.section}>
             <SectionHeader title="الإعلان الدعائي" />
             <Pressable
-              onPress={() => setShowTrailer(true)}
+              onPress={() => {
+                if (Platform.OS === "web") {
+                  setShowTrailer(true);
+                } else {
+                  // على الأجهزة الحقيقية: يفتح تطبيق YouTube مباشرة (WebView يحجب YouTube)
+                  Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`).catch(() => {
+                    setShowTrailer(true);
+                  });
+                }
+              }}
               style={d.trailerBtn}
             >
               <Image

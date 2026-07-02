@@ -15,6 +15,10 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
+import { loadRuntimeApiUrl } from "@/utils/baseUrl";
+
+// تحميل عنوان API المخصص من AsyncStorage قبل أي طلب شبكي
+loadRuntimeApiUrl().catch(() => {});
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
