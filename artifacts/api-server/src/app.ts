@@ -71,8 +71,12 @@ export async function createApp(): Promise<Express> {
       // السماح للطلبات بدون origin (mobile apps, curl, server-to-server)
       if (!origin) return cb(null, true);
       if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+      // السماح لـ Replit domains (*.replit.dev, *.repl.co, *.replit.app)
+      if (origin.endsWith(".replit.dev") || origin.endsWith(".repl.co") || origin.endsWith(".replit.app")) {
+        return cb(null, true);
+      }
       // في التطوير: اسمح بأي localhost
-      if (process.env.NODE_ENV !== "production" && origin.includes("localhost")) return cb(null, true);
+      if (origin.includes("localhost") || origin.includes("127.0.0.1")) return cb(null, true);
       cb(new Error(`CORS: ${origin} غير مسموح`));
     },
     credentials: true,
