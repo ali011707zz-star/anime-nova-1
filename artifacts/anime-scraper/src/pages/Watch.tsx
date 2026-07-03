@@ -3086,7 +3086,7 @@ export default function WatchPage() {
 
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
-      const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(40000), headers: { "X-App-Token": await getAppToken() } });
+      const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(22000), headers: { "X-App-Token": await getAppToken() } });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
 
@@ -3129,7 +3129,7 @@ export default function WatchPage() {
     if (autoFetchedRef.current) return;
     autoFetchedRef.current = true;
     SCRAPER_DEFS.forEach((def, i) => {
-      setTimeout(() => handleFetchSite(def.site), i * 80);
+      setTimeout(() => handleFetchSite(def.site), i * 25);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

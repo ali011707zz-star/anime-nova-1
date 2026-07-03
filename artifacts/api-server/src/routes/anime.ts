@@ -9797,66 +9797,69 @@ router.get("/anime/translate-vtt-stream", async (req, res) => {
       return;
     }
 
-    const CHUNK    = 10;
-    const PARALLEL = 6;
+    const CHUNK    = 25;
+    const PARALLEL = 10;
     const SEP      = " ||| ";
 
     // Split all cues into chunks of CHUNK
     const allChunks: Array<{ timing: string; rawText: string }[]> = [];
     for (let i = 0; i < cues.length; i += CHUNK) allChunks.push(cues.slice(i, i + CHUNK));
-    const totalRounds = Math.ceil(allChunks.length / PARALLEL);
+    const totalChunks = allChunks.length;
 
     // Full accumulator for cache save at the end
     const fullResult: { timing: string; text: string }[] = new Array(cues.length).fill(null as any);
     let sentIndex = 0;
 
+    // Translate a single chunk and stream it immediately when done
+    const translateChunk = async (chunk: { timing: string; rawText: string }[], chunkIdx: number) => {
+      if (res.writableEnded) return;
+      const cueStart = chunkIdx * CHUNK;
+      const cleaned  = chunk.map(t => t.rawText.replace(/\|\|\|/g, "").trim());
+      let translated: string[] = cleaned; // fallback = original
+
+      try {
+        const tUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(cleaned.join(SEP))}`;
+        const tr   = await fetch(tUrl, {
+          headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+          signal: AbortSignal.timeout(12000),
+        });
+        if (tr.ok) {
+          const data = await tr.json() as any;
+          const joined: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || "";
+          if (joined) {
+            const parts = joined.split(/\s*\|\|\|\s*/);
+            translated = chunk.map((_, j) => parts[j]?.trim() || cleaned[j]);
+          }
+        }
+      } catch {
+        // MyMemory fallback — one request per cue (parallel)
+        await Promise.allSettled(chunk.map(async (c, j) => {
+          try {
+            const mm  = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(c.rawText.slice(0, 300))}&langpair=${from}|${to}`;
+            const mmR = await fetch(mm, { signal: AbortSignal.timeout(6000) });
+            if (mmR.ok) translated[j] = (await mmR.json() as any)?.responseData?.translatedText || c.rawText;
+          } catch {}
+        }));
+      }
+
+      const chunkCues = chunk.map((c, j) => {
+        const row = { timing: c.timing, text: translated[j] ?? c.rawText };
+        fullResult[cueStart + j] = row;
+        return row;
+      });
+
+      // Stream this chunk immediately as soon as it's ready
+      if (chunkCues.length > 0 && !res.writableEnded) {
+        send({ type: "chunk", cues: chunkCues, index: sentIndex++, total: totalChunks });
+      }
+    };
+
+    // Run PARALLEL chunks at a time, streaming each chunk the moment it finishes
     for (let roundStart = 0; roundStart < allChunks.length && !res.writableEnded; roundStart += PARALLEL) {
       const group = allChunks.slice(roundStart, roundStart + PARALLEL);
-      const roundCues: { timing: string; text: string }[] = [];
-
       await Promise.allSettled(
-        group.map(async (chunk, pi) => {
-          const cueStart = (roundStart + pi) * CHUNK;
-          const cleaned  = chunk.map(t => t.rawText.replace(/\|\|\|/g, "").trim());
-          let translated: string[] = cleaned; // fallback = original
-
-          try {
-            const tUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(cleaned.join(SEP))}`;
-            const tr   = await fetch(tUrl, {
-              headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
-              signal: AbortSignal.timeout(15000),
-            });
-            if (tr.ok) {
-              const data = await tr.json() as any;
-              const joined: string = data?.[0]?.map((x: any) => x?.[0] || "").join("") || "";
-              if (joined) {
-                const parts = joined.split(/\s*\|\|\|\s*/);
-                translated = chunk.map((_, j) => parts[j]?.trim() || cleaned[j]);
-              }
-            }
-          } catch {
-            // MyMemory fallback for this chunk
-            await Promise.allSettled(chunk.map(async (c, j) => {
-              try {
-                const mm  = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(c.rawText.slice(0, 300))}&langpair=${from}|${to}`;
-                const mmR = await fetch(mm, { signal: AbortSignal.timeout(8000) });
-                if (mmR.ok) translated[j] = (await mmR.json() as any)?.responseData?.translatedText || c.rawText;
-              } catch {}
-            }));
-          }
-
-          chunk.forEach((c, j) => {
-            const row = { timing: c.timing, text: translated[j] ?? c.rawText };
-            fullResult[cueStart + j] = row;
-            roundCues.push(row);
-          });
-        }),
+        group.map((chunk, pi) => translateChunk(chunk, roundStart + pi))
       );
-
-      // Stream this round immediately
-      if (roundCues.length > 0 && !res.writableEnded) {
-        send({ type: "chunk", cues: roundCues, index: sentIndex++, total: totalRounds });
-      }
     }
 
     // Save complete translation to L1+L2 cache (fire-and-forget)
