@@ -84,3 +84,16 @@ Custom email/password auth with verification codes, plus Google and GitHub OAuth
 
 **Build command**: `cd artifacts/nova-mobile && eas build --platform android --profile preview`
 **Debug**: `adb logcat | grep -E "FATAL|crash|nova|expo"`
+
+## Anime Rift APK Reverse-Engineering (owner's previous app)
+
+The user's previous app "Anime Rift" (Flutter, downloaded from mobiltna.com mirror, real APK host `s1.mbdownload.com`) was inspected to recover its API structure for reference/migration purposes.
+
+**Findings (via `strings` on `lib/arm64-v8a/libapp.so` — Dart AOT compiled, no full decompile possible without more tooling):**
+- API gateway: `https://gateway.anime-rift.com/api/v4`
+- Payments/subscriptions service: `https://payments.anime-rift.com/api/v1`
+- No exposed raw database (no Supabase/Firebase Realtime DB strings) — backend-gateway architecture, auth via `Authorization: Bearer <token>` + Google Sign-In.
+- Known route paths: `/library/search`, `/library/episodes/`, `/library/episode/sources`, `/library/episode/source/{can_play,can_use,direct_link,next_episode,report_issue}`, `/favorite/anime/*`, `/favorite/episode/`, `/watch_history/*` (mark, un_mark, latest, overview, watch, watch_many, clear/one, clear/multi, full).
+- Static string extraction cannot reveal request/response bodies or the token-issuance flow — needs live traffic capture.
+
+**Live capture setup (in progress)**: `mitmdump` installed and running on the VPS (95.182.93.105) via `pip3 install --break-system-packages --ignore-installed mitmproxy`, listening on port **8888**, writing captured flows to `/opt/mitm-capture/anime-rift.flow` (log: `/opt/mitm-capture/mitm.log`). No firewall (ufw not installed, iptables empty) is blocking the port. Next step: route the Anime Rift Android app's traffic through this proxy (phone Wi-Fi proxy → `95.182.93.105:8888`, install CA cert from `http://mitm.it`) to capture a real authenticated session, then use the captured request/response shapes to build a new scraper source for Anime NOVA.
