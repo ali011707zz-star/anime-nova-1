@@ -3424,7 +3424,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           });
           if (!r.ok) { console.warn(`[CinePro] HTTP ${r.status} for tmdbId=${tmdbId}`); return; }
           const data = await r.json() as { sources?: any[]; subtitles?: any[] };
+          // مزودون مستقرون فقط — vidapi يستخدم domains متغيرة وغير موثوق
+          const STABLE_PROVIDERS = new Set(["vidrock", "fsharetv", "vixsrc", "purstream"]);
           for (const src of (data.sources || [])) {
+            const provId = typeof src.provider === "object"
+              ? (src.provider?.id || "")
+              : String(src.provider || "");
+            if (provId && !STABLE_PROVIDERS.has(provId.toLowerCase())) continue;
             const provName = typeof src.provider === "object"
               ? (src.provider?.name || "CinePro")
               : (src.provider || "CinePro");
