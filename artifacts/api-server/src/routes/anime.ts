@@ -8497,8 +8497,8 @@ router.get("/anime/fetch-source", async (req, res) => {
     return;
   }
 
-  const SCRAPER_MS = 20000;
-  const EXTRACT_MS = 15000;
+  const SCRAPER_MS = 7000;   // موحّد مع مسار التدفق المتوازي — كان 20000
+  const EXTRACT_MS = 7000;   // موحّد مع مسار التدفق المتوازي — كان 15000
   const race = <T>(p: Promise<T>, ms: number, fallback: T) =>
     Promise.race([p, new Promise<T>(r => setTimeout(() => r(fallback), ms))]);
 

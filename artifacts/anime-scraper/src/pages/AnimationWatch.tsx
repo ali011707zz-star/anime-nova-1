@@ -88,6 +88,92 @@ function parseSrt(srt: string): SubCue[] {
   return cues;
 }
 
+/* ── Merge + sort subtitle cue arrays (preserves timeline order) ── */
+function _mergeAnimSubCues(existing: SubCue[], incoming: SubCue[]): SubCue[] {
+  if (!existing.length) return incoming;
+  const out = [...existing, ...incoming];
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
+/* ── Parse SSE chunk cues into SubCue[] ── */
+function _parseAnimSseCues(raw: Array<{ timing: string; text: string }>): SubCue[] {
+  const toSec = (ts: string) => {
+    const t = ts.trim();
+    const m3 = t.match(/^(\d+):(\d{2}):(\d{2})[,.](\d{1,3})/);
+    if (m3) return parseInt(m3[1]) * 3600 + parseInt(m3[2]) * 60 + parseInt(m3[3]) + parseInt(m3[4].padEnd(3, "0")) / 1000;
+    const m2 = t.match(/^(\d+):(\d{2})[,.](\d{1,3})/);
+    if (m2) return parseInt(m2[1]) * 60 + parseInt(m2[2]) + parseInt(m2[3].padEnd(3, "0")) / 1000;
+    return 0;
+  };
+  return raw.map(c => {
+    const parts = c.timing.split("-->");
+    return { start: toSec(parts[0] || ""), end: toSec(parts[1] || ""), text: c.text };
+  }).filter(c => c.start < c.end && c.text.trim().length > 0);
+}
+
+/**
+ * Open an SSE stream to /translate-vtt-stream and deliver cues progressively.
+ * Converts /translate-vtt?… → /translate-vtt-stream?… automatically.
+ * Returns a cleanup() function — call on abort / unmount.
+ */
+function _streamAnimVttTranslation(
+  vttUrl: string,
+  callbacks: {
+    onChunk: (cues: SubCue[], isFirst: boolean) => void;
+    onDone:  (totalCues: number) => void;
+    onError: () => void;
+  },
+  signal?: AbortSignal,
+): () => void {
+  const streamUrl = vttUrl.includes("/translate-vtt-stream")
+    ? vttUrl
+    : vttUrl.replace("/translate-vtt?", "/translate-vtt-stream?");
+
+  const es = new EventSource(streamUrl);
+  let closed = false;
+  let chunkCount = 0;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    es.close();
+  };
+
+  if (signal) {
+    if (signal.aborted) { cleanup(); return cleanup; }
+    signal.addEventListener("abort", cleanup, { once: true });
+  }
+
+  es.onmessage = (e: MessageEvent) => {
+    if (closed || signal?.aborted) { cleanup(); return; }
+    try {
+      const msg = JSON.parse(e.data as string) as {
+        type: string;
+        cues?: Array<{ timing: string; text: string }>;
+        totalCues?: number;
+      };
+      if (msg.type === "chunk" && msg.cues?.length) {
+        const parsed = _parseAnimSseCues(msg.cues);
+        if (parsed.length > 0) {
+          callbacks.onChunk(parsed, chunkCount === 0);
+          chunkCount++;
+        }
+      } else if (msg.type === "done") {
+        callbacks.onDone(msg.totalCues ?? 0);
+        cleanup();
+      } else if (msg.type === "error") {
+        callbacks.onError();
+        cleanup();
+      }
+    } catch { /* ignore malformed chunk */ }
+  };
+
+  es.onerror = () => { if (!closed) { callbacks.onError(); cleanup(); } };
+
+  return cleanup;
+}
+
 /* ── Quality tiers ── */
 type QualityTier = "1080p FHD" | "720p HD" | "360p SD";
 const QUALITY_STYLE: Record<QualityTier, { dot: string; badge: string; border: string; text: string; icon: string }> = {
@@ -609,30 +695,38 @@ export default function AnimationWatch() {
     } catch { return []; }
   }, []);
 
-  // Translate a VTT URL → Arabic via server-side translate-vtt (cached server-side)
-  // Max 120s wait; also respects lifecycle signal (episode change / unmount)
-  const translateVttUrl = useCallback(async (url: string, signal?: AbortSignal): Promise<SubCue[]> => {
-    try {
-      const mergedCtrl = new AbortController();
-      const tid = setTimeout(() => mergedCtrl.abort(), 120_000);
-      signal?.addEventListener("abort", () => mergedCtrl.abort(), { once: true });
-      let d: { cues?: Array<{ timing: string; text: string }> };
-      try {
-        const proxyUrl = `/api/anime/proxy-text?url=${encodeURIComponent(url)}&ref=${SC_REF}`;
-        const r = await fetch(
-          `/api/anime/translate-vtt?url=${encodeURIComponent(proxyUrl)}&from=en&to=ar`,
-          { signal: mergedCtrl.signal }
-        );
-        if (!r.ok) return [];
-        d = await r.json();
-      } finally { clearTimeout(tid); }
-      if (!d.cues?.length) return [];
-      return d.cues.map(c => {
-        const [startStr, endStr] = c.timing.split(" --> ");
-        return { start: parseTiming(startStr ?? ""), end: parseTiming(endStr ?? ""), text: c.text };
-      });
-    } catch { return []; }
+  // يشغّل بث SSE لأي translate-vtt endpoint جاهز ويُجمّع الأكواد تدريجياً
+  const _runVttStream = useCallback((
+    translateUrl: string,
+    signal?: AbortSignal,
+    onProgress?: (cues: SubCue[], isFirst: boolean) => void,
+  ): Promise<SubCue[]> => {
+    return new Promise<SubCue[]>((resolve) => {
+      let allCues: SubCue[] = [];
+      const cleanup = _streamAnimVttTranslation(translateUrl, {
+        onChunk: (incoming, isFirst) => {
+          if (signal?.aborted) { resolve(allCues); return; }
+          allCues = _mergeAnimSubCues(allCues, incoming);
+          onProgress?.(allCues, isFirst);
+        },
+        onDone: () => resolve(allCues),
+        onError: () => resolve(allCues),
+      }, signal);
+      signal?.addEventListener("abort", () => { cleanup(); resolve(allCues); }, { once: true });
+    });
   }, []);
+
+  // Translate a raw VTT URL → Arabic تدريجياً عبر SSE stream — أول دفعة تظهر خلال ~3 ثوانٍ
+  // بدلاً من الانتظار الكامل حتى تنتهي كل الترجمة (كان يستغرق حتى دقيقتين).
+  const translateVttUrl = useCallback(async (
+    url: string,
+    signal?: AbortSignal,
+    onProgress?: (cues: SubCue[], isFirst: boolean) => void,
+  ): Promise<SubCue[]> => {
+    const proxyUrl = `/api/anime/proxy-text?url=${encodeURIComponent(url)}&ref=${SC_REF}`;
+    const translateUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(proxyUrl)}&from=en&to=ar`;
+    return _runVttStream(translateUrl, signal, onProgress);
+  }, [_runVttStream]);
 
   // Load a single track — direct parse or server-side translation; returns true on success
   const loadSubTrack = useCallback(async (track: SubTrack, mode: "direct" | "translate", signal?: AbortSignal): Promise<boolean> => {
@@ -648,35 +742,28 @@ export default function AnimationWatch() {
     }
 
     setSubCues([]);
-    // If the URL is already a translate-vtt JSON endpoint, fetch it directly
+    // If the URL is already a translate-vtt endpoint → استخدم البث التدريجي (SSE) بدلاً من الانتظار الكامل
     if (track.url.startsWith("/api/anime/translate-vtt") || track.url.startsWith("/api/animation/translate-vtt")) {
-      setSubStatus("loading");
-      try {
-        const r = await fetch(track.url, { signal: signal ?? AbortSignal.timeout(120_000) });
-        if (!r.ok || signal?.aborted) { setSubStatus("failed"); return false; }
-        const d = await r.json() as { cues?: Array<{ timing: string; text: string }> };
-        if (!d.cues?.length) { setSubStatus("failed"); return false; }
-        const parseTiming = (ts: string) => {
-          const t = ts.trim();
-          const m3 = t.match(/^(\d+):(\d{2}):(\d{2})[,.](\d{1,3})/);
-          if (m3) return parseInt(m3[1])*3600 + parseInt(m3[2])*60 + parseInt(m3[3]) + parseInt(m3[4].padEnd(3,"0"))/1000;
-          const m2 = t.match(/^(\d+):(\d{2})[,.](\d{1,3})/);
-          if (m2) return parseInt(m2[1])*60 + parseInt(m2[2]) + parseInt(m2[3].padEnd(3,"0"))/1000;
-          return 0;
-        };
-        const cues = d.cues.map(c => {
-          const [s, e] = c.timing.split("-->").map(x => x.trim());
-          return { start: parseTiming(s||""), end: parseTiming(e||""), text: c.text };
-        }).filter(c => c.start < c.end && c.text.trim());
-        if (!cues.length || signal?.aborted) { setSubStatus("failed"); return false; }
+      setSubStatus("translating");
+      const cues = await _runVttStream(track.url, signal, (progressive, isFirst) => {
+        if (isFirst) setSubStatus("translating");
+        setSubCues(progressive);
+      });
+      if (signal?.aborted) return false;
+      if (cues.length > 0) {
         setAnimSubCached(normKey, cues);
         setAnimSubCached(track.url, cues);
         setSubCues(cues); setSubStatus("ready"); return true;
-      } catch { setSubStatus("failed"); return false; }
+      }
+      setSubStatus("failed");
+      return false;
     }
     setSubStatus(mode === "translate" ? "translating" : "loading");
     const cues = mode === "translate"
-      ? await translateVttUrl(track.url, signal)
+      ? await translateVttUrl(track.url, signal, (progressive, isFirst) => {
+          if (isFirst) setSubStatus("translating");
+          setSubCues(progressive);
+        })
       : await fetchVttParsed(track.url, signal);
     if (signal?.aborted) return false;
     if (cues.length > 0) {
