@@ -6,3 +6,4 @@
 - [HLS & Translation optimizations](hls-translation-opts.md) — seg-proxy was 1-1.7s; translate-vtt-stream was 40s; fixed with Nginx cache + Google Translate API + hls.js 1.6.2 config.
 - [Dulo.tv integration](dulo-integration.md) — public API key WDNUNBUB3HR983Y9ISBADK4O82; vidrock+purstream confirmed working for anime TMDB IDs; session cookie cached 7h.
 - [7-repo deep analysis](repo-analysis-2026-07.md) — ani.pm ✅ excellent (37 sub sources per ep); anineko.to ✅ M3U8 verified; Miruro/Videasy/EncDecEndpoints/MovieBox all dead/blocked from VPS; staticine+hls-downloader irrelevant.
+- [Web vs Mobile source sync](web-mobile-source-sync.md) — VPS IP gives more sources than Replit IP; dead sites removed from web SCRAPER_DEFS; mobile ANIME_SITES synced; vidmoly embed bug fixed; mp4upload filtered on mobile.

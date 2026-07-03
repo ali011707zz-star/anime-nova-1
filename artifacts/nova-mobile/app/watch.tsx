@@ -42,9 +42,9 @@ const SITE_TAG: Record<string, string> = {
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC", animephoenix: "PH",
   animewitcher: "AW", kawaii: "KW",
   anikoto: "AK", anikototv: "ATV", animekai: "KI", hianime: "HI",
-  animex: "AX", anineko: "AN", mitanime: "MT",
+  anineko: "AN", mitanime: "MT",
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
-  seepanel: "SP", animetime: "AT",
+  animetime: "AT", animepahe: "AP", dulo_anim: "DL",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -79,13 +79,15 @@ function isDirectPlayable(s: Src): boolean {
   const url = (s.directUrl || s.url || "").toLowerCase();
   if (!url) return false;
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return false;
+  // mp4upload: HEVC codec — يُشغَّل بدون صوت/صورة على أغلب الأجهزة
+  if (url.includes("mp4upload")) return false;
   return true;
 }
 function isEmbedSrc(s: Src): boolean {
   if (!s.isEmbed) return false;
   const url = (s.directUrl || s.url || "").toLowerCase();
-  if (url.includes("vidmoly")) return false;
-  return url.includes("mega.nz") || url.includes("mega.co.nz");
+  // vidmoly و mega → عرض داخل WebView
+  return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 function getPlayUrl(s: Src): string {
   return s.directUrl || s.url || "";
@@ -112,6 +114,7 @@ const ANIME_SITES = [
   // مصادر سريعة (ياباني مترجم / إنجليزي)
   "anineko", "anikoto", "hianime", "videasy_anim", "vidlink_anim",
   "animewitcher", "mitanime", "vidfast", "anikototv", "animekai",
+  "animepahe", "dulo_anim",
   // مصادر عربية (تحتاج extraction)
   "shahiid", "animelek", "animedar", "okanime", "ristoanime",
   "animeify", "animeday", "arabseed", "anime4up2",
