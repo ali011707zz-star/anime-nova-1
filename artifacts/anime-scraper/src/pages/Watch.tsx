@@ -148,13 +148,11 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
   { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY", isArabic: true },
-  { site: "seepanel",     name: "سي بانيل",     desc: "عربي مدبلج · HLS نظيف",   tag: "SP", isArabic: true },
   { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS", isArabic: true },
   { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U", isArabic: true },
   { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC", isArabic: true },
   { site: "topcinemaa",   name: "توب سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "TC", isArabic: true },
   { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH", isArabic: true },
-  { site: "witanime_db",  name: "ويتانيم DB",   desc: "عربي مدبلج · HLS مباشر",   tag: "WIT", isArabic: true },
   { site: "faselhd_db",  name: "فاصل HD",      desc: "عربي مترجم · GitHub DB",   tag: "FH",  isArabic: true },
   { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم · HLS",         tag: "AT", isArabic: true },
   // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
@@ -163,21 +161,16 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "anikototv",    name: "AniKototv",     desc: "ياباني مترجم · skip مدمج", tag: "ATV" },
   { site: "animekai",     name: "AnimeKai",      desc: "ياباني مترجم · DB مباشر",  tag: "KI" },
   { site: "hianime",      name: "HiAnime",       desc: "ياباني مترجم · HLS نظيف", tag: "HI" },
-  { site: "animex",       name: "AnimEx",        desc: "ياباني مترجم · REST API",  tag: "AX" },
   { site: "animepahe",    name: "AnimePahe",      desc: "ياباني مترجم · HLS نظيف", tag: "AP" },
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
   { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
-  { site: "reanime",      name: "Reanime",        desc: "ياباني مترجم · FlixCloud", tag: "RE" },
-  // ── TMDB-native · صوت ياباني ─────────────────────────────────────────────
-  { site: "starcima_anim", name: "StarCima",      desc: "TMDB · HLS · صوت ياباني",  tag: "SC" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
   { site: "videasy_anim",  name: "Videasy",       desc: "TMDB · HLS · ترجمة عربية", tag: "VE", audioLang: "en" },
   { site: "vidlink_anim",  name: "VidLink",       desc: "TMDB · HLS · ترجمة عربية", tag: "VL", audioLang: "en" },
-  { site: "lordflix_anim", name: "LordFlix",      desc: "TMDB · HLS · ترجمة عربية", tag: "LF", audioLang: "en" },
-  // vyla_anim: DEAD (missourimonster-vyla.hf.space returns 404 — 2026-06)
   { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
+  { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/عربي · HLS مباشر",  tag: "DL" },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -190,8 +183,8 @@ const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.sit
  * بواسطة تأثير subtitleUrl الحالي — لا تحتاج لإدراجها هنا.
  */
 const PROVIDER_WANTS_SMART_SUB = new Set([
-  "hianime", "animepahe", "anineko", "mitanime", "reanime",
-  "starcima_anim", "anikototv", "animekai",
+  "hianime", "animepahe", "anineko", "mitanime",
+  "anikototv", "animekai", "dulo_anim",
 ]);
 
 type SlotStatus = "idle" | "fetching" | "ready" | "failed";
