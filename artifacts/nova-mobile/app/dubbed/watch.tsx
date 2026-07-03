@@ -41,7 +41,6 @@ export default function DubbedWatchScreen() {
         url: fullUrl,
         label: title || "مدبلج عربي",
         quality: "720p HD",
-        type: d.type || "mp4",
       }]);
       setLoading(false);
     } catch {
