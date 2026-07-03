@@ -7883,6 +7883,57 @@ async function getDuloAnimeSources(title: string, english: string | null, ep: nu
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  CineSrc (cinesrc.st, TMDB-native, 15 providers, multi-quality HLS)
+//  يعمل كـ microservice على VPS (CINESRC_BASE=http://localhost:13004)
+// ════════════════════════════════════════════════════════════════════
+async function getCineSrcAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
+  const CINESRC_BASE = process.env.CINESRC_BASE;
+  if (!CINESRC_BASE) return [];
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+  const CS_ORIGIN = "https://cinesrc.st";
+
+  try {
+    const catRes = await fetch(
+      `${CINESRC_BASE}/api/catalog?id=${tmdbId}&type=tv&season=1&episode=${ep}`,
+      { signal: AbortSignal.timeout(10_000) },
+    );
+    if (!catRes.ok) return [];
+    const catalog: any = await catRes.json();
+    const providers: Array<{ id: string; name: string }> = Array.isArray(catalog.providers) ? catalog.providers : [];
+    if (!providers.length) return [];
+
+    const sources: UnifiedSource[] = [];
+    const seenCS = new Set<string>();
+    await Promise.allSettled(
+      providers.slice(0, 8).map(async (p) => {
+        try {
+          const r = await fetch(
+            `${CINESRC_BASE}/api/stream/provider?id=${tmdbId}&type=tv&season=1&episode=${ep}&provider=${p.id}`,
+            { signal: AbortSignal.timeout(30_000) },
+          );
+          if (!r.ok) return;
+          const data: any = await r.json();
+          if (!data.ok || !data.url || seenCS.has(data.url)) return;
+          seenCS.add(data.url);
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(data.url)}&ref=${encodeURIComponent(CS_ORIGIN + "/")}`;
+          sources.push({
+            name: `CineSrc · ${p.name}`,
+            url: proxied,
+            quality: "HD",
+            qualityRank: 12,
+            site: "cinesrc_anim",
+            directUrl: proxied,
+            directType: "hls",
+          });
+        } catch { /* silent */ }
+      }),
+    );
+    return sources;
+  } catch { return []; }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  WITANIME-DB — Arabic dubbed content via GitHub releases ZIP
 //  Repo: github.com/mhmod3/WITanime-DB (daily updates, 2185+ anime)
 //  Hosts: hlswish (streamwish), luluvdo, darkibox → all extractable
@@ -8519,6 +8570,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
       scrapeCached("vidfast",       () => getVidFastAnimeSources(title, english, ep, anilistId),  false, 22000),
       scrapeCached("dulo_anim",    () => getDuloAnimeSources(title, english, ep, anilistId),      false, 18000),
+      scrapeCached("cinesrc_anim", () => getCineSrcAnimeSources(title, english, ep, anilistId),   false, 35000),
       // ── WITanime-DB — محتوى عربي مدبلج (hlswish/luluvdo/darkibox) ─────
       // scrapeCached("witanime_db",  () => getWitanimeDBSources(title, english, ep, anilistId), false, 25000), // مخفي مؤقتاً
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
@@ -8649,6 +8701,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       case "dulo_anim":    (await race(getDuloAnimeSources(title, english, ep, anilistId),     18_000, [])).forEach(collectSrc); break;
+      case "cinesrc_anim": (await race(getCineSrcAnimeSources(title, english, ep, anilistId), 35_000, [])).forEach(collectSrc); break;
       // witanime_db: removed
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       case "animetime":    (await race(getAnimeTimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
