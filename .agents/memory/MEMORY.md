@@ -7,3 +7,4 @@
 - [Dulo.tv integration](dulo-integration.md) — public API key WDNUNBUB3HR983Y9ISBADK4O82; vidrock+purstream confirmed working for anime TMDB IDs; session cookie cached 7h.
 - [7-repo deep analysis](repo-analysis-2026-07.md) — ani.pm ✅ excellent (37 sub sources per ep); anineko.to ✅ M3U8 verified; Miruro/Videasy/EncDecEndpoints/MovieBox all dead/blocked from VPS; staticine+hls-downloader irrelevant.
 - [Web vs Mobile source sync](web-mobile-source-sync.md) — VPS IP gives more sources than Replit IP; dead sites removed from web SCRAPER_DEFS; mobile ANIME_SITES synced; vidmoly embed bug fixed; mp4upload filtered on mobile.
+- [Anime Rift MITM capture attempt](anime-rift-mitm.md) — Android system-CA-trust wall blocks non-rooted MITM; failed-handshake domains still revealed it uses the same vidsrc/embed.su/TMDB ecosystem already in Anime NOVA.
