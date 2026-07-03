@@ -2797,13 +2797,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const streamUrl = data.stream_url;
               if (seenUrls.has(streamUrl)) return;
               const ezRef = `https://www.${prov}.pro/`;
-              // vidrock: EzVidAPI proxy URL already handles CORS/auth internally — send raw to browser
-              // Others: wrap with hls-proxy so server rewrites segments via seg-proxy
+              // Wrap HLS streams through hls-proxy for segment rewriting; MP4 through video-proxy
               const proxiedStream = streamUrl.includes(".m3u8") ? wrapHls(streamUrl, ezRef) : wrapMp4(streamUrl, ezRef);
-              // Probe — probeHlsProxy returns true immediately for external (non-/api/) URLs
-              const ezProbeOk = await probeHlsProxy(proxiedStream);
-              if (!ezProbeOk) return;
-              const subtitleUrl: string | undefined = undefined;
+              // Skip probe — EzVidAPI URLs are valid, probe adds latency and may falsely fail
               seenUrls.add(streamUrl);
               sourceCount++;
               send("source", {
@@ -2811,7 +2807,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 label: `EzVidAPI · ${prov}`,
                 directUrl: streamUrl,
                 proxyUrl: proxiedStream,
-                ...(subtitleUrl ? { subtitleUrl } : {}),
               });
             } catch { /* silent per provider */ }
           }));
@@ -3456,6 +3451,68 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             if (!probeOk) continue;
             sendSource(proxied, `Hexa · ${src.server}`, proxied, proxied);
           }
+        } catch { /* silent */ }
+      }),
+
+      // ── vidsrc.cc — TMDB-native free API, accessible from datacenter IPs ─────
+      scrapeAnimCached("vidsrc_cc", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "VidSrc: جاري الاستخراج…" });
+          const apiUrl = type === "tv"
+            ? `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${epNum}`
+            : `https://vidsrc.cc/v2/embed/movie/${tmdbId}`;
+          const r = await fetch(apiUrl, {
+            headers: { "User-Agent": UA, "Referer": "https://vidsrc.cc/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!r.ok) return;
+          const html = await r.text();
+          // Extract data-id for API call
+          const dataId = html.match(/data-id=["']([^"']+)["']/)?.[1]
+                      || html.match(/\/e\/([a-zA-Z0-9]+)/)?.[1];
+          if (!dataId) return;
+          // Fetch sources JSON
+          const srcUrl = `https://vidsrc.cc/v2/sources?id=${dataId}`;
+          const sr = await fetch(srcUrl, {
+            headers: { "User-Agent": UA, "Referer": apiUrl },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!sr.ok) return;
+          const data = await sr.json() as { sources?: Array<{ url?: string; label?: string }> };
+          for (const src of (data.sources || [])) {
+            if (!src?.url) continue;
+            const isHls = src.url.includes(".m3u8");
+            const proxied = isHls
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://vidsrc.cc/")}`
+              : src.url;
+            sendSource(proxied, `VidSrc · ${src.label || "HD"}`, src.url, proxied);
+          }
+        } catch { /* silent */ }
+      }),
+
+      // ── superembed.stream — TMDB-native iframe with JSON API ─────────────────
+      scrapeAnimCached("superembed", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "SuperEmbed: جاري الاستخراج…" });
+          const apiUrl = type === "tv"
+            ? `https://superembed.stream/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+            : `https://superembed.stream/embed/movie?tmdb=${tmdbId}`;
+          const r = await fetch(apiUrl, {
+            headers: { "User-Agent": UA, "Referer": "https://superembed.stream/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!r.ok) return;
+          const html = await r.text();
+          // Extract HLS URL from JS
+          const hlsMatch = html.match(/source\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/i)
+                        || html.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)/i)
+                        || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)/);
+          if (!hlsMatch?.[1]) return;
+          const hlsUrl = hlsMatch[1];
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://superembed.stream/")}`;
+          sendSource(proxied, "SuperEmbed · HLS", hlsUrl, proxied);
         } catch { /* silent */ }
       }),
 
