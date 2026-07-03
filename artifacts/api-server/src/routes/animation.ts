@@ -212,7 +212,7 @@ async function cfProxyGet(url: string): Promise<string> {
   return r.text();
 }
 
-// CF fallback — يجرب cfProxyGet أولاً، ثم يرجع خطأ إذا حجبه CF
+// CF + Orkestr fallback — يجرب cfProxyGet أولاً، إذا حجبه CF يجرب خادم Orkestr الخارجي (EU IP)
 async function cfOrOrkestGet(url: string): Promise<string> {
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
@@ -220,38 +220,65 @@ async function cfOrOrkestGet(url: string): Promise<string> {
     const html = await cfProxyGet(url);
     if (!isCfPage(html)) return html;
   } catch { /* fall through */ }
-  throw new Error("CF proxy: could not bypass Cloudflare protection");
+  // Fallback: Orkestr relay (EU IP, not Replit datacenter)
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
+  const r = await fetch(
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
+    { headers: orkHeaders, signal: AbortSignal.timeout(25_000) }
+  );
+  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
+  const html = await r.text();
+  if (isCfPage(html)) throw new Error("CF still blocked via Orkestr");
+  return html;
 }
 
-// Direct GET عبر CF proxy المحلي — يتجاوز حجب IP من الـ VPS
+// Orkestr direct GET — يتجاوز CF proxy تماماً (مفيد للمواقع التي تحجب Replit IPs وcf_proxy معاً)
 async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string> {
-  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
   const r = await fetch(
-    `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
-    { signal: AbortSignal.timeout(timeoutMs) }
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
+    { headers: orkHeaders, signal: AbortSignal.timeout(timeoutMs) }
   );
-  if (!r.ok) throw new Error(`CF proxy HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
   const html = await r.text();
   if (html.length < 500 || html.includes("Just a moment") || html.includes("Attention Required")) {
-    throw new Error("CF proxy: still blocked");
+    throw new Error("Orkestr: CF blocked");
   }
   return html;
 }
 
-// CF proxy POST — يرسل POST عبر curl_cffi
+// CF proxy POST — يرسل POST عبر curl_cffi مع Orkestr fallback
 async function cfOrOrkestPost(url: string): Promise<string> {
   const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
-  const r = await fetch(
-    `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
-    { signal: AbortSignal.timeout(18_000) }
+  try {
+    const r = await fetch(
+      `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
+      { signal: AbortSignal.timeout(18_000) }
+    );
+    if (r.ok) {
+      const html = await r.text();
+      if (!isCfPage(html)) return html;
+    }
+  } catch { /* fall through */ }
+  // Fallback: Orkestr POST relay
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders2: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders2["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
+  const r2 = await fetch(
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}&method=POST`,
+    { headers: orkHeaders2, signal: AbortSignal.timeout(25_000) }
   );
-  if (r.ok) {
-    const html = await r.text();
-    if (!isCfPage(html)) return html;
-  }
-  throw new Error("CF proxy POST: failed");
+  if (!r2.ok) throw new Error(`Orkestr POST HTTP ${r2.status}`);
+  return r2.text();
 }
 
 async function asFetchPosts(params: string): Promise<Array<{ id: number; link: string; title: { rendered: string } }>> {
@@ -1267,8 +1294,48 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
     } catch { /* silent — GitHub rate limit or network */ }
   }
 
+
+  // ── CinePro subtitles — مصدر ترجمات خارجي (VTT/SRT) ─────────────────────
+  const cineproItems: Track[] = [];
+  try {
+    const cpUrl = type === "tv"
+      ? `http://localhost:3000/v1/tv/${tmdbId}/seasons/${season}/episodes/${ep}`
+      : `http://localhost:3000/v1/movies/${tmdbId}`;
+    const cpR = await fetch(cpUrl, {
+      headers: { "User-Agent": "AnimeNOVA/1.0" },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (cpR.ok) {
+      const cpData = await cpR.json() as { subtitles?: any[] };
+      const WANTED_LANGS: Record<string, string> = {
+        "arabic": "ar", "arabic 2": "ar", "arabic2": "ar",
+        "english": "en", "english 2": "en",
+      };
+      (cpData.subtitles || []).forEach((s: any, i: number) => {
+        const lbl: string = (s.label || s.language || "").toLowerCase();
+        const lang = WANTED_LANGS[lbl];
+        if (!lang) return;
+        let url: string = s.url || "";
+        // فك تشفير proxy URL لاستخراج الرابط الحقيقي
+        if (url.includes("/v1/proxy?data=")) {
+          try {
+            const enc = url.split("data=")[1]?.split("&")[0] || "";
+            const inner = JSON.parse(decodeURIComponent(enc)) as { url?: string };
+            url = inner.url || url;
+          } catch { /* keep */ }
+        }
+        if (!url.startsWith("http")) return;
+        const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "vtt";
+        const labelAr = lang === "ar"
+          ? (lbl.includes("2") ? "عربي · CinePro 2" : "عربي · CinePro")
+          : (lbl.includes("2") ? "إنجليزي · CinePro 2" : "إنجليزي · CinePro");
+        cineproItems.push({ id: `cinepro-${lang}-${i}`, lang, label: labelAr, url });
+      });
+    }
+  } catch (e: any) { console.warn(`[CinePro-subs] error tmdbId=${tmdbId} type=${type}:`, e?.message); }
+
   // ── Merge, sort Arabic-first, deduplicate by URL ──
-  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems, ...kitsunekkoItems];
+  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems, ...kitsunekkoItems, ...cineproItems];
   all.sort((a, b) => (a.lang === "ar" && b.lang !== "ar" ? -1 : a.lang !== "ar" && b.lang === "ar" ? 1 : 0));
   const seen = new Set<string>();
   const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
@@ -3282,6 +3349,45 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // CDN: nxt.cfw69.workers.dev — CORS * — يعمل من Replit مباشرة
       // cooldown: enc-dec.app/api/enc-hexa يعيد 500 مع "Next retry: N minutes"
       //           → نتجنب الـ hammering بحفظ _hexaFailUntil
+
+      // ── CinePro — مجمّع مصادر إنجليزي (14 مزود: VidSrc, VidApi, Icefy, FshareTV, VixSrc...) ──
+      // يعمل محلياً على المنفذ 3000 (OMSS-compliant API)
+      scrapeAnimCached("cinepro", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "CinePro: جاري جلب المصادر…" });
+          const cpUrl = type === "movie"
+            ? `http://localhost:3000/v1/movies/${tmdbId}`
+            : `http://localhost:3000/v1/tv/${tmdbId}/seasons/${season}/episodes/${epNum}`;
+          const r = await fetch(cpUrl, {
+            headers: { "User-Agent": "AnimeNOVA/1.0", "Accept": "application/json" },
+            signal: AbortSignal.timeout(28_000),
+          });
+          if (!r.ok) { console.warn(`[CinePro] HTTP ${r.status} for tmdbId=${tmdbId}`); return; }
+          const data = await r.json() as { sources?: any[]; subtitles?: any[] };
+          for (const src of (data.sources || [])) {
+            const provName = typeof src.provider === "object"
+              ? (src.provider?.name || "CinePro")
+              : (src.provider || "CinePro");
+            const quality = src.quality || "HD";
+            let realUrl: string = src.url || "";
+            // فك تشفير proxy URL الداخلي للحصول على الرابط الحقيقي
+            if (realUrl.includes("/v1/proxy?data=")) {
+              try {
+                const encoded = realUrl.split("data=")[1]?.split("&")[0] || "";
+                const inner = JSON.parse(decodeURIComponent(encoded)) as { url?: string };
+                realUrl = inner.url || realUrl;
+              } catch { /* keep proxied URL */ }
+            }
+            if (!realUrl.startsWith("http")) continue;
+            const proxied = realUrl.includes(".m3u8") || realUrl.includes("manifest")
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`
+              : `/api/anime/video-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`;
+            sendSource(realUrl, `CinePro · ${provName} · ${quality}`, realUrl, proxied);
+          }
+        } catch (e: any) { console.warn(`[CinePro] sources error tmdbId=${tmdbId} type=${type}:`, e?.message); }
+      }),
+
       scrapeAnimCached("hexa", async () => {
         if (!tmdbId) return;
         if (Date.now() < _hexaFailUntil) return; // cooldown active — enc-dec.app مشغول

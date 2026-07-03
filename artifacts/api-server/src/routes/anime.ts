@@ -315,26 +315,52 @@ async function denoProxyGet(
 
 // ════════════════════════════════════════════════════════════════════
 //  Orkestr external relay — يجلب المواقع المحجوبة من Replit
+//  يستخدم anime-nova.orkestr.run (IP أوروبي) كـ relay عبر proxy-text
 // ════════════════════════════════════════════════════════════════════
-//  orkestGet — جلب HTML عبر CF proxy المحلي (localhost:8000/fetch)
-//  يتجاوز Cloudflare للمواقع التي تحجب IPs — يعمل مباشرة من VPS
-// ════════════════════════════════════════════════════════════════════
+const ORKESTR_BASE = "https://anime-nova.orkestr.run";
+let _orkestAlive: boolean | null = null;
+let _orkestCheckedAt = 0;
+const ORKESTR_HEALTH_TTL = 90_000; // 90ث
+
 async function orkestGet(
   url: string,
   referer?: string,
   timeoutMs = 25000,
 ): Promise<string | null> {
-  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkestHeaders: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkestHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
+
+  // Health check مُؤقَّت
+  const now = Date.now();
+  if (_orkestAlive === null || now - _orkestCheckedAt > ORKESTR_HEALTH_TTL) {
+    try {
+      const h = await fetch(
+        `${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`,
+        { headers: orkestHeaders, signal: AbortSignal.timeout(12_000) },
+      );
+      _orkestAlive = h.ok || h.status === 301 || h.status === 302;
+    } catch { _orkestAlive = false; }
+    _orkestCheckedAt = Date.now();
+  }
+  if (!_orkestAlive) return null;
+
   try {
-    const ep = new URL(`http://localhost:${CF_PORT}/fetch`);
+    const ep = new URL(`${ORKESTR_BASE}/api/anime/proxy-text`);
     ep.searchParams.set("url", url);
     if (referer) ep.searchParams.set("ref", referer);
-    const r = await fetch(ep.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+    const r = await fetch(ep.toString(), { headers: orkestHeaders, signal: AbortSignal.timeout(timeoutMs) });
     if (!r.ok) return null;
     const text = await r.text();
     return text.length > 50 ? text : null;
   } catch { return null; }
 }
+
+// Wake-up ping عند إقلاع السيرفر (غير مُعيق — يستيقظ الخادم الخارجي مسبقاً)
+fetch(`${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`, {
+  signal: AbortSignal.timeout(15_000),
+}).then(r => { _orkestAlive = r.ok || r.status === 301 || r.status === 302; _orkestCheckedAt = Date.now(); })
+  .catch(() => { _orkestAlive = false; _orkestCheckedAt = Date.now(); });
 
 // ════════════════════════════════════════════════════════════════════
 //  scraperApiGet — جلب HTML عبر ScraperAPI (residential proxy pool)
@@ -3016,12 +3042,18 @@ async function searchAnimeTimeArcs(title: string, english: string | null): Promi
       for (const m of html.matchAll(/href="(https:\/\/anime-time\.live\/anime\/[^"]+)"/g)) {
         const u = m[1];
         if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
-        const slug = decodeURIComponent(u.replace(ATIME_BASE + "/anime/", "").replace(/\/$/, ""));
+        const rawSlug = decodeURIComponent(u.replace(ATIME_BASE + "/anime/", "").replace(/\/$/, ""));
+        // Strip Arabic prefix (e.g. "أنمي-") and Arabic suffix terms before scoring
+        const slug = rawSlug
+          .replace(/^[\u0600-\u06FF\s-]+/, "")
+          .replace(/[-\u0600-\u06FF\s]+مترجم.*$/u, "")
+          .replace(/[-_]+/g, " ").trim();
         const score = Math.max(
           similarity(slug, title), english ? similarity(slug, english) : 0,
           asciiSimilarity(slug, title), english ? asciiSimilarity(slug, english) : 0,
+          asciiSimilarity(rawSlug, title), english ? asciiSimilarity(rawSlug, english) : 0,
         );
-        if (score > 0.12 && !allArcs.includes(u)) allArcs.push(u);
+        if (score > 0.10 && !allArcs.includes(u)) allArcs.push(u);
       }
 
       if (seriesUrls.length > 0 || allArcs.length > 0) break;
@@ -3377,8 +3409,8 @@ async function getRistoAnimeSources(
 //  Old-format URL (works for ALL episodes): /episode/{romaji-slug}-الحلقة-{N}/
 // ════════════════════════════════════════════════════════════════════
 
-const A4UP_BASE = "https://anime4up.cam";
-const A4UP_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime4up.cam/" };
+const A4UP_BASE = "https://anime4up.pro";
+const A4UP_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime4up.pro/" };
 
 const a4upSeriesCache = new Map<string, { url: string | null; ts: number }>();
 const a4upSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
@@ -3393,12 +3425,12 @@ async function a4upFetchHtml(url: string): Promise<{ ok: boolean; html: string }
 
   // ── المسار 1: Orkestr EU relay (يتجاوز CF) ──────────────────────────────
   try {
-    let html = await orkestGet(url, "https://anime4up.cam/", 15000) ?? "";
+    let html = await orkestGet(url, `${A4UP2_BASE}/`, 15000) ?? "";
     if (html && !isCloudflareBlock(html)) {
       // تحقق من JWT redirect وتابعه عبر Orkestr
       const redir = html.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/)?.[1];
       if (redir && isJwtRedir(html)) {
-        const html2 = await orkestGet(redir, "https://anime4up.cam/", 12000) ?? "";
+        const html2 = await orkestGet(redir, `${A4UP2_BASE}/`, 12000) ?? "";
         if (html2 && !isCloudflareBlock(html2) && !isJwtRedir(html2) && html2.length > 300)
           return { ok: true, html: html2 };
       } else if (html.length > 300 && !isJwtRedir(html)) {
@@ -3486,7 +3518,9 @@ async function getAnime4upSources(
     for (const m of html.matchAll(/(?:src|data-src)=["']([^"']{10,})["']/gi)) {
       const raw = m[1].trim();
       if (!raw.startsWith("https://")) continue;
-      if (raw.includes("anime4up.cam") || raw.includes("w1.anime4up.rest")) continue;
+      // Skip anime4up links that appear in wrong context (check by both old+new domains)
+      const a4upHosts = ["anime4up.cam","w1.anime4up.rest","anime4up.pro","ww5.anime4up.pro"];
+      if (a4upHosts.some(h => raw.includes(h))) continue;
       if (/google-analytics|googleapis|gstatic|facebook|twitter|cloudflare|jquery|bootstrap/i.test(raw)) continue;
       if (!seen.has(raw)) { seen.add(raw); iframeUrls.push(raw); }
     }
@@ -3587,13 +3621,13 @@ async function getAnime4upSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  Anime4up (anime4up.cam / w1.anime4up.rest) — Arabic dubbed/subbed scraper
+//  Anime4up (anime4up.pro) — Arabic dubbed/subbed scraper
 //  Confirmed working via CF proxy (200). 13 servers per episode.
 //  Episode structure: <li data-watch="URL"><a>Name</a></li>
 //  Series page: shows latest 48 eps. Search: /?search_param=animes&s=
 // ════════════════════════════════════════════════════════════════════
 
-const A4UP2_BASE = "https://anime4up.cam";
+const A4UP2_BASE = "https://anime4up.pro";
 const a4up2SeriesCache = new Map<string, { url: string | null; ts: number }>();
 const a4up2SrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
@@ -3708,7 +3742,7 @@ async function getAnime4up2Sources(
   // Each request has a 7s timeout (previously 20s), so parallel runs cost at most 7s.
   const fastCandidates: string[] = [];
   const seenSlugs = new Set<string>();
-  const A4UP2_ALT = "https://w1.anime4up.rest";           // نطاق بديل — نفس المحتوى
+  const A4UP2_ALT = "https://ww5.anime4up.pro";           // نطاق بديل
   for (const q of [english, title].filter(Boolean) as string[]) {
     const slug = toSlug(q as string);
     if (!slug || seenSlugs.has(slug)) continue;
@@ -7546,21 +7580,7 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
     let vlData: any;
     try { vlData = JSON.parse(vlText); } catch { return []; }
     const hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
-
-    /* ── fallback: stream.type==="file" مع stream.qualities بـ MP4 ──
-       vidlink أحياناً يعيد مقاطع MP4 مباشرة بدل playlist HLS */
-    if (!hlsUrl) {
-      const quals: Record<string, { type?: string; url?: string }> = vlData?.stream?.qualities || {};
-      const mp4Entries = Object.entries(quals)
-        .filter(([, v]) => v.url && (v.type === "mp4" || (v.url || "").includes(".mp4")))
-        .sort(([a], [b]) => parseInt(b) - parseInt(a)); // أعلى دقة أولاً
-      if (!mp4Entries.length) { console.error("[vidlink_anim] no playlist or qualities in response", JSON.stringify(vlData).slice(0, 200)); return []; }
-      const [resLabel, best] = mp4Entries[0];
-      const mp4Url = best.url!;
-      const proxied = `/api/anime/video-proxy?url=${encryptParam(mp4Url)}&ref=${encryptParam("https://vidlink.pro/")}`;
-      const kawaiiSub  = await getKawaiiSubForSource(anilistId, ep);
-      return [{ name: `VidLink · MP4 · ${resLabel}p`, url: proxied, quality: resLabel === "1080" ? "1080p" : resLabel === "720" ? "720p" : "HD", qualityRank: 16, site: "vidlink_anim", directUrl: proxied, directType: "mp4" as const, ...(kawaiiSub ? { subtitleUrl: kawaiiSub } : {}) }];
-    }
+    if (!hlsUrl) return [];
     const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
     const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
@@ -8161,6 +8181,30 @@ async function getFaselhdDbSources(
       if (r.status === "fulfilled" && r.value) out.push(r.value);
     }
 
+    // Fallback: إذا لم ينجح أي extraction، أضف player token URL + download link مباشرة
+    if (out.length === 0) {
+      // Player token iframes — embed في المتصفح
+      for (const pUrl of playerTokens.slice(0, 2)) {
+        out.push({
+          name: `FaselHD · ${isMovie ? "فيلم" : `ح${ep}`} · Player`,
+          url: pUrl,
+          quality: "HD",
+          qualityRank: 8,
+          site: "faselhd_db",
+        });
+      }
+      // Download links — T7meel
+      for (const dlUrl of dlLinks.slice(0, 1)) {
+        out.push({
+          name: `FaselHD · ${isMovie ? "فيلم" : `ح${ep}`} · تحميل`,
+          url: dlUrl,
+          quality: "HD",
+          qualityRank: 6,
+          site: "faselhd_db",
+        });
+      }
+    }
+
   } catch (e: any) {
     console.warn("[FaselhdDB]", e?.message);
   }
@@ -8397,10 +8441,10 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
       scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
       scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep),           true, 20000),
-      scrapeCached("witanime",     () => getWitanimeSources(title, english, ep),           true, 20000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
-      // anime3rb:     CF WAF IP block — 403 حتى مع curl_cffi (2026-07)
+      // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
+      // anime3rb:     CF IP block حقيقي، curl_cffi لا تنفع
       // animetime CDN (vidhls.com) يعمل لبعض الأنمي (200) — مُعاد تفعيله 2026-07-01
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
