@@ -23,7 +23,6 @@ import {
 } from "@/utils/anilist";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import CommentsSheet from "@/components/CommentsSheet";
 
 const TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8";
 
@@ -45,7 +44,6 @@ export default function HomeScreen() {
   const router = useRouter();
   const { watchHistory } = useApp();
   const [showDrawer, setShowDrawer] = useState(false);
-  const [newsComment, setNewsComment] = useState<{ animeId: number; ep: number; title: string } | null>(null);
 
   const topPad = Platform.OS === "web" ? 0 : insets.top;
   const { season, year } = getCurrentSeason();
@@ -129,16 +127,6 @@ export default function HomeScreen() {
       .catch(() => {});
   }, []);
 
-  /* ── حلقات مؤكدة من AnimeWitcher — قسم الأخبار ── */
-  const [recentAiring, setRecentAiring] = useState<any[]>([]);
-  useEffect(() => {
-    fetch(`${BASE_URL}/api/anime/new-episodes`)
-      .then(r => r.json())
-      .then((data: any[]) => {
-        if (Array.isArray(data)) setRecentAiring(data.slice(0, 10));
-      })
-      .catch(() => {});
-  }, []);
 
   const trendingList = trending?.Page?.media || [];
   const popularList = popular?.Page?.media || [];
@@ -389,102 +377,12 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {/* ── أخبار الأنمي Section ── */}
-              {recentAiring.length > 0 && (
-                <View style={{ marginBottom: 24, paddingHorizontal: 16 }}>
-                  <View style={[styles.sectionHeader, { paddingHorizontal: 0 }]}>
-                    <View style={styles.sectionLeft}>
-                      <View style={[styles.sectionDot, { backgroundColor: "#f59e0b" }]} />
-                      <Text style={[styles.sectionTitle, { color: colors.text }]}>📰 آخر أخبار الأنمي</Text>
-                    </View>
-                    <Pressable style={styles.seeAllBtn} onPress={() => router.push("/(tabs)/news" as any)}>
-                      <Text style={[styles.seeAllText, { color: colors.primary }]}>المزيد</Text>
-                      <Ionicons name="chevron-back" size={13} color={colors.primary} />
-                    </Pressable>
-                  </View>
-                  <View style={{ gap: 10 }}>
-                    {recentAiring.slice(0, 6).map((ep: any, idx: number) => {
-                      const diffSec = Date.now() / 1000 - ep.airingAt;
-                      const timeLabel = diffSec < 3600
-                        ? `منذ ${Math.floor(diffSec / 60)} دقيقة`
-                        : diffSec < 86400
-                          ? `منذ ${Math.floor(diffSec / 3600)} ساعة`
-                          : `منذ ${Math.floor(diffSec / 86400)} يوم`;
-                      const views = ep.popularity
-                        ? ep.popularity > 1000 ? `${(ep.popularity / 1000).toFixed(1)}K` : String(ep.popularity)
-                        : "0";
-                      const newsTitle = `تم بث الحلقة ${ep.episode} من أنمي "${ep.title}"`;
-                      return (
-                        <Pressable
-                          key={ep.anilistId + "-" + idx}
-                          onPress={() => router.push(`/anime/${ep.anilistId}` as any)}
-                          style={[newsCardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-                        >
-                          {/* Text content on the left */}
-                          <View style={newsCardStyles.content}>
-                            <View style={newsCardStyles.tagsRow}>
-                              <View style={newsCardStyles.badge}>
-                                <Text style={newsCardStyles.badgeText}>
-                                  {ep.format === "TV" ? "مسلسل" : ep.format === "MOVIE" ? "فيلم" : "أنمي"}
-                                </Text>
-                              </View>
-                              {ep.averageScore ? (
-                                <Text style={newsCardStyles.score}>⭐ {(ep.averageScore / 10).toFixed(1)}</Text>
-                              ) : null}
-                              <View style={[newsCardStyles.badge, { backgroundColor: "rgba(34,197,94,0.15)", borderColor: "rgba(34,197,94,0.3)" }]}>
-                                <Text style={[newsCardStyles.badgeText, { color: "#4ade80" }]}>✓ AW</Text>
-                              </View>
-                            </View>
-                            <Text style={[newsCardStyles.title, { color: colors.text }]} numberOfLines={3}>{newsTitle}</Text>
-                            <View style={newsCardStyles.metaRow}>
-                              <View style={newsCardStyles.metaItem}>
-                                <Ionicons name="eye-outline" size={11} color="rgba(255,255,255,0.4)" />
-                                <Text style={newsCardStyles.metaText}>{views} مشاهدة</Text>
-                              </View>
-                              <Text style={newsCardStyles.metaDot}>·</Text>
-                              <Pressable
-                                onPress={(e) => { e.stopPropagation(); setNewsComment({ animeId: ep.anilistId, ep: ep.episode, title: ep.title }); }}
-                                style={newsCardStyles.metaItem}
-                              >
-                                <Ionicons name="chatbubble-outline" size={11} color="#a78bfa" />
-                                <Text style={[newsCardStyles.metaText, { color: "#a78bfa" }]}>تعليق</Text>
-                              </Pressable>
-                              <Text style={newsCardStyles.metaDot}>·</Text>
-                              <View style={newsCardStyles.metaItem}>
-                                <Ionicons name="time-outline" size={11} color="rgba(255,255,255,0.4)" />
-                                <Text style={newsCardStyles.metaText}>{timeLabel}</Text>
-                              </View>
-                            </View>
-                          </View>
-                          {/* Thumbnail on the right */}
-                          <View style={newsCardStyles.thumbWrap}>
-                            <Image
-                              source={{ uri: ep.poster || ep.anilistPoster }}
-                              style={newsCardStyles.thumb}
-                              resizeMode="cover"
-                            />
-                          </View>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
 
             </>
           )}
         </View>
       </ScrollView>
       <DrawerMenu visible={showDrawer} onClose={() => setShowDrawer(false)} />
-      {newsComment && (
-        <CommentsSheet
-          visible={!!newsComment}
-          onClose={() => setNewsComment(null)}
-          animeId={newsComment.animeId}
-          episodeNumber={newsComment.ep}
-          title={newsComment.title}
-        />
-      )}
     </View>
   );
 }
@@ -567,77 +465,3 @@ const todayEpStyles = StyleSheet.create({
   time: { color: "rgba(255,255,255,0.5)", fontSize: 9, fontFamily: "Cairo_400Regular", marginTop: 3 },
 });
 
-const newsCardStyles = StyleSheet.create({
-  card: {
-    flexDirection: "row",
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: "hidden",
-    padding: 10,
-    gap: 10,
-    alignItems: "center",
-  },
-  content: {
-    flex: 1,
-    gap: 5,
-  },
-  tagsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  badge: {
-    backgroundColor: "rgba(139,92,246,0.18)",
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: "rgba(139,92,246,0.3)",
-  },
-  badgeText: {
-    color: "#a78bfa",
-    fontSize: 9,
-    fontFamily: "Cairo_700Bold",
-  },
-  score: {
-    color: "#facc15",
-    fontSize: 9,
-    fontFamily: "Cairo_700Bold",
-  },
-  title: {
-    fontSize: 12,
-    fontFamily: "Cairo_700Bold",
-    lineHeight: 18,
-  },
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    flexWrap: "wrap",
-  },
-  metaItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  metaText: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 9,
-    fontFamily: "Cairo_400Regular",
-  },
-  metaDot: {
-    color: "rgba(255,255,255,0.2)",
-    fontSize: 10,
-  },
-  thumbWrap: {
-    width: 70,
-    height: 95,
-    borderRadius: 10,
-    overflow: "hidden",
-    flexShrink: 0,
-  },
-  thumb: {
-    width: "100%",
-    height: "100%",
-  },
-});
