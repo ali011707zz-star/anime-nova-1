@@ -12,7 +12,7 @@ function toAbsUrl(domain: string): string {
   return `https://${domain}`;
 }
 
-const PRODUCTION_SERVER = "https://anime-nova.orkestr.run";
+const PRODUCTION_SERVER = "https://95.182.93.105";
 
 // ── Runtime-overridable API URL ────────────────────────────────────────────
 // يُحمَّل من AsyncStorage عند بدء التطبيق عبر loadRuntimeApiUrl()
