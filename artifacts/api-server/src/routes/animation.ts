@@ -3591,6 +3591,48 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
+      // ── CineSrc (cinesrc.st, TMDB-native, 15 providers, multi-quality HLS) ─────
+      // يعمل كـ microservice على VPS (port 13004) — يُتخطّى إذا لم تكن CINESRC_BASE مُعيَّنة
+      scrapeAnimCached("cinesrc", async () => {
+        if (!tmdbId) return;
+        const CINESRC_BASE = process.env.CINESRC_BASE;
+        if (!CINESRC_BASE) return;
+        try {
+          send("status", { msg: "CineSrc: جاري الاستخراج…" });
+          const CS_ORIGIN = "https://cinesrc.st";
+          const catPath = type === "tv"
+            ? `/api/catalog?id=${tmdbId}&type=tv&season=${season}&episode=${epNum}`
+            : `/api/catalog?id=${tmdbId}&type=movie`;
+          const catRes = await fetch(`${CINESRC_BASE}${catPath}`, {
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!catRes.ok) return;
+          const catalog: any = await catRes.json();
+          const providers: Array<{ id: string; name: string }> = Array.isArray(catalog.providers) ? catalog.providers : [];
+          if (!providers.length) return;
+
+          const seenCS = new Set<string>();
+          await Promise.allSettled(
+            providers.slice(0, 8).map(async (p) => {
+              try {
+                const streamPath = type === "tv"
+                  ? `/api/stream/provider?id=${tmdbId}&type=tv&season=${season}&episode=${epNum}&provider=${p.id}`
+                  : `/api/stream/provider?id=${tmdbId}&type=movie&provider=${p.id}`;
+                const r = await fetch(`${CINESRC_BASE}${streamPath}`, {
+                  signal: AbortSignal.timeout(30_000),
+                });
+                if (!r.ok) return;
+                const data: any = await r.json();
+                if (!data.ok || !data.url || seenCS.has(data.url)) return;
+                seenCS.add(data.url);
+                const proxied = wrapHls(data.url, CS_ORIGIN + "/");
+                sendSource(proxied, `CineSrc · ${p.name}`, data.url, proxied);
+              } catch { /* silent per provider */ }
+            }),
+          );
+        } catch { /* silent */ }
+      }),
+
     ]);
 
     clearTimeout(forceClose);
