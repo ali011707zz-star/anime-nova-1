@@ -177,36 +177,17 @@ router.get("/dubbed/watch-src", async (req, res) => {
     const html = await cfGet(epUrl, AT_BASE + "/", 18000);
     if (!html) { res.status(502).json({ error: "failed to fetch episode page" }); return; }
 
-    // Helper: probe if a URL is accessible from our server (not IP-blocked).
-    // We follow redirects (e.g. foupix returns 302 → actual stream) so we get
-    // a real 200/206 instead of treating the redirect as inaccessible.
-    async function probeOk(url: string): Promise<boolean> {
-      try {
-        const r = await fetch(url, {
-          method: "HEAD",
-          headers: { Referer: AT_BASE + "/", "User-Agent": BROWSER_UA },
-          redirect: "follow",
-          signal: AbortSignal.timeout(8000),
-        });
-        return r.ok || r.status === 206;
-      } catch { return false; }
-    }
-
-    // Helper: choose between proxied URL and raw URL based on server-side probe
-    async function resolveVideoUrl(rawUrl: string, type: "hls" | "mp4"): Promise<{ hlsUrl: string; rawUrl: string; type: string }> {
+    // Helper: build proxied or HLS-proxy URL for the video.
+    // foupix tokens embed the IP that fetched the episode page (our server IP),
+    // so we MUST always proxy — returning the raw URL to the client would fail
+    // because the client's IP doesn't match the token's embedded IP.
+    function resolveVideoUrl(rawUrl: string, type: "hls" | "mp4"): { hlsUrl: string; rawUrl: string; type: string } {
       if (type === "hls") {
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
         return { hlsUrl: proxied, rawUrl, type: "hls" };
       }
-      // For MP4: probe to see if server can access it; if blocked, return raw URL to client
-      const accessible = await probeOk(rawUrl);
-      if (accessible) {
-        const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
-        return { hlsUrl: proxied, rawUrl, type: "mp4" };
-      }
-      // CDN is IP-restricted (e.g. foupix.com:8443 token-tied to client IP)
-      // Return raw URL so the mobile WebView fetches it directly from the user's IP
-      return { hlsUrl: rawUrl, rawUrl, type: "mp4-direct" };
+      const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+      return { hlsUrl: proxied, rawUrl, type: "mp4" };
     }
 
     // Pattern 1: const videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."  (main pattern)

@@ -1335,7 +1335,7 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
       : `http://localhost:3000/v1/movies/${tmdbId}`;
     const cpR = await fetch(cpUrl, {
       headers: { "User-Agent": "AnimeNOVA/1.0" },
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(12_000),
     });
     if (cpR.ok) {
       const cpData = await cpR.json() as { subtitles?: any[] };
@@ -3420,7 +3420,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             : `http://localhost:3000/v1/tv/${tmdbId}/seasons/${season}/episodes/${epNum}`;
           const r = await fetch(cpUrl, {
             headers: { "User-Agent": "AnimeNOVA/1.0", "Accept": "application/json" },
-            signal: AbortSignal.timeout(28_000),
+            signal: AbortSignal.timeout(12_000),
           });
           if (!r.ok) { console.warn(`[CinePro] HTTP ${r.status} for tmdbId=${tmdbId}`); return; }
           const data = await r.json() as { sources?: any[]; subtitles?: any[] };
