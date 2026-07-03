@@ -3,3 +3,4 @@
 - [MXPlayer service search approach](mxplayer-search.md) — use /search/result (not /search/suggest); tvshow needs season→episode chain; CDN prefix is isa-1.mxplay.com.
 - [ScraperAPI integration](scraperapi-integration.md) — scraperApiGet is the last-resort proxy fallback; key stored as SCRAPERAPI_KEY shared env var; integrated in 5 points across witanime + ristoanime scrapers.
 - [Streamrip integration](streamrip-integration.md) — MovieBox [English] MP4 source added to animation sources-stream; video-proxy supports optional &origin= override with validation.
+- [HLS & Translation optimizations](hls-translation-opts.md) — seg-proxy was 1-1.7s; translate-vtt-stream was 40s; fixed with Nginx cache + Google Translate API + hls.js 1.6.2 config.
