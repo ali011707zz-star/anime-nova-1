@@ -4,3 +4,5 @@
 - [ScraperAPI integration](scraperapi-integration.md) — scraperApiGet is the last-resort proxy fallback; key stored as SCRAPERAPI_KEY shared env var; integrated in 5 points across witanime + ristoanime scrapers.
 - [Streamrip integration](streamrip-integration.md) — MovieBox [English] MP4 source added to animation sources-stream; video-proxy supports optional &origin= override with validation.
 - [HLS & Translation optimizations](hls-translation-opts.md) — seg-proxy was 1-1.7s; translate-vtt-stream was 40s; fixed with Nginx cache + Google Translate API + hls.js 1.6.2 config.
+- [Dulo.tv integration](dulo-integration.md) — public API key WDNUNBUB3HR983Y9ISBADK4O82; vidrock+purstream confirmed working for anime TMDB IDs; session cookie cached 7h.
+- [7-repo deep analysis](repo-analysis-2026-07.md) — Miruro 403 from VPS IP; LordFlix CF-blocked; enc-dec.app has no database endpoint; stream-api/dulo is the only new working source.
