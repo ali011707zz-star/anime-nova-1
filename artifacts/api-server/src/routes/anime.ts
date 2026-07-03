@@ -8409,10 +8409,10 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
       scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
       scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep),           true, 20000),
+      scrapeCached("witanime",     () => getWitanimeSources(title, english, ep),           true, 20000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
-      // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
-      // anime3rb:     CF IP block حقيقي، curl_cffi لا تنفع
+      // anime3rb:     CF WAF IP block — 403 حتى مع curl_cffi (2026-07)
       // animetime CDN (vidhls.com) يعمل لبعض الأنمي (200) — مُعاد تفعيله 2026-07-01
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
