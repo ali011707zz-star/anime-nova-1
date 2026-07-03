@@ -3,7 +3,7 @@ modules = ["nodejs-20", "python-3.11", "bash", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["sh", "-c", "PORT=5000 NODE_ENV=production node --enable-source-maps artifacts/api-server/dist/index.mjs"]
+run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 build = ["sh", "-c", "pnpm install --prefer-offline && pnpm --filter @workspace/api-server run build && VITE_API_URL= pnpm --filter @workspace/anime-scraper run build"]
 
 [deployment.postBuild]
@@ -82,3 +82,4 @@ SCRAPERAPI_KEY = "8044e1c6275e5031ffaadf156d9e62d7"
 VPS_SSH_PASSWORD = "unGpfM6wCE_2IKotc"
 DUCKDNS_TOKEN = "d0404bbc-becf-44b2-a60f-b1b27d4c8d22"
 DUCKDNS_DOMAIN = "animenovaa"
+APP_SECRET = "anime-nova-replit-m3ub1498afax5ci25svl5"
