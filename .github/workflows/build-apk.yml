@@ -8,10 +8,10 @@ on:
       backend_domain:
         description: 'Backend API URL'
         required: false
-        default: 'https://anime-nova.orkestr.run'
+        default: 'https://animenovaa.duckdns.org'
 
 env:
-  EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://anime-nova.orkestr.run' }}
+  EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
 
 jobs:
   build:
