@@ -76,6 +76,7 @@
   },
   "dependencies": {
     "hls.js": "^1.6.16",
+    "react-helmet-async": "^3.0.0",
     "react-player": "^3.4.0"
   }
 }

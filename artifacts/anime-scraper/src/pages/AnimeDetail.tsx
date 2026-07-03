@@ -9,6 +9,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { motion, AnimatePresence } from "framer-motion";
 import CommentsSheet from "@/components/CommentsSheet";
+import SEO from "@/components/SEO";
 import { saveAnime, unsaveAnime } from "@/lib/db";
 
 const ADULT_WARN = "قد يحتوي هذا الأنمي على مشاهد جنسية أو عنف أو مشاهد للبالغين فقط وغير مناسبة للأطفال أو المشاهدة العائلية.\n\nينصح بمراعاة المشاهدين";
@@ -431,6 +432,12 @@ export default function AnimeDetail() {
 
   return (
     <main className="bg-[#09090B] min-h-screen pb-32 text-white" dir="rtl">
+      <SEO
+        title={anime.title?.arabic || anime.title?.english || anime.title?.romaji || "أنمي"}
+        description={descAr || anime.description?.replace(/<[^>]+>/g, "").slice(0, 160)}
+        image={anime.coverImage?.extraLarge || anime.coverImage?.large || anime.bannerImage}
+        path={`/anime/${params.id}`}
+      />
 
       {/* ══ HERO BANNER ══════════════════════════════════════════ */}
       <div className="relative w-full overflow-hidden" style={{ height: 240 }}>

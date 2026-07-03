@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
 import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard, Tv2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import SEO from "@/components/SEO";
 
 /* ── Module-level cache — survives component unmount/remount so categories
       don't disappear when navigating Home → AnimeDetail → Home ── */
@@ -538,6 +539,11 @@ export default function Home() {
 
   return (
     <main className="bg-[#09090B] min-h-screen pb-28 text-white" dir="rtl">
+      <SEO
+        title="Anime NOVA | أنمي نوفا - مشاهدة وتحميل الأنمي مترجم ومدبلج"
+        description="أنمي نوفا — مشاهدة وتحميل الأنمي المترجم والمدبلج مجاناً بجودة عالية، مع دعم مصادر متعددة ومشغّل داخلي متكامل."
+        path="/"
+      />
 
       {/* Hero Banner — Modern Cinematic */}
       {hero && !selectedGenre && (

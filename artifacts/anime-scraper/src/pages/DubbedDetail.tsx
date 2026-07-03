@@ -4,6 +4,7 @@ import { useParams, useLocation, useSearch } from "wouter";
 import { ChevronRight, Play, Clock, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { AnimeMascot } from "@/components/AnimeMascot";
+import SEO from "@/components/SEO";
 
 interface Season { label: string; arabicToonsId: string; }
 interface Episode { number: number; epId: string; url: string; thumbnail?: string; }
@@ -95,6 +96,12 @@ export default function DubbedDetail() {
 
   return (
     <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
+      <SEO
+        title={`${title} مدبلج`}
+        description={`مشاهدة أنمي ${title} مدبلج بالعربية مجاناً بجودة عالية على أنمي نوفا.`}
+        image={posterSrc || undefined}
+        path={`/dubbed/${key}`}
+      />
 
       {/* ── Sticky Header ── */}
       <div className="sticky top-0 z-20 bg-[#09090B]/97 backdrop-blur-xl border-b border-white/5">

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
+import SEO from "@/components/SEO";
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
 const IMG_O = "https://image.tmdb.org/t/p/original";
@@ -155,6 +156,12 @@ export default function AnimationDetail() {
 
   return (
     <main className="min-h-screen bg-[#09090B] pb-32 text-white" dir="rtl">
+      <SEO
+        title={detail.title || detail.name || "أنمي"}
+        description={descAr || detail.overview?.slice(0, 160)}
+        image={detail.poster_path ? `${IMG_O}${detail.poster_path}` : undefined}
+        path={`/animation/${type}/${id}`}
+      />
 
       {/* ── Hero Banner ── */}
       <div className="relative w-full overflow-hidden" style={{ height: 250 }}>
