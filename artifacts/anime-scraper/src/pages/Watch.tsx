@@ -3134,7 +3134,8 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Auto-open picker: فور وصول أول مصدر يُظهر الـ picker فوراً بدلاً من التشغيل التلقائي ── */
+  /* ── Auto-play: فور وصول أول مصدر جاهز، شغّله تلقائياً فوراً بدلاً من انتظار المستخدم ──
+     يبقى بإمكان المستخدم فتح قائمة السيرفرات من داخل المشغل لتبديل المصدر متى شاء. */
   useEffect(() => {
     if (autoPlayedRef.current) return;
     if (!autoPlayReady) return;
@@ -3173,8 +3174,10 @@ export default function WatchPage() {
         setPhase("player");
         return;
       }
-      /* لجميع المصادر الأخرى: أظهر الـ picker فوراً ليختار المستخدم */
-      setShowPicker(true);
+      /* شغّل أفضل مصدر متاح تلقائياً (الأعلى جودة) — المستخدم يقدر يبدّل السيرفر من داخل المشغل */
+      const nonResume = allSrcs.filter(s => s.site !== "_resume");
+      const best = [...nonResume].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0];
+      if (best) handlePlaySrc(best);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotSources, phase, autoPlayReady]);
