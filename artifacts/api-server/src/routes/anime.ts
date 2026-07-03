@@ -7572,7 +7572,21 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
     let vlData: any;
     try { vlData = JSON.parse(vlText); } catch { return []; }
     const hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
-    if (!hlsUrl) return [];
+
+    /* ── fallback: stream.type==="file" مع stream.qualities بـ MP4 ──
+       vidlink أحياناً يعيد مقاطع MP4 مباشرة بدل playlist HLS */
+    if (!hlsUrl) {
+      const quals: Record<string, { type?: string; url?: string }> = vlData?.stream?.qualities || {};
+      const mp4Entries = Object.entries(quals)
+        .filter(([, v]) => v.url && (v.type === "mp4" || (v.url || "").includes(".mp4")))
+        .sort(([a], [b]) => parseInt(b) - parseInt(a)); // أعلى دقة أولاً
+      if (!mp4Entries.length) { console.error("[vidlink_anim] no playlist or qualities in response", JSON.stringify(vlData).slice(0, 200)); return []; }
+      const [resLabel, best] = mp4Entries[0];
+      const mp4Url = best.url!;
+      const proxied = `/api/anime/video-proxy?url=${encryptParam(mp4Url)}&ref=${encryptParam("https://vidlink.pro/")}`;
+      const kawaiiSub  = await getKawaiiSubForSource(anilistId, ep);
+      return [{ name: `VidLink · MP4 · ${resLabel}p`, url: proxied, quality: resLabel === "1080" ? "1080p" : resLabel === "720" ? "720p" : "HD", qualityRank: 16, site: "vidlink_anim", directUrl: proxied, directType: "mp4" as const, ...(kawaiiSub ? { subtitleUrl: kawaiiSub } : {}) }];
+    }
     const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
     const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
     const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
