@@ -409,21 +409,30 @@ export default function AnimationWatchScreen() {
                 const isGoodSrc = isDirectPlayable(src);
                 if (!isGoodSrc || autoPlayFiredRef.current) return next;
 
-                /* يفضّل VL (vidlink) — تشغيل فوري إن كان هو المصدر الأول، وإلا انتظر 800ms */
+                /* أولوية الأنيميشن: DU → SC (StarCima) → SP (SeePanal) → SR (Streamrip) → أي مصدر */
                 autoPlayFiredRef.current = true;
-                const isVLNow = (src.label || "").toLowerCase().startsWith("vidlink");
+                const animPriority = (s: AnimSrc): number => {
+                  const l = (s.label || "").toLowerCase();
+                  if (l.startsWith("dulo"))       return 100;
+                  if (l.startsWith("starcima"))   return 90;
+                  if (l.startsWith("seepan"))     return 80;
+                  if (l.startsWith("streamrip"))  return 70;
+                  return 0;
+                };
+                const isDuloNow = (src.label || "").toLowerCase().startsWith("dulo");
+                /* تأخير 1.2s — يمنح DU فرصة الوصول قبل الاختيار النهائي */
                 setTimeout(() => {
                   setSources(latest => {
-                    const isVL2 = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("vidlink");
                     const best =
-                      latest.find(s => isDirectPlayable(s) && isVL2(s)) ??
-                      latest.find(s => isDirectPlayable(s)) ??
+                      latest
+                        .filter(s => isDirectPlayable(s))
+                        .sort((a, b) => animPriority(b) - animPriority(a))[0] ??
                       src;
                     setPlayingSrc(best);
                     setScreen("native");
                     return latest;
                   });
-                }, isVLNow ? 0 : 800);
+                }, isDuloNow ? 0 : 1200);
                 return next;
               });
 

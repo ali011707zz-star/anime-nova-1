@@ -107,14 +107,21 @@ function resolveUrl(url: string | undefined, base: string): string {
   return resolved;
 }
 
-/* ── قائمة المصادر (kawaii أولاً — الأولوية القصوى للتشغيل الفوري) ── */
+/* ── أولويات المصادر: KW → AW → HI → DU → rest ── */
+const SITE_PRIORITY: Record<string, number> = {
+  kawaii: 100, animewitcher: 90, hianime: 80,
+  dulo_anim: 70, videasy_anim: 60, vidlink_anim: 55,
+  anineko: 50, mitanime: 45, anikoto: 40, vidfast: 35,
+  anikototv: 30, animekai: 25, animepahe: 20,
+};
+
+/* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 const ANIME_SITES = [
-  // kawaii أولاً لضمان التشغيل الفوري
-  "kawaii",
+  // الأولوية القصوى: KW → AW → HI → DU
+  "kawaii", "animewitcher", "hianime", "dulo_anim",
   // مصادر سريعة (ياباني مترجم / إنجليزي)
-  "anineko", "anikoto", "hianime", "videasy_anim", "vidlink_anim",
-  "animewitcher", "mitanime", "vidfast", "anikototv", "animekai",
-  "animepahe", "dulo_anim",
+  "videasy_anim", "vidlink_anim", "anineko", "anikoto",
+  "mitanime", "vidfast", "anikototv", "animekai", "animepahe",
   // مصادر عربية (تحتاج extraction)
   "shahiid", "animelek", "animedar", "okanime", "ristoanime",
   "animeify", "animeday", "arabseed", "anime4up2",
@@ -337,14 +344,34 @@ export default function WatchScreen() {
         if (!autoPlayFiredRef.current) {
           const good = newSrcs.find(isDirectPlayable);
           if (good) {
-            autoPlayFiredRef.current = true;
-            /* يفضّل KW من المصادر الواردة الآن — تشغيل فوري بدون تأخير */
-            const best =
-              newSrcs.find(s => isDirectPlayable(s) && s.site === "kawaii") ??
-              good;
-            if (!isMountedRef.current) return;
-            setPlayingSrc(best);
-            setScreen("native");
+            /* الأولوية: KW → AW → HI → DU → أي مصدر مباشر */
+            const pickBest = (pool: Src[]): Src => {
+              const direct = pool.filter(isDirectPlayable);
+              return (
+                direct.find(s => s.site === "kawaii") ??
+                direct.find(s => s.site === "animewitcher") ??
+                direct.find(s => s.site === "hianime") ??
+                direct.find(s => s.site === "dulo_anim") ??
+                direct[0]
+              ) || good;
+            };
+            /* تأخير 400ms — يمنح KW/AW فرصة الوصول قبل الاختيار */
+            const isHighPriority = ["kawaii", "animewitcher"].includes(site);
+            setTimeout(() => {
+              if (!isMountedRef.current || autoPlayFiredRef.current) return;
+              /* أعد جمع كل المصادر المتاحة حتى الآن */
+              setSources(latest => {
+                const best = pickBest(latest);
+                if (isDirectPlayable(best)) {
+                  autoPlayFiredRef.current = true;
+                  setPlayingSrc(best);
+                  setScreen("native");
+                } else {
+                  setScreen(s => s === "loading" ? "picker" : s);
+                }
+                return latest;
+              });
+            }, isHighPriority ? 0 : 400);
           } else {
             /* embed فقط — أظهر الـ picker */
             setScreen(s => s === "loading" ? "picker" : s);
@@ -448,7 +475,12 @@ export default function WatchScreen() {
       if (isDirectPlayable(src)) direct.push(src);
       else if (isEmbedSrc(src)) embeds.push(src);
     }
-    direct.sort((a, b) => TIER_RANK[getSrcQuality(b)] - TIER_RANK[getSrcQuality(a)]);
+    /* ترتيب: جودة أعلى أولاً، ثم أولوية الموقع (KW → AW → HI → DU → rest) */
+    direct.sort((a, b) => {
+      const qDiff = TIER_RANK[getSrcQuality(b)] - TIER_RANK[getSrcQuality(a)];
+      if (qDiff !== 0) return qDiff;
+      return (SITE_PRIORITY[b.site || ""] ?? 0) - (SITE_PRIORITY[a.site || ""] ?? 0);
+    });
     return { directSrcs: direct, embedSrcs: embeds };
   }, [sources]);
 
