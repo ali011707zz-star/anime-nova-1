@@ -2939,15 +2939,26 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           });
           if (!vlR.ok) { console.error(`[vidlink_anim] API ${vlR.status}`); return; }
           const vlData = await vlR.json() as any;
-          const hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
-          if (!hlsUrl) { console.error("[vidlink_anim] no playlist in response", JSON.stringify(vlData).slice(0, 150)); return; }
+          let hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
+          // VidLink may return stream.qualities (file type) instead of stream.playlist (HLS)
+          if (!hlsUrl && vlData?.stream?.qualities) {
+            const quals = vlData.stream.qualities as Record<string, { type?: string; url?: string }>;
+            for (const q of ["1080", "720", "480", "360"]) {
+              if (quals[q]?.url) { hlsUrl = quals[q].url; break; }
+            }
+          }
+          if (!hlsUrl) { console.error("[vidlink_anim] no playlist in response", JSON.stringify(vlData).slice(0, 200)); return; }
           const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
           const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
           // storm.vodvidl.site auth token is bound to the server IP that requested it.
           // Browser (different IP) gets 403. Use hls-proxy so server fetches segments
           // with the same IP that generated the auth token.
-          const VL_REF  = "https://vidlink.pro/";
-          const vlProxy = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`;
+          // For MP4 (file type), use video-proxy instead of hls-proxy.
+          const VL_REF   = "https://vidlink.pro/";
+          const isVlHls  = hlsUrl.includes(".m3u8") || hlsUrl.includes("manifest");
+          const vlProxy  = isVlHls
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`;
           sendSource(
             vlProxy, "VidLink · HLS", hlsUrl, vlProxy,
             araCap?.url ? { subtitleUrl: araCap.url } : undefined,
@@ -3424,13 +3435,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           });
           if (!r.ok) { console.warn(`[CinePro] HTTP ${r.status} for tmdbId=${tmdbId}`); return; }
           const data = await r.json() as { sources?: any[]; subtitles?: any[] };
-          // مزودون مستقرون فقط — vidapi يستخدم domains متغيرة وغير موثوق
-          const STABLE_PROVIDERS = new Set(["vidrock", "fsharetv", "vixsrc", "purstream"]);
           for (const src of (data.sources || [])) {
-            const provId = typeof src.provider === "object"
-              ? (src.provider?.id || "")
-              : String(src.provider || "");
-            if (provId && !STABLE_PROVIDERS.has(provId.toLowerCase())) continue;
             const provName = typeof src.provider === "object"
               ? (src.provider?.name || "CinePro")
               : (src.provider || "CinePro");
