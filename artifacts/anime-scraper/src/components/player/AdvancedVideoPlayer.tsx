@@ -227,6 +227,7 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
   );
   const [showControls, setShowControls] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
@@ -286,10 +287,37 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
         if (!isNaN(savedSpeed) && savedSpeed > 0) video.playbackRate = savedSpeed;
         if (autoPlay) video.play();
       });
+      /* بعض السيرفرات (خصوصاً VidRock/FshareTV/Icefy) تحجب أحياناً بعض
+         الـ segments بـ 403 بشكل متقطع (rate-limit / انتهاء صلاحية الرابط الموقّع).
+         بدون إعادة محاولة، خطأ واحد "fatal" كان يوقف التشغيل نهائياً ويظهر شاشة سوداء.
+         الآن: أعد المحاولة (شبكة) أو استرجع (وسائط) قبل إظهار خطأ نهائي للمستخدم. */
       hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) {
-          setError('خطأ في تحميل الفيديو. يرجى محاولة جودة أخرى.');
+        if (hlsRef.current !== hls) return;
+        if (!data.fatal) return;
+
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          const mediaAttempts = ((hls as any)._mediaRetry = ((hls as any)._mediaRetry || 0) + 1);
+          if (mediaAttempts <= 2) {
+            hls.recoverMediaError();
+            return;
+          }
+        } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          const netAttempts = ((hls as any)._netRetry = ((hls as any)._netRetry || 0) + 1);
+          if (netAttempts <= 3) {
+            setTimeout(() => {
+              if (hlsRef.current === hls) hls.startLoad();
+            }, 1000 * netAttempts);
+            return;
+          }
         }
+
+        /* استنفدت المحاولات — جرّب جودة/سيرفر آخر تلقائياً إن وُجد قبل إظهار الخطأ */
+        const otherQualities = qualities.filter((q) => q !== currentQuality);
+        if (otherQualities.length > 0) {
+          setCurrentQuality(otherQualities[0]);
+          return;
+        }
+        setError('تعذّر تحميل الفيديو من هذا السيرفر. جرّب سيرفراً آخر.');
       });
     } else if (currentSource.type === 'mp4') {
       video.src = currentSource.url;
@@ -301,7 +329,7 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
     return () => {
       hlsRef.current?.destroy();
     };
-  }, [currentSource, autoPlay]);
+  }, [currentSource, autoPlay, reloadKey]);
 
   const handlePlayPause = () => {
     if (!videoRef.current && !iframeRef.current) return;
@@ -370,7 +398,11 @@ export const AdvancedVideoPlayer: React.FC<AdvancedVideoPlayerProps> = ({
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
             <p className="text-white text-sm font-['Cairo']">{error}</p>
             <button
-              onClick={() => setError(null)}
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                setReloadKey((k) => k + 1);
+              }}
               className="px-4 py-2 bg-primary rounded-lg text-white text-xs font-bold transition-colors hover:bg-primary/90"
             >
               إعادة محاولة
