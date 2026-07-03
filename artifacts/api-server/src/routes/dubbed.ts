@@ -177,13 +177,16 @@ router.get("/dubbed/watch-src", async (req, res) => {
     const html = await cfGet(epUrl, AT_BASE + "/", 18000);
     if (!html) { res.status(502).json({ error: "failed to fetch episode page" }); return; }
 
-    // Helper: probe if a URL is accessible from our server (not IP-blocked)
+    // Helper: probe if a URL is accessible from our server (not IP-blocked).
+    // We follow redirects (e.g. foupix returns 302 → actual stream) so we get
+    // a real 200/206 instead of treating the redirect as inaccessible.
     async function probeOk(url: string): Promise<boolean> {
       try {
         const r = await fetch(url, {
           method: "HEAD",
           headers: { Referer: AT_BASE + "/", "User-Agent": BROWSER_UA },
-          signal: AbortSignal.timeout(6000),
+          redirect: "follow",
+          signal: AbortSignal.timeout(8000),
         });
         return r.ok || r.status === 206;
       } catch { return false; }
