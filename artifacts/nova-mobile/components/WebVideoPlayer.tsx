@@ -42,7 +42,7 @@ function buildHtml(p: WebPlayerProps): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.2/dist/hls.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;outline:none}
 html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'Cairo',sans-serif;user-select:none}
@@ -756,11 +756,41 @@ function loadSrc() {
   loadingOvl.classList.remove('hidden');
   if (Hls.isSupported()) {
     if (hlsRef) hlsRef.destroy();
+    // ─── تقدير النطاق الترددي الأولي من Network Information API ───
+    let bwEstimate = 3000000;
+    try {
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (conn && conn.downlink > 0) bwEstimate = Math.min(conn.downlink * 1000000, 20000000);
+    } catch(e) {}
+
     const hls = new Hls({
+      enableWorker: true,
       startLevel: -1,
-      abrEwmaDefaultEstimate: 3000000,
-      enableCEA708Captions: false,
+      abrEwmaDefaultEstimate: bwEstimate,
+      abrEwmaFastLive: 3,
+      abrBandWidthFactor: 0.90,
+      abrBandWidthUpFactor: 0.80,
+      capLevelToPlayerSize: true,
+      // ── Buffer: مُحسَّن للجوال مع VPS proxy ──
+      maxBufferLength: 30,
+      maxMaxBufferLength: 120,
+      backBufferLength: 15,
+      maxBufferSize: 80 * 1024 * 1024, // 80MB
       maxBufferHole: 0.5,
+      // ── Prefetch: يبدأ تحميل السيقمنت القادم مبكراً ──
+      startFragPrefetch: true,
+      progressive: true,
+      // ── Retry: يعيد المحاولة تلقائياً عند فشل الشبكة ──
+      fragLoadingMaxRetry: 5,
+      fragLoadingRetryDelay: 500,
+      fragLoadingMaxRetryTimeout: 12000,
+      manifestLoadingMaxRetry: 4,
+      manifestLoadingRetryDelay: 800,
+      maxStarvationDelay: 6,
+      maxLoadingDelay: 6,
+      nudgeMaxRetry: 20,
+      enableCEA708Captions: false,
+      xhrSetup: function(xhr) { xhr.timeout = 20000; },
     });
     hlsRef = hls;
     hls.loadSource(SRC);
@@ -777,7 +807,7 @@ function loadSrc() {
       if (d.type === Hls.ErrorTypes.MEDIA_ERROR) { hls.recoverMediaError(); return; }
       if (d.type === Hls.ErrorTypes.NETWORK_ERROR) {
         const retries = (hls._netRetry = (hls._netRetry || 0) + 1);
-        if (retries <= 5) { setTimeout(() => hls.startLoad(), 1000 * retries); return; }
+        if (retries <= 6) { setTimeout(() => hls.startLoad(), Math.min(800 * retries, 6000)); return; }
       }
       loadingOvl.classList.add('hidden');
       errorMsg.textContent = 'فشل تحميل الفيديو — ' + (d.details || '');
