@@ -12,7 +12,7 @@ function toAbsUrl(domain: string): string {
   return `https://${domain}`;
 }
 
-const PRODUCTION_SERVER = "https://95.182.93.105";
+const PRODUCTION_SERVER = "https://animenovaa.duckdns.org";
 
 // ── Runtime-overridable API URL ────────────────────────────────────────────
 // يُحمَّل من AsyncStorage عند بدء التطبيق عبر loadRuntimeApiUrl()
