@@ -169,6 +169,38 @@ async function spGetSources(
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// ── Dulo.tv shared client (module-level session cache, 7h TTL) ────────────────
+const DULO_TV_BASE    = "https://dulo.tv";
+const DULO_TV_API_KEY = "WDNUNBUB3HR983Y9ISBADK4O82";
+let _duloAnimCookie   = "";
+let _duloAnimCookieAt = 0;
+const DULO_SESS_TTL_ANIM = 7 * 3_600_000;
+
+function duloRequestHeaders(cookie: string): Record<string, string> {
+  return {
+    "X-API-Key":     DULO_TV_API_KEY,
+    "Authorization": `Bearer ${DULO_TV_API_KEY}`,
+    "User-Agent":    UA,
+    "Origin":        DULO_TV_BASE,
+    "Referer":       `${DULO_TV_BASE}/`,
+    ...(cookie ? { Cookie: cookie } : {}),
+  };
+}
+
+async function duloGetSession(): Promise<string> {
+  if (_duloAnimCookie && Date.now() - _duloAnimCookieAt < DULO_SESS_TTL_ANIM) return _duloAnimCookie;
+  try {
+    const r = await fetch(`${DULO_TV_BASE}/api/session`, {
+      headers: duloRequestHeaders(""),
+      signal:  AbortSignal.timeout(8_000),
+    });
+    const raw = r.headers.get("set-cookie") || "";
+    const cookie = raw.split(";")[0].trim();
+    if (cookie) { _duloAnimCookie = cookie; _duloAnimCookieAt = Date.now(); }
+  } catch { /* keep existing cookie */ }
+  return _duloAnimCookie;
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 const _tmdbCache = new Map<string, { data: any; ts: number }>();
@@ -2947,6 +2979,38 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       }),
 
       // LordFlix: محذوف — Cloudflare browser-challenge يمنع استخراج البيانات
+
+      // ── Dulo.tv — multi-provider aggregator (TMDB-native HLS) ────────────────
+      // Confirmed working providers: vidrock (TV+Movie), purstream (TV only)
+      // Session cookie is cached module-level (shared with anime.ts helper via duloGetSession)
+      scrapeAnimCached("dulo_anim", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "Dulo: جاري الاستخراج…" });
+          const cookie = await duloGetSession();
+          const hdrs   = duloRequestHeaders(cookie);
+          // TV providers: vidrock + purstream; Movie: vidrock only
+          const providers = type === "tv" ? ["vidrock", "purstream"] : ["vidrock"];
+          await Promise.allSettled(providers.map(async (prov) => {
+            try {
+              const apiUrl = type === "tv"
+                ? `${DULO_TV_BASE}/api/sources/call?type=tv&provider=${prov}&tmdb=${tmdbId}&season=${season}&episode=${epNum}`
+                : `${DULO_TV_BASE}/api/sources/call?type=movie&provider=${prov}&tmdb=${tmdbId}`;
+              const r = await fetch(apiUrl, { headers: hdrs, signal: AbortSignal.timeout(14_000) });
+              if (!r.ok) { console.warn(`[dulo_anim] ${prov} → HTTP ${r.status}`); return; }
+              const data = await r.json() as { sources?: Array<{ url: string; type?: string; title?: string }> };
+              for (const src of (data.sources ?? [])) {
+                if (!src.url) continue;
+                const isHls = (src.type || "").toLowerCase() === "hls" || src.url.includes(".m3u8");
+                if (!isHls) continue;
+                const proxied = wrapHls(src.url, `${DULO_TV_BASE}/`);
+                const label = `Dulo · ${prov}${src.title ? " · " + src.title : ""}`;
+                sendSource(proxied, label, src.url, proxied);
+              }
+            } catch (err: any) { console.warn(`[dulo_anim] ${prov} error: ${err?.message}`); }
+          }));
+        } catch (err: any) { console.warn(`[dulo_anim] outer error: ${err?.message}`); }
+      }),
 
       // ── VixSrc (vixsrc.to) — أفلام فقط (API يعيد فارغاً للمسلسلات) ──────────────
       // API: GET /api/movie/{tmdbId} → {src: "/embed/{id}?token=...&expires=..."}

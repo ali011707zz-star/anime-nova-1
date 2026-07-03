@@ -7801,6 +7801,76 @@ async function getVidFastAnimeSources(title: string, english: string | null, ep:
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  DULO.TV — multi-provider aggregator (TMDB-native HLS, anime TV)
+//  API key: WDNUNBUB3HR983Y9ISBADK4O82
+//  Confirmed working providers: vidrock, purstream (tested 2026-07-03)
+//  Session cookie expires every 8h → cached in module scope
+// ════════════════════════════════════════════════════════════════════
+const DULO_BASE    = "https://dulo.tv";
+const DULO_API_KEY = "WDNUNBUB3HR983Y9ISBADK4O82";
+const DULO_HDRS    = {
+  "X-API-Key":     DULO_API_KEY,
+  "Authorization": `Bearer ${DULO_API_KEY}`,
+  "User-Agent":    BROWSER_UA,
+  "Origin":        DULO_BASE,
+  "Referer":       `${DULO_BASE}/`,
+};
+
+let _duloCookie     = "";
+let _duloCookieAt   = 0;
+const DULO_SESS_TTL = 7 * 3_600_000; // 7h (server TTL is 8h)
+
+async function getDuloSession(): Promise<string> {
+  if (_duloCookie && Date.now() - _duloCookieAt < DULO_SESS_TTL) return _duloCookie;
+  try {
+    const r = await fetch(`${DULO_BASE}/api/session`, {
+      headers: DULO_HDRS,
+      signal:  AbortSignal.timeout(8_000),
+    });
+    const raw = r.headers.get("set-cookie") || "";
+    const cookie = raw.split(";")[0].trim();
+    if (cookie) { _duloCookie = cookie; _duloCookieAt = Date.now(); }
+  } catch { /* use existing */ }
+  return _duloCookie;
+}
+
+// Anime TV providers confirmed working from VPS (2026-07-03)
+const DULO_ANIME_PROVIDERS = ["vidrock", "purstream"];
+
+async function getDuloAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+
+  const cookie  = await getDuloSession();
+  const sources: UnifiedSource[] = [];
+
+  await Promise.allSettled(DULO_ANIME_PROVIDERS.map(async (prov) => {
+    try {
+      const url = `${DULO_BASE}/api/sources/call?type=tv&provider=${prov}&tmdb=${tmdbId}&season=1&episode=${ep}`;
+      const r = await fetch(url, {
+        headers: { ...DULO_HDRS, ...(cookie ? { Cookie: cookie } : {}) },
+        signal:  AbortSignal.timeout(14_000),
+      });
+      if (!r.ok) return;
+      const data = await r.json() as { sources?: Array<{ url: string; type?: string; title?: string }> };
+      for (const src of (data.sources ?? [])) {
+        if (!src.url) continue;
+        const isHls = (src.type || "").toLowerCase() === "hls" || src.url.includes(".m3u8");
+        if (!isHls) continue; // skip non-HLS (mp4 usually needs special auth headers)
+        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(DULO_BASE + "/")}`;
+        const label = `Dulo · ${prov}${src.title ? " · " + src.title : ""}`;
+        sources.push({
+          name: label, url: proxied, quality: "HD", qualityRank: 11,
+          site: "dulo_anim", directUrl: proxied, directType: "hls",
+        });
+      }
+    } catch { /* silent per provider */ }
+  }));
+
+  return sources;
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  WITANIME-DB — Arabic dubbed content via GitHub releases ZIP
 //  Repo: github.com/mhmod3/WITanime-DB (daily updates, 2185+ anime)
 //  Hosts: hlswish (streamwish), luluvdo, darkibox → all extractable
@@ -8436,6 +8506,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
       // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
       scrapeCached("vidfast",       () => getVidFastAnimeSources(title, english, ep, anilistId),  false, 22000),
+      scrapeCached("dulo_anim",    () => getDuloAnimeSources(title, english, ep, anilistId),      false, 18000),
       // ── WITanime-DB — محتوى عربي مدبلج (hlswish/luluvdo/darkibox) ─────
       // scrapeCached("witanime_db",  () => getWitanimeDBSources(title, english, ep, anilistId), false, 25000), // مخفي مؤقتاً
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
@@ -8565,6 +8636,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
+      case "dulo_anim":    (await race(getDuloAnimeSources(title, english, ep, anilistId),     18_000, [])).forEach(collectSrc); break;
       // witanime_db: removed
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       case "animetime":    (await race(getAnimeTimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
