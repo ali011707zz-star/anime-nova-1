@@ -7579,16 +7579,28 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
     if (!vlText || !vlText.trim()) return [];
     let vlData: any;
     try { vlData = JSON.parse(vlText); } catch { return []; }
-    const hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
+    let hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
+    // VidLink may return stream.qualities (file/MP4 type) instead of stream.playlist (HLS)
+    if (!hlsUrl && vlData?.stream?.qualities) {
+      const quals = vlData.stream.qualities as Record<string, { type?: string; url?: string }>;
+      for (const q of ["1080", "720", "480", "360"]) {
+        if (quals[q]?.url) { hlsUrl = quals[q].url; break; }
+      }
+    }
     if (!hlsUrl) return [];
     const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
     const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
-    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://vidlink.pro/")}`;
+    const VL_REF  = "https://vidlink.pro/";
+    const isVlHls = hlsUrl.includes(".m3u8") || hlsUrl.includes("manifest");
+    const proxied = isVlHls
+      ? `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`
+      : `/api/anime/video-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`;
     // kawaii subtitle (EN→AR) يُفضَّل على caption VidLink — الجودة أفضل
     const kawaiiSub  = await getKawaiiSubForSource(anilistId, ep);
     const fallbackSub = araCap?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araCap.url)}&from=ar&to=ar` : undefined;
     const chosenSub  = kawaiiSub || fallbackSub;
-    return [{ name: "VidLink · HLS", url: proxied, quality: "HD", qualityRank: 18, site: "vidlink_anim", directUrl: proxied, directType: "hls", ...(chosenSub ? { subtitleUrl: chosenSub } : {}) }];
+    const vlLabel = isVlHls ? "VidLink · HLS" : "VidLink · MP4";
+    return [{ name: vlLabel, url: proxied, quality: "HD", qualityRank: 18, site: "vidlink_anim", directUrl: proxied, directType: isVlHls ? "hls" : "mp4", ...(chosenSub ? { subtitleUrl: chosenSub } : {}) }];
   } catch (err) { console.error("[vidlink_anim] error:", err); return []; }
 }
 
@@ -8500,8 +8512,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
       // scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
-      scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep, anilistId),  false),
-      scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep, anilistId),  false),
+      scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep, anilistId),  false, 28000),
+      scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep, anilistId),  false, 25000),
       scrapeCached("mxplayer",      () => getMXPlayerSources(title, english, ep),                 false),
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
       // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
