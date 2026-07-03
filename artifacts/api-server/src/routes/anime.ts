@@ -315,52 +315,26 @@ async function denoProxyGet(
 
 // ════════════════════════════════════════════════════════════════════
 //  Orkestr external relay — يجلب المواقع المحجوبة من Replit
-//  يستخدم anime-nova.orkestr.run (IP أوروبي) كـ relay عبر proxy-text
 // ════════════════════════════════════════════════════════════════════
-const ORKESTR_BASE = "https://anime-nova.orkestr.run";
-let _orkestAlive: boolean | null = null;
-let _orkestCheckedAt = 0;
-const ORKESTR_HEALTH_TTL = 90_000; // 90ث
-
+//  orkestGet — جلب HTML عبر CF proxy المحلي (localhost:8000/fetch)
+//  يتجاوز Cloudflare للمواقع التي تحجب IPs — يعمل مباشرة من VPS
+// ════════════════════════════════════════════════════════════════════
 async function orkestGet(
   url: string,
   referer?: string,
   timeoutMs = 25000,
 ): Promise<string | null> {
-  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
-  const orkestHeaders: Record<string, string> = {};
-  if (ORKESTR_API_KEY) orkestHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
-
-  // Health check مُؤقَّت
-  const now = Date.now();
-  if (_orkestAlive === null || now - _orkestCheckedAt > ORKESTR_HEALTH_TTL) {
-    try {
-      const h = await fetch(
-        `${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`,
-        { headers: orkestHeaders, signal: AbortSignal.timeout(12_000) },
-      );
-      _orkestAlive = h.ok || h.status === 301 || h.status === 302;
-    } catch { _orkestAlive = false; }
-    _orkestCheckedAt = Date.now();
-  }
-  if (!_orkestAlive) return null;
-
+  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   try {
-    const ep = new URL(`${ORKESTR_BASE}/api/anime/proxy-text`);
+    const ep = new URL(`http://localhost:${CF_PORT}/fetch`);
     ep.searchParams.set("url", url);
     if (referer) ep.searchParams.set("ref", referer);
-    const r = await fetch(ep.toString(), { headers: orkestHeaders, signal: AbortSignal.timeout(timeoutMs) });
+    const r = await fetch(ep.toString(), { signal: AbortSignal.timeout(timeoutMs) });
     if (!r.ok) return null;
     const text = await r.text();
     return text.length > 50 ? text : null;
   } catch { return null; }
 }
-
-// Wake-up ping عند إقلاع السيرفر (غير مُعيق — يستيقظ الخادم الخارجي مسبقاً)
-fetch(`${ORKESTR_BASE}/api/anime/probe?url=https%3A%2F%2Fexample.com`, {
-  signal: AbortSignal.timeout(15_000),
-}).then(r => { _orkestAlive = r.ok || r.status === 301 || r.status === 302; _orkestCheckedAt = Date.now(); })
-  .catch(() => { _orkestAlive = false; _orkestCheckedAt = Date.now(); });
 
 // ════════════════════════════════════════════════════════════════════
 //  scraperApiGet — جلب HTML عبر ScraperAPI (residential proxy pool)

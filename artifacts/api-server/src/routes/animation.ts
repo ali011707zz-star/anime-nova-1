@@ -212,7 +212,7 @@ async function cfProxyGet(url: string): Promise<string> {
   return r.text();
 }
 
-// CF + Orkestr fallback — يجرب cfProxyGet أولاً، إذا حجبه CF يجرب خادم Orkestr الخارجي (EU IP)
+// CF fallback — يجرب cfProxyGet أولاً، ثم يرجع خطأ إذا حجبه CF
 async function cfOrOrkestGet(url: string): Promise<string> {
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
@@ -220,65 +220,38 @@ async function cfOrOrkestGet(url: string): Promise<string> {
     const html = await cfProxyGet(url);
     if (!isCfPage(html)) return html;
   } catch { /* fall through */ }
-  // Fallback: Orkestr relay (EU IP, not Replit datacenter)
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
-  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
-  const orkHeaders: Record<string, string> = {};
-  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
-  const r = await fetch(
-    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
-    { headers: orkHeaders, signal: AbortSignal.timeout(25_000) }
-  );
-  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
-  const html = await r.text();
-  if (isCfPage(html)) throw new Error("CF still blocked via Orkestr");
-  return html;
+  throw new Error("CF proxy: could not bypass Cloudflare protection");
 }
 
-// Orkestr direct GET — يتجاوز CF proxy تماماً (مفيد للمواقع التي تحجب Replit IPs وcf_proxy معاً)
+// Direct GET عبر CF proxy المحلي — يتجاوز حجب IP من الـ VPS
 async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string> {
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
-  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
-  const orkHeaders: Record<string, string> = {};
-  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
+  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const r = await fetch(
-    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
-    { headers: orkHeaders, signal: AbortSignal.timeout(timeoutMs) }
+    `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
+    { signal: AbortSignal.timeout(timeoutMs) }
   );
-  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`CF proxy HTTP ${r.status}`);
   const html = await r.text();
   if (html.length < 500 || html.includes("Just a moment") || html.includes("Attention Required")) {
-    throw new Error("Orkestr: CF blocked");
+    throw new Error("CF proxy: still blocked");
   }
   return html;
 }
 
-// CF proxy POST — يرسل POST عبر curl_cffi مع Orkestr fallback
+// CF proxy POST — يرسل POST عبر curl_cffi
 async function cfOrOrkestPost(url: string): Promise<string> {
   const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
-  try {
-    const r = await fetch(
-      `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
-      { signal: AbortSignal.timeout(18_000) }
-    );
-    if (r.ok) {
-      const html = await r.text();
-      if (!isCfPage(html)) return html;
-    }
-  } catch { /* fall through */ }
-  // Fallback: Orkestr POST relay
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
-  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
-  const orkHeaders2: Record<string, string> = {};
-  if (ORKESTR_API_KEY) orkHeaders2["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
-  const r2 = await fetch(
-    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}&method=POST`,
-    { headers: orkHeaders2, signal: AbortSignal.timeout(25_000) }
+  const r = await fetch(
+    `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
+    { signal: AbortSignal.timeout(18_000) }
   );
-  if (!r2.ok) throw new Error(`Orkestr POST HTTP ${r2.status}`);
-  return r2.text();
+  if (r.ok) {
+    const html = await r.text();
+    if (!isCfPage(html)) return html;
+  }
+  throw new Error("CF proxy POST: failed");
 }
 
 async function asFetchPosts(params: string): Promise<Array<{ id: number; link: string; title: { rendered: string } }>> {

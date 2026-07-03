@@ -6,8 +6,6 @@ const router = Router();
 const SC_BASE = "https://starcima.com";
 const AT_BASE = "https://www.arabic-toons.com";
 const CF_PROXY_BASE = "http://localhost:8000";
-const ORKESTR_BASE = process.env.ORKESTR_RELAY_URL || process.env.ORKESTR_URL || "https://anime-nova.orkestr.run";
-
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
