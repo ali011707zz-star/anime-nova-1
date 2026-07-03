@@ -3,7 +3,7 @@ modules = ["nodejs-20", "python-3.11", "bash"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+run = ["sh", "-c", "PORT=5000 NODE_ENV=production node --enable-source-maps artifacts/api-server/dist/index.mjs"]
 build = ["sh", "-c", "pnpm install --prefer-offline && pnpm --filter @workspace/api-server run build && VITE_API_URL= pnpm --filter @workspace/anime-scraper run build"]
 
 [deployment.postBuild]
