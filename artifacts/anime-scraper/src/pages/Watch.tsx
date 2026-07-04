@@ -100,6 +100,26 @@ function loadLastSrc(animeId: number, ep: number): { url: string; qualityRank: n
   } catch { return null; }
 }
 
+/* ── كاش مصادر الأنمي — TTL 45 دقيقة (يمنع re-scraping في كل فتح للحلقة) ── */
+const ANIME_SRC_CACHE_TTL = 45 * 60_000; // 45 دقيقة
+function saveAnimeSrcs(animeId: number, ep: number, site: string, srcs: FetchedSrc[]) {
+  try {
+    const key = `anime-srcs-v1-${animeId}-${ep}-${site}`;
+    localStorage.setItem(key, JSON.stringify({ srcs, ts: Date.now() }));
+  } catch {}
+}
+function loadAnimeSrcs(animeId: number, ep: number, site: string): FetchedSrc[] | null {
+  try {
+    const key = `anime-srcs-v1-${animeId}-${ep}-${site}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!Array.isArray(d?.srcs) || !d.srcs.length) return null;
+    if (Date.now() - (d.ts || 0) > ANIME_SRC_CACHE_TTL) { localStorage.removeItem(key); return null; }
+    return d.srcs;
+  } catch { return null; }
+}
+
 /* ══════════════════════════════════ HELPERS ══════════════════ */
 function saveHistory(id: number, title: string, cover: string, ep: number, totalEps = 0, userId?: string | null) {
   if (localStorage.getItem("pref-automark") === "false") return;
@@ -3086,6 +3106,8 @@ export default function WatchPage() {
       if (srcs.length > 0) {
         setSlotSources(prev => ({ ...prev, [site]: srcs }));
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+        /* احفظ في الكاش لفتح فوري في المرة القادمة */
+        if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
@@ -3096,9 +3118,11 @@ export default function WatchPage() {
     }
   }
 
-  /* ── Quick-resume: حقن آخر مصدر عند فتح الصفحة مباشرة ── */
+  /* ── Quick-resume + كاش المصادر: تحميل فوري من localStorage عند فتح الصفحة ── */
   useEffect(() => {
     if (!animeId || !titleParam) return;
+
+    /* 1. آخر مصدر شُغِّل (للاستئناف من آخر نقطة) */
     const savedProgress = parseFloat(localStorage.getItem(`wp-${animeId}-${ep}`) || "0");
     if (savedProgress > 30) {
       const lastSrc = loadLastSrc(animeId, ep);
@@ -3110,6 +3134,22 @@ export default function WatchPage() {
         setSlotSources(prev => ({ ...prev, _resume: [resumeSrc] }));
         setSlotStatus(prev => ({ ...prev, _resume: "ready" }));
       }
+    }
+
+    /* 2. كاش المصادر — حقن ما يوجد من مصادر محفوظة فوراً (يشغّل auto-play بدون انتظار scrapers) */
+    const PRIORITY_SITES = ["kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto"];
+    let injectedAny = false;
+    for (const site of PRIORITY_SITES) {
+      const cached = loadAnimeSrcs(animeId, ep, site);
+      if (cached) {
+        setSlotSources(prev => ({ ...prev, [site]: cached }));
+        setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+        injectedAny = true;
+      }
+    }
+    if (injectedAny) {
+      /* إذا وُجد كاش → أخفِ picker وانتقل للمشغّل فوراً عبر auto-play */
+      /* auto-play effect يلتقط التغيير ويشغّل أفضل مصدر متاح */
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
