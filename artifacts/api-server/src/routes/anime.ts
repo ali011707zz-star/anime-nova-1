@@ -315,9 +315,9 @@ async function denoProxyGet(
 
 // ════════════════════════════════════════════════════════════════════
 //  Orkestr external relay — يجلب المواقع المحجوبة من Replit
-//  يستخدم anime-nova.orkestr.run (IP أوروبي) كـ relay عبر proxy-text
+//  يستخدم animenovaa.duckdns.org (IP أوروبي) كـ relay عبر proxy-text
 // ════════════════════════════════════════════════════════════════════
-const ORKESTR_BASE = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+const ORKESTR_BASE = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
 let _orkestAlive: boolean | null = null;
 let _orkestCheckedAt = 0;
 const ORKESTR_HEALTH_TTL = 90_000; // 90ث

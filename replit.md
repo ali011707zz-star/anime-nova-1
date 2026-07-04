@@ -76,7 +76,7 @@ ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
 **EAS Config**:
 - Project ID: `07296477-c5e8-4a47-a804-95f28b46ef7b`
 - Owner: `ali011707s-team`
-- Backend URL: `https://anime-nova.orkestr.run` (Orkestr EU relay)
+- Backend URL: `https://animenovaa.duckdns.org` (Orkestr EU relay)
 - Build profile: `preview` (APK, internal distribution)
 
 **Crash fixes applied (build 3+)**:

@@ -3,7 +3,7 @@
  * يعمل على Replit ويقرأ من Supabase عبر db-relay على Orkestr
  */
 
-const ORKESTR_URL    = "https://anime-nova.orkestr.run";
+const ORKESTR_URL    = "https://animenovaa.duckdns.org";
 const RELAY_SECRET   = process.env.APP_SECRET || "anime-nova-default-change-me-aabbccdd";
 const POLL_INTERVAL  = 60_000;          // كل دقيقة
 const LOOKBACK_MS    = 12 * 60_000;     // آخر 12 دقيقة (ضعف الـ interval للأمان)
