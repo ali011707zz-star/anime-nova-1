@@ -7598,8 +7598,16 @@ async function getVidLinkAnimeSources(title: string, english: string | null, ep:
     // VidLink may return stream.qualities (file/MP4 type) instead of stream.playlist (HLS)
     if (!hlsUrl && vlData?.stream?.qualities) {
       const quals = vlData.stream.qualities as Record<string, { type?: string; url?: string }>;
+      // Skip H.265/HEVC URLs — browsers don't support them; prefer H.264
       for (const q of ["1080", "720", "480", "360"]) {
-        if (quals[q]?.url) { hlsUrl = quals[q].url; break; }
+        const qUrl = quals[q]?.url || "";
+        if (qUrl && !/h265|hevc|av1/i.test(qUrl)) { hlsUrl = qUrl; break; }
+      }
+      // Fallback: if all qualities are HEVC, take any URL (better than nothing)
+      if (!hlsUrl) {
+        for (const q of ["1080", "720", "480", "360"]) {
+          if (quals[q]?.url) { hlsUrl = quals[q].url; break; }
+        }
       }
     }
     if (!hlsUrl) return [];
