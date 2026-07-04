@@ -49,19 +49,21 @@ Custom email/password auth with verification codes, plus Google and GitHub OAuth
 
 السيرفر: `root@95.182.93.105` — مسار التطبيق: `/opt/anime-nova`
 
+المصادقة تعتمد على مفتاح SSH المثبَّت في `~/.ssh/deploy_key` (لا كلمة مرور).
+
 ```bash
-# نسخ ملف معدَّل للـ VPS وإعادة البناء والتشغيل
-SSHPASS='unGpfM6wCE_2IKotc' sshpass -e scp -o StrictHostKeyChecking=no \
+# نسخ ملف معدَّل للـ VPS وإعادة البناء والتشغيل (باكند)
+scp -i ~/.ssh/deploy_key \
   artifacts/api-server/src/routes/anime.ts \
   root@95.182.93.105:/opt/anime-nova/artifacts/api-server/src/routes/anime.ts
 
-SSHPASS='unGpfM6wCE_2IKotc' sshpass -e ssh -o StrictHostKeyChecking=no root@95.182.93.105 \
+ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
   "cd /opt/anime-nova && pnpm --filter @workspace/api-server run build && pm2 restart anime-nova-api"
 ```
 
 للفرونتيند:
 ```bash
-SSHPASS='unGpfM6wCE_2IKotc' sshpass -e ssh -o StrictHostKeyChecking=no root@95.182.93.105 \
+ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
   "cd /opt/anime-nova && pnpm --filter @workspace/anime-scraper run build && pm2 restart anime-nova-api"
 ```
 
