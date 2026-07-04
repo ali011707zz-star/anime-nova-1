@@ -43,6 +43,30 @@ Custom email/password auth with verification codes, plus Google and GitHub OAuth
 - Use pnpm (not npm or yarn) — enforced by preinstall script
 - Arabic RTL UI — the app is designed for Arabic-speaking users
 
+## ⚠️ ملاحظة مهمة — نشر التغييرات على VPS
+
+**بعد كل تعديل على الكود في Replit، يجب تحديث VPS مباشرة عبر SSH.**
+
+السيرفر: `root@95.182.93.105` — مسار التطبيق: `/opt/anime-nova`
+
+```bash
+# نسخ ملف معدَّل للـ VPS وإعادة البناء والتشغيل
+SSHPASS='unGpfM6wCE_2IKotc' sshpass -e scp -o StrictHostKeyChecking=no \
+  artifacts/api-server/src/routes/anime.ts \
+  root@95.182.93.105:/opt/anime-nova/artifacts/api-server/src/routes/anime.ts
+
+SSHPASS='unGpfM6wCE_2IKotc' sshpass -e ssh -o StrictHostKeyChecking=no root@95.182.93.105 \
+  "cd /opt/anime-nova && pnpm --filter @workspace/api-server run build && pm2 restart anime-nova-api"
+```
+
+للفرونتيند:
+```bash
+SSHPASS='unGpfM6wCE_2IKotc' sshpass -e ssh -o StrictHostKeyChecking=no root@95.182.93.105 \
+  "cd /opt/anime-nova && pnpm --filter @workspace/anime-scraper run build && pm2 restart anime-nova-api"
+```
+
+**لا يوجد نشر تلقائي عبر GitHub** — التحديث يدوي مباشرة للـ VPS بعد كل تعديل.
+
 ## Nova Mobile (Expo APK) — Current Status
 
 **Project**: `artifacts/nova-mobile/` — Expo SDK 52 React Native app (Arabic anime streaming)
