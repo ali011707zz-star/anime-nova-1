@@ -7,6 +7,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import WebView from "react-native-webview";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -253,6 +254,19 @@ export default function AnimeDetailScreen() {
     }, 60_000);
     return () => clearInterval(timer);
   }, [countdown]);
+
+  /* ── قفل الاتجاه أفقياً عند فتح التريلر، استعادة العمودي عند الإغلاق أو unmount ── */
+  useEffect(() => {
+    if (showTrailer) {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT).catch(() => {});
+    } else {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    }
+    /* cleanup: يُعيد العمودي إن غادر المستخدم الصفحة أثناء فتح التريلر */
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    };
+  }, [showTrailer]);
 
   const handleFavorite = useCallback(async () => {
     if (!anime) return;
@@ -659,9 +673,12 @@ export default function AnimeDetailScreen() {
               <Ionicons name="close" size={18} color="rgba(255,255,255,0.6)" />
             </Pressable>
           </View>
+          {/* تحميل رابط إيمبيد يوتيوب مباشرةً (لا HTML wrapper) —
+              source={{ html }} يجعل الـ referer فارغاً فيحجب يوتيوب التشغيل.
+              مع URI مباشر يرى يوتيوب الطلب كأنه من youtube-nocookie.com نفسه. */}
           <WebView
             source={{
-              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"><style>*{margin:0;padding:0;background:#000;}html,body{width:100%;height:100%;overflow:hidden;}iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:none;}</style></head><body><iframe src="https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>`,
+              uri: `https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1`,
             }}
             style={{ flex: 1 }}
             allowsFullscreenVideo
