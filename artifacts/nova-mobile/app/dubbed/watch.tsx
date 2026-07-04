@@ -184,6 +184,10 @@ export default function DubbedWatchScreen() {
       title={`${title || ""} · ${season || ""}`}
       episode={ep ? parseInt(ep, 10) : undefined}
       onBack={() => router.back()}
+      onError={() => {
+        /* عند فشل التشغيل المباشر — ارجع للـ WebView */
+        if (epUrl) setWebViewUrl(decodeURIComponent(epUrl));
+      }}
     />
   );
 }
