@@ -223,6 +223,8 @@ export default function WatchScreen() {
   const autoPlayFiredRef  = useRef(false);
   const hasCachedRef      = useRef(false);
   const isMountedRef      = useRef(true);
+  const fetchEpochRef     = useRef(0);
+  const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
   useEffect(() => {
@@ -274,6 +276,8 @@ export default function WatchScreen() {
   /* ── Parallel per-source HTTP fetch (يحل محل SSE تماماً) ── */
   const fetchSources = useCallback(async () => {
     if (!anime) return;
+    const myEpoch = ++fetchEpochRef.current;
+    if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
     autoPlayFiredRef.current = false;
     setLoading(true);
     const hasCached = hasCachedRef.current;
@@ -317,7 +321,7 @@ export default function WatchScreen() {
         clearTimeout(tid);
         mainSignal.removeEventListener("abort", onMainAbort);
 
-        if (!res.ok || !isMountedRef.current) return;
+        if (!res.ok || !isMountedRef.current || fetchEpochRef.current !== myEpoch) return;
         const data = await res.json();
         const rawSrcs: Src[] = data.sources || [];
         if (!rawSrcs.length) return;
@@ -337,7 +341,7 @@ export default function WatchScreen() {
             return true;
           });
 
-        if (!newSrcs.length || !isMountedRef.current) return;
+        if (!newSrcs.length || !isMountedRef.current || fetchEpochRef.current !== myEpoch) return;
         allFresh.push(...newSrcs);
 
         setSources(prev => [...prev, ...newSrcs]);
@@ -359,8 +363,9 @@ export default function WatchScreen() {
             };
             /* تأخير 400ms — يمنح KW/HI/AW فرصة الوصول قبل الاختيار */
             const isHighPriority = ["kawaii", "hianime", "animewitcher"].includes(site);
-            setTimeout(() => {
-              if (!isMountedRef.current || autoPlayFiredRef.current) return;
+            autoPlayTimerRef.current = setTimeout(() => {
+              autoPlayTimerRef.current = null;
+              if (!isMountedRef.current || autoPlayFiredRef.current || fetchEpochRef.current !== myEpoch) return;
               /* أعد جمع كل المصادر المتاحة حتى الآن */
               setSources(latest => {
                 const best = pickBest(latest);
@@ -730,6 +735,27 @@ export default function WatchScreen() {
           </View>
         )}
 
+        {/* ── Web App Player (مشاهدة عبر المتصفح) ── */}
+        {!loading && anime && (
+          <Pressable
+            onPress={() => {
+              const base = getBaseUrl();
+              setPlayingSrc({ url: `${base}/watch?anime=${anime}&ep=${epNum}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}`, isEmbed: true } as Src);
+              setScreen("embed");
+            }}
+            style={({ pressed }) => [d.webAppBtn, { opacity: pressed ? 0.75 : 1 }]}
+          >
+            <View style={d.webAppIcon}>
+              <Ionicons name="globe-outline" size={20} color="#8B5CF6" />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={d.webAppTitle}>مشاهدة عبر المتصفح</Text>
+              <Text style={d.webAppSub}>جميع المصادر المتاحة على موقع نوفا</Text>
+            </View>
+            <Ionicons name="chevron-back" size={15} color="rgba(139,92,246,0.5)" />
+          </Pressable>
+        )}
+
         {/* ── Loading indicator while more sources stream in ── */}
         {loading && allSrcs.length > 0 && (
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12 }}>
@@ -818,4 +844,8 @@ const d = StyleSheet.create({
   emptySub:      { fontSize: 12, color: "rgba(255,255,255,0.22)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 20, paddingHorizontal: 24 },
   retryBtn:      { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(139,92,246,0.15)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.28)", paddingHorizontal: 20, paddingVertical: 11 },
   retryBtnText:  { fontSize: 13, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
+  webAppBtn:     { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "rgba(109,40,217,0.10)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", paddingHorizontal: 14, paddingVertical: 13, marginTop: 4 },
+  webAppIcon:    { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(139,92,246,0.16)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
+  webAppTitle:   { fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.95)", textAlign: "right" },
+  webAppSub:     { fontSize: 10, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.30)", textAlign: "right" },
 });
