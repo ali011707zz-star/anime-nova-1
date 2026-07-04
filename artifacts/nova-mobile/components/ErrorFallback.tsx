@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
@@ -18,6 +19,9 @@ export type ErrorFallbackProps = {
   resetError: () => void;
 };
 
+/* مفاتيح AsyncStorage التي قد تتسبب في أعطال عند فسادها */
+const VOLATILE_KEYS = ["nova-history", "nova-favorites", "nova-theme"];
+
 export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -25,6 +29,10 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
   const [isModalVisible, setIsModalVisible] = useState(false);
 
   const handleRestart = async () => {
+    /* مسح البيانات المتقلبة قبل إعادة التشغيل لتجنب تكرار العطل */
+    try {
+      await Promise.all(VOLATILE_KEYS.map(k => AsyncStorage.removeItem(k)));
+    } catch {}
     try {
       const expoModule = await import("expo");
       if (typeof (expoModule as any).reloadAppAsync === "function") {

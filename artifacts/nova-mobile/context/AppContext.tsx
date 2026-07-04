@@ -55,16 +55,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loadAll = async () => {
-    try {
-      const [themeVal, historyVal, favVal] = await Promise.all([
-        AsyncStorage.getItem("nova-theme"),
-        AsyncStorage.getItem("nova-history"),
-        AsyncStorage.getItem("nova-favorites"),
-      ]);
-      if (themeVal) setThemeState(themeVal as Theme);
-      if (historyVal) setWatchHistory(JSON.parse(historyVal));
-      if (favVal) setFavorites(JSON.parse(favVal));
-    } catch {}
+    const [themeVal, historyVal, favVal] = await Promise.all([
+      AsyncStorage.getItem("nova-theme").catch(() => null),
+      AsyncStorage.getItem("nova-history").catch(() => null),
+      AsyncStorage.getItem("nova-favorites").catch(() => null),
+    ]);
+    if (themeVal) {
+      try { setThemeState(themeVal as Theme); } catch {}
+    }
+    if (historyVal) {
+      try {
+        const parsed = JSON.parse(historyVal);
+        if (Array.isArray(parsed)) {
+          setWatchHistory(parsed);
+        } else {
+          await AsyncStorage.removeItem("nova-history").catch(() => {});
+        }
+      } catch {
+        await AsyncStorage.removeItem("nova-history").catch(() => {});
+      }
+    }
+    if (favVal) {
+      try {
+        const parsed = JSON.parse(favVal);
+        if (Array.isArray(parsed)) {
+          setFavorites(parsed);
+        } else {
+          await AsyncStorage.removeItem("nova-favorites").catch(() => {});
+        }
+      } catch {
+        await AsyncStorage.removeItem("nova-favorites").catch(() => {});
+      }
+    }
   };
 
   const refreshConfig = useCallback(async () => {

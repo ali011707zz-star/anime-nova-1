@@ -1199,10 +1199,11 @@ export function RiftPlayer({
      نستخدم gestureState.moveX (إحداثي مطلق على الشاشة) بدلاً من locationX
      لأن locationX على Android غير موثوق أثناء onPanResponderMove خارج حدود الـ View. */
   const _nRTL = Platform.OS !== "web" && I18nManager.isRTL;
+  /* شريط التقدم يسير دائماً من اليسار (0%) إلى اليمين (100%) بغض النظر عن RTL —
+     هذا هو المعيار العالمي لمشغلات الفيديو حتى في التطبيقات العربية */
   const _calcPctFromAbsolute = (absoluteX: number): number => {
     const localX = absoluteX - barPageX.current;
-    const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
-    return _nRTL ? 1 - raw : raw;
+    return Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
   };
   const seekBarPan = useRef(
     PanResponder.create({
@@ -1790,13 +1791,12 @@ export function RiftPlayer({
             {/* الوقت — الوقت الحالي أقصى اليسار، المدة الكلية أقصى اليمين */}
             {/* في RTL يُعكس left/right لأن Yoga يتبادلهما في وضع RTL */}
             <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
-              <Text style={[s.timeText, _nRTL ? { position: "absolute", right: 0 } : { position: "absolute", left: 0 }]}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, _nRTL ? { position: "absolute", left: 0, opacity: 0.45 } : { position: "absolute", right: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+              <Text style={[s.timeText, { position: "absolute", left: 0 }]}>{fmtTime(position)}</Text>
+              <Text style={[s.timeText, { position: "absolute", right: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
-            {/* شريط التقدم — يسار=بداية، يمين=نهاية (مع تعويض RTL تلقائياً) */}
+            {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي) */}
             {(() => {
-              const isRTL = _nRTL; /* نتبع لغة الجهاز لتوافق Yoga RTL */
               const rawFill = (isDragging ? dragPct : progress) * 100;
               const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
               const thumbPct = fillPct;
@@ -1807,51 +1807,38 @@ export function RiftPlayer({
                   style={[s.progressWrap, isDragging && s.progressWrapDragging]}
                   onLayout={(e) => {
                     barWidth.current = e.nativeEvent.layout.width || 1;
-                    /* measureInWindow يعطي الإحداثي المطلق (pageX) بشكل موثوق على Android RTL
-                       بدلاً من الاعتماد على locationX داخل PanResponder */
                     barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
                   }}
                   {...seekBarPan.panHandlers}
                 >
                   <View style={s.progressBg} />
                   {bufferedPct > 0 && (
-                    <View style={[s.bufferBar, isRTL
-                      ? { right: 0, width: `${bufferedPct * 100}%` as any }
-                      : { width: `${bufferedPct * 100}%` as any }
-                    ]} />
+                    <View style={[s.bufferBar, { left: 0, width: `${bufferedPct * 100}%` as any }]} />
                   )}
                   {markerPctIntro && (
-                    <View style={[s.skipMarker, isRTL
-                      ? { right: `${markerPctIntro.start}%` as any, width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any }
-                      : { left: `${markerPctIntro.start}%` as any, width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any }
-                    ]} />
+                    <View style={[s.skipMarker, {
+                      left: `${markerPctIntro.start}%` as any,
+                      width: `${Math.max(1.2, markerPctIntro.end - markerPctIntro.start)}%` as any,
+                    }]} />
                   )}
                   {markerPctOutro && (
-                    <View style={[s.skipMarker, isRTL
-                      ? { right: `${markerPctOutro.start}%` as any, width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any }
-                      : { left: `${markerPctOutro.start}%` as any, width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any }
-                    ]} />
+                    <View style={[s.skipMarker, {
+                      left: `${markerPctOutro.start}%` as any,
+                      width: `${Math.max(1.2, markerPctOutro.end - markerPctOutro.start)}%` as any,
+                    }]} />
                   )}
                   <LinearGradient
-                    colors={isRTL ? ["#a78bfa", "#8B5CF6", "#6D28D9"] : ["#6D28D9", "#8B5CF6", "#a78bfa"]}
+                    colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
                     start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    style={[s.progressFill, isRTL
-                      ? { right: 0, left: undefined, width: `${fillPct}%` as any }
-                      : { width: `${fillPct}%` as any }
-                    ]}
+                    style={[s.progressFill, { left: 0, width: `${fillPct}%` as any }]}
                   />
                   <View style={[
                     s.thumb,
-                    isRTL
-                      ? { right: `${thumbPct}%` as any, left: undefined, marginRight: -9, marginLeft: 0 }
-                      : { left: `${thumbPct}%` as any },
+                    { left: `${thumbPct}%` as any },
                     isDragging && s.thumbDragging,
                   ]} />
                   {isDragging && (
-                    <View style={[s.dragTooltip, isRTL
-                      ? { right: `${tooltipPct}%` as any, left: undefined }
-                      : { left: `${tooltipPct}%` as any }
-                    ]}>
+                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any }]}>
                       <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
                     </View>
                   )}
@@ -2241,7 +2228,8 @@ const s = StyleSheet.create({
   halfRight: { position: "absolute", right: 0, top: 0, width: "50%", height: "100%" },
 
   /* ── Skip intro/outro pill buttons ── */
-  skipBtnRow: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginBottom: 4, paddingRight: 2 },
+  /* في RTL: flex-start = الجانب الأيمن بصرياً — هذا هو الموضع الصحيح لأزرار التخطي */
+  skipBtnRow: { flexDirection: "row", justifyContent: "flex-start", gap: 8, marginBottom: 4, paddingStart: 2 },
   skipPillIntro: {
     flexDirection: "row", alignItems: "center", gap: 5,
     backgroundColor: "rgba(251,191,36,0.90)", borderRadius: 20,
