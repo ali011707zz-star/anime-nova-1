@@ -10454,8 +10454,10 @@ router.get("/anime/hls-proxy", async (req, res) => {
       return;
     }
 
-    /* ويب (بدون mobile=1): segments تمر عبر seg-proxy لتجاوز CORS */
-    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, false);
+    /* ويب: segments مباشرة للـ CDN (directSegs=true) — لا تمر أي بيانات فيديو عبر الخادم.
+       هذا يُلغي استهلاك bandwidth الـ seg-proxy تمامًا.
+       المتصفح يجلب الـ segments مباشرة من CDN عبر hls.js. */
+    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, true);
     const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
     if (isCdnCacheable(url)) {
       cdnCache.set(effectiveCacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
@@ -10482,87 +10484,12 @@ router.get("/anime/video-proxy", async (req, res) => {
   if (originParam) try { originParam = decodeURIComponent(originParam); } catch { originParam = ""; }
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* موبايل: أعد توجيهاً مباشراً للـ CDN بدلاً من تمرير البيانات عبر VPS.
-     React Native لا يعاني من CORS لذا يمكنه الاتصال بالـ CDN مباشرة.
-     307 Temporary Redirect يحافظ على الـ method (GET/HEAD) ولا يُخزّن. */
-  if (isMobile) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.redirect(307, url);
-    return;
-  }
-
-  // Validate origin override: must be a well-formed http/https URL, never private/internal ranges
-  let validatedOrigin = "";
-  if (originParam) {
-    try {
-      const parsed = new URL(originParam);
-      const isInternal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(parsed.hostname);
-      if ((parsed.protocol === "http:" || parsed.protocol === "https:") && !isInternal) {
-        validatedOrigin = parsed.origin; // normalized form
-      }
-    } catch { /* invalid — ignore */ }
-  }
-  let origin = validatedOrigin; if (!origin) try { origin = new URL(url).origin; } catch {}
-
-  const reqHeaders: Record<string, string> = {
-    "User-Agent": BROWSER_UA,
-    "Referer": ref || url,
-    "Origin": origin,
-    "Accept": "*/*",
-  };
-  const range = req.headers["range"] as string | undefined;
-  if (range) reqHeaders["Range"] = range;
-
-  if (req.method === "HEAD") {
-    try {
-      const r = await fetch(url, { method: "HEAD", headers: reqHeaders, signal: AbortSignal.timeout(8000), redirect: "follow" });
-      res.status(r.status);
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Headers", "Range");
-      res.setHeader("Accept-Ranges", "bytes");
-      const passHead = ["content-type","content-length","cache-control"];
-      for (const h of passHead) { const v = r.headers.get(h); if (v) res.setHeader(h, v); }
-      res.end(); return;
-    } catch { res.status(200).setHeader("Access-Control-Allow-Origin", "*").end(); return; }
-  }
-
-  try {
-    const r = await fetch(url, {
-      headers: reqHeaders,
-      // 5-minute timeout — large MKV/MP4 files (e.g. anime-phoenix 400MB+) need time to stream
-      signal: AbortSignal.timeout(300000),
-      redirect: "follow",
-    });
-
-    const status = (range && r.status === 206) ? 206 : r.status;
-    res.status(status);
-
-    const ct = r.headers.get("content-type") || "video/mp4";
-    res.setHeader("Content-Type", ct);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Range");
-    res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length");
-    // Always declare range support so browsers can seek without full download
-    res.setHeader("Accept-Ranges", "bytes");
-
-    const pass = ["content-length","content-range","cache-control","last-modified","etag"];
-    for (const h of pass) { const v = r.headers.get(h); if (v) res.setHeader(h, v); }
-
-    if (!r.body) { res.end(); return; }
-    const reader = r.body.getReader();
-    req.on("close", () => reader.cancel().catch(() => {}));
-    (async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) { res.end(); break; }
-          if (!res.write(value)) await new Promise<void>(ok => res.once("drain", ok));
-        }
-      } catch { res.end(); }
-    })();
-  } catch (e: any) {
-    if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`);
-  }
+  /* إعادة توجيه مباشرة للـ CDN لجميع العملاء (موبايل وويب).
+     لا تمر أي بيانات MP4/فيديو عبر الخادم — صفر bandwidth للفيديو.
+     307 Temporary Redirect: المتصفح يتبع الـ redirect ويتصل بالـ CDN مباشرة. */
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Range");
+  res.redirect(307, url);
 });
 
 router.get("/anime/seg-proxy", async (req, res) => {
@@ -10577,75 +10504,13 @@ router.get("/anime/seg-proxy", async (req, res) => {
   let origin = ""; try { origin = new URL(ref || url).origin; } catch {}
   if (!origin) try { origin = new URL(url).origin; } catch {}
 
-  const cacheKey = `seg:${url}`;
-
-  // ── L1: in-memory (binary body — instant) ──
-  const hit = cdnCache.get(cacheKey);
-  if (hit && isCdnCacheable(url) && Date.now() - hit.ts < CDN_CACHE_TTL) {
-    res.setHeader("Content-Type", hit.ct);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    res.setHeader("Content-Length", String(hit.body.length));
-    res.setHeader("X-Cache", "HIT-L1");
-    res.send(hit.body);
-    return;
-  }
-
-  // ── L2: PostgreSQL — للـ m3u8 sub-playlists فقط (ليس binary segments) ──
-  if (isCdnCacheable(url)) {
-    const pgHit = await cdnManifestGet(cacheKey);
-    if (pgHit) {
-      const buf = Buffer.from(pgHit.content);
-      cdnCache.set(cacheKey, { body: buf, ct: pgHit.ct, ts: Date.now() }); // أعِد تعبئة L1
-      res.setHeader("Content-Type", pgHit.ct);
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "public, max-age=3600");
-      res.setHeader("Content-Length", String(buf.length));
-      res.setHeader("X-Cache", "HIT-L2");
-      res.send(buf);
-      return;
-    }
-  }
-
-  try {
-    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(25000), redirect: "follow" });
-    if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
-    const ct = r.headers.get("content-type") || "video/mp2t";
-    const len = r.headers.get("content-length");
-    if (ct.includes("mpegurl") || url.includes(".m3u8")) {
-      const body = await r.text();
-      const proto2   = /^https?$/.test(req.protocol) ? req.protocol : "https";
-      const rawHost2 = (req.headers["x-forwarded-host"] as string || req.get("host") || "localhost:8080").split(",")[0].trim();
-      const rewritten = rewriteM3u8(body, url, `${proto2}://${rawHost2}`, ref || url);
-      const mCt = "application/vnd.apple.mpegurl";
-      if (isCdnCacheable(url)) {
-        cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: mCt, ts: Date.now() }); // L1
-        cdnManifestSet(cacheKey, rewritten, mCt);                                           // L2
-      }
-      res.setHeader("Content-Type", mCt);
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "public, max-age=3600");
-      res.send(rewritten);
-      return;
-    }
-    /* Stream binary TS/AAC segments directly — avoids buffering entire chunk before sending.
-       Binary segments go to L1 only (too large for PostgreSQL) */
-    res.setHeader("Content-Type", ct);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    if (len) res.setHeader("Content-Length", len);
-    if (r.body) {
-      const { Readable } = await import("stream");
-      const readable = Readable.fromWeb(r.body as any);
-      readable.on("error", () => { try { res.destroy(); } catch {} });
-      res.on("close", () => { try { readable.destroy(); } catch {} });
-      readable.pipe(res);
-    } else {
-      const body = Buffer.from(await r.arrayBuffer());
-      if (isCdnCacheable(url)) cdnCache.set(cacheKey, { body, ct, ts: Date.now() }); // L1 only
-      res.send(body);
-    }
-  } catch (e: any) { if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`); }
+  /* seg-proxy: أعِد التوجيه مباشرة للـ CDN — لا تمر بيانات الـ segment عبر الخادم.
+     hls-proxy صار يُضمّن روابط CDN مطلقة في الـ manifest (directSegs=true)
+     لذا هذا الـ route لا يُستدعى إلا من كود قديم أو استثنائي.
+     307 Temporary Redirect: المتصفح/hls.js يتبعه ويجلب الـ segment من CDN مباشرة. */
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Range");
+  res.redirect(307, url);
 });
 
 // ══════════════════════════════════════════════════════════════════
