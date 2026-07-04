@@ -3167,9 +3167,16 @@ export default function WatchPage() {
         setPhase("player");
         return;
       }
-      /* شغّل أفضل مصدر متاح تلقائياً (الأعلى جودة) — المستخدم يقدر يبدّل السيرفر من داخل المشغل */
+      /* شغّل أفضل مصدر متاح تلقائياً — أولوية: KW → HI → AW → الأعلى جودة */
       const nonResume = allSrcs.filter(s => s.site !== "_resume");
-      const best = [...nonResume].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0];
+      const animePriority = (s: FetchedSrc): number => {
+        const site = s.site || "";
+        if (site === "kawaii")       return 1000;
+        if (site === "hianime")      return 900;
+        if (site === "animewitcher") return 800;
+        return s.qualityRank ?? 0;
+      };
+      const best = [...nonResume].sort((a, b) => animePriority(b) - animePriority(a))[0];
       if (best) handlePlaySrc(best);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

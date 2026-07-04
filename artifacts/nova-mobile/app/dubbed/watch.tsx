@@ -41,9 +41,10 @@ export default function DubbedWatchScreen() {
         : null;
       if (!rawUrl && !proxyUrl) { setError("لم يُعثر على مصدر الفيديو"); setLoading(false); return; }
 
-      // البث المباشر (rawUrl) أولاً: CDN يحجب IPs مراكز البيانات لكن يسمح للأجهزة المنزلية
-      // إذا لم يكن rawUrl متاحاً، نرجع للـ proxy
-      const streamUrl = rawUrl ?? proxyUrl!;
+      // foupix CDN يربط التوكن بـ IP الخادم (وقت جلب الصفحة)،
+      // أي الجهاز يُرسَل له rawUrl مباشرة سيحصل على 403 لأن IP الهاتف ≠ IP الخادم.
+      // الحل: نمرّر دائماً عبر بروكسي الخادم على الهاتف.
+      const streamUrl = proxyUrl ?? rawUrl!;
       setSources([{
         url: streamUrl,
         label: title || "مدبلج عربي",

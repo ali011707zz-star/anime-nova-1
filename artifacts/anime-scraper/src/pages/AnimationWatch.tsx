@@ -408,6 +408,16 @@ export default function AnimationWatch() {
       arr.find(s => s.label?.startsWith(prefix) && (s.proxyUrl?.startsWith("/api/") || s.directUrl?.startsWith("/api/"))) ??
       arr.find(s => s.label?.startsWith(prefix));
 
+    // ── الأولوية القصوى: DU (Dulo) — يُشغَّل فور وصوله ──
+    const dulo = okSources.find(s => s.label?.toLowerCase().startsWith("dulo"));
+    if (dulo) {
+      if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      autoPlayAttemptsRef.current += 1;
+      autoPlayedRef.current = true;
+      playSource(dulo);
+      return;
+    }
+
     // ── FAST tier: Videasy & VidLink — play the instant they arrive ──
     const videasy = prefProxy(okSources, "Videasy");
     const vidlink = prefProxy(okSources, "VidLink");
@@ -445,7 +455,8 @@ export default function AnimationWatch() {
         autoPlayTimerRef.current = null;
         if (autoPlayedRef.current) return;
         const stillOk = sources.filter(s => s.status === "ok");
-        const fastNow = prefProxy(stillOk, "VidLink") ?? prefProxy(stillOk, "Videasy");
+        const duloNow = stillOk.find(s => s.label?.toLowerCase().startsWith("dulo"));
+        const fastNow = duloNow ?? prefProxy(stillOk, "VidLink") ?? prefProxy(stillOk, "Videasy");
         if (fastNow) {
           autoPlayAttemptsRef.current += 1;
           autoPlayedRef.current = true;

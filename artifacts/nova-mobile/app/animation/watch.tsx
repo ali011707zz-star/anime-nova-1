@@ -264,11 +264,11 @@ export default function AnimationWatchScreen() {
         setLoading(false);
         setScreen("picker");
 
-        /* شغّل تلقائياً — يفضّل VL (vidlink) كمصدر افتراضي للأنيميشن */
+        /* شغّل تلقائياً — أولوية: DU (Dulo) أولاً ثم أي مصدر مباشر */
         if (autoplay) {
-          const isVL = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("vidlink");
+          const isDU = (s: AnimSrc) => (s.label || "").toLowerCase().startsWith("dulo");
           const first =
-            resolved.find(s => isDirectPlayable(s) && isVL(s)) ??
+            resolved.find(s => isDirectPlayable(s) && isDU(s)) ??
             resolved.find(s => isDirectPlayable(s));
           if (first) {
             autoPlayFiredRef.current = true;
