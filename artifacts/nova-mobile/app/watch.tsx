@@ -107,10 +107,7 @@ function resolveUrl(url: string | undefined, base: string): string {
   return resolved;
 }
 
-/* ── مصادر تُعرض في القائمة لكن تُشغَّل عبر مشغّل الويب (WebView) ── */
-const WEBVIEW_PLAYER_SITES = new Set([
-  "anineko", "anikoto", "dulo_anim", "hianime", "videasy_anim", "animetime",
-]);
+/* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
 /* ── أولويات المصادر: KW → HI → AW → DU → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
@@ -454,17 +451,6 @@ export default function WatchScreen() {
   const playSrc = useCallback((src: Src) => {
     const thumb = coverUrl || (anime ? `https://img.anili.st/media/${anime}` : "");
     if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: thumb, updatedAt: Date.now() });
-
-    /* مصادر AN/AK/DU/HI/VE/AT — تُفتح عبر مشغّل الويب WebView */
-    if (WEBVIEW_PLAYER_SITES.has(src.site || "")) {
-      const base = getBaseUrl();
-      setPlayingSrc({
-        url: `${base}/watch?anime=${anime}&ep=${epNum}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}`,
-        isEmbed: true,
-      } as Src);
-      setScreen("embed");
-      return;
-    }
 
     setPlayingSrc(src);
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
