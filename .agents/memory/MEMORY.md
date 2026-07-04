@@ -10,3 +10,4 @@
 - [Videasy disable + Dubbed foupix fix](videasy-dubbed-fixes.md) — videasy disabled (STREAMCRYPTO_SEED_INVALID); dubbed 403 = datacenter IP block by foupix CDN; fix: rawUrl direct streaming from mobile; SSRF fix in watch-src.
 - [Web vs Mobile source sync](web-mobile-source-sync.md) — VPS IP gives more sources than Replit IP; dead sites removed from web SCRAPER_DEFS; mobile ANIME_SITES synced; vidmoly embed bug fixed; mp4upload filtered on mobile.
 - [Anime Rift MITM capture attempt](anime-rift-mitm.md) — Android system-CA-trust wall blocks non-rooted MITM; failed-handshake domains still revealed it uses the same vidsrc/embed.su/TMDB ecosystem already in Anime NOVA.
+- [Source playback fixes — DU AK AN HI SC AT](source-playback-fixes-2026-07.md) — parseVidHls JSON scanner, dulo CDN probe, starcima expiry filter, anineko direct-fetch fallback.

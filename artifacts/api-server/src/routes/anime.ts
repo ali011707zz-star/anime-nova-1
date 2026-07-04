@@ -902,13 +902,30 @@ async function parseVidHls(
   html: string,
   referer?: string,
 ): Promise<{ url: string; type: "hls" | "mp4" } | null> {
-  // Match the config object — third boolean arg is optional
-  const configMatch = html.match(
-    /FirePlayer\s*\([^,]+,\s*(\{[\s\S]+?\})\s*(?:,\s*(?:true|false)\s*)?\)/,
-  );
-  if (!configMatch) return null;
+  // Find FirePlayer( call and extract the config object using a JSON-aware scanner.
+  // Non-greedy regex breaks on nested JSON objects; bracket counting alone breaks when
+  // '}' appears inside a quoted string value. This scanner tracks string context properly.
+  const fpIdx = html.search(/FirePlayer\s*\(/);
+  if (fpIdx === -1) return null;
+  // Skip to the opening '{' of the config argument (second arg after vhash)
+  const objStart = html.indexOf("{", fpIdx);
+  if (objStart === -1) return null;
+  // JSON-aware bracket scan: ignore '{' and '}' inside string literals
+  let depth = 0, configEnd = -1;
+  let inStr = false, escNext = false;
+  for (let i = objStart; i < html.length; i++) {
+    const ch = html[i];
+    if (escNext) { escNext = false; continue; }
+    if (ch === "\\" && inStr) { escNext = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") { depth--; if (depth === 0) { configEnd = i; break; } }
+  }
+  if (configEnd === -1) return null;
+  const configStr = html.slice(objStart, configEnd + 1);
   try {
-    const config = JSON.parse(configMatch[1]);
+    const config = JSON.parse(configStr);
     const rawVideoUrl: string = config.videoUrl || "";
     if (!rawVideoUrl) return null;
     const cleanUrl = rawVideoUrl.replace(/\\\//g, "/");
@@ -3159,7 +3176,7 @@ async function getAnimeTimeSources(
       try {
         const result = await Promise.race([
           extractVideoDeep(url, url),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 12000)),
         ]);
         if (result?.url) {
           const directUrl = result.type === "hls"
@@ -3174,24 +3191,9 @@ async function getAnimeTimeSources(
             directUrl,
             directType: result.type,
           });
-        } else {
-          sources.push({
-            name: `أنمي تايم · سيرفر ${i + 1}`,
-            url,
-            quality: "HD",
-            qualityRank: 9,
-            site: "animetime",
-          });
         }
-      } catch {
-        sources.push({
-          name: `أنمي تايم · سيرفر ${i + 1}`,
-          url,
-          quality: "HD",
-          qualityRank: 9,
-          site: "animetime",
-        });
-      }
+        // Skip source if extraction failed — embed URL alone can't be played natively
+      } catch { /* skip on error */ }
     }));
     sources.sort((a, b) => uniqueUrls.indexOf(a.url) - uniqueUrls.indexOf(b.url));
 
@@ -5509,8 +5511,18 @@ async function getAninekoSources(
     const slug = await findAninekoSlug(title, english);
     if (!slug) return [];
 
-    // صفحة الحلقة — عبر Orkestr relay (IP أوروبي لتجاوز حجب Replit)
-    const epHtml = await orkestGet(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, `${ANINEKO_BASE}/watch/${slug}`, 20000) ?? "";
+    // صفحة الحلقة — عبر Orkestr relay أولاً، ثم direct fetch كـ fallback
+    let epHtml = await orkestGet(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, `${ANINEKO_BASE}/watch/${slug}`, 20000) ?? "";
+    if (!epHtml) {
+      // Fallback: direct fetch (VPS IP is not blocked by anineko)
+      try {
+        const rfr = await fetch(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, {
+          headers: { "User-Agent": BROWSER_UA, Referer: `${ANINEKO_BASE}/watch/${slug}`, Accept: "text/html,*/*;q=0.9", "Accept-Language": "ar,en;q=0.9" },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (rfr.ok) epHtml = await rfr.text();
+      } catch { /* ignore */ }
+    }
     if (!epHtml) return [];
 
     // استهدف الـ panel الخاص بـ sub مباشرة (class lang-group + data-id="sub")
@@ -7859,6 +7871,7 @@ async function getDuloAnimeSources(title: string, english: string | null, ep: nu
   const cookie  = await getDuloSession();
   const sources: UnifiedSource[] = [];
 
+  const DULO_PROBE_PORT = parseInt(String(process.env.PORT || 5000), 10);
   await Promise.allSettled(DULO_ANIME_PROVIDERS.map(async (prov) => {
     try {
       const url = `${DULO_BASE}/api/sources/call?type=tv&provider=${prov}&tmdb=${tmdbId}&season=1&episode=${ep}`;
@@ -7874,9 +7887,26 @@ async function getDuloAnimeSources(title: string, english: string | null, ep: nu
         if (!isHls) continue; // skip non-HLS (mp4 usually needs special auth headers)
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(DULO_BASE + "/")}`;
         const label = `Dulo · ${prov}${src.title ? " · " + src.title : ""}`;
+        // Probe CDN accessibility from server — some CDNs block datacenter IPs
+        let finalUrl = proxied;
+        let finalDirectUrl = proxied;
+        try {
+          const probe = await fetch(`http://127.0.0.1:${DULO_PROBE_PORT}${proxied}`, {
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (!probe.ok && probe.status !== 206) {
+            // CDN blocks server IP → send raw URL for direct mobile access
+            finalUrl = src.url;
+            finalDirectUrl = src.url;
+          }
+        } catch {
+          // Network error → assume blocked → raw URL for direct access
+          finalUrl = src.url;
+          finalDirectUrl = src.url;
+        }
         sources.push({
-          name: label, url: proxied, quality: "HD", qualityRank: 11,
-          site: "dulo_anim", directUrl: proxied, directType: "hls",
+          name: label, url: finalUrl, quality: "HD", qualityRank: 11,
+          site: "dulo_anim", directUrl: finalDirectUrl, directType: "hls",
         });
       }
     } catch { /* silent per provider */ }
