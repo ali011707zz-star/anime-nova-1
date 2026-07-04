@@ -35,10 +35,17 @@ export default function DubbedWatchScreen() {
       if (!mountedRef.current) return;
       if (!r.ok) { setError("تعذّر تحميل الحلقة"); setLoading(false); return; }
       const d = await r.json();
-      if (!d.hlsUrl) { setError("لم يُعثر على مصدر الفيديو"); setLoading(false); return; }
-      const fullUrl = d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl;
+      const rawUrl   = typeof d.rawUrl  === "string" ? d.rawUrl  : null;
+      const proxyUrl = typeof d.hlsUrl  === "string"
+        ? (d.hlsUrl.startsWith("/") ? `${BASE}${d.hlsUrl}` : d.hlsUrl)
+        : null;
+      if (!rawUrl && !proxyUrl) { setError("لم يُعثر على مصدر الفيديو"); setLoading(false); return; }
+
+      // البث المباشر (rawUrl) أولاً: CDN يحجب IPs مراكز البيانات لكن يسمح للأجهزة المنزلية
+      // إذا لم يكن rawUrl متاحاً، نرجع للـ proxy
+      const streamUrl = rawUrl ?? proxyUrl!;
       setSources([{
-        url: fullUrl,
+        url: streamUrl,
         label: title || "مدبلج عربي",
         quality: "720p HD",
       }]);

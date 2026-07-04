@@ -7461,7 +7461,10 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
 }
 
 // ── Videasy anime sources (api.videasy.to, TMDB-native multi-quality HLS) ──
+// [2026-07-04] DISABLED: api.videasy.to غيّر بنية الـ API → STREAMCRYPTO_SEED_INVALID
+// سيُعاد التفعيل عند إيجاد مفتاح التشفير الجديد.
 async function getVideasyAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
+  return []; // مؤقتاً معطّل
   const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
   const sources: UnifiedSource[] = [];

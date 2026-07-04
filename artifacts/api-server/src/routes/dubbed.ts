@@ -167,9 +167,21 @@ router.get("/dubbed/episodes", async (req, res) => {
 // ── GET /api/dubbed/watch-src?epUrl= ──
 // Fetches the arabic-toons.com episode page and extracts the video URL (MP4 or HLS).
 // arabic-toons uses a clappr player with a JS variable: const videoSrc = "https://...mp4?tkn=..."
+const ALLOWED_DUBBED_HOSTNAMES = new Set([
+  "www.arabic-toons.com",
+  "arabic-toons.com",
+]);
+
 router.get("/dubbed/watch-src", async (req, res) => {
   const epUrl = (req.query.epUrl as string || "").trim();
-  if (!epUrl || !epUrl.includes("arabic-toons.com")) {
+  // صلاحية الـ URL: يجب أن يكون https ومن نطاق arabic-toons.com فقط
+  let parsedEpUrl: URL;
+  try {
+    parsedEpUrl = new URL(epUrl);
+    if (parsedEpUrl.protocol !== "https:" || !ALLOWED_DUBBED_HOSTNAMES.has(parsedEpUrl.hostname)) {
+      throw new Error("hostname not allowed");
+    }
+  } catch {
     res.status(400).json({ error: "invalid epUrl" }); return;
   }
 
