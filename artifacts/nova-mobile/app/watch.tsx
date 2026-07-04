@@ -95,11 +95,12 @@ function getPlayUrl(s: Src): string {
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
   let resolved = url.startsWith("/") ? base + url : url;
-  /* على الأجهزة: أضف mobile=1 لـ hls-proxy حتى يختار السيرفر H.264 variant
-     بدلاً من HEVC/H.265 التي لا يدعمها ExoPlayer على أغلب الهواتف */
+  /* على الأجهزة: أضف mobile=1 لـ:
+     - hls-proxy  → السيرفر يختار H.264 + segments تذهب مباشرة للـ CDN (صفر bandwidth proxy)
+     - video-proxy → السيرفر يُرسل 307 redirect للـ CDN بدلاً من تمرير الملف كاملاً */
   if (
     Platform.OS !== "web" &&
-    resolved.includes("hls-proxy") &&
+    (resolved.includes("hls-proxy") || resolved.includes("video-proxy")) &&
     !resolved.includes("mobile=1")
   ) {
     resolved += (resolved.includes("?") ? "&" : "?") + "mobile=1";

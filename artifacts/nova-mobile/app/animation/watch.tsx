@@ -42,8 +42,16 @@ const TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
-  if (url.startsWith("/")) return base + url;
-  return url;
+  let resolved = url.startsWith("/") ? base + url : url;
+  /* موبايل: hls-proxy → H.264 + direct CDN segments | video-proxy → 307 redirect للـ CDN */
+  if (
+    Platform.OS !== "web" &&
+    (resolved.includes("hls-proxy") || resolved.includes("video-proxy")) &&
+    !resolved.includes("mobile=1")
+  ) {
+    resolved += (resolved.includes("?") ? "&" : "?") + "mobile=1";
+  }
+  return resolved;
 }
 
 function getSrcQuality(src: AnimSrc): Quality {
