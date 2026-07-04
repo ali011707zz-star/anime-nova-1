@@ -61,10 +61,10 @@ ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
   "cd /opt/anime-nova && pnpm --filter @workspace/api-server run build && pm2 restart anime-nova-api"
 ```
 
-للفرونتيند:
+للفرونتيند (static build — لا يحتاج إعادة تشغيل PM2، Nginx يخدّمه مباشرة):
 ```bash
 ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
-  "cd /opt/anime-nova && pnpm --filter @workspace/anime-scraper run build && pm2 restart anime-nova-api"
+  "cd /opt/anime-nova && pnpm --filter @workspace/anime-scraper run build"
 ```
 
 **لا يوجد نشر تلقائي عبر GitHub** — التحديث يدوي مباشرة للـ VPS بعد كل تعديل.
