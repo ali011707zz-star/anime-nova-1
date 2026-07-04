@@ -483,9 +483,10 @@ export function RiftPlayer({
   const gestureStartY     = useRef(0);
   const gestureStartVal   = useRef(0);
   const barRef            = useRef<View>(null);
-  const barWidth          = useRef(1);
-  const barPageX          = useRef(0); // absolute X of bar's left edge on screen (for reliable seek)
-  const lastMoveX         = useRef(0); // last known absolute X during drag (fallback for release on Android)
+  const barWidth          = useRef(W);   // يبدأ بعرض الشاشة كـ fallback آمن قبل onLayout
+  const barPageX          = useRef(0);   // absolute X of bar's left edge on screen (for reliable seek)
+  const lastMoveX         = useRef(0);   // last known absolute X during drag (fallback for release on Android)
+  const grantLocationXRef = useRef(0);   // locationX النسبي لحدث Grant (أدق من pageX للنقر السريع)
   const resumedRef        = useRef(false);
   const subRafRef         = useRef<any>(null);
   const durationRef       = useRef(0);
@@ -1220,18 +1221,25 @@ export function RiftPlayer({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
-        /* على Android RTL يكون locationX غير موثوق (قد يُحسب من الحافة اليمنى أو يساوي صفراً).
-           نستخدم measureInWindow لتحديث barPageX بشكل موثوق، مع fallback فوري من آخر قيمة محفوظة. */
-        const grantPageX = e.nativeEvent.pageX;
-        lastMoveX.current = grantPageX;
+        const grantPageX  = e.nativeEvent.pageX;
+        const grantLocX   = e.nativeEvent.locationX; // نسبي للـ View — أدق من pageX للنقرات السريعة
+        lastMoveX.current        = grantPageX;
+        grantLocationXRef.current = grantLocX;
         setIsDragging(true);
-        // Immediate feedback using pre-measured barPageX (set from last onLayout → measureInWindow)
-        setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
-        // Refresh measurement asynchronously (corrects if layout shifted since last onLayout)
+
+        /* حساب فوري: نفضّل locationX (لا يعتمد على barPageX) إن كان ضمن حدود الشريط */
+        const bw = barWidth.current;
+        if (grantLocX >= 0 && grantLocX <= bw + 4) {
+          const raw = Math.min(1, Math.max(0, grantLocX / Math.max(1, bw)));
+          setDragPct(_nRTL ? 1 - raw : raw);
+        } else {
+          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
+        }
+
+        /* تحديث القياسات بشكل غير متزامن (يُصلح إن تغيّر تخطيط الشريط) */
         barRef.current?.measureInWindow((px, _py, pw) => {
           if (px >= 0) barPageX.current = px;
           if (pw > 1)  barWidth.current  = pw;
-          setDragPct(Math.max(0, Math.min(1, _calcPctFromAbsolute(grantPageX))));
         });
       },
       onPanResponderMove: (_, gs) => {
@@ -1242,9 +1250,29 @@ export function RiftPlayer({
         setDragPct(Math.max(0, Math.min(1, pct)));
       },
       onPanResponderRelease: (_, gs) => {
-        /* gs.moveX على بعض إصدارات Android يساوي 0 عند الرفع — نستخدم lastMoveX كـ fallback */
-        const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
-        const safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
+        /* نقرة سريعة (dx < 8px): نفضّل locationX المحفوظ — لا يعتمد على barPageX/barWidth.
+           لكن locationX قد يكون 0 على Android لأسباب داخلية (موثّق)؛ نتحقق أن الصفر
+           منطقي فعلاً (الطرف الأيسر من الشريط) وإلا نرجع لحساب pageX. */
+        let safePct: number;
+        const isPureTap = Math.abs(gs.dx) < 8 && Math.abs(gs.dy) < 8;
+        if (isPureTap) {
+          const loc = grantLocationXRef.current;
+          const bw  = barWidth.current;
+          /* اعتبر locationX صالحاً إن كان موجباً، أو صفراً مع نقرة في الطرف الأيسر فعلاً */
+          const isEdgeTap = lastMoveX.current <= barPageX.current + 4;
+          const locValid  = loc > 0 || (loc === 0 && isEdgeTap);
+          if (locValid && bw > 1) {
+            const raw = Math.min(1, Math.max(0, loc / bw));
+            safePct = _nRTL ? 1 - raw : raw;
+          } else {
+            /* fallback: pageX-based (Android RTL أو locationX=0 غير طرفي) */
+            const x = lastMoveX.current > 0 ? lastMoveX.current : gs.x0;
+            safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
+          }
+        } else {
+          const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
+          safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
+        }
         setIsDragging(false);
         seekRef.current(safePct * durationRef.current);
       },
