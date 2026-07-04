@@ -10314,13 +10314,16 @@ function pickH264Variant(masterBody: string, masterUrl: string): string | null {
   return pool[0].url;
 }
 
-function rewriteM3u8(manifest: string, baseUrl: string, _selfBase: string, ref: string): string {
+function rewriteM3u8(manifest: string, baseUrl: string, selfBase: string, ref: string): string {
   const base = new URL(baseUrl);
+  /* selfBase يجعل روابط الـ segments مطلقة (e.g. https://vps:8080/api/anime/seg-proxy?...)
+     بدلاً من نسبية (/api/anime/seg-proxy?...) — ExoPlayer وAVPlayer قد يُخطئان
+     في حساب base URL من manifest ذو query params معقدة مما يُفشل كل طلبات الـ segments. */
   const toProxy = (raw: string) => {
     let absUrl: string;
     try { absUrl = new URL(raw).href; }
     catch { try { absUrl = new URL(raw, base).href; } catch { return raw; } }
-    return `/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref)}`;
+    return `${selfBase}/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref)}`;
   };
   return manifest.split("\n").map(line => {
     const trimmed = line.trim();
@@ -10394,9 +10397,10 @@ router.get("/anime/hls-proxy", async (req, res) => {
     if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
     const ct = r.headers.get("content-type") || "";
     const masterBody = await r.text();
-    const proto = req.headers["x-forwarded-proto"] || "https";
-    const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
-    const selfBase = `${proto}://${host}`;
+    /* استخدم req.protocol (آمن — trust proxy مفعّل) وhost مع تنظيف proxy-chain */
+    const proto    = /^https?$/.test(req.protocol) ? req.protocol : "https";
+    const rawHost  = (req.headers["x-forwarded-host"] as string || req.get("host") || "localhost:8080").split(",")[0].trim();
+    const selfBase = `${proto}://${rawHost}`;
 
     /* ── mobile=1: اختر H.264 variant من master playlist ── */
     if (mobileMode) {
@@ -10575,9 +10579,9 @@ router.get("/anime/seg-proxy", async (req, res) => {
     const len = r.headers.get("content-length");
     if (ct.includes("mpegurl") || url.includes(".m3u8")) {
       const body = await r.text();
-      const proto = req.headers["x-forwarded-proto"] || "https";
-      const host  = req.headers["x-forwarded-host"] || req.headers.host || "localhost:8080";
-      const rewritten = rewriteM3u8(body, url, `${proto}://${host}`, ref || url);
+      const proto2   = /^https?$/.test(req.protocol) ? req.protocol : "https";
+      const rawHost2 = (req.headers["x-forwarded-host"] as string || req.get("host") || "localhost:8080").split(",")[0].trim();
+      const rewritten = rewriteM3u8(body, url, `${proto2}://${rawHost2}`, ref || url);
       const mCt = "application/vnd.apple.mpegurl";
       if (isCdnCacheable(url)) {
         cdnCache.set(cacheKey, { body: Buffer.from(rewritten), ct: mCt, ts: Date.now() }); // L1
