@@ -29,6 +29,11 @@ export type PlayerSource = {
   isArabic?: boolean;
   /** المزوّد يحتاج ترجمة ذكية تلقائية (مصدر ياباني بدون ترجمة عربية مدمجة) */
   wantsSmartSub?: boolean;
+  /**
+   * HTTP headers مخصّصة (Referer/Origin) تُرسَل مع كل طلب عبر ExoPlayer/AVPlayer.
+   * ضرورية لـ CDN تتحقق من Referer حين تذهب الـ segments مباشرةً (mobile=1).
+   */
+  headers?: Record<string, string>;
 };
 
 export interface SubCue { start: number; end: number; text: string }
@@ -499,10 +504,16 @@ export function RiftPlayer({
   const orientLockRef     = useRef<"left" | "right">("left");
 
   /* ─── expo-video player ─── */
-  /* نستخدم ref ثابت للـ URL الأولي حتى لا يُعيد useVideoPlayer
-     تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط) */
-  const _initUrlRef = useRef(sources[initialSourceIndex ?? 0]?.url || "");
-  const player = useVideoPlayer(_initUrlRef.current, (p) => {
+  /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
+     تهيئة المشغّل عند تغيير srcIdx (التبديل يتم عبر player.replace فقط).
+     نمرّر headers حتى يُرسلها ExoPlayer مع كل طلب (manifest + segments + redirects). */
+  const _initSrc = sources[initialSourceIndex ?? 0];
+  const _initVideoSrcRef = useRef<{ uri: string; headers?: Record<string, string> } | string>(
+    _initSrc?.url
+      ? (_initSrc.headers ? { uri: _initSrc.url, headers: _initSrc.headers } : _initSrc.url)
+      : "",
+  );
+  const player = useVideoPlayer(_initVideoSrcRef.current || null, (p) => {
     p.loop = false;
     p.volume = 1;
     p.play();
@@ -1091,7 +1102,10 @@ export function RiftPlayer({
     setWhisperStatus("idle");
     setWhisperLang("");
     try {
-      player.replace(newSrc.url);
+      /* نمرّر headers (Referer/Origin) حتى يُرسلها ExoPlayer مع segments و redirects */
+      const videoSrc: { uri: string; headers?: Record<string, string> } | string =
+        newSrc.headers ? { uri: newSrc.url, headers: newSrc.headers } : newSrc.url;
+      player.replace(videoSrc as any);
       /* play() is triggered in statusChange → readyToPlay once the stream is buffered */
     } catch {}
   }, [player, sources]);
