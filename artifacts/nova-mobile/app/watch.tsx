@@ -107,9 +107,9 @@ function resolveUrl(url: string | undefined, base: string): string {
   return resolved;
 }
 
-/* ── أولويات المصادر: KW → AW → HI → DU → rest ── */
+/* ── أولويات المصادر: KW → HI → AW → DU → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
-  kawaii: 100, animewitcher: 90, hianime: 80,
+  kawaii: 100, hianime: 95, animewitcher: 90,
   dulo_anim: 70, videasy_anim: 60, vidlink_anim: 55,
   anineko: 50, mitanime: 45, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20,
@@ -344,19 +344,19 @@ export default function WatchScreen() {
         if (!autoPlayFiredRef.current) {
           const good = newSrcs.find(isDirectPlayable);
           if (good) {
-            /* الأولوية: KW → AW → HI → DU → أي مصدر مباشر */
+            /* الأولوية: KW → HI → AW → DU → أي مصدر مباشر */
             const pickBest = (pool: Src[]): Src => {
               const direct = pool.filter(isDirectPlayable);
               return (
                 direct.find(s => s.site === "kawaii") ??
-                direct.find(s => s.site === "animewitcher") ??
                 direct.find(s => s.site === "hianime") ??
+                direct.find(s => s.site === "animewitcher") ??
                 direct.find(s => s.site === "dulo_anim") ??
                 direct[0]
               ) || good;
             };
-            /* تأخير 400ms — يمنح KW/AW فرصة الوصول قبل الاختيار */
-            const isHighPriority = ["kawaii", "animewitcher"].includes(site);
+            /* تأخير 400ms — يمنح KW/HI/AW فرصة الوصول قبل الاختيار */
+            const isHighPriority = ["kawaii", "hianime", "animewitcher"].includes(site);
             setTimeout(() => {
               if (!isMountedRef.current || autoPlayFiredRef.current) return;
               /* أعد جمع كل المصادر المتاحة حتى الآن */
