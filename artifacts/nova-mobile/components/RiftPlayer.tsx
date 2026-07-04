@@ -1771,8 +1771,9 @@ export function RiftPlayer({
             style={[s.bottomSection, { paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 12 }]}
           >
             {/* ── أزرار تخطي المقدمة / النهاية ── */}
+            {/* direction:'ltr' يضمن أن الأيقونة دائماً قبل النص بصرياً بغض النظر عن RTL */}
             {(inIntroRange || inOutroRange) && (
-              <View style={s.skipBtnRow}>
+              <View style={[s.skipBtnRow, { direction: "ltr" }]}>
                 {inIntroRange && (
                   <Pressable onPress={doSkipIntro} style={s.skipPillIntro} hitSlop={8}>
                     <Ionicons name="play-forward" size={13} color="#92400e" />
@@ -1788,14 +1789,17 @@ export function RiftPlayer({
               </View>
             )}
 
-            {/* الوقت — الوقت الحالي أقصى اليسار، المدة الكلية أقصى اليمين */}
-            {/* في RTL يُعكس left/right لأن Yoga يتبادلهما في وضع RTL */}
-            <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
+            {/* الوقت — الوقت الحالي أقصى اليسار الفيزيائي، المدة الكلية أقصى اليمين الفيزيائي */}
+            {/* direction:'ltr' يلغي تأثير RTL على left/right هنا لأن المشغّل دائماً LTR */}
+            <View style={{ position: "relative", height: 18, marginBottom: 2, direction: "ltr" }}>
               <Text style={[s.timeText, { position: "absolute", left: 0 }]}>{fmtTime(position)}</Text>
               <Text style={[s.timeText, { position: "absolute", right: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
-            {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي) */}
+            {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي لمشغلات الفيديو)
+                direction:'ltr' يُجبر Yoga على تخطيط LTR حتى في التطبيقات العربية RTL،
+                مما يجعل left:0%→100% من اليسار الفيزيائي وليس من يمين RTL.
+                هذا يُصلح: (1) ملء الشريط (2) موضع الـ thumb (3) حساب الـ seek */}
             {(() => {
               const rawFill = (isDragging ? dragPct : progress) * 100;
               const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
@@ -1804,7 +1808,7 @@ export function RiftPlayer({
               return (
                 <View
                   ref={barRef}
-                  style={[s.progressWrap, isDragging && s.progressWrapDragging]}
+                  style={[s.progressWrap, isDragging && s.progressWrapDragging, { direction: "ltr" }]}
                   onLayout={(e) => {
                     barWidth.current = e.nativeEvent.layout.width || 1;
                     barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
