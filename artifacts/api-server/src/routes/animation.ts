@@ -2047,14 +2047,29 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   .filter(r => r.status === "fulfilled")
                   .map(r => (r as PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; serverAccessible: boolean }>).value);
 
+                // Helper: detect time-limited URLs with expired tokens
+                const isTokenExpired = (url: string): boolean => {
+                  try {
+                    const u = new URL(url);
+                    const expiry = u.searchParams.get("e") || u.searchParams.get("expires") || u.searchParams.get("exp");
+                    if (expiry) {
+                      const expiryTs = parseInt(expiry, 10);
+                      if (!isNaN(expiryTs) && expiryTs < Math.floor(Date.now() / 1000)) return true;
+                    }
+                  } catch { /* ignore */ }
+                  return false;
+                };
+
                 for (const { proxied, rawUrl: sRaw, label, serverAccessible } of probed) {
                   if (serverAccessible) {
                     // CDN accessible from server → use hls-proxy (handles CORS + seg rewriting)
                     sendSource(proxied, label, sRaw, proxied);
-                  } else {
-                    // CDN blocks server IPs (403) → send raw URL for browser direct access
+                  } else if (!isTokenExpired(sRaw)) {
+                    // CDN blocks server IPs → send raw URL for direct mobile access
+                    // (skip if URL has already-expired time-limited token)
                     sendSource(sRaw, label, sRaw, sRaw);
                   }
+                  // else: expired token URL — skip entirely
                 }
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
             })(),
@@ -3001,7 +3016,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const cookie = await duloGetSession();
           const hdrs   = duloRequestHeaders(cookie);
           // Confirmed working from VPS: purstream (TV+Movie); vidrock returns 0 from VPS IPs
-          const providers = ["vidrock", "purstream"];
+          // purstream only — vidrock consistently returns 0 from VPS IPs
+          const providers = ["purstream"];
+          const DULO_PROBE_PORT = parseInt(String(process.env.PORT || 5000), 10);
           await Promise.allSettled(providers.map(async (prov) => {
             try {
               const apiUrl = type === "tv"
@@ -3016,7 +3033,21 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (!isHls) continue;
                 const proxied = wrapHls(src.url, `${DULO_TV_BASE}/`);
                 const label = `Dulo · ${prov}${src.title ? " · " + src.title : ""}`;
-                sendSource(proxied, label, src.url, proxied);
+                // Probe CDN — some CDNs block datacenter IPs (403) → send raw URL for direct mobile access
+                let finalUrl = proxied;
+                let finalRaw = src.url;
+                try {
+                  const probe = await fetch(`http://127.0.0.1:${DULO_PROBE_PORT}${proxied}`, {
+                    signal: AbortSignal.timeout(5_000),
+                  });
+                  if (!probe.ok && probe.status !== 206) {
+                    // CDN blocks server IP → raw URL for mobile to fetch directly
+                    finalUrl = src.url;
+                  }
+                } catch {
+                  finalUrl = src.url;
+                }
+                sendSource(finalUrl, label, finalRaw, finalUrl);
               }
             } catch (err: any) { console.warn(`[dulo_anim] ${prov} error: ${err?.message}`); }
           }));
