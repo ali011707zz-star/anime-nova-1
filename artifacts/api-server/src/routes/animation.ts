@@ -20,7 +20,7 @@ const RUBY_B    = "https://rubystm.com";
 
 // ── Icefy (streams.icefy.top) — عبر Orkestr EU relay ─────────────────────────
 // API: GET /movie/{tmdbId} → {"stream":"https://streams.icefy.top/{hash}/master.m3u8"}
-// CF blocks Replit IPs → route API + HLS through anime-nova.orkestr.run (EU IP)
+// CF blocks Replit IPs → route API + HLS through animenovaa.duckdns.org (EU IP)
 
 // ── SeePanal (panel.seepanel.top) ─────────────────────────────────────────────
 const SP_BASE = "https://panel.seepanel.top/api";
@@ -253,7 +253,7 @@ async function cfOrOrkestGet(url: string): Promise<string> {
     if (!isCfPage(html)) return html;
   } catch { /* fall through */ }
   // Fallback: Orkestr relay (EU IP, not Replit datacenter)
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
   const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
   const orkHeaders: Record<string, string> = {};
   if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
@@ -269,7 +269,7 @@ async function cfOrOrkestGet(url: string): Promise<string> {
 
 // Orkestr direct GET — يتجاوز CF proxy تماماً (مفيد للمواقع التي تحجب Replit IPs وcf_proxy معاً)
 async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string> {
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
   const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
   const orkHeaders: Record<string, string> = {};
   if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
@@ -301,7 +301,7 @@ async function cfOrOrkestPost(url: string): Promise<string> {
     }
   } catch { /* fall through */ }
   // Fallback: Orkestr POST relay
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
   const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
   const orkHeaders2: Record<string, string> = {};
   if (ORKESTR_API_KEY) orkHeaders2["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
@@ -1443,7 +1443,7 @@ router.get("/animation/quick-check", async (req: Request, res: Response) => {
   // Quick probe via Icefy (movie only) — fast EU relay check
   try {
     if (type === "movie") {
-      const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+      const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
       const raw = await fetch(
         `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(`https://streams.icefy.top/movie/${tmdbId}`)}`,
         { signal: controller.signal }
@@ -2466,7 +2466,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         if (type !== "movie") return; // TV endpoint format غير مكتشف
         try {
-          const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           send("status", { msg: "Icefy: جاري الاستخراج…" });
           const raw = await orkestDirectGet(`https://streams.icefy.top/movie/${tmdbId}`, 12_000);
           const data = JSON.parse(raw) as { stream?: string };
@@ -2483,7 +2483,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       scrapeAnimCached("nebula", async () => {
         if (!tmdbId) return;
         try {
-          const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           send("status", { msg: "Nebula: جاري الاستخراج…" });
           const apiUrl = type === "movie"
             ? `https://nebula.aether.cx/movie/${tmdbId}?ser=tik`
@@ -3030,7 +3030,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         if (type !== "movie") return;
         try {
-          const ORKESTR = process.env["ORKESTR_URL"] || "https://anime-nova.orkestr.run";
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           const VIXSRC_BASE = "https://vixsrc.to";
           send("status", { msg: "VixSrc: جاري الاستخراج…" });
           // Step 1: Get embed URL with token/expires from API

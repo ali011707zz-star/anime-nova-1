@@ -1,6 +1,6 @@
 # نشر Nova Anime على Cloudflare Pages + APK
 
-## الرابط الخلفي: https://anime-nova.orkestr.run
+## الرابط الخلفي: https://animenovaa.duckdns.org
 
 ---
 
@@ -17,7 +17,7 @@
 ### متغيرات البيئة (Environment Variables):
 | المتغير | القيمة |
 |---------|--------|
-| `VITE_API_URL` | `https://anime-nova.orkestr.run` |
+| `VITE_API_URL` | `https://animenovaa.duckdns.org` |
 | `NODE_VERSION` | `20` |
 | `BASE_PATH` | `/` |
 
@@ -44,7 +44,7 @@ eas build --platform android --profile preview
 
 ### EXPO_PUBLIC_DOMAIN مضبوط تلقائياً في eas.json على:
 ```
-https://anime-nova.orkestr.run
+https://animenovaa.duckdns.org
 ```
 
 ---

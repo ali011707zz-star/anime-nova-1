@@ -17,7 +17,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "https://anime-nova.orkestr.run"
+        "EXPO_PUBLIC_DOMAIN": "https://animenovaa.duckdns.org"
       }
     },
     "production": {
@@ -25,8 +25,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_DOMAIN": "https://anime-nova.orkestr.run",
-        "EXPO_PUBLIC_API_URL": "https://anime-nova.orkestr.run"
+        "EXPO_PUBLIC_DOMAIN": "https://animenovaa.duckdns.org",
+        "EXPO_PUBLIC_API_URL": "https://animenovaa.duckdns.org"
       }
     }
   }
