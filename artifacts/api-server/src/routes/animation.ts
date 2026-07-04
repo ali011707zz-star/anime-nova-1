@@ -3000,8 +3000,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Dulo: جاري الاستخراج…" });
           const cookie = await duloGetSession();
           const hdrs   = duloRequestHeaders(cookie);
-          // TV providers: vidrock + purstream; Movie: vidrock only
-          const providers = type === "tv" ? ["vidrock", "purstream"] : ["vidrock"];
+          // Confirmed working from VPS: purstream (TV+Movie); vidrock returns 0 from VPS IPs
+          const providers = ["vidrock", "purstream"];
           await Promise.allSettled(providers.map(async (prov) => {
             try {
               const apiUrl = type === "tv"
