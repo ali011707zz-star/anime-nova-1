@@ -92,6 +92,29 @@ function isEmbedSrc(s: Src): boolean {
 function getPlayUrl(s: Src): string {
   return s.directUrl || s.url || "";
 }
+
+/**
+ * استخراج Referer/Origin من رابط proxy (hls-proxy أو video-proxy).
+ * يُمرَّران لـ ExoPlayer/AVPlayer كـ HTTP headers مع كل طلب:
+ * - segments مباشرة (mobile=1 + directSegs=true)
+ * - MP4 بعد 307 redirect (mobile=1 + video-proxy)
+ * بدون هذه الـ headers يعيد CDN 403 لأن الطلب يبدو من مصدر مجهول.
+ */
+function extractProxyHeaders(url: string): Record<string, string> | undefined {
+  if (!url) return undefined;
+  try {
+    const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
+    const u = new URL(fullUrl);
+    const ref = u.searchParams.get("ref");
+    if (!ref) return undefined;
+    let origin = "";
+    try { origin = new URL(ref).origin; } catch {}
+    return origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
   let resolved = url.startsWith("/") ? base + url : url;
@@ -500,16 +523,22 @@ export default function WatchScreen() {
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const srcs = directSrcs;
-    return srcs.map(s => ({
-      url: getPlayUrl(s),
-      label: `سيرفر · ${getSiteTag(s.site || "")}`,
-      quality: getSrcQuality(s),
-      subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
-      isArabic: ["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher"].includes(s.site || ""),
-      wantsSmartSub: !["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher"].includes(s.site || ""),
-      skipIntro: s.skipIntro,
-      skipOutro: s.skipOutro,
-    })).filter(s => s.url);
+    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher"]);
+    return srcs.map(s => {
+      const url = getPlayUrl(s);
+      return {
+        url,
+        /* headers: Referer/Origin مستخرجة من رابط الـ proxy — تُرسَل مع كل طلب CDN */
+        headers: extractProxyHeaders(url),
+        label: `سيرفر · ${getSiteTag(s.site || "")}`,
+        quality: getSrcQuality(s),
+        subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
+        isArabic: ARABIC_SITES.has(s.site || ""),
+        wantsSmartSub: !ARABIC_SITES.has(s.site || ""),
+        skipIntro: s.skipIntro,
+        skipOutro: s.skipOutro,
+      };
+    }).filter(s => s.url);
   }, [directSrcs, globalSubUrl]);
 
   /* ── Frozen sources: تُجمَّد لحظة اختيار المستخدم للمصدر ولا تتغير أثناء التشغيل.
