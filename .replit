@@ -3,7 +3,7 @@ modules = ["nodejs-20", "python-3.11", "bash", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+run = ["sh", "-c", "cd artifacts/api-server && pnpm run start"]
 build = ["sh", "-c", "pnpm install --prefer-offline && pnpm --filter @workspace/api-server run build && VITE_API_URL= pnpm --filter @workspace/anime-scraper run build"]
 
 [deployment.postBuild]
@@ -25,6 +25,10 @@ args = "CF Proxy"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "Start application"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Backend API"
 
 [[workflows.workflow]]
 name = "CF Proxy"
@@ -48,6 +52,18 @@ waitForPort = 5000
 
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow]]
+name = "Backend API"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd artifacts/api-server && PORT=8080 NODE_ENV=development pnpm run dev"
+waitForPort = 8080
 
 [agent]
 stack = "FLASK_VANILLA_JS"
