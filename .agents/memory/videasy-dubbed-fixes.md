@@ -44,6 +44,23 @@ Also enforces `https:` protocol only.
 
 ---
 
+## WebView Removal (2026-07-04)
+
+All three mobile watch screens now have NO WebView for native (iOS/Android):
+- `nova-mobile/app/dubbed/watch.tsx` — WebView import removed; all fallback paths now show error UI + retry
+- `nova-mobile/app/animation/watch.tsx` — WebView embed block replaced with info card (with Linking.openURL for embed sources)
+- `nova-mobile/app/watch.tsx` — WebView embed block replaced with info card
+
+**Why:** arabic-toons.com episode pages don't render in WebView (blank white screen). vidmoly/mega embed sources genuinely can't play natively — better to show info card than blank WebView.
+
+**How to apply:** Never use WebView as a video fallback in mobile watch screens. Show explicit error state instead.
+
+## streamUrl Fix in dubbed/watch.tsx
+
+Changed `const streamUrl = proxyUrl ?? rawUrl!` → `const streamUrl = rawUrl ?? proxyUrl!`.
+
+**Why:** proxyUrl goes through VPS which is blocked by foupix CDN. rawUrl goes directly from mobile (residential IP) to foupix CDN — which works. The old code always used proxy, causing 403 errors.
+
 ## Testing Notes
 
 - All 6 "failing" sources (AK, AN, HI, DL, VE, VL) actually work on VPS when called with valid auth token.

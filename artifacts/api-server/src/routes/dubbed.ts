@@ -189,10 +189,11 @@ router.get("/dubbed/watch-src", async (req, res) => {
     const html = await cfGet(epUrl, AT_BASE + "/", 18000);
     if (!html) { res.status(502).json({ error: "failed to fetch episode page" }); return; }
 
-    // Helper: build proxied or HLS-proxy URL for the video.
-    // foupix tokens embed the IP that fetched the episode page (our server IP),
-    // so we MUST always proxy — returning the raw URL to the client would fail
-    // because the client's IP doesn't match the token's embedded IP.
+    // Helper: build proxied URL + return rawUrl for mobile clients.
+    // foupix CDN (stream.foupix.com:8443) blocks datacenter IPs (VPS/Replit).
+    // Mobile devices on residential IPs CAN stream rawUrl directly.
+    // The `ips` query param is a constant tied to the content file — NOT to any IP.
+    // nova-mobile/dubbed/watch.tsx picks rawUrl first, proxyUrl as fallback.
     function resolveVideoUrl(rawUrl: string, type: "hls" | "mp4"): { hlsUrl: string; rawUrl: string; type: string } {
       if (type === "hls") {
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;

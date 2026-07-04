@@ -5,7 +5,6 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import WebView from "react-native-webview";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -638,15 +637,19 @@ export default function WatchScreen() {
         </View>
       );
     }
+    // Native: no WebView — show info card
     return (
-      <View style={{ flex: 1, backgroundColor: "#000" }}>
-        <WebView source={{ uri: embedUrl }} style={{ flex: 1 }} allowsFullscreenVideo allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false} javaScriptEnabled domStorageEnabled />
-        <View style={[d.embedTopRow, { paddingTop: topPad + 4 }]}>
-          <Text style={[d.playerTitle, { flex: 1 }]} numberOfLines={1}>{displayTitle}</Text>
-          <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={d.playerBackBtn}>
-            <Ionicons name="arrow-back" size={18} color="#fff" />
-          </Pressable>
+      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 16 }}>
+        <Pressable onPress={() => { saveProgress(); setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </Pressable>
+        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
         </View>
+        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>هذا المصدر يحتاج التطبيق الأصلي</Text>
+        <Pressable onPress={() => { saveProgress(); setScreen("picker"); }}>
+          <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
+        </Pressable>
       </View>
     );
   }
