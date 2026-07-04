@@ -1,3 +1,4 @@
+- [CineSrc integration](cinesrc-integration.md) — cinesrc.st in animation.ts+anime.ts; VPS IP blocked for server actions (graceful fail); SubtleCrypto Proxy patch documented.
 - [Anime NOVA startup fix](anime-nova-startup.md) — DB migration must run AFTER server starts listening, not before, or the workflow port-open timeout fails.
 - [VPS Deployment](vps-deployment.md) — خادم 95.182.93.105 Ubuntu 24.04; Telegram webhook uses self-signed cert uploaded to Telegram API; CHANNEL_ID in .env + DB; token DB-only via config-sync.
 - [MXPlayer service search approach](mxplayer-search.md) — use /search/result (not /search/suggest); tvshow needs season→episode chain; CDN prefix is isa-1.mxplay.com.
