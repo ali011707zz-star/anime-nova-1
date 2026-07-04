@@ -509,16 +509,7 @@ export default function AnimeDetailScreen() {
           <View style={d.section}>
             <SectionHeader title="الإعلان الدعائي" />
             <Pressable
-              onPress={() => {
-                if (Platform.OS === "web") {
-                  setShowTrailer(true);
-                } else {
-                  // على الأجهزة الحقيقية: يفتح تطبيق YouTube مباشرة (WebView يحجب YouTube)
-                  Linking.openURL(`https://www.youtube.com/watch?v=${trailerYT}`).catch(() => {
-                    setShowTrailer(true);
-                  });
-                }
-              }}
+              onPress={() => setShowTrailer(true)}
               style={d.trailerBtn}
             >
               <Image
@@ -670,7 +661,7 @@ export default function AnimeDetailScreen() {
           </View>
           <WebView
             source={{
-              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"><style>*{margin:0;padding:0;background:#000;}html,body{width:100%;height:100%;overflow:hidden;}iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:none;}</style></head><body><iframe src="https://www.youtube.com/embed/${trailerYT}?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1&enablejsapi=1&origin=https://www.youtube.com" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>`,
+              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"><style>*{margin:0;padding:0;background:#000;}html,body{width:100%;height:100%;overflow:hidden;}iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:none;}</style></head><body><iframe src="https://www.youtube-nocookie.com/embed/${trailerYT}?autoplay=1&playsinline=1&rel=0&modestbranding=1&fs=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>`,
             }}
             style={{ flex: 1 }}
             allowsFullscreenVideo

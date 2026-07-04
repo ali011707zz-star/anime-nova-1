@@ -386,16 +386,7 @@ export default function AnimationDetailScreen() {
         <View style={s.section}>
           <Text style={s.sectionTitle}>الإعلان الدعائي</Text>
           <Pressable
-            onPress={() => {
-              if (Platform.OS === "web") {
-                setShowTrailer(true);
-              } else {
-                // على الأجهزة الحقيقية: يفتح تطبيق YouTube مباشرة (WebView يحجب YouTube)
-                Linking.openURL(`https://www.youtube.com/watch?v=${trailerKey}`).catch(() => {
-                  setShowTrailer(true); // fallback للـ WebView إذا فشل الفتح
-                });
-              }
-            }}
+            onPress={() => setShowTrailer(true)}
             style={s.trailerBtn}
           >
             <Image
