@@ -60,6 +60,8 @@ type Props = {
   autoPlayNext?: boolean;
   totalEps?: number;
   episodeTitle?: string;
+  /** يُستدعى عند فشل جميع المصادر المتاحة */
+  onError?: () => void;
 };
 
 /* ─── Constants ─── */
@@ -357,6 +359,7 @@ export function RiftPlayer({
   autoPlayNext = true,
   totalEps = 999,
   episodeTitle,
+  onError,
 }: Props) {
   const insets = useSafeAreaInsets();
 
@@ -593,18 +596,19 @@ export function RiftPlayer({
   const consecutiveErrorsRef = useRef(0);
   useEffect(() => {
     if (!error) { consecutiveErrorsRef.current = 0; setIsAutoCycling(false); return; }
-    if (sources.length <= 1) { setIsAutoCycling(false); return; }
+    if (sources.length <= 1) { setIsAutoCycling(false); onError?.(); return; }
     consecutiveErrorsRef.current += 1;
     /* لا تدور في حلقة — فقط جرّب المصادر التالية (بدون wrap-around) */
     const nextIdx = srcIdx + 1;
     if (nextIdx >= sources.length || consecutiveErrorsRef.current > sources.length) {
       setIsAutoCycling(false); // كل المصادر جُرِّبت، أوقف الدوران
+      onError?.();
       return;
     }
     setIsAutoCycling(true); // suppress full error UI — show silent loading instead
     const t = setTimeout(() => switchSource(nextIdx), 600);
     return () => clearTimeout(t);
-  }, [error, srcIdx, sources.length]); // eslint-disable-line
+  }, [error, srcIdx, sources.length, onError]); // eslint-disable-line
 
   /* ─── Progress polling ─── */
   useEffect(() => {

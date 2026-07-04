@@ -44,7 +44,7 @@ const SITE_TAG: Record<string, string> = {
   anikoto: "AK", anikototv: "ATV", animekai: "KI", hianime: "HI",
   anineko: "AN", mitanime: "MT",
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
-  animetime: "AT", animepahe: "AP", dulo_anim: "DL",
+  animetime: "AT", animepahe: "AP", dulo_anim: "DU",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -106,6 +106,11 @@ function resolveUrl(url: string | undefined, base: string): string {
   }
   return resolved;
 }
+
+/* ── مصادر تُعرض في القائمة لكن تُشغَّل عبر مشغّل الويب (WebView) ── */
+const WEBVIEW_PLAYER_SITES = new Set([
+  "anineko", "anikoto", "dulo_anim", "hianime", "videasy_anim", "animetime",
+]);
 
 /* ── أولويات المصادر: KW → HI → AW → DU → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
@@ -447,9 +452,21 @@ export default function WatchScreen() {
 
   /* ── Play a source ── */
   const playSrc = useCallback((src: Src) => {
-    setPlayingSrc(src);
     const thumb = coverUrl || (anime ? `https://img.anili.st/media/${anime}` : "");
     if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: thumb, updatedAt: Date.now() });
+
+    /* مصادر AN/AK/DU/HI/VE/AT — تُفتح عبر مشغّل الويب WebView */
+    if (WEBVIEW_PLAYER_SITES.has(src.site || "")) {
+      const base = getBaseUrl();
+      setPlayingSrc({
+        url: `${base}/watch?anime=${anime}&ep=${epNum}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}`,
+        isEmbed: true,
+      } as Src);
+      setScreen("embed");
+      return;
+    }
+
+    setPlayingSrc(src);
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
     if (Platform.OS === "web") {
       setScreen(isEmbedSrc(src) ? "embed" : "native");
@@ -735,26 +752,6 @@ export default function WatchScreen() {
           </View>
         )}
 
-        {/* ── Web App Player (مشاهدة عبر المتصفح) ── */}
-        {!loading && anime && (
-          <Pressable
-            onPress={() => {
-              const base = getBaseUrl();
-              setPlayingSrc({ url: `${base}/watch?anime=${anime}&ep=${epNum}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}`, isEmbed: true } as Src);
-              setScreen("embed");
-            }}
-            style={({ pressed }) => [d.webAppBtn, { opacity: pressed ? 0.75 : 1 }]}
-          >
-            <View style={d.webAppIcon}>
-              <Ionicons name="globe-outline" size={20} color="#8B5CF6" />
-            </View>
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={d.webAppTitle}>مشاهدة عبر المتصفح</Text>
-              <Text style={d.webAppSub}>جميع المصادر المتاحة على موقع نوفا</Text>
-            </View>
-            <Ionicons name="chevron-back" size={15} color="rgba(139,92,246,0.5)" />
-          </Pressable>
-        )}
 
         {/* ── Loading indicator while more sources stream in ── */}
         {loading && allSrcs.length > 0 && (
