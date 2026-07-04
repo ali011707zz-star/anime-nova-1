@@ -37,15 +37,19 @@ export type RemoteConfig = {
 
 export const DEFAULT_CONFIG: RemoteConfig = {
   sources: {
-    shahiid: true,
-    animelek: true,
-    animedar: true,
-    anikoto: true,
-    anineko: true,
-    videasy: true,
-    vidlink: true,
-    vyla: true,
-    starcima: true,
+    // مصادر يابانية مترجمة (HI → DU → اولوية عالية)
+    kawaii: true, animewitcher: true, hianime: true, dulo_anim: true,
+    // مصادر سريعة (ياباني / إنجليزي)
+    vidlink_anim: true, anineko: true, anikoto: true,
+    vidfast: true, anikototv: true, animekai: true,
+    // videasy_anim معطّل مؤقتاً: API endpoint تغيّر
+    videasy_anim: false,
+    // مصادر عربية
+    shahiid: true, animelek: true, animedar: true,
+    okanime: true, ristoanime: true, animeify: true,
+    animeday: true, arabseed: true, anime4up2: true,
+    mycima: true, topcinemaa: true, animephoenix: true,
+    faselhd_db: true, animetime: true,
   },
   announcements: [],
   features: {
