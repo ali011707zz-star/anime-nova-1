@@ -10314,17 +10314,40 @@ function pickH264Variant(masterBody: string, masterUrl: string): string | null {
   return pool[0].url;
 }
 
-function rewriteM3u8(manifest: string, baseUrl: string, selfBase: string, ref: string): string {
+/**
+ * rewriteM3u8 — يُعيد كتابة روابط الـ segments والـ keys داخل manifest.
+ *
+ * directSegs=true  (موبايل): يُحوّل الروابط النسبية إلى مطلقة CDN مباشرة.
+ *   → لا تمر أي بيانات فيديو عبر الـ VPS — صفر bandwidth للـ segments.
+ *   → React Native لا يعاني من CORS فيمكنه جلب CDN مباشرة.
+ *
+ * directSegs=false (ويب): يُمرر الـ segments عبر seg-proxy لتجاوز CORS.
+ *   → المتصفح يحتاج الـ proxy لأن CDNs تُرفض بـ CORS أو Referer block.
+ */
+function rewriteM3u8(
+  manifest: string,
+  baseUrl: string,
+  selfBase: string,
+  ref: string,
+  directSegs = false,
+): string {
   const base = new URL(baseUrl);
-  /* selfBase يجعل روابط الـ segments مطلقة (e.g. https://vps:8080/api/anime/seg-proxy?...)
-     بدلاً من نسبية (/api/anime/seg-proxy?...) — ExoPlayer وAVPlayer قد يُخطئان
-     في حساب base URL من manifest ذو query params معقدة مما يُفشل كل طلبات الـ segments. */
-  const toProxy = (raw: string) => {
-    let absUrl: string;
-    try { absUrl = new URL(raw).href; }
-    catch { try { absUrl = new URL(raw, base).href; } catch { return raw; } }
+
+  const toAbsolute = (raw: string): string => {
+    try { return new URL(raw).href; }
+    catch { try { return new URL(raw, base).href; } catch { return raw; } }
+  };
+
+  const toProxy = (raw: string): string => {
+    const absUrl = toAbsolute(raw);
+    if (directSegs) {
+      /* موبايل: الرابط المطلق مباشرةً — ExoPlayer/AVPlayer يتصل بالـ CDN دون وساطة */
+      return absUrl;
+    }
+    /* ويب: مرّر عبر seg-proxy لتجاوز CORS وإضافة Referer */
     return `${selfBase}/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref)}`;
   };
+
   return manifest.split("\n").map(line => {
     const trimmed = line.trim();
     if (!trimmed) return line;
@@ -10402,7 +10425,7 @@ router.get("/anime/hls-proxy", async (req, res) => {
     const rawHost  = (req.headers["x-forwarded-host"] as string || req.get("host") || "localhost:8080").split(",")[0].trim();
     const selfBase = `${proto}://${rawHost}`;
 
-    /* ── mobile=1: اختر H.264 variant من master playlist ── */
+    /* ── mobile=1: اختر H.264 variant + segments مباشرة للـ CDN (صفر bandwidth proxy) ── */
     if (mobileMode) {
       const h264Url = pickH264Variant(masterBody, baseForSegments);
       if (h264Url) {
@@ -10410,7 +10433,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
           const vr = await fetch(h264Url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
           if (vr.ok) {
             const variantBody = await vr.text();
-            const rewritten = rewriteM3u8(variantBody, h264Url, selfBase, ref || url);
+            /* directSegs=true: روابط الـ segments تذهب مباشرة للـ CDN — لا تمر عبر VPS */
+            const rewritten = rewriteM3u8(variantBody, h264Url, selfBase, ref || url, true);
             res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -10420,8 +10444,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
           }
         } catch { /* تابع بالـ master إن فشل جلب الـ variant */ }
       }
-      /* الـ master ليس playlist متعدد variants أو فشل جلب الـ variant — أعِد master كما هو */
-      const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url);
+      /* الـ master ليس playlist متعدد variants أو فشل جلب الـ variant — أعِد master مع direct segs */
+      const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, true);
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -10430,7 +10454,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
       return;
     }
 
-    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url);
+    /* ويب (بدون mobile=1): segments تمر عبر seg-proxy لتجاوز CORS */
+    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, false);
     const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
     if (isCdnCacheable(url)) {
       cdnCache.set(effectiveCacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
@@ -10448,6 +10473,7 @@ router.get("/anime/video-proxy", async (req, res) => {
   const rawUrl    = (req.query.url    as string || "").trim();
   let ref         = (req.query.ref    as string || "").trim();
   let originParam = (req.query.origin as string || "").trim();
+  const isMobile  = req.query.mobile === "1";
   if (!rawUrl) { res.status(400).send("url required"); return; }
   let url: string;
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
@@ -10455,6 +10481,15 @@ router.get("/anime/video-proxy", async (req, res) => {
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (originParam) try { originParam = decodeURIComponent(originParam); } catch { originParam = ""; }
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
+
+  /* موبايل: أعد توجيهاً مباشراً للـ CDN بدلاً من تمرير البيانات عبر VPS.
+     React Native لا يعاني من CORS لذا يمكنه الاتصال بالـ CDN مباشرة.
+     307 Temporary Redirect يحافظ على الـ method (GET/HEAD) ولا يُخزّن. */
+  if (isMobile) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.redirect(307, url);
+    return;
+  }
 
   // Validate origin override: must be a well-formed http/https URL, never private/internal ranges
   let validatedOrigin = "";
