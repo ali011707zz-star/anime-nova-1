@@ -10454,10 +10454,10 @@ router.get("/anime/hls-proxy", async (req, res) => {
       return;
     }
 
-    /* ويب: segments مباشرة للـ CDN (directSegs=true) — لا تمر أي بيانات فيديو عبر الخادم.
-       هذا يُلغي استهلاك bandwidth الـ seg-proxy تمامًا.
-       المتصفح يجلب الـ segments مباشرة من CDN عبر hls.js. */
-    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, true);
+    /* ويب: segments عبر seg-proxy (directSegs=false) — أغلب الـ CDN تتطلب Referer/Origin
+       صحيح لا يستطيع المتصفح إرساله عند الاتصال المباشر (CORS/Referer block).
+       الخادم فقط يقدر يضيف الـ headers الصحيحة، لذلك لازم يمر عبر seg-proxy. */
+    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, false);
     const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
     if (isCdnCacheable(url)) {
       cdnCache.set(effectiveCacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
@@ -10484,12 +10484,44 @@ router.get("/anime/video-proxy", async (req, res) => {
   if (originParam) try { originParam = decodeURIComponent(originParam); } catch { originParam = ""; }
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* إعادة توجيه مباشرة للـ CDN لجميع العملاء (موبايل وويب).
-     لا تمر أي بيانات MP4/فيديو عبر الخادم — صفر bandwidth للفيديو.
-     307 Temporary Redirect: المتصفح يتبع الـ redirect ويتصل بالـ CDN مباشرة. */
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Range");
-  res.redirect(307, url);
+  /* موبايل: ExoPlayer/AVPlayer يقدر يضيف Referer/Origin بنفسه فيتصل مباشرة بالـ CDN
+     (307 redirect يوفّر bandwidth الخادم). */
+  if (isMobile) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range");
+    res.redirect(307, url);
+    return;
+  }
+
+  /* ويب: المتصفح لا يقدر يرسل Referer/Origin مخصّص عند اتباع redirect،
+     وأغلب CDN تتطلبهم فيرفض الطلب المباشر (CORS/403). لازم نمرّر البيانات
+     عبر الخادم مع الـ headers الصحيحة. */
+  let origin = originParam;
+  if (!origin) try { origin = new URL(ref || url).origin; } catch {}
+  if (!origin) try { origin = new URL(url).origin; } catch {}
+
+  try {
+    const upstreamHeaders: Record<string, string> = { ...HLS_PROXY_HDRS(ref || url, origin) };
+    if (req.headers.range) upstreamHeaders["Range"] = req.headers.range as string;
+
+    const r = await fetch(url, { headers: upstreamHeaders, signal: AbortSignal.timeout(20000), redirect: "follow" });
+    if (!r.ok && r.status !== 206) { res.status(r.status).send(`upstream ${r.status}`); return; }
+
+    res.status(r.status);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range");
+    res.setHeader("Content-Type", r.headers.get("content-type") || "video/mp4");
+    const cl = r.headers.get("content-length"); if (cl) res.setHeader("Content-Length", cl);
+    const cr = r.headers.get("content-range"); if (cr) res.setHeader("Content-Range", cr);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-store");
+
+    if (!r.body) { res.end(); return; }
+    const { Readable } = await import("node:stream");
+    Readable.fromWeb(r.body as any).pipe(res);
+  } catch (e: any) {
+    if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`);
+  }
 });
 
 router.get("/anime/seg-proxy", async (req, res) => {
@@ -10504,13 +10536,30 @@ router.get("/anime/seg-proxy", async (req, res) => {
   let origin = ""; try { origin = new URL(ref || url).origin; } catch {}
   if (!origin) try { origin = new URL(url).origin; } catch {}
 
-  /* seg-proxy: أعِد التوجيه مباشرة للـ CDN — لا تمر بيانات الـ segment عبر الخادم.
-     hls-proxy صار يُضمّن روابط CDN مطلقة في الـ manifest (directSegs=true)
-     لذا هذا الـ route لا يُستدعى إلا من كود قديم أو استثنائي.
-     307 Temporary Redirect: المتصفح/hls.js يتبعه ويجلب الـ segment من CDN مباشرة. */
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Range");
-  res.redirect(307, url);
+  /* seg-proxy: مرّر بيانات الـ segment عبر الخادم مع Referer/Origin الصحيحين.
+     أغلب CDN تحجب الطلبات المباشرة من المتصفح بدون هذه الـ headers (CORS/403). */
+  try {
+    const upstreamHeaders: Record<string, string> = { ...HLS_PROXY_HDRS(ref || url, origin) };
+    if (req.headers.range) upstreamHeaders["Range"] = req.headers.range as string;
+
+    const r = await fetch(url, { headers: upstreamHeaders, signal: AbortSignal.timeout(15000), redirect: "follow" });
+    if (!r.ok && r.status !== 206) { res.status(r.status).send(`upstream ${r.status}`); return; }
+
+    res.status(r.status);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range");
+    res.setHeader("Content-Type", r.headers.get("content-type") || "video/mp2t");
+    const cl = r.headers.get("content-length"); if (cl) res.setHeader("Content-Length", cl);
+    const cr = r.headers.get("content-range"); if (cr) res.setHeader("Content-Range", cr);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-store");
+
+    if (!r.body) { res.end(); return; }
+    const { Readable } = await import("node:stream");
+    Readable.fromWeb(r.body as any).pipe(res);
+  } catch (e: any) {
+    if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`);
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════
