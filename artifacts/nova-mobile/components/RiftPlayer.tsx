@@ -274,8 +274,11 @@ function PulseRing() {
           Animated.timing(op, { toValue: delay === 0 ? 0.65 : 0.35, duration: 0, useNativeDriver: true }),
         ]),
       ]));
-    pulse(scale1, opacity1, 0).start();
-    pulse(scale2, opacity2, 550).start();
+    const a1 = pulse(scale1, opacity1, 0);
+    const a2 = pulse(scale2, opacity2, 550);
+    a1.start();
+    a2.start();
+    return () => { a1.stop(); a2.stop(); };
   }, []);
   return (
     <>
@@ -297,9 +300,11 @@ function PulseRing() {
 function SpinRing({ size = 52 }: { size?: number }) {
   const rot = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.loop(
+    const anim = Animated.loop(
       Animated.timing(rot, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })
-    ).start();
+    );
+    anim.start();
+    return () => anim.stop();
   }, []);
   const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   const r = size / 2;
@@ -1203,7 +1208,8 @@ export function RiftPlayer({
      هذا هو المعيار العالمي لمشغلات الفيديو حتى في التطبيقات العربية */
   const _calcPctFromAbsolute = (absoluteX: number): number => {
     const localX = absoluteX - barPageX.current;
-    return Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
+    const raw = Math.min(1, Math.max(0, localX) / Math.max(1, barWidth.current));
+    return _nRTL ? 1 - raw : raw;
   };
   const seekBarPan = useRef(
     PanResponder.create({
@@ -1773,7 +1779,7 @@ export function RiftPlayer({
             {/* ── أزرار تخطي المقدمة / النهاية ── */}
             {/* direction:'ltr' يضمن أن الأيقونة دائماً قبل النص بصرياً بغض النظر عن RTL */}
             {(inIntroRange || inOutroRange) && (
-              <View style={[s.skipBtnRow, { direction: "ltr" }]}>
+              <View style={s.skipBtnRow}>
                 {inIntroRange && (
                   <Pressable onPress={doSkipIntro} style={s.skipPillIntro} hitSlop={8}>
                     <Ionicons name="play-forward" size={13} color="#92400e" />
@@ -1790,10 +1796,9 @@ export function RiftPlayer({
             )}
 
             {/* الوقت — الوقت الحالي أقصى اليسار الفيزيائي، المدة الكلية أقصى اليمين الفيزيائي */}
-            {/* direction:'ltr' يلغي تأثير RTL على left/right هنا لأن المشغّل دائماً LTR */}
-            <View style={{ position: "relative", height: 18, marginBottom: 2, direction: "ltr" }}>
-              <Text style={[s.timeText, { position: "absolute", left: 0 }]}>{fmtTime(position)}</Text>
-              <Text style={[s.timeText, { position: "absolute", right: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
+            <View style={{ position: "relative", height: 18, marginBottom: 2 }}>
+              <Text style={[s.timeText, { position: "absolute", [_nRTL ? "right" : "left"]: 0 }]}>{fmtTime(position)}</Text>
+              <Text style={[s.timeText, { position: "absolute", [_nRTL ? "left" : "right"]: 0, opacity: 0.45 }]}>{fmtTime(duration)}</Text>
             </View>
 
             {/* شريط التقدم — يسار=بداية، يمين=نهاية (LTR دائماً، المعيار العالمي لمشغلات الفيديو)
@@ -1808,7 +1813,9 @@ export function RiftPlayer({
               return (
                 <View
                   ref={barRef}
-                  style={[s.progressWrap, isDragging && s.progressWrapDragging, { direction: "ltr" }]}
+                  style={[s.progressWrap, isDragging && s.progressWrapDragging,
+                    _nRTL && { transform: [{ scaleX: -1 }] },
+                  ]}
                   onLayout={(e) => {
                     barWidth.current = e.nativeEvent.layout.width || 1;
                     barRef.current?.measureInWindow((px) => { if (px >= 0) barPageX.current = px; });
@@ -1833,7 +1840,8 @@ export function RiftPlayer({
                   )}
                   <LinearGradient
                     colors={["#6D28D9", "#8B5CF6", "#a78bfa"]}
-                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    start={_nRTL ? { x: 1, y: 0 } : { x: 0, y: 0 }}
+                    end={_nRTL ? { x: 0, y: 0 } : { x: 1, y: 0 }}
                     style={[s.progressFill, { left: 0, width: `${fillPct}%` as any }]}
                   />
                   <View style={[
@@ -1842,7 +1850,9 @@ export function RiftPlayer({
                     isDragging && s.thumbDragging,
                   ]} />
                   {isDragging && (
-                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any }]}>
+                    <View style={[s.dragTooltip, { left: `${tooltipPct}%` as any },
+                      _nRTL && { transform: [{ scaleX: -1 }] },
+                    ]}>
                       <Text style={s.dragTooltipText}>{fmtTime(dragPct * (durationRef.current || duration))}</Text>
                     </View>
                   )}
