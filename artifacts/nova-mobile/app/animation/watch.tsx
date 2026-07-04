@@ -5,7 +5,6 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import WebView from "react-native-webview";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -159,6 +158,7 @@ function getAnimTag(label: string): string {
   if (l.startsWith("animephoenix") || l.startsWith("phoenix")) return "PH";
   if (l.startsWith("animehub"))    return "AH";
   if (l.startsWith("streamrip"))   return "SR";
+  if (l.startsWith("cinepro"))     return "CP";
   const word = label.replace(/[^a-zA-Z\u0621-\u064a]/g, "").slice(0, 2).toUpperCase();
   return word || "??";
 }
@@ -679,33 +679,34 @@ export default function AnimationWatchScreen() {
         </View>
       );
     }
+    // Native: no WebView — show info card with option to open in browser
     return (
-      <View style={w.container}>
-        <WebView
-          source={{ uri: embedUrl }}
-          style={w.video}
-          allowsFullscreenVideo
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction={false}
-          javaScriptEnabled
-        />
-        <LinearGradient
-          colors={["rgba(0,0,0,0.75)", "transparent"]}
-          style={[w.videoTopBar, { paddingTop: topPad }]}
-          pointerEvents="box-none"
-        >
-          <Pressable onPress={() => setScreen("picker")} style={w.videoBackBtn}>
-            <Ionicons name="arrow-forward" size={18} color="#fff" />
+      <View style={[w.container, { alignItems: "center", justifyContent: "center", gap: 16 }]}>
+        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </Pressable>
+        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(139,92,246,0.15)", alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="tv-outline" size={36} color="rgba(139,92,246,0.7)" />
+        </View>
+        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 16, textAlign: "center" }}>
+          {playingSrc?.directType === "hls" ? "بث HLS — جاري التحميل" : "هذا المصدر يحتاج متصفحاً خارجياً"}
+        </Text>
+        <Text style={{ color: "rgba(255,255,255,0.45)", fontFamily: "Cairo_400Regular", fontSize: 13, textAlign: "center", paddingHorizontal: 32 }}>
+          {playingSrc?.isEmbed
+            ? "مصدر الإطار لا يدعم التشغيل المباشر — افتحه في المتصفح"
+            : "يتعذّر تشغيل هذا المصدر — اختر مصدراً آخر"}
+        </Text>
+        {playingSrc?.isEmbed && (
+          <Pressable
+            onPress={() => Linking.openURL(embedUrl)}
+            style={{ backgroundColor: "rgba(139,92,246,0.25)", borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: "rgba(139,92,246,0.4)", marginTop: 4 }}
+          >
+            <Text style={{ color: "#c4b5fd", fontFamily: "Cairo_700Bold", fontSize: 14 }}>فتح في المتصفح</Text>
           </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={w.videoTitle} numberOfLines={1}>{titleStr}</Text>
-            <Text style={w.videoEp}>{playingSrc.label || "إطار"}</Text>
-          </View>
-          <Pressable onPress={() => setScreen("picker")} style={w.srcSwitchBtn}>
-            <Ionicons name="swap-horizontal" size={16} color="rgba(255,255,255,0.8)" />
-            <Text style={w.srcSwitchText}>تغيير</Text>
-          </Pressable>
-        </LinearGradient>
+        )}
+        <Pressable onPress={() => setScreen("picker")} style={{ marginTop: 4 }}>
+          <Text style={{ color: "rgba(255,255,255,0.35)", fontFamily: "Cairo_400Regular", fontSize: 13 }}>العودة للمصادر</Text>
+        </Pressable>
       </View>
     );
   }
