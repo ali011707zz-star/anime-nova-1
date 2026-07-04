@@ -10518,7 +10518,10 @@ router.get("/anime/video-proxy", async (req, res) => {
 
     if (!r.body) { res.end(); return; }
     const { Readable } = await import("node:stream");
-    Readable.fromWeb(r.body as any).pipe(res);
+    const nodeStream = Readable.fromWeb(r.body as any);
+    nodeStream.on("error", () => { try { if (!res.writableEnded) res.end(); } catch {} });
+    res.on("close", () => { try { nodeStream.destroy(); } catch {} });
+    nodeStream.pipe(res);
   } catch (e: any) {
     if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`);
   }
@@ -10556,7 +10559,10 @@ router.get("/anime/seg-proxy", async (req, res) => {
 
     if (!r.body) { res.end(); return; }
     const { Readable } = await import("node:stream");
-    Readable.fromWeb(r.body as any).pipe(res);
+    const nodeStream = Readable.fromWeb(r.body as any);
+    nodeStream.on("error", () => { try { if (!res.writableEnded) res.end(); } catch {} });
+    res.on("close", () => { try { nodeStream.destroy(); } catch {} });
+    nodeStream.pipe(res);
   } catch (e: any) {
     if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`);
   }
