@@ -3,7 +3,7 @@ modules = ["python-3.11", "bash", "postgresql-16", "nodejs-22"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["sh", "-c", "cd artifacts/api-server && pnpm run start"]
+run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 build = ["sh", "-c", "pnpm install --prefer-offline && pnpm --filter @workspace/api-server run build && VITE_API_URL= pnpm --filter @workspace/anime-scraper run build"]
 
 [deployment.postBuild]
@@ -26,10 +26,6 @@ args = "CF Proxy"
 task = "workflow.run"
 args = "Start application"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Backend API"
-
 [[workflows.workflow]]
 name = "CF Proxy"
 author = "agent"
@@ -45,25 +41,13 @@ args = "CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py"
 name = "Start application"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd artifacts/anime-scraper && PORT=5000 pnpm exec vite --config vite.config.ts --host 0.0.0.0"
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
 
-[[workflows.workflow]]
-name = "Backend API"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd artifacts/api-server && PORT=8080 NODE_ENV=development pnpm run dev"
-waitForPort = 8080
+args = "cd artifacts/api-server && PORT=5000 node --enable-source-maps ./dist/index.mjs"
+waitForPort = 5000
 
 [agent]
 stack = "FLASK_VANILLA_JS"
@@ -77,10 +61,6 @@ timeoutMs = 20000
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
 
 [nix]
 channel = "stable-25_05"
