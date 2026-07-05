@@ -13,3 +13,4 @@
 - [Source playback fixes — DU AK AN HI SC AT](source-playback-fixes-2026-07.md) — parseVidHls JSON scanner, dulo CDN probe, starcima expiry filter, anineko direct-fetch fallback.
 - [Bandwidth proxy removal](bandwidth-proxy-removal.md) — seg-proxy+video-proxy→307 redirect; hls-proxy→directSegs=true; headers field added to source responses for CDN auth.
 - [WebView removal + dubbed streamUrl fix](videasy-dubbed-fixes.md) — WebView removed from all 3 mobile watch screens; dubbed streamUrl changed to rawUrl-first (foupix blocks VPS, allows residential IPs); cinepro tag fixed to "CP".
+- [VPS CDN proxy setup](vps-cdn-proxy.md) — cf_proxy /stream endpoint يضيف Referer للـ browser؛ nginx يكشفه على /cdn-proxy بـ HTTPS؛ CF_WORKER_URL+CF_PROXY_KEY في .env
