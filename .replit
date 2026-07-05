@@ -3,7 +3,7 @@ modules = ["nodejs-20", "python-3.11", "web", "bash", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["sh", "-c", "cd artifacts/api-server && PORT=5000 node --enable-source-maps ./dist/index.mjs"]
+run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 build = ["sh", "-c", "pnpm install --prefer-offline && pnpm --filter @workspace/api-server run build && VITE_API_URL= pnpm --filter @workspace/anime-scraper run build"]
 
 [deployment.postBuild]
@@ -22,6 +22,10 @@ author = "agent"
 task = "workflow.run"
 args = "CF Proxy"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
 [[workflows.workflow]]
 name = "CF Proxy"
 author = "agent"
@@ -32,6 +36,18 @@ outputType = "console"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "CF_PROXY_PORT=8000 python3 scripts/cf_proxy.py"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/replit-dev-start.sh"
+waitForPort = 5000
 
 [agent]
 stack = "FLASK_VANILLA_JS"
@@ -45,18 +61,6 @@ timeoutMs = 20000
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 8080
-externalPort = 8080
-
-[[ports]]
-localPort = 23209
-externalPort = 3000
-
-[[ports]]
-localPort = 24968
-externalPort = 3001
 
 [nix]
 channel = "stable-25_05"
