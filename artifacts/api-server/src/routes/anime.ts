@@ -218,6 +218,63 @@ async function cfGet(url: string, extraHdrs: Record<string, string> = {}): Promi
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  cycleTLSGet — TLS fingerprint spoofing via CycleTLS (JA3/Chrome120)
+//  Bypasses Cloudflare TLS fingerprint detection.
+//  NOTE: r.data is a Buffer — NOT r.body (confirmed from tests).
+//  Does NOT solve JS IUAM/Managed Challenge — for that use cfProxyGet.
+// ════════════════════════════════════════════════════════════════════
+const CYCLE_JA3 =
+  "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53," +
+  "0-23-65281-10-11-35-16-5-13-18-51-45-43-27-21,29-23-24,0";
+const CYCLE_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+let _cycleTLS: any = null;
+let _cycleTLSPending: Promise<any> | null = null;
+
+async function getCycleTLS(): Promise<any> {
+  if (_cycleTLS) return _cycleTLS;
+  if (_cycleTLSPending) return _cycleTLSPending;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const initCycleTLS = require("cycletls");
+    _cycleTLSPending = initCycleTLS().then((c: any) => {
+      _cycleTLS = c;
+      _cycleTLSPending = null;
+      return c;
+    });
+    return _cycleTLSPending;
+  } catch (e: any) {
+    console.warn("[CycleTLS] init failed:", e?.message);
+    return null;
+  }
+}
+
+async function cycleTLSGet(url: string, referer?: string): Promise<string | null> {
+  try {
+    const client = await getCycleTLS();
+    if (!client) return null;
+    const r = await client.get(url, {
+      ja3: CYCLE_JA3,
+      userAgent: CYCLE_UA,
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en;q=0.9",
+        ...(referer ? { Referer: referer } : {}),
+      },
+    });
+    if (r.status !== 200) return null;
+    // CycleTLS response body is in r.data (Buffer) — NOT r.body
+    const text: string = Buffer.isBuffer(r.data)
+      ? r.data.toString("utf-8")
+      : typeof r.data === "string" ? r.data : "";
+    if (!text || isCloudflareBlock(text)) return null;
+    return text;
+  } catch { return null; }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  cfProxyGet — fetches via Python curl_cffi proxy (port 8000)
 //  Used for sites that block Node.js fetch but allow real Chrome TLS.
 //  Falls back to cfGet if proxy is unavailable.
@@ -4561,8 +4618,9 @@ async function searchWitanime(query: string): Promise<string | null> {
     }
   } catch {}
 
-  // Fallback: GET search page via CF bypass, then ScraperAPI
-  const html = await cfGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`)
+  // Fallback: GET search page — try CycleTLS (JA3 spoof) first, then cfProxy, then ScraperAPI
+  const html = await cycleTLSGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`, WITANIME_BASE + "/")
+    ?? await cfProxyGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`, WITANIME_BASE + "/")
     ?? await scraperApiGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`);
   if (!html) return null;
   const re = /href="(https?:\/\/witanime\.life\/anime\/([^/"]+)\/?)"/gi;
@@ -4592,7 +4650,9 @@ function findBestLink(
 
 /** Extract episode URL from a witanime series page */
 async function findWitaEpisodeUrl(seriesUrl: string, ep: number): Promise<string | null> {
-  const html = await cfGet(seriesUrl) ?? await scraperApiGet(seriesUrl);
+  const html = await cycleTLSGet(seriesUrl, WITANIME_BASE + "/")
+    ?? await cfProxyGet(seriesUrl, WITANIME_BASE + "/")
+    ?? await scraperApiGet(seriesUrl);
   if (!html) return null;
   // Episode links: /ep/{slug}-N/ or /episode/{slug}-episode-N/ or /watch/{slug}/N/
   const patterns = [
@@ -4615,7 +4675,9 @@ async function findWitaEpisodeUrl(seriesUrl: string, ep: number): Promise<string
 
 /** Fetch server embed URLs from a witanime episode page (various WP theme patterns) */
 async function fetchWitaServerUrls(epUrl: string): Promise<string[]> {
-  const html = await cfGet(epUrl) ?? await scraperApiGet(epUrl);
+  const html = await cycleTLSGet(epUrl, WITANIME_BASE + "/")
+    ?? await cfProxyGet(epUrl, WITANIME_BASE + "/")
+    ?? await scraperApiGet(epUrl);
   if (!html) return [];
   const urls: string[] = [];
   const seen = new Set<string>();
@@ -4713,7 +4775,9 @@ const a3rbSeriesCache = new Map<string, { url: string | null; ts: number }>();
 const a3rbSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
 async function searchAnime3rb(query: string): Promise<string | null> {
-  const html = await cfGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`);
+  const html = await cycleTLSGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`, A3RB_BASE + "/")
+    ?? await cfProxyGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`, A3RB_BASE + "/")
+    ?? await scraperApiGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`);
   if (!html) return null;
 
   const candidates: Array<{ url: string; score: number }> = [];
@@ -4764,7 +4828,9 @@ async function getAnime3rbSources(
     if (!seriesUrl) return [];
 
     // Fetch series page → find episode link
-    const seriesHtml = await cfGet(seriesUrl);
+    const seriesHtml = await cycleTLSGet(seriesUrl, A3RB_BASE + "/")
+      ?? await cfProxyGet(seriesUrl, A3RB_BASE + "/")
+      ?? await scraperApiGet(seriesUrl);
     if (!seriesHtml) return [];
 
     // Find episode link by number
@@ -4784,8 +4850,10 @@ async function getAnime3rbSources(
     }
     if (!epUrl) return [];
 
-    // Fetch episode page via CF bypass
-    const epHtml = await cfGet(epUrl);
+    // Fetch episode page via CF bypass chain
+    const epHtml = await cycleTLSGet(epUrl, seriesUrl)
+      ?? await cfProxyGet(epUrl, seriesUrl)
+      ?? await scraperApiGet(epUrl);
     if (!epHtml) return [];
 
     const urls: string[] = [];
@@ -8617,10 +8685,12 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
       scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
       scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep),           true, 20000),
+      scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 22000),
+      scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 22000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
-      // witanime:     CF IP block حقيقي، curl_cffi لا تنفع
-      // anime3rb:     CF IP block حقيقي، curl_cffi لا تنفع
+      // witanime:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy + ScraperAPI chain
+      // anime3rb:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy + ScraperAPI chain
       // animetime CDN (vidhls.com) يعمل لبعض الأنمي (200) — مُعاد تفعيله 2026-07-01
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
