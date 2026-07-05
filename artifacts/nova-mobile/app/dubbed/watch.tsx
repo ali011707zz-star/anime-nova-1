@@ -51,13 +51,19 @@ export default function DubbedWatchScreen() {
 
       // foupix CDN يحجب IPs مراكز البيانات (VPS/Replit).
       // الأجهزة المحمولة على IPs سكنية يمكنها الوصول لـ rawUrl مباشرةً.
-      // نفضّل rawUrl أولاً — إن لم يكن متاحاً نستخدم proxyUrl كـ fallback.
-      const streamUrl = rawUrl ?? proxyUrl!;
-      setSources([{
-        url: streamUrl,
-        label: title || "مدبلج عربي",
-        quality: "720p HD",
-      }]);
+      // نضيف Referer header لأن foupix CDN يتحقق منه عند التشغيل.
+      const foupixHeaders: Record<string, string> = {
+        Referer: "https://www.arabic-toons.com/",
+        Origin: "https://www.arabic-toons.com",
+      };
+      const srcs: PlayerSource[] = [];
+      if (rawUrl) {
+        srcs.push({ url: rawUrl, label: "مدبلج عربي", quality: "720p HD", headers: foupixHeaders });
+      }
+      if (proxyUrl && proxyUrl !== rawUrl) {
+        srcs.push({ url: proxyUrl, label: "مدبلج عربي (بروكسي)", quality: "720p HD", headers: foupixHeaders });
+      }
+      setSources(srcs);
       setLoading(false);
     } catch {
       if (!mountedRef.current) return;

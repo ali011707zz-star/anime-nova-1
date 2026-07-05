@@ -64,9 +64,14 @@ export default function DubbedWatch() {
       if (!mountedRef.current) return;
       if (!r.ok) { setError("تعذّر تحميل الحلقة"); setLoading(false); return; }
       const d = await r.json();
-      if (!d.hlsUrl) { setError("لم يُعثر على مصدر الفيديو"); setLoading(false); return; }
-      try { sessionStorage.setItem(cacheKey, JSON.stringify({ url: d.hlsUrl, ts: Date.now() })); } catch {}
-      setSource({ url: d.hlsUrl, proxyUrl: d.hlsUrl });
+      const rawUrl  = typeof d.rawUrl  === "string" ? d.rawUrl  : null;
+      const hlsUrl  = typeof d.hlsUrl  === "string" ? d.hlsUrl  : null;
+      if (!rawUrl && !hlsUrl) { setError("لم يُعثر على مصدر الفيديو"); setLoading(false); return; }
+      // المتصفح يستخدم IP سكني → rawUrl مباشرة لـ foupix CDN (لا يحجب المتصفحات)
+      // hlsUrl عبر بروكسي VPS كـ fallback فقط
+      const playUrl = rawUrl || hlsUrl!;
+      try { sessionStorage.setItem(cacheKey, JSON.stringify({ url: playUrl, ts: Date.now() })); } catch {}
+      setSource({ url: playUrl, proxyUrl: playUrl });
       setLoading(false);
     } catch {
       if (!mountedRef.current) return;
