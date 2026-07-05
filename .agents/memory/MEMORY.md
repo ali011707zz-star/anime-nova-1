@@ -11,6 +11,7 @@
 - [Web vs Mobile source sync](web-mobile-source-sync.md) — VPS IP gives more sources than Replit IP; dead sites removed from web SCRAPER_DEFS; mobile ANIME_SITES synced; vidmoly embed bug fixed; mp4upload filtered on mobile.
 - [Anime Rift MITM capture attempt](anime-rift-mitm.md) — Android system-CA-trust wall blocks non-rooted MITM; failed-handshake domains still revealed it uses the same vidsrc/embed.su/TMDB ecosystem already in Anime NOVA.
 - [Source playback fixes — DU AK AN HI SC AT](source-playback-fixes-2026-07.md) — parseVidHls JSON scanner, dulo CDN probe, starcima expiry filter, anineko direct-fetch fallback.
+- [MovieBox integration](moviebox-integration.md) — h5-api.aoneroom.com; JWT auth via search-suggest; signed MP4 URLs expire (10min TTL); dubbed filter + race guard.
 - [Bandwidth proxy removal](bandwidth-proxy-removal.md) — seg-proxy+video-proxy→307 redirect; hls-proxy→directSegs=true; headers field added to source responses for CDN auth.
 - [WebView removal + dubbed streamUrl fix](videasy-dubbed-fixes.md) — WebView removed from all 3 mobile watch screens; dubbed streamUrl changed to rawUrl-first (foupix blocks VPS, allows residential IPs); cinepro tag fixed to "CP".
 - [VPS CDN proxy setup](vps-cdn-proxy.md) — cf_proxy /stream endpoint يضيف Referer للـ browser؛ nginx يكشفه على /cdn-proxy بـ HTTPS؛ CF_WORKER_URL+CF_PROXY_KEY في .env
