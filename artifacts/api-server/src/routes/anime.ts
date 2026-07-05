@@ -11089,37 +11089,44 @@ router.get("/anime/animewitcher-catalog", async (req, res) => {
 // Metadata Cache + Multi-Source Proxy (AniList → Jikan fallback + PostgreSQL cache)
 // ════════════════════════════════════════════════════════════════════════════
 
-/** حسب نوع الاستعلام نحدد مدة الـ cache */
+/** حسب نوع الاستعلام نحدد مدة الـ cache (الحد الأقصى للصلاحية) */
 function metaTtl(body: any): number {
   const q    = JSON.stringify(body?.query ?? "");
   const rawQ: string = body?.query ?? "";
   if (q.includes("airingSchedules"))  return 1800;      // 30 دقيقة — الجداول الزمنية
   if (body?.variables?.search)         return 3600;      // 1 ساعة — بحث (نتائج تتغير)
-  if (body?.variables?.id)             return 5184000;   // 60 يوم — metadata ثابتة (بوسترات، وصف، تقييم)
+  if (body?.variables?.id)             return 7776000;   // 90 يوم — metadata ثابتة (بوسترات، وصف، تقييم)
   if (q.includes("TRENDING_DESC"))     return 86400;     // 24 ساعة — trending
-  if (q.includes("POPULARITY_DESC"))   return 604800;    // 7 أيام — الأكثر شعبية
-  if (q.includes("SCORE_DESC"))        return 604800;    // 7 أيام — الأعلى تقييماً
-  if (rawQ.includes("format: MOVIE") || rawQ.includes("format:MOVIE")) return 604800; // 7 أيام — أفلام
+  if (q.includes("POPULARITY_DESC"))   return 2592000;   // 30 يوم — الأكثر شعبية
+  if (q.includes("SCORE_DESC"))        return 2592000;   // 30 يوم — الأعلى تقييماً
+  if (rawQ.includes("format: MOVIE") || rawQ.includes("format:MOVIE")) return 2592000; // 30 يوم — أفلام
   if (rawQ.match(/season:\s*[A-Z]/) || body?.variables?.season) return 2592000; // 30 يوم — موسمي
-  return 604800; // 7 أيام افتراضي
+  return 2592000; // 30 يوم افتراضي
 }
+
+/** عتبة إعادة التحديث الخلفي (30 يوم) — يُخدَّم الكاش فوراً لكن يُحدَّث في الخلفية */
+const META_REFRESH_AGE = 2592000; // 30 يوم بالثواني
 
 function metaHash(body: any): string {
   return createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 40);
 }
 
-async function metaCacheGet(key: string): Promise<any | null> {
+/** نتيجة الكاش مع عمرها — stale=true يعني تجاوزت 30 يوم ويجب تحديثها خلفياً */
+interface MetaCacheResult { data: any; stale: boolean; source?: string; }
+
+async function metaCacheGet(key: string): Promise<MetaCacheResult | null> {
   try {
-    const rows = await sbSelect<{ data: any; created_at: string; ttl_seconds: number }>(
+    const rows = await sbSelect<{ data: any; created_at: string; ttl_seconds: number; source?: string }>(
       "anime_meta_cache",
       { cache_key: `eq.${key}` },
-      { limit: 1, select: "data,created_at,ttl_seconds" }
+      { limit: 1, select: "data,created_at,ttl_seconds,source" }
     );
     if (!rows.length) return null;
-    const { data, created_at, ttl_seconds } = rows[0];
+    const { data, created_at, ttl_seconds, source } = rows[0];
     const ageSeconds = (Date.now() - new Date(created_at).getTime()) / 1000;
-    if (ageSeconds > ttl_seconds) return null;
-    return data;
+    if (ageSeconds > ttl_seconds) return null;              // منتهي الصلاحية تماماً
+    const stale = ageSeconds > META_REFRESH_AGE;            // تجاوز 30 يوم → يحتاج تحديث خلفي
+    return { data, stale, source };
   } catch { return null; }
 }
 
@@ -11501,26 +11508,8 @@ async function kitsuEnrichBannerImages(mediaList: any[]): Promise<any[]> {
 let _anilistDown = false;
 let _anilistDownSince = 0;
 
-router.post("/anilist", async (req, res) => {
-  const body        = req.body;
-  const cacheKey    = metaHash(body);
-  const ttl         = metaTtl(body);
-  const isIdQuery   = !!body?.variables?.id;
-
-  // 1️⃣ PostgreSQL cache — أسرع مصدر
-  // استثناء: استعلامات Media(id) أثناء انقطاع AniList — الكاش قد يحتوي على
-  // بيانات AniList لـ ID مختلف بينما القوائم تُعيد MAL IDs من Jikan
-  const skipCache = isIdQuery && _anilistDown;
-  if (!skipCache) {
-    const cached = await metaCacheGet(cacheKey);
-    if (cached) {
-      res.setHeader("Cache-Control", "public, max-age=300");
-      res.setHeader("X-Meta-Source", "cache");
-      return res.json(cached);
-    }
-  }
-
-  // 2️⃣ AniList GraphQL — المصدر الأساسي
+/** يجلب من AniList مباشرة ويحدّث الكاش — يُستخدم للتحديث الخلفي */
+async function anilistFetchAndCache(body: any, cacheKey: string, ttl: number): Promise<any | null> {
   try {
     const r = await fetch("https://graphql.anilist.co", {
       method: "POST",
@@ -11535,27 +11524,50 @@ router.post("/anilist", async (req, res) => {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(12000),
     });
-    if (r.ok) {
-      const data = await r.json() as any;
-      if (!data?.errors?.length) {
-        _anilistDown = false;
-        _anilistDownSince = 0;
-        metaCacheSet(cacheKey, data, ttl, "anilist").catch(() => {});
-        res.setHeader("Cache-Control", "public, max-age=60");
-        res.setHeader("X-Meta-Source", "anilist");
-        return res.json(data);
+    if (!r.ok) return null;
+    const data = await r.json() as any;
+    if (data?.errors?.length) return null;
+    _anilistDown = false;
+    _anilistDownSince = 0;
+    metaCacheSet(cacheKey, data, ttl, "anilist").catch(() => {});
+    return data;
+  } catch { return null; }
+}
+
+router.post("/anilist", async (req, res) => {
+  const body        = req.body;
+  const cacheKey    = metaHash(body);
+  const ttl         = metaTtl(body);
+  const isIdQuery   = !!body?.variables?.id;
+
+  // 1️⃣ PostgreSQL cache — أسرع مصدر
+  // استثناء: استعلامات Media(id) أثناء انقطاع AniList — الكاش قد يحتوي على
+  // بيانات Jikan بـ MAL IDs، فنتخطاه حتى تعود AniList للعمل
+  const skipCache = isIdQuery && _anilistDown;
+  if (!skipCache) {
+    const cached = await metaCacheGet(cacheKey);
+    if (cached) {
+      // ✅ Stale-While-Revalidate: إذا تجاوز الكاش 30 يوم → أرسله فوراً وحدّث خلفياً
+      if (cached.stale && !_anilistDown) {
+        anilistFetchAndCache(body, cacheKey, ttl).catch(() => {});
       }
-      // 200 + errors — AniList متعطّل جزئياً (rate limit / outage)
-      _anilistDown = true;
-      _anilistDownSince = _anilistDownSince || Date.now();
-    } else {
-      _anilistDown = true;
-      _anilistDownSince = _anilistDownSince || Date.now();
+      res.setHeader("Cache-Control", "public, max-age=300");
+      res.setHeader("X-Meta-Source", cached.stale ? "cache-stale" : "cache");
+      return res.json(cached.data);
     }
-  } catch {
-    _anilistDown = true;
-    _anilistDownSince = _anilistDownSince || Date.now();
   }
+
+  // 2️⃣ AniList GraphQL — المصدر الأساسي
+  const freshData = await anilistFetchAndCache(body, cacheKey, ttl);
+  if (freshData) {
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.setHeader("X-Meta-Source", "anilist");
+    return res.json(freshData);
+  }
+
+  // AniList فشلت — سجّل ذلك
+  _anilistDown = true;
+  _anilistDownSince = _anilistDownSince || Date.now();
 
   // 3️⃣ Jikan (MyAnimeList) fallback
   const jikanData = await jikanFallback(body);
@@ -11563,11 +11575,12 @@ router.post("/anilist", async (req, res) => {
     if (jikanData.data?.Page?.media) {
       jikanData.data.Page.media = await kitsuEnrichBannerImages(jikanData.data.Page.media);
     }
-    // بيانات fallback (Jikan) — IDs هي MAL IDs وليست AniList IDs، ولا نعرف
-    // متى تعود AniList للعمل، لذا TTL قصير دائماً (10 دقائق) بدل TTL الطويل
-    // المخصّص لبيانات AniList الحقيقية — وإلا تتلوّث النتائج لأيام بعد عودة الخدمة.
-    const jikanTtl = 600;
-    metaCacheSet(cacheKey, jikanData, jikanTtl, "jikan").catch(() => {});
+    // ⚠️ استعلامات Media(id): لا نُخزّن في الكاش — IDs ستكون MAL IDs وتُفسد
+    // استعلامات الأنمي الفردية بعد عودة AniList للعمل.
+    // استعلامات Page: نُخزّن بـ TTL قصير (10 دق) لتجنّب ضرب Jikan في كل طلب.
+    if (!isIdQuery) {
+      metaCacheSet(cacheKey, jikanData, 600, "jikan").catch(() => {});
+    }
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "jikan");
     return res.json(jikanData);
@@ -11576,9 +11589,9 @@ router.post("/anilist", async (req, res) => {
   // 4️⃣ Kitsu fallback — بديل ثالث لـ Page queries
   const kitsuData = await kitsuFallback(body);
   if (kitsuData) {
-    // نفس المنطق: TTL قصير دائماً لبيانات fallback بغض النظر عن نوع الاستعلام
-    const kitsuTtl = 600;
-    metaCacheSet(cacheKey, kitsuData, kitsuTtl, "kitsu").catch(() => {});
+    if (!isIdQuery) {
+      metaCacheSet(cacheKey, kitsuData, 600, "kitsu").catch(() => {});
+    }
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "kitsu");
     return res.json(kitsuData);
