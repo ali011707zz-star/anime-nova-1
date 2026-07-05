@@ -197,6 +197,16 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
 const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.site));
 
 /**
+ * الموجة الأولى من المصادر التي تُجرَّب فوراً عند فتح الحلقة — أسرع/أوثق المصادر تاريخياً.
+ * بقية المصادر (~20 موقع) تُجرَّب فقط لو ما لقينا مصدر شغّال خلال 1.8 ثانية،
+ * وتُلغى فوراً بمجرد بدء التشغيل — هذا يقلل طلبات السيرفر الخارجية بشكل كبير
+ * دون التأثير على سرعة تجربة المستخدم (auto-play يبقى فورياً).
+ */
+const PRIORITY_FETCH_SITES = new Set([
+  "kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto", "shahiid", "animelek",
+]);
+
+/**
  * مجموعة المصادر اليابانية التي تستفيد من الترجمة الذكية التلقائية.
  * هذه المصادر بدون ترجمة عربية مدمجة → يتم تفعيل الترجمة تلقائياً عند التشغيل.
  * المصادر التي تُرسل subtitleUrl مدمجاً (kawaii/anikoto/videasy) يتم التعامل معها
@@ -2792,6 +2802,10 @@ export default function WatchPage() {
   const autoPlayedRef     = useRef(false);
   const upgradedToFhdRef  = useRef(false);
   const phaseRef          = useRef<"picker" | "player">("picker");
+  /* تتبع طلبات fetch-source الجارية + المؤقتات المعلَّقة — لإلغائها فور اختيار مصدر التشغيل
+     (يمنع بقية السكربرز من إكمال طلباتهم بلا فائدة بعد بدء التشغيل، يقلل استهلاك السيرفر) */
+  const fetchControllersRef = useRef<Record<string, AbortController>>({});
+  const pendingTimeoutsRef  = useRef<number[]>([]);
   const [autoPlayReady,   setAutoPlayReady]   = useState(false);
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
@@ -3097,9 +3111,15 @@ export default function WatchPage() {
     const resolvedTitle   = anime?.title?.romaji   || titleParam;
     const resolvedEnglish = anime?.title?.english  || englishParam || "";
 
+    /* AbortController مستقل لكل موقع — يُلغى فوراً بمجرد اختيار مصدر التشغيل
+       (بدلاً من ترك بقية المواقع تكمل طلباتها بلا فائدة بعد بدء التشغيل) */
+    const ctrl = new AbortController();
+    fetchControllersRef.current[site] = ctrl;
+    const timeoutId = window.setTimeout(() => ctrl.abort(), 22000);
+
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
-      const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: AbortSignal.timeout(22000), headers: { "X-App-Token": await getAppToken() } });
+      const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: ctrl.signal, headers: { "X-App-Token": await getAppToken() } });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
 
@@ -3114,8 +3134,19 @@ export default function WatchPage() {
     } catch {
       setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
     } finally {
+      clearTimeout(timeoutId);
+      delete fetchControllersRef.current[site];
       inFlightRef.current.delete(site);
     }
+  }
+
+  /* ── ألغِ كل طلبات fetch-source الجارية + المؤقتات المعلَّقة لبقية المواقع.
+     يُستدعى فور اختيار مصدر وبدء التشغيل — لا داعي أن تكمل ~20 موقع آخر طلباتهم بالخلفية. ── */
+  function cancelRemainingScrapers() {
+    pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
+    pendingTimeoutsRef.current = [];
+    Object.values(fetchControllersRef.current).forEach(ctrl => ctrl.abort());
+    fetchControllersRef.current = {};
   }
 
   /* ── Quick-resume + كاش المصادر: تحميل فوري من localStorage عند فتح الصفحة ── */
@@ -3157,13 +3188,29 @@ export default function WatchPage() {
   /* ── auto-play enabled immediately ── */
   useEffect(() => { setAutoPlayReady(true); }, []);
 
-  /* ── Auto-fetch ALL scrapers on mount ── */
+  /* ── Auto-fetch: موجة أولى فقط من أسرع/أوثق المصادر فوراً — الباقي يُجرَّب فقط لو ما لقينا
+     مصدر شغّال خلال 1.8 ثانية. هذا يقلل الطلبات الخارجية من السيرفر (28 موقع → 8 غالباً)
+     بدون أي تأخير محسوس بتجربة المستخدم (auto-play ما زال فورياً). ── */
   useEffect(() => {
     if (autoFetchedRef.current) return;
     autoFetchedRef.current = true;
-    SCRAPER_DEFS.forEach((def, i) => {
-      setTimeout(() => handleFetchSite(def.site), i * 25);
+
+    const priorityDefs = SCRAPER_DEFS.filter(d => PRIORITY_FETCH_SITES.has(d.site));
+    const restDefs     = SCRAPER_DEFS.filter(d => !PRIORITY_FETCH_SITES.has(d.site));
+
+    priorityDefs.forEach((def, i) => {
+      const id = window.setTimeout(() => handleFetchSite(def.site), i * 25);
+      pendingTimeoutsRef.current.push(id);
     });
+
+    const secondWaveId = window.setTimeout(() => {
+      if (autoPlayedRef.current) return; // مصدر شغّال بالفعل — لا داعي لتجربة بقية الـ 20 موقع
+      restDefs.forEach((def, i) => {
+        const id = window.setTimeout(() => handleFetchSite(def.site), i * 25);
+        pendingTimeoutsRef.current.push(id);
+      });
+    }, 1800);
+    pendingTimeoutsRef.current.push(secondWaveId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3187,6 +3234,9 @@ export default function WatchPage() {
 
     if (allSrcs.length > 0) {
       autoPlayedRef.current = true;
+      /* مصدر التشغيل تحدَّد الآن — ألغِ بقية طلبات fetch-source الجارية/المعلَّقة فوراً،
+         لا داعي أن تكمل ~20 موقع آخر طلباتهم بالخلفية بلا فائدة */
+      cancelRemainingScrapers();
       /* _resume: شغّله مباشرة (رابط محفوظ سابقاً — سريع وموثوق) */
       const resumeSrc = allSrcs.find(s => s.site === "_resume");
       if (resumeSrc && allSrcs.length === 1) {
