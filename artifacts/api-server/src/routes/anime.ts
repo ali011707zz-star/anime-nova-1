@@ -11135,6 +11135,91 @@ function jikanToAniList(a: any): any {
   };
 }
 
+const JIKAN_DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+/** يحوّل عنصر جدول Jikan إلى عنصر airingSchedule متوافق مع AniList، مع حساب أقرب موعد بث ضمن الأسبوع */
+function jikanScheduleToAniList(a: any, dayIdx: number, weekStart: number, weekEnd: number): any | null {
+  const bday = a.broadcast?.day ? JIKAN_DAYS.indexOf(String(a.broadcast.day).toLowerCase()) : dayIdx;
+  const resolvedDay = bday >= 0 ? bday : dayIdx;
+  const [bh, bm] = (a.broadcast?.time || "00:00").split(":").map((x: string) => parseInt(x) || 0);
+
+  // نبني أقرب تاريخ ضمن نافذة [weekStart, weekEnd) يقع في نفس يوم الأسبوع، بتوقيت JST (UTC+9)
+  const startDate = new Date(weekStart * 1000);
+  for (let i = 0; i < 8; i++) {
+    const cand = new Date(startDate.getTime() + i * 86400000);
+    if (cand.getUTCDay() === resolvedDay) {
+      const airingAt = Math.floor(
+        Date.UTC(cand.getUTCFullYear(), cand.getUTCMonth(), cand.getUTCDate(), bh - 9, bm) / 1000
+      );
+      if (airingAt >= weekStart && airingAt < weekEnd) {
+        const episode = a.episodes ? Math.max(1, Math.min(a.episodes, Math.ceil((Date.now() / 1000 - airingAt) / (7 * 86400)) + 1)) : 1;
+        return { airingAt, episode, media: jikanToAniList(a) };
+      }
+    }
+  }
+  return null;
+}
+
+const _scheduleDayCache = new Map<string, { ts: number; data: any[] }>();
+
+/** Jikan schedules fallback — لجدول البث الأسبوعي عندما يكون AniList معطّلاً */
+async function jikanScheduleFallback(vars: any): Promise<any | null> {
+  const weekStart = vars?.weekStart ?? Math.floor(Date.now() / 1000);
+  const weekEnd    = vars?.weekEnd ?? (weekStart + 7 * 86400);
+
+  // كاش داخلي بالذاكرة لكل يوم على حدة — MyAnimeList غالباً متقطّع (504)،
+  // فنفصل نجاح/فشل كل يوم عن الآخر بدل تلويث الأسبوع كامل بفشل يوم واحد.
+  const now = Date.now();
+  const FRESH_TTL = 3 * 60 * 60_000;  // 3 ساعات — نُعيد الجلب لتحديث البيانات
+  const STALE_TTL = 24 * 60 * 60_000; // 24 ساعة — نُستخدم كـ fallback عند تعطّل Jikan بالكامل
+
+  const fetchDay = async (day: string): Promise<any[]> => {
+    const cached = _scheduleDayCache.get(day);
+    if (cached && now - cached.ts < FRESH_TTL) return cached.data;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const r = await fetch(`https://api.jikan.moe/v4/schedules?filter=${day}&sfw=true&limit=25`, {
+          headers: { "Accept": "application/json", "User-Agent": "AnimeNova/1.0" },
+          signal: AbortSignal.timeout(9000),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          const data = d.data || [];
+          if (data.length) _scheduleDayCache.set(day, { ts: now, data });
+          return data;
+        }
+      } catch {}
+      if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+    }
+    // فشلت كل المحاولات — استخدم آخر نسخة ناجحة محفوظة حتى لو قديمة نسبياً
+    if (cached && now - cached.ts < STALE_TTL) return cached.data;
+    return [];
+  };
+
+  try {
+    const results = await Promise.allSettled(JIKAN_DAYS.map(fetchDay));
+    const airingSchedules: any[] = [];
+    results.forEach((res, dayIdx) => {
+      if (res.status !== "fulfilled") return;
+      for (const a of res.value.filter(isLikelyJapaneseAnime)) {
+        const sched = jikanScheduleToAniList(a, dayIdx, weekStart, weekEnd);
+        if (sched) airingSchedules.push(sched);
+      }
+    });
+    if (!airingSchedules.length) return null; // كل المصادر فشلت — دع الاستدعاء التالي يُكمل
+    airingSchedules.sort((x, y) => x.airingAt - y.airingAt);
+    return {
+      data: {
+        Page: {
+          pageInfo: { hasNextPage: false },
+          airingSchedules,
+        },
+      },
+    };
+  } catch { return null; }
+}
+
 /** Jikan v4 fallback — يُرجع بنية AniList متوافقة */
 async function jikanFallback(body: any): Promise<any | null> {
   try {
@@ -11179,7 +11264,7 @@ async function jikanFallback(body: any): Promise<any | null> {
       return null;
     }
 
-    if (q.includes("airingSchedules")) return null; // لا بديل كافٍ لجداول البث
+    if (q.includes("airingSchedules")) return await jikanScheduleFallback(vars);
 
     // ── استخراج params المدمجة في query string (بدون variables) ──
     const rawQ: string = body?.query ?? "";
