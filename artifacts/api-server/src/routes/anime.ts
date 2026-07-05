@@ -8756,10 +8756,27 @@ router.get("/anime/fetch-source", async (req, res) => {
   const cKey = makeSourceCacheKey(site, title, ep);
   const cached = await getFromSourceCache(cKey);
   if (cached && !shouldRefreshCache(cached.expiresAt)) {
-    const enc = cached.sources.map((s: UnifiedSource) => ({
-      ...s,
-      directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
-    }));
+    const enc = cached.sources.map((s: UnifiedSource) => {
+      /* استخراج headers (Referer/Origin) من رابط الـ proxy قبل التشفير.
+         يحتاجها ExoPlayer/AVPlayer لإرسال Referer مع طلبات الـ segments مباشرةً للـ CDN. */
+      let derivedHeaders = s.headers;
+      if (!derivedHeaders && s.directUrl) {
+        try {
+          const pu = new URL(s.directUrl.startsWith("/") ? `http://x.com${s.directUrl}` : s.directUrl);
+          const ref = pu.searchParams.get("ref");
+          if (ref) {
+            let origin = "";
+            try { origin = new URL(ref).origin; } catch {}
+            derivedHeaders = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+          }
+        } catch { /* ignore */ }
+      }
+      return {
+        ...s,
+        ...(derivedHeaders ? { headers: derivedHeaders } : {}),
+        directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
+      };
+    });
     res.json({ sources: enc, fromCache: true });
     return;
   }
@@ -8845,10 +8862,27 @@ router.get("/anime/fetch-source", async (req, res) => {
       setSourceCache(cKey, site, sources).catch(() => {});
     }
 
-    const encSources = sources.map(s => ({
-      ...s,
-      directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
-    }));
+    const encSources = sources.map(s => {
+      /* استخراج headers (Referer/Origin) قبل تشفير directUrl —
+         يحتاجها ExoPlayer/AVPlayer للـ CDN segments مباشرةً. */
+      let derivedHeaders = s.headers;
+      if (!derivedHeaders && s.directUrl) {
+        try {
+          const pu = new URL(s.directUrl.startsWith("/") ? `http://x.com${s.directUrl}` : s.directUrl);
+          const ref = pu.searchParams.get("ref");
+          if (ref) {
+            let origin = "";
+            try { origin = new URL(ref).origin; } catch {}
+            derivedHeaders = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+          }
+        } catch { /* ignore */ }
+      }
+      return {
+        ...s,
+        ...(derivedHeaders ? { headers: derivedHeaders } : {}),
+        directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
+      };
+    });
     res.json({ sources: encSources });
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? String(e), sources: [] });

@@ -59,8 +59,8 @@ export async function createApp(): Promise<Express> {
   // ── CORS — السماح للواجهة الأمامية وتطبيق الموبايل فقط ─────────────────────
   const ALLOWED_ORIGINS = new Set([
     process.env.FRONTEND_ORIGIN || "",
-    `https://${process.env.APP_DOMAIN || ""}`,
-    `http://${process.env.APP_DOMAIN || ""}`,
+    process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : "",
+    process.env.APP_DOMAIN ? `http://${process.env.APP_DOMAIN}` : "",
     // Replit dev domains
     process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "",
     ...(process.env.REPLIT_DOMAINS?.split(",").map(d => `https://${d.trim()}`) ?? []),
@@ -75,6 +75,8 @@ export async function createApp(): Promise<Express> {
       if (origin.endsWith(".replit.dev") || origin.endsWith(".repl.co") || origin.endsWith(".replit.app")) {
         return cb(null, true);
       }
+      // السماح لـ DuckDNS (VPS self-hosted — animenovaa.duckdns.org وما شابهه)
+      if (/^https?:\/\/[a-zA-Z0-9-]+\.duckdns\.org$/.test(origin)) return cb(null, true);
       // في التطوير: اسمح بأي localhost
       if (origin.includes("localhost") || origin.includes("127.0.0.1")) return cb(null, true);
       cb(new Error(`CORS: ${origin} غير مسموح`));
