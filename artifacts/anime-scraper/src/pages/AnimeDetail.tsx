@@ -214,8 +214,17 @@ export default function AnimeDetail() {
       .then(r => r.json()).then(d => { if (!cancelled && d.comments) setComments(d.comments); })
       .catch(() => {});
 
+    // إذا كان الرابط يحمل مصدر id غير AniList (mal/kitsu — قادم من قائمة
+    // بُنيت أثناء انقطاع AniList) نجلب التفاصيل مباشرة من نفس المصدر بدل
+    // معاملتها كـ AniList id (ما كان يفتح صفحة أنمي مختلف تماماً)
+    const idSource = new URLSearchParams(window.location.search).get("src");
+
     const doFetch = (useProxy: boolean) => {
-      const p: Promise<any> = useProxy
+      const p: Promise<any> = (idSource === "mal" || idSource === "kitsu")
+        ? fetch(`${API_BASE}/api/anime/meta-by-id?id=${encodeURIComponent(params.id!)}&source=${idSource}`, {
+            signal: ctrl.signal,
+          }).then(r => r.json())
+        : useProxy
         ? fetch(API_BASE + "/api/anime/anilist", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -394,11 +403,15 @@ export default function AnimeDetail() {
             onClick={() => {
               if (!params.id) { navigate("/"); return; }
               setLoading(true); setAnime(null);
-              fetch(API_BASE + "/api/anilist", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "Accept": "application/json" },
-                body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id) } }),
-              }).then(r => r.json()).then(d => {
+              const idSource = new URLSearchParams(window.location.search).get("src");
+              const retryFetch = (idSource === "mal" || idSource === "kitsu")
+                ? fetch(`${API_BASE}/api/anime/meta-by-id?id=${encodeURIComponent(params.id)}&source=${idSource}`)
+                : fetch(API_BASE + "/api/anilist", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                    body: JSON.stringify({ query: DETAIL_Q, variables: { id: parseInt(params.id) } }),
+                  });
+              retryFetch.then(r => r.json()).then(d => {
                 const a = d.data?.Media;
                 if (a) setAnime(a);
                 setLoading(false);
