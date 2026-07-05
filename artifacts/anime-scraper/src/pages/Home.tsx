@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
+import { animeHref } from "@/lib/animeLink";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "wouter";
 import { Play, Loader2, ChevronDown, Star, ChevronLeft, ChevronRight, Info, Flame, Film, RotateCw, Clapperboard, Tv2 } from "lucide-react";
@@ -150,7 +151,7 @@ const TODAY_EPISODES_QUERY = `query($gt:Int,$lt:Int){
 
 function AnimeCard({ anime }: { anime: any }) {
   return (
-    <Link href={`/anime/${anime.id}`}>
+    <Link href={animeHref(anime)}>
       <motion.div whileTap={{ scale: 0.91 }} className="cursor-pointer">
         <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.09] shadow-xl shadow-black/60">
           {anime.coverImage?.large ? (
@@ -1063,7 +1064,7 @@ export default function Home() {
                 : (anime.episodes || 0);
               const total = anime.episodes || 0;
               return (
-                <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <Link key={anime.id} href={animeHref(anime)}>
                   <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                     <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50"
                       style={{ width: 92, height: 132 }}>
@@ -1121,7 +1122,7 @@ export default function Home() {
             {fall2025.map(anime => {
               const ep = anime.nextAiringEpisode?.episode ? anime.nextAiringEpisode.episode - 1 : (anime.episodes || 0);
               return (
-                <Link key={anime.id} href={`/anime/${anime.id}`}>
+                <Link key={anime.id} href={animeHref(anime)}>
                   <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                     <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg" style={{ width: 92, height: 132 }}>
                       {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
@@ -1167,7 +1168,7 @@ export default function Home() {
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-1" style={{ scrollbarWidth: "none" }}>
             {movies.map(anime => (
-              <Link key={anime.id} href={`/anime/${anime.id}`}>
+              <Link key={anime.id} href={animeHref(anime)}>
                 <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
                   <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
                     {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1a1a2e] to-[#0f0f1a]" />}
@@ -1211,7 +1212,7 @@ export default function Home() {
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
             {topRated.map(anime => (
-              <Link key={anime.id} href={`/anime/${anime.id}`}>
+              <Link key={anime.id} href={animeHref(anime)}>
                 <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                   <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-yellow-500/10 shadow-lg shadow-yellow-900/20" style={{ width: 92, height: 132 }}>
                     {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
@@ -1258,7 +1259,7 @@ export default function Home() {
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
             {isekaiList.map(anime => (
-              <Link key={anime.id} href={`/anime/${anime.id}`}>
+              <Link key={anime.id} href={animeHref(anime)}>
                 <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                   <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg" style={{ width: 92, height: 132 }}>
                     {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
