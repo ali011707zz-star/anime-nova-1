@@ -11120,7 +11120,7 @@ async function jikanFallback(body: any): Promise<any | null> {
 
     // ── Media(id) — تفاصيل أنمي واحد ──────────────────────────────────────
     if (vars.id && (q.includes("Media(") || q.includes("Media "))) {
-      // خطوة 1: تحويل AniList ID → MAL ID عبر arm.haglund.dev
+      // استراتيجية 1: AniList ID → ARM lookup → MAL ID → Jikan
       try {
         const armR = await fetch(
           `https://arm.haglund.dev/api/v2/ids?source=anilist&id=${vars.id}`,
@@ -11139,6 +11139,18 @@ async function jikanFallback(body: any): Promise<any | null> {
               if (jD.data) return { data: { Media: jikanToAniList(jD.data) } };
             }
           }
+        }
+      } catch {}
+      // استراتيجية 2: معاملة الـ ID مباشرة كـ MAL ID (حالة fallback-origin IDs)
+      // يحدث عندما تأتي القوائم من Jikan فتصبح IDs هي MAL IDs
+      try {
+        const jR2 = await fetch(`https://api.jikan.moe/v4/anime/${vars.id}`, {
+          headers: { "Accept": "application/json", "User-Agent": "AnimeNova/1.0" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (jR2.ok) {
+          const jD2 = await jR2.json();
+          if (jD2.data) return { data: { Media: jikanToAniList(jD2.data) } };
         }
       } catch {}
       return null;
