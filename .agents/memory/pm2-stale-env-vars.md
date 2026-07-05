@@ -1,0 +1,10 @@
+---
+name: PM2 stale environment variables on VPS
+description: Editing .env or ecosystem.config.cjs on the VPS does NOT affect an already-running pm2 process; must delete+start (or restart --update-env) or fixes silently never apply.
+---
+
+The Node app does not use dotenv — all config comes from the environment pm2 injects at process start (from `ecosystem.config.cjs`'s `env:` object). Editing `.env` or `ecosystem.config.cjs` on the VPS has **zero effect** on an already-running pm2 process; pm2 caches the env from whenever the process was last started/reloaded.
+
+**Why:** A prior session changed `CF_WORKER_URL` in `ecosystem.config.cjs` (switching from the working self-hosted proxy `https://animenovaa.duckdns.org/cdn-proxy` to a broken third-party Cloudflare Workers.dev URL that returns a CF "Attention Required" challenge page) but never reloaded pm2. The running process kept its old env (no `CF_WORKER_URL` at all), so every web HLS/video manifest returned raw unproxied CDN URLs — causing widespread "source shows but black screen" across nearly every scraper simultaneously (they all funnel through the same `rewriteM3u8`/`hls-proxy` CF-proxy layer). Verified via `/proc/<pid>/environ` showing vars present in `ecosystem.config.cjs` were absent from the live process.
+
+**How to apply:** After ANY change to `ecosystem.config.cjs` or `.env` on the VPS, verify the fix actually took effect by checking `/proc/<pid>/environ` (or equivalent), not just by re-reading the config file. To apply: `pm2 delete <name> && pm2 start ecosystem.config.cjs --only <name> && pm2 save`. Also: `ecosystem.config.cjs` is a VPS-only artifact, not tracked in the Replit repo — it's easy to forget it holds the source of truth for prod env vars (CF_WORKER_URL must stay `https://animenovaa.duckdns.org/cdn-proxy`, the self-hosted `cf_proxy.py` exposed via nginx — NOT a Cloudflare Workers.dev URL).
