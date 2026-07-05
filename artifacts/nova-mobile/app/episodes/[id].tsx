@@ -130,7 +130,7 @@ export default function EpisodeListScreen() {
     getWatched(id).then(setWatched);
     getCommentCounts(id).then(setCommentCounts);
 
-    fetch("https://graphql.anilist.co", {
+    fetch(`${getBaseUrl()}/api/anilist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANIME_QUERY, variables: { id: parseInt(id) } }),

@@ -212,7 +212,7 @@ export default function AnimeDetailScreen() {
     if (!id) return;
     setLoading(true);
     setDescAr(null);
-    fetch("https://graphql.anilist.co", {
+    fetch(`${getBaseUrl()}/api/anilist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: DETAIL_QUERY, variables: { id: parseInt(id) } }),

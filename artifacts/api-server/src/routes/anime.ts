@@ -11115,12 +11115,38 @@ function jikanToAniList(a: any): any {
 /** Jikan v4 fallback — يُرجع بنية AniList متوافقة */
 async function jikanFallback(body: any): Promise<any | null> {
   try {
-    const q   = JSON.stringify(body?.query ?? "");
+    const q    = JSON.stringify(body?.query ?? "");
     const vars = body?.variables ?? {};
+
+    // ── Media(id) — تفاصيل أنمي واحد ──────────────────────────────────────
+    if (vars.id && (q.includes("Media(") || q.includes("Media "))) {
+      // خطوة 1: تحويل AniList ID → MAL ID عبر arm.haglund.dev
+      try {
+        const armR = await fetch(
+          `https://arm.haglund.dev/api/v2/ids?source=anilist&id=${vars.id}`,
+          { headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(5000) }
+        );
+        if (armR.ok) {
+          const armD = await armR.json();
+          const malId = armD?.myanimelist;
+          if (malId) {
+            const jR = await fetch(`https://api.jikan.moe/v4/anime/${malId}`, {
+              headers: { "Accept": "application/json", "User-Agent": "AnimeNova/1.0" },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (jR.ok) {
+              const jD = await jR.json();
+              if (jD.data) return { data: { Media: jikanToAniList(jD.data) } };
+            }
+          }
+        }
+      } catch {}
+      return null;
+    }
+
+    if (q.includes("airingSchedules")) return null; // لا بديل كافٍ لجداول البث
+
     let url = "";
-
-    if (q.includes("airingSchedules")) return null; // لا بديل لجداول البث
-
     if (vars.search) {
       url = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(vars.search)}&sfw=true&limit=20`;
     } else if (vars.season && vars.seasonYear) {
@@ -11132,7 +11158,7 @@ async function jikanFallback(body: any): Promise<any | null> {
     } else if (q.includes("SCORE_DESC")) {
       url = "https://api.jikan.moe/v4/top/anime?limit=20&sfw=true";
     } else {
-      url = "https://api.jikan.moe/v4/top/anime?limit=20&sfw=true";
+      url = "https://api.jikan.moe/v4/top/anime?filter=bypopularity&limit=20&sfw=true";
     }
 
     const r = await fetch(url, {
@@ -11140,13 +11166,86 @@ async function jikanFallback(body: any): Promise<any | null> {
       signal: AbortSignal.timeout(10000),
     });
     if (!r.ok) return null;
-    const d    = await r.json();
+    const d     = await r.json();
     const media = (d.data || []).map(jikanToAniList);
     return {
       data: {
         Page: {
           media,
           pageInfo: { hasNextPage: d.pagination?.has_next_page ?? false, total: d.pagination?.items?.total ?? media.length },
+        },
+      },
+    };
+  } catch { return null; }
+}
+
+/** تحويل بيانات Kitsu إلى تنسيق AniList */
+function kitsuToAniList(a: any): any {
+  const attr = a.attributes ?? {};
+  const poster = attr.posterImage?.large || attr.posterImage?.medium || null;
+  const banner = attr.coverImage?.large || attr.coverImage?.original || null;
+  const status = attr.status === "current" ? "RELEASING"
+    : attr.status === "finished" ? "FINISHED"
+    : attr.status === "upcoming" ? "NOT_YET_RELEASED" : "RELEASING";
+  const format = attr.subtype === "TV" ? "TV"
+    : attr.subtype === "movie" ? "MOVIE"
+    : attr.subtype === "OVA" ? "OVA" : (attr.subtype || "TV");
+  return {
+    id: parseInt(a.id) || 0,
+    idMal: null,
+    title: {
+      romaji:  attr.titles?.en_jp || attr.canonicalTitle || "",
+      english: attr.titles?.en   || attr.titles?.en_us  || null,
+      native:  attr.titles?.ja_jp || null,
+    },
+    coverImage: { large: poster, extraLarge: poster, color: null },
+    bannerImage: banner,
+    description: attr.description || null,
+    episodes: attr.episodeCount || null,
+    status,
+    averageScore: attr.averageRating ? Math.round(parseFloat(attr.averageRating)) : null,
+    popularity: attr.userCount || null,
+    genres: [],
+    format,
+    countryOfOrigin: "JP",
+    isAdult: attr.nsfw === true,
+    nextAiringEpisode: null,
+    season: null, seasonYear: null,
+    bannerImageInitialized: false,
+  };
+}
+
+/** Kitsu fallback — للـ Page queries عندما تفشل Jikan */
+async function kitsuFallback(body: any): Promise<any | null> {
+  try {
+    const q    = JSON.stringify(body?.query ?? "");
+    const vars = body?.variables ?? {};
+
+    if (q.includes("airingSchedules") || vars.id) return null;
+
+    let url = "";
+    if (vars.search) {
+      url = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(vars.search)}&page[limit]=20&filter[ageRating]=G,PG,R`;
+    } else if (q.includes("TRENDING_DESC")) {
+      url = "https://kitsu.io/api/edge/anime?sort=-userCount&page[limit]=20&filter[ageRating]=G,PG,R";
+    } else if (q.includes("SCORE_DESC")) {
+      url = "https://kitsu.io/api/edge/anime?sort=-averageRating&page[limit]=20&filter[ageRating]=G,PG,R";
+    } else {
+      url = "https://kitsu.io/api/edge/anime?sort=-favoritesCount&page[limit]=20&filter[ageRating]=G,PG,R";
+    }
+
+    const r = await fetch(url, {
+      headers: { "Accept": "application/vnd.api+json", "User-Agent": "AnimeNova/1.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return null;
+    const d     = await r.json();
+    const media = (d.data || []).map(kitsuToAniList);
+    return {
+      data: {
+        Page: {
+          media,
+          pageInfo: { hasNextPage: !!d.links?.next, total: media.length },
         },
       },
     };
@@ -11162,7 +11261,7 @@ async function kitsuEnrichBannerImages(mediaList: any[]): Promise<any[]> {
       missing.slice(0, 6).map(async m => {
         try {
           const r = await fetch(
-            `https://kitsu.app/api/edge/anime?filter[text]=${encodeURIComponent(m.title.romaji)}&page[limit]=1&fields[anime]=coverImage,posterImage`,
+            `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(m.title.romaji)}&page[limit]=1&fields[anime]=coverImage,posterImage`,
             { headers: { "Accept": "application/vnd.api+json" }, signal: AbortSignal.timeout(5000) }
           );
           if (!r.ok) return;
@@ -11170,6 +11269,10 @@ async function kitsuEnrichBannerImages(mediaList: any[]): Promise<any[]> {
           const hit = d.data?.[0]?.attributes;
           if (hit?.coverImage?.original || hit?.coverImage?.large) {
             m.bannerImage = hit.coverImage.original || hit.coverImage.large;
+          }
+          // إذا كانت صورة الـ poster فارغة كذلك، عبِّئها من Kitsu
+          if (!m.coverImage?.large && hit?.posterImage?.large) {
+            m.coverImage = { large: hit.posterImage.large, extraLarge: hit.posterImage.large, color: null };
           }
         } catch {}
       })
@@ -11210,7 +11313,6 @@ router.post("/anilist", async (req, res) => {
     if (r.ok) {
       const data = await r.json() as any;
       if (!data?.errors?.length) {
-        // تخزين في الـ cache (async — لا ننتظر)
         metaCacheSet(cacheKey, data, ttl, "anilist").catch(() => {});
         res.setHeader("Cache-Control", "public, max-age=60");
         res.setHeader("X-Meta-Source", "anilist");
@@ -11219,10 +11321,9 @@ router.post("/anilist", async (req, res) => {
     }
   } catch {}
 
-  // 3️⃣ Jikan (MyAnimeList) fallback — عندما تُحجب AniList
+  // 3️⃣ Jikan (MyAnimeList) fallback
   const jikanData = await jikanFallback(body);
   if (jikanData) {
-    // تعبئة صور الـ banner من Kitsu إذا كانت فارغة
     if (jikanData.data?.Page?.media) {
       jikanData.data.Page.media = await kitsuEnrichBannerImages(jikanData.data.Page.media);
     }
@@ -11232,7 +11333,16 @@ router.post("/anilist", async (req, res) => {
     return res.json(jikanData);
   }
 
-  // 4️⃣ كل المصادر فشلت — هيكل فارغ بدل خطأ
+  // 4️⃣ Kitsu fallback — بديل ثالث لـ Page queries
+  const kitsuData = await kitsuFallback(body);
+  if (kitsuData) {
+    metaCacheSet(cacheKey, kitsuData, Math.min(ttl, 3600), "kitsu").catch(() => {});
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.setHeader("X-Meta-Source", "kitsu");
+    return res.json(kitsuData);
+  }
+
+  // 5️⃣ كل المصادر فشلت — هيكل فارغ بدل خطأ
   return res.json({ data: { Page: { media: [], pageInfo: { hasNextPage: false, total: 0 } }, Media: null } });
 });
 

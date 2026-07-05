@@ -80,7 +80,7 @@ function timeAgo(ts: number | string): string {
 
 async function gqlFetch(query: string): Promise<any> {
   try {
-    const r = await fetch("https://graphql.anilist.co", {
+    const r = await fetch(`${getBaseUrl()}/api/anilist`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ query }),
