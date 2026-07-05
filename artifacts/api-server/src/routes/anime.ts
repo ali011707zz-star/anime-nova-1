@@ -11084,6 +11084,20 @@ async function metaCacheSet(key: string, data: any, ttl: number, source: string)
   } catch {}
 }
 
+/**
+ * فلتر الأنمي الصيني (Donghua) — العناوين اليابانية الحقيقية دائماً تحتوي
+ * على حروف hiragana أو katakana. إذا كان العنوان الياباني موجوداً لكن
+ * يحتوي فقط على كانجي وحروف لاتينية (بدون كانا) فغالباً هو دونغوا صيني.
+ */
+function isLikelyJapaneseAnime(a: any): boolean {
+  const jpTitle = a.title_japanese ?? "";
+  if (!jpTitle) return true; // لا معلومات → نبقيه
+  // الحروف اليابانية: hiragana (3040-309F) أو katakana (30A0-30FF) أو katakana ممتد (31F0-31FF)
+  if (/[\u3040-\u30FF\u31F0-\u31FF]/.test(jpTitle)) return true;
+  // يحتوي فقط على كانجي/لاتيني — غالباً دونغوا صيني → نُزيله
+  return false;
+}
+
 /** تحويل بيانات Jikan إلى تنسيق AniList */
 function jikanToAniList(a: any): any {
   return {
@@ -11165,12 +11179,14 @@ async function jikanFallback(body: any): Promise<any | null> {
       url = `https://api.jikan.moe/v4/seasons/${vars.seasonYear}/${String(vars.season).toLowerCase()}?sfw=true&limit=20`;
     } else if (vars.genre) {
       url = `https://api.jikan.moe/v4/anime?genres=${vars.genre}&sfw=true&limit=20`;
-    } else if (q.includes("TRENDING_DESC") || q.includes("POPULARITY_DESC")) {
-      url = "https://api.jikan.moe/v4/top/anime?filter=airing&limit=20&sfw=true";
+    } else if (q.includes("TRENDING_DESC")) {
+      url = "https://api.jikan.moe/v4/top/anime?filter=airing&limit=30&sfw=true";
+    } else if (q.includes("POPULARITY_DESC")) {
+      url = "https://api.jikan.moe/v4/top/anime?filter=bypopularity&limit=30&sfw=true";
     } else if (q.includes("SCORE_DESC")) {
-      url = "https://api.jikan.moe/v4/top/anime?limit=20&sfw=true";
+      url = "https://api.jikan.moe/v4/top/anime?limit=30&sfw=true";
     } else {
-      url = "https://api.jikan.moe/v4/top/anime?filter=bypopularity&limit=20&sfw=true";
+      url = "https://api.jikan.moe/v4/top/anime?filter=bypopularity&limit=30&sfw=true";
     }
 
     const r = await fetch(url, {
@@ -11178,8 +11194,9 @@ async function jikanFallback(body: any): Promise<any | null> {
       signal: AbortSignal.timeout(10000),
     });
     if (!r.ok) return null;
-    const d     = await r.json();
-    const media = (d.data || []).map(jikanToAniList);
+    const d = await r.json();
+    // فلترة الدونغوا الصيني: نبقي فقط الأنمي الياباني
+    const media = (d.data || []).filter(isLikelyJapaneseAnime).map(jikanToAniList);
     return {
       data: {
         Page: {
@@ -11270,7 +11287,7 @@ async function kitsuEnrichBannerImages(mediaList: any[]): Promise<any[]> {
   if (!missing.length) return mediaList;
   try {
     await Promise.allSettled(
-      missing.slice(0, 6).map(async m => {
+      missing.slice(0, 14).map(async m => {
         try {
           const r = await fetch(
             `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(m.title.romaji)}&page[limit]=1&fields[anime]=coverImage,posterImage`,
