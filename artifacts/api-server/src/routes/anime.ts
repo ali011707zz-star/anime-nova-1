@@ -8045,6 +8045,142 @@ async function getCineSrcAnimeSources(title: string, english: string | null, ep:
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  MovieBox (h5-api.aoneroom.com) — Direct MP4, صوت خام, بدون ترجمة مدمجة
+//  المصدر: https://github.com/Simatwa/moviebox-api
+//  Auth: JWT عبر search-suggest (صالح 90 يوم) + cookies
+//  Search → POST /wefeed-h5api-bff/subject/search
+//  Download → GET /wefeed-h5api-bff/subject/download
+// ════════════════════════════════════════════════════════════════════
+
+const MBX_API    = "https://h5-api.aoneroom.com";
+const MBX_REF    = "https://videodownloader.site/";
+const MBX_UA     = "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0";
+const MBX_SUGGEST  = `${MBX_API}/wefeed-h5api-bff/subject/search-suggest`;
+const MBX_SEARCH   = `${MBX_API}/wefeed-h5api-bff/subject/search`;
+const MBX_DOWNLOAD = `${MBX_API}/wefeed-h5api-bff/subject/download`;
+const MBX_TOKEN_TTL = 7 * 24 * 3_600_000; // تجديد كل 7 أيام (صالح 90 يوماً)
+
+// أنماط المدبلج — نستبعد النتائج التي تحتوي عليها
+const MBX_DUBBED_RE = /\[\s*(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|dubbed|dub)\s*\]/i;
+
+interface MbxAuth { token: string; cookies: string; fetchedAt: number; }
+let _mbxAuth: MbxAuth | null = null;
+
+async function getMbxAuth(): Promise<{ token: string; cookies: string } | null> {
+  const now = Date.now();
+  if (_mbxAuth && now - _mbxAuth.fetchedAt < MBX_TOKEN_TTL) {
+    return { token: _mbxAuth.token, cookies: _mbxAuth.cookies };
+  }
+  try {
+    const r = await fetch(MBX_SUGGEST, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": MBX_UA,
+        "Referer": MBX_REF,
+      },
+      body: JSON.stringify({ keyword: "avatar", perPage: 0 }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!r.ok) return null;
+    const xUser = r.headers.get("x-user");
+    if (!xUser) return null;
+    const userInfo = JSON.parse(xUser);
+    const setCookies = r.headers.getSetCookie?.() ?? [];
+    const cookies = setCookies.map((c: string) => c.split(";")[0]).filter(Boolean).join("; ");
+    _mbxAuth = { token: userInfo.token, cookies, fetchedAt: now };
+    return { token: userInfo.token, cookies };
+  } catch { return null; }
+}
+
+async function getMovieBoxAnimeSources(
+  title: string,
+  english: string | null,
+  ep: number,
+  isMovie: boolean,
+): Promise<UnifiedSource[]> {
+  const auth = await getMbxAuth();
+  if (!auth) return [];
+
+  const { token, cookies } = auth;
+  const hdrs: Record<string, string> = {
+    "Accept": "application/json",
+    "User-Agent": MBX_UA,
+    "Referer": MBX_REF,
+    "Authorization": `Bearer ${token}`,
+    "Cookie": cookies,
+  };
+
+  // استخرج رقم الموسم من العنوان (Season 2 / الموسم الثاني ...)
+  const seasonNum = extractSeasonNum(english || "") ?? extractSeasonNum(title) ?? 1;
+  const query = english || title;
+
+  try {
+    // ── 1. بحث ──
+    const sr = await fetch(MBX_SEARCH, {
+      method: "POST",
+      headers: { ...hdrs, "Content-Type": "application/json" },
+      body: JSON.stringify({ keyword: query, page: 1, perPage: 12, subjectType: 0 }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!sr.ok) return [];
+    const sData: any = await sr.json();
+    const items: any[] = sData?.data?.items || [];
+    if (!items.length) return [];
+
+    // فلتر: استبعد النسخ المدبلجة أولاً
+    const nonDubbed = items.filter((it: any) => !MBX_DUBBED_RE.test(it.title || ""));
+    const candidates = nonDubbed.length ? nonDubbed : items;
+
+    // رتّب: الأقرب للعنوان أولاً
+    const qLow = query.toLowerCase();
+    candidates.sort((a: any, b: any) => {
+      const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+      const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+      return bHit - aHit;
+    });
+    const item = candidates[0];
+    if (!item?.subjectId || !item?.detailPath) return [];
+
+    // ── 2. روابط التحميل ──
+    const se = isMovie ? 0 : seasonNum;
+    const epParam = isMovie ? 0 : ep;
+    const dr = await fetch(
+      `${MBX_DOWNLOAD}?subjectId=${encodeURIComponent(item.subjectId)}&se=${se}&ep=${epParam}&detailPath=${encodeURIComponent(item.detailPath)}`,
+      { headers: hdrs, signal: AbortSignal.timeout(10_000) },
+    );
+    if (!dr.ok) return [];
+    const dData: any = await dr.json();
+    const downloads: any[] = dData?.data?.downloads || [];
+    if (!downloads.length) return [];
+
+    // رتّب تنازلياً حسب الدقة
+    downloads.sort((a: any, b: any) => (b.resolution || 0) - (a.resolution || 0));
+
+    const sources: UnifiedSource[] = [];
+    for (const dl of downloads.slice(0, 3)) {
+      const res = Number(dl.resolution) || 0;
+      if (!dl.url || res <= 0) continue;
+      const qualityRank = res >= 1080 ? 14 : res >= 720 ? 13 : 11;
+      const qualityLabel = res >= 1080 ? "FHD" : res >= 720 ? "HD" : "SD";
+      sources.push({
+        name: `MovieBox · ${res}p`,
+        url: String(dl.url),
+        quality: qualityLabel,
+        qualityRank,
+        site: "moviebox",
+        directUrl: String(dl.url),
+        directType: "mp4",
+        headers: { Referer: MBX_REF },
+        // ملاحظة: لا subtitleUrl — صوت خام بدون ترجمة مدمجة
+      });
+    }
+    return sources;
+  } catch { return []; }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  WITANIME-DB — Arabic dubbed content via GitHub releases ZIP
 //  Repo: github.com/mhmod3/WITanime-DB (daily updates, 2185+ anime)
 //  Hosts: hlswish (streamwish), luluvdo, darkibox → all extractable
@@ -8708,6 +8844,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep),           true, 20000),
       scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 22000),
       scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 22000),
+      // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
+      scrapeCached("moviebox",  () => getMovieBoxAnimeSources(title, english, ep, isMovie), false, 18000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy + ScraperAPI chain
