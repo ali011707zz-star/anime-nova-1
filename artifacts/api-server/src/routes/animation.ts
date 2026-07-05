@@ -3530,11 +3530,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           });
           if (!r.ok) { console.warn(`[CinePro] HTTP ${r.status} for tmdbId=${tmdbId}`); return; }
           const data = await r.json() as { sources?: any[]; subtitles?: any[] };
+          // حد أقصى 2 سيرفر لكل جودة — CinePro يرسل أحياناً 10+ روابط بنفس الجودة وأغلبها معطّل
+          const MAX_PER_QUALITY = 2;
+          const qualityCounts: Record<string, number> = {};
           for (const src of (data.sources || [])) {
             const provName = typeof src.provider === "object"
               ? (src.provider?.name || "CinePro")
               : (src.provider || "CinePro");
             const quality = src.quality || "HD";
+            if ((qualityCounts[quality] || 0) >= MAX_PER_QUALITY) continue;
             let realUrl: string = src.url || "";
             // فك تشفير proxy URL الداخلي للحصول على الرابط الحقيقي
             if (realUrl.includes("/v1/proxy?data=")) {
@@ -3549,6 +3553,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               ? `/api/anime/hls-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`
               : `/api/anime/video-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`;
             sendSource(realUrl, `CinePro · ${provName} · ${quality}`, realUrl, proxied);
+            qualityCounts[quality] = (qualityCounts[quality] || 0) + 1;
           }
         } catch (e: any) { console.warn(`[CinePro] sources error tmdbId=${tmdbId} type=${type}:`, e?.message); }
       }),
