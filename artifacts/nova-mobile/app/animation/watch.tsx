@@ -29,6 +29,8 @@ interface AnimSrc {
   tier?: string;
   isEmbed?: boolean;
   directType?: string;  // "hls" | "mp4" — used to filter on web
+  /** Referer/Origin headers مطلوبة للـ CDN — مُعادة من الخادم مباشرةً */
+  headers?: Record<string, string>;
 }
 
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string; label: string }> = {
@@ -38,6 +40,22 @@ const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: strin
 };
 const Q_SHORT: Record<Quality, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
 const TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
+
+/** استخراج Referer/Origin من رابط proxy (ref= param) — fallback إذا لم تُرسَل headers من الخادم */
+function extractHeadersFromProxy(url: string): Record<string, string> | undefined {
+  if (!url) return undefined;
+  try {
+    const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
+    const u = new URL(fullUrl);
+    const ref = u.searchParams.get("ref");
+    if (!ref) return undefined;
+    let origin = "";
+    try { origin = new URL(ref).origin; } catch {}
+    return origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+  } catch {
+    return undefined;
+  }
+}
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
@@ -539,12 +557,17 @@ export default function AnimationWatchScreen() {
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
       const isArabic = subLang === "ar" && !!resolvedSubUrl;
+      const playUrl = getPlayUrl(s);
+      /* headers: استخدم الـ headers المُرسَلة من الخادم (Referer/Origin مباشرة)،
+         ثم احسبها من رابط الـ proxy كـ fallback */
+      const headers = s.headers || extractHeadersFromProxy(playUrl);
       return {
-        url: getPlayUrl(s),
+        url: playUrl,
         label: lbl || "مصدر",
         quality: getSrcQuality(s),
         subtitleUrl: resolvedSubUrl,
         isArabic,
+        ...(headers ? { headers } : {}),
       };
     }).filter(s => s.url);
   }, [directSrcs, globalArSubUrl, globalEnSubUrl, subLang]);

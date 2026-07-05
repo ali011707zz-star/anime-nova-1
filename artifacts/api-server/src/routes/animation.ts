@@ -1720,7 +1720,24 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     if (!url || seenUrls.has(url)) return;
     seenUrls.add(url);
     sourceCount++;
-    const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}) };
+
+    /* استخراج Referer/Origin من رابط الـ proxyUrl (ref= param) وتضمينهم في الاستجابة.
+       ExoPlayer/AVPlayer يُرسلهم مع segments وredirects مباشرةً للـ CDN. */
+    let headers: Record<string, string> | undefined;
+    const proxyLookup = proxyUrl || directUrl;
+    if (proxyLookup) {
+      try {
+        const pu = new URL(proxyLookup.startsWith("/") ? `http://x.com${proxyLookup}` : proxyLookup);
+        const ref = pu.searchParams.get("ref");
+        if (ref) {
+          let origin = "";
+          try { origin = new URL(ref).origin; } catch {}
+          headers = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+        }
+      } catch { /* ignore */ }
+    }
+
+    const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}), ...(headers ? { headers } : {}) };
     send("source", { url, label, directUrl, proxyUrl, ...extra });
     // capture for caching — isolated per async context (no race condition)
     const captureArr = captureStorage.getStore();

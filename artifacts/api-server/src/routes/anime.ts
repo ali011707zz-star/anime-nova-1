@@ -1645,6 +1645,8 @@ interface UnifiedSource {
   hasBuiltinSub?: boolean;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
+  /** Referer/Origin headers مطلوبة للـ CDN — تُرسَل مع كل طلب (segments + redirects) */
+  headers?: Record<string, string>;
 }
 
 const SKIP_EXTRACT_HOSTS = [
@@ -8514,9 +8516,28 @@ router.get("/anime/sources-stream", async (req, res) => {
       : checkUrl;
     if (globalSeen.has(key)) return;
     globalSeen.add(key);
+
+    /* استخراج Referer/Origin من رابط الـ proxy (ref= param) وتضمينهم في الاستجابة.
+       هذا يتيح للعميل (ExoPlayer/AVPlayer) إرسال الـ headers الصحيحة مباشرةً للـ CDN
+       حتى لو لم يكن هناك proxy يمر عبر الخادم. */
+    let derivedHeaders = s.headers;
+    if (!derivedHeaders && s.directUrl) {
+      try {
+        const proxyUrl = s.directUrl.startsWith("/") ? `http://x.com${s.directUrl}` : s.directUrl;
+        const pu = new URL(proxyUrl);
+        const ref = pu.searchParams.get("ref");
+        if (ref) {
+          let origin = "";
+          try { origin = new URL(ref).origin; } catch {}
+          derivedHeaders = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+        }
+      } catch { /* ignore */ }
+    }
+
     const toSend: UnifiedSource = {
       ...s,
       directUrl: s.directUrl ? encryptProxyUrl(s.directUrl) : s.directUrl,
+      ...(derivedHeaders ? { headers: derivedHeaders } : {}),
     };
     res.write(`data: ${JSON.stringify(toSend)}\n\n`);
   }
@@ -10532,10 +10553,11 @@ router.get("/anime/hls-proxy", async (req, res) => {
       return;
     }
 
-    /* ويب: segments عبر seg-proxy (directSegs=false) — أغلب الـ CDN تتطلب Referer/Origin
-       صحيح لا يستطيع المتصفح إرساله عند الاتصال المباشر (CORS/Referer block).
-       الخادم فقط يقدر يضيف الـ headers الصحيحة، لذلك لازم يمر عبر seg-proxy. */
-    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, false);
+    /* ويب: segments تذهب مباشرةً للـ CDN (directSegs=true) — لا تمر عبر seg-proxy.
+       يُقلّل bandwidth الخادم إلى الصفر للـ segments؛ الـ manifest فقط (نص صغير) يمر عبرنا.
+       المتصفح/hls.js يتصل بالـ CDN مباشرةً — CDN مع CORS يعمل، بدون CORS لن يعمل
+       في المتصفح لكن هذا خارج سيطرة الخادم ولا يُسبّب استهلاك bandwidth. */
+    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, true);
     const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
     if (isCdnCacheable(url)) {
       cdnCache.set(effectiveCacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
@@ -10550,62 +10572,6 @@ router.get("/anime/hls-proxy", async (req, res) => {
 });
 
 router.get("/anime/video-proxy", async (req, res) => {
-  const rawUrl    = (req.query.url    as string || "").trim();
-  let ref         = (req.query.ref    as string || "").trim();
-  let originParam = (req.query.origin as string || "").trim();
-  const isMobile  = req.query.mobile === "1";
-  if (!rawUrl) { res.status(400).send("url required"); return; }
-  let url: string;
-  try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
-  if (isEncrypted(url)) url = decryptParam(url);
-  if (ref && isEncrypted(ref)) ref = decryptParam(ref);
-  if (originParam) try { originParam = decodeURIComponent(originParam); } catch { originParam = ""; }
-  if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
-
-  /* موبايل: ExoPlayer/AVPlayer يقدر يضيف Referer/Origin بنفسه فيتصل مباشرة بالـ CDN
-     (307 redirect يوفّر bandwidth الخادم). */
-  if (isMobile) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Range");
-    res.redirect(307, url);
-    return;
-  }
-
-  /* ويب: المتصفح لا يقدر يرسل Referer/Origin مخصّص عند اتباع redirect،
-     وأغلب CDN تتطلبهم فيرفض الطلب المباشر (CORS/403). لازم نمرّر البيانات
-     عبر الخادم مع الـ headers الصحيحة. */
-  let origin = originParam;
-  if (!origin) try { origin = new URL(ref || url).origin; } catch {}
-  if (!origin) try { origin = new URL(url).origin; } catch {}
-
-  try {
-    const upstreamHeaders: Record<string, string> = { ...HLS_PROXY_HDRS(ref || url, origin) };
-    if (req.headers.range) upstreamHeaders["Range"] = req.headers.range as string;
-
-    const r = await fetch(url, { headers: upstreamHeaders, signal: AbortSignal.timeout(20000), redirect: "follow" });
-    if (!r.ok && r.status !== 206) { res.status(r.status).send(`upstream ${r.status}`); return; }
-
-    res.status(r.status);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Range");
-    res.setHeader("Content-Type", r.headers.get("content-type") || "video/mp4");
-    const cl = r.headers.get("content-length"); if (cl) res.setHeader("Content-Length", cl);
-    const cr = r.headers.get("content-range"); if (cr) res.setHeader("Content-Range", cr);
-    res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", "no-store");
-
-    if (!r.body) { res.end(); return; }
-    const { Readable } = await import("node:stream");
-    const nodeStream = Readable.fromWeb(r.body as any);
-    nodeStream.on("error", () => { try { if (!res.writableEnded) res.end(); } catch {} });
-    res.on("close", () => { try { nodeStream.destroy(); } catch {} });
-    nodeStream.pipe(res);
-  } catch (e: any) {
-    if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`);
-  }
-});
-
-router.get("/anime/seg-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   let ref      = (req.query.ref as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
@@ -10613,37 +10579,34 @@ router.get("/anime/seg-proxy", async (req, res) => {
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
   if (isEncrypted(url)) url = decryptParam(url);
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
-  // Derive Origin from ref (Referer) so it matches what a real browser would send
-  let origin = ""; try { origin = new URL(ref || url).origin; } catch {}
-  if (!origin) try { origin = new URL(url).origin; } catch {}
+  if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* seg-proxy: مرّر بيانات الـ segment عبر الخادم مع Referer/Origin الصحيحين.
-     أغلب CDN تحجب الطلبات المباشرة من المتصفح بدون هذه الـ headers (CORS/403). */
-  try {
-    const upstreamHeaders: Record<string, string> = { ...HLS_PROXY_HDRS(ref || url, origin) };
-    if (req.headers.range) upstreamHeaders["Range"] = req.headers.range as string;
+  /* 307 redirect للجميع (موبايل + ويب):
+     - ExoPlayer/AVPlayer يُرسل الـ headers الصحيحة (Referer/Origin) التي أعادها
+       sendSrc ضمن حقل headers في الـ source object.
+     - المتصفح يتبع الـ redirect مباشرةً للـ CDN — لا يمر أي بيانات فيديو عبر الخادم.
+     هذا يُلغي استهلاك bandwidth الخادم للفيديو المباشر (MP4). */
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Range");
+  res.redirect(307, url);
+});
 
-    const r = await fetch(url, { headers: upstreamHeaders, signal: AbortSignal.timeout(15000), redirect: "follow" });
-    if (!r.ok && r.status !== 206) { res.status(r.status).send(`upstream ${r.status}`); return; }
+router.get("/anime/seg-proxy", async (req, res) => {
+  const rawUrl = (req.query.url as string || "").trim();
+  if (!rawUrl) { res.status(400).send("url required"); return; }
+  let url: string;
+  try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
+  if (isEncrypted(url)) url = decryptParam(url);
+  if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-    res.status(r.status);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Range");
-    res.setHeader("Content-Type", r.headers.get("content-type") || "video/mp2t");
-    const cl = r.headers.get("content-length"); if (cl) res.setHeader("Content-Length", cl);
-    const cr = r.headers.get("content-range"); if (cr) res.setHeader("Content-Range", cr);
-    res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", "no-store");
-
-    if (!r.body) { res.end(); return; }
-    const { Readable } = await import("node:stream");
-    const nodeStream = Readable.fromWeb(r.body as any);
-    nodeStream.on("error", () => { try { if (!res.writableEnded) res.end(); } catch {} });
-    res.on("close", () => { try { nodeStream.destroy(); } catch {} });
-    nodeStream.pipe(res);
-  } catch (e: any) {
-    if (!res.headersSent) res.status(502).send(`proxy error: ${e?.message ?? e}`);
-  }
+  /* 307 redirect مباشرةً للـ CDN — لا تمر بيانات الـ segments عبر الخادم إطلاقاً.
+     ExoPlayer/AVPlayer يُرسل الـ headers (Referer/Origin) التي أعادها sendSrc
+     في حقل headers، فيحصل على الـ segment مباشرةً من الـ CDN بالـ headers الصحيحة.
+     المتصفح (hls.js) يتبع الـ redirect — CDN مع CORS headers يعمل، بدونها لن يعمل
+     في المتصفح لكن لا يُسبّب أي استهلاك bandwidth على الخادم. */
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Range");
+  res.redirect(307, url);
 });
 
 // ══════════════════════════════════════════════════════════════════

@@ -32,6 +32,8 @@ interface Src {
   directType?: string;
   skipIntro?: { start: number; end: number };
   skipOutro?: { start: number; end: number };
+  /** Referer/Origin headers مطلوبة للـ CDN — مُعادة من الخادم لتجنب الاعتماد على تحليل رابط الـ proxy */
+  headers?: Record<string, string>;
 }
 
 /* ── Site → 2-letter tag ── */
@@ -525,10 +527,12 @@ export default function WatchScreen() {
     const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher"]);
     return srcs.map(s => {
       const url = getPlayUrl(s);
+      /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
+         ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
+      const headers = s.headers || extractProxyHeaders(url);
       return {
         url,
-        /* headers: Referer/Origin مستخرجة من رابط الـ proxy — تُرسَل مع كل طلب CDN */
-        headers: extractProxyHeaders(url),
+        headers,
         label: `سيرفر · ${getSiteTag(s.site || "")}`,
         quality: getSrcQuality(s),
         subtitleUrl: s.subtitleUrl ? resolveUrl(s.subtitleUrl, base) : globalSubUrl,
