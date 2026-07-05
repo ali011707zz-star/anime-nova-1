@@ -10618,18 +10618,14 @@ function rewriteM3u8(
 
   const toProxy = (raw: string): string => {
     const absUrl = toAbsolute(raw);
-    if (directSegs) {
-      /* موبايل: الرابط المطلق مباشرةً — ExoPlayer/AVPlayer يتصل بالـ CDN دون وساطة */
-      return absUrl;
-    }
-    /* ويب: CF Worker يُضيف Referer/Origin على الـ CDN ← يحلّ مشكلة 403 في المتصفح.
-       إن لم يكن CF_WORKER_URL مضبوطاً: يُعاد الرابط مباشرةً (CDN بدون CORS لن يعمل
-       في المتصفح لكن لا يُسبّب أي استهلاك bandwidth على الخادم). */
+    /* جميع المنصات (ويب + موبايل): كل الـ segments تمر عبر CF Worker دائماً.
+       CF Worker يُضيف Referer/Origin → يحلّ 403 من CDN بدون استهلاك bandwidth على VPS. */
     const cfBase = process.env.CF_WORKER_URL;
     if (cfBase) {
       const cfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
       return `${cfBase}?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}${cfKey}`;
     }
+    /* إذا لم يكن CF Worker مضبوطاً: fallback للرابط المباشر */
     return absUrl;
   };
 
@@ -10773,7 +10769,8 @@ router.get("/anime/video-proxy", async (req, res) => {
   const cfBase = process.env.CF_WORKER_URL;
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  if (cfBase && req.query.mobile !== "1") {
+  if (cfBase) {
+    /* جميع المنصات: CF Worker يتولى إضافة Referer/Origin بدون استهلاك VPS bandwidth */
     const cfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
     res.redirect(307, `${cfBase}?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref || url)}${cfKey}`);
   } else {
@@ -10789,14 +10786,23 @@ router.get("/anime/seg-proxy", async (req, res) => {
   if (isEncrypted(url)) url = decryptParam(url);
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* 307 redirect مباشرةً للـ CDN — لا تمر بيانات الـ segments عبر الخادم إطلاقاً.
-     ExoPlayer/AVPlayer يُرسل الـ headers (Referer/Origin) التي أعادها sendSrc
-     في حقل headers، فيحصل على الـ segment مباشرةً من الـ CDN بالـ headers الصحيحة.
-     المتصفح (hls.js) يتبع الـ redirect — CDN مع CORS headers يعمل، بدونها لن يعمل
-     في المتصفح لكن لا يُسبّب أي استهلاك bandwidth على الخادم. */
+  /* 307 redirect عبر CF Worker — يُضيف Referer/Origin بدون استهلاك VPS bandwidth.
+     ref: origin URL للـ CDN (لتمرير Referer صحيح للـ Worker).
+     إن لم يكن CF Worker مضبوطاً: redirect مباشر للـ CDN كـ fallback. */
+  const segRef = (req.query.ref as string || "").trim();
+  let segRefDecoded = segRef;
+  try { if (segRef) segRefDecoded = decodeURIComponent(segRef); } catch {}
+  const segOrigin = (() => { try { return new URL(segRefDecoded || url).origin; } catch { return ""; } })();
+  const segCfBase = process.env.CF_WORKER_URL;
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  res.redirect(307, url);
+  if (segCfBase) {
+    const segCfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
+    const segRefParam = segOrigin ? `&ref=${encodeURIComponent(segOrigin)}` : "";
+    res.redirect(307, `${segCfBase}?url=${encodeURIComponent(url)}${segRefParam}${segCfKey}`);
+  } else {
+    res.redirect(307, url);
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════
@@ -11181,7 +11187,8 @@ async function jikanFallback(body: any): Promise<any | null> {
     const yearInlineM   = rawQ.match(/seasonYear:\s*(\d{4})/);
     const inlineSeason  = seasonInlineM?.[1]?.toLowerCase(); // "spring","fall","summer","winter"
     const inlineYear    = yearInlineM ? parseInt(yearInlineM[1]) : null;
-    const inlineGenreM  = rawQ.match(/genre_in:\s*\["([^"]+)"/);
+    // يدعم كلاً من: genre_in: ["Isekai"] و genre: "Isekai" و genre_in: ["X","Y"]
+    const inlineGenreM  = rawQ.match(/genre_in:\s*\["([^"]+)"/) || rawQ.match(/genre:\s*"([^"]+)"/);
     const inlineGenre   = inlineGenreM?.[1]; // e.g. "Isekai"
     const isMovieQ      = rawQ.includes("format: MOVIE") || rawQ.includes("format:MOVIE");
     const seasonMap: Record<string, string> = { spring: "spring", summer: "summer", fall: "fall", autumn: "fall", winter: "winter" };
@@ -11288,7 +11295,7 @@ async function kitsuFallback(body: any): Promise<any | null> {
     const inlineSeason2  = seasonInlineM2?.[1]?.toLowerCase();
     const inlineYear2    = yearInlineM2 ? parseInt(yearInlineM2[1]) : null;
     const isMovieQ2      = rawQ.includes("format: MOVIE") || rawQ.includes("format:MOVIE");
-    const inlineGenreM2  = rawQ.match(/genre_in:\s*\["([^"]+)"/);
+    const inlineGenreM2  = rawQ.match(/genre_in:\s*\["([^"]+)"/) || rawQ.match(/genre:\s*"([^"]+)"/);
     const inlineGenre2   = inlineGenreM2?.[1];
     const kitsuSeasonMap: Record<string, string> = { spring: "spring", summer: "summer", fall: "fall", autumn: "fall", winter: "winter" };
     const kitsuSeason2   = inlineSeason2 ? (kitsuSeasonMap[inlineSeason2] ?? null) : null;
@@ -11358,17 +11365,32 @@ async function kitsuEnrichBannerImages(mediaList: any[]): Promise<any[]> {
 }
 
 // ── AniList GraphQL Proxy — Cache + Multi-Source ─────────────────────────────
+/** 
+ * يتتبع ما إذا كان AniList حالياً معطّلاً (يُعاد تعيينه عند أول نجاح).
+ * يُستخدم لتخطّي الكاش المُخزَّن من AniList أثناء انقطاع الخدمة عندما
+ * يكون الاستعلام Media(id) — حينئذٍ تكون IDs المُعادة هي MAL IDs من Jikan
+ * وليست AniList IDs، مما يتعارض مع الكاش القديم.
+ */
+let _anilistDown = false;
+let _anilistDownSince = 0;
+
 router.post("/anilist", async (req, res) => {
-  const body     = req.body;
-  const cacheKey = metaHash(body);
-  const ttl      = metaTtl(body);
+  const body        = req.body;
+  const cacheKey    = metaHash(body);
+  const ttl         = metaTtl(body);
+  const isIdQuery   = !!body?.variables?.id;
 
   // 1️⃣ PostgreSQL cache — أسرع مصدر
-  const cached = await metaCacheGet(cacheKey);
-  if (cached) {
-    res.setHeader("Cache-Control", "public, max-age=300");
-    res.setHeader("X-Meta-Source", "cache");
-    return res.json(cached);
+  // استثناء: استعلامات Media(id) أثناء انقطاع AniList — الكاش قد يحتوي على
+  // بيانات AniList لـ ID مختلف بينما القوائم تُعيد MAL IDs من Jikan
+  const skipCache = isIdQuery && _anilistDown;
+  if (!skipCache) {
+    const cached = await metaCacheGet(cacheKey);
+    if (cached) {
+      res.setHeader("Cache-Control", "public, max-age=300");
+      res.setHeader("X-Meta-Source", "cache");
+      return res.json(cached);
+    }
   }
 
   // 2️⃣ AniList GraphQL — المصدر الأساسي
@@ -11389,13 +11411,24 @@ router.post("/anilist", async (req, res) => {
     if (r.ok) {
       const data = await r.json() as any;
       if (!data?.errors?.length) {
+        _anilistDown = false;
+        _anilistDownSince = 0;
         metaCacheSet(cacheKey, data, ttl, "anilist").catch(() => {});
         res.setHeader("Cache-Control", "public, max-age=60");
         res.setHeader("X-Meta-Source", "anilist");
         return res.json(data);
       }
+      // 200 + errors — AniList متعطّل جزئياً (rate limit / outage)
+      _anilistDown = true;
+      _anilistDownSince = _anilistDownSince || Date.now();
+    } else {
+      _anilistDown = true;
+      _anilistDownSince = _anilistDownSince || Date.now();
     }
-  } catch {}
+  } catch {
+    _anilistDown = true;
+    _anilistDownSince = _anilistDownSince || Date.now();
+  }
 
   // 3️⃣ Jikan (MyAnimeList) fallback
   const jikanData = await jikanFallback(body);
@@ -11403,7 +11436,10 @@ router.post("/anilist", async (req, res) => {
     if (jikanData.data?.Page?.media) {
       jikanData.data.Page.media = await kitsuEnrichBannerImages(jikanData.data.Page.media);
     }
-    metaCacheSet(cacheKey, jikanData, ttl, "jikan").catch(() => {});
+    // استعلامات Media(id) من fallback = MAL IDs — لا نُخزّنها بـ TTL طويل
+    // حتى لا تلوّث الكاش عند عودة AniList (AniList ID ≠ MAL ID)
+    const jikanTtl = isIdQuery ? 300 : ttl; // 5 دقائق فقط لـ ID queries أثناء الانقطاع
+    metaCacheSet(cacheKey, jikanData, jikanTtl, "jikan").catch(() => {});
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "jikan");
     return res.json(jikanData);
@@ -11412,7 +11448,8 @@ router.post("/anilist", async (req, res) => {
   // 4️⃣ Kitsu fallback — بديل ثالث لـ Page queries
   const kitsuData = await kitsuFallback(body);
   if (kitsuData) {
-    metaCacheSet(cacheKey, kitsuData, ttl, "kitsu").catch(() => {});
+    const kitsuTtl = isIdQuery ? 300 : ttl;
+    metaCacheSet(cacheKey, kitsuData, kitsuTtl, "kitsu").catch(() => {});
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "kitsu");
     return res.json(kitsuData);
