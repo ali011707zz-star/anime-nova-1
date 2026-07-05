@@ -170,6 +170,46 @@ async function spGetSources(
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 // ── Dulo.tv shared client (module-level session cache, 7h TTL) ────────────────
+// ── MovieBox auth state (h5-api.aoneroom.com) ────────────────────────────────
+const _MBX_API_ANIM    = "https://h5-api.aoneroom.com";
+const _MBX_REF_ANIM    = "https://videodownloader.site/";
+const _MBX_UA_ANIM     = "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0";
+const _MBX_SUGGEST_ANIM  = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/search-suggest`;
+const _MBX_SEARCH_ANIM   = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/search`;
+const _MBX_DOWNLOAD_ANIM = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/download`;
+const _MBX_TOKEN_TTL_ANIM = 7 * 24 * 3_600_000;
+const _MBX_DUBBED_RE_ANIM = /\[\s*(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|dubbed|dub)\s*\]/i;
+interface MbxAuthAnim { token: string; cookies: string; fetchedAt: number; }
+let _mbxAuthAnim: MbxAuthAnim | null = null;
+
+async function getMbxAuthAnim(): Promise<{ token: string; cookies: string } | null> {
+  const now = Date.now();
+  if (_mbxAuthAnim && now - _mbxAuthAnim.fetchedAt < _MBX_TOKEN_TTL_ANIM) {
+    return { token: _mbxAuthAnim.token, cookies: _mbxAuthAnim.cookies };
+  }
+  try {
+    const r = await fetch(_MBX_SUGGEST_ANIM, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": _MBX_UA_ANIM,
+        "Referer": _MBX_REF_ANIM,
+      },
+      body: JSON.stringify({ keyword: "avatar", perPage: 0 }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!r.ok) return null;
+    const xUser = r.headers.get("x-user");
+    if (!xUser) return null;
+    const userInfo = JSON.parse(xUser);
+    const setCookies = r.headers.getSetCookie?.() ?? [];
+    const cookies = setCookies.map((c: string) => c.split(";")[0]).filter(Boolean).join("; ");
+    _mbxAuthAnim = { token: userInfo.token, cookies, fetchedAt: now };
+    return { token: userInfo.token, cookies };
+  } catch { return null; }
+}
+
 const DULO_TV_BASE    = "https://dulo.tv";
 const DULO_TV_API_KEY = "WDNUNBUB3HR983Y9ISBADK4O82";
 let _duloAnimCookie   = "";
@@ -3678,6 +3718,65 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               } catch { /* silent per provider */ }
             }),
           );
+        } catch { /* silent */ }
+      }),
+
+      // ── MovieBox (h5-api.aoneroom.com) — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ──
+      scrapeAnimCached("moviebox_anim", async () => {
+        if (!title) return;
+        const auth = await getMbxAuthAnim();
+        if (!auth) return;
+        const { token, cookies } = auth;
+        const hdrs: Record<string, string> = {
+          "Accept": "application/json",
+          "User-Agent": _MBX_UA_ANIM,
+          "Referer": _MBX_REF_ANIM,
+          "Authorization": `Bearer ${token}`,
+          "Cookie": cookies,
+        };
+        try {
+          const sr = await fetch(_MBX_SEARCH_ANIM, {
+            method: "POST",
+            headers: { ...hdrs, "Content-Type": "application/json" },
+            body: JSON.stringify({ keyword: title, page: 1, perPage: 12, subjectType: 0 }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!sr.ok) return;
+          const sData: any = await sr.json();
+          const items: any[] = sData?.data?.items || [];
+          if (!items.length) return;
+
+          // فلتر: استبعد المدبلج أولاً
+          const nonDubbed = items.filter((it: any) => !_MBX_DUBBED_RE_ANIM.test(it.title || ""));
+          const candidates = nonDubbed.length ? nonDubbed : items;
+          const qLow = title.toLowerCase();
+          candidates.sort((a: any, b: any) => {
+            const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+            const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+            return bHit - aHit;
+          });
+          const item = candidates[0];
+          if (!item?.subjectId || !item?.detailPath) return;
+
+          // الموسم والحلقة: فيلم → se=0&ep=0، مسلسل → se=season&ep=epNum
+          const se = type === "movie" ? 0 : season;
+          const epP = type === "movie" ? 0 : epNum;
+          const dr = await fetch(
+            `${_MBX_DOWNLOAD_ANIM}?subjectId=${encodeURIComponent(item.subjectId)}&se=${se}&ep=${epP}&detailPath=${encodeURIComponent(item.detailPath)}`,
+            { headers: hdrs, signal: AbortSignal.timeout(10_000) },
+          );
+          if (!dr.ok) return;
+          const dData: any = await dr.json();
+          const downloads: any[] = dData?.data?.downloads || [];
+          if (!downloads.length) return;
+
+          downloads.sort((a: any, b: any) => (b.resolution || 0) - (a.resolution || 0));
+          for (const dl of downloads.slice(0, 3)) {
+            const res = Number(dl.resolution) || 0;
+            if (!dl.url || res <= 0) continue;
+            const label = `MovieBox · ${res}p`;
+            sendSource(String(dl.url), label, String(dl.url), undefined, { headers: { Referer: _MBX_REF_ANIM } });
+          }
         } catch { /* silent */ }
       }),
 
