@@ -11045,14 +11045,17 @@ router.get("/anime/animewitcher-catalog", async (req, res) => {
 
 /** حسب نوع الاستعلام نحدد مدة الـ cache */
 function metaTtl(body: any): number {
-  const q = JSON.stringify(body?.query ?? "");
-  if (q.includes("airingSchedules")) return 1800;       // 30 دقيقة — الجداول الزمنية
-  if (q.includes("TRENDING_DESC"))   return 3600;       // 1 ساعة — trending
-  if (q.includes("POPULARITY_DESC")) return 3600;       // 1 ساعة — popular
-  if (q.includes("season") && body?.variables?.season) return 21600; // 6 ساعات — موسمي
-  if (body?.variables?.search)        return 3600;       // 1 ساعة — بحث
-  if (body?.variables?.id)            return 86400;      // 24 ساعة — تفاصيل أنمي
-  return 21600; // 6 ساعات افتراضي
+  const q    = JSON.stringify(body?.query ?? "");
+  const rawQ: string = body?.query ?? "";
+  if (q.includes("airingSchedules"))  return 1800;      // 30 دقيقة — الجداول الزمنية
+  if (body?.variables?.search)         return 3600;      // 1 ساعة — بحث (نتائج تتغير)
+  if (body?.variables?.id)             return 5184000;   // 60 يوم — metadata ثابتة (بوسترات، وصف، تقييم)
+  if (q.includes("TRENDING_DESC"))     return 86400;     // 24 ساعة — trending
+  if (q.includes("POPULARITY_DESC"))   return 604800;    // 7 أيام — الأكثر شعبية
+  if (q.includes("SCORE_DESC"))        return 604800;    // 7 أيام — الأعلى تقييماً
+  if (rawQ.includes("format: MOVIE") || rawQ.includes("format:MOVIE")) return 604800; // 7 أيام — أفلام
+  if (rawQ.match(/season:\s*[A-Z]/) || body?.variables?.season) return 2592000; // 30 يوم — موسمي
+  return 604800; // 7 أيام افتراضي
 }
 
 function metaHash(body: any): string {
@@ -11172,11 +11175,37 @@ async function jikanFallback(body: any): Promise<any | null> {
 
     if (q.includes("airingSchedules")) return null; // لا بديل كافٍ لجداول البث
 
+    // ── استخراج params المدمجة في query string (بدون variables) ──
+    const rawQ: string = body?.query ?? "";
+    const seasonInlineM = rawQ.match(/season:\s*([A-Z]+)/);
+    const yearInlineM   = rawQ.match(/seasonYear:\s*(\d{4})/);
+    const inlineSeason  = seasonInlineM?.[1]?.toLowerCase(); // "spring","fall","summer","winter"
+    const inlineYear    = yearInlineM ? parseInt(yearInlineM[1]) : null;
+    const inlineGenreM  = rawQ.match(/genre_in:\s*\["([^"]+)"/);
+    const inlineGenre   = inlineGenreM?.[1]; // e.g. "Isekai"
+    const isMovieQ      = rawQ.includes("format: MOVIE") || rawQ.includes("format:MOVIE");
+    const seasonMap: Record<string, string> = { spring: "spring", summer: "summer", fall: "fall", autumn: "fall", winter: "winter" };
+    const jikanSeason   = inlineSeason ? (seasonMap[inlineSeason] ?? null) : null;
+    const jikanGenreMap: Record<string, number> = {
+      Isekai: 62, Action: 1, Comedy: 4, Romance: 22, Fantasy: 10,
+      Horror: 14, Mystery: 7, "Sci-Fi": 24, Sports: 30, Mecha: 18,
+      Drama: 8, Psychological: 40, Supernatural: 37, Thriller: 41,
+    };
+
     let url = "";
     if (vars.search) {
       url = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(vars.search)}&sfw=true&limit=20`;
     } else if (vars.season && vars.seasonYear) {
       url = `https://api.jikan.moe/v4/seasons/${vars.seasonYear}/${String(vars.season).toLowerCase()}?sfw=true&limit=20`;
+    } else if (jikanSeason && inlineYear) {
+      // استعلام موسمي مضمّن في query string — مثل SPRING 2026 / FALL 2025
+      url = `https://api.jikan.moe/v4/seasons/${inlineYear}/${jikanSeason}?sfw=true&limit=20`;
+    } else if (isMovieQ) {
+      // استعلام أفلام أنمي
+      url = "https://api.jikan.moe/v4/top/anime?type=movie&limit=20&sfw=true";
+    } else if (inlineGenre && jikanGenreMap[inlineGenre]) {
+      // استعلام تصنيف مضمّن — مثل Isekai
+      url = `https://api.jikan.moe/v4/anime?genres=${jikanGenreMap[inlineGenre]}&sfw=true&limit=20&order_by=popularity`;
     } else if (vars.genre) {
       url = `https://api.jikan.moe/v4/anime?genres=${vars.genre}&sfw=true&limit=20`;
     } else if (q.includes("TRENDING_DESC")) {
@@ -11248,13 +11277,31 @@ function kitsuToAniList(a: any): any {
 async function kitsuFallback(body: any): Promise<any | null> {
   try {
     const q    = JSON.stringify(body?.query ?? "");
+    const rawQ: string = body?.query ?? "";
     const vars = body?.variables ?? {};
 
     if (q.includes("airingSchedules") || vars.id) return null;
 
+    // استخراج params مدمجة في query string
+    const seasonInlineM2 = rawQ.match(/season:\s*([A-Z]+)/);
+    const yearInlineM2   = rawQ.match(/seasonYear:\s*(\d{4})/);
+    const inlineSeason2  = seasonInlineM2?.[1]?.toLowerCase();
+    const inlineYear2    = yearInlineM2 ? parseInt(yearInlineM2[1]) : null;
+    const isMovieQ2      = rawQ.includes("format: MOVIE") || rawQ.includes("format:MOVIE");
+    const inlineGenreM2  = rawQ.match(/genre_in:\s*\["([^"]+)"/);
+    const inlineGenre2   = inlineGenreM2?.[1];
+    const kitsuSeasonMap: Record<string, string> = { spring: "spring", summer: "summer", fall: "fall", autumn: "fall", winter: "winter" };
+    const kitsuSeason2   = inlineSeason2 ? (kitsuSeasonMap[inlineSeason2] ?? null) : null;
+
     let url = "";
     if (vars.search) {
       url = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(vars.search)}&page[limit]=20&filter[ageRating]=G,PG,R`;
+    } else if (kitsuSeason2 && inlineYear2) {
+      url = `https://kitsu.io/api/edge/anime?filter[season]=${kitsuSeason2}&filter[seasonYear]=${inlineYear2}&page[limit]=20&filter[ageRating]=G,PG,R&sort=-userCount`;
+    } else if (isMovieQ2) {
+      url = "https://kitsu.io/api/edge/anime?filter[subtype]=movie&page[limit]=20&filter[ageRating]=G,PG,R&sort=-averageRating";
+    } else if (inlineGenre2 === "Isekai") {
+      url = "https://kitsu.io/api/edge/anime?filter[categories]=isekai&page[limit]=20&filter[ageRating]=G,PG,R&sort=-userCount";
     } else if (q.includes("TRENDING_DESC")) {
       url = "https://kitsu.io/api/edge/anime?sort=-userCount&page[limit]=20&filter[ageRating]=G,PG,R";
     } else if (q.includes("SCORE_DESC")) {
@@ -11356,7 +11403,7 @@ router.post("/anilist", async (req, res) => {
     if (jikanData.data?.Page?.media) {
       jikanData.data.Page.media = await kitsuEnrichBannerImages(jikanData.data.Page.media);
     }
-    metaCacheSet(cacheKey, jikanData, Math.min(ttl, 3600), "jikan").catch(() => {});
+    metaCacheSet(cacheKey, jikanData, ttl, "jikan").catch(() => {});
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "jikan");
     return res.json(jikanData);
@@ -11365,7 +11412,7 @@ router.post("/anilist", async (req, res) => {
   // 4️⃣ Kitsu fallback — بديل ثالث لـ Page queries
   const kitsuData = await kitsuFallback(body);
   if (kitsuData) {
-    metaCacheSet(cacheKey, kitsuData, Math.min(ttl, 3600), "kitsu").catch(() => {});
+    metaCacheSet(cacheKey, kitsuData, ttl, "kitsu").catch(() => {});
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "kitsu");
     return res.json(kitsuData);
