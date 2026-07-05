@@ -179,6 +179,8 @@ export default function AnimeDetailScreen() {
   const [descLoading, setDescLoading] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [favCharIds, setFavCharIds] = useState<Set<number>>(new Set());
+  const [loadError, setLoadError] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
 
   const isFav = anime ? isFavorite(anime.id) : false;
 
@@ -211,13 +213,21 @@ export default function AnimeDetailScreen() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
+    setLoadError(false);
+    setAnime(null);
     setDescAr(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
     fetch(`${getBaseUrl()}/api/anilist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: DETAIL_QUERY, variables: { id: parseInt(id) } }),
+      signal: controller.signal,
     }).then(r => r.json()).then(data => {
       const a = data.data?.Media;
+      if (!a) { setLoadError(true); return; }
       setAnime(a);
       if (a?.nextAiringEpisode?.timeUntilAiring) {
         setCountdown(a.nextAiringEpisode.timeUntilAiring);
@@ -239,12 +249,15 @@ export default function AnimeDetailScreen() {
             }).catch(() => { setDescAr(stripped); });
         });
       }
-    }).finally(() => setLoading(false));
+    }).catch(() => { setLoadError(true); })
+      .finally(() => { clearTimeout(timeoutId); setLoading(false); });
 
     AsyncStorage.getItem(`my-rating-${id}`).then(v => { if (v) setMyRating(parseInt(v)); });
     AsyncStorage.getItem(`saved-${id}`).then(v => { if (v === "1") setSaved(true); });
     AsyncStorage.getItem(`adult-warn-${id}`).then(v => { if (v === "1") setWarnDismissed(true); });
-  }, [id]);
+
+    return () => { clearTimeout(timeoutId); controller.abort(); };
+  }, [id, retryTick]);
 
   /* Update countdown timer every minute */
   useEffect(() => {
@@ -303,7 +316,28 @@ export default function AnimeDetailScreen() {
       <View style={d.center}><ActivityIndicator color="#8B5CF6" size="large" /></View>
     </View>
   );
-  if (!anime) return null;
+  if (!anime) return (
+    <View style={[d.container, { paddingTop: topPad }]}>
+      <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace("/(tabs)")}
+        style={{ position: "absolute", right: 14, top: 14, width: 36, height: 36, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", zIndex: 10 }}>
+        <Ionicons name="chevron-forward" size={20} color="#fff" />
+      </Pressable>
+      <View style={[d.center, { paddingHorizontal: 32, gap: 14 }]}>
+        <Ionicons name="cloud-offline-outline" size={44} color="rgba(255,255,255,0.3)" />
+        <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 15, textAlign: "center" }}>
+          تعذّر تحميل بيانات الأنمي
+        </Text>
+        <Text style={{ color: "rgba(255,255,255,0.4)", fontFamily: "Cairo_400Regular", fontSize: 12, textAlign: "center" }}>
+          يبدو أن هناك مشكلة في الاتصال بمصدر البيانات، حاول مرة أخرى
+        </Text>
+        <Pressable onPress={() => setRetryTick(t => t + 1)}
+          style={{ marginTop: 6, backgroundColor: "#7C3AED", paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Ionicons name="refresh" size={16} color="#fff" />
+          <Text style={{ color: "#fff", fontFamily: "Cairo_700Bold", fontSize: 13 }}>إعادة المحاولة</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
 
   const desc = descAr || stripHtml(anime.description);
   const mainChars = (anime.characters?.edges || []).filter((e: any) => e.role === "MAIN");
