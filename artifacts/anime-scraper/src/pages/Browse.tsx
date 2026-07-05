@@ -120,7 +120,7 @@ export default function Browse() {
   const loaderRef   = useRef<HTMLDivElement | null>(null);
 
   const fetch$ = async (query: string) => {
-    const r = await fetch(API_BASE + "/api/anime/anilist", {
+    const r = await fetch(API_BASE + "/api/anilist", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
     });
