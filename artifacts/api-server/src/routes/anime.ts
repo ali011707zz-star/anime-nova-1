@@ -10443,8 +10443,15 @@ function rewriteM3u8(
       /* موبايل: الرابط المطلق مباشرةً — ExoPlayer/AVPlayer يتصل بالـ CDN دون وساطة */
       return absUrl;
     }
-    /* ويب: مرّر عبر seg-proxy لتجاوز CORS وإضافة Referer */
-    return `${selfBase}/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref)}`;
+    /* ويب: CF Worker يُضيف Referer/Origin على الـ CDN ← يحلّ مشكلة 403 في المتصفح.
+       إن لم يكن CF_WORKER_URL مضبوطاً: يُعاد الرابط مباشرةً (CDN بدون CORS لن يعمل
+       في المتصفح لكن لا يُسبّب أي استهلاك bandwidth على الخادم). */
+    const cfBase = process.env.CF_WORKER_URL;
+    if (cfBase) {
+      const cfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
+      return `${cfBase}?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}${cfKey}`;
+    }
+    return absUrl;
   };
 
   return manifest.split("\n").map(line => {
@@ -10553,11 +10560,10 @@ router.get("/anime/hls-proxy", async (req, res) => {
       return;
     }
 
-    /* ويب: segments تذهب مباشرةً للـ CDN (directSegs=true) — لا تمر عبر seg-proxy.
-       يُقلّل bandwidth الخادم إلى الصفر للـ segments؛ الـ manifest فقط (نص صغير) يمر عبرنا.
-       المتصفح/hls.js يتصل بالـ CDN مباشرةً — CDN مع CORS يعمل، بدون CORS لن يعمل
-       في المتصفح لكن هذا خارج سيطرة الخادم ولا يُسبّب استهلاك bandwidth. */
-    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, true);
+    /* ويب: directSegs=false → toProxy يُوجّه الـ segments عبر CF Worker (إن كان مضبوطاً)
+       الـ Worker يُضيف Referer/Origin فيحلّ مشكلة 403؛ وإلا يُعاد الرابط مباشرةً للـ CDN.
+       الـ manifest نفسه (نص صغير) يمر عبر الخادم فقط — لا bandwidth لبيانات الفيديو. */
+    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, false);
     const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
     if (isCdnCacheable(url)) {
       cdnCache.set(effectiveCacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
@@ -10581,14 +10587,19 @@ router.get("/anime/video-proxy", async (req, res) => {
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* 307 redirect للجميع (موبايل + ويب):
-     - ExoPlayer/AVPlayer يُرسل الـ headers الصحيحة (Referer/Origin) التي أعادها
-       sendSrc ضمن حقل headers في الـ source object.
-     - المتصفح يتبع الـ redirect مباشرةً للـ CDN — لا يمر أي بيانات فيديو عبر الخادم.
-     هذا يُلغي استهلاك bandwidth الخادم للفيديو المباشر (MP4). */
+  /* 307 redirect:
+     - موبايل: ExoPlayer/AVPlayer يُرسل الـ headers من حقل headers في الـ source object مباشرةً.
+     - ويب: CF Worker يُضيف Referer/Origin فيحلّ 403 من الـ CDN.
+       إن لم يكن CF_WORKER_URL مضبوطاً: redirect مباشر (CDN مع Referer requirement لن يعمل). */
+  const cfBase = process.env.CF_WORKER_URL;
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  res.redirect(307, url);
+  if (cfBase && req.query.mobile !== "1") {
+    const cfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
+    res.redirect(307, `${cfBase}?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref || url)}${cfKey}`);
+  } else {
+    res.redirect(307, url);
+  }
 });
 
 router.get("/anime/seg-proxy", async (req, res) => {
