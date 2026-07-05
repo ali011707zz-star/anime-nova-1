@@ -47,6 +47,8 @@ export const SITE_TTL: Record<string, number> = {
   topcinemaa:     4 * 3_600_000,
   animeday_anim:  4 * 3_600_000,
   "2embed":       4 * 3_600_000,
+  moviebox:       10 * 60_000,    // CDN URLs مُوقَّعة بـ &t= تنتهي بسرعة → 10 دقائق فقط
+  moviebox_anim:  10 * 60_000,    // نفس السبب — Animation version
 };
 const DEFAULT_TTL = 4 * 3_600_000;
 

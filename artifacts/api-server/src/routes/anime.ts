@@ -8060,38 +8060,45 @@ const MBX_SEARCH   = `${MBX_API}/wefeed-h5api-bff/subject/search`;
 const MBX_DOWNLOAD = `${MBX_API}/wefeed-h5api-bff/subject/download`;
 const MBX_TOKEN_TTL = 7 * 24 * 3_600_000; // تجديد كل 7 أيام (صالح 90 يوماً)
 
-// أنماط المدبلج — نستبعد النتائج التي تحتوي عليها
-const MBX_DUBBED_RE = /\[\s*(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|dubbed|dub)\s*\]/i;
+// أنماط المدبلج — نستبعد النتائج التي تحتوي عليها (مع أو بدون أقواس)
+const MBX_DUBBED_RE = /(?:\[\s*|\b)(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|dual[\s-]?audio|dubbed|dub)(?:\s*\]|\b)/i;
 
 interface MbxAuth { token: string; cookies: string; fetchedAt: number; }
 let _mbxAuth: MbxAuth | null = null;
+let _mbxAuthPending: Promise<{ token: string; cookies: string } | null> | null = null;
 
 async function getMbxAuth(): Promise<{ token: string; cookies: string } | null> {
   const now = Date.now();
   if (_mbxAuth && now - _mbxAuth.fetchedAt < MBX_TOKEN_TTL) {
     return { token: _mbxAuth.token, cookies: _mbxAuth.cookies };
   }
-  try {
-    const r = await fetch(MBX_SUGGEST, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": MBX_UA,
-        "Referer": MBX_REF,
-      },
-      body: JSON.stringify({ keyword: "avatar", perPage: 0 }),
-      signal: AbortSignal.timeout(12_000),
-    });
-    if (!r.ok) return null;
-    const xUser = r.headers.get("x-user");
-    if (!xUser) return null;
-    const userInfo = JSON.parse(xUser);
-    const setCookies = r.headers.getSetCookie?.() ?? [];
-    const cookies = setCookies.map((c: string) => c.split(";")[0]).filter(Boolean).join("; ");
-    _mbxAuth = { token: userInfo.token, cookies, fetchedAt: now };
-    return { token: userInfo.token, cookies };
-  } catch { return null; }
+  // حارس: تجنّب إرسال طلبات auth متعددة في آنٍ واحد (race condition)
+  if (_mbxAuthPending) return _mbxAuthPending;
+  _mbxAuthPending = (async () => {
+    try {
+      const r = await fetch(MBX_SUGGEST, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": MBX_UA,
+          "Referer": MBX_REF,
+        },
+        body: JSON.stringify({ keyword: "avatar", perPage: 0 }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!r.ok) return null;
+      const xUser = r.headers.get("x-user");
+      if (!xUser) return null;
+      const userInfo = JSON.parse(xUser);
+      const setCookies = r.headers.getSetCookie?.() ?? [];
+      const cookies = setCookies.map((c: string) => c.split(";")[0]).filter(Boolean).join("; ");
+      _mbxAuth = { token: userInfo.token, cookies, fetchedAt: Date.now() };
+      return { token: userInfo.token, cookies };
+    } catch { return null; }
+    finally { _mbxAuthPending = null; }
+  })();
+  return _mbxAuthPending;
 }
 
 async function getMovieBoxAnimeSources(

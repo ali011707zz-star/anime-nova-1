@@ -178,36 +178,43 @@ const _MBX_SUGGEST_ANIM  = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/search-sug
 const _MBX_SEARCH_ANIM   = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/search`;
 const _MBX_DOWNLOAD_ANIM = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/download`;
 const _MBX_TOKEN_TTL_ANIM = 7 * 24 * 3_600_000;
-const _MBX_DUBBED_RE_ANIM = /\[\s*(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|dubbed|dub)\s*\]/i;
+const _MBX_DUBBED_RE_ANIM = /(?:\[\s*|\b)(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|dual[\s-]?audio|dubbed|dub)(?:\s*\]|\b)/i;
 interface MbxAuthAnim { token: string; cookies: string; fetchedAt: number; }
 let _mbxAuthAnim: MbxAuthAnim | null = null;
+let _mbxAuthAnimPending: Promise<{ token: string; cookies: string } | null> | null = null;
 
 async function getMbxAuthAnim(): Promise<{ token: string; cookies: string } | null> {
   const now = Date.now();
   if (_mbxAuthAnim && now - _mbxAuthAnim.fetchedAt < _MBX_TOKEN_TTL_ANIM) {
     return { token: _mbxAuthAnim.token, cookies: _mbxAuthAnim.cookies };
   }
-  try {
-    const r = await fetch(_MBX_SUGGEST_ANIM, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": _MBX_UA_ANIM,
-        "Referer": _MBX_REF_ANIM,
-      },
-      body: JSON.stringify({ keyword: "avatar", perPage: 0 }),
-      signal: AbortSignal.timeout(12_000),
-    });
-    if (!r.ok) return null;
-    const xUser = r.headers.get("x-user");
-    if (!xUser) return null;
-    const userInfo = JSON.parse(xUser);
-    const setCookies = r.headers.getSetCookie?.() ?? [];
-    const cookies = setCookies.map((c: string) => c.split(";")[0]).filter(Boolean).join("; ");
-    _mbxAuthAnim = { token: userInfo.token, cookies, fetchedAt: now };
-    return { token: userInfo.token, cookies };
-  } catch { return null; }
+  // حارس: تجنّب إرسال طلبات auth متعددة في آنٍ واحد (race condition)
+  if (_mbxAuthAnimPending) return _mbxAuthAnimPending;
+  _mbxAuthAnimPending = (async () => {
+    try {
+      const r = await fetch(_MBX_SUGGEST_ANIM, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": _MBX_UA_ANIM,
+          "Referer": _MBX_REF_ANIM,
+        },
+        body: JSON.stringify({ keyword: "avatar", perPage: 0 }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!r.ok) return null;
+      const xUser = r.headers.get("x-user");
+      if (!xUser) return null;
+      const userInfo = JSON.parse(xUser);
+      const setCookies = r.headers.getSetCookie?.() ?? [];
+      const cookies = setCookies.map((c: string) => c.split(";")[0]).filter(Boolean).join("; ");
+      _mbxAuthAnim = { token: userInfo.token, cookies, fetchedAt: Date.now() };
+      return { token: userInfo.token, cookies };
+    } catch { return null; }
+    finally { _mbxAuthAnimPending = null; }
+  })();
+  return _mbxAuthAnimPending;
 }
 
 const DULO_TV_BASE    = "https://dulo.tv";
