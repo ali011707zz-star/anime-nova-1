@@ -90,7 +90,7 @@ function buildPopularQuery(genre: string) {
   return `query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     pageInfo { hasNextPage }
-    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, MOVIE, OVA, ONA], isAdult: false, genre_not_in: ["Hentai"]${gf}) {
+    media(type: ANIME, sort: POPULARITY_DESC, countryOfOrigin: "JP", format_in: [TV, ONA], isAdult: false, genre_not_in: ["Hentai", "Music"]${gf}) {
       id title { romaji english } coverImage { large extraLarge }
       bannerImage averageScore episodes genres status format
     }
@@ -153,12 +153,17 @@ function AnimeCard({ anime }: { anime: any }) {
     <Link href={`/anime/${anime.id}`}>
       <motion.div whileTap={{ scale: 0.91 }} className="cursor-pointer">
         <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.09] shadow-xl shadow-black/60">
-          <img
-            src={anime.coverImage?.large}
-            alt={anime.title?.romaji}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
+          {anime.coverImage?.large ? (
+            <img
+              src={anime.coverImage.large}
+              alt={anime.title?.romaji}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
           {anime.averageScore && (
             <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[7px] px-1.5 py-0.5 rounded-lg font-black border border-yellow-500/25">
@@ -240,7 +245,7 @@ export default function Home() {
   /* Load popular animation movies + TV from TMDB, and trending news from AniList */
   useEffect(() => {
     const key = "8265bd1679663a7ea12ac168da84d2e8";
-    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&without_original_language=ja&include_adult=false&sort_by=popularity.desc&page=1`)
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&include_adult=false&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
       .then(d => setAnimationMovies((d.results || []).slice(0, 10)))
       .catch(() => {});
@@ -1062,7 +1067,7 @@ export default function Home() {
                   <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                     <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50"
                       style={{ width: 92, height: 132 }}>
-                      <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
                       {anime.averageScore > 0 && (
                         <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
@@ -1119,7 +1124,7 @@ export default function Home() {
                 <Link key={anime.id} href={`/anime/${anime.id}`}>
                   <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                     <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg" style={{ width: 92, height: 132 }}>
-                      <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/15 to-transparent" />
                       {anime.averageScore > 0 && (
                         <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
@@ -1165,7 +1170,7 @@ export default function Home() {
               <Link key={anime.id} href={`/anime/${anime.id}`}>
                 <motion.div whileTap={{ scale: 0.92 }} className="shrink-0 w-[136px] cursor-pointer">
                   <div className="relative w-[136px] h-[192px] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg shadow-black/50">
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1a1a2e] to-[#0f0f1a]" />}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-transparent" />
                     <div className="absolute top-2 left-2 bg-blue-500 text-white text-[7px] px-1.5 py-0.5 rounded-md font-black shadow-md shadow-blue-500/50">فيلم</div>
                     {anime.averageScore && (
@@ -1209,7 +1214,7 @@ export default function Home() {
               <Link key={anime.id} href={`/anime/${anime.id}`}>
                 <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                   <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-yellow-500/10 shadow-lg shadow-yellow-900/20" style={{ width: 92, height: 132 }}>
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/10 to-transparent" />
                     {anime.averageScore > 0 && (
                       <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-yellow-500/90 text-black text-[6.5px] px-1 py-0.5 rounded-md font-black">
@@ -1256,7 +1261,7 @@ export default function Home() {
               <Link key={anime.id} href={`/anime/${anime.id}`}>
                 <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 92 }}>
                   <div className="relative rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.08] shadow-lg" style={{ width: 92, height: 132 }}>
-                    <img src={anime.coverImage?.large} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    {anime.coverImage?.large ? <img src={anime.coverImage.large} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-full h-full bg-gradient-to-b from-[#1e1e2e] to-[#0f0f1a]" />}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/10 to-transparent" />
                     {anime.averageScore > 0 && (
                       <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 bg-black/70 backdrop-blur-md text-yellow-400 text-[6.5px] px-1 py-0.5 rounded-md font-black">
