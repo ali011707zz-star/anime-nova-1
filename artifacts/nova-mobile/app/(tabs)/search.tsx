@@ -209,7 +209,7 @@ export default function SearchScreen() {
       } else {
         body = { query: buildBrowseQuery(so, fo, st, ge, se), variables: { page: 1, perPage: 30 } };
       }
-      const res = await fetch("https://graphql.anilist.co", {
+      const res = await fetch(`${getBaseUrl()}/api/anilist`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

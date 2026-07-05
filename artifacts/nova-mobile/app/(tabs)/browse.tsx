@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { getBaseUrl } from "@/utils/api";
 
 /* ── Data ── */
 interface AnimeResult {
@@ -158,7 +159,7 @@ export default function BrowseScreen() {
     const covers: Record<string,number> = {};
     Promise.all(GENRES_WITH_COVERS.map(async item => {
       try {
-        const r = await fetch("https://graphql.anilist.co", {
+        const r = await fetch(`${getBaseUrl()}/api/anilist`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: GENRE_COVER_QUERY(item.genre) }),
         });
@@ -173,7 +174,7 @@ export default function BrowseScreen() {
     setLoading(true);
     const gen = ++genRef.current;
     try {
-      const r = await fetch("https://graphql.anilist.co", {
+      const r = await fetch(`${getBaseUrl()}/api/anilist`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: BROWSE_QUERY(sort, format, season, year, activeGenre),

@@ -1,4 +1,6 @@
-const ANILIST_API = "https://graphql.anilist.co";
+import { getBaseUrl } from "./baseUrl";
+// يستخدم proxy الـ VPS بدلاً من AniList مباشرة — يدعم Jikan + Kitsu fallback تلقائياً
+const getAnilistApi = () => `${getBaseUrl()}/api/anilist`;
 
 export type AnilistMedia = {
   id: number;
@@ -22,7 +24,7 @@ export async function anilistQuery<T = unknown>(
   query: string,
   variables?: Record<string, unknown>
 ): Promise<T> {
-  const response = await fetch(ANILIST_API, {
+  const response = await fetch(getAnilistApi(), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ query, variables }),

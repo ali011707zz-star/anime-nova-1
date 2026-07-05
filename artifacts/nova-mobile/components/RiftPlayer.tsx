@@ -890,7 +890,7 @@ export function RiftPlayer({
     (async () => {
       try {
         // 1. Get MAL ID from AniList
-        const alRes = await fetch("https://graphql.anilist.co", {
+        const alRes = await fetch(`${getBaseUrl()}/api/anilist`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: "query($id:Int){Media(id:$id){idMal}}", variables: { id: anilistId } }),
