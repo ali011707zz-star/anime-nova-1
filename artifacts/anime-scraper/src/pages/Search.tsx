@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
+import { animeHref } from "@/lib/animeLink";
 import { useState, useEffect, useRef } from 'react';
 import { Search as SearchIcon, X, Loader2, SlidersHorizontal, ChevronDown, Camera, Upload, ExternalLink } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
@@ -148,7 +149,7 @@ function AnimeCardSmall({ anime }: { anime: AnimeResult }) {
   const fmt    = anime.format ? FORMAT_AR[anime.format] || anime.format : null;
   const isFilm = anime.format === "MOVIE";
   return (
-    <Link href={`/anime/${anime.id}`}>
+    <Link href={animeHref(anime)}>
       <motion.div whileTap={{ scale: 0.93 }} className="cursor-pointer">
         <div className="relative w-full aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07] shadow-lg shadow-black/50">
           {anime.coverImage?.large
