@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Search, Star, Loader2, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { API_BASE } from "@/lib/apiBase";
+import { animeHref } from "@/lib/animeLink";
 
 /* AniList cover IDs that reliably have banner images */
 const GENRES: { ar: string; en: string; color: string; animeId: number; adult?: boolean }[] = [
@@ -71,7 +72,7 @@ function buildQuery(genre: string, format: string, year: number | "", page: numb
 
 function AnimeCard({ anime }: { anime: any }) {
   return (
-    <Link href={`/anime/${anime.id}`}>
+    <Link href={animeHref(anime)}>
       <motion.div whileTap={{ scale: 0.93 }} className="cursor-pointer group">
         <div className="relative aspect-[2/3] rounded-2xl overflow-hidden bg-[#18181B] border border-white/[0.07]">
           <img

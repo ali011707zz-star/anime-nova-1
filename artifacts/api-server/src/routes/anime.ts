@@ -9705,6 +9705,46 @@ router.post("/anime/anilist", async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+//  meta-by-id  GET /api/anime/meta-by-id?id=&source=mal|kitsu
+//  عند عرض قوائم مبنية من Jikan/Kitsu (أثناء انقطاع AniList) تكون الـ id
+//  المُعادة هي MAL/Kitsu id وليست AniList id. الضغط على البوستر يجب أن
+//  يجلب التفاصيل بنفس المصدر مباشرة، بدل معاملتها كـ AniList id (وهو ما
+//  كان يفتح صفحة أنمي مختلف تماماً بسبب تطابق رقمي عشوائي بين النطاقين).
+// ════════════════════════════════════════════════════════════════════
+router.get("/anime/meta-by-id", async (req, res) => {
+  const id = String(req.query.id || "").trim();
+  const source = String(req.query.source || "").trim();
+  if (!id || !["mal", "kitsu"].includes(source)) {
+    res.status(400).json({ error: "id and source (mal|kitsu) required" });
+    return;
+  }
+  try {
+    if (source === "mal") {
+      const r = await fetch(`https://api.jikan.moe/v4/anime/${id}`, {
+        headers: { "Accept": "application/json", "User-Agent": "AnimeNova/1.0" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) { res.status(r.status).json({ error: "jikan error" }); return; }
+      const d = await r.json();
+      if (!d.data) { res.status(404).json({ error: "not found" }); return; }
+      res.json({ data: { Media: jikanToAniList(d.data) } });
+      return;
+    }
+    // kitsu
+    const r = await fetch(`https://kitsu.io/api/edge/anime/${id}`, {
+      headers: { "Accept": "application/vnd.api+json", "User-Agent": "AnimeNova/1.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) { res.status(r.status).json({ error: "kitsu error" }); return; }
+    const d = await r.json();
+    if (!d.data) { res.status(404).json({ error: "not found" }); return; }
+    res.json({ data: { Media: kitsuToAniList(d.data) } });
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
 //  Proxies AniSkip API to avoid CORS/network issues from browser
 // ════════════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════════════
@@ -11112,6 +11152,7 @@ function jikanToAniList(a: any): any {
   return {
     id: a.mal_id,
     idMal: a.mal_id,
+    idSource: "mal",
     title: { romaji: a.title, english: a.title_english, native: a.title_japanese },
     coverImage: {
       large: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url || null,
@@ -11258,6 +11299,7 @@ function kitsuToAniList(a: any): any {
   return {
     id: parseInt(a.id) || 0,
     idMal: null,
+    idSource: "kitsu",
     title: {
       romaji:  attr.titles?.en_jp || attr.canonicalTitle || "",
       english: attr.titles?.en   || attr.titles?.en_us  || null,
@@ -11436,9 +11478,10 @@ router.post("/anilist", async (req, res) => {
     if (jikanData.data?.Page?.media) {
       jikanData.data.Page.media = await kitsuEnrichBannerImages(jikanData.data.Page.media);
     }
-    // استعلامات Media(id) من fallback = MAL IDs — لا نُخزّنها بـ TTL طويل
-    // حتى لا تلوّث الكاش عند عودة AniList (AniList ID ≠ MAL ID)
-    const jikanTtl = isIdQuery ? 300 : ttl; // 5 دقائق فقط لـ ID queries أثناء الانقطاع
+    // بيانات fallback (Jikan) — IDs هي MAL IDs وليست AniList IDs، ولا نعرف
+    // متى تعود AniList للعمل، لذا TTL قصير دائماً (10 دقائق) بدل TTL الطويل
+    // المخصّص لبيانات AniList الحقيقية — وإلا تتلوّث النتائج لأيام بعد عودة الخدمة.
+    const jikanTtl = 600;
     metaCacheSet(cacheKey, jikanData, jikanTtl, "jikan").catch(() => {});
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "jikan");
@@ -11448,7 +11491,8 @@ router.post("/anilist", async (req, res) => {
   // 4️⃣ Kitsu fallback — بديل ثالث لـ Page queries
   const kitsuData = await kitsuFallback(body);
   if (kitsuData) {
-    const kitsuTtl = isIdQuery ? 300 : ttl;
+    // نفس المنطق: TTL قصير دائماً لبيانات fallback بغض النظر عن نوع الاستعلام
+    const kitsuTtl = 600;
     metaCacheSet(cacheKey, kitsuData, kitsuTtl, "kitsu").catch(() => {});
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Meta-Source", "kitsu");
