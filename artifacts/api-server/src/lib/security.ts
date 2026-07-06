@@ -6,6 +6,41 @@ import {
   timingSafeEqual,
 } from "crypto";
 
+// ── مفتاح CF Worker (CF_PROXY_KEY) — يُستخدم لتشفير توكن CF Worker ──────────
+// لا يوجد قيمة افتراضية — يجب أن يكون CF_PROXY_KEY مضبوطاً صراحةً.
+function getCfKey(): Buffer | null {
+  const raw = process.env.CF_PROXY_KEY;
+  if (!raw) return null;
+  return Buffer.from(raw.padEnd(32, "0").slice(0, 32), "utf8");
+}
+
+/**
+ * تشفير بيانات CF Worker (url + ref + exp) بـ AES-256-GCM → hex token
+ * الصيغة: iv(24 hex = 12B) + ciphertext(N hex) + authTag(32 hex = 16B)
+ * الـ CF Worker يفكّ التشفير باستخدام نفس CF_PROXY_KEY
+ * يعيد null إذا لم يكن CF_PROXY_KEY مضبوطاً (fail-closed)
+ */
+export function encryptCfToken(url: string, ref: string): string | null {
+  const key = getCfKey();
+  if (!key) {
+    console.warn("[security] ⚠️ CF_PROXY_KEY غير مضبوط — تعذّر تشفير CF token");
+    return null;
+  }
+  try {
+    // TTL 4 ساعات: كافٍ لجلسات مشاهدة طويلة مع تقليص نافذة الـ replay
+    const payload = JSON.stringify({ url, ref, exp: Math.floor(Date.now() / 1000) + 14400 });
+    const iv = randomBytes(12); // 12 bytes = recommended IV for AES-GCM
+    const cipher = createCipheriv("aes-256-gcm", key, iv) as import("crypto").CipherGCM;
+    const enc    = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
+    const authTag = cipher.getAuthTag(); // 16 bytes — authentication tag
+    // format: iv(24) + ciphertext(N) + authTag(32)
+    return iv.toString("hex") + enc.toString("hex") + authTag.toString("hex");
+  } catch (err) {
+    console.error("[security] encryptCfToken error:", err);
+    return null;
+  }
+}
+
 // ── مفتاح السر (APP_SECRET env var) ──────────────────────────────────────────
 const DEFAULT_SECRET = "anime-nova-default-change-me-aabbccdd";
 

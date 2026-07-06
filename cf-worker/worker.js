@@ -3,12 +3,64 @@
  * يعمل كـ proxy شفّاف للـ CDN: يُضيف Referer/Origin فقط.
  * يُستخدم حصراً من متصفح الويب (hls.js + video MP4)؛ الموبايل يتصل بالـ CDN مباشرةً.
  *
- * الاستخدام:
- *   https://<worker-subdomain>.workers.dev?url=<encoded-cdn-url>&ref=<encoded-referer>&key=<CF_PROXY_KEY>
+ * الاستخدام (الجديد — مُشفَّر بـ AES-256-GCM):
+ *   https://<worker>.workers.dev?t=<hex-token>
+ *   الـ token صيغته: iv(24 hex = 12B) + ciphertext(N hex) + authTag(32 hex = 16B)
  *
- * المتغيّرات (Secrets في Cloudflare Dashboard أو wrangler secret put):
- *   CF_PROXY_KEY  — مفتاح سرّي يُتحقّق منه في كل طلب لمنع إساءة الاستخدام
+ * الاستخدام (قديم — للتوافقية فقط):
+ *   https://<worker>.workers.dev?url=<encoded-cdn-url>&ref=<encoded-referer>&key=<CF_PROXY_KEY>
+ *
+ * المتغيّرات (Secrets في Cloudflare Dashboard):
+ *   CF_PROXY_KEY  — مفتاح AES-256-GCM (يجب ضبطه؛ بدونه يُرفض الطلب بـ 401)
  */
+
+// ── مساعد: hex → Uint8Array ──────────────────────────────────────────────────
+function hexToBytes(hex) {
+  const len = hex.length >> 1;
+  const buf = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    buf[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return buf;
+}
+
+/**
+ * فك تشفير توكن CF Worker (AES-256-GCM)
+ * صيغة التوكن: iv(24 hex = 12B) + ciphertext(N hex) + authTag(32 hex = 16B)
+ *
+ * @param {string} token
+ * @param {string} keyStr  — CF_PROXY_KEY (يجب أن يكون مضبوطاً)
+ * @returns {{ url: string, ref: string }}
+ * @throws إذا كان الـ token غير صالح أو انتهت صلاحيته
+ */
+async function decryptCfToken(token, keyStr) {
+  if (!keyStr) throw new Error("CF_PROXY_KEY not configured");
+
+  // إعداد المفتاح: أول 32 بايت من CF_PROXY_KEY مُرتّب على 32 حرف
+  const rawKey = new TextEncoder().encode(keyStr.padEnd(32, "0").slice(0, 32));
+  const key = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["decrypt"]);
+
+  // تقسيم التوكن: iv(24) + ciphertext(N) + authTag(32)
+  const iv       = hexToBytes(token.slice(0, 24));           // 12 bytes
+  const authTag  = hexToBytes(token.slice(token.length - 32)); // آخر 16 bytes
+  const ctHex    = token.slice(24, token.length - 32);
+  const ctBytes  = hexToBytes(ctHex);
+
+  // Web Crypto API: AES-GCM يتوقع ciphertext + authTag كـ buffer واحد
+  const combined = new Uint8Array(ctBytes.length + authTag.length);
+  combined.set(ctBytes);
+  combined.set(authTag, ctBytes.length);
+
+  // فك التشفير — يرمي خطأ إذا كان authTag غير صحيح (بيانات مزوّرة)
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv, tagLength: 128 }, key, combined);
+  const parsed = JSON.parse(new TextDecoder().decode(plain));
+
+  // التحقق من انتهاء الصلاحية
+  if (parsed.exp && Math.floor(Date.now() / 1000) > parsed.exp) {
+    throw new Error("token expired");
+  }
+  return { url: parsed.url, ref: parsed.ref || "" };
+}
 
 export default {
   async fetch(request, env) {
@@ -25,14 +77,30 @@ export default {
     }
 
     const reqUrl = new URL(request.url);
-    const targetRaw = reqUrl.searchParams.get("url");
-    const ref       = reqUrl.searchParams.get("ref") || "";
-    const key       = reqUrl.searchParams.get("key") || "";
+    let targetRaw, ref;
 
-    // ── التحقق من المفتاح السري ────────────────────────────────────
-    const expectedKey = env.CF_PROXY_KEY || "";
-    if (expectedKey && key !== expectedKey) {
-      return new Response("Unauthorized", { status: 401 });
+    const token = reqUrl.searchParams.get("t");
+    if (token) {
+      // ── الصيغة الجديدة: توكن AES-256-GCM مُشفَّر ────────────────
+      if (!env.CF_PROXY_KEY) {
+        return new Response("Worker misconfigured: CF_PROXY_KEY not set", { status: 500 });
+      }
+      try {
+        const decoded = await decryptCfToken(token, env.CF_PROXY_KEY);
+        targetRaw = decoded.url;
+        ref       = decoded.ref;
+      } catch {
+        return new Response("Invalid or expired token", { status: 401 });
+      }
+    } else {
+      // ── الصيغة القديمة: للتوافقية مع clients قديمة فقط ─────────
+      targetRaw = reqUrl.searchParams.get("url");
+      ref       = reqUrl.searchParams.get("ref") || "";
+      const legacyKey  = reqUrl.searchParams.get("key") || "";
+      const expectedKey = env.CF_PROXY_KEY || "";
+      if (expectedKey && legacyKey !== expectedKey) {
+        return new Response("Unauthorized", { status: 401 });
+      }
     }
 
     if (!targetRaw) {
@@ -41,7 +109,9 @@ export default {
 
     let target;
     try {
-      target = new URL(decodeURIComponent(targetRaw));
+      target = new URL(
+        targetRaw.startsWith("http") ? targetRaw : decodeURIComponent(targetRaw),
+      );
     } catch {
       return new Response("invalid url", { status: 400 });
     }

@@ -13,7 +13,7 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
-import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
+import { encryptProxyUrl, encryptParam, encryptCfToken, decryptParam, isEncrypted } from "../lib/security.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
@@ -3250,8 +3250,18 @@ async function getAnimeTimeSources(
             directUrl,
             directType: result.type,
           });
+        } else if (url && url.includes("vidhls.com")) {
+          // AT fallback: استخراج فشل → أرسل embed URL لـ iframe
+          sources.push({
+            name: `أنمي تايم · سيرفر ${i + 1}`,
+            url,
+            quality: "HD",
+            qualityRank: 7,
+            site: "animetime",
+            directUrl: url,
+            directType: "embed" as any,
+          });
         }
-        // Skip source if extraction failed — embed URL alone can't be played natively
       } catch { /* skip on error */ }
     }));
     sources.sort((a, b) => uniqueUrls.indexOf(a.url) - uniqueUrls.indexOf(b.url));
@@ -4343,6 +4353,17 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             site: "animeify",
             directUrl: proxyUrl,
             directType: "hls",
+          });
+        } else {
+          // AF fallback: FileMoon extraction failed → أرسل embed لـ iframe
+          sources.push({
+            name: "فايل مون · HD",
+            url: filemoonUrl,
+            quality: "HD",
+            qualityRank: 24,
+            site: "animeify",
+            directUrl: filemoonUrl,
+            directType: "embed" as any,
           });
         }
       } catch {}
@@ -5895,7 +5916,7 @@ async function getAnimeWitcherSources(
     for (const q of queries) {
       const searchR = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
         headers: BASE_HDRS,
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(25000),
       });
       if (!searchR.ok) continue;
       const searchData = await searchR.json() as { hits?: Array<{ id: string; name: string; type?: string }> };
@@ -5912,7 +5933,7 @@ async function getAnimeWitcherSources(
     // 2. احصل على قائمة الحلقات واستخرج معرف الحلقة المطلوبة
     const epsR = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(animeId)}`, {
       headers: BASE_HDRS,
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(25000),
     });
     if (!epsR.ok) return [];
     const epsData = await epsR.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
@@ -5925,7 +5946,7 @@ async function getAnimeWitcherSources(
     // 3. احصل على الـ servers المحلولة
     const srvR = await fetch(
       `${AW_HF_BASE}/api/servers_resolved?anime=${encodeURIComponent(animeId)}&ep=${encodeURIComponent(epObj.id)}`,
-      { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) },
+      { headers: BASE_HDRS, signal: AbortSignal.timeout(25000) },
     );
     if (!srvR.ok) return [];
     const srvData = await srvR.json() as {
@@ -8830,7 +8851,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animex: محذوف
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
-      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
+      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 28000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
@@ -8968,7 +8989,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
       case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, [])); break;
-      case "animeify":    (await race(getAnimeifySources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
@@ -8982,7 +9003,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // anikuro: محذوف
       // anivault: محذوف
       case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),28000, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
@@ -10662,8 +10683,9 @@ function rewriteM3u8(
        CF Worker يُضيف Referer/Origin → يحلّ 403 من CDN بدون استهلاك bandwidth على VPS. */
     const cfBase = process.env.CF_WORKER_URL;
     if (cfBase) {
-      const cfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
-      return `${cfBase}?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}${cfKey}`;
+      const token = encryptCfToken(absUrl, ref);
+      if (!token) return absUrl; // fail-closed: CF_PROXY_KEY غير مضبوط — fallback مباشر
+      return `${cfBase}?t=${token}`;
     }
     /* إذا لم يكن CF Worker مضبوطاً: fallback للرابط المباشر */
     return absUrl;
@@ -10807,13 +10829,21 @@ router.get("/anime/video-proxy", async (req, res) => {
      - ويب: CF Worker يُضيف Referer/Origin فيحلّ 403 من الـ CDN.
        إن لم يكن CF_WORKER_URL مضبوطاً: redirect مباشر (CDN مع Referer requirement لن يعمل). */
   const cfBase = process.env.CF_WORKER_URL;
+  // مواقع تُعيد 403 عند المرور عبر CF Worker → redirect مباشر للـ CDN
+  const BYPASS_CF_HOSTS = ["pixeldrain.com", "hakunaymatata.com", "hakunamatata.com"];
+  const bypassCf = BYPASS_CF_HOSTS.some(h => url.includes(h));
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  if (cfBase) {
+  if (cfBase && !bypassCf) {
     /* جميع المنصات: CF Worker يتولى إضافة Referer/Origin بدون استهلاك VPS bandwidth */
-    const cfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
-    res.redirect(307, `${cfBase}?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref || url)}${cfKey}`);
+    const token = encryptCfToken(url, ref || url);
+    if (token) {
+      res.redirect(307, `${cfBase}?t=${token}`);
+    } else {
+      res.redirect(307, url); // fail-closed: CF_PROXY_KEY غير مضبوط
+    }
   } else {
+    // bypass CF Worker: redirect مباشر للـ CDN
     res.redirect(307, url);
   }
 });
@@ -10837,9 +10867,12 @@ router.get("/anime/seg-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
   if (segCfBase) {
-    const segCfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
-    const segRefParam = segOrigin ? `&ref=${encodeURIComponent(segOrigin)}` : "";
-    res.redirect(307, `${segCfBase}?url=${encodeURIComponent(url)}${segRefParam}${segCfKey}`);
+    const token = encryptCfToken(url, segOrigin || url);
+    if (token) {
+      res.redirect(307, `${segCfBase}?t=${token}`);
+    } else {
+      res.redirect(307, url); // fail-closed: CF_PROXY_KEY غير مضبوط
+    }
   } else {
     res.redirect(307, url);
   }
