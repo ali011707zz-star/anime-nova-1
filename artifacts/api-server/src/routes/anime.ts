@@ -5895,7 +5895,7 @@ async function getAnimeWitcherSources(
     for (const q of queries) {
       const searchR = await fetch(`${AW_HF_BASE}/api/search?q=${encodeURIComponent(q)}`, {
         headers: BASE_HDRS,
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(25000),
       });
       if (!searchR.ok) continue;
       const searchData = await searchR.json() as { hits?: Array<{ id: string; name: string; type?: string }> };
@@ -5912,7 +5912,7 @@ async function getAnimeWitcherSources(
     // 2. احصل على قائمة الحلقات واستخرج معرف الحلقة المطلوبة
     const epsR = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(animeId)}`, {
       headers: BASE_HDRS,
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(25000),
     });
     if (!epsR.ok) return [];
     const epsData = await epsR.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
@@ -5925,7 +5925,7 @@ async function getAnimeWitcherSources(
     // 3. احصل على الـ servers المحلولة
     const srvR = await fetch(
       `${AW_HF_BASE}/api/servers_resolved?anime=${encodeURIComponent(animeId)}&ep=${encodeURIComponent(epObj.id)}`,
-      { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) },
+      { headers: BASE_HDRS, signal: AbortSignal.timeout(25000) },
     );
     if (!srvR.ok) return [];
     const srvData = await srvR.json() as {
@@ -8830,7 +8830,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animex: محذوف
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
-      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false),
+      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 28000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
@@ -8968,7 +8968,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
       case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, [])); break;
-      case "animeify":    (await race(getAnimeifySources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
@@ -8982,7 +8982,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // anikuro: محذوف
       // anivault: محذوف
       case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),28000, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;

@@ -2172,7 +2172,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 await Promise.allSettled(ordered.map(async (srv: any) => {
                   if (!srv.embedUrl) return;
                   // Try server-side extraction only — no iframe fallback
-                  await sendExtracted(srv.embedUrl, `الثريا · ${srv.name || "عربي"}`);
+                  await sendExtracted(srv.embedUrl, `StarCima · ${srv.name || "عربي"}`);
                 }));
               } catch (e) { console.error("[StarCima/arabic] error:", e); }
             })(),
@@ -2727,8 +2727,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── SeePanal — أنيميشن وكرتون مدبلج عربي ─────────────────────────────────
-      scrapeAnimCached("seepanel", async () => {
+      // ── SeePanal — DISABLED: API dead (panel.seepanel.top/api returns 404) ─────
+      Promise.resolve() || scrapeAnimCached("seepanel", async () => {
         if (!title) return;
         try {
           send("status", { msg: "SeePanal: جاري البحث…" });
@@ -3737,8 +3737,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── MovieBox (h5-api.aoneroom.com) — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ──
-      scrapeAnimCached("moviebox_anim", async () => {
+      // ── MovieBox — DISABLED: h5-api.aoneroom.com returns 404 (API dead) ────────
+      Promise.resolve() || scrapeAnimCached("moviebox_anim", async () => {
         if (!title) return;
         const auth = await getMbxAuthAnim();
         if (!auth) return;
