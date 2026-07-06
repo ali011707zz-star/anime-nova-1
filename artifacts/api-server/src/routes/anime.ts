@@ -3250,8 +3250,18 @@ async function getAnimeTimeSources(
             directUrl,
             directType: result.type,
           });
+        } else {
+          // CDN restricted from VPS IP → send embed iframe (vidhls.com player) as fallback
+          sources.push({
+            name: `أنمي تايم · سيرفر ${i + 1}`,
+            url,
+            quality: "HD",
+            qualityRank: 8,
+            site: "animetime",
+            directUrl: url,
+            isEmbed: true,
+          });
         }
-        // Skip source if extraction failed — embed URL alone can't be played natively
       } catch { /* skip on error */ }
     }));
     sources.sort((a, b) => uniqueUrls.indexOf(a.url) - uniqueUrls.indexOf(b.url));
@@ -4327,7 +4337,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
     const sources: UnifiedSource[] = [];
 
-    // ── FileMoon (FDLink) → HLS مباشر → مشغّل داخلي بدون إعلانات ──
+    // ── FileMoon (FDLink) → محاولة HLS مباشر → fallback embed iframe ──
     const fdLink = String(epData.FDLink || "").trim();
     if (fdLink) {
       const filemoonUrl = `https://filemoon.sx/e/${fdLink}`;
@@ -4344,8 +4354,29 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             directUrl: proxyUrl,
             directType: "hls",
           });
+        } else {
+          // FileMoon blocks VPS datacenter IP for server-side extraction → embed iframe fallback
+          sources.push({
+            name: "فايل مون · 1080p",
+            url: filemoonUrl,
+            quality: "FHD",
+            qualityRank: 29,
+            site: "animeify",
+            directUrl: filemoonUrl,
+            isEmbed: true,
+          });
         }
-      } catch {}
+      } catch {
+        sources.push({
+          name: "فايل مون · 1080p",
+          url: filemoonUrl,
+          quality: "FHD",
+          qualityRank: 29,
+          site: "animeify",
+          directUrl: filemoonUrl,
+          isEmbed: true,
+        });
+      }
     }
 
     // ── MediaFire MP4 (FRFhdQ=1080p, FRLink=720p, FRLowQ=480p) → مشغّل داخلي مباشر ──
@@ -10807,9 +10838,16 @@ router.get("/anime/video-proxy", async (req, res) => {
      - موبايل: ExoPlayer/AVPlayer يُرسل الـ headers من حقل headers في الـ source object مباشرةً.
      - ويب: CF Worker يُضيف Referer/Origin فيحلّ 403 من الـ CDN.
        إن لم يكن CF_WORKER_URL مضبوطاً: redirect مباشر (CDN مع Referer requirement لن يعمل). */
-  const cfBase = process.env.CF_WORKER_URL;
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
+  /* بعض CDNs تحجب IPs الـ Cloudflare Workers لكن تسمح بالوصول المباشر من المتصفح.
+     لهذه المضيفات نتجاوز CF Worker ونُعيد التوجيه مباشرةً. */
+  const DIRECT_HOSTS = ["pixeldrain.com", "hakunaymatata.com"];
+  if (DIRECT_HOSTS.some(h => url.includes(h))) {
+    res.redirect(307, url);
+    return;
+  }
+  const cfBase = process.env.CF_WORKER_URL;
   if (cfBase) {
     /* جميع المنصات: CF Worker يتولى إضافة Referer/Origin بدون استهلاك VPS bandwidth */
     const token = encryptCfToken(url, ref || url);
