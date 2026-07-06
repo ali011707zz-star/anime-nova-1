@@ -19,3 +19,5 @@
 - [PM2 stale env vars](pm2-stale-env-vars.md) — editing ecosystem.config.cjs/.env on VPS does nothing until pm2 delete+start; caused universal web black-screen bug (broken CF_WORKER_URL never reloaded).
 - [Source picker 1-source fix](source-picker-fix.md) — cancelRemainingScrapers must NOT abort fetchControllersRef (in-flight); only clear pendingTimeoutsRef (queued). Aborting in-flight prevents sources from accumulating in picker.
 - [PG JSON serialization](pg-json-serialization.md) — pg (node-postgres) treats JS arrays as PostgreSQL ARRAY syntax, not jsonb. Must JSON.stringify() objects/arrays before parameterized inserts into jsonb columns. Also: timestamps stored as "timestamptz" need ISO string (not ms epoch); read back with new Date(val).getTime().
+- [CF Worker token encryption](cf-token-encryption.md) — AES-256-GCM replaces plain ?url=&key=; encryptCfToken null=fail-closed; wrangler name=nova-cdn-proxy.
+- [Nova Mobile themes fix](mobile-themes-fix.md) — useColors() reads AppContext theme now; 5 palettes in colors.ts; needs EAS rebuild for users.
