@@ -8998,6 +8998,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // witanime_db: removed
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       case "animetime":    (await race(getAnimeTimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
+      case "witanime":     (await race(getWitanimeSources(title, english, ep),  22_000, [])).forEach(collectSrc); break;
       case "reanime":      (await race(getReanímeSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       default: break;
     }

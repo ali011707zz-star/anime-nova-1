@@ -46,7 +46,7 @@ const SITE_TAG: Record<string, string> = {
   anineko: "AN", mitanime: "MT",
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
-  faselhd_db: "FH",
+  faselhd_db: "FH", witanime: "WI",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -132,6 +132,7 @@ const SITE_PRIORITY: Record<string, number> = {
   dulo_anim: 70, videasy_anim: 60, vidlink_anim: 55,
   anineko: 50, mitanime: 45, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20,
+  witanime: 12,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
@@ -521,7 +522,7 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     const srcs = directSrcs;
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
-    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime"]);
+    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime"]);
     return srcs.map(s => {
       const url = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
