@@ -10701,33 +10701,16 @@ router.get("/anime/video-proxy", async (req, res) => {
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* 307 redirect:
-     - موبايل: ExoPlayer/AVPlayer يُرسل الـ headers من حقل headers في الـ source object مباشرةً.
-     - ويب: CF Worker يُضيف Referer/Origin فيحلّ 403 من الـ CDN.
-       إن لم يكن CF_WORKER_URL مضبوطاً: redirect مباشر (CDN مع Referer requirement لن يعمل). */
+  /* 307 redirect: جميع المنصات (ويب + موبايل) تمر دائماً عبر CF Worker — لا يوجد أي
+     مسار مباشر للـ CDN مهما كان المصدر. إن لم يكن CF Worker مضبوطاً أو فشل توليد
+     التوكن: نرفض الطلب (503) بدلاً من الرجوع لرابط مباشر. */
   const cfBase = process.env.CF_WORKER_URL;
-  // مواقع تُعيد 403 عند المرور عبر CF Worker → redirect مباشر للـ CDN
-  const BYPASS_CF_HOSTS = new Set(["pixeldrain.com", "hakunaymatata.com", "hakunamatata.com"]);
-  let bypassCf = false;
-  try {
-    const parsedBypass = new URL(url);
-    const bh = parsedBypass.hostname.toLowerCase();
-    bypassCf = BYPASS_CF_HOSTS.has(bh) || [...BYPASS_CF_HOSTS].some(d => bh.endsWith("." + d));
-  } catch { /* invalid URL — do not bypass */ }
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  if (cfBase && !bypassCf) {
-    /* جميع المنصات: CF Worker يتولى إضافة Referer/Origin بدون استهلاك VPS bandwidth */
-    const token = encryptCfToken(url, ref || url);
-    if (token) {
-      res.redirect(307, `${cfBase}?t=${token}`);
-    } else {
-      res.redirect(307, url); // fail-closed: CF_PROXY_KEY غير مضبوط
-    }
-  } else {
-    // bypass CF Worker: redirect مباشر للـ CDN
-    res.redirect(307, url);
-  }
+  if (!cfBase) { res.status(503).send("CF_WORKER_URL not configured"); return; }
+  const token = encryptCfToken(url, ref || url);
+  if (!token) { res.status(500).send("token generation failed"); return; }
+  res.redirect(307, `${cfBase}?t=${token}`);
 });
 
 router.get("/anime/seg-proxy", async (req, res) => {
@@ -10738,9 +10721,9 @@ router.get("/anime/seg-proxy", async (req, res) => {
   if (isEncrypted(url)) url = decryptParam(url);
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* 307 redirect عبر CF Worker — يُضيف Referer/Origin بدون استهلاك VPS bandwidth.
+  /* 307 redirect عبر CF Worker دائماً — لا يوجد أي مسار مباشر للـ CDN.
      ref: origin URL للـ CDN (لتمرير Referer صحيح للـ Worker).
-     إن لم يكن CF Worker مضبوطاً: redirect مباشر للـ CDN كـ fallback. */
+     إن لم يكن CF Worker مضبوطاً أو فشل توليد التوكن: نرفض الطلب (503). */
   const segRef = (req.query.ref as string || "").trim();
   let segRefDecoded = segRef;
   try { if (segRef) segRefDecoded = decodeURIComponent(segRef); } catch {}
@@ -10748,16 +10731,10 @@ router.get("/anime/seg-proxy", async (req, res) => {
   const segCfBase = process.env.CF_WORKER_URL;
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  if (segCfBase) {
-    const token = encryptCfToken(url, segOrigin || url);
-    if (token) {
-      res.redirect(307, `${segCfBase}?t=${token}`);
-    } else {
-      res.redirect(307, url); // fail-closed: CF_PROXY_KEY غير مضبوط
-    }
-  } else {
-    res.redirect(307, url);
-  }
+  if (!segCfBase) { res.status(503).send("CF_WORKER_URL not configured"); return; }
+  const token = encryptCfToken(url, segOrigin || url);
+  if (!token) { res.status(500).send("token generation failed"); return; }
+  res.redirect(307, `${segCfBase}?t=${token}`);
 });
 
 // ══════════════════════════════════════════════════════════════════
