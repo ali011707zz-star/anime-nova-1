@@ -6673,10 +6673,17 @@ async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: 
   const kf2   = re_b64toU8(kf2raw);
   const token: string = data[fields.tokenField];
   if (!token) throw new Error(`tokenField "${fields.tokenField}" missing`);
-  const tokData: any = await fetch(`${REANIME_FLIX}/api/m3u8/${token}`, {
-    headers: { ...REANIME_H, "Referer": `${REANIME_BASE}/` },
-    signal: AbortSignal.timeout(8000),
-  }).then(r => { if (!r.ok) throw new Error(`Token API ${r.status}`); return r.json(); });
+  const tokUrl = `${REANIME_FLIX}/api/m3u8/${token}`;
+  let tokData: any = await cfProxyGet(tokUrl, `${REANIME_BASE}/`, 8000).then(t => {
+    if (!t) return null;
+    try { return JSON.parse(t); } catch { return null; }
+  }).catch(() => null);
+  if (!tokData) {
+    tokData = await fetch(tokUrl, {
+      headers: { ...REANIME_H, "Referer": `${REANIME_BASE}/` },
+      signal: AbortSignal.timeout(8000),
+    }).then(r => { if (!r.ok) throw new Error(`Token API ${r.status}`); return r.json(); });
+  }
   const vidKey  = (await re_sha256hex(token + "vid")).substring(0, 10);
   const keyKey  = (await re_sha256hex(token + "key")).substring(0, 10);
   const v_bytes = re_b64toU8(tokData[vidKey]);
@@ -6708,9 +6715,9 @@ async function re_decryptEmbed(html: string): Promise<{ url: string; subtitles: 
 const reanimeSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 const REANIME_TTL = 30 * 60_000;
 
-// DISABLED 2026-06: reanime.to CF Managed Challenge blocks all datacenter IPs on /api/flix/*
-// FlixCloud CDN also blocks Replit IPs (403 on HLS after decrypt)
-const REANIME_DISABLED = true;
+// [2026-07-06] أُعيد تفعيله: reanime.to/api/flix لم يعد يحجب Replit datacenter IPs (فُحص مباشرة).
+// FlixCloud embed page لا يزال محميّاً بـ CF challenge بسيط → يُستخدم cfProxyGet (curl_cffi impersonation) بدلاً من fetch العادي.
+const REANIME_DISABLED = false;
 async function getReanímeSources(
   title: string, english: string | null, ep: number, anilistId?: number,
 ): Promise<UnifiedSource[]> {
@@ -6737,11 +6744,15 @@ async function getReanímeSources(
     const embedUrl: string = subServer.dataLink || subServer.link || "";
     if (!embedUrl.startsWith("http")) return [];
 
-    // جلب صفحة الـ embed وفك تشفيرها
-    const embedHtml = await fetch(embedUrl, {
-      headers: { "User-Agent": REANIME_UA, "Referer": `${REANIME_BASE}/` },
-      signal: AbortSignal.timeout(12000),
-    }).then(r => r.ok ? r.text() : "").catch(() => "");
+    // جلب صفحة الـ embed وفك تشفيرها — FlixCloud محمي بـ CF challenge بسيط،
+    // يُستخدم cfProxyGet (curl_cffi impersonation) بدلاً من fetch العادي لتجاوزه.
+    let embedHtml = await cfProxyGet(embedUrl, `${REANIME_BASE}/`, 12000) || "";
+    if (!embedHtml) {
+      embedHtml = await fetch(embedUrl, {
+        headers: { "User-Agent": REANIME_UA, "Referer": `${REANIME_BASE}/` },
+        signal: AbortSignal.timeout(12000),
+      }).then(r => r.ok ? r.text() : "").catch(() => "");
+    }
     if (!embedHtml) return [];
 
     const { url: m3u8Url, subtitles, introChapter, outroChapter } = await re_decryptEmbed(embedHtml);
@@ -6782,7 +6793,7 @@ async function getReanímeSources(
     }];
     reanimeSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
-  } catch { return []; }
+  } catch (e: any) { console.error("[reanime] error:", e?.message ?? e); return []; }
 }
 
 
@@ -8849,8 +8860,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
       // allmanga:     clock.json→500, fast4speed→401
-      // reanime:      CF Managed Challenge يحجب reanime.to/api/flix من IPs الـ datacenter (2026-06)
-      // scrapeCached("reanime", () => getReanímeSources(title, english, ep, anilistId), false, 25000),
+      // reanime:      أُعيد تفعيله 2026-07-06 — CF challenge لم يعد يحجب /api/flix + cfProxyGet لصفحة FlixCloud
+      scrapeCached("reanime", () => getReanímeSources(title, english, ep, anilistId), false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
     ]);
 
@@ -8987,6 +8998,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // witanime_db: removed
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       case "animetime":    (await race(getAnimeTimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
+      case "reanime":      (await race(getReanímeSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
