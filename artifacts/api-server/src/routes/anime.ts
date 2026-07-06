@@ -13,7 +13,7 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
-import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
+import { encryptProxyUrl, encryptParam, encryptCfToken, decryptParam, isEncrypted } from "../lib/security.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
@@ -10662,8 +10662,9 @@ function rewriteM3u8(
        CF Worker يُضيف Referer/Origin → يحلّ 403 من CDN بدون استهلاك bandwidth على VPS. */
     const cfBase = process.env.CF_WORKER_URL;
     if (cfBase) {
-      const cfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
-      return `${cfBase}?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ref)}${cfKey}`;
+      const token = encryptCfToken(absUrl, ref);
+      if (!token) return absUrl; // fail-closed: CF_PROXY_KEY غير مضبوط — fallback مباشر
+      return `${cfBase}?t=${token}`;
     }
     /* إذا لم يكن CF Worker مضبوطاً: fallback للرابط المباشر */
     return absUrl;
@@ -10811,8 +10812,12 @@ router.get("/anime/video-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Headers", "Range");
   if (cfBase) {
     /* جميع المنصات: CF Worker يتولى إضافة Referer/Origin بدون استهلاك VPS bandwidth */
-    const cfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
-    res.redirect(307, `${cfBase}?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref || url)}${cfKey}`);
+    const token = encryptCfToken(url, ref || url);
+    if (token) {
+      res.redirect(307, `${cfBase}?t=${token}`);
+    } else {
+      res.redirect(307, url); // fail-closed: CF_PROXY_KEY غير مضبوط
+    }
   } else {
     res.redirect(307, url);
   }
@@ -10837,9 +10842,12 @@ router.get("/anime/seg-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
   if (segCfBase) {
-    const segCfKey = process.env.CF_PROXY_KEY ? `&key=${encodeURIComponent(process.env.CF_PROXY_KEY)}` : "";
-    const segRefParam = segOrigin ? `&ref=${encodeURIComponent(segOrigin)}` : "";
-    res.redirect(307, `${segCfBase}?url=${encodeURIComponent(url)}${segRefParam}${segCfKey}`);
+    const token = encryptCfToken(url, segOrigin || url);
+    if (token) {
+      res.redirect(307, `${segCfBase}?t=${token}`);
+    } else {
+      res.redirect(307, url); // fail-closed: CF_PROXY_KEY غير مضبوط
+    }
   } else {
     res.redirect(307, url);
   }

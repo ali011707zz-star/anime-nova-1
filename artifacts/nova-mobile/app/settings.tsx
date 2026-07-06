@@ -284,9 +284,9 @@ function ApiServerSection() {
             <Ionicons name="server" size={16} color="#38bdf8" />
           </View>
           <View style={[ts.navText, { alignItems: "flex-end" }]}>
-            <Text style={ts.navLabel}>عنوان السيرفر الحالي</Text>
-            <Text style={[ts.navSub, { color: saved ? "#34d399" : "rgba(255,255,255,0.3)" }]} numberOfLines={1}>
-              {currentBase}
+            <Text style={ts.navLabel}>حالة الاتصال</Text>
+            <Text style={[ts.navSub, { color: saved ? "#34d399" : "rgba(255,255,255,0.5)" }]} numberOfLines={1}>
+              {saved ? "✓ سيرفر مخصص" : "✓ متصل بالسيرفر الرسمي"}
             </Text>
           </View>
           {saved ? (

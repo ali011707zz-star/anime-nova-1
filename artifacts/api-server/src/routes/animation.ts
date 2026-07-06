@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, createHash, createDecipheriv } from "node:crypto";
+import { encryptParam, encryptProxyUrl } from "../lib/security.js";
 import {
   makeAnimCacheKey,
   getFromSourceCache,
@@ -95,7 +96,7 @@ async function scrapeVidFastAnim(
       try { const j = _animVfDecJson(b64); url = j.url; if (!url) return; } catch { return; }
       if (seenVF.has(url)) return;
       seenVF.add(url);
-      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(_VF_ORIGIN + "/")}`;
+      const proxied = `/api/anime/hls-proxy?url=${encryptParam(url)}&ref=${encryptParam(_VF_ORIGIN + "/")}`;
       sendSource(proxied, `VidFast · ${srv.name}`, url, proxied);
     }),
   );
@@ -868,12 +869,12 @@ async function callExtractApi(url: string): Promise<{ directUrl?: string } | nul
 
 // Wrap m3u8 in hls-proxy (relative path → works for client)
 function wrapHls(url: string, ref: string): string {
-  return `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+  return `/api/anime/hls-proxy?url=${encryptParam(url)}&ref=${encryptParam(ref)}`;
 }
 
 // Wrap MP4/video through video-proxy (needed for IP-tied sources like Streamtape, Sendvid, CDNs)
 function wrapMp4(url: string, ref: string): string {
-  return `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+  return `/api/anime/video-proxy?url=${encryptParam(url)}&ref=${encryptParam(ref)}`;
 }
 
 // Hexa cooldown — enc-dec.app returns "Next retry: N minutes" on 500; don't hammer it
@@ -1785,10 +1786,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     }
 
     const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}), ...(headers ? { headers } : {}) };
-    send("source", { url, label, directUrl, proxyUrl, ...extra });
+    // تشفير params في روابط الـ proxy قبل إرسالها للعميل — يمنع كشف CDN URLs في devtools
+    const safeProxyUrl  = proxyUrl  ? encryptProxyUrl(proxyUrl)  : proxyUrl;
+    const safeDirectUrl = directUrl ? encryptProxyUrl(directUrl) : directUrl;
+    send("source", { url, label, directUrl: safeDirectUrl, proxyUrl: safeProxyUrl, ...extra });
     // capture for caching — isolated per async context (no race condition)
     const captureArr = captureStorage.getStore();
-    if (captureArr) captureArr.push({ url, label, directUrl, proxyUrl, ...extra });
+    if (captureArr) captureArr.push({ url, label, directUrl: safeDirectUrl, proxyUrl: safeProxyUrl, ...extra });
   };
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
