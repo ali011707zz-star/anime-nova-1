@@ -10669,7 +10669,10 @@ function rewriteM3u8(
   }).join("\n");
 }
 
-router.get("/anime/hls-proxy", async (req, res) => {
+router.get("/anime/hls-proxy", (req, res) => {
+  /* هذا الـ endpoint أصبح 307 redirect بحت — لا يجلب أي بيانات على VPS.
+     CF Worker يتولى جلب M3U8 manifest + إعادة كتابة روابط الـ segments لتمر عبره.
+     النتيجة: صفر استهلاك bandwidth على VPS لبيانات الفيديو. */
   const rawUrl = (req.query.url as string || "").trim();
   let ref      = (req.query.ref as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
@@ -10677,121 +10680,15 @@ router.get("/anime/hls-proxy", async (req, res) => {
   try { url = decodeURIComponent(rawUrl); } catch { url = rawUrl; }
   if (isEncrypted(url)) url = decryptParam(url);
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
+  if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  let baseForSegments = url;
-  if (url.includes("animanga.fun") && url.includes("url=")) {
-    try {
-      const pu = new URL(url);
-      const inner = pu.searchParams.get("url");
-      if (inner) baseForSegments = inner;
-    } catch {}
-  }
-
-  let origin = "";
-  try { origin = new URL(ref || url).origin; } catch {}
-  if (!origin) try { origin = new URL(url).origin; } catch {}
-  const cacheKey = `hls:${url}`;
-  const mobileMode = req.query.mobile === "1";
-  /* مفتاح الكاش يشمل وضع الموبايل حتى لا تُعاد نتيجة master playlist لطلب mobile=1 */
-  const effectiveCacheKey = mobileMode ? `hls-m:${url}` : cacheKey;
-
-  /* ── L1: in-memory (لا يُقرأ إلا للكاش المناسب) ── */
-  if (!mobileMode) {
-    const hit = cdnCache.get(cacheKey);
-    if (hit && isCdnCacheable(url) && Date.now() - hit.ts < CDN_CACHE_TTL) {
-      res.setHeader("Content-Type", hit.ct);
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("X-Cache", "HIT-L1");
-      res.send(hit.body);
-      return;
-    }
-
-    /* ── L2: PostgreSQL ── */
-    if (isCdnCacheable(url)) {
-      const pgHit = await cdnManifestGet(cacheKey);
-      if (pgHit) {
-        const buf = Buffer.from(pgHit.content);
-        cdnCache.set(cacheKey, { body: buf, ct: pgHit.ct, ts: Date.now() });
-        res.setHeader("Content-Type", pgHit.ct);
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "no-store");
-        res.setHeader("X-Cache", "HIT-L2");
-        res.send(buf);
-        return;
-      }
-    }
-  }
-
-  try {
-    /* 12s timeout — manifests are small text files; CDN should respond fast.
-       If it takes > 12s the CDN is down/overloaded — fail fast so client can try next source.
-       Fallback: إذا حجب CDN IP السيرفر (4xx) → أعِد المحاولة عبر CF Worker الذي يُضيف Referer/Origin. */
-    let r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
-    if (!r.ok) {
-      const cfFallback = process.env.CF_WORKER_URL;
-      if (cfFallback) {
-        const cfTok = encryptCfToken(url, ref || url);
-        if (cfTok) {
-          try {
-            const cfR = await fetch(`${cfFallback}?t=${cfTok}`, { signal: AbortSignal.timeout(12000), redirect: "follow" });
-            if (cfR.ok) { r = cfR; }
-            else { res.status(r.status).send(`upstream ${r.status} (cf: ${cfR.status})`); return; }
-          } catch { res.status(r.status).send(`upstream ${r.status}`); return; }
-        } else { res.status(r.status).send(`upstream ${r.status}`); return; }
-      } else { res.status(r.status).send(`upstream ${r.status}`); return; }
-    }
-    const ct = r.headers.get("content-type") || "";
-    const masterBody = await r.text();
-    /* استخدم req.protocol (آمن — trust proxy مفعّل) وhost مع تنظيف proxy-chain */
-    const proto    = /^https?$/.test(req.protocol) ? req.protocol : "https";
-    const rawHost  = (req.headers["x-forwarded-host"] as string || req.get("host") || "localhost:8080").split(",")[0].trim();
-    const selfBase = `${proto}://${rawHost}`;
-
-    /* ── mobile=1: اختر H.264 variant + segments مباشرة للـ CDN (صفر bandwidth proxy) ── */
-    if (mobileMode) {
-      const h264Url = pickH264Variant(masterBody, baseForSegments);
-      if (h264Url) {
-        try {
-          const vr = await fetch(h264Url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
-          if (vr.ok) {
-            const variantBody = await vr.text();
-            /* directSegs=true: روابط الـ segments تذهب مباشرة للـ CDN — لا تمر عبر VPS */
-            const rewritten = rewriteM3u8(variantBody, h264Url, selfBase, ref || url, true);
-            res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-            res.setHeader("Access-Control-Allow-Origin", "*");
-            res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-            res.setHeader("Pragma", "no-cache");
-            res.send(rewritten);
-            return;
-          }
-        } catch { /* تابع بالـ master إن فشل جلب الـ variant */ }
-      }
-      /* الـ master ليس playlist متعدد variants أو فشل جلب الـ variant — أعِد master مع direct segs */
-      const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, true);
-      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.send(rewritten);
-      return;
-    }
-
-    /* ويب: directSegs=false → toProxy يُوجّه الـ segments عبر CF Worker (إن كان مضبوطاً)
-       الـ Worker يُضيف Referer/Origin فيحلّ مشكلة 403؛ وإلا يُعاد الرابط مباشرةً للـ CDN.
-       الـ manifest نفسه (نص صغير) يمر عبر الخادم فقط — لا bandwidth لبيانات الفيديو. */
-    const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, false);
-    const finalCt = ct.includes("mpegurl") || url.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : ct || "application/vnd.apple.mpegurl";
-    if (isCdnCacheable(url)) {
-      cdnCache.set(effectiveCacheKey, { body: Buffer.from(rewritten), ct: finalCt, ts: Date.now() }); // L1
-      cdnManifestSet(effectiveCacheKey, rewritten, finalCt);                                           // L2
-    }
-    res.setHeader("Content-Type", finalCt);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.send(rewritten);
-  } catch (e: any) { res.status(502).send(`proxy error: ${e?.message ?? e}`); }
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Range");
+  const cfBase = process.env.CF_WORKER_URL;
+  if (!cfBase) { res.status(503).send("CF_WORKER_URL not configured"); return; }
+  const token = encryptCfToken(url, ref || url);
+  if (!token) { res.status(500).send("token generation failed"); return; }
+  res.redirect(307, `${cfBase}?t=${token}`);
 });
 
 router.get("/anime/video-proxy", async (req, res) => {
