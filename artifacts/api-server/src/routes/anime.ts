@@ -10768,7 +10768,7 @@ router.get("/anime/hls-proxy", async (req, res) => {
     const rawHost  = (req.headers["x-forwarded-host"] as string || req.get("host") || "localhost:8080").split(",")[0].trim();
     const selfBase = `${proto}://${rawHost}`;
 
-    /* ── mobile=1: اختر H.264 variant + segments مباشرة للـ CDN (صفر bandwidth proxy) ── */
+    /* ── mobile=1: اختر H.264 variant + segments عبر CF Worker (يحلّ 403 من CDNs) ── */
     if (mobileMode) {
       const h264Url = pickH264Variant(masterBody, baseForSegments);
       if (h264Url) {
@@ -10776,8 +10776,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
           const vr = await fetch(h264Url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
           if (vr.ok) {
             const variantBody = await vr.text();
-            /* directSegs=true: روابط الـ segments تذهب مباشرة للـ CDN — لا تمر عبر VPS */
-            const rewritten = rewriteM3u8(variantBody, h264Url, selfBase, ref || url, true);
+            /* directSegs=false: segments تمر عبر CF Worker (يُضيف Referer/Origin → يحلّ 403) */
+            const rewritten = rewriteM3u8(variantBody, h264Url, selfBase, ref || url, false);
             res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -10787,8 +10787,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
           }
         } catch { /* تابع بالـ master إن فشل جلب الـ variant */ }
       }
-      /* الـ master ليس playlist متعدد variants أو فشل جلب الـ variant — أعِد master مع direct segs */
-      const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, true);
+      /* الـ master ليس playlist متعدد variants أو فشل جلب الـ variant — أعِد master عبر CF Worker */
+      const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, false);
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
