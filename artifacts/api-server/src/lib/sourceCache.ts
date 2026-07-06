@@ -116,7 +116,11 @@ async function sbGet(cacheKey: string): Promise<{ sources: any[]; expiresAt: num
   try {
     const rows = await cacheSelect("source_cache", { cache_key: `eq.${cacheKey}` }, { limit: 1 });
     if (!rows[0]) return null;
-    return { sources: rows[0].sources as any[], expiresAt: Number(rows[0].expires_at) };
+    // expires_at is stored as ISO timestamp — convert back to milliseconds epoch
+    const expMs = typeof rows[0].expires_at === "number"
+      ? rows[0].expires_at
+      : new Date(rows[0].expires_at).getTime();
+    return { sources: rows[0].sources as any[], expiresAt: expMs };
   } catch { return null; }
 }
 
@@ -126,9 +130,11 @@ async function sbUpsertCache(cacheKey: string, site: string, sources: any[], exp
     await cacheUpsert("source_cache", {
       cache_key:  cacheKey,
       site,
-      sources,
+      // deep-clone to strip any undefined/non-serializable values
+      sources: JSON.parse(JSON.stringify(sources)),
       fetched_at: Date.now(),
-      expires_at: expiresAt,
+      // expires_at column is "timestamp with time zone" — pass ISO string, not milliseconds
+      expires_at: new Date(expiresAt).toISOString(),
     }, "cache_key");
   } catch (err) {
     console.error(`[sourceCache] upsert failed for ${site}:${cacheKey}`, err instanceof Error ? err.message : err);

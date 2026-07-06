@@ -292,7 +292,12 @@ export async function sbUpsert<T = any>(
     const entries = Object.entries(row).filter(([, v]) => v !== undefined);
     const cols = entries.map(([k]) => `"${k}"`).join(", ");
     const placeholders = entries.map((_, i) => `$${i + 1}`).join(", ");
-    const values = entries.map(([, v]) => v);
+    // Serialize objects/arrays to JSON strings so pg doesn't treat them as
+    // PostgreSQL arrays ({...}) when the column type is json/jsonb.
+    const values = entries.map(([, v]) => {
+      if (v !== null && typeof v === "object") return JSON.stringify(v);
+      return v;
+    });
 
     let conflictClause = "";
     if (onConflict) {
