@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
 import { getBaseUrl } from "@/utils/api";
-import { secureFetch } from "@/utils/secureApi";
+import { secureFetch, warmAuthToken } from "@/utils/secureApi";
 import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
@@ -332,6 +332,10 @@ export default function WatchScreen() {
     });
 
     const allFresh: Src[] = [];
+
+    /* pre-warm التوكن مرة واحدة قبل الطلبات المتوازية —
+       يمنع 20+ طلب token متوازٍ عند فتح الشاشة (السبب الجذري لـ 403 الجماعي) */
+    await warmAuthToken();
 
     /* جلب مصدر واحد — يُستدعى بالتوازي لكل site */
     const fetchOneSite = async (site: string) => {
