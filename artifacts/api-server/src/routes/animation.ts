@@ -2171,8 +2171,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
                 await Promise.allSettled(ordered.map(async (srv: any) => {
                   if (!srv.embedUrl) return;
-                  // Try server-side extraction only — no iframe fallback
+                  // Try server-side extraction; fallback to embed if extraction fails
                   await sendExtracted(srv.embedUrl, `StarCima · ${srv.name || "عربي"}`);
+                  // Embed fallback: يُرسَل embed URL إذا فشل الاستخراج (browser iframe)
+                  if (!seenUrls.has(srv.embedUrl)) {
+                    seenUrls.add(srv.embedUrl);
+                    sendSource(srv.embedUrl, `StarCima · ${srv.name || "عربي"}`, srv.embedUrl, srv.embedUrl);
+                  }
                 }));
               } catch (e) { console.error("[StarCima/arabic] error:", e); }
             })(),
@@ -3737,33 +3742,61 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── MovieBox — عبر Streamrip Railway.app (نفس CDN hakunaymatata) ───────────
-      // h5-api.aoneroom.com مات — نستخدم streamrip-website-production.up.railway.app بديلاً
+      // ── MovieBox — مُعاد تفعيله (Streamrip API) ──────────────────────────────
       scrapeAnimCached("moviebox_anim", async () => {
-        if (!tmdbId) return;
+        if (!title) return;
+        const auth = await getMbxAuthAnim();
+        if (!auth) return;
+        const { token, cookies } = auth;
+        const hdrs: Record<string, string> = {
+          "Accept": "application/json",
+          "User-Agent": _MBX_UA_ANIM,
+          "Referer": _MBX_REF_ANIM,
+          "Authorization": `Bearer ${token}`,
+          "Cookie": cookies,
+        };
         try {
-          const SRIP_MO = "https://streamrip-website-production.up.railway.app";
-          const SRIP_MO_REF = "https://fmoviesunblocked.net/";
-          const endpoint = type === "tv"
-            ? `${SRIP_MO}/api/download/tv/${tmdbId}`
-            : `${SRIP_MO}/api/download/movie/${tmdbId}`;
-          const r = await fetch(endpoint, { signal: AbortSignal.timeout(12_000) });
-          if (!r.ok) return;
-          const data: any = await r.json();
-          const downloads: any[] = data?.downloads || [];
-          // إنجليزي فقط، يستبعد المدبلج
-          const english = downloads.filter((d: any) => {
-            const srv = (d.server || "").toLowerCase();
-            return srv.includes("english") &&
-              !srv.includes("hindi") && !srv.includes("telugu") &&
-              typeof d.url === "string" && d.url.startsWith("http");
+          const sr = await fetch(_MBX_SEARCH_ANIM, {
+            method: "POST",
+            headers: { ...hdrs, "Content-Type": "application/json" },
+            body: JSON.stringify({ keyword: title, page: 1, perPage: 12, subjectType: 0 }),
+            signal: AbortSignal.timeout(10_000),
           });
-          for (const dl of english) {
-            const q = Number(dl.quality) || 0;
-            if (q <= 0) continue;
-            const label = `MovieBox · ${q}p`;
-            const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(dl.url)}&ref=${encodeURIComponent(SRIP_MO_REF)}`;
-            sendSource(String(dl.url), label, String(dl.url), proxyUrl);
+          if (!sr.ok) return;
+          const sData: any = await sr.json();
+          const items: any[] = sData?.data?.items || [];
+          if (!items.length) return;
+
+          // فلتر: استبعد المدبلج أولاً
+          const nonDubbed = items.filter((it: any) => !_MBX_DUBBED_RE_ANIM.test(it.title || ""));
+          const candidates = nonDubbed.length ? nonDubbed : items;
+          const qLow = title.toLowerCase();
+          candidates.sort((a: any, b: any) => {
+            const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+            const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
+            return bHit - aHit;
+          });
+          const item = candidates[0];
+          if (!item?.subjectId || !item?.detailPath) return;
+
+          // الموسم والحلقة: فيلم → se=0&ep=0، مسلسل → se=season&ep=epNum
+          const se = type === "movie" ? 0 : season;
+          const epP = type === "movie" ? 0 : epNum;
+          const dr = await fetch(
+            `${_MBX_DOWNLOAD_ANIM}?subjectId=${encodeURIComponent(item.subjectId)}&se=${se}&ep=${epP}&detailPath=${encodeURIComponent(item.detailPath)}`,
+            { headers: hdrs, signal: AbortSignal.timeout(10_000) },
+          );
+          if (!dr.ok) return;
+          const dData: any = await dr.json();
+          const downloads: any[] = dData?.data?.downloads || [];
+          if (!downloads.length) return;
+
+          downloads.sort((a: any, b: any) => (b.resolution || 0) - (a.resolution || 0));
+          for (const dl of downloads.slice(0, 3)) {
+            const res = Number(dl.resolution) || 0;
+            if (!dl.url || res <= 0) continue;
+            const label = `MovieBox · ${res}p`;
+            sendSource(String(dl.url), label, String(dl.url), undefined, { headers: { Referer: _MBX_REF_ANIM } });
           }
         } catch { /* silent */ }
       }),
