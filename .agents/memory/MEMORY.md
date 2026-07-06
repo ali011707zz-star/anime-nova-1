@@ -22,3 +22,4 @@
 - [PG JSON serialization](pg-json-serialization.md) — pg (node-postgres) treats JS arrays as PostgreSQL ARRAY syntax, not jsonb. Must JSON.stringify() objects/arrays before parameterized inserts into jsonb columns. Also: timestamps stored as "timestamptz" need ISO string (not ms epoch); read back with new Date(val).getTime().
 - [CF Worker token encryption](cf-token-encryption.md) — AES-256-GCM replaces plain ?url=&key=; encryptCfToken null=fail-closed; wrangler name=nova-cdn-proxy.
 - [Nova Mobile themes fix](mobile-themes-fix.md) — useColors() reads AppContext theme now; 5 palettes in colors.ts; needs EAS rebuild for users.
+- [HLS CF Worker routing](hls-cf-worker-routing.md) — hls-proxy is now pure 307 redirect; CF Worker fetches manifest + rewrites segment URLs to go through itself; zero VPS video bandwidth.
