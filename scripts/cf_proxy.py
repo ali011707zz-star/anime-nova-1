@@ -61,9 +61,24 @@ def fetch_url():
             body = request.get_data(as_text=False) or b""
             content_type = request.content_type or "application/x-www-form-urlencoded"
             hdrs["Content-Type"] = content_type
-            resp = cf.post(url, headers=hdrs, data=body, impersonate=IMPERSONATE, timeout=timeout, allow_redirects=True)
+            resp = cf.post(
+                url,
+                headers=hdrs,
+                data=body,
+                impersonate=IMPERSONATE,
+                timeout=timeout,
+                allow_redirects=True,
+                verify=False,
+            )
         else:
-            resp = cf.get(url, headers=hdrs, impersonate=IMPERSONATE, timeout=timeout, allow_redirects=True)
+            resp = cf.get(
+                url,
+                headers=hdrs,
+                impersonate=IMPERSONATE,
+                timeout=timeout,
+                allow_redirects=True,
+                verify=False,
+            )
 
         body_text = resp.text
         cf_blocked = (
@@ -94,7 +109,6 @@ def stream_url():
     if not target.startswith(("http://", "https://")):
         return "invalid url", 400
 
-    # استخراج Origin من الـ ref
     origin = ""
     if ref:
         try:
@@ -119,7 +133,6 @@ def stream_url():
     if ref:    hdrs["Referer"] = ref
     if origin: hdrs["Origin"]  = origin
 
-    # دعم Range للـ video seeking
     range_hdr = request.headers.get("Range")
     if range_hdr:
         hdrs["Range"] = range_hdr
@@ -132,11 +145,11 @@ def stream_url():
             timeout=30,
             allow_redirects=True,
             stream=True,
+            verify=False,
         )
     except Exception as e:
         return f"upstream fetch failed: {e}", 502
 
-    # أعد ترويسات المحتوى المفيدة
     res_headers = {
         "Access-Control-Allow-Origin":   "*",
         "Access-Control-Allow-Headers":  "Range",
