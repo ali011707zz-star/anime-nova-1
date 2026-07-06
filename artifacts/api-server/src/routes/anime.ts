@@ -10830,8 +10830,13 @@ router.get("/anime/video-proxy", async (req, res) => {
        إن لم يكن CF_WORKER_URL مضبوطاً: redirect مباشر (CDN مع Referer requirement لن يعمل). */
   const cfBase = process.env.CF_WORKER_URL;
   // مواقع تُعيد 403 عند المرور عبر CF Worker → redirect مباشر للـ CDN
-  const BYPASS_CF_HOSTS = ["pixeldrain.com", "hakunaymatata.com", "hakunamatata.com"];
-  const bypassCf = BYPASS_CF_HOSTS.some(h => url.includes(h));
+  const BYPASS_CF_HOSTS = new Set(["pixeldrain.com", "hakunaymatata.com", "hakunamatata.com"]);
+  let bypassCf = false;
+  try {
+    const parsedBypass = new URL(url);
+    const bh = parsedBypass.hostname.toLowerCase();
+    bypassCf = BYPASS_CF_HOSTS.has(bh) || [...BYPASS_CF_HOSTS].some(d => bh.endsWith("." + d));
+  } catch { /* invalid URL — do not bypass */ }
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
   if (cfBase && !bypassCf) {
