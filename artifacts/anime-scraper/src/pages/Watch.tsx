@@ -27,6 +27,9 @@ const ANILIST_Q = `query ($id: Int) {
     streamingEpisodes { title episode }
   }
 }`;
+// NOTE: description is fetched above but intentionally NOT rendered on the Watch screen.
+// Removed per explicit user complaint — the synopsis section cluttered the watch UI
+// and distracted from the player. It remains in the query for future SEO/meta use only.
 
 /* ══════════════════════════════════ MAPS ═════════════════════ */
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
