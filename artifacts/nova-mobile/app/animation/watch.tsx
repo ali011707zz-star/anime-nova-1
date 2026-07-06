@@ -153,30 +153,50 @@ function SpinRing() {
 /* ── 2-letter tag from animation source label (mirrors web AnimationWatch) ── */
 function getAnimTag(label: string): string {
   const l = label.toLowerCase();
-  if (l.startsWith("vyla"))        return "VY";
-  if (l.startsWith("videasy"))     return "VE";
-  if (l.startsWith("vidlink"))     return "VL";
-  if (l.startsWith("lordflix"))    return "LF";
-  if (l.startsWith("starcima"))    return "SC";
-  if (l.startsWith("stardima"))    return "SD";
+  // ─── المصادر الرئيسية ───
+  if (l.startsWith("vyla"))           return "VY";
+  if (l.startsWith("videasy"))        return "VE";
+  if (l.startsWith("vidlink"))        return "VL";
+  if (l.startsWith("vidfast"))        return "VF";
+  if (l.startsWith("vidcore"))        return "VC";
+  if (l.startsWith("lordflix"))       return "LF";
+  if (l.startsWith("starcima"))       return "SC";
+  if (l.startsWith("stardima"))       return "SD";
+  if (l.startsWith("dulo"))           return "DL";  // Dulo.tv
+  // ─── مصادر عربية ───
   if (l.startsWith("mycima") || l.startsWith("ماي سيما") || l.startsWith("maycima")) return "MC";
-  if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "MG";
+  if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "AF";
   if (l.includes("ميغا") || l.startsWith("mega"))        return "MG";
-  if (l.startsWith("aflaam"))      return "AF";
-  if (l.startsWith("arabseed"))    return "AS";
-  if (l.startsWith("ezvidapi"))    return "EZ";
-  if (l.startsWith("topcinema"))   return "TC";
-  if (l.startsWith("moviz"))       return "MV";
-  if (l.startsWith("seepan"))      return "SP";
-  if (l.startsWith("animewitcher")) return "AW";
-  if (l.startsWith("toonstream"))  return "TS";
-  if (l.startsWith("anikoto"))     return "AK";
-  if (l.startsWith("anineko"))     return "AN";
-  if (l.startsWith("kawaii"))      return "KW";
+  if (l.startsWith("aflaam"))         return "AL";
+  if (l.startsWith("arabseed"))       return "AS";
+  if (l.startsWith("ezvidapi"))       return "EZ";
+  if (l.startsWith("topcinema"))      return "TC";
+  if (l.startsWith("moviz"))          return "MV";
+  if (l.startsWith("faselhd"))        return "FH";  // FaselHD
+  if (l.startsWith("seepan"))         return "SP";
+  if (l.startsWith("animewitcher"))   return "AW";
+  if (l.startsWith("toonstream"))     return "TS";
+  if (l.startsWith("anikoto"))        return "AK";
+  if (l.startsWith("anineko"))        return "AN";
+  if (l.startsWith("kawaii"))         return "KW";
   if (l.startsWith("animephoenix") || l.startsWith("phoenix")) return "PH";
-  if (l.startsWith("animehub"))    return "AH";
-  if (l.startsWith("streamrip"))   return "SR";
-  if (l.startsWith("cinepro"))     return "CP";
+  if (l.startsWith("animehub"))       return "AH";
+  if (l.startsWith("streamrip"))      return "SR";
+  if (l.startsWith("cinepro"))        return "CP";
+  // ─── مصادر إنجليزية / دولية ───
+  if (l.startsWith("icefy"))          return "IF";
+  if (l.startsWith("nebula"))         return "NB";
+  if (l.startsWith("superembed"))     return "SE";
+  if (l.startsWith("cinesrc"))        return "CS";
+  if (l.startsWith("moviebox"))       return "MB";
+  if (l.startsWith("vidsrc"))         return "VS";
+  if (l.startsWith("vixsrc"))         return "VX";
+  if (l.startsWith("hexa"))           return "HX";
+  if (l.startsWith("mxplayer") || l.startsWith("mx player")) return "MX";
+  if (l.startsWith("aether"))         return "AE";
+  if (l.startsWith("egydeadnet") || l.startsWith("egydead")) return "EG";
+  if (l.startsWith("animetime"))      return "AT";
+  // ─── fallback: أول حرفان من label ───
   const word = label.replace(/[^a-zA-Z\u0621-\u064a]/g, "").slice(0, 2).toUpperCase();
   return word || "??";
 }

@@ -36,16 +36,17 @@ interface Src {
   headers?: Record<string, string>;
 }
 
-/* ── Site → 2-letter tag ── */
+/* ── Site → 2-letter tag (mirrors web SCRAPER_DEFS tags exactly) ── */
 const SITE_TAG: Record<string, string> = {
-  shahiid: "SH", animelek: "AL", animedar: "AD", okanime: "OK",
-  ristoanime: "RS", animeify: "MG", animeday: "DY", arabseed: "AS",
+  shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
+  ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AS",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC", animephoenix: "PH",
   animewitcher: "AW", kawaii: "KW",
   anikoto: "AK", anikototv: "ATV", animekai: "KI", hianime: "HI",
   anineko: "AN", mitanime: "MT",
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
-  animetime: "AT", animepahe: "AP", dulo_anim: "DU",
+  animetime: "AT", animepahe: "AP", dulo_anim: "DL",
+  faselhd_db: "FH",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -524,7 +525,8 @@ export default function WatchScreen() {
   const riftSources = useMemo((): PlayerSource[] => {
     const base = getBaseUrl();
     const srcs = directSrcs;
-    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher"]);
+    /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
+    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime"]);
     return srcs.map(s => {
       const url = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
