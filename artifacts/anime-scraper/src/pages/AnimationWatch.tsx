@@ -1570,6 +1570,8 @@ function getAnimTag(label: string): string {
   if (l.startsWith("fasel"))      return "FH";
   if (l.startsWith("dulo"))       return "DU";
   if (l.startsWith("cinepro"))    return "CP";
+  if (l.startsWith("streamrip"))  return "SR";
+  if (l.startsWith("moviebox"))   return "MO";
   if (l.startsWith("mycima"))     return "MY";
   if (l.startsWith("topcin"))     return "TC";
   const word = label.replace(/[^a-zA-Zأ-ي]/g, "").slice(0, 2).toUpperCase();
