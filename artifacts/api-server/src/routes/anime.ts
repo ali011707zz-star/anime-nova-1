@@ -7816,33 +7816,16 @@ async function getStarCimaAnimeSources(title: string, english: string | null, ep
       return { proxied, rawUrl, label: `StarCima · ${srv.name || "HD"}` };
     });
 
-    const probeResults = await Promise.allSettled(
-      prepared.map(async ({ proxied, rawUrl, label }) => {
-        try {
-          const pr = await fetch(`http://127.0.0.1:${PROBE_PORT}${proxied}`, { signal: AbortSignal.timeout(6_000) });
-          const serverAccessible = pr.ok || pr.status === 206;
-          return { proxied, rawUrl, label, serverAccessible };
-        } catch { return { proxied, rawUrl, label, serverAccessible: false }; }
-      }),
-    );
-
-    return probeResults
-      .filter((r): r is PromiseFulfilledResult<{ proxied: string; rawUrl: string; label: string; serverAccessible: boolean }> => r.status === "fulfilled")
-      .map(r => {
-        const { proxied, rawUrl, label, serverAccessible } = r.value;
-        // CDN متاح من السيرفر → hls-proxy (CORS + segment rewriting)
-        // CDN محجوب → raw URL للمتصفح مباشرة (IP المستخدم المنزلي)
-        const directUrl = serverAccessible ? proxied : rawUrl;
-        return {
-          name: label,
-          url: directUrl,
-          quality: "HD",
-          qualityRank: 9,
-          site: "starcima_anim",
-          directUrl,
-          directType: "hls" as const,
-        };
-      });
+    // كل المصادر تمر عبر hls-proxy → CF Worker يُضيف Referer ويمنع رابط CDN المباشر
+    return prepared.map(({ proxied, label }) => ({
+      name: label,
+      url: proxied,
+      quality: "HD",
+      qualityRank: 9,
+      site: "starcima_anim",
+      directUrl: proxied,
+      directType: "hls" as const,
+    }));
   } catch { return []; }
 }
 
@@ -7986,26 +7969,10 @@ async function getDuloAnimeSources(title: string, english: string | null, ep: nu
         if (!isHls) continue; // skip non-HLS (mp4 usually needs special auth headers)
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent(DULO_BASE + "/")}`;
         const label = `Dulo · ${prov}${src.title ? " · " + src.title : ""}`;
-        // Probe CDN accessibility from server — some CDNs block datacenter IPs
-        let finalUrl = proxied;
-        let finalDirectUrl = proxied;
-        try {
-          const probe = await fetch(`http://127.0.0.1:${DULO_PROBE_PORT}${proxied}`, {
-            signal: AbortSignal.timeout(5_000),
-          });
-          if (!probe.ok && probe.status !== 206) {
-            // CDN blocks server IP → send raw URL for direct mobile access
-            finalUrl = src.url;
-            finalDirectUrl = src.url;
-          }
-        } catch {
-          // Network error → assume blocked → raw URL for direct access
-          finalUrl = src.url;
-          finalDirectUrl = src.url;
-        }
+        // كل المصادر تمر عبر hls-proxy → CF Worker يُضيف Referer
         sources.push({
-          name: label, url: finalUrl, quality: "HD", qualityRank: 11,
-          site: "dulo_anim", directUrl: finalDirectUrl, directType: "hls",
+          name: label, url: proxied, quality: "HD", qualityRank: 11,
+          site: "dulo_anim", directUrl: proxied, directType: "hls",
         });
       }
     } catch { /* silent per provider */ }
@@ -8194,13 +8161,13 @@ async function getMovieBoxAnimeSources(
       const qualityLabel = res >= 1080 ? "FHD" : res >= 720 ? "HD" : "SD";
       sources.push({
         name: `MovieBox · ${res}p`,
-        url: String(dl.url),
+        url: `/api/anime/video-proxy?url=${encodeURIComponent(String(dl.url))}&ref=${encodeURIComponent(MBX_REF)}`,
         quality: qualityLabel,
         qualityRank,
         site: "moviebox",
-        directUrl: String(dl.url),
+        directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(String(dl.url))}&ref=${encodeURIComponent(MBX_REF)}`,
         directType: "mp4",
-        headers: { Referer: MBX_REF },
+        // CF Worker يُضيف Referer تلقائياً — لا حاجة لحقل headers
         // ملاحظة: لا subtitleUrl — صوت خام بدون ترجمة مدمجة
       });
     }
@@ -10758,9 +10725,22 @@ router.get("/anime/hls-proxy", async (req, res) => {
 
   try {
     /* 12s timeout — manifests are small text files; CDN should respond fast.
-       If it takes > 12s the CDN is down/overloaded — fail fast so client can try next source. */
-    const r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
-    if (!r.ok) { res.status(r.status).send(`upstream ${r.status}`); return; }
+       If it takes > 12s the CDN is down/overloaded — fail fast so client can try next source.
+       Fallback: إذا حجب CDN IP السيرفر (4xx) → أعِد المحاولة عبر CF Worker الذي يُضيف Referer/Origin. */
+    let r = await fetch(url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
+    if (!r.ok) {
+      const cfFallback = process.env.CF_WORKER_URL;
+      if (cfFallback) {
+        const cfTok = encryptCfToken(url, ref || url);
+        if (cfTok) {
+          try {
+            const cfR = await fetch(`${cfFallback}?t=${cfTok}`, { signal: AbortSignal.timeout(12000), redirect: "follow" });
+            if (cfR.ok) { r = cfR; }
+            else { res.status(r.status).send(`upstream ${r.status} (cf: ${cfR.status})`); return; }
+          } catch { res.status(r.status).send(`upstream ${r.status}`); return; }
+        } else { res.status(r.status).send(`upstream ${r.status}`); return; }
+      } else { res.status(r.status).send(`upstream ${r.status}`); return; }
+    }
     const ct = r.headers.get("content-type") || "";
     const masterBody = await r.text();
     /* استخدم req.protocol (آمن — trust proxy مفعّل) وhost مع تنظيف proxy-chain */
@@ -10768,7 +10748,7 @@ router.get("/anime/hls-proxy", async (req, res) => {
     const rawHost  = (req.headers["x-forwarded-host"] as string || req.get("host") || "localhost:8080").split(",")[0].trim();
     const selfBase = `${proto}://${rawHost}`;
 
-    /* ── mobile=1: اختر H.264 variant + segments عبر CF Worker (يحلّ 403 من CDNs) ── */
+    /* ── mobile=1: اختر H.264 variant + segments مباشرة للـ CDN (صفر bandwidth proxy) ── */
     if (mobileMode) {
       const h264Url = pickH264Variant(masterBody, baseForSegments);
       if (h264Url) {
@@ -10776,8 +10756,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
           const vr = await fetch(h264Url, { headers: HLS_PROXY_HDRS(ref || url, origin), signal: AbortSignal.timeout(12000), redirect: "follow" });
           if (vr.ok) {
             const variantBody = await vr.text();
-            /* directSegs=false: segments تمر عبر CF Worker (يُضيف Referer/Origin → يحلّ 403) */
-            const rewritten = rewriteM3u8(variantBody, h264Url, selfBase, ref || url, false);
+            /* directSegs=true: روابط الـ segments تذهب مباشرة للـ CDN — لا تمر عبر VPS */
+            const rewritten = rewriteM3u8(variantBody, h264Url, selfBase, ref || url, true);
             res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -10787,8 +10767,8 @@ router.get("/anime/hls-proxy", async (req, res) => {
           }
         } catch { /* تابع بالـ master إن فشل جلب الـ variant */ }
       }
-      /* الـ master ليس playlist متعدد variants أو فشل جلب الـ variant — أعِد master عبر CF Worker */
-      const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, false);
+      /* الـ master ليس playlist متعدد variants أو فشل جلب الـ variant — أعِد master مع direct segs */
+      const rewritten = rewriteM3u8(masterBody, baseForSegments, selfBase, ref || url, true);
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
