@@ -31,7 +31,7 @@ router.post("/api/report", async (req, res) => {
     return;
   }
 
-  // ── 1. حفظ في Supabase دائماً ────────────────────────────────────────────
+  // ── 1. حفظ في Supabase (اختياري — لا يوقف العملية إن فشل) ──────────────────
   try {
     await sbInsert("reports", {
       type:              type || "other",
@@ -40,9 +40,8 @@ router.post("/api/report", async (req, res) => {
       user_display_name: userDisplayName || null,
     });
   } catch (dbErr) {
-    console.error("[report] Supabase error:", dbErr);
-    res.status(500).json({ ok: false, error: "فشل حفظ التقرير في قاعدة البيانات" });
-    return;
+    console.warn("[report] Supabase unavailable — continuing without DB save:", (dbErr as Error)?.message);
+    // لا نوقف العملية — يكفي إرسال Telegram
   }
 
   // ── 2. إرسال Telegram اختياري ─────────────────────────────────────────────

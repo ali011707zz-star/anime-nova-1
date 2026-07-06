@@ -13,6 +13,9 @@ const APP_UA = "NovaAnime/1.0 (Expo; Mobile)";
 let _cachedToken: string | null = null;
 let _cachedExp: number = 0;
 
+// Singleton: يمنع 20+ طلب token متوازٍ عند فتح شاشة المشاهدة
+let _inflightFetch: Promise<string | null> | null = null;
+
 async function secureGet(key: string): Promise<string | null> {
   try {
     if (Platform.OS === "web") return AsyncStorage.getItem(key);
@@ -45,9 +48,9 @@ async function getStoredToken(): Promise<string | null> {
   return token;
 }
 
-async function fetchFreshToken(): Promise<string | null> {
+async function doFetchFreshToken(): Promise<string | null> {
   const MAX_RETRIES = 3;
-  const TIMEOUTS = [4000, 7000, 12000]; // مهلة أقصر — Orkestr يستجيب في < 1 ث عادةً
+  const TIMEOUTS = [4000, 7000, 12000];
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const controller = new AbortController();
@@ -70,7 +73,7 @@ async function fetchFreshToken(): Promise<string | null> {
       await secureSet(TOKEN_KEY, data.token);
       await secureSet(TOKEN_EXP_KEY, data.exp.toString());
       return data.token;
-    } catch (e: any) {
+    } catch {
       if (attempt < MAX_RETRIES - 1) {
         await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
       }
@@ -79,11 +82,26 @@ async function fetchFreshToken(): Promise<string | null> {
   return null;
 }
 
+/**
+ * Singleton wrapper — إذا كان هناك طلب token جارٍ بالفعل (من طلب متوازٍ آخر)
+ * ننتظره بدلاً من إطلاق طلب جديد. هذا يمنع 20+ طلب متوازٍ عند فتح شاشة المشاهدة.
+ */
+async function fetchFreshToken(): Promise<string | null> {
+  if (_inflightFetch) return _inflightFetch;
+  _inflightFetch = doFetchFreshToken().finally(() => { _inflightFetch = null; });
+  return _inflightFetch;
+}
+
 export async function getAuthToken(): Promise<string | null> {
   if (_cachedToken && Date.now() / 1000 < _cachedExp - 60) return _cachedToken;
   const stored = await getStoredToken();
   if (stored) { _cachedToken = stored; return stored; }
   return fetchFreshToken();
+}
+
+/** Pre-warm: يُستدعى قبل الطلبات المتوازية لضمان وجود توكن صالح */
+export async function warmAuthToken(): Promise<void> {
+  await getAuthToken();
 }
 
 export async function invalidateToken(): Promise<void> {
@@ -111,14 +129,33 @@ export async function secureFetch(
   options: RequestInit = {}
 ): Promise<Response> {
   const [token, mobileUserId] = await Promise.all([getAuthToken(), getMobileUserId()]);
-  const headers: Record<string, string> = {
-    ...(options.headers as Record<string, string> || {}),
-    "X-Nova-Client": CLIENT_ID,
-    "User-Agent": APP_UA,
+  const buildHeaders = (tok: string | null): Record<string, string> => {
+    const h: Record<string, string> = {
+      ...(options.headers as Record<string, string> || {}),
+      "X-Nova-Client": CLIENT_ID,
+      "User-Agent": APP_UA,
+    };
+    if (tok) h["X-App-Token"] = tok;
+    if (mobileUserId) h["X-Mobile-User-Id"] = mobileUserId;
+    return h;
   };
-  if (token) headers["X-App-Token"] = token;
-  if (mobileUserId) headers["X-Mobile-User-Id"] = mobileUserId;
-  return fetch(url, { ...options, headers });
+
+  const res = await fetch(url, { ...options, headers: buildHeaders(token) });
+
+  // إذا رفض السيرفر التوكن (منتهي الصلاحية أثناء الجلسة) → جدّد وأعد المحاولة مرة واحدة
+  if (res.status === 403) {
+    try {
+      const body = await res.clone().json();
+      if (body?.code === "INVALID_TOKEN") {
+        await invalidateToken();
+        const fresh = await fetchFreshToken();
+        // أعد المحاولة فقط إذا حصلنا على توكن جديد فعلاً (تجنّب طلب ثانٍ بدون توكن)
+        if (fresh) return fetch(url, { ...options, headers: buildHeaders(fresh) });
+      }
+    } catch { /* ليس JSON أو خطأ آخر — أعد الرد الأصلي */ }
+  }
+
+  return res;
 }
 
 export async function secureStreamFetch(
