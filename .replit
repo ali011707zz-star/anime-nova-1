@@ -1,9 +1,9 @@
-modules = ["nodejs-20", "python-3.11", "web", "bash"]
+modules = ["nodejs-20", "python-3.11", "web", "bash", "postgresql-16"]
 
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+run = ["bash", "scripts/replit-dev-start.sh"]
 build = ["sh", "-c", "pnpm install --prefer-offline && pnpm --filter @workspace/api-server run build && VITE_API_URL= pnpm --filter @workspace/anime-scraper run build"]
 
 [deployment.postBuild]
