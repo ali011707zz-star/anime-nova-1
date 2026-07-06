@@ -8,7 +8,7 @@ import {
   ChevronRight, ChevronLeft, Play, Loader2,
   AlertTriangle, RefreshCw, X, Maximize2, Minimize2,
   Settings, Subtitles, MonitorPlay, Tv2, Download,
-  Star, Calendar, Sparkles,
+  Star,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer from "@/components/player/RiftPlayer";
@@ -1032,17 +1032,7 @@ function ScraperPicker({
 
   /* ── Shared: extract anime metadata — memoised ── */
   const animeScore   = anime?.averageScore ? (anime.averageScore / 10) : 0;
-  const animeGenres: string[] = anime?.genres?.slice(0, 6) || [];
-  const animeDesc = useMemo(() => {
-    const raw = anime?.description || "";
-    return raw.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/gm, "")
-      .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
-      .replace(/&quot;/g,'"').replace(/&#039;/g,"'").replace(/&nbsp;/g," ")
-      .replace(/\s+/g," ").trim().substring(0, 400);
-  }, [anime?.description]);
   const animeStatus  = anime?.status ? (STATUS_MAP[anime.status]?.label || "") : "";
-  const animeStudio  = anime?.studios?.nodes?.[0]?.name || "";
-  const animeSeason  = anime?.seasonYear ? `${SEASON_MAP[anime.season] || ""} ${anime.seasonYear}`.trim() : "";
   const animeBanner  = anime?.bannerImage || anime?.coverImage?.extraLarge || cover;
 
   /* ── Shared: hero section (compact header — no large banner) ── */
@@ -1126,46 +1116,6 @@ function ScraperPicker({
         </div>
       )}
 
-      {/* Genre tags */}
-      {animeGenres.length > 0 && (
-        <div className="mt-3 px-4 flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-          {animeGenres.map((g: string) => (
-            <span key={g}
-              className="shrink-0 text-[10px] font-bold bg-[#18181B] text-white/55 px-3 py-1.5 rounded-xl border border-white/6 font-['Cairo'] whitespace-nowrap">
-              {GENRE_MAP[g] || g}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Studio + season */}
-      {(animeStudio || animeSeason) && (
-        <div className="px-4 mt-3 flex gap-3 flex-wrap">
-          {animeStudio && (
-            <div className="flex items-center gap-1.5 text-white/35 text-[10px] font-['Cairo']">
-              <Sparkles className="w-3 h-3" />{animeStudio}
-            </div>
-          )}
-          {animeSeason && (
-            <div className="flex items-center gap-1.5 text-white/35 text-[10px] font-['Cairo']">
-              <Calendar className="w-3 h-3" />{animeSeason}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Synopsis */}
-      {animeDesc && (
-        <div className="mt-4 px-4">
-          <div className="flex items-center mb-2">
-            <div className="w-1 h-4 bg-primary rounded-full ml-2" />
-            <h2 className="text-[13px] font-black font-['Cairo']">القصة</h2>
-          </div>
-          <div className="bg-[#111116] border border-white/6 rounded-2xl p-3.5">
-            <p className="text-[#B4B4B8] leading-relaxed text-[12px] font-['Cairo'] line-clamp-4">{animeDesc}</p>
-          </div>
-        </div>
-      )}
     </>
   );
 
@@ -3140,13 +3090,14 @@ export default function WatchPage() {
     }
   }
 
-  /* ── ألغِ كل طلبات fetch-source الجارية + المؤقتات المعلَّقة لبقية المواقع.
-     يُستدعى فور اختيار مصدر وبدء التشغيل — لا داعي أن تكمل ~20 موقع آخر طلباتهم بالخلفية. ── */
+  /* ── أوقف الطلبات المُجدولة (لم تبدأ بعد) فقط — لا تُلغِ الطلبات الجارية فعلياً.
+     هذا يسمح لبقية المصادر بالإكمال وإضافة نفسها للـ picker (يحل مشكلة ظهور مصدر واحد فقط).
+     الطلبات المُجدولة (second wave) تُلغى لتوفير bandwidth السيرفر بعد بدء التشغيل. ── */
   function cancelRemainingScrapers() {
+    // أوقف الطلبات المُجدولة فقط (second wave لم تبدأ بعد)
     pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
     pendingTimeoutsRef.current = [];
-    Object.values(fetchControllersRef.current).forEach(ctrl => ctrl.abort());
-    fetchControllersRef.current = {};
+    // لا تُلغِ fetchControllersRef — اتركها تكمل وتُضيف مصادرها للـ picker
   }
 
   /* ── Quick-resume + كاش المصادر: تحميل فوري من localStorage عند فتح الصفحة ── */

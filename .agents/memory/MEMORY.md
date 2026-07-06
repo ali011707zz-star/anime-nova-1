@@ -17,3 +17,5 @@
 - [VPS CDN proxy setup](vps-cdn-proxy.md) — cf_proxy /stream endpoint يضيف Referer للـ browser؛ nginx يكشفه على /cdn-proxy بـ HTTPS؛ CF_WORKER_URL+CF_PROXY_KEY في .env
 - [Cloudflare Worker CDN Proxy](cf-worker-deployment.md) — nova-cdn-proxy.ali011707zz.workers.dev يحل bandwidth VPS؛ VPS .env يحتاج تحديث + pm2 delete+start
 - [PM2 stale env vars](pm2-stale-env-vars.md) — editing ecosystem.config.cjs/.env on VPS does nothing until pm2 delete+start; caused universal web black-screen bug (broken CF_WORKER_URL never reloaded).
+- [Source picker 1-source fix](source-picker-fix.md) — cancelRemainingScrapers must NOT abort fetchControllersRef (in-flight); only clear pendingTimeoutsRef (queued). Aborting in-flight prevents sources from accumulating in picker.
+- [PG JSON serialization](pg-json-serialization.md) — pg (node-postgres) treats JS arrays as PostgreSQL ARRAY syntax, not jsonb. Must JSON.stringify() objects/arrays before parameterized inserts into jsonb columns. Also: timestamps stored as "timestamptz" need ISO string (not ms epoch); read back with new Date(val).getTime().
