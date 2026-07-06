@@ -2916,18 +2916,12 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               if (!data.stream_url) return;
               const streamUrl = data.stream_url;
               if (seenUrls.has(streamUrl)) return;
+              seenUrls.add(streamUrl); // dedup بـ URL الأصلي قبل الـ wrap
               const ezRef = `https://www.${prov}.pro/`;
-              // Wrap HLS streams through hls-proxy for segment rewriting; MP4 through video-proxy
+              // Wrap HLS streams through hls-proxy → CF Worker | MP4 through video-proxy → CF Worker
               const proxiedStream = streamUrl.includes(".m3u8") ? wrapHls(streamUrl, ezRef) : wrapMp4(streamUrl, ezRef);
-              // Skip probe — EzVidAPI URLs are valid, probe adds latency and may falsely fail
-              seenUrls.add(streamUrl);
-              sourceCount++;
-              send("source", {
-                url: proxiedStream,
-                label: `EzVidAPI · ${prov}`,
-                directUrl: streamUrl,
-                proxyUrl: proxiedStream,
-              });
+              // sendSource يتولى sourceCount++ والتشفير — لا تُرسل raw CDN URL كـ directUrl
+              sendSource(proxiedStream, `EzVidAPI · ${prov}`, proxiedStream, proxiedStream);
             } catch { /* silent per provider */ }
           }));
         } catch { /* silent */ }

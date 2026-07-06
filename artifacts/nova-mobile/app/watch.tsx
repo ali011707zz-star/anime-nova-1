@@ -119,18 +119,9 @@ function extractProxyHeaders(url: string): Record<string, string> | undefined {
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
-  let resolved = url.startsWith("/") ? base + url : url;
-  /* على الأجهزة: أضف mobile=1 لـ:
-     - hls-proxy  → السيرفر يختار H.264 + segments تذهب مباشرة للـ CDN (صفر bandwidth proxy)
-     - video-proxy → السيرفر يُرسل 307 redirect للـ CDN بدلاً من تمرير الملف كاملاً */
-  if (
-    Platform.OS !== "web" &&
-    (resolved.includes("hls-proxy") || resolved.includes("video-proxy")) &&
-    !resolved.includes("mobile=1")
-  ) {
-    resolved += (resolved.includes("?") ? "&" : "?") + "mobile=1";
-  }
-  return resolved;
+  /* hls-proxy يُعيد 307 → CF Worker مباشرة (يجلب M3U8 + يُعيد كتابة الـ segments عبره)
+     video-proxy يُعيد 307 → CF Worker أيضاً — لا حاجة لـ mobile=1 بعد الآن */
+  return url.startsWith("/") ? base + url : url;
 }
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */

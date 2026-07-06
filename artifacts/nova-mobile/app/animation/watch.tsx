@@ -59,16 +59,9 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
-  let resolved = url.startsWith("/") ? base + url : url;
-  /* موبايل: hls-proxy → H.264 + direct CDN segments | video-proxy → 307 redirect للـ CDN */
-  if (
-    Platform.OS !== "web" &&
-    (resolved.includes("hls-proxy") || resolved.includes("video-proxy")) &&
-    !resolved.includes("mobile=1")
-  ) {
-    resolved += (resolved.includes("?") ? "&" : "?") + "mobile=1";
-  }
-  return resolved;
+  /* hls-proxy يُعيد 307 → CF Worker (يجلب M3U8 + يُعيد كتابة segments عبره)
+     video-proxy يُعيد 307 → CF Worker — لا حاجة لـ mobile=1 بعد الآن */
+  return url.startsWith("/") ? base + url : url;
 }
 
 function getSrcQuality(src: AnimSrc): Quality {
