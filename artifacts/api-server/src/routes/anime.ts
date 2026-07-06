@@ -4603,58 +4603,117 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 
 
 // ════════════════════════════════════════════════════════════════════
-//  WITANIME.LIFE scraper  (CF-protected Arabic WordPress anime site)
-//  Uses Playwright-cached CF cookies → regular fetch for all pages
-//  Search: WP AJAX action=data_fetch OR /?s=
-//  Series page: /anime/{slug}/ → episode links
-//  Episode page: server buttons with AJAX or data-* attrs → embed → extract
+//  WITANIME.YOU scraper  (WP REST API — بدون CF challenge)
+//  اكتُشف عبر الهندسة العكسية للتطبيق الرسمي 2026-07
+//  Search:  GET /wp-json/wp/v2/anime?search={title}  → taxonomy ID
+//  Episodes: GET /wp-json/wp/v2/episode?anime={id}   → episode link
+//  Episode page: _zX + _zK → gh100.js decryption → embed URLs
+//  Servers: yonaplay · videa · playerwish
 // ════════════════════════════════════════════════════════════════════
-const WITANIME_BASE  = "https://witanime.life";
-const WITANIME_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: WITANIME_BASE + "/" };
+const WITANIME_YOU_BASE = "https://witanime.you";
+// API key من gh100.js: FRAMEWORK_HASH = _m1+_m2+_m3+_m4
+const YONAPLAY_API_KEY  = "23a97133-caf3-4eb4-9466-93d0a4ff8198";
 
-const witaSeriesCache = new Map<string, { url: string | null; ts: number }>();
+const witaSeriesCache = new Map<string, { id: number | null; ts: number }>();
 const witaSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchWitanime(query: string): Promise<string | null> {
-  // Try WP AJAX search first (faster)
+/** البحث في anime taxonomy → taxonomy ID */
+async function searchWitanimeYou(title: string): Promise<number | null> {
   try {
-    const hdrs: Record<string, string> = {
-      ...WITANIME_HDRS,
-      "Content-Type": "application/x-www-form-urlencoded",
-      "X-Requested-With": "XMLHttpRequest",
-    };
-    const r = await fetch(`${WITANIME_BASE}/wp-admin/admin-ajax.php`, {
-      method: "POST",
-      headers: hdrs,
-      body: new URLSearchParams({ action: "data_fetch", keyword: query }).toString(),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (r.ok) {
-      const html = await r.text();
-      if (!isCloudflareBlock(html) && html.includes("/anime/")) {
-        const best = findBestLink(html, query, /href="(https?:\/\/witanime\.life\/anime\/([^/"]+)\/?)"[^>]*>[\s\S]{0,300}?<h\d[^>]*>([^<]{1,80})<\/h\d>/gi, 1, 3);
-        if (best) return best;
-        // Simple href parse
-        const m = html.match(/href="(https?:\/\/witanime\.life\/anime\/[^/"]+\/?)"/)
-        if (m) return m[1];
-      }
+    const r = await fetch(
+      `${WITANIME_YOU_BASE}/wp-json/wp/v2/anime?search=${encodeURIComponent(title)}&per_page=10`,
+      { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) },
+    );
+    if (!r.ok) return null;
+    const data = await r.json() as Array<{ id: number; name: string; slug: string; count: number }>;
+    if (!data.length) return null;
+    let best: { id: number; score: number } | null = null;
+    for (const a of data) {
+      const score = Math.max(
+        similarity(a.name, title),
+        asciiSimilarity(a.slug.replace(/-/g, " "), title),
+      );
+      if (!best || score > best.score) best = { id: a.id, score };
     }
-  } catch {}
+    return best && best.score > 0.1 ? best.id : (data[0]?.id ?? null);
+  } catch { return null; }
+}
 
-  // Fallback: GET search page — try CycleTLS (JA3 spoof) first, then cfProxy, then ScraperAPI
-  const html = await cycleTLSGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`, WITANIME_BASE + "/")
-    ?? await cfProxyGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`, WITANIME_BASE + "/")
-    ?? await scraperApiGet(`${WITANIME_BASE}/?s=${encodeURIComponent(query)}`);
-  if (!html) return null;
-  const re = /href="(https?:\/\/witanime\.life\/anime\/([^/"]+)\/?)"/gi;
-  const candidates: Array<{ url: string; score: number }> = [];
-  for (const m of html.matchAll(re)) {
-    const slug = decodeURIComponent(m[2]).replace(/-/g, " ");
-    const score = Math.max(similarity(slug, query), asciiSimilarity(m[2], query));
-    candidates.push({ url: m[1], score });
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0]?.score > 0.1 ? candidates[0].url : null;
+/** جلب رابط الحلقة عبر REST API (anime taxonomy ID + ep number) */
+async function getWitanimeYouEpisodeUrl(animeId: number, ep: number): Promise<string | null> {
+  try {
+    for (let page = 1; page <= 6; page++) {
+      const r = await fetch(
+        `${WITANIME_YOU_BASE}/wp-json/wp/v2/episode?anime=${animeId}&per_page=100&page=${page}&order=asc&orderby=date`,
+        { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) },
+      );
+      if (!r.ok) break;
+      const episodes = await r.json() as Array<{
+        id: number; slug: string; link: string; title: { rendered: string };
+      }>;
+      if (!episodes.length) break;
+
+      for (const epData of episodes) {
+        const slug  = decodeURIComponent(epData.slug);
+        const label = epData.title?.rendered ?? "";
+        // نستخرج رقم الحلقة من الـ slug أو العنوان
+        const m = slug.match(/(?:الحلقة|episode)[- ]?(\d+)/i)
+               ?? slug.match(/[- ](\d+)$/)
+               ?? label.match(/(?:الحلقة|episode)[- ]?(\d+)/i);
+        if (m && parseInt(m[1], 10) === ep) return epData.link;
+      }
+      if (episodes.length < 100) break;
+    }
+    return null;
+  } catch { return null; }
+}
+
+/** فك تشفير URL واحد من resourceRegistry + configRegistry — خوارزمية gh100.js */
+function decodeWitaYouServer(
+  raw: string,
+  cfg: { d: number[]; k: string; v: string; x: number[] },
+): string {
+  let s = raw.split("").reverse().join("");
+  s = s.replace(/[^A-Za-z0-9+/=]/g, "");
+  const decoded  = Buffer.from(s, "base64").toString("utf8");
+  const idxKey   = parseInt(Buffer.from(cfg.k, "base64").toString("utf8"), 10);
+  const offset   = cfg.d[idxKey] ?? 0;
+  return offset > 0 ? decoded.slice(0, -offset) : decoded;
+}
+
+/** جلب صفحة الحلقة → فك تشفير _zX/_zK → embed URLs */
+async function fetchWitaYouServers(epUrl: string): Promise<string[]> {
+  let html: string | null = null;
+  try {
+    const r = await fetch(epUrl, {
+      headers: { ...BASE_HDRS, Referer: WITANIME_YOU_BASE + "/" },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (r.ok) html = await r.text();
+  } catch {}
+  if (!html) return [];
+
+  const zXm = html.match(/var\s+_zX\s*=\s*"([^"]+)"/);
+  const zKm = html.match(/var\s+_zK\s*=\s*"([^"]+)"/);
+  if (!zXm || !zKm) return [];
+
+  try {
+    const resources = JSON.parse(Buffer.from(zXm[1], "base64").toString()) as string[];
+    const configs   = JSON.parse(Buffer.from(zKm[1], "base64").toString()) as Array<{
+      d: number[]; k: string; v: string; x: number[];
+    }>;
+    const urls: string[] = [];
+    for (let i = 0; i < Math.min(resources.length, configs.length); i++) {
+      try {
+        let url = decodeWitaYouServer(resources[i], configs[i]);
+        // yonaplay يحتاج API key
+        if (url.includes("yonaplay.net") && !url.includes("apiKey"))
+          url += "&apiKey=" + YONAPLAY_API_KEY;
+        if (url.startsWith("http")) urls.push(url);
+      } catch {}
+    }
+    return urls;
+  } catch { return []; }
 }
 
 /** Generic helper: find best-matching href from html */
@@ -4671,112 +4730,43 @@ function findBestLink(
   return best && best.score > 0.1 ? best.url : null;
 }
 
-/** Extract episode URL from a witanime series page */
-async function findWitaEpisodeUrl(seriesUrl: string, ep: number): Promise<string | null> {
-  const html = await cycleTLSGet(seriesUrl, WITANIME_BASE + "/")
-    ?? await cfProxyGet(seriesUrl, WITANIME_BASE + "/")
-    ?? await scraperApiGet(seriesUrl);
-  if (!html) return null;
-  // Episode links: /ep/{slug}-N/ or /episode/{slug}-episode-N/ or /watch/{slug}/N/
-  const patterns = [
-    /href="(https?:\/\/witanime\.life\/ep\/([^/"]+)\/?)"[^>]*>([\s\S]{0,100}?الحلقة[\s\S]{0,20}?(\d+)[\s\S]{0,10}?)<\/a>/gi,
-    /href="(https?:\/\/witanime\.life\/(?:ep|episode|watch)\/[^"]+\/?)"[^>]*>/gi,
-  ];
-  // First try structured match with episode number
-  for (const m of html.matchAll(patterns[0])) {
-    if (parseInt(m[4] || "0") === ep) return m[1];
-  }
-  // Fallback: any ep link that contains the episode number in the slug
-  for (const m of html.matchAll(patterns[1])) {
-    const slug = decodeURIComponent(m[1]);
-    if (slug.match(new RegExp(`[/-]0*${ep}[/-]?$`)) || slug.endsWith(`-${ep}/`) || slug.endsWith(`/${ep}`)) {
-      return m[1];
-    }
-  }
-  return null;
-}
-
-/** Fetch server embed URLs from a witanime episode page (various WP theme patterns) */
-async function fetchWitaServerUrls(epUrl: string): Promise<string[]> {
-  const html = await cycleTLSGet(epUrl, WITANIME_BASE + "/")
-    ?? await cfProxyGet(epUrl, WITANIME_BASE + "/")
-    ?? await scraperApiGet(epUrl);
-  if (!html) return [];
-  const urls: string[] = [];
-  const seen = new Set<string>();
-
-  const addUrl = (u: string) => {
-    if (!u || !u.startsWith("http") || seen.has(u)) return;
-    seen.add(u); urls.push(u);
-  };
-
-  // Pattern A: data-src="URL" on server buttons
-  for (const m of html.matchAll(/data-src="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
-  // Pattern B: data-url="URL" or data-embed="URL"
-  for (const m of html.matchAll(/data-(?:url|embed)="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
-  // Pattern C: iframe src directly
-  for (const m of html.matchAll(/<iframe[^>]+src="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
-  // Pattern D: onclick="...window.location='URL'..." or similar
-  for (const m of html.matchAll(/onclick="[^"]*(?:location\.href|src)\s*=\s*'(https?:\/\/[^']+)'/gi)) addUrl(m[1]);
-  // Pattern E: WP AJAX server buttons (post_id + nonce) — decode and POST
-  if (!urls.length) {
-    const nonce = html.match(/["']nonce["']\s*:\s*["']([a-f0-9]{10,})["']/)?.[1]
-      || html.match(/nonce['"]\s*:\s*['"]([a-f0-9]+)['"]/)?.[1] || "";
-    const postId = html.match(/["']post["']\s*:\s*["']?(\d+)["']?/)?.[1]
-      || html.match(/post_id\s*=\s*(\d+)/)?.[1] || "";
-    if (nonce && postId) {
-      try {
-        const r = await fetch(`${WITANIME_BASE}/wp-admin/admin-ajax.php`, {
-          method: "POST",
-          headers: { ...WITANIME_HDRS, "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ action: "anime_get_servers", post_id: postId, nonce }).toString(),
-          signal: AbortSignal.timeout(10000),
-        });
-        if (r.ok) {
-          const data = await r.text();
-          for (const m of data.matchAll(/(https?:\/\/[^"'<>\s]+)/g)) addUrl(m[1]);
-        }
-      } catch {}
-    }
-  }
-  return urls;
-}
-
 async function getWitanimeSources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
-  const ck = `wita:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const ck = `wita_you:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = witaSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    // Try both title and english title for search
-    let seriesUrl: string | null = null;
+    // 1. ابحث عن anime taxonomy ID
     const sCacheKey = (title + "|" + (english || "")).toLowerCase();
+    let animeId: number | null = null;
     const sHit = witaSeriesCache.get(sCacheKey);
     if (sHit && Date.now() - sHit.ts < SRC_TTL) {
-      seriesUrl = sHit.url;
+      animeId = sHit.id;
     } else {
       for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
-        seriesUrl = await searchWitanime(q);
-        if (seriesUrl) break;
+        animeId = await searchWitanimeYou(q);
+        if (animeId) break;
       }
-      witaSeriesCache.set(sCacheKey, { url: seriesUrl, ts: Date.now() });
+      witaSeriesCache.set(sCacheKey, { id: animeId, ts: Date.now() });
     }
-    if (!seriesUrl) return [];
+    if (!animeId) return [];
 
-    const epUrl = await findWitaEpisodeUrl(seriesUrl, ep);
+    // 2. رابط الحلقة عبر REST API
+    const epUrl = await getWitanimeYouEpisodeUrl(animeId, ep);
     if (!epUrl) return [];
 
-    const serverUrls = await fetchWitaServerUrls(epUrl);
+    // 3. فك تشفير server URLs من صفحة الحلقة
+    const serverUrls = await fetchWitaYouServers(epUrl);
     if (!serverUrls.length) return [];
 
     const sources: UnifiedSource[] = serverUrls.map((url, i) => ({
-      name: `ويتأنمي · سيرفر ${i + 1}`,
+      name:        `ويتأنمي · سيرفر ${i + 1}`,
       url,
-      quality: "HD",
+      quality:     "HD",
       qualityRank: 9,
-      site: "witanime",
+      site:        "witanime",
     }));
 
     witaSrcCache.set(ck, { sources, ts: Date.now() });
@@ -8998,7 +8988,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // witanime_db: removed
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       case "animetime":    (await race(getAnimeTimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
-      case "witanime":     (await race(getWitanimeSources(title, english, ep),  22_000, [])).forEach(collectSrc); break;
+      case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep), 22_000, [])); break;
       case "reanime":      (await race(getReanímeSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       default: break;
     }
