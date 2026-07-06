@@ -144,7 +144,8 @@ async function sbUpsertCache(cacheKey: string, site: string, sources: any[], exp
 async function sbDeleteExpired(): Promise<void> {
   if (!isCacheDbReady()) return;
   try {
-    await cacheDelete("source_cache", { expires_at: `lt.${Date.now()}` });
+    // expires_at is TIMESTAMPTZ — must compare with ISO string, not ms epoch
+    await cacheDelete("source_cache", { expires_at: `lt.${new Date().toISOString()}` });
   } catch { /* silent */ }
 }
 
