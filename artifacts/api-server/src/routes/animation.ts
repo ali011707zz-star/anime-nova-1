@@ -3413,7 +3413,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (vpr.ok) vpHtml = await vpr.text();
               } catch { /* silent */ }
               if (!vpHtml || isCfBlocked(vpHtml)) {
-                vpHtml = await cfProxyGet(playerUrl);
+                try { vpHtml = await cfProxyGet(playerUrl); } catch { /* silent */ }
+              }
+              // إذا فشل cfProxy (32 bytes / CF challenge / خطأ) → جرب Orkestr relay مباشرةً
+              if (!vpHtml || vpHtml.length < 100 || isCfBlocked(vpHtml)) {
+                try { vpHtml = await orkestDirectGet(playerUrl, 10_000); } catch { /* silent */ }
               }
               if (vpHtml) {
                 // البحث عن روابط HLS/MP4 مباشرة في HTML
