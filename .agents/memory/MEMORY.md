@@ -26,6 +26,7 @@
 - [Animation mobile playback](animation-mobile-playback.md) — شاشة سوداء صامتة: garbage Referer في sendSource + Dulo raw fallback بلا Referer + no onError handler + CF Worker لا يكتشف M3U8 بـ #EXTM3U content sniff.
 - [Orkestr removal](orkestr-removal.md) — Orkestr أُزيل كلياً من animation.ts+anime.ts; كل calls صارت cfProxy (localhost:8000); CINESRC_BASE=http://localhost:13004 أُضيف لـ ecosystem.
 
+- [Lazy source loading](lazy-source-loading.md) — Web+Mobile: user picks scraper first → only that one fetches → auto-plays → rest loads in background; witanime_db re-enabled.
 - [EgyBest scraper](egybest-scraper.md) — egytbest.live WP-JSON+data-embed-url; hgcloud/stmruby via parseStreamwish; no CF proxy needed.
 - [WeCima domain 2026-07](wecima-domain-2026-07.md) — mycima.gripe→wecima.gold; data-watch+mycimafsd unchanged; fastvip.space/cdn-centaurus.com.
 - [EgyDead domain rotation](egydead-domain.md) — tv9→tv10.egydead.live; VPS+Replit CF-blocked; scraper silently fails.
