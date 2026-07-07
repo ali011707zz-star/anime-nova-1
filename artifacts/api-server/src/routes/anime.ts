@@ -424,7 +424,7 @@ async function orkestGet(
 
 // ════════════════════════════════════════════════════════════════════
 //  scraperApiGet — جلب HTML عبر ScraperAPI (residential proxy pool)
-//  يُستخدم كـ fallback أخير للمواقع المحجوبة من Replit وOrkestr
+//  يُستخدم كـ fallback للمواقع المحجوبة من Replit وOrkestr
 //  يتطلب: SCRAPERAPI_KEY في env vars
 // ════════════════════════════════════════════════════════════════════
 const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY || "";
@@ -451,6 +451,69 @@ async function scraperApiGet(
     console.warn(`[scraperapi] error: ${e.message}`);
     return null;
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  scrapingAntGet — جلب HTML عبر ScrapingAnt (10,000 كريدت/شهر مجاناً)
+//  أقوى من ScraperAPI في تجاوز Cloudflare — Chrome headless حقيقي
+//  التسجيل المجاني: https://app.scrapingant.com/signup (بدون بطاقة بنك)
+//  يتطلب: SCRAPINGANT_KEY في env vars
+// ════════════════════════════════════════════════════════════════════
+const SCRAPINGANT_KEY = process.env.SCRAPINGANT_KEY || "";
+
+async function scrapingAntGet(
+  url: string,
+  opts: { browser?: boolean; timeoutMs?: number } = {},
+): Promise<string | null> {
+  if (!SCRAPINGANT_KEY) return null;
+  const { browser = false, timeoutMs = 35000 } = opts;
+  try {
+    // browser=true → 10 كريدت (يحل JS Challenge) | browser=false → 1 كريدت (HTML فقط)
+    const apiUrl = new URL("https://api.scrapingant.com/v2/general");
+    apiUrl.searchParams.set("url", url);
+    apiUrl.searchParams.set("x-api-key", SCRAPINGANT_KEY);
+    if (browser) apiUrl.searchParams.set("browser", "true");
+    const r = await fetch(apiUrl.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) {
+      console.warn(`[scrapingant] ${r.status} for ${url}`);
+      return null;
+    }
+    const text = await r.text();
+    if (isCloudflareBlock(text)) return null;
+    return text.length > 50 ? text : null;
+  } catch (e: any) {
+    console.warn(`[scrapingant] error: ${e.message}`);
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  smartFetch — جلب ذكي يجرب كل الوسائل بالترتيب (تلقائياً)
+//  1. cfProxy (curl_cffi + primp محلي)
+//  2. ScraperAPI (residential IPs)
+//  3. ScrapingAnt (Chrome headless — آخر خيار لتوفير الكريدت)
+// ════════════════════════════════════════════════════════════════════
+async function smartFetch(
+  url: string,
+  opts: { referer?: string; timeoutMs?: number; forceAnt?: boolean } = {},
+): Promise<string | null> {
+  const { referer, timeoutMs = 20000, forceAnt = false } = opts;
+
+  // 1) cfProxy (curl_cffi + primp) — المحلي الأسرع
+  const fromProxy = await cfProxyGet(url, referer, timeoutMs).catch(() => null);
+  if (fromProxy && !isCloudflareBlock(fromProxy)) return fromProxy;
+
+  // 2) ScraperAPI — residential IPs
+  const fromScraper = await scraperApiGet(url, timeoutMs + 10000);
+  if (fromScraper) return fromScraper;
+
+  // 3) ScrapingAnt — الأقوى لكن يستهلك كريدت أكثر
+  if (SCRAPINGANT_KEY) {
+    const fromAnt = await scrapingAntGet(url, { browser: forceAnt, timeoutMs: timeoutMs + 15000 });
+    if (fromAnt) return fromAnt;
+  }
+
+  return null;
 }
 
 // ════════════════════════════════════════════════════════════════════
