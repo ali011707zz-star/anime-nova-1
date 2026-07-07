@@ -16,7 +16,12 @@ pnpm install --prefer-offline --ignore-scripts 2>/dev/null || pnpm install --ign
 pnpm --filter @workspace/api-server run build
 VITE_API_URL= NODE_ENV=production pnpm --filter @workspace/anime-scraper run build
 
-pm2 restart anime-nova-api
+# ⚠️  يجب استخدام delete+start وليس restart
+# pm2 restart لا يُعيد تحميل env vars من ecosystem.config.cjs
+# بينما delete+start يُعيد قراءة الملف بالكامل مع كل متغيرات البيئة
+pm2 delete anime-nova-api 2>/dev/null || true
+pm2 start "$APP_DIR/ecosystem.config.cjs" --only anime-nova-api
+pm2 save
 
 echo "✅ التحديث اكتمل!"
 pm2 status
