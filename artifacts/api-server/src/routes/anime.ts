@@ -423,39 +423,8 @@ async function orkestGet(
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  scraperApiGet — جلب HTML عبر ScraperAPI (residential proxy pool)
-//  يُستخدم كـ fallback للمواقع المحجوبة من Replit وOrkestr
-//  يتطلب: SCRAPERAPI_KEY في env vars
-// ════════════════════════════════════════════════════════════════════
-const SCRAPERAPI_KEY = process.env.SCRAPERAPI_KEY || "";
-
-async function scraperApiGet(
-  url: string,
-  timeoutMs = 30000,
-): Promise<string | null> {
-  if (!SCRAPERAPI_KEY) return null;
-  try {
-    const apiUrl = new URL("https://api.scraperapi.com/");
-    apiUrl.searchParams.set("api_key", SCRAPERAPI_KEY);
-    apiUrl.searchParams.set("url", url);
-    apiUrl.searchParams.set("render", "false");
-    const r = await fetch(apiUrl.toString(), { signal: AbortSignal.timeout(timeoutMs) });
-    if (!r.ok) {
-      console.warn(`[scraperapi] ${r.status} for ${url}`);
-      return null;
-    }
-    const text = await r.text();
-    if (isCloudflareBlock(text)) return null;
-    return text.length > 50 ? text : null;
-  } catch (e: any) {
-    console.warn(`[scraperapi] error: ${e.message}`);
-    return null;
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════
 //  scrapingAntGet — جلب HTML عبر ScrapingAnt (10,000 كريدت/شهر مجاناً)
-//  أقوى من ScraperAPI في تجاوز Cloudflare — Chrome headless حقيقي
+//  Chrome headless حقيقي — يتجاوز Cloudflare
 //  التسجيل المجاني: https://app.scrapingant.com/signup (بدون بطاقة بنك)
 //  يتطلب: SCRAPINGANT_KEY في env vars
 // ════════════════════════════════════════════════════════════════════
@@ -490,8 +459,7 @@ async function scrapingAntGet(
 // ════════════════════════════════════════════════════════════════════
 //  smartFetch — جلب ذكي يجرب كل الوسائل بالترتيب (تلقائياً)
 //  1. cfProxy (curl_cffi + primp محلي)
-//  2. ScraperAPI (residential IPs)
-//  3. ScrapingAnt (Chrome headless — آخر خيار لتوفير الكريدت)
+//  2. ScrapingAnt (Chrome headless — آخر خيار لتوفير الكريدت)
 // ════════════════════════════════════════════════════════════════════
 async function smartFetch(
   url: string,
@@ -503,11 +471,7 @@ async function smartFetch(
   const fromProxy = await cfProxyGet(url, referer, timeoutMs).catch(() => null);
   if (fromProxy && !isCloudflareBlock(fromProxy)) return fromProxy;
 
-  // 2) ScraperAPI — residential IPs
-  const fromScraper = await scraperApiGet(url, timeoutMs + 10000);
-  if (fromScraper) return fromScraper;
-
-  // 3) ScrapingAnt — الأقوى لكن يستهلك كريدت أكثر
+  // 2) ScrapingAnt — الأقوى لكن يستهلك كريدت أكثر
   if (SCRAPINGANT_KEY) {
     const fromAnt = await scrapingAntGet(url, { browser: forceAnt, timeoutMs: timeoutMs + 15000 });
     if (fromAnt) return fromAnt;
@@ -3439,8 +3403,7 @@ async function getRistoAnimeSources(
     } catch { /* fall through */ }
     if (!seriesHtml || isCloudflareBlock(seriesHtml)) {
       seriesHtml = (await orkestGet(seriesUrl, `${RISTO_BASE}/`, 12000))
-        ?? await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000)
-        ?? await scraperApiGet(seriesUrl);
+        ?? await cfProxyGet(seriesUrl, `${RISTO_BASE}/`, 10000);
     }
     if (!seriesHtml || isCloudflareBlock(seriesHtml)) return [];
 
@@ -3515,8 +3478,7 @@ async function getRistoAnimeSources(
     } catch { /* fall through */ }
     if (!epHtml || isCloudflareBlock(epHtml)) {
       epHtml = (await orkestGet(watchEpUrl, seriesUrl, 12000))
-        ?? await cfProxyGet(watchEpUrl, seriesUrl, 10000)
-        ?? await scraperApiGet(watchEpUrl);
+        ?? await cfProxyGet(watchEpUrl, seriesUrl, 10000);
     }
     if (!epHtml || isCloudflareBlock(epHtml)) return [];
 
@@ -4960,8 +4922,7 @@ const a3rbSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }
 
 async function searchAnime3rb(query: string): Promise<string | null> {
   const html = await cycleTLSGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`, A3RB_BASE + "/")
-    ?? await cfProxyGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`, A3RB_BASE + "/")
-    ?? await scraperApiGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`);
+    ?? await cfProxyGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`, A3RB_BASE + "/");
   if (!html) return null;
 
   const candidates: Array<{ url: string; score: number }> = [];
@@ -5013,8 +4974,7 @@ async function getAnime3rbSources(
 
     // Fetch series page → find episode link
     const seriesHtml = await cycleTLSGet(seriesUrl, A3RB_BASE + "/")
-      ?? await cfProxyGet(seriesUrl, A3RB_BASE + "/")
-      ?? await scraperApiGet(seriesUrl);
+      ?? await cfProxyGet(seriesUrl, A3RB_BASE + "/");
     if (!seriesHtml) return [];
 
     // Find episode link by number
@@ -5036,8 +4996,7 @@ async function getAnime3rbSources(
 
     // Fetch episode page via CF bypass chain
     const epHtml = await cycleTLSGet(epUrl, seriesUrl)
-      ?? await cfProxyGet(epUrl, seriesUrl)
-      ?? await scraperApiGet(epUrl);
+      ?? await cfProxyGet(epUrl, seriesUrl);
     if (!epHtml) return [];
 
     const urls: string[] = [];
@@ -5061,6 +5020,119 @@ async function getAnime3rbSources(
     a3rbSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
   } catch { return []; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  AKOAM (اكوام) scraper — Arabic dubbed/subbed anime
+//  Domain: akoam.com (WP-based, embed servers)
+//  Flow: search /?s={q} → series page → episode link → embed URLs
+// ════════════════════════════════════════════════════════════════════
+const AKOAM_BASE = "https://www.akoam.com";
+const AKOAM_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: AKOAM_BASE + "/" };
+
+const akoamSeriesCache = new Map<string, { url: string | null; ts: number }>();
+const akoamSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function akoamFetch(url: string, timeoutMs = 10000): Promise<string | null> {
+  try {
+    const r = await fetch(url, { headers: AKOAM_HDRS, signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
+    if (r.ok) {
+      const t = await r.text();
+      if (t.length > 200 && !isCloudflareBlock(t)) return t;
+    }
+  } catch { /* fall through */ }
+  return cfProxyGet(url, AKOAM_BASE + "/", timeoutMs + 3000).catch(() => null);
+}
+
+async function searchAkoam(query: string): Promise<string | null> {
+  const html = await akoamFetch(AKOAM_BASE + "/?s=" + encodeURIComponent(query));
+  if (!html) return null;
+  const candidates: Array<{ url: string; score: number }> = [];
+  for (const m of html.matchAll(/href="(https?:\/\/(?:www\.)?akoam\.com\/(?:anime|series|cartoon|movie)\/([^"/#?]+)\/?)"[^>]*>([\s\S]{2,80}?)(?:<\/|>)/gi)) {
+    const url = m[1]; const slug = decodeURIComponent(m[2]).replace(/-/g, " "); const label = m[3].replace(/<[^>]+>/g, "").trim();
+    if (url.includes("/page/")) continue;
+    const score = Math.max(similarity(label, query), similarity(slug, query), asciiSimilarity(m[2], query));
+    if (score > 0.18) candidates.push({ url, score });
+  }
+  if (!candidates.length) {
+    for (const m of html.matchAll(/href="(https?:\/\/(?:www\.)?akoam\.com\/[^"#?]+)"[^>]*>([^<]{2,60})<\/a>/gi)) {
+      const score = Math.max(similarity(m[2].trim(), query), asciiSimilarity(m[2].trim(), query));
+      if (score > 0.25) candidates.push({ url: m[1], score });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.score > 0.15 ? candidates[0].url : null;
+}
+
+async function getAkoamSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = "akoam:" + (title + "|" + (english ?? "")).toLowerCase() + ":" + ep;
+  const hit = akoamSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  try {
+    const sCk = "akoam:s:" + (english ?? title).toLowerCase();
+    let seriesUrl = akoamSeriesCache.get(sCk)?.url;
+    if (seriesUrl === undefined) {
+      for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
+        seriesUrl = await searchAkoam(q);
+        if (seriesUrl) break;
+      }
+      akoamSeriesCache.set(sCk, { url: seriesUrl ?? null, ts: Date.now() });
+    }
+    if (!seriesUrl) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
+
+    const seriesHtml = await akoamFetch(seriesUrl, 12000);
+    if (!seriesHtml) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
+
+    const epStr = String(ep);
+    let epUrl: string | null = null;
+    const allLinks: string[] = [];
+    for (const m of seriesHtml.matchAll(/href="(https?:\/\/(?:www\.)?akoam\.com\/[^"#?]+)"/gi)) {
+      const l = m[1];
+      if (!l.includes("/page/") && !l.includes("/feed/") && !allLinks.includes(l)) allLinks.push(l);
+    }
+    for (const link of allLinks) {
+      try {
+        const decoded = decodeURIComponent(link);
+        const epMatchRe = new RegExp("[-/]0*" + epStr + "[-/]?$");
+        if (
+          epMatchRe.test(decoded) ||
+          decoded.includes("\u0627\u0644\u062d\u0644\u0642\u0629-" + epStr) ||
+          decoded.includes("episode-" + epStr)
+        ) { epUrl = link; break; }
+      } catch { /* skip */ }
+    }
+
+    if (!epUrl) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
+
+    const epHtml = await akoamFetch(epUrl, 12000);
+    if (!epHtml) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
+
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    const addU = (u: string) => { if (u?.startsWith("http") && !seen.has(u)) { seen.add(u); urls.push(u); } };
+
+    for (const m of epHtml.matchAll(/data-(?:watch|embed|src|url)=["'](https?:\/\/[^"']{8,})["']/gi)) addU(m[1]);
+    for (const m of epHtml.matchAll(/<iframe[^>]+src=["'](https?:\/\/[^"']{8,})["']/gi)) addU(m[1]);
+    for (const m of epHtml.matchAll(/"(?:file|src|url|link)"\s*:\s*"(https?:\/\/[^"]{8,})"/gi)) addU(m[1]);
+
+    if (!urls.length) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
+
+    const sources: UnifiedSource[] = urls.map((u, i) => ({
+      name: "\u0627\u0643\u0648\u0627\u0645 \u00b7 \u0633\u064a\u0631\u0641\u0631 " + (i + 1),
+      url: u, quality: "HD", qualityRank: 10, site: "akoam",
+    }));
+
+    akoamSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch (e: any) {
+    console.warn("[akoam]", e?.message ?? e);
+    akoamSrcCache.set(ck, { sources: [], ts: Date.now() });
+    return [];
+  }
 }
 
 
@@ -9133,12 +9205,13 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep),           true, 20000),
       scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 22000),
       scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 22000),
+      scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
       scrapeCached("moviebox",  () => getMovieBoxAnimeSources(title, english, ep, isMovie), false, 18000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
-      // witanime:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy + ScraperAPI chain
-      // anime3rb:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy + ScraperAPI chain
+      // witanime:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy chain
+      // anime3rb:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy chain
       // animetime CDN (vidhls.com) يعمل لبعض الأنمي (200) — مُعاد تفعيله 2026-07-01
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
@@ -9285,6 +9358,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animetime":    (await race(getAnimeTimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
       case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep), 22_000, [])); break;
       case "reanime":      (await race(getReanímeSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
+      case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       default: break;
     }
 

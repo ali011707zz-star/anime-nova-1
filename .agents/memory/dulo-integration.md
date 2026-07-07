@@ -6,7 +6,7 @@ description: Dulo.tv multi-provider HLS aggregator — API key, confirmed provid
 ## Dulo.tv Source Integration
 
 **Base URL:** https://dulo.tv  
-**API Key (public):** WDNUNBUB3HR983Y9ISBADK4O82 (from vyla-entertainment/stream-api repo)
+**API Key:** configured via hardcoded constant in anime.ts/animation.ts (sourced from public stream-api repo)
 
 ### Confirmed Working Providers (tested VPS 2026-07-03):
 - `vidrock` — works for TV anime (tested Demon Slayer S3E1, JJK S2E1)
