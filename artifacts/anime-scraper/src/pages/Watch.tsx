@@ -2730,8 +2730,8 @@ export default function WatchPage() {
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey,      setPlayKey]      = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
-  // showPicker: false on initial load (auto-fetch + auto-play), true only when coming back from player
-  const [showPicker,   setShowPicker]   = useState(false);
+  // showPicker: true — picker shown immediately, user picks scraper first
+  const [showPicker,   setShowPicker]   = useState(true);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
@@ -2760,7 +2760,7 @@ export default function WatchPage() {
      (يمنع بقية السكربرز من إكمال طلباتهم بلا فائدة بعد بدء التشغيل، يقلل استهلاك السيرفر) */
   const fetchControllersRef = useRef<Record<string, AbortController>>({});
   const pendingTimeoutsRef  = useRef<number[]>([]);
-  const [autoPlayReady,   setAutoPlayReady]   = useState(false);
+  // autoPlayReady removed — يُفعَّل الـ auto-play الآن داخل handleFetchSite مباشرةً
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -3053,9 +3053,11 @@ export default function WatchPage() {
   /* ── Track in-flight fetches to prevent duplicate calls ── */
   const inFlightRef = useRef<Set<string>>(new Set());
 
-  /* ── Per-site on-demand fetch ── */
-  async function handleFetchSite(site: string) {
-    /* Guard: skip if already fetching or ready (check both state snapshot and in-flight ref) */
+  /* ── Per-site on-demand fetch ──
+     bgLoad=true  → background loading after player started (no auto-play, no re-trigger)
+     bgLoad=false → user tapped this scraper → auto-play first result + background-load rest */
+  async function handleFetchSite(site: string, bgLoad = false) {
+    /* Guard: skip if already fetching or ready */
     if (inFlightRef.current.has(site)) return;
     if (slotStatus[site] === "fetching" || slotStatus[site] === "ready") return;
 
@@ -3065,8 +3067,6 @@ export default function WatchPage() {
     const resolvedTitle   = anime?.title?.romaji   || titleParam;
     const resolvedEnglish = anime?.title?.english  || englishParam || "";
 
-    /* AbortController مستقل لكل موقع — يُلغى فوراً بمجرد اختيار مصدر التشغيل
-       (بدلاً من ترك بقية المواقع تكمل طلباتها بلا فائدة بعد بدء التشغيل) */
     const ctrl = new AbortController();
     fetchControllersRef.current[site] = ctrl;
     const timeoutId = window.setTimeout(() => ctrl.abort(), 22000);
@@ -3080,8 +3080,21 @@ export default function WatchPage() {
       if (srcs.length > 0) {
         setSlotSources(prev => ({ ...prev, [site]: srcs }));
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-        /* احفظ في الكاش لفتح فوري في المرة القادمة */
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
+
+        /* المستخدم اختار هذا المصدر — شغّل أول نتيجة فوراً وابدأ تحميل الباقي خلفياً */
+        if (!bgLoad && !autoPlayedRef.current && phaseRef.current === "picker") {
+          const playable = srcs.find(s => shouldShowSrc(s));
+          if (playable) {
+            autoPlayedRef.current = true;
+            handlePlaySrc(playable);
+            /* تحميل خلفي لبقية المصادر لملء الـ picker داخل المشغّل */
+            SCRAPER_DEFS.filter(d => d.site !== site).forEach((def, i) => {
+              const id = window.setTimeout(() => handleFetchSite(def.site, true), 300 + i * 80);
+              pendingTimeoutsRef.current.push(id);
+            });
+          }
+        }
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
@@ -3104,128 +3117,27 @@ export default function WatchPage() {
     // لا تُلغِ fetchControllersRef — اتركها تكمل وتُضيف مصادرها للـ picker
   }
 
-  /* ── Quick-resume + كاش المصادر: تحميل فوري من localStorage عند فتح الصفحة ── */
+  /* ── Quick-resume: إذا كان هناك آخر مصدر شُغِّل وتقدُّم محفوظ → شغّله فوراً ── */
   useEffect(() => {
     if (!animeId || !titleParam) return;
-
-    /* 1. آخر مصدر شُغِّل (للاستئناف من آخر نقطة) */
     const savedProgress = parseFloat(localStorage.getItem(`wp-${animeId}-${ep}`) || "0");
-    if (savedProgress > 30) {
-      const lastSrc = loadLastSrc(animeId, ep);
-      if (lastSrc && !isIframeUrl(lastSrc.url)) {
-        const resumeSrc: FetchedSrc = {
-          url: lastSrc.url, directUrl: lastSrc.url,
-          qualityRank: lastSrc.qualityRank, site: "_resume", name: "آخر مصدر",
-        };
-        setSlotSources(prev => ({ ...prev, _resume: [resumeSrc] }));
-        setSlotStatus(prev => ({ ...prev, _resume: "ready" }));
-      }
-    }
+    if (savedProgress <= 30) return;
+    const lastSrc = loadLastSrc(animeId, ep);
+    if (!lastSrc || isIframeUrl(lastSrc.url)) return;
 
-    /* 2. كاش المصادر — حقن ما يوجد من مصادر محفوظة فوراً (يشغّل auto-play بدون انتظار scrapers) */
-    const PRIORITY_SITES = ["kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto"];
-    let injectedAny = false;
-    for (const site of PRIORITY_SITES) {
-      const cached = loadAnimeSrcs(animeId, ep, site);
-      if (cached) {
-        setSlotSources(prev => ({ ...prev, [site]: cached }));
-        setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-        injectedAny = true;
-      }
-    }
-    if (injectedAny) {
-      /* إذا وُجد كاش → أخفِ picker وانتقل للمشغّل فوراً عبر auto-play */
-      /* auto-play effect يلتقط التغيير ويشغّل أفضل مصدر متاح */
-    }
+    const resumeSrc: FetchedSrc = {
+      url: lastSrc.url, directUrl: lastSrc.url,
+      qualityRank: lastSrc.qualityRank, site: "_resume", name: "آخر مصدر",
+    };
+    /* شغّل مصدر الاستئناف مباشرةً بدون انتظار المستخدم */
+    autoPlayedRef.current = true;
+    handlePlaySrc(resumeSrc);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── auto-play enabled immediately ── */
-  useEffect(() => { setAutoPlayReady(true); }, []);
-
-  /* ── Auto-fetch: موجة أولى فقط من أسرع/أوثق المصادر فوراً — الباقي يُجرَّب فقط لو ما لقينا
-     مصدر شغّال خلال 1.8 ثانية. هذا يقلل الطلبات الخارجية من السيرفر (28 موقع → 8 غالباً)
-     بدون أي تأخير محسوس بتجربة المستخدم (auto-play ما زال فورياً). ── */
-  useEffect(() => {
-    if (autoFetchedRef.current) return;
-    autoFetchedRef.current = true;
-
-    const priorityDefs = SCRAPER_DEFS.filter(d => PRIORITY_FETCH_SITES.has(d.site));
-    const restDefs     = SCRAPER_DEFS.filter(d => !PRIORITY_FETCH_SITES.has(d.site));
-
-    priorityDefs.forEach((def, i) => {
-      const id = window.setTimeout(() => handleFetchSite(def.site), i * 25);
-      pendingTimeoutsRef.current.push(id);
-    });
-
-    const secondWaveId = window.setTimeout(() => {
-      if (autoPlayedRef.current) return; // مصدر شغّال بالفعل — لا داعي لتجربة بقية الـ 20 موقع
-      restDefs.forEach((def, i) => {
-        const id = window.setTimeout(() => handleFetchSite(def.site), i * 25);
-        pendingTimeoutsRef.current.push(id);
-      });
-    }, 1800);
-    pendingTimeoutsRef.current.push(secondWaveId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ── Auto-play: فور وصول أول مصدر جاهز، شغّله تلقائياً فوراً بدلاً من انتظار المستخدم ──
-     يبقى بإمكان المستخدم فتح قائمة السيرفرات من داخل المشغل لتبديل المصدر متى شاء. */
-  useEffect(() => {
-    if (autoPlayedRef.current) return;
-    if (!autoPlayReady) return;
-    if (phase !== "picker") return;
-    const allSrcs: FetchedSrc[] = [];
-    const seenKeys = new Set<string>();
-    for (const srcs of Object.values(slotSources)) {
-      for (const s of srcs) {
-        if (!shouldShowSrc(s)) continue;
-        const key = s.directUrl || s.url;
-        if (!key || seenKeys.has(key)) continue;
-        seenKeys.add(key);
-        allSrcs.push(s);
-      }
-    }
-
-    if (allSrcs.length > 0) {
-      autoPlayedRef.current = true;
-      /* مصدر التشغيل تحدَّد الآن — ألغِ بقية طلبات fetch-source الجارية/المعلَّقة فوراً،
-         لا داعي أن تكمل ~20 موقع آخر طلباتهم بالخلفية بلا فائدة */
-      cancelRemainingScrapers();
-      /* _resume: شغّله مباشرة (رابط محفوظ سابقاً — سريع وموثوق) */
-      const resumeSrc = allSrcs.find(s => s.site === "_resume");
-      if (resumeSrc && allSrcs.length === 1) {
-        const clickedUrl = resumeSrc.directUrl || resumeSrc.url;
-        const clickedTier = getSrcQualityTier(resumeSrc);
-        const srvMap: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
-        srvMap[clickedTier].push(clickedUrl);
-        setPlayerDlUrl(undefined);
-        const skipSub = ARABIC_SITES.has(resumeSrc.site || "");
-        setPlayerSubUrl(skipSub ? undefined : (resumeSrc.subtitleUrl || undefined));
-        if (skipSub) setKawaiiSubUrl(undefined);
-        playerSrcSiteRef.current = resumeSrc.site || "";
-        setPlayerSrcSite(resumeSrc.site || "");
-        setPlayerServers(srvMap);
-        setQuality(clickedTier);
-        setInitialSrv(0);
-        setPlayKey(k => k + 1);
-        setPhase("player");
-        return;
-      }
-      /* شغّل أفضل مصدر متاح تلقائياً — أولوية: KW → HI → AW → الأعلى جودة */
-      const nonResume = allSrcs.filter(s => s.site !== "_resume");
-      const animePriority = (s: FetchedSrc): number => {
-        const site = s.site || "";
-        if (site === "kawaii")       return 1000;
-        if (site === "hianime")      return 900;
-        if (site === "animewitcher") return 800;
-        return s.qualityRank ?? 0;
-      };
-      const best = [...nonResume].sort((a, b) => animePriority(b) - animePriority(a))[0];
-      if (best) handlePlaySrc(best);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slotSources, phase, autoPlayReady]);
+  /* ── النظام الجديد: لا auto-fetch ولا auto-play — المستخدم يختار المصدر أولاً ──
+     فور وصول أول مصدر لمصدر اختاره المستخدم يُشغَّل تلقائياً (في handleFetchSite).
+     المصادر المحفوظة في الكاش تُشغَّل فوراً عبر _resume (في الـ useEffect أدناه). ── */
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
