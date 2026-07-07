@@ -81,15 +81,20 @@ function resolveUrl(relOrAbs, base) {
 
 /**
  * اكتشاف هل المحتوى هو M3U8 manifest
+ * يدعم: Content-Type + امتداد URL + أول بايتات المحتوى
  */
-function isHlsManifest(contentType, urlStr) {
-  if (!contentType) contentType = "";
-  return (
-    contentType.includes("mpegurl") ||
-    contentType.includes("x-mpegURL") ||
-    urlStr.includes(".m3u8") ||
-    urlStr.includes(".m3u")
-  );
+function isHlsManifest(contentType, urlStr, bodyPrefix) {
+  const ct = (contentType || "").toLowerCase();
+  const url = (urlStr || "").toLowerCase();
+  // فحص Content-Type
+  if (ct.includes("mpegurl") || ct.includes("x-mpegurl") || ct.includes("vnd.apple.mpeg")) return true;
+  // فحص امتداد URL (مع تجاهل الكيس وquery params)
+  const urlPath = url.split("?")[0];
+  if (urlPath.endsWith(".m3u8") || urlPath.endsWith(".m3u")) return true;
+  // فحص محتوى أول سطر — بعض CDNs يُعيدون text/plain أو application/octet-stream
+  // نُحوّل للأحرف الصغيرة لأن المعيار يكتبها #EXTM3U (uppercase) لكن نريد تسامحاً
+  if (bodyPrefix && bodyPrefix.trimStart().toLowerCase().startsWith("#extm3u")) return true;
+  return false;
 }
 
 /**
@@ -234,36 +239,64 @@ export default {
     }
 
     const ct = cdnRes.headers.get("content-type") || "";
+    const targetStr = target.toString();
+    const targetPathLower = (targetStr.split("?")[0]).toLowerCase();
 
-    // ── اكتشاف M3U8: إذا كان manifest → أعِد كتابة الـ segments ──
-    if (cdnRes.ok && isHlsManifest(ct, target.toString())) {
+    // ── هل الـ URL يدل بوضوح على ملف بيناري (TS/MP4/AAC/WebM)؟ ──
+    const isClearlyBinary =
+      targetPathLower.endsWith(".ts") ||
+      targetPathLower.endsWith(".mp4") ||
+      targetPathLower.endsWith(".m4s") ||
+      targetPathLower.endsWith(".aac") ||
+      targetPathLower.endsWith(".webm") ||
+      ct.startsWith("video/") ||
+      ct.startsWith("audio/");
+
+    // ── اكتشاف M3U8 بالـ Content-Type أو امتداد URL (سريع) ──
+    const mightBeHls = !isClearlyBinary && isHlsManifest(ct, targetStr, null);
+
+    // ── إذا لم يكن HLS واضحاً ولم يكن ملفاً بيناريًا → اقرأ أول ~512 بايت للتحقق ──
+    const needsBodyCheck = !isClearlyBinary && !mightBeHls && (
+      !ct || ct.includes("text") || ct.includes("application")
+    );
+
+    if (cdnRes.ok && (mightBeHls || needsBodyCheck)) {
       try {
         const body = await cdnRes.text();
-        const finalRef = ref || target.toString();
-        const rewritten = await rewriteM3u8(
-          body,
-          target.toString(),
-          workerOrigin,
-          finalRef,
-          env.CF_PROXY_KEY,
-        );
-        return new Response(rewritten, {
-          status: 200,
-          headers: {
-            "Content-Type": "application/vnd.apple.mpegurl",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Range",
-            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type",
-            "Cache-Control": "no-store, no-cache, must-revalidate",
-          },
-        });
+        // فحص نهائي بمحتوى أول سطر للكشف عن #EXTM3U
+        if (isHlsManifest(ct, targetStr, body)) {
+          const finalRef = ref || targetStr;
+          const rewritten = await rewriteM3u8(
+            body,
+            targetStr,
+            workerOrigin,
+            finalRef,
+            env.CF_PROXY_KEY,
+          );
+          return new Response(rewritten, {
+            status: 200,
+            headers: {
+              "Content-Type": "application/vnd.apple.mpegurl",
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Headers": "Range",
+              "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type",
+              "Cache-Control": "no-store, no-cache, must-revalidate",
+            },
+          });
+        }
+        // ليس HLS — أعِد كنص مباشرةً
+        const resHeadersTxt = new Headers(cdnRes.headers);
+        resHeadersTxt.set("Access-Control-Allow-Origin", "*");
+        resHeadersTxt.set("Access-Control-Allow-Headers", "Range");
+        resHeadersTxt.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type");
+        if (!resHeadersTxt.has("Cache-Control")) resHeadersTxt.set("Cache-Control", "public, max-age=3600");
+        return new Response(body, { status: cdnRes.status, headers: resHeadersTxt });
       } catch (e) {
-        // فشل إعادة الكتابة → أعِد خطأ
-        return new Response("m3u8 rewrite failed: " + e.message, { status: 500 });
+        return new Response("m3u8 processing failed: " + e.message, { status: 500 });
       }
     }
 
-    // ── غير M3U8: مرور مباشر (MP4 segments وغيرها) ──────────────
+    // ── بيناري أو غير قابل للكشف — مرور مباشر كـ stream بدون قراءة ──
     const resHeaders = new Headers(cdnRes.headers);
     resHeaders.set("Access-Control-Allow-Origin", "*");
     resHeaders.set("Access-Control-Allow-Headers", "Range");

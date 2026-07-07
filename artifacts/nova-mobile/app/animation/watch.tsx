@@ -667,6 +667,11 @@ export default function AnimationWatchScreen() {
         initialPosition={resumeTime}
         onBack={() => setScreen("picker")}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
+        onError={() => {
+          /* جميع المصادر فشلت → العودة للـ picker حتى يرى المستخدم ماذا حدث */
+          console.warn("[Animation] جميع المصادر فشلت — العودة للـ picker");
+          setScreen("picker");
+        }}
         onNextEpisode={type === "tv" ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);

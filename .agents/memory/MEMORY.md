@@ -23,3 +23,4 @@
 - [CF Worker token encryption](cf-token-encryption.md) — AES-256-GCM replaces plain ?url=&key=; encryptCfToken null=fail-closed; wrangler name=nova-cdn-proxy.
 - [Nova Mobile themes fix](mobile-themes-fix.md) — useColors() reads AppContext theme now; 5 palettes in colors.ts; needs EAS rebuild for users.
 - [HLS CF Worker routing](hls-cf-worker-routing.md) — hls-proxy is now pure 307 redirect; CF Worker fetches manifest + rewrites segment URLs to go through itself; zero VPS video bandwidth.
+- [Animation mobile playback](animation-mobile-playback.md) — شاشة سوداء صامتة: garbage Referer في sendSource + Dulo raw fallback بلا Referer + no onError handler + CF Worker لا يكتشف M3U8 بـ #EXTM3U content sniff.
