@@ -16,6 +16,7 @@ import newsRouter from "./routes/news.js";
 import notificationsRouter from "./routes/notifications.js";
 import { logger } from "./lib/logger";
 import { setupSession, registerEmailAuthRoutes, registerGoogleAuthRoutes, registerGithubAuthRoutes } from "./auth/index.js";
+import sitemapRouter from "./routes/sitemap.js";
 import { validateAnonToken, checkRateLimit } from "./lib/security.js";
 
 // ── المسارات التي تتطلب توكن صالح ──
