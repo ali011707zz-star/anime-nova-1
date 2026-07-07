@@ -284,6 +284,36 @@ const CF_PROXY_BASE = `http://localhost:${CF_PROXY_PORT}`;
 let _cfProxyAlive: boolean | null = null;
 let _cfProxyCheckedAt = 0;
 
+// cfProxyChainFetch — يجلب url1 ثم url2 بنفس الجلسة (session-persistent cookies)
+// يُستخدم لـ FaselHD: player_token مرتبط بـ session cookies من صفحة الحلقة
+async function cfProxyChainFetch(
+  url1: string,
+  url2: string,
+  ref1?: string,
+  timeoutMs = 20_000,
+): Promise<string | null> {
+  const now = Date.now();
+  if (_cfProxyAlive === null || now - _cfProxyCheckedAt > 60_000) {
+    try {
+      const h = await fetch(`${CF_PROXY_BASE}/health`, { signal: AbortSignal.timeout(2000) });
+      _cfProxyAlive = h.ok;
+    } catch { _cfProxyAlive = false; }
+    _cfProxyCheckedAt = now;
+  }
+  if (!_cfProxyAlive) return null;
+
+  try {
+    const params = new URLSearchParams({ url1, url2, timeout: String(Math.floor(timeoutMs / 1000)) });
+    if (ref1) params.set("ref1", ref1);
+    const r = await fetch(`${CF_PROXY_BASE}/chain-fetch?${params}`, {
+      signal: AbortSignal.timeout(timeoutMs + 5_000),
+    });
+    const chainSize2 = parseInt(r.headers.get("X-Chain-Size2") || "0");
+    if (!r.ok || chainSize2 < 100) return null;
+    return await r.text();
+  } catch { _cfProxyAlive = false; return null; }
+}
+
 async function cfProxyGet(
   url: string,
   referer?: string,
@@ -8547,6 +8577,8 @@ async function getFaselhdDbSources(
     if (pageHtml.includes("Just a moment") || pageHtml.includes("cf-browser-verification")) return out;
 
     let epHtml: string | null;
+    // يُستخدم كـ url1 في chain-fetch لتأسيس session cookies قبل جلب player URL
+    let epPageUrl: string = best.link;
 
     if (isMovie) {
       // Movie: the series page IS the content page
@@ -8573,6 +8605,7 @@ async function getFaselhdDbSources(
       }
 
       // 5b. Fetch episode page — cfProxy أولاً، ثم direct fetch
+      epPageUrl = target.url; // نحفظه لاستخدامه في chain-fetch لاحقاً
       epHtml = await cfProxyGet(target.url, best.link, 22_000);
       if (!epHtml || epHtml.length < 1000) {
         try {
@@ -8625,11 +8658,22 @@ async function getFaselhdDbSources(
       } catch { return null; }
     });
 
-    // 9. Try video_player token pages: CF proxy fetch → parseVideoUrl
+    // 9. Try video_player token pages: chain-fetch (session-persistent) → parseVideoUrl
+    // الإصلاح 2026-07: player_token مرتبط بـ session cookies من صفحة الحلقة/السيريال.
+    // cfProxyGet (stateless) يُعيد "Token Expired!". chain-fetch يجلب epHtml أولاً لتأسيس
+    // الكوكيز ثم يجلب player URL بنفس الجلسة.
     const playerAttempts = playerTokens.slice(0, 2).map(async (pUrl): Promise<UnifiedSource | null> => {
       try {
-        const pHtml = await cfProxyGet(pUrl, best.link, 15_000);
+        // نستخدم epHtml (صفحة الحلقة التي استُخرج منها الـ token) كـ url1 لتأسيس الجلسة
+        // epPageUrl مُعرَّف في الخارج — يُشير لصفحة الحلقة أو صفحة السيريال (للأفلام)
+        let pHtml = await cfProxyChainFetch(epPageUrl, pUrl, best.link, 18_000);
+        // fallback: cfProxyGet مباشر (إذا لم يكن chain-fetch متاحاً)
+        if (!pHtml || pHtml.length < 100 || (pHtml.includes("Token Expired") && pHtml.length < 50)) {
+          pHtml = await cfProxyGet(pUrl, best.link, 15_000);
+        }
         if (!pHtml || pHtml.length < 100) return null;
+        // تجاهل "Token Expired!" الصريح
+        if (pHtml.trim() === "Token Expired!" || pHtml.length < 20) return null;
         const video = parseVideoUrl(pHtml);
         if (!video || !video.url.startsWith("http")) return null;
         const faRef = encodeURIComponent(pUrl);
