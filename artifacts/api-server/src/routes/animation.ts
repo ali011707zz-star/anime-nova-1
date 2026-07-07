@@ -293,72 +293,43 @@ async function cfProxyGet(url: string): Promise<string> {
 }
 
 // CF + Orkestr fallback — يجرب cfProxyGet أولاً، إذا حجبه CF يجرب خادم Orkestr الخارجي (EU IP)
+// cfOrOrkestGet → الآن يستخدم cfProxy فقط (Orkestr أُزيل — 2026-07)
 async function cfOrOrkestGet(url: string): Promise<string> {
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
-  try {
-    const html = await cfProxyGet(url);
-    if (!isCfPage(html)) return html;
-  } catch { /* fall through */ }
-  // Fallback: Orkestr relay (EU IP, not Replit datacenter)
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
-  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
-  const orkHeaders: Record<string, string> = {};
-  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
-  const r = await fetch(
-    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
-    { headers: orkHeaders, signal: AbortSignal.timeout(25_000) }
-  );
-  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
-  const html = await r.text();
-  if (isCfPage(html)) throw new Error("CF still blocked via Orkestr");
+  const html = await cfProxyGet(url);
+  if (isCfPage(html)) throw new Error("CF blocked via cfProxy");
   return html;
 }
 
-// Orkestr direct GET — يتجاوز CF proxy تماماً (مفيد للمواقع التي تحجب Replit IPs وcf_proxy معاً)
+// orkestDirectGet → الآن يستخدم cfProxy مباشرة (Orkestr أُزيل — 2026-07)
 async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string> {
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
-  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
-  const orkHeaders: Record<string, string> = {};
-  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
+  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const r = await fetch(
-    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
-    { headers: orkHeaders, signal: AbortSignal.timeout(timeoutMs) }
+    `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
+    { signal: AbortSignal.timeout(timeoutMs) }
   );
-  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`cfProxy HTTP ${r.status}`);
   const html = await r.text();
   if (html.length < 500 || html.includes("Just a moment") || html.includes("Attention Required")) {
-    throw new Error("Orkestr: CF blocked");
+    throw new Error("CF blocked via cfProxy");
   }
   return html;
 }
 
-// CF proxy POST — يرسل POST عبر curl_cffi مع Orkestr fallback
+// cfOrOrkestPost → الآن يستخدم cfProxy POST فقط (Orkestr أُزيل — 2026-07)
 async function cfOrOrkestPost(url: string): Promise<string> {
   const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
-  try {
-    const r = await fetch(
-      `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
-      { signal: AbortSignal.timeout(18_000) }
-    );
-    if (r.ok) {
-      const html = await r.text();
-      if (!isCfPage(html)) return html;
-    }
-  } catch { /* fall through */ }
-  // Fallback: Orkestr POST relay
-  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
-  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
-  const orkHeaders2: Record<string, string> = {};
-  if (ORKESTR_API_KEY) orkHeaders2["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
-  const r2 = await fetch(
-    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}&method=POST`,
-    { headers: orkHeaders2, signal: AbortSignal.timeout(25_000) }
+  const r = await fetch(
+    `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
+    { signal: AbortSignal.timeout(18_000) }
   );
-  if (!r2.ok) throw new Error(`Orkestr POST HTTP ${r2.status}`);
-  return r2.text();
+  if (!r.ok) throw new Error(`cfProxy POST HTTP ${r.status}`);
+  const html = await r.text();
+  if (isCfPage(html)) throw new Error("CF blocked via cfProxy POST");
+  return html;
 }
 
 async function asFetchPosts(params: string): Promise<Array<{ id: number; link: string; title: { rendered: string } }>> {
@@ -1488,12 +1459,12 @@ router.get("/animation/quick-check", async (req: Request, res: Response) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 6_500);
 
-  // Quick probe via Icefy (movie only) — fast EU relay check
+  // Quick probe via Icefy (movie only) — fast cfProxy check
   try {
     if (type === "movie") {
-      const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
+      const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
       const raw = await fetch(
-        `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(`https://streams.icefy.top/movie/${tmdbId}`)}`,
+        `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(`https://streams.icefy.top/movie/${tmdbId}`)}`,
         { signal: controller.signal }
       ).then(r => r.ok ? r.text() : "{}").catch(() => "{}");
       const data = JSON.parse(raw) as { stream?: string };
@@ -2557,13 +2528,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         if (type !== "movie") return; // TV endpoint format غير مكتشف
         try {
-          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           send("status", { msg: "Icefy: جاري الاستخراج…" });
           const raw = await orkestDirectGet(`https://streams.icefy.top/movie/${tmdbId}`, 12_000);
           const data = JSON.parse(raw) as { stream?: string };
           if (!data.stream) return;
-          // HLS عبر Orkestr hls-proxy (EU IP يصل CDN بدون حجب)
-          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(data.stream)}&ref=${encodeURIComponent("https://icefy.top/")}`;
+          const proxied = wrapHls(data.stream, "https://icefy.top/");
           sendSource(proxied, "Icefy · FHD", data.stream, proxied);
         } catch { /* silent */ }
       }),
@@ -2574,7 +2543,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       scrapeAnimCached("nebula", async () => {
         if (!tmdbId) return;
         try {
-          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           send("status", { msg: "Nebula: جاري الاستخراج…" });
           const apiUrl = type === "movie"
             ? `https://nebula.aether.cx/movie/${tmdbId}?ser=tik`
@@ -2582,7 +2550,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const raw = await orkestDirectGet(apiUrl, 12_000);
           const data = JSON.parse(raw) as { stream_url?: string };
           if (!data.stream_url) return;
-          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(data.stream_url)}&ref=${encodeURIComponent("https://nebula.aether.cx/")}`;
+          const proxied = wrapHls(data.stream_url, "https://nebula.aether.cx/");
           sendSource(proxied, "Nebula · HD", data.stream_url, proxied);
         } catch { /* silent */ }
       }),
@@ -2896,39 +2864,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── EzVidAPI (api.ezvidapi.com) — free HLS multi-quality TMDB-native ────────
-      scrapeAnimCached("2embed", async () => {
-        if (!tmdbId) return;
-        try {
-          send("status", { msg: "EzVidAPI: جاري الاستخراج…" });
-          // vidnest: TV-only (times out for movies); vidlink works for both; vidrock removed (broken)
-          const providers = type === "tv"
-            ? ["vidnest", "vidlink"]
-            : ["vidlink"];
-          await Promise.allSettled(providers.map(async (prov) => {
-            try {
-              const apiUrl = type === "tv"
-                ? `https://api.ezvidapi.com/tv/${prov}/${tmdbId}?season=${season}&episode=${epNum}`
-                : `https://api.ezvidapi.com/movie/${prov}/${tmdbId}`;
-              const r = await fetch(apiUrl, {
-                headers: { "User-Agent": UA },
-                signal: AbortSignal.timeout(10_000),
-              });
-              if (!r.ok) return;
-              const data = await r.json() as { stream_url?: string };
-              if (!data.stream_url) return;
-              const streamUrl = data.stream_url;
-              if (seenUrls.has(streamUrl)) return;
-              seenUrls.add(streamUrl); // dedup بـ URL الأصلي قبل الـ wrap
-              const ezRef = `https://www.${prov}.pro/`;
-              // Wrap HLS streams through hls-proxy → CF Worker | MP4 through video-proxy → CF Worker
-              const proxiedStream = streamUrl.includes(".m3u8") ? wrapHls(streamUrl, ezRef) : wrapMp4(streamUrl, ezRef);
-              // sendSource يتولى sourceCount++ والتشفير — لا تُرسل raw CDN URL كـ directUrl
-              sendSource(proxiedStream, `EzVidAPI · ${prov}`, proxiedStream, proxiedStream);
-            } catch { /* silent per provider */ }
-          }));
-        } catch { /* silent */ }
-      }),
+      // ── EzVidAPI — DISABLED (api.ezvidapi.com returns Bad Gateway 502 as of 2026-07) ─
+      Promise.resolve(),
 
       // ── Videasy (api.videasy.to) — TMDB-native HLS multi-quality + Arabic subtitle ─
       scrapeAnimCached("videasy3", async () => {
@@ -3139,7 +3076,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         if (type !== "movie") return;
         try {
-          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           const VIXSRC_BASE = "https://vixsrc.to";
           send("status", { msg: "VixSrc: جاري الاستخراج…" });
           // Step 1: Get embed URL with token/expires from API
@@ -3157,7 +3093,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (!token || !expires || !playlist) return;
           const sep = playlist.includes("?") ? "&" : "?";
           const masterUrl = `${playlist}${sep}token=${token}&expires=${expires}&h=1&lang=en`;
-          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(masterUrl)}&ref=${encodeURIComponent(`${VIXSRC_BASE}/`)}`;
+          const proxied = wrapHls(masterUrl, `${VIXSRC_BASE}/`);
           sendSource(proxied, "VixSrc · FHD", masterUrl, proxied);
         } catch { /* silent */ }
       }),
@@ -3679,7 +3615,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── vidsrc.cc — TMDB-native free API, accessible from datacenter IPs ─────
+      // ── vidsrc.cc — TMDB-native free API, روuted through cfProxy (VPS IP blocked directly) ─
       scrapeAnimCached("vidsrc_cc", async () => {
         if (!tmdbId) return;
         try {
@@ -3687,36 +3623,39 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const apiUrl = type === "tv"
             ? `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${epNum}`
             : `https://vidsrc.cc/v2/embed/movie/${tmdbId}`;
-          const r = await fetch(apiUrl, {
-            headers: { "User-Agent": UA, "Referer": "https://vidsrc.cc/" },
-            signal: AbortSignal.timeout(12_000),
-          });
-          if (!r.ok) return;
-          const html = await r.text();
+          // VPS datacenter IPs blocked by vidsrc.cc → must route through CF proxy
+          let html = "";
+          try {
+            html = await cfProxyGet(apiUrl);
+          } catch {
+            // cfProxy unavailable → skip (direct fetch times out from datacenter IP)
+            return;
+          }
+          if (!html || html.length < 100) return;
           // Extract data-id for API call
           const dataId = html.match(/data-id=["']([^"']+)["']/)?.[1]
-                      || html.match(/\/e\/([a-zA-Z0-9]+)/)?.[1];
+                      || html.match(/\/e\/([a-zA-Z0-9]{6,})/)?.[1];
           if (!dataId) return;
-          // Fetch sources JSON
+          // Fetch sources JSON — also via cfProxy since same IP restriction applies
           const srcUrl = `https://vidsrc.cc/v2/sources?id=${dataId}`;
-          const sr = await fetch(srcUrl, {
-            headers: { "User-Agent": UA, "Referer": apiUrl },
-            signal: AbortSignal.timeout(10_000),
-          });
-          if (!sr.ok) return;
-          const data = await sr.json() as { sources?: Array<{ url?: string; label?: string }> };
-          for (const src of (data.sources || [])) {
+          let srcData: { sources?: Array<{ url?: string; label?: string }> } = {};
+          try {
+            const srcHtml = await cfProxyGet(srcUrl);
+            srcData = JSON.parse(srcHtml);
+          } catch { return; }
+          for (const src of (srcData.sources || [])) {
             if (!src?.url) continue;
             const isHls = src.url.includes(".m3u8");
             const proxied = isHls
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://vidsrc.cc/")}`
+              ? wrapHls(src.url, "https://vidsrc.cc/")
               : src.url;
             sendSource(proxied, `VidSrc · ${src.label || "HD"}`, src.url, proxied);
           }
         } catch { /* silent */ }
       }),
 
-      // ── superembed.stream — TMDB-native iframe with JSON API ─────────────────
+      // ── superembed.stream — TMDB-native iframe, routed through cfProxy ──────────
+      // محتوى الصفحة محمّل عبر JavaScript — cfProxy يُنفّذه (مقارنةً بـ fetch المباشر)
       scrapeAnimCached("superembed", async () => {
         if (!tmdbId) return;
         try {
@@ -3724,19 +3663,28 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const apiUrl = type === "tv"
             ? `https://superembed.stream/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
             : `https://superembed.stream/embed/movie?tmdb=${tmdbId}`;
-          const r = await fetch(apiUrl, {
-            headers: { "User-Agent": UA, "Referer": "https://superembed.stream/" },
-            signal: AbortSignal.timeout(12_000),
-          });
-          if (!r.ok) return;
-          const html = await r.text();
-          // Extract HLS URL from JS
+          // cfProxy (curl_cffi) can handle JS-rendered pages better than raw fetch
+          let html = "";
+          try {
+            html = await cfProxyGet(apiUrl);
+          } catch {
+            // Fall back to direct fetch
+            const r = await fetch(apiUrl, {
+              headers: { "User-Agent": UA, "Referer": "https://superembed.stream/" },
+              signal: AbortSignal.timeout(12_000),
+            });
+            if (!r.ok) return;
+            html = await r.text();
+          }
+          if (!html || html.length < 100) return;
+          // Extract HLS URL from inline JS — multiple patterns for different SuperEmbed versions
           const hlsMatch = html.match(/source\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/i)
                         || html.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)/i)
+                        || html.match(/playlist\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/i)
                         || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)/);
           if (!hlsMatch?.[1]) return;
           const hlsUrl = hlsMatch[1];
-          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://superembed.stream/")}`;
+          const proxied = wrapHls(hlsUrl, "https://superembed.stream/");
           sendSource(proxied, "SuperEmbed · HLS", hlsUrl, proxied);
         } catch { /* silent */ }
       }),
