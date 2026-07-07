@@ -10967,10 +10967,140 @@ function rewriteM3u8(
   }).join("\n");
 }
 
-router.get("/anime/hls-proxy", (req, res) => {
-  /* هذا الـ endpoint أصبح 307 redirect بحت — لا يجلب أي بيانات على VPS.
-     CF Worker يتولى جلب M3U8 manifest + إعادة كتابة روابط الـ segments لتمر عبره.
-     النتيجة: صفر استهلاك bandwidth على VPS لبيانات الفيديو. */
+// ── CF Worker health cache — فحص خلفي كل 45 ثانية (لا يُضيف latency للطلبات) ──
+// ok=false حتى يثبت الفحص الأول أن CF Worker يعمل (fail-safe: VPS fallback دائماً حتى التحقق)
+const _cfh = { ok: false, ts: 0, busy: false };
+async function cfWorkerHealthy(): Promise<boolean> {
+  const cfBase = process.env.CF_WORKER_URL;
+  if (!cfBase || !process.env.CF_PROXY_KEY) return false;
+  if (Date.now() - _cfh.ts < 45_000) return _cfh.ok;
+  if (!_cfh.busy) {
+    _cfh.busy = true;
+    fetch(cfBase, { method: "OPTIONS", signal: AbortSignal.timeout(4000) })
+      .then(r => { _cfh.ok = r.status === 200; })
+      .catch(() => { _cfh.ok = false; })
+      .finally(() => { _cfh.ts = Date.now(); _cfh.busy = false; });
+  }
+  return _cfh.ok; // القيمة المُخزَّنة بينما الفحص يجري في الخلفية
+}
+
+// ── تحويل URL نسبي → مطلق ────────────────────────────────────────────────────
+function toAbsoluteUrl(raw: string, base: string): string {
+  try { return new URL(raw).href; } catch {}
+  try { return new URL(raw, base).href; } catch {}
+  const dir = base.split("?")[0].replace(/[^/]+$/, "");
+  return raw.startsWith("/") ? (new URL(base).origin + raw) : dir + raw;
+}
+
+// ── بناء رابط seg-proxy (VPS fallback) ───────────────────────────────────────
+function toVpsSegProxy(absUrl: string, ref: string): string {
+  return `/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref || absUrl)}`;
+}
+
+// ── إعادة كتابة M3U8 عبر VPS seg-proxy (بدون CF Worker) ─────────────────────
+// يستخدم السياق (EXT-X-STREAM-INF) لتحديد هل السطر playlist أم segment
+function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): string {
+  const lines = manifest.split("\n");
+  const out: string[] = [];
+  let nextIsPlaylist = false;
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) { out.push(line); nextIsPlaylist = false; continue; }
+
+    // السطر التالي variant playlist (جودات متعددة)
+    if (t.startsWith("#EXT-X-STREAM-INF") || t.startsWith("#EXT-X-I-FRAME-STREAM-INF")) {
+      nextIsPlaylist = true; out.push(line); continue;
+    }
+
+    // Tags التي تحتوي URI
+    if ((t.startsWith("#EXT-X-KEY") || t.startsWith("#EXT-X-MEDIA") || t.startsWith("#EXT-X-MAP")) && t.includes('URI="')) {
+      const rewritten = t.replace(/URI="([^"]+)"/g, (_, uri) => {
+        const abs = toAbsoluteUrl(uri, baseUrl);
+        // EXT-X-MEDIA قد تشير لـ playlist (صوت/ترجمة بديلة)
+        if (t.startsWith("#EXT-X-MEDIA") && /\.m3u8/i.test(uri)) {
+          return `URI="/api/anime/hls-proxy?url=${encryptParam(abs)}&ref=${encryptParam(ref || abs)}"`;
+        }
+        return `URI="${toVpsSegProxy(abs, ref)}"`;
+      });
+      out.push(rewritten); continue;
+    }
+
+    if (t.startsWith("#")) { out.push(line); continue; }
+
+    // سطر URL: variant playlist أو segment
+    const abs = toAbsoluteUrl(t, baseUrl);
+    if (nextIsPlaylist || /\.m3u8(\?|#|$)/i.test(t)) {
+      out.push(`/api/anime/hls-proxy?url=${encryptParam(abs)}&ref=${encryptParam(ref || abs)}`);
+    } else {
+      out.push(toVpsSegProxy(abs, ref));
+    }
+    nextIsPlaylist = false;
+  }
+
+  return out.join("\n");
+}
+
+// ── VPS-side HLS manifest proxy (يُستخدم عند سقوط CF Worker) ──────────────────
+async function serveHlsVPS(
+  url: string, ref: string,
+  res: import("express").Response,
+): Promise<void> {
+  const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
+  if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
+  try {
+    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) { res.status(r.status).send("upstream error"); return; }
+    const body = await r.text();
+    const rewritten = rewriteM3u8ForVPS(body, url, ref);
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-cache");
+    res.send(rewritten);
+  } catch {
+    res.status(502).send("HLS fetch failed");
+  }
+}
+
+// ── VPS-side segment/video proxy (يُستخدم عند سقوط CF Worker) ─────────────────
+async function serveMediaVPS(
+  url: string, ref: string,
+  req: import("express").Request,
+  res: import("express").Response,
+): Promise<void> {
+  const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
+  if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
+  const range = req.headers.range;
+  if (range) hdrs.Range = range;
+  try {
+    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Content-Type");
+    const ct = r.headers.get("content-type") || "video/MP2T";
+    res.setHeader("Content-Type", ct);
+    const cl = r.headers.get("content-length");
+    if (cl) res.setHeader("Content-Length", cl);
+    if (r.status === 206) {
+      const cr = r.headers.get("content-range");
+      if (cr) res.setHeader("Content-Range", cr);
+      res.status(206);
+    } else {
+      res.status(r.ok ? 200 : r.status);
+    }
+    // Stream directly — لا نبفّر في الذاكرة (مهم للـ MP4 الكبيرة)
+    if (r.body) {
+      const { Readable } = await import("stream");
+      (Readable.fromWeb as Function)(r.body).pipe(res);
+    } else {
+      res.end();
+    }
+  } catch {
+    if (!res.headersSent) res.status(502).send("media fetch failed");
+  }
+}
+
+// ── hls-proxy: CF Worker أولاً، VPS fallback عند الفشل ──────────────────────
+router.get("/anime/hls-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   let ref      = (req.query.ref as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
@@ -10982,13 +11112,18 @@ router.get("/anime/hls-proxy", (req, res) => {
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
+
   const cfBase = process.env.CF_WORKER_URL;
-  if (!cfBase) { res.status(503).send("CF_WORKER_URL not configured"); return; }
-  const token = encryptCfToken(url, ref || url);
-  if (!token) { res.status(500).send("token generation failed"); return; }
-  res.redirect(307, `${cfBase}?t=${token}`);
+  if (cfBase && await cfWorkerHealthy()) {
+    const token = encryptCfToken(url, ref || url);
+    if (token) { res.redirect(307, `${cfBase}?t=${token}`); return; }
+  }
+  // Fallback: VPS يجلب M3U8 ويُعيد كتابة الـ segments عبر seg-proxy
+  console.log(`[hls-proxy] CF Worker غير متاح — fallback VPS لـ ${url.slice(0, 80)}`);
+  await serveHlsVPS(url, ref, res);
 });
 
+// ── video-proxy: CF Worker أولاً، VPS fallback عند الفشل ────────────────────
 router.get("/anime/video-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   let ref      = (req.query.ref as string || "").trim();
@@ -10999,18 +11134,20 @@ router.get("/anime/video-proxy", async (req, res) => {
   if (ref && isEncrypted(ref)) ref = decryptParam(ref);
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* 307 redirect: جميع المنصات (ويب + موبايل) تمر دائماً عبر CF Worker — لا يوجد أي
-     مسار مباشر للـ CDN مهما كان المصدر. إن لم يكن CF Worker مضبوطاً أو فشل توليد
-     التوكن: نرفض الطلب (503) بدلاً من الرجوع لرابط مباشر. */
-  const cfBase = process.env.CF_WORKER_URL;
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  if (!cfBase) { res.status(503).send("CF_WORKER_URL not configured"); return; }
-  const token = encryptCfToken(url, ref || url);
-  if (!token) { res.status(500).send("token generation failed"); return; }
-  res.redirect(307, `${cfBase}?t=${token}`);
+
+  const cfBase = process.env.CF_WORKER_URL;
+  if (cfBase && await cfWorkerHealthy()) {
+    const token = encryptCfToken(url, ref || url);
+    if (token) { res.redirect(307, `${cfBase}?t=${token}`); return; }
+  }
+  // Fallback: VPS يبث الفيديو مباشرةً مع Referer الصحيح
+  console.log(`[video-proxy] CF Worker غير متاح — fallback VPS لـ ${url.slice(0, 80)}`);
+  await serveMediaVPS(url, ref, req, res);
 });
 
+// ── seg-proxy: CF Worker أولاً، VPS fallback عند الفشل ──────────────────────
 router.get("/anime/seg-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
@@ -11019,20 +11156,21 @@ router.get("/anime/seg-proxy", async (req, res) => {
   if (isEncrypted(url)) url = decryptParam(url);
   if (!url.startsWith("http")) { res.status(400).send("invalid url"); return; }
 
-  /* 307 redirect عبر CF Worker دائماً — لا يوجد أي مسار مباشر للـ CDN.
-     ref: origin URL للـ CDN (لتمرير Referer صحيح للـ Worker).
-     إن لم يكن CF Worker مضبوطاً أو فشل توليد التوكن: نرفض الطلب (503). */
-  const segRef = (req.query.ref as string || "").trim();
-  let segRefDecoded = segRef;
-  try { if (segRef) segRefDecoded = decodeURIComponent(segRef); } catch {}
-  const segOrigin = (() => { try { return new URL(segRefDecoded || url).origin; } catch { return ""; } })();
-  const segCfBase = process.env.CF_WORKER_URL;
+  let ref = (req.query.ref as string || "").trim();
+  try { if (ref) ref = decodeURIComponent(ref); } catch {}
+  if (ref && isEncrypted(ref)) ref = decryptParam(ref);
+
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  if (!segCfBase) { res.status(503).send("CF_WORKER_URL not configured"); return; }
-  const token = encryptCfToken(url, segOrigin || url);
-  if (!token) { res.status(500).send("token generation failed"); return; }
-  res.redirect(307, `${segCfBase}?t=${token}`);
+
+  const cfBase = process.env.CF_WORKER_URL;
+  if (cfBase && await cfWorkerHealthy()) {
+    const origin = (() => { try { return new URL(ref || url).origin; } catch { return ""; } })();
+    const token = encryptCfToken(url, origin || url);
+    if (token) { res.redirect(307, `${cfBase}?t=${token}`); return; }
+  }
+  // Fallback: VPS يجلب الـ segment مباشرةً من CDN مع Referer الصحيح
+  await serveMediaVPS(url, ref, req, res);
 });
 
 // ══════════════════════════════════════════════════════════════════
