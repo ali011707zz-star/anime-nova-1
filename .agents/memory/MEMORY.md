@@ -24,3 +24,7 @@
 - [Nova Mobile themes fix](mobile-themes-fix.md) — useColors() reads AppContext theme now; 5 palettes in colors.ts; needs EAS rebuild for users.
 - [HLS CF Worker routing](hls-cf-worker-routing.md) — hls-proxy is now pure 307 redirect; CF Worker fetches manifest + rewrites segment URLs to go through itself; zero VPS video bandwidth.
 - [Animation mobile playback](animation-mobile-playback.md) — شاشة سوداء صامتة: garbage Referer في sendSource + Dulo raw fallback بلا Referer + no onError handler + CF Worker لا يكتشف M3U8 بـ #EXTM3U content sniff.
+
+- [EgyBest scraper](egybest-scraper.md) — egytbest.live WP-JSON+data-embed-url; hgcloud/stmruby via parseStreamwish; no CF proxy needed.
+- [WeCima domain 2026-07](wecima-domain-2026-07.md) — mycima.gripe→wecima.gold; data-watch+mycimafsd unchanged; fastvip.space/cdn-centaurus.com.
+- [EgyDead domain rotation](egydead-domain.md) — tv9→tv10.egydead.live; VPS+Replit CF-blocked; scraper silently fails.

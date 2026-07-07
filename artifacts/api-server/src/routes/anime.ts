@@ -1103,7 +1103,10 @@ async function extractVideoDeep(
           url.includes("fastvip.space") || url.includes("streamup.ws") ||
           url.includes("mxdrop.to") || url.includes("vidtube.one") ||
           url.includes("mp4plus.cyou") || url.includes("vidoba.cyou") ||
-          url.includes("vidspeed.cyou") || url.includes("anafast.cyou")) {
+          url.includes("vidspeed.cyou") || url.includes("anafast.cyou") ||
+          url.includes("hgcloud.to") || url.includes("stmruby.com") ||
+          url.includes("bysekoze.com") || url.includes("vidaraa.cc") ||
+          url.includes("playmogo.com") || url.includes("mixdrop.top")) {
         const v = parseStreamwish(html); if (v) return v;
       }
       if (url.includes("share4max.com/iframe/") || url.includes("megamax.me/iframe/")) {
@@ -3902,7 +3905,7 @@ async function getAnime4up2Sources(
 //  ماي سيما: أنمي مترجم + أفلام + كرتون مدبلج
 //  Approach: WP-JSON search → episode post → data-watch servers → extractVideoDeep
 // ════════════════════════════════════════════════════════════════════
-const MYCIMA_BASE = "https://mycima.gripe";
+const MYCIMA_BASE = "https://wecima.gold";
 
 const mycimaSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
@@ -4046,6 +4049,107 @@ async function getMyCimaSources(
   }
 
   return cache(sources);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  EgyBest scraper (egytbest.live — WordPress WP-JSON + data-embed-url)
+//  أفلام + مسلسلات + أنمي عربي مترجم
+//  Flow: WP-JSON search → episode post page → data-embed-url servers (hgcloud, fastvip, voe, mixdrop…)
+//  NOTE: WP-JSON يعمل مباشرة بدون CF proxy — الموقع لا يحجب Replit/VPS IPs
+// ════════════════════════════════════════════════════════════════════
+const EGYBEST_BASE = "https://egytbest.live";
+const egyBestSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getEgyBestSources(
+  title: string, english: string | null, ep: number, isMovie = false,
+): Promise<UnifiedSource[]> {
+  const ck = `egybest:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${isMovie}`;
+  const hit = egyBestSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+  const cache = (s: UnifiedSource[]) => { egyBestSrcCache.set(ck, { sources: s, ts: Date.now() }); return s; };
+
+  const epStr = String(ep);
+  const mainTitle = english || title;
+
+  let postUrl: string | null = null;
+
+  // ── الخطوة 1: البحث عبر WP-JSON مباشرة (لا يحتاج CF proxy) ─────────────
+  const searchTerms = isMovie
+    ? [mainTitle]
+    : [`${mainTitle} ${epStr}`, mainTitle];
+
+  for (const term of searchTerms) {
+    const apiUrl = `${EGYBEST_BASE}/wp-json/wp/v2/posts?search=${encodeURIComponent(term)}&per_page=10&_fields=id,link,title`;
+    try {
+      const resp = await fetch(apiUrl, {
+        headers: { "User-Agent": BROWSER_UA },
+        signal: AbortSignal.timeout(14_000),
+      });
+      if (!resp.ok) continue;
+      const posts = await resp.json() as Array<{ id: number; link: string; title: { rendered: string } }>;
+      if (!Array.isArray(posts) || !posts.length) continue;
+
+      for (const post of posts) {
+        const pTitle = post.title?.rendered ?? "";
+        if (!isMovie) {
+          // مطابقة رقم الحلقة بالعربي أو الإنجليزي في عنوان البوست
+          const epMatch =
+            new RegExp(`الحلق[ةه][-\\s]*0*${epStr}(?:[^\\d]|$)`).test(pTitle) ||
+            new RegExp(`ep[-\\s]*0*${epStr}(?:[^\\d]|$)`, "i").test(pTitle);
+          const simMatch = Math.max(similarity(mainTitle, pTitle), asciiSimilarity(mainTitle, pTitle)) > 0.25;
+          if (epMatch && simMatch) { postUrl = post.link; break; }
+        } else {
+          if (Math.max(similarity(mainTitle, pTitle), asciiSimilarity(mainTitle, pTitle)) > 0.35) { postUrl = post.link; break; }
+        }
+      }
+      if (postUrl) break;
+    } catch { /* جرب العبارة التالية */ }
+  }
+
+  if (!postUrl) return cache([]);
+
+  // ── الخطوة 2: جلب صفحة الحلقة/الفيلم واستخراج data-embed-url ────────────
+  try {
+    const r = await fetch(postUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: `${EGYBEST_BASE}/` },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!r.ok) return cache([]);
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return cache([]);
+
+    const sources: UnifiedSource[] = [];
+    const seen = new Set<string>();
+
+    // كل سيرفر يظهر كـ data-embed-url داخل أزرار اختيار السيرفر
+    for (const m of html.matchAll(/data-embed-url=["'](https?:\/\/[^"']+)["']/g)) {
+      const url = m[1];
+      if (seen.has(url)) continue;
+      seen.add(url);
+      // اسم السيرفر من دومين رابط الـ embed
+      let serverName = "سيرفر";
+      try {
+        serverName = new URL(url).hostname.replace(/^www\./, "").split(".")[0];
+        // تحسين أسماء الأسماء المعروفة
+        if (serverName === "hgcloud")    serverName = "StreamHG";
+        else if (serverName === "fastvip") serverName = "FastVIP";
+        else if (serverName === "voe")     serverName = "VOE";
+        else if (serverName === "mixdrop") serverName = "MixDrop";
+        else if (serverName === "stmruby") serverName = "StmRuby";
+        else if (serverName === "bysekoze") serverName = "BySekoze";
+        else if (serverName === "vidaraa") serverName = "Vidaraa";
+        else if (serverName === "playmogo") serverName = "PlayMogo";
+      } catch { /* use default */ }
+
+      sources.push({
+        name: `EgyBest · ${serverName}`,
+        url, quality: "HD", qualityRank: 9, site: "egybest",
+      });
+    }
+    return cache(sources);
+  } catch {
+    return cache([]);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -8806,6 +8910,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep, isMovie)),
       scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep),   true, 22000),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
+      scrapeCached("egybest",      () => getEgyBestSources(title, english, ep, isMovie)),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep, isMovie, matchCtx)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
@@ -8963,6 +9068,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "arabseed":     await runExtract(await race(getArabSeedSources(title, english, ep),   SCRAPER_MS, [])); break;
       case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  25000, [])); break;
       case "mycima":       await runExtract(await race(getMyCimaSources(title, english, ep, isMovie), 30000, [])); break;
+      case "egybest":      await runExtract(await race(getEgyBestSources(title, english, ep, isMovie), 30000, [])); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;

@@ -3186,7 +3186,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const u = src.directUrl || src.url;
             if (!u) continue;
             const proxied = u.startsWith("/api/") ? u
-              : u.includes(".m3u8") ? wrapHls(u, "https://mycima.gripe/")
+              : u.includes(".m3u8") ? wrapHls(u, "https://wecima.gold/")
               : u;
             sendSource(proxied, `MyCima · ${src.name || "Arabic Dubbed"}`, proxied, proxied);
           }
@@ -3229,6 +3229,38 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // Animeify (animeify.net) → موقع أنمي ياباني بالعربية — ليس أنيميشن غربي → مُعطَّل من قسم الأنيميشن
       // (متاح في قسم الأنمي عبر /api/anime/fetch-source?site=animeify)
       Promise.resolve(),
+
+      // ── EgyBest (egytbest.live) — أفلام + مسلسلات + أنيميشن عربي مترجم ─────────
+      // الاستراتيجية: WP-JSON بحث مباشر (لا يحتاج proxy) → data-embed-url servers
+      // يستخدم نفس scraper الأنمي (getEgyBestSources) عبر internal API
+      scrapeAnimCached("egybest_anim", async () => {
+        const q = enTitlePrefetched || title;
+        if (!q) return;
+        try {
+          send("status", { msg: "EgyBest: جاري البحث…" });
+          const PORT    = process.env["PORT"] || "5000";
+          const ep      = type === "movie" ? 1 : epNum;
+          const isMovie = type === "movie" ? "true" : "false";
+          const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=egybest`
+            + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMovie}`;
+          const r = await fetch(fsUrl, {
+            headers: { "x-internal": "1" },
+            signal: AbortSignal.timeout(28_000),
+          });
+          if (!r.ok) return;
+          const { sources } = await r.json() as {
+            sources?: Array<{ directUrl?: string; url?: string; name?: string; qualityRank?: number }>;
+          };
+          for (const src of sources || []) {
+            const u = src.directUrl || src.url;
+            if (!u) continue;
+            const proxied = u.startsWith("/api/") ? u
+              : u.includes(".m3u8") ? wrapHls(u, "https://egytbest.live/")
+              : u;
+            sendSource(proxied, `EgyBest · ${src.name || "Arabic"}`, proxied, proxied);
+          }
+        } catch { /* silent */ }
+      }),
 
       // ── FaselHD (www.fasel-hd.cam) — أنمي ومسلسلات مترجمة عربي ─────────────────
       // الاستراتيجية: GitHub pre-scraped JSON → slug → صفحة الحلقة مباشرة (غير محجوبة بـ CF)
@@ -3425,7 +3457,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // القيد: روابط السيرفرات (data-link) محملة عبر JS فقط — لا توجد في HTML الثابت
       // المحاولة: استخراج أي iframe/رابط src/data-link مباشرة من الـ HTML
       scrapeAnimCached("egydead", async () => {
-        const ED_BASE = "https://tv9.egydead.live";
+        const ED_BASE = "https://tv10.egydead.live";
         send("status", { msg: "EgyDead: جاري البحث…" });
         try {
           // الخطوة 1: البحث عن الحلقة (صفحات الحلقات مرتبة بالرابط /episode/{slug}-e{N}/)
