@@ -3909,11 +3909,12 @@ const MYCIMA_BASE = "https://wecima.gold";
 
 const mycimaSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-/** Decode MyCima's custom player wrappers (mycima-my.com?mycimafsd=BASE64, mycima.cx/?wplvp=BASE64) */
+/** Decode MyCima's custom player wrappers (mycima-my.com?mycimafsd=BASE64, mycima.cx/?wplvp=BASE64, ?my_player=BASE64) */
 function decodeMyCimaWrap(url: string): string {
   try {
     const u = new URL(url);
-    const b64 = u.searchParams.get("mycimafsd") ?? u.searchParams.get("wplvp");
+    // my_player=VALUE: WeCima movie player token (used in /افلام/ pages instead of mycimafsd)
+    const b64 = u.searchParams.get("mycimafsd") ?? u.searchParams.get("wplvp") ?? u.searchParams.get("my_player");
     if (b64) {
       const decoded = Buffer.from(b64, "base64").toString("utf-8");
       if (decoded.startsWith("http")) return decoded;
@@ -8558,8 +8559,17 @@ async function getFaselhdDbSources(
     const best = scored[0];
     console.log(`[FaselhdDB] best match: "${best.name}" (score ${best._sc.toFixed(2)}) → ${best.link}`);
 
-    // 4. Fetch series/movie page via CF proxy (curl_cffi chrome136 — fasel-hd.cam is accessible)
-    const pageHtml = await cfProxyGet(best.link, `${FASELHD_DB_BASE}/`, 22_000);
+    // 4. Fetch series/movie page — cfProxy أولاً، ثم direct fetch كـ fallback (fasel-hd.cam مفتوح من VPS)
+    let pageHtml = await cfProxyGet(best.link, `${FASELHD_DB_BASE}/`, 22_000);
+    if (!pageHtml || pageHtml.length < 1000) {
+      try {
+        const dr = await fetch(best.link, {
+          headers: { "User-Agent": UA, "Referer": FASELHD_DB_BASE + "/" },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (dr.ok) pageHtml = await dr.text();
+      } catch { /* silent */ }
+    }
     if (!pageHtml || pageHtml.length < 1000) return out;
     if (pageHtml.includes("Just a moment") || pageHtml.includes("cf-browser-verification")) return out;
 
@@ -8589,8 +8599,17 @@ async function getFaselhdDbSources(
         return out;
       }
 
-      // 5b. Fetch episode page via CF proxy
+      // 5b. Fetch episode page — cfProxy أولاً، ثم direct fetch
       epHtml = await cfProxyGet(target.url, best.link, 22_000);
+      if (!epHtml || epHtml.length < 1000) {
+        try {
+          const er = await fetch(target.url, {
+            headers: { "User-Agent": UA, "Referer": best.link },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (er.ok) epHtml = await er.text();
+        } catch { /* silent */ }
+      }
       if (!epHtml || epHtml.length < 1000) return out;
     }
 
@@ -8695,6 +8714,94 @@ async function getFaselhdDbSources(
 setImmediate(() => {
   faselhdDbFetchSection("anime").catch(() => {});
 });
+
+// ════════════════════════════════════════════════════════════════════
+//  ANI.PM — أفضل مصدر ياباني جديد (37 مصدر/حلقة، HLS + MP4 + VTT)
+//  يعمل مباشرةً من VPS وReplit بدون proxy
+//  API: GET https://ani.pm/api/anime/src/servers?title=...&ep=...&anilistId=...
+//  HLS: /api/anime/src/hls?t=TOKEN  |  VTT: /api/anime/src/vtt?t=TOKEN
+// ════════════════════════════════════════════════════════════════════
+const ANI_PM_BASE = "https://ani.pm";
+const aniPmCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const ANI_PM_TTL = 6 * 3_600_000;
+
+async function getAniPmSources(
+  title: string, english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  const ck = `anipm:${(english || title).toLowerCase()}:${ep}:${anilistId ?? ""}`;
+  const hit = aniPmCache.get(ck);
+  if (hit && Date.now() - hit.ts < ANI_PM_TTL) return hit.sources;
+
+  const out: UnifiedSource[] = [];
+  try {
+    const params = new URLSearchParams({ title: english || title, ep: String(ep) });
+    if (anilistId) params.set("anilistId", String(anilistId));
+
+    const r = await fetch(`${ANI_PM_BASE}/api/anime/src/servers?${params}`, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        "Referer": ANI_PM_BASE + "/",
+        "Accept": "application/json",
+      },
+      signal: AbortSignal.timeout(14_000),
+    });
+    if (!r.ok) return out;
+    const raw = await r.json();
+    if (!raw || typeof raw !== "object") return out;
+    const data = raw as {
+      sources?: Array<{
+        url?: string; server?: string; quality?: string; label?: string; type?: string;
+        subType?: string; // "sub" | "dub"
+      }>;
+      subtitles?: Array<{ url?: string; label?: string; language?: string }>;
+    };
+    if (!Array.isArray(data.sources)) return out;
+
+    // ابحث عن ترجمة إنجليزية → لاحقاً تُترجم للعربية
+    const subs = data.subtitles || [];
+    const enSub = subs.find(s =>
+      (s.label || "").toLowerCase().includes("engl") ||
+      (s.language || "").toLowerCase() === "en" ||
+      (s.label || "").toLowerCase() === "english"
+    );
+    let subtitleUrl: string | undefined;
+    if (enSub?.url) {
+      const absSubUrl = enSub.url.startsWith("http") ? enSub.url : `${ANI_PM_BASE}${enSub.url}`;
+      subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(absSubUrl)}&from=en&to=ar`;
+    }
+
+    for (const src of (data.sources || [])) {
+      if (!src.url) continue;
+      const absUrl = src.url.startsWith("http") ? src.url : `${ANI_PM_BASE}${src.url}`;
+      const isHls = absUrl.includes(".m3u8") || src.type === "hls" || src.url.includes("/hls");
+      const isDub = (src.subType || src.label || "").toLowerCase().includes("dub");
+      const serverName = src.server || (isDub ? "Dub" : "Sub");
+      const label = `AniPm · ${serverName}`;
+
+      const directUrl = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ANI_PM_BASE + "/")}`
+        : absUrl;
+
+      out.push({
+        name: label,
+        url:  absUrl,
+        quality:     src.quality || "HD",
+        qualityRank: 11,
+        site:        "anipm",
+        directUrl,
+        directType:  isHls ? "hls" : "mp4",
+        subtitleUrl: isDub ? undefined : subtitleUrl,
+        corsOk:      false,
+      });
+    }
+
+    console.log(`[AniPm] "${english || title}" ep${ep} → ${out.length} sources`);
+    aniPmCache.set(ck, { sources: out, ts: Date.now() });
+  } catch (e: any) {
+    console.warn("[AniPm]", e?.message);
+  }
+  return out;
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
@@ -8924,6 +9031,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animex: محذوف
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
+      scrapeCached("anipm",        () => getAniPmSources(title, english, ep, anilistId),        false, 20000),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 28000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
@@ -9079,6 +9187,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),28000, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       // ── TMDB-native (StarCima محذوف من الأنمي — مصادر إنجليزية) ─────────────────────
