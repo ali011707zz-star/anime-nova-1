@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, createHash, createDecipheriv } from "node:crypto";
-import { encryptParam, encryptProxyUrl } from "../lib/security.js";
+import { encryptParam, encryptProxyUrl, isEncrypted } from "../lib/security.js";
 import {
   makeAnimCacheKey,
   getFromSourceCache,
@@ -1770,14 +1770,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     sourceCount++;
 
     /* استخراج Referer/Origin من رابط الـ proxyUrl (ref= param) وتضمينهم في الاستجابة.
-       ExoPlayer/AVPlayer يُرسلهم مع segments وredirects مباشرةً للـ CDN. */
+       ExoPlayer/AVPlayer يُرسلهم مع segments وredirects مباشرةً للـ CDN.
+       ملاحظة: نتجاهل الـ ref المشفَّر (encryptParam) — hls-proxy يفكّ التشفير داخلياً
+       ونُرسل الـ headers فقط للروابط الخام (encodeURIComponent أو plain URLs) */
     let headers: Record<string, string> | undefined;
     const proxyLookup = proxyUrl || directUrl;
     if (proxyLookup) {
       try {
         const pu = new URL(proxyLookup.startsWith("/") ? `http://x.com${proxyLookup}` : proxyLookup);
         const ref = pu.searchParams.get("ref");
-        if (ref) {
+        /* تجاهل ref المشفَّر بـ encryptParam (hex خالص) — إرسال headers فقط للقيم الواضحة */
+        if (ref && !isEncrypted(ref)) {
           let origin = "";
           try { origin = new URL(ref).origin; } catch {}
           headers = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
@@ -3103,18 +3106,26 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 // Probe CDN — some CDNs block datacenter IPs (403) → send raw URL for direct mobile access
                 let finalUrl = proxied;
                 let finalRaw = src.url;
+                let useRawFallback = false;
                 try {
                   const probe = await fetch(`http://127.0.0.1:${DULO_PROBE_PORT}${proxied}`, {
-                    signal: AbortSignal.timeout(5_000),
+                    signal: AbortSignal.timeout(6_000),
                   });
                   if (!probe.ok && probe.status !== 206) {
-                    // CDN blocks server IP → raw URL for mobile to fetch directly
+                    // CDN blocks server IP → raw URL for direct client access
                     finalUrl = src.url;
+                    useRawFallback = true;
                   }
                 } catch {
                   finalUrl = src.url;
+                  useRawFallback = true;
                 }
-                sendSource(finalUrl, label, finalRaw, finalUrl);
+                /* للروابط الخام (بدون proxy): أرسل Referer/Origin الصحيح حتى يُرسله ExoPlayer
+                   مباشرةً للـ CDN (لأنه لا يمر عبر CF Worker في هذه الحالة) */
+                const duloExtra = useRawFallback
+                  ? { headers: { Referer: `${DULO_TV_BASE}/`, Origin: DULO_TV_BASE } }
+                  : undefined;
+                sendSource(finalUrl, label, finalRaw, finalUrl, duloExtra);
               }
             } catch (err: any) { console.warn(`[dulo_anim] ${prov} error: ${err?.message}`); }
           }));

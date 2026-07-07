@@ -586,6 +586,7 @@ export function RiftPlayer({
       else if (e.status === "readyToPlay") {
         setBuffering(false);
         setError(false);
+        console.log(`[RiftPlayer] ✅ readyToPlay: ${sources[srcIdx]?.label || "?"} → ${sources[srcIdx]?.url?.slice(0, 100)}`);
         /* ── Restore position on readyToPlay (server-switch or initial resume) ──
            Doing this here (not in the polling timer) ensures we only seek AFTER
            the new stream is actually buffered, preventing conflicts with loading. */
@@ -599,7 +600,12 @@ export function RiftPlayer({
         }
         try { player.play(); } catch {}
       }
-      else if (e.status === "error") { setError(true); setBuffering(false); }
+      else if (e.status === "error") {
+        setError(true);
+        setBuffering(false);
+        /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
+        console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
+      }
     });
     return () => { sub1.remove(); sub2.remove(); };
   }, [player, initialPosition]); // eslint-disable-line
