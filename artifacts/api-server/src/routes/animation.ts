@@ -1928,8 +1928,31 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
 
-      // ── 11. vidsrc.xyz + vidsrc.me → DISABLED (DNS failure from Replit datacenter) ─
-      Promise.resolve(),
+      // ── 11. vidsrc.to → VPS-only (Replit IP مُعاق، VPS يعمل) ───────────────
+      // يُرجع embed iframe لـ vsembed.ru الذي يُشغّل cloudorchestranova.com
+      scrapeAnimCached("vidsrc_to", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "VidSrc.to…" });
+          const embedUrl = type === "tv"
+            ? `https://vidsrc.to/embed/tv/${tmdbId}/${season}-${epNum}`
+            : `https://vidsrc.to/embed/movie/${tmdbId}`;
+          const r = await fetch(embedUrl, {
+            headers: { "User-Agent": UA, "Referer": "https://vidsrc.to/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!r.ok) return;
+          const html = await r.text();
+          if (!html || html.length < 200) return;
+          // Extract vsembed.ru iframe — the actual video player
+          // Accept single/double quotes, protocol-relative URLs, and data-src
+          const ifrMatch = html.match(/<iframe[^>]+(?:src|data-src)\s*=\s*["']((?:https?:)?\/\/vsembed\.ru\/[^"']+)["']/i);
+          if (!ifrMatch?.[1]) return;
+          // Normalise protocol-relative URLs to https
+          const vsEmbedUrl = ifrMatch[1].startsWith("//") ? `https:${ifrMatch[1]}` : ifrMatch[1];
+          await sendExtracted(vsEmbedUrl, "VidSrc.to");
+        } catch { /* silent */ }
+      }),
 
       // ── 12. vidsrc.pro → DISABLED (redirects to embed.su, already handled below) ─
       Promise.resolve(),

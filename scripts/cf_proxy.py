@@ -28,7 +28,8 @@ CF_PROXY_KEY = os.environ.get("CF_PROXY_KEY", "")
 # edge136 غير مدعوم — تمت إزالته
 CURL_IMPERSONATES = [
     "chrome136", "chrome131", "chrome130", "chrome124",
-    "edge131", "safari18_0", "firefox133",
+    "safari18_0", "firefox133",
+    # edge131 مُزال — تسبب في: "Impersonating edge131 is not supported"
 ]
 
 # ── بصمات primp ──────────────────────────────────────────────────────────────
@@ -48,7 +49,8 @@ PRIMP_IMPERSONATES = [
 # الإصدار يُحدد بدقة من اسم البصمة
 _IMP_TO_CHROME_VER = {
     "chrome136": "136", "chrome131": "131", "chrome130": "130", "chrome124": "124",
-    "edge131": "131", "edge_148": "148", "edge_147": "147",
+    # edge131 مُزال من CURL_IMPERSONATES — نُبقيه هنا فقط للـ primp edge variants
+    "edge_148": "148", "edge_147": "147",
     "chrome_148": "148", "chrome_147": "147", "chrome_146": "146",
     "chrome_145": "145",
 }
