@@ -13,7 +13,7 @@ import {
   setSubtitleCache,
 } from "../lib/sourceCache.js";
 import { notifyNewEpisode } from "./telegram.js";
-import { encryptProxyUrl, encryptParam, encryptCfToken, decryptParam, isEncrypted } from "../lib/security.js";
+import { encryptProxyUrl, encryptParam, decryptParam, isEncrypted } from "../lib/security.js";
 import { sbSelect, sbUpsert } from "../lib/supabaseClient.js";
 import pg from "pg";
 // Pool مباشر لـ translations_cache + anime_meta_ar (بدون Supabase REST)
@@ -10944,16 +10944,9 @@ function rewriteM3u8(
 
   const toProxy = (raw: string): string => {
     const absUrl = toAbsolute(raw);
-    /* جميع المنصات (ويب + موبايل): كل الـ segments تمر عبر CF Worker دائماً.
-       CF Worker يُضيف Referer/Origin → يحلّ 403 من CDN بدون استهلاك bandwidth على VPS. */
-    const cfBase = process.env.CF_WORKER_URL;
-    if (cfBase) {
-      const token = encryptCfToken(absUrl, ref);
-      if (!token) return absUrl; // fail-closed: CF_PROXY_KEY غير مضبوط — fallback مباشر
-      return `${cfBase}?t=${token}`;
-    }
-    /* إذا لم يكن CF Worker مضبوطاً: fallback للرابط المباشر */
-    return absUrl;
+    if (directSegs) return absUrl; // موبايل: CDN مباشرة بدون CORS
+    // ويب: عبر VPS seg-proxy (يُضيف Referer ويحلّ CORS)
+    return toVpsSegProxy(absUrl, ref);
   };
 
   return manifest.split("\n").map(line => {
@@ -10967,22 +10960,7 @@ function rewriteM3u8(
   }).join("\n");
 }
 
-// ── CF Worker health cache — فحص خلفي كل 45 ثانية (لا يُضيف latency للطلبات) ──
-// ok=false حتى يثبت الفحص الأول أن CF Worker يعمل (fail-safe: VPS fallback دائماً حتى التحقق)
-const _cfh = { ok: false, ts: 0, busy: false };
-async function cfWorkerHealthy(): Promise<boolean> {
-  const cfBase = process.env.CF_WORKER_URL;
-  if (!cfBase || !process.env.CF_PROXY_KEY) return false;
-  if (Date.now() - _cfh.ts < 45_000) return _cfh.ok;
-  if (!_cfh.busy) {
-    _cfh.busy = true;
-    fetch(cfBase, { method: "OPTIONS", signal: AbortSignal.timeout(4000) })
-      .then(r => { _cfh.ok = r.status === 200; })
-      .catch(() => { _cfh.ok = false; })
-      .finally(() => { _cfh.ts = Date.now(); _cfh.busy = false; });
-  }
-  return _cfh.ok; // القيمة المُخزَّنة بينما الفحص يجري في الخلفية
-}
+// CF Worker أُزيل — جميع الطلبات تمر عبر VPS مباشرة
 
 // ── تحويل URL نسبي → مطلق ────────────────────────────────────────────────────
 function toAbsoluteUrl(raw: string, base: string): string {
@@ -11099,7 +11077,7 @@ async function serveMediaVPS(
   }
 }
 
-// ── hls-proxy: CF Worker أولاً، VPS fallback عند الفشل ──────────────────────
+// ── hls-proxy: VPS يجلب M3U8 ويُعيد كتابة الـ segments عبر seg-proxy ──────────
 router.get("/anime/hls-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   let ref      = (req.query.ref as string || "").trim();
@@ -11113,17 +11091,10 @@ router.get("/anime/hls-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
 
-  const cfBase = process.env.CF_WORKER_URL;
-  if (cfBase && await cfWorkerHealthy()) {
-    const token = encryptCfToken(url, ref || url);
-    if (token) { res.redirect(307, `${cfBase}?t=${token}`); return; }
-  }
-  // Fallback: VPS يجلب M3U8 ويُعيد كتابة الـ segments عبر seg-proxy
-  console.log(`[hls-proxy] CF Worker غير متاح — fallback VPS لـ ${url.slice(0, 80)}`);
   await serveHlsVPS(url, ref, res);
 });
 
-// ── video-proxy: CF Worker أولاً، VPS fallback عند الفشل ────────────────────
+// ── video-proxy: VPS يبث الفيديو مع Referer الصحيح ─────────────────────────
 router.get("/anime/video-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   let ref      = (req.query.ref as string || "").trim();
@@ -11137,17 +11108,10 @@ router.get("/anime/video-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
 
-  const cfBase = process.env.CF_WORKER_URL;
-  if (cfBase && await cfWorkerHealthy()) {
-    const token = encryptCfToken(url, ref || url);
-    if (token) { res.redirect(307, `${cfBase}?t=${token}`); return; }
-  }
-  // Fallback: VPS يبث الفيديو مباشرةً مع Referer الصحيح
-  console.log(`[video-proxy] CF Worker غير متاح — fallback VPS لـ ${url.slice(0, 80)}`);
   await serveMediaVPS(url, ref, req, res);
 });
 
-// ── seg-proxy: CF Worker أولاً، VPS fallback عند الفشل ──────────────────────
+// ── seg-proxy: VPS يجلب الـ segment مع Referer الصحيح ───────────────────────
 router.get("/anime/seg-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
@@ -11163,13 +11127,6 @@ router.get("/anime/seg-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
 
-  const cfBase = process.env.CF_WORKER_URL;
-  if (cfBase && await cfWorkerHealthy()) {
-    const origin = (() => { try { return new URL(ref || url).origin; } catch { return ""; } })();
-    const token = encryptCfToken(url, origin || url);
-    if (token) { res.redirect(307, `${cfBase}?t=${token}`); return; }
-  }
-  // Fallback: VPS يجلب الـ segment مباشرةً من CDN مع Referer الصحيح
   await serveMediaVPS(url, ref, req, res);
 });
 
