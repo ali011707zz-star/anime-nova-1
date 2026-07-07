@@ -177,6 +177,42 @@ def stream_url():
     )
 
 
+# ── /chain-fetch : جلب صفحتين بنفس الجلسة (session persistence للـ cookies) ──────────
+# يُستخدم لـ FaselHD: الـ player_token مرتبط بـ session كوكيز من صفحة الحلقة
+# url1 = رابط صفحة الحلقة (يُنشئ الكوكيز)، url2 = رابط video_player (يحتاج نفس الكوكيز)
+@app.route("/chain-fetch", methods=["GET"])
+def chain_fetch():
+    url1 = request.args.get("url1", "").strip()
+    url2 = request.args.get("url2", "").strip()
+    ref1 = request.args.get("ref1", "").strip() or None
+    timeout = int(request.args.get("timeout", "18"))
+
+    if not url1 or not url2:
+        return {"error": "url1 and url2 params required"}, 400
+
+    hdrs1 = dict(DEFAULT_HEADERS)
+    if ref1:
+        hdrs1["Referer"] = urllib.parse.quote(ref1, safe="/:@?#&=+,;!()*~%._-")
+
+    try:
+        sess = cf.Session(impersonate=IMPERSONATE)
+        # الطلب 1: جلب صفحة الحلقة لتأسيس الكوكيز
+        r1 = sess.get(url1, headers=hdrs1, timeout=timeout, allow_redirects=True, verify=False)
+        # الطلب 2: جلب صفحة الـ player بنفس الجلسة (يحمل الكوكيز تلقائياً)
+        hdrs2 = dict(DEFAULT_HEADERS)
+        hdrs2["Referer"] = url1
+        r2 = sess.get(url2, headers=hdrs2, timeout=timeout, allow_redirects=True, verify=False)
+        body2 = r2.text.encode("utf-8", errors="replace")
+        return Response(body2, status=r2.status_code, headers={
+            "Content-Type": "text/html; charset=utf-8",
+            "X-Chain-Size1": str(len(r1.text)),
+            "X-Chain-Size2": str(len(r2.text)),
+            "X-Chain-Status1": str(r1.status_code),
+        })
+    except Exception as e:
+        return {"error": str(e)}, 502
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("CF_PROXY_PORT", 8082))
     print(f"[cf-proxy] Starting on port {port} with impersonate={IMPERSONATE}", flush=True)
