@@ -186,7 +186,28 @@ router.get("/dubbed/watch-src", async (req, res) => {
   }
 
   try {
-    const html = await cfGet(epUrl, AT_BASE + "/", 18000);
+    // ── جلب صفحة الحلقة — نجرب direct fetch أولاً (أسرع وأكثر موثوقية لـ arabic-toons)
+    // ثم cfGet كـ fallback إن فشل الطلب المباشر
+    let html: string | null = null;
+    try {
+      const directR = await fetch(epUrl, {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          Referer: AT_BASE + "/",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+          "Accept-Encoding": "gzip, deflate, br",
+          "Cache-Control": "no-cache",
+        },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (directR.ok) {
+        const t = await directR.text();
+        if (t.length > 500 && !isCfBlock(t)) html = t;
+      }
+    } catch { /* fall through */ }
+
+    if (!html) html = await cfGet(epUrl, AT_BASE + "/", 18000);
     if (!html) { res.status(502).json({ error: "failed to fetch episode page" }); return; }
 
     // Helper: build proxied URL + return rawUrl for mobile clients.
@@ -203,8 +224,9 @@ router.get("/dubbed/watch-src", async (req, res) => {
       return { hlsUrl: proxied, rawUrl, type: "mp4" };
     }
 
-    // Pattern 1: const videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."  (main pattern)
-    const videoSrcMatch = html.match(/const\s+videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/);
+    // Pattern 1: videoSrc = "https://stream.foupix.com:8443/...mp4?tkn=..."  (main pattern)
+    // arabic-toons uses: videoSrc = "URL"+ "&_=" + Date.now()  — بدون كلمة const
+    const videoSrcMatch = html.match(/(?:const\s+)?videoSrc\s*=\s*["']([^"']+(?:\.mp4|\.m3u8)[^"']*)["']/);
     if (videoSrcMatch) {
       const rawUrl = videoSrcMatch[1].split('"')[0].split("'")[0]; // strip any trailing quote
       const isHls = rawUrl.includes(".m3u8");
