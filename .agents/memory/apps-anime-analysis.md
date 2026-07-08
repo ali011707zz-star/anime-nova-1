@@ -110,7 +110,7 @@ https://.*\.workers\.dev/.*  ← CF Worker streams
   "MF_Cookie": ""
 }
 ```
-**مهم:** هذا الـ endpoint مفتوح ويرجع OK.ru auth cookies مباشرة — يمكن استخدامها لجلب فيديوهات OK.ru!
+**مهم:** هذا الـ endpoint مفتوح ويرجع OK.ru auth cookies مباشرة.
 
 ---
 
@@ -152,30 +152,33 @@ Solo Leveling → xmlbxy8p
 
 ---
 
-## نقاط صالحة للاستخدام في Nova
+## التطبيق في Nova (مُطبَّق ✅)
 
-| المصدر | القيمة | الصعوبة |
-|--------|--------|---------|
-| `AgentsAndCookies/getData.php` | OK.ru cookies جاهزة للاستخدام | ✅ سهل |
-| OK.ru regex: `ok\.ru/video/(\d+)` | فيديوهات مباشرة | ✅ ممكن |
-| Vudeo CDN patterns | vudeo.io/vudeo.net | متوسط |
-| الـ PHP API | يحتاج reverse engineer للـ auth | ⚠️ صعب |
+تمّ إضافة كاشط `appsanime` في `artifacts/api-server/src/routes/anime.ts`:
 
----
+### الدوال المضافة:
+| الدالة | الوصف |
+|--------|--------|
+| `getOkRuCreds()` | جلب OK.ru cookies من الـ endpoint المفتوح (cache 7h) |
+| `extractOkRuVideo(videoId)` | استخراج روابط MP4 المباشرة من ok.ru باستخدام الـ cookies |
+| `getAppsAnimeSources(title, english, ep)` | الكاشط الكامل: بحث → صفحة أنمي → صفحة حلقة → OK.ru IDs |
 
-## ما لم يُكتشف بعد
+### نقاط مهمة في التطبيق:
+- **الـ similarity check**: يُستخدم `similarity()` الموجود بالفعل لتصفية نتائج البحث (threshold=0.3)
+- **episode matching**: deterministic فقط (regex `-{N}$` من slug) — لا index fallback
+- **CF block detection**: `isCloudflareBlock()` في كلا المسارين (cfProxy + plain fetch)
+- **timeout**: 20 ثانية في sources-stream + fetch-source
 
-- [ ] القيمة الفعلية لـ Authorization header
-- [ ] هل الـ auth token مبني على Package Signature أو شيء أبسط؟
-- [ ] ماذا يرجع `Accses/getVideoAppPackageName2.php` (قد يكشف الـ token)
-- [ ] بنية response بيانات الأنمي عند نجاح الـ auth
+### ما لم يُنجز:
+- [ ] اكتشاف Authorization header للـ PHP API
+- [ ] Vudeo/MixDrop extraction من صفحات الحلقة (إضافة مستقبلية)
+- [ ] `Accses/getVideoAppPackageName2.php` قد يكشف الـ auth token
 
 ---
 
 ## ملاحظة مهمة
 
-الموقع يمنع DevTools بـ JavaScript:
+الموقع يمنع DevTools بـ JavaScript (client-side فقط):
 - يراقب `outerWidth - innerWidth > 160px`
 - يراقب `debugger` pause > 100ms
-- يمسح محتوى الصفحة فوراً عند الكشف
-→ يجب استخدام Puppeteer/CDP mode بدون debugging للـ scraping
+→ لا تأثير على server-side fetching (SSR HTML يُجلب بدون JS)
