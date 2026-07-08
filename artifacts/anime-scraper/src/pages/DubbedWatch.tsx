@@ -67,9 +67,9 @@ export default function DubbedWatch() {
       const rawUrl  = typeof d.rawUrl  === "string" ? d.rawUrl  : null;
       const hlsUrl  = typeof d.hlsUrl  === "string" ? d.hlsUrl  : null;
       if (!rawUrl && !hlsUrl) { setError("لم يُعثر على مصدر الفيديو"); setLoading(false); return; }
-      // المتصفح يستخدم IP سكني → rawUrl مباشرة لـ foupix CDN (لا يحجب المتصفحات)
-      // hlsUrl عبر بروكسي VPS كـ fallback فقط
-      const playUrl = rawUrl || hlsUrl!;
+      // foupix CDN يتحقق من UA-hash في الـ token ضد الـ User-Agent الذي أنتجه.
+      // /api/dubbed/stream يبثّ من السيرفر بنفس UA → يجب تفضيله على rawUrl.
+      const playUrl = hlsUrl || rawUrl!;
       try { sessionStorage.setItem(cacheKey, JSON.stringify({ url: playUrl, ts: Date.now() })); } catch {}
       setSource({ url: playUrl, proxyUrl: playUrl });
       setLoading(false);
