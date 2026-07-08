@@ -9304,6 +9304,233 @@ async function getAniPmSources(
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  APPS-ANIME.COM scraper  (Arabic anime — مدبلج عربي)
+//
+//  Infrastructure:
+//    apps-anime.com         ← SSR Node.js (Cloudflare)
+//    apps-player.com/...API/ ← PHP API (authenticated — skip)
+//    AgentsAndCookies/getData.php ← OPEN — returns OK.ru cookies
+//
+//  Flow:
+//    1. GET apps-anime.com/search?q={title} → /anime/{slug}-{id}
+//    2. GET /anime/{slug}-{id} → episode link list
+//    3. GET /episode/{slug}-{id}-{ep} → ok.ru/video/{id} IDs
+//    4. extractOkRuVideo(id) → direct MP4 URLs (with cookies)
+// ════════════════════════════════════════════════════════════════════
+
+const APPS_ANIME_BASE = "https://apps-anime.com";
+const APPS_ANIME_API_BASE = "https://apps-player.com/Anime_Cartoon_Full/API/";
+
+// OK.ru credentials cache (7h TTL — endpoint is open, no auth needed)
+interface OkRuCreds { cookie: string; agent: string; ts: number }
+let _okRuCredsCache: OkRuCreds | null = null;
+const OKRU_CREDS_TTL = 7 * 60 * 60_000;
+
+async function getOkRuCreds(): Promise<{ cookie: string; agent: string } | null> {
+  const now = Date.now();
+  if (_okRuCredsCache && now - _okRuCredsCache.ts < OKRU_CREDS_TTL) {
+    return { cookie: _okRuCredsCache.cookie, agent: _okRuCredsCache.agent };
+  }
+  try {
+    const r = await fetch(`${APPS_ANIME_API_BASE}AgentsAndCookies/getData.php`, {
+      headers: { "User-Agent": BROWSER_UA, Accept: "application/json, */*" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as { oKru_Agent?: string; okRu_Cookie?: string };
+    if (!data.okRu_Cookie) return null;
+    _okRuCredsCache = {
+      cookie: data.okRu_Cookie,
+      agent:  data.oKru_Agent || BROWSER_UA,
+      ts: now,
+    };
+    console.log("[AppsAnime] OK.ru cookies refreshed ✓");
+    return { cookie: _okRuCredsCache.cookie, agent: _okRuCredsCache.agent };
+  } catch (e: any) {
+    console.warn("[AppsAnime] getOkRuCreds failed:", e?.message);
+    return null;
+  }
+}
+
+// Extract OK.ru video direct URLs using cookies from the open endpoint
+async function extractOkRuVideo(
+  videoId: string,
+): Promise<Array<{ name: string; url: string }>> {
+  const creds = await getOkRuCreds();
+  const embedUrl = `https://ok.ru/videoembed/${videoId}`;
+  const hdrs: Record<string, string> = {
+    "User-Agent":      creds?.agent || BROWSER_UA,
+    Referer:           "https://ok.ru/",
+    Accept:            "text/html,application/xhtml+xml,*/*;q=0.9",
+    "Accept-Language": "ar,en;q=0.9",
+  };
+  if (creds?.cookie) hdrs["Cookie"] = creds.cookie;
+
+  try {
+    const r = await fetch(embedUrl, {
+      headers: hdrs,
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+
+    // data-options attribute contains JSON with flashvars.metadata.videos
+    const m = html.match(/data-options=["']([^"']{20,})["']/);
+    if (!m) return [];
+    const raw = m[1]
+      .replace(/&quot;/g, '"')
+      .replace(/&#34;/g, '"')
+      .replace(/&amp;/g, "&");
+    let options: { flashvars?: { metadata?: string } };
+    try { options = JSON.parse(raw); } catch { return []; }
+
+    let videos: Array<{ name: string; url: string }> = [];
+    try {
+      const metadata = JSON.parse(options.flashvars?.metadata || "{}") as {
+        videos?: Array<{ name: string; url: string }>;
+      };
+      videos = metadata.videos || [];
+    } catch { return []; }
+
+    return videos.filter(v => v.url?.startsWith("http"));
+  } catch { return []; }
+}
+
+const appsAnimeSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getAppsAnimeSources(
+  title: string,
+  english: string | null,
+  ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `appsanim:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+  const hit = appsAnimeSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+
+  // Helper: fetch with cfProxy fallback then plain fetch (always checks for CF block)
+  async function fetchHtml(url: string, ref: string, ms = 14000): Promise<string | null> {
+    let h = await cfProxyGet(url, ref, ms);
+    if (h && h.length > 200 && !isCloudflareBlock(h)) return h;
+    try {
+      const r = await fetch(url, {
+        headers: { ...BASE_HDRS, Referer: ref },
+        signal: AbortSignal.timeout(Math.min(ms, 12000)),
+        redirect: "follow",
+      });
+      if (r.ok) {
+        const t = await r.text();
+        if (t.length > 200 && !isCloudflareBlock(t)) return t;
+      }
+    } catch { /* fall through */ }
+    return null;
+  }
+
+  try {
+    // 1. Search — prefer English title for better match; Arabic title as fallback
+    const queries = [english, title].filter(Boolean) as string[];
+    let animeUrl: string | null = null;
+
+    for (const q of queries) {
+      const searchUrl = `${APPS_ANIME_BASE}/search?q=${encodeURIComponent(q)}`;
+      const searchHtml = await fetchHtml(searchUrl, `${APPS_ANIME_BASE}/`);
+      if (!searchHtml) continue;
+
+      // Collect all /anime/{slug} links then pick best similarity match
+      const candidates: Array<{ url: string; slug: string }> = [];
+      for (const m of searchHtml.matchAll(/href=["'](\/anime\/[^"'?#]+)["']/g)) {
+        const path = m[1];
+        if (path.includes("/page/") || path.includes("/category/")) continue;
+        candidates.push({ url: `${APPS_ANIME_BASE}${path}`, slug: path });
+      }
+
+      // Score each candidate against title/english using existing similarity()
+      const queries2 = [english, title].filter(Boolean) as string[];
+      let bestScore = 0;
+      for (const c of candidates) {
+        // Slug often contains romanized title; strip the 8-char ID suffix
+        const slugText = decodeURIComponent(c.slug.replace(/^\/anime\//, "").replace(/-[A-Za-z0-9]{8}$/, "")).replace(/-/g, " ");
+        const score = Math.max(...queries2.map(q2 => similarity(slugText, q2)));
+        if (score > bestScore) { bestScore = score; animeUrl = c.url; }
+      }
+      // Require at least a weak match (0.3) to avoid totally wrong series
+      if (bestScore < 0.3) animeUrl = null;
+      if (animeUrl) break;
+    }
+    if (!animeUrl) return [];
+
+    // 2. Fetch anime page → episode list
+    const animeHtml = await fetchHtml(animeUrl, `${APPS_ANIME_BASE}/search?q=`);
+    if (!animeHtml) return [];
+
+    const epLinks: string[] = [];
+    for (const m of animeHtml.matchAll(/href=["'](\/episode\/[^"'?#]+)["']/g)) {
+      const u = `${APPS_ANIME_BASE}${m[1]}`;
+      if (!epLinks.includes(u)) epLinks.push(u);
+    }
+    if (!epLinks.length) return [];
+
+    // Extract episode number from slug deterministically — no unsafe index fallback
+    function extractEpNum(u: string): number | null {
+      const seg = decodeURIComponent(u.split("/").pop() || "");
+      // Pattern: ends with -{N} where N is the episode number
+      const m2 = seg.match(/-(\d+)$/);
+      return m2 ? parseInt(m2[1], 10) : null;
+    }
+
+    const targetEpUrl = epLinks.find(u => extractEpNum(u) === ep) ?? null;
+    if (!targetEpUrl) {
+      console.warn(`[AppsAnime] ep ${ep} not found in list (found: ${epLinks.map(u => extractEpNum(u)).join(",")})`);
+      return [];
+    }
+
+    // 3. Fetch episode page → OK.ru video IDs
+    const epHtml = await fetchHtml(targetEpUrl, animeUrl);
+    if (!epHtml) return [];
+
+    const okIds: string[] = [];
+    for (const m of epHtml.matchAll(/ok\.ru\/(?:video|videoembed)\/(\d+)/g)) {
+      if (!okIds.includes(m[1])) okIds.push(m[1]);
+    }
+    if (!okIds.length) return [];
+
+    // 4. Extract direct video URLs for each ID (max 3 concurrent)
+    const sources: UnifiedSource[] = [];
+    await Promise.allSettled(okIds.slice(0, 3).map(async (id) => {
+      const videos = await extractOkRuVideo(id);
+      for (const v of videos) {
+        const embedUrl = `https://ok.ru/videoembed/${id}`;
+        const name = v.name || "";
+        const qual =
+          name.includes("1080") ? "FHD" :
+          name.includes("720")  ? "HD"  :
+          name.includes("480")  ? "SD"  : "SD";
+        const rank =
+          name.includes("1080") ? 22 :
+          name.includes("720")  ? 16 :
+          name.includes("480")  ? 8  : 5;
+        sources.push({
+          name:        `أبس أنمي · ${name || "OK.ru"}`,
+          url:         embedUrl,
+          quality:     qual,
+          qualityRank: rank,
+          site:        "appsanime",
+          directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(embedUrl)}`,
+          directType:  "mp4",
+        });
+      }
+    }));
+
+    console.log(`[AppsAnime] "${english || title}" ep${ep} → ${sources.length} sources`);
+    if (sources.length) appsAnimeSrcCache.set(ck, { sources, ts: Date.now() });
+    return sources;
+  } catch (e: any) {
+    console.warn("[AppsAnime]", e?.message);
+    return [];
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  sources-stream  SSE endpoint — runs all 4 scrapers in parallel
 //  Streams sources as found (keeps proxy alive), sends [DONE] at end
 //  Frontend waits for [DONE] before rendering all sources at once
@@ -9558,6 +9785,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
       scrapeCached("moviebox",  () => getMovieBoxAnimeSources(title, english, ep, isMovie), false, 18000),
+      // ── أبس أنمي — OK.ru مع cookies مفتوحة من AgentsAndCookies/getData.php ────
+      scrapeCached("appsanime", () => getAppsAnimeSources(title, english, ep), false, 20000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy chain
@@ -9713,6 +9942,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
+      case "appsanime":   (await race(getAppsAnimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
