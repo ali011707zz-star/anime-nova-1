@@ -6587,14 +6587,30 @@ const ALLANIME_HEX: Record<string, string> = {
 };
 
 let _aaKey: CryptoKey | null = null;
+let _aaKeyGcm: CryptoKey | null = null;
 async function getAllAnimeKey(): Promise<CryptoKey> {
   if (_aaKey) return _aaKey;
   const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ALLANIME_PASS));
   _aaKey = await crypto.subtle.importKey("raw", h, { name: "AES-CTR" }, false, ["decrypt"]);
   return _aaKey;
 }
+async function getAllAnimeKeyGcm(): Promise<CryptoKey> {
+  if (_aaKeyGcm) return _aaKeyGcm;
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ALLANIME_PASS));
+  _aaKeyGcm = await crypto.subtle.importKey("raw", h, { name: "AES-GCM" }, false, ["decrypt"]);
+  return _aaKeyGcm;
+}
 async function aaDecryptB64(b64: string): Promise<string> {
   const buf = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  // محاولة AES-GCM أولاً (anipy-cli): iv=12 بايت، ciphertext+tag=باقي البيانات
+  try {
+    const iv = buf.slice(0, 12);
+    const cipherAndTag = buf.slice(12); // SubtleCrypto يتوقع tag مُلحقة بنهاية ciphertext
+    const keyGcm = await getAllAnimeKeyGcm();
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, keyGcm, cipherAndTag);
+    return new TextDecoder().decode(plain);
+  } catch { /* fallback → AES-CTR */ }
+  // Fallback: AES-CTR (legacy format)
   const ctr = new Uint8Array(16); ctr.set(buf.slice(1, 13)); ctr[15] = 2;
   const key = await getAllAnimeKey();
   const ctLen = buf.length - 13 - 16;
@@ -8870,6 +8886,330 @@ setImmediate(() => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+//  ANIZONE (anizone.to) — صوت ياباني + ترجمة عربية/إنجليزية ناعمة
+//  API REST مباشر — لا scraping HTML ثقيل
+//  Search → GET /search?keyword=   Episodes → GET /api/anime/{id}/episodes
+//  Stream  → GET /api/episode/{epId}/sources
+// ════════════════════════════════════════════════════════════════════
+const ANIZONE_BASE = "https://anizone.to";
+const anizoneSlugCache = new Map<string, { id: string | null; ts: number }>();
+const ANIZONE_SLUG_TTL = 12 * 3_600_000;
+
+async function searchAniZone(
+  query: string,
+): Promise<Array<{ id: string; title: string }>> {
+  const r = await fetch(
+    `${ANIZONE_BASE}/search?keyword=${encodeURIComponent(query)}`,
+    {
+      headers: { "User-Agent": BROWSER_UA, Referer: ANIZONE_BASE + "/" },
+      signal: AbortSignal.timeout(12000),
+    },
+  );
+  if (!r.ok) return [];
+  const html = await r.text();
+  const results: Array<{ id: string; title: string }> = [];
+  const seen = new Set<string>();
+  // Match anime cards: href="/anime/<slug>"
+  for (const m of html.matchAll(
+    /href=["']\/anime\/([^"'/?#]+)["'][^>]*>[\s\S]{0,300}?<[^>]+class=["'][^"']*(?:title|name)[^"']*["'][^>]*>([\s\S]*?)<\//gi,
+  )) {
+    const id = m[1].trim();
+    const title = m[2].replace(/<[^>]+>/g, "").trim();
+    if (id && title && !seen.has(id)) {
+      seen.add(id);
+      results.push({ id, title });
+    }
+  }
+  // Fallback: any href="/anime/<slug>" + nearby text
+  if (!results.length) {
+    for (const m of html.matchAll(/href=["']\/anime\/([^"'/?#]+)["']/gi)) {
+      const id = m[1].trim();
+      if (!seen.has(id)) { seen.add(id); results.push({ id, title: id.replace(/-/g, " ") }); }
+    }
+  }
+  return results;
+}
+
+async function getAniZoneSources(
+  title: string,
+  english: string | null,
+  ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    const ck = `anizone:${(english || title).toLowerCase()}`;
+    const cached = anizoneSlugCache.get(ck);
+    let animeId: string | null = null;
+    if (cached && Date.now() - cached.ts < ANIZONE_SLUG_TTL) {
+      animeId = cached.id;
+    } else {
+      const queries = [...new Set([english, title].filter(Boolean) as string[])];
+      for (const q of queries) {
+        const results = await searchAniZone(q);
+        if (!results.length) continue;
+        let bestId: string | null = null;
+        let bestSc = 0;
+        for (const r of results) {
+          const sc = Math.max(
+            similarity(r.title.toLowerCase(), title.toLowerCase()),
+            english ? similarity(r.title.toLowerCase(), english.toLowerCase()) : 0,
+            asciiSimilarity(r.id, title),
+            english ? asciiSimilarity(r.id, english) : 0,
+          );
+          if (sc > bestSc) { bestSc = sc; bestId = r.id; }
+        }
+        if (bestId && bestSc >= 0.3) { animeId = bestId; break; }
+      }
+      anizoneSlugCache.set(ck, { id: animeId, ts: Date.now() });
+    }
+    if (!animeId) return [];
+
+    // جلب قائمة الحلقات
+    const epR = await fetch(`${ANIZONE_BASE}/api/anime/${animeId}/episodes`, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: `${ANIZONE_BASE}/anime/${animeId}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!epR.ok) return [];
+    const epData = (await epR.json()) as {
+      episodes?: Array<{ number?: number; id?: string; slug?: string }>;
+      data?: Array<{ number?: number; id?: string; slug?: string }>;
+    };
+    const epList = epData.episodes ?? epData.data ?? [];
+    const epEntry = epList.find(
+      e => Number(e.number) === ep || Number(e.slug) === ep,
+    );
+    if (!epEntry?.id) return [];
+
+    // جلب مصادر الحلقة
+    const srcR = await fetch(
+      `${ANIZONE_BASE}/api/episode/${epEntry.id}/sources`,
+      {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          Referer: `${ANIZONE_BASE}/anime/${animeId}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    if (!srcR.ok) return [];
+    const srcData = (await srcR.json()) as {
+      sources?: Array<{ file: string; label?: string; type?: string }>;
+      subtitles?: Array<{ file: string; label?: string; kind?: string }>;
+    };
+    if (!srcData.sources?.length) return [];
+
+    // ترجمة: أولوية للعربية، ثم الإنجليزية مع translate-vtt
+    const arSub = srcData.subtitles?.find(
+      s => (s.label || "").toLowerCase().includes("arab") ||
+           (s.label || "").toLowerCase() === "ar",
+    );
+    const enSub = srcData.subtitles?.find(
+      s => (s.label || "").toLowerCase().includes("engl") ||
+           (s.label || "").toLowerCase() === "en",
+    );
+    const rawSubFile = arSub?.file ?? enSub?.file;
+    const subtitleUrl = rawSubFile
+      ? arSub
+        ? rawSubFile
+        : `/api/anime/translate-vtt?url=${encodeURIComponent(rawSubFile)}&from=en&to=ar`
+      : undefined;
+
+    const sources: UnifiedSource[] = [];
+    for (const src of srcData.sources) {
+      if (!src.file?.startsWith("http")) continue;
+      const isHls = src.type === "hls" || src.file.includes(".m3u8");
+      const proxied = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.file)}&ref=${encodeURIComponent(ANIZONE_BASE + "/")}`
+        : `/api/anime/video-proxy?url=${encodeURIComponent(src.file)}&ref=${encodeURIComponent(ANIZONE_BASE + "/")}`;
+      sources.push({
+        name: `AniZone · ${src.label || "HD"} · ياباني مترجم`,
+        url: src.file,
+        quality: src.label || "1080p",
+        qualityRank: 9,
+        site: "anizone",
+        directUrl: proxied,
+        directType: isHls ? "hls" : "mp4",
+        subtitleUrl,
+        corsOk: false,
+      } as UnifiedSource);
+    }
+    console.log(`[AniZone] "${english || title}" ep${ep} → ${sources.length} sources`);
+    return sources;
+  } catch (e: any) {
+    console.warn("[AniZone]", e?.message);
+    return [];
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  2DHIVE (2dhive.com) — صوت ياباني خام، بدون ترجمة مدمجة
+//  WordPress AJAX: action=z_ajax_search | action=get_player_links
+//  Embeds → FileMoon / StreamWish → parseFilemoon / parseStreamwish
+// ════════════════════════════════════════════════════════════════════
+const DHIVE_BASE = "https://2dhive.com";
+const dhiveSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const DHIVE_SLUG_TTL = 12 * 3_600_000;
+
+async function search2Dhive(
+  term: string,
+): Promise<Array<{ slug: string; title: string }>> {
+  const body = new URLSearchParams({ action: "z_ajax_search", term });
+  const r = await fetch(`${DHIVE_BASE}/wp-admin/admin-ajax.php`, {
+    method: "POST",
+    headers: {
+      "User-Agent": BROWSER_UA,
+      Referer: DHIVE_BASE + "/",
+      "X-Requested-With": "XMLHttpRequest",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!r.ok) return [];
+  let data: any;
+  try { data = await r.json(); } catch { return []; }
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((d: any) => d.slug || d.url || d.link)
+    .map((d: any) => ({
+      slug:
+        d.slug ||
+        String(d.url || d.link || "")
+          .split("/")
+          .filter(Boolean)
+          .pop() ||
+        "",
+      title: String(d.title || d.name || d.slug || ""),
+    }))
+    .filter(d => d.slug);
+}
+
+async function get2DhiveSources(
+  title: string,
+  english: string | null,
+  ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    const ck = `2dhive:${(english || title).toLowerCase()}`;
+    const cached = dhiveSlugCache.get(ck);
+    let slug: string | null = null;
+    if (cached && Date.now() - cached.ts < DHIVE_SLUG_TTL) {
+      slug = cached.slug;
+    } else {
+      const queries = [...new Set([english, title].filter(Boolean) as string[])];
+      for (const q of queries) {
+        const results = await search2Dhive(q);
+        if (!results.length) continue;
+        let best: string | null = null;
+        let bestSc = 0;
+        for (const r of results) {
+          const sc = Math.max(
+            similarity(r.title.toLowerCase(), title.toLowerCase()),
+            english ? similarity(r.title.toLowerCase(), english.toLowerCase()) : 0,
+            asciiSimilarity(r.slug, title),
+            english ? asciiSimilarity(r.slug, english) : 0,
+          );
+          if (sc > bestSc) { bestSc = sc; best = r.slug; }
+        }
+        if (best && bestSc >= 0.28) { slug = best; break; }
+      }
+      dhiveSlugCache.set(ck, { slug, ts: Date.now() });
+    }
+    if (!slug) return [];
+
+    // محاولة تحديد رابط الحلقة بصيغ مختلفة
+    const epPad = String(ep).padStart(2, "0");
+    const variants = [
+      `${slug}-episode-${epPad}`,
+      `${slug}-episode-${ep}`,
+      `${slug}-ep-${ep}`,
+      `${slug}-${epPad}`,
+    ];
+
+    let postId: string | null = null;
+    let epPageUrl = "";
+    for (const v of variants) {
+      const url = `${DHIVE_BASE}/episode/${v}/`;
+      try {
+        const r = await fetch(url, {
+          headers: { "User-Agent": BROWSER_UA, Referer: DHIVE_BASE + "/" },
+          signal: AbortSignal.timeout(8000),
+          redirect: "follow",
+        });
+        if (!r.ok) continue;
+        const html = await r.text();
+        const idM =
+          html.match(/['"](post_id|postID)['"]\s*[:=,]\s*['"]?(\d+)/i) ??
+          html.match(/<article\b[^>]+id=["']post-(\d+)["']/i) ??
+          html.match(/"post"\s*:\s*\{\s*"id"\s*:\s*(\d+)/i) ??
+          html.match(/data-(?:postid|post-id|id)=["'](\d+)["']/i);
+        if (idM) {
+          postId = idM[idM.length - 1]; // آخر capture group هو الـ ID
+          epPageUrl = r.url; // قد يكون redirect
+          break;
+        }
+      } catch { /* جرّب الصيغة التالية */ }
+    }
+    if (!postId) return [];
+
+    // طلب روابط التشغيل
+    const lBody = new URLSearchParams({ action: "get_player_links", episode_id: postId });
+    const lr = await fetch(`${DHIVE_BASE}/wp-admin/admin-ajax.php`, {
+      method: "POST",
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Referer: epPageUrl || DHIVE_BASE + "/",
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: lBody.toString(),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!lr.ok) return [];
+    let ldata: any;
+    try { ldata = await lr.json(); } catch { return []; }
+
+    const embedUrls: string[] = [];
+    if (ldata?.servers && typeof ldata.servers === "object") {
+      for (const v of Object.values(ldata.servers)) {
+        if (typeof v === "string" && v.startsWith("http")) embedUrls.push(v);
+      }
+    } else if (Array.isArray(ldata)) {
+      for (const item of ldata) {
+        if (typeof item === "string" && item.startsWith("http")) embedUrls.push(item);
+        else if (item?.url && typeof item.url === "string") embedUrls.push(item.url);
+        else if (item?.link && typeof item.link === "string") embedUrls.push(item.link);
+      }
+    } else if (typeof ldata === "object" && ldata !== null) {
+      for (const v of Object.values(ldata)) {
+        if (typeof v === "string" && v.startsWith("http")) embedUrls.push(v);
+      }
+    }
+
+    if (!embedUrls.length) return [];
+
+    // نُعيد المواقع كـ embed للاستخراج عبر extractAndCollect
+    const sources: UnifiedSource[] = embedUrls.slice(0, 4).map((u, i) => ({
+      name: `2Dhive · سيرفر ${i + 1} · ياباني خام`,
+      url: u,
+      quality: "HD",
+      qualityRank: 8,
+      site: "2dhive",
+      corsOk: false,
+    }));
+    console.log(`[2Dhive] "${english || title}" ep${ep} → ${sources.length} servers`);
+    return sources;
+  } catch (e: any) {
+    console.warn("[2Dhive]", e?.message);
+    return [];
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  ANI.PM — أفضل مصدر ياباني جديد (37 مصدر/حلقة، HLS + MP4 + VTT)
 //  يعمل مباشرةً من VPS وReplit بدون proxy
 //  API: GET https://ani.pm/api/anime/src/servers?title=...&ep=...&anilistId=...
@@ -9186,6 +9526,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animepahe: mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل
       scrapeCached("anineko",      () => getAninekoSources(title, english, ep),                 false),
       scrapeCached("anipm",        () => getAniPmSources(title, english, ep, anilistId),        false, 20000),
+      scrapeCached("anizone",      () => getAniZoneSources(title, english, ep),                 false, 18000),
+      scrapeCached("2dhive",       () => get2DhiveSources(title, english, ep),                  true,  20000),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 28000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
@@ -9316,7 +9658,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // scrapers that use probe-only (no deep extraction)
-  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anineko","mitanime"]);
+  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anineko","anizone","mitanime"]);
 
   try {
     switch (site) {
@@ -9343,6 +9685,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),28000, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
+      case "anizone":       (await race(getAniZoneSources(title, english, ep),               18_000,     [])).forEach(collectSrc); break;
+      case "2dhive":        await runExtract(await race(get2DhiveSources(title, english, ep), 20_000, [])); break;
       case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       // ── TMDB-native (StarCima محذوف من الأنمي — مصادر إنجليزية) ─────────────────────
@@ -9361,6 +9705,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep), 22_000, [])); break;
       case "reanime":      (await race(getReanímeSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
+      case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
+      case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
       default: break;
     }
 
@@ -9431,6 +9777,148 @@ router.get("/anime/check-arabic", async (req, res) => {
   );
 
   res.json({ available });
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Arabic Dub Check  GET /api/anime/arabic-dub-check?malId=
+//  Source: MyDubList (Joelis57) — 321 confirmed Arabic-dubbed anime
+//  Returns { isDubbed: boolean, confidence: string|null }
+// ════════════════════════════════════════════════════════════════════
+const MYDUBLIST_URL =
+  "https://raw.githubusercontent.com/Joelis57/MyDubList/main/dubs/dubbed_arabic.json";
+let _mydubCache: Record<string, string> | null = null;
+let _mydubCacheTs = 0;
+const MYDUB_TTL = 24 * 3_600_000;
+
+async function fetchMyDubList(): Promise<Record<string, string>> {
+  if (_mydubCache && Date.now() - _mydubCacheTs < MYDUB_TTL) return _mydubCache;
+  try {
+    const r = await fetch(MYDUBLIST_URL, {
+      headers: { "User-Agent": "NovaApp/1.0" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return _mydubCache ?? {};
+    const data = await r.json() as any;
+    // شكل البيانات: { "mal_id": "confidence", ... }
+    // أو مصفوفة: [{ mal_id, confidence }, ...]
+    const out: Record<string, string> = {};
+    if (Array.isArray(data)) {
+      for (const entry of data) {
+        const id = String(entry.mal_id ?? entry.malId ?? "");
+        const conf = String(entry.confidence ?? entry.level ?? "");
+        if (id) out[id] = conf;
+      }
+    } else if (typeof data === "object") {
+      for (const [k, v] of Object.entries(data)) {
+        out[k] = String(v);
+      }
+    }
+    _mydubCache = out;
+    _mydubCacheTs = Date.now();
+    return out;
+  } catch { return _mydubCache ?? {}; }
+}
+
+router.get("/anime/arabic-dub-check", async (req, res) => {
+  const malId = String(req.query.malId || req.query.mal_id || "").trim();
+  if (!malId) { res.json({ isDubbed: false, confidence: null }); return; }
+  try {
+    const list = await fetchMyDubList();
+    const conf = list[malId] ?? null;
+    res.json({ isDubbed: conf !== null, confidence: conf });
+  } catch {
+    res.json({ isDubbed: false, confidence: null });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Trailer  GET /api/anime/trailer?tmdbId=&lang=ar
+//  Source: trailerdb (mhadifilms) — 330k+ trailers mapped to TMDB
+//  Returns { youtubeId: string|null, url: string|null }
+// ════════════════════════════════════════════════════════════════════
+const trailerCache = new Map<string, { ts: number; youtubeId: string | null }>();
+const TRAILER_TTL = 48 * 3_600_000;
+
+router.get("/anime/trailer", async (req, res) => {
+  const tmdbId = String(req.query.tmdbId || req.query.tmdb_id || "").trim();
+  const lang   = String(req.query.lang || "ar").trim();
+  if (!tmdbId) { res.json({ youtubeId: null, url: null }); return; }
+
+  const ck = `${tmdbId}:${lang}`;
+  const hit = trailerCache.get(ck);
+  if (hit && Date.now() - hit.ts < TRAILER_TTL) {
+    const id = hit.youtubeId;
+    res.json({ youtubeId: id, url: id ? `https://www.youtube.com/watch?v=${id}` : null });
+    return;
+  }
+
+  try {
+    const sql = `SELECT youtube_id FROM trailers WHERE tmdb_id=${encodeURIComponent(tmdbId)} AND language='${encodeURIComponent(lang)}' LIMIT 1`;
+    const r = await fetch(
+      `https://trailerdb.workers.dev/query?sql=${encodeURIComponent(sql)}`,
+      { headers: { "User-Agent": "NovaApp/1.0" }, signal: AbortSignal.timeout(8000) },
+    );
+    let youtubeId: string | null = null;
+    if (r.ok) {
+      const data = await r.json() as any;
+      youtubeId = data?.results?.[0]?.youtube_id ?? data?.[0]?.youtube_id ?? null;
+    }
+    // Fallback: English trailer if no Arabic
+    if (!youtubeId && lang !== "en") {
+      const sqlEn = `SELECT youtube_id FROM trailers WHERE tmdb_id=${encodeURIComponent(tmdbId)} AND language='en' LIMIT 1`;
+      const r2 = await fetch(
+        `https://trailerdb.workers.dev/query?sql=${encodeURIComponent(sqlEn)}`,
+        { headers: { "User-Agent": "NovaApp/1.0" }, signal: AbortSignal.timeout(6000) },
+      );
+      if (r2.ok) {
+        const d2 = await r2.json() as any;
+        youtubeId = d2?.results?.[0]?.youtube_id ?? d2?.[0]?.youtube_id ?? null;
+      }
+    }
+    trailerCache.set(ck, { ts: Date.now(), youtubeId });
+    res.json({ youtubeId, url: youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : null });
+  } catch {
+    res.json({ youtubeId: null, url: null });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  ID Map  GET /api/anime/id-map?anilistId=
+//  Source: anime-mapper (subhajeetch-fl) — 30k+ anime, all ID mappings
+//  Returns { malId, anilistId, tmdbId, tvdbId, anidbId, kitsuId, ... }
+// ════════════════════════════════════════════════════════════════════
+const idMapCache = new Map<string, { ts: number; data: any }>();
+const IDMAP_TTL  = 72 * 3_600_000;
+
+router.get("/anime/id-map", async (req, res) => {
+  const anilistId = String(req.query.anilistId || req.query.anilist_id || "").trim();
+  if (!anilistId) { res.json({}); return; }
+
+  const hit = idMapCache.get(anilistId);
+  if (hit && Date.now() - hit.ts < IDMAP_TTL) { res.json(hit.data); return; }
+
+  try {
+    const r = await fetch(
+      `https://cdn.jsdelivr.net/gh/subhajeetch-fl/anime-mapper@main/data/anime/000/${anilistId}.json`,
+      { headers: { "User-Agent": "NovaApp/1.0" }, signal: AbortSignal.timeout(8000) },
+    );
+    if (!r.ok) { res.json({}); return; }
+    const data = await r.json() as any;
+    const normalized = {
+      anilistId:  data.anilist_id   ?? data.anilistId   ?? Number(anilistId),
+      malId:      data.mal_id       ?? data.malId       ?? null,
+      tmdbId:     data.tmdb_id      ?? data.tmdbId      ?? null,
+      tvdbId:     data.tvdb_id      ?? data.tvdbId      ?? null,
+      anidbId:    data.anidb_id     ?? data.anidbId     ?? null,
+      kitsuId:    data.kitsu_id     ?? data.kitsuId     ?? null,
+      traktId:    data.trakt_id     ?? data.traktId     ?? null,
+      episodes:   data.episodes     ?? null,
+    };
+    idMapCache.set(anilistId, { ts: Date.now(), data: normalized });
+    res.json(normalized);
+  } catch {
+    res.json({});
+  }
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -11188,6 +11676,16 @@ router.get("/anime/video-proxy", async (req, res) => {
 });
 
 // ── seg-proxy: VPS يجلب الـ segment مع Referer الصحيح ───────────────────────
+// CDNs من anineko تحزم الـ TS segments داخل PNG (252 بايت header ثم TS خام)
+// نكشفها تلقائياً وننزع الـ header
+const ANINEKO_STRIP_CDNS = [
+  "cdn.anizara.store",
+  "otakuhg.com",
+  "otakuvid.com",
+  "bibiemb.xyz",
+];
+const ANINEKO_STRIP_BYTES = 252;
+
 router.get("/anime/seg-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
   if (!rawUrl) { res.status(400).send("url required"); return; }
@@ -11202,6 +11700,27 @@ router.get("/anime/seg-proxy", async (req, res) => {
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
+
+  // anineko CDN: segments مُغلَّفة كـ PNG (252 بايت, ثم MPEG-TS خام)
+  const needsStrip = ANINEKO_STRIP_CDNS.some(h => url.includes(h));
+  if (needsStrip) {
+    const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
+    if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
+    try {
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
+      if (!r.ok) { res.status(r.status).send("upstream error"); return; }
+      const raw = await r.arrayBuffer();
+      const stripped = raw.byteLength > ANINEKO_STRIP_BYTES
+        ? raw.slice(ANINEKO_STRIP_BYTES)
+        : raw;
+      res.setHeader("Content-Type", "video/MP2T");
+      res.setHeader("Content-Length", String(stripped.byteLength));
+      res.status(200).end(Buffer.from(stripped));
+    } catch {
+      if (!res.headersSent) res.status(502).send("segment fetch failed");
+    }
+    return;
+  }
 
   await serveMediaVPS(url, ref, req, res);
 });
