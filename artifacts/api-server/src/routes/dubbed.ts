@@ -220,7 +220,9 @@ router.get("/dubbed/watch-src", async (req, res) => {
         const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
         return { hlsUrl: proxied, rawUrl, type: "hls" };
       }
-      const proxied = `/api/anime/video-proxy?url=${encodeURIComponent(rawUrl)}&ref=${encodeURIComponent(AT_BASE + "/")}`;
+      // foupix CDN validates ua-hash in token against the User-Agent used at token-generation time.
+      // Use /api/dubbed/stream which proxies from server with the same BROWSER_UA — NOT a 307 redirect.
+      const proxied = `/api/dubbed/stream?url=${encodeURIComponent(rawUrl)}`;
       return { hlsUrl: proxied, rawUrl, type: "mp4" };
     }
 
@@ -258,6 +260,75 @@ router.get("/dubbed/watch-src", async (req, res) => {
   } catch (e: any) {
     logger.warn({ err: e }, "dubbed: watch-src error");
     res.status(502).json({ error: String(e?.message || e) });
+  }
+});
+
+// ── GET /api/dubbed/stream → فوبيكس CDN streaming proxy ──────────────────────
+// foupix CDN يتحقق من UA hash في الـ token — يجب الـ stream من السيرفر بنفس UA الذي أنتج الـ token.
+// يدعم Range requests للتقديم والتأخير (seeking).
+const FOUPIX_HOSTS = new Set(["stream.foupix.com"]);
+
+router.get("/dubbed/stream", async (req, res) => {
+  const rawUrl = (req.query.url as string || "").trim();
+  if (!rawUrl) { res.status(400).json({ error: "missing url" }); return; }
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:" || !FOUPIX_HOSTS.has(parsed.hostname)) {
+      throw new Error("hostname not allowed");
+    }
+  } catch {
+    res.status(400).json({ error: "invalid or disallowed url" }); return;
+  }
+  try {
+    const fetchHeaders: Record<string, string> = {
+      "User-Agent": BROWSER_UA,
+      "Referer": AT_BASE + "/",
+      "Origin": AT_BASE,
+      "Accept": "*/*",
+    };
+    // Forward Range header for seeking support
+    const rangeHeader = req.headers["range"];
+    if (rangeHeader) fetchHeaders["Range"] = rangeHeader;
+
+    const upstream = await fetch(rawUrl, {
+      headers: fetchHeaders,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    // Forward status (206 Partial Content for Range, 200 for full)
+    const status = upstream.status;
+    if (status === 403 || status === 401) {
+      res.status(403).json({ error: "foupix token expired or UA mismatch" }); return;
+    }
+    if (!upstream.ok && status !== 206) {
+      res.status(status).json({ error: `upstream ${status}` }); return;
+    }
+
+    // Forward relevant headers
+    const ct = upstream.headers.get("content-type") || "video/mp4";
+    const cl = upstream.headers.get("content-length");
+    const cr = upstream.headers.get("content-range");
+    const ac = upstream.headers.get("accept-ranges");
+    res.status(status);
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (cl) res.setHeader("Content-Length", cl);
+    if (cr) res.setHeader("Content-Range", cr);
+    if (ac) res.setHeader("Accept-Ranges", ac);
+
+    // Pipe body
+    if (upstream.body) {
+      const { Readable } = await import("stream");
+      const readable = Readable.fromWeb(upstream.body as any);
+      readable.pipe(res);
+      readable.on("error", () => res.end());
+    } else {
+      res.end();
+    }
+  } catch (e: any) {
+    if (!res.headersSent) res.status(502).json({ error: String(e?.message || e) });
   }
 });
 

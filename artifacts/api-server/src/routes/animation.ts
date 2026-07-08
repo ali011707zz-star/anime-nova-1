@@ -15,7 +15,7 @@ const TMDB_KEY  = process.env.TMDB_API_KEY || "8265bd1679663a7ea12ac168da84d2e8"
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const SD_BASE   = "https://watch.stardima.com/watch";
 const SD_AJAX   = "https://watch.stardima.com/watch/wp-admin/admin-ajax.php";
-const MV_BASE   = "https://moviz-time.co";
+const MV_BASE   = "https://moviz-time.org"; // was moviz-time.co (301→org as of 2026-07)
 const AS_CDN_B  = "https://as-cdn21.top";
 const RUBY_B    = "https://rubystm.com";
 
@@ -558,21 +558,21 @@ async function sdDoopPlayerAjax(postId: string, nonce: string, referer: string):
   return out;
 }
 
-// ── moviz-time.co helpers ─────────────────────────────────────────────────────
+// ── moviz-time.org helpers (was moviz-time.co — 301→org 2026-07) ─────────────
 
 function parseMVLinks(html: string): { url: string; title: string }[] {
   const seen = new Set<string>();
   const out: { url: string; title: string }[] = [];
-  // Match any moviz-time.co page links (case-insensitive percent encoding)
-  const re = /href="(https?:\/\/moviz-time\.co\/[^"]+)"[^>]*(?:title="([^"]*)")?/gi;
+  // Match any moviz-time.org (or .co redirect) page links
+  const re = /href="(https?:\/\/moviz-time\.(?:org|co)\/[^"]+)"[^>]*(?:title="([^"]*)")?/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
-    const url  = m[1];
+    let url  = m[1].replace("moviz-time.co", "moviz-time.org");
     const title = m[2] || decodeURIComponent(url).split("/").filter(Boolean).pop() || url;
     if (seen.has(url)) continue;
     // Skip pagination, category, feed, contact, tag pages
     if (/\/(category|page|feed|tag|contact|about|wp-|wp-json)\//i.test(url)) continue;
-    if (url === "https://moviz-time.co/" || url === "https://moviz-time.co") continue;
+    if (url === "https://moviz-time.org/" || url === "https://moviz-time.org") continue;
     seen.add(url);
     out.push({ url, title });
   }
@@ -587,12 +587,12 @@ async function mvScrapeMovie(url: string): Promise<string[]> {
   } catch { return []; }
 }
 
-// For moviz-time.co series: find episode links
+// For moviz-time.org series: find episode links
 async function mvFindEpisode(seriesUrl: string, epNum: number): Promise<string | null> {
   try {
     const html = await cfGet(seriesUrl, MV_BASE + "/");
-    // Look for episode links
-    const re = /href="(https:\/\/moviz-time\.co\/[^"]+(?:الحلقة|حلقة|episode)[^"]+)"/g;
+    // Look for episode links (match both .org and .co domains)
+    const re = /href="(https:\/\/moviz-time\.(?:org|co)\/[^"]+(?:الحلقة|حلقة|episode)[^"]+)"/g;
     const episodes: { url: string; num: number }[] = [];
     let m: RegExpExecArray | null;
     while ((m = re.exec(html)) !== null) {
@@ -3662,8 +3662,12 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               } catch { /* keep proxied URL */ }
             }
             if (!realUrl.startsWith("http")) continue;
-            const proxied = realUrl.includes(".m3u8") || realUrl.includes("manifest")
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`
+            // VidApi URLs use /pl/ or /playlist/ paths (not .m3u8 extension) but ARE HLS M3U8
+            // VidRock URLs return single '.' byte — skip them
+            const isHls = realUrl.includes(".m3u8") || realUrl.includes("manifest")
+              || realUrl.includes("/pl/") || realUrl.includes("/playlist/");
+            const proxied = isHls
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://vidapi.cc/")}`
               : `/api/anime/video-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`;
             sendSource(realUrl, `CinePro · ${provName} · ${quality}`, realUrl, proxied);
             qualityCounts[quality] = (qualityCounts[quality] || 0) + 1;
