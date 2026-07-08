@@ -9410,6 +9410,176 @@ async function getXyraAnimeSources(
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  SANIME (app.sanime.net / server.sanime.net) — عربي مدبلج + مترجم
+//
+//  UA Gate: User-Agent: IBRAHIMSEVEN (مطلوب لعرض الحلقات)
+//  Flow:
+//    1. GET h10.php?page=search&name={english}  → [{id, name, year, status}]
+//    2. similarity match على العنوان
+//    3. GET h10.php?page=info&id={id}           → {ep[][], ...}  (2D array صفحات 25)
+//    4. ep.flat().find(e => e.epName === ep)
+//    5. Direct: https://server.sanime.net/Video/{id}/{ep}.mp4  (HEAD check)
+//    6. Fallback: h10.php?page=openAnd&id={b64(JSON(epObj))}  → {hd, sd}
+//  Notes:
+//    - server.sanime.net لا يحجب VPS IP ✅
+//    - لا يحتاج Referer أو auth للـ CDN ✅
+//    - sample-videos.com = حلقة غير مرفوعة → تجاهله
+//    - ep.epName هو integer
+// ════════════════════════════════════════════════════════════════════
+const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
+const SANIME_CDN  = "https://server.sanime.net/Video";
+const SANIME_UA   = "IBRAHIMSEVEN";
+const _sanimeCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const SANIME_TTL  = 4 * 3_600_000;
+
+async function getSAnimeSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `sanime:${english || title}:${ep}`;
+  const hit = _sanimeCacheMap.get(ck);
+  if (hit && Date.now() - hit.ts < SANIME_TTL) return hit.sources;
+
+  const out: UnifiedSource[] = [];
+  try {
+    // 1. بحث بالعنوان الإنجليزي أولاً ثم العربي
+    const query = encodeURIComponent(english || title);
+    const searchRes = await fetch(`${SANIME_API}search&name=${query}`, {
+      headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!searchRes.ok) { console.warn(`[SAnime] search HTTP ${searchRes.status}`); return out; }
+    const results: any[] = await searchRes.json().catch(() => []);
+    if (!Array.isArray(results) || results.length === 0) return out;
+
+    // 2. similarity match
+    let bestId: string | null = null;
+    let bestScore = 0;
+    for (const r of results) {
+      const label = r.name ?? "";
+      const score = Math.max(
+        similarity(label, title),
+        english ? similarity(label, english) : 0,
+      );
+      if (score > bestScore) { bestScore = score; bestId = String(r.id); }
+    }
+    if (!bestId || bestScore < 0.42) {
+      console.log(`[SAnime] no match for "${english || title}" (best=${bestScore.toFixed(2)})`);
+      return out;
+    }
+
+    // 3. info + episodes
+    const infoRes = await fetch(`${SANIME_API}info&id=${bestId}`, {
+      headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!infoRes.ok) { console.warn(`[SAnime] info HTTP ${infoRes.status}`); return out; }
+    const info: any = await infoRes.json().catch(() => null);
+    if (!info?.ep) return out;
+
+    // 4. إيجاد الحلقة (ep هو 2D array)
+    const allEps: any[] = (Array.isArray(info.ep) ? info.ep : []).flat();
+    const epObj = allEps.find((e: any) =>
+      Number(e.epName) === ep || String(e.epName) === String(ep),
+    );
+    if (!epObj) {
+      console.log(`[SAnime] ep${ep} not found in ${allEps.length} eps for id=${bestId}`);
+      return out;
+    }
+
+    // 5. Direct CDN URL (HEAD check)
+    const directHD = `${SANIME_CDN}/${bestId}/${ep}.mp4`;
+    const directSD = `${SANIME_CDN}/${bestId}/${ep}SD.mp4`;
+    let usedDirect = false;
+    try {
+      const headRes = await fetch(directHD, {
+        method: "HEAD",
+        headers: { "User-Agent": SANIME_UA },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (headRes.ok) {
+        out.push({
+          name:        "SAnime · HD",
+          url:         directHD,
+          quality:     "HD",
+          qualityRank: 14,
+          site:        "sanime",
+          directUrl:   directHD,
+          directType:  "mp4",
+          corsOk:      false,
+        });
+        // تحقق من SD قبل الإضافة
+        try {
+          const sdHead = await fetch(directSD, {
+            method: "HEAD",
+            headers: { "User-Agent": SANIME_UA },
+            signal: AbortSignal.timeout(4_000),
+          });
+          if (sdHead.ok) {
+            out.push({
+              name:        "SAnime · SD",
+              url:         directSD,
+              quality:     "SD",
+              qualityRank: 6,
+              site:        "sanime",
+              directUrl:   directSD,
+              directType:  "mp4",
+              corsOk:      false,
+            });
+          }
+        } catch { /* SD غير موجود — نتجاهله */ }
+        usedDirect = true;
+      }
+    } catch { /* timeout أو 404 — نجرب openAnd */ }
+
+    // 6. openAnd fallback
+    if (!usedDirect) {
+      // بتقنية browser: btoa(unescape(encodeURIComponent(JSON))) = Buffer utf8→base64
+      const epB64 = Buffer.from(JSON.stringify(epObj), "utf8").toString("base64");
+      const openRes = await fetch(`${SANIME_API}openAnd&id=${encodeURIComponent(epB64)}`, {
+        headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (openRes.ok) {
+        const links: any = await openRes.json().catch(() => null);
+        const hdUrl = links?.hd;
+        const sdUrl = links?.sd;
+        const isBad = (u: string) => !u || u.includes("sample-videos.com");
+        if (!isBad(hdUrl)) {
+          out.push({
+            name:        "SAnime · HD",
+            url:         hdUrl,
+            quality:     "HD",
+            qualityRank: 14,
+            site:        "sanime",
+            directUrl:   hdUrl,
+            directType:  "mp4",
+            corsOk:      false,
+          });
+        }
+        if (!isBad(sdUrl)) {
+          out.push({
+            name:        "SAnime · SD",
+            url:         sdUrl,
+            quality:     "SD",
+            qualityRank: 6,
+            site:        "sanime",
+            directUrl:   sdUrl,
+            directType:  "mp4",
+            corsOk:      false,
+          });
+        }
+      }
+    }
+
+    console.log(`[SAnime] id=${bestId} ep${ep} → ${out.length} sources (match=${bestScore.toFixed(2)})`);
+    if (out.length) _sanimeCacheMap.set(ck, { sources: out, ts: Date.now() });
+  } catch (e: any) {
+    console.warn("[SAnime]", e?.message);
+  }
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  APPS-ANIME.COM scraper  (Arabic anime — مدبلج عربي)
 //
 //  Infrastructure:
@@ -9907,6 +10077,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
+      scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
     ]);
 
   } catch (e: any) {
@@ -10054,6 +10225,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
+      case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
