@@ -280,11 +280,19 @@ function asDecode(raw: string): string {
             .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
-// CF proxy helper — يمرر الطلب عبر curl_cffi (يتجاوز حجب IP من Replit)
+// ════════════════════════════════════════════════════════════════════
+//  CF_PROXY_BASE — مشابه لـ anime.ts
+//  VPS: localhost:8000 | Replit: NOVA_PROXY_BASE/api/cfproxy
+// ════════════════════════════════════════════════════════════════════
+const CF_PROXY_PORT = process.env.CF_PROXY_PORT || "8000";
+const _NOVA_PROXY_BASE = process.env.NOVA_PROXY_BASE;
+const CF_PROXY_BASE = _NOVA_PROXY_BASE
+  ? `${_NOVA_PROXY_BASE}/api/cfproxy`
+  : `http://localhost:${CF_PROXY_PORT}`;
+
+// CF proxy helper — يمرر الطلب عبر curl_cffi
 async function cfProxyGet(url: string): Promise<string> {
-  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
-  const proxyUrl = `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`;
-  const r = await fetch(proxyUrl, {
+  const r = await fetch(`${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}`, {
     headers: { "User-Agent": UA },
     signal: AbortSignal.timeout(12_000),
   });
@@ -292,8 +300,7 @@ async function cfProxyGet(url: string): Promise<string> {
   return r.text();
 }
 
-// CF + Orkestr fallback — يجرب cfProxyGet أولاً، إذا حجبه CF يجرب خادم Orkestr الخارجي (EU IP)
-// cfOrOrkestGet → الآن يستخدم cfProxy فقط (Orkestr أُزيل — 2026-07)
+// cfOrOrkestGet — يستخدم cfProxy فقط
 async function cfOrOrkestGet(url: string): Promise<string> {
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
@@ -302,11 +309,10 @@ async function cfOrOrkestGet(url: string): Promise<string> {
   return html;
 }
 
-// orkestDirectGet → الآن يستخدم cfProxy مباشرة (Orkestr أُزيل — 2026-07)
+// orkestDirectGet — يستخدم CF_PROXY_BASE
 async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string> {
-  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const r = await fetch(
-    `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
+    `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}`,
     { signal: AbortSignal.timeout(timeoutMs) }
   );
   if (!r.ok) throw new Error(`cfProxy HTTP ${r.status}`);
@@ -318,26 +324,22 @@ async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string>
 }
 
 // cfProxyChainFetch — يجلب url1 ثم url2 بنفس الجلسة (cookies مشتركة)
-// يُستخدم لـ FaselHD player_token الذي ينتهي إذا تغيرت الجلسة بين الطلبين
 async function cfProxyChainFetch(url1: string, url2: string, ref1?: string, timeoutMs = 20_000): Promise<string> {
-  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const params = new URLSearchParams({ url1, url2, timeout: String(Math.floor(timeoutMs / 1000)) });
   if (ref1) params.set("ref1", ref1);
-  const r = await fetch(`http://localhost:${CF_PORT}/chain-fetch?${params}`, {
+  const r = await fetch(`${CF_PROXY_BASE}/chain-fetch?${params}`, {
     signal: AbortSignal.timeout(timeoutMs + 5_000),
   });
   if (!r.ok) throw new Error(`chain-fetch HTTP ${r.status}`);
-  const html = await r.text();
-  return html;
+  return r.text();
 }
 
-// cfOrOrkestPost → الآن يستخدم cfProxy POST فقط (Orkestr أُزيل — 2026-07)
+// cfOrOrkestPost — يستخدم CF_PROXY_BASE POST
 async function cfOrOrkestPost(url: string): Promise<string> {
-  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
   const r = await fetch(
-    `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
+    `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}&method=POST`,
     { signal: AbortSignal.timeout(18_000) }
   );
   if (!r.ok) throw new Error(`cfProxy POST HTTP ${r.status}`);
@@ -1476,9 +1478,8 @@ router.get("/animation/quick-check", async (req: Request, res: Response) => {
   // Quick probe via Icefy (movie only) — fast cfProxy check
   try {
     if (type === "movie") {
-      const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
       const raw = await fetch(
-        `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(`https://streams.icefy.top/movie/${tmdbId}`)}`,
+        `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(`https://streams.icefy.top/movie/${tmdbId}`)}`,
         { signal: controller.signal }
       ).then(r => r.ok ? r.text() : "{}").catch(() => "{}");
       const data = JSON.parse(raw) as { stream?: string };
