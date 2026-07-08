@@ -4529,31 +4529,21 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       });
     }));
 
-    // ── SendVid (SVLink) → MP4 مباشر عبر video-proxy بدون إعلانات ──
+    // ── SendVid (SVLink) → embed iframe ──────────────────────────────────────
+    // ⚠️ sendvid.com يُصدر MP4 موقَّعاً بـ IP+TTL-4h، لكن SRC_TTL=6h
+    //    → لا نخزّن الرابط الموقَّع في الكاش؛ نستخدم embed URL مستقر بدلاً منه
     const svLink = String(epData.SVLink || "").trim();
     if (svLink) {
       const sendvidUrl = `https://sendvid.com/embed/${svLink}`;
-      try {
-        const svHtml = await (await fetch(sendvidUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-          signal: AbortSignal.timeout(8000),
-        })).text();
-        const mp4Match = svHtml.match(/"(https:\/\/[^"]+\.mp4[^"]*)"/) ||
-                         svHtml.match(/src\s*:\s*"(https:\/\/[^"]+\.mp4[^"]*)"/);
-        if (mp4Match) {
-          const directMp4 = mp4Match[1];
-          const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(directMp4)}&ref=${encodeURIComponent(sendvidUrl)}`;
-          sources.push({
-            name: "سيندفيد · HD",
-            url: sendvidUrl,
-            quality: "HD",
-            qualityRank: 27,
-            site: "animeify",
-            directUrl: proxyUrl,
-            directType: "mp4",
-          });
-        }
-      } catch {}
+      sources.push({
+        name: "سيندفيد · HD",
+        url: sendvidUrl,
+        quality: "HD",
+        qualityRank: 22,
+        site: "animeify",
+        directUrl: sendvidUrl,
+        isEmbed: true,
+      });
     }
 
     // ── Mega.nz embed (MALink) — يدعم عدة صيغ ──
@@ -4621,27 +4611,33 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
       }
     }
 
-    // ── SFLink (Strwish) → HLS مباشر ──
+    // ── SFLink → filemoon.sx أولاً (strwish.com محجوب من VPS — 452 bytes) ──
+    //   نفس الـ ID يعمل على filemoon.sx (extractVideoDeep يدعمها عبر cfProxy)
     const sfLink = String(epData.SFLink || "").trim();
     if (sfLink) {
-      const strwishUrl = sfLink.startsWith("http") ? sfLink : `https://strwish.com/e/${sfLink}`;
-      try {
-        const extracted = await extractVideoDeep(strwishUrl, strwishUrl);
-        if (extracted?.url) {
-          const proxyUrl = extracted.url.includes(".m3u8")
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(strwishUrl)}`
-            : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(strwishUrl)}`;
-          sources.push({
-            name: "ستريم ويش · HD",
-            url: strwishUrl,
-            quality: "HD",
-            qualityRank: 27,
-            site: "animeify",
-            directUrl: proxyUrl,
-            directType: extracted.url.includes(".m3u8") ? "hls" : "mp4",
-          });
-        }
-      } catch {}
+      const sfCandidates = sfLink.startsWith("http")
+        ? [sfLink]
+        : [`https://filemoon.sx/e/${sfLink}`, `https://strwish.com/e/${sfLink}`];
+      for (const sfUrl of sfCandidates) {
+        try {
+          const extracted = await extractVideoDeep(sfUrl, sfUrl);
+          if (extracted?.url) {
+            const proxyUrl = extracted.url.includes(".m3u8")
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(sfUrl)}`
+              : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(sfUrl)}`;
+            sources.push({
+              name: "فايل مون SF · HD",
+              url: sfUrl,
+              quality: "HD",
+              qualityRank: 27,
+              site: "animeify",
+              directUrl: proxyUrl,
+              directType: extracted.url.includes(".m3u8") ? "hls" : "mp4",
+            });
+            break; // نجح → لا حاجة للـ fallback
+          }
+        } catch {}
+      }
     }
 
     // ── GDLink (Google Drive) → MP4 مباشر ──
@@ -9785,8 +9781,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
       scrapeCached("moviebox",  () => getMovieBoxAnimeSources(title, english, ep, isMovie), false, 18000),
-      // ── أبس أنمي — OK.ru مع cookies مفتوحة من AgentsAndCookies/getData.php ────
-      scrapeCached("appsanime", () => getAppsAnimeSources(title, english, ep), false, 20000),
+      // ── أبس أنمي — معطّل مؤقتاً (OK.ru يحجب datacenter IPs) ────────────────────
+      // scrapeCached("appsanime", () => getAppsAnimeSources(title, english, ep), false, 20000),
       // ── معطّلة / محذوفة ────────────────────────────────────────────
       // toonstream:   للأنيميشن فقط، غير مناسب للأنمي
       // witanime:     مُعاد تفعيله 2026-07 — CycleTLS + cfProxy chain
@@ -9942,7 +9938,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
-      case "appsanime":   (await race(getAppsAnimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
+      // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       default: break;
     }
 
