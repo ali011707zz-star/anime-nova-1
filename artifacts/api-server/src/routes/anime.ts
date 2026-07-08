@@ -9300,6 +9300,116 @@ async function getAniPmSources(
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  NEKOWATCH (nekowatch.xyz) — ANIME ONLY (AniList ID)
+//  API: /api/anime/watch/anineko/{anilistId}/sub/anineko-{ep}
+//  Returns HLS streams from vivibebe.site CDN
+//  Filter: isActive=true AND type=hls
+//  Referer: https://nekowatch.xyz
+// ════════════════════════════════════════════════════════════════════
+const NEKOWATCH_BASE = "https://nekowatch.xyz";
+const _nekoCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const NEKO_TTL = 4 * 3_600_000;
+
+async function getNekowatchSources(
+  _title: string, _english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  if (!anilistId) return [];
+  const ck = `nekowatch:${anilistId}:${ep}`;
+  const hit = _nekoCacheMap.get(ck);
+  if (hit && Date.now() - hit.ts < NEKO_TTL) return hit.sources;
+
+  const out: UnifiedSource[] = [];
+  try {
+    const url = `${NEKOWATCH_BASE}/api/anime/watch/anineko/${anilistId}/sub/anineko-${ep}`;
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        "Referer":    NEKOWATCH_BASE + "/",
+        "Accept":     "application/json",
+      },
+      signal: AbortSignal.timeout(14_000),
+    });
+    if (!r.ok) { console.warn(`[Nekowatch] HTTP ${r.status}`); return out; }
+    const data: any = await r.json();
+    const streams: any[] = Array.isArray(data?.streams) ? data.streams : [];
+    const active = streams.filter((s: any) => s.isActive && s.type === "hls" && typeof s.url === "string" && s.url.startsWith("http"));
+    for (const stream of active.slice(0, 3)) {
+      out.push({
+        name:        "Nekowatch · ياباني مترجم",
+        url:         stream.url,
+        quality:     "HD",
+        qualityRank: 10,
+        site:        "nekowatch",
+        directUrl:   `/api/anime/hls-proxy?url=${encodeURIComponent(stream.url)}&ref=${encodeURIComponent(NEKOWATCH_BASE + "/")}`,
+        directType:  "hls",
+        corsOk:      false,
+      });
+    }
+    console.log(`[Nekowatch] anilist:${anilistId} ep${ep} → ${out.length} active HLS streams`);
+    if (out.length) _nekoCacheMap.set(ck, { sources: out, ts: Date.now() });
+  } catch (e: any) {
+    console.warn("[Nekowatch]", e?.message);
+  }
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  XYRA (api.xyra.stream) — ANIME + ANIMATION (TMDB ID, freekey)
+//  Endpoint: /v1/streamhub/streams?api_key=freekey&tmdb_id=&type=series&season=1&episode=
+//  Returns pre-sorted streams (4K first), some with headers field
+//  skipProxy=true — streams are direct CDN (MP4 / HLS)
+// ════════════════════════════════════════════════════════════════════
+const XYRA_API = "https://api.xyra.stream/v1/streamhub/streams";
+
+async function getXyraAnimeSources(
+  title: string, english: string | null, ep: number, anilistId?: number,
+): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+  const out: UnifiedSource[] = [];
+  try {
+    const url = `${XYRA_API}?api_key=freekey&tmdb_id=${tmdbId}&type=series&season=1&episode=${ep}`;
+    const r = await fetch(url, {
+      headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
+      signal: AbortSignal.timeout(14_000),
+    });
+    if (!r.ok) { console.warn(`[Xyra] HTTP ${r.status}`); return out; }
+    const data: any = await r.json();
+    const streams: any[] = Array.isArray(data?.streams) ? data.streams : [];
+    for (const s of streams.slice(0, 5)) {
+      if (typeof s.url !== "string") continue;
+      // Strict https?:// validation — reject anything else
+      let validUrl: URL;
+      try { validUrl = new URL(s.url); } catch { continue; }
+      if (validUrl.protocol !== "https:" && validUrl.protocol !== "http:") continue;
+      const isHls  = s.url.includes(".m3u8");
+      const hdrs   = s.headers && typeof s.headers === "object" ? s.headers as Record<string, string> : {};
+      // Default referer fallback — mirrors animation.ts behaviour
+      const referer = hdrs["Referer"] || hdrs["referer"] || "https://xyra.stream/";
+      const label  = `Xyra · ${s.name || s.provider || "HD"} · ${s.quality || "HD"}`;
+      const directUrl = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${encodeURIComponent(referer)}`
+        : s.url;
+      out.push({
+        name:        label,
+        url:         s.url,
+        quality:     String(s.quality || "HD"),
+        qualityRank: 12,
+        site:        "xyra_anim",
+        directUrl,
+        directType:  isHls ? "hls" : "mp4",
+        headers:     { Referer: referer },
+        corsOk:      false,
+      });
+    }
+    console.log(`[Xyra] tmdb:${tmdbId} ep${ep} → ${out.length} streams`);
+  } catch (e: any) {
+    console.warn("[Xyra]", e?.message);
+  }
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  APPS-ANIME.COM scraper  (Arabic anime — مدبلج عربي)
 //
 //  Infrastructure:
@@ -9794,6 +9904,9 @@ router.get("/anime/sources-stream", async (req, res) => {
       // reanime:      أُعيد تفعيله 2026-07-06 — CF challenge لم يعد يحجب /api/flix + cfProxyGet لصفحة FlixCloud
       scrapeCached("reanime", () => getReanímeSources(title, english, ep, anilistId), false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
+      // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
+      scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
+      scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
     ]);
 
   } catch (e: any) {
@@ -9939,6 +10052,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
+      case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
+      case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
