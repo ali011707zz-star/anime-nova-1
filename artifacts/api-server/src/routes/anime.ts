@@ -275,12 +275,15 @@ async function cycleTLSGet(url: string, referer?: string): Promise<string | null
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  cfProxyGet — fetches via Python curl_cffi proxy (port 8000)
-//  Used for sites that block Node.js fetch but allow real Chrome TLS.
-//  Falls back to cfGet if proxy is unavailable.
+//  cfProxyGet — fetches via Python curl_cffi proxy (port 8000 locally)
+//  على VPS: CF_PROXY_BASE = http://localhost:8000 (مباشر)
+//  على Replit: NOVA_PROXY_BASE=https://animenovaa.duckdns.org → /api/cfproxy
 // ════════════════════════════════════════════════════════════════════
 const CF_PROXY_PORT = process.env.CF_PROXY_PORT || "8000";
-const CF_PROXY_BASE = `http://localhost:${CF_PROXY_PORT}`;
+const _NOVA_PROXY_BASE = process.env.NOVA_PROXY_BASE;
+const CF_PROXY_BASE = _NOVA_PROXY_BASE
+  ? `${_NOVA_PROXY_BASE}/api/cfproxy`
+  : `http://localhost:${CF_PROXY_PORT}`;
 let _cfProxyAlive: boolean | null = null;
 let _cfProxyCheckedAt = 0;
 
@@ -401,18 +404,16 @@ async function denoProxyGet(
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  orkestGet → الآن يستخدم cf_proxy.py مباشرة (Orkestr أُزيل — 2026-07)
-//  يستخدم https://animenovaa.duckdns.org كقاعدة للـ VPS
+//  orkestGet — يستخدم CF_PROXY_BASE (محلي أو VPS حسب NOVA_PROXY_BASE)
 // ════════════════════════════════════════════════════════════════════
 async function orkestGet(
   url: string,
   _referer?: string,
   timeoutMs = 25000,
 ): Promise<string | null> {
-  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   try {
     const r = await fetch(
-      `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`,
+      `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}`,
       { signal: AbortSignal.timeout(timeoutMs) },
     );
     if (!r.ok) return null;
@@ -2367,6 +2368,7 @@ async function getAnimePhoenixSources(
   title: string, english: string | null, ep: number, isMovie = false,
   ctx?: MatchCtx,
 ): Promise<UnifiedSource[]> {
+  return []; // anime-phoenix.com: domain parked / site dead 2026-07
   const cKey = `phoenix:${title}|${english ?? ""}|${ep}`;
   const cached = aphSrcCache.get(cKey);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
@@ -2510,6 +2512,7 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
 async function getMitanimeSources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
+  return []; // mitanime.net: site down 2026-07
   const ck = `mitanime:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = mitanimeSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
@@ -6966,7 +6969,7 @@ const REANIME_TTL = 30 * 60_000;
 
 // [2026-07-06] أُعيد تفعيله: reanime.to/api/flix لم يعد يحجب Replit datacenter IPs (فُحص مباشرة).
 // FlixCloud embed page لا يزال محميّاً بـ CF challenge بسيط → يُستخدم cfProxyGet (curl_cffi impersonation) بدلاً من fetch العادي.
-const REANIME_DISABLED = false;
+const REANIME_DISABLED = true; // reanime.net: "website has been stopped" 2026-07
 async function getReanímeSources(
   title: string, english: string | null, ep: number, anilistId?: number,
 ): Promise<UnifiedSource[]> {
@@ -8935,6 +8938,7 @@ async function getAniZoneSources(
   english: string | null,
   ep: number,
 ): Promise<UnifiedSource[]> {
+  return []; // anizone.to: /search endpoint → 404, /livewire/update → 404 (2026-07)
   try {
     const ck = `anizone:${(english || title).toLowerCase()}`;
     const cached = anizoneSlugCache.get(ck);
@@ -9093,6 +9097,7 @@ async function get2DhiveSources(
   english: string | null,
   ep: number,
 ): Promise<UnifiedSource[]> {
+  return []; // 2dhive: wp-admin/admin-ajax.php → 404 (site restructured 2026-07)
   try {
     const ck = `2dhive:${(english || title).toLowerCase()}`;
     const cached = dhiveSlugCache.get(ck);
@@ -9242,54 +9247,55 @@ async function getAniPmSources(
     if (!r.ok) return out;
     const raw = await r.json();
     if (!raw || typeof raw !== "object") return out;
-    const data = raw as {
-      sources?: Array<{
-        url?: string; server?: string; quality?: string; label?: string; type?: string;
-        subType?: string; // "sub" | "dub"
-      }>;
-      subtitles?: Array<{ url?: string; label?: string; language?: string }>;
+
+    // تنسيق جديد (2026-07): { sub: [...], dub: [...] }
+    // تنسيق قديم: { sources: [...] }
+    type AniPmEntry = {
+      url?: string; provider?: string; name?: string; kind?: string;
+      priority?: number; subtitle?: string; resolvable?: boolean; slow?: boolean;
     };
-    if (!Array.isArray(data.sources)) return out;
+    const rawAny = raw as Record<string, unknown>;
+    let subList: AniPmEntry[] = [];
+    let dubList: AniPmEntry[] = [];
 
-    // ابحث عن ترجمة إنجليزية → لاحقاً تُترجم للعربية
-    const subs = data.subtitles || [];
-    const enSub = subs.find(s =>
-      (s.label || "").toLowerCase().includes("engl") ||
-      (s.language || "").toLowerCase() === "en" ||
-      (s.label || "").toLowerCase() === "english"
-    );
-    let subtitleUrl: string | undefined;
-    if (enSub?.url) {
-      const absSubUrl = enSub.url.startsWith("http") ? enSub.url : `${ANI_PM_BASE}${enSub.url}`;
-      subtitleUrl = `/api/anime/translate-vtt?url=${encodeURIComponent(absSubUrl)}&from=en&to=ar`;
+    if (Array.isArray(rawAny.sub)) {
+      // تنسيق جديد
+      subList = rawAny.sub as AniPmEntry[];
+      dubList = Array.isArray(rawAny.dub) ? rawAny.dub as AniPmEntry[] : [];
+    } else if (Array.isArray((rawAny as any).sources)) {
+      // تنسيق قديم للتوافقية
+      subList = (rawAny as any).sources as AniPmEntry[];
     }
 
-    for (const src of (data.sources || [])) {
-      if (!src.url) continue;
-      const absUrl = src.url.startsWith("http") ? src.url : `${ANI_PM_BASE}${src.url}`;
-      const isHls = absUrl.includes(".m3u8") || src.type === "hls" || src.url.includes("/hls");
-      const isDub = (src.subType || src.label || "").toLowerCase().includes("dub");
-      const serverName = src.server || (isDub ? "Dub" : "Sub");
-      const label = `AniPm · ${serverName}`;
+    const processEntries = (entries: AniPmEntry[], isDub: boolean) => {
+      for (const src of entries) {
+        if (!src.url) continue;
+        const absUrl = src.url.startsWith("http") ? src.url : `${ANI_PM_BASE}${src.url}`;
+        const isHls = absUrl.includes(".m3u8") || src.kind === "hls" || src.url.includes("/hls");
+        const providerName = src.provider || src.name || (isDub ? "Dub" : "Sub");
+        const label = `AniPm · ${providerName}${isDub ? " [مدبلج]" : ""}`;
 
-      const directUrl = isHls
-        ? `/api/anime/hls-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ANI_PM_BASE + "/")}`
-        : absUrl;
+        const directUrl = isHls
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ANI_PM_BASE + "/")}`
+          : absUrl;
 
-      out.push({
-        name: label,
-        url:  absUrl,
-        quality:     src.quality || "HD",
-        qualityRank: 11,
-        site:        "anipm",
-        directUrl,
-        directType:  isHls ? "hls" : "mp4",
-        subtitleUrl: isDub ? undefined : subtitleUrl,
-        corsOk:      false,
-      });
-    }
+        out.push({
+          name: label,
+          url:  absUrl,
+          quality:     "HD",
+          qualityRank: 11,
+          site:        "anipm",
+          directUrl,
+          directType:  isHls ? "hls" : "mp4",
+          corsOk:      false,
+        });
+      }
+    };
 
-    console.log(`[AniPm] "${english || title}" ep${ep} → ${out.length} sources`);
+    processEntries(subList, false);
+    processEntries(dubList, true);
+
+    console.log(`[AniPm] "${english || title}" ep${ep} → ${out.length} sources (sub:${subList.length} dub:${dubList.length})`);
     aniPmCache.set(ck, { sources: out, ts: Date.now() });
   } catch (e: any) {
     console.warn("[AniPm]", e?.message);
@@ -9306,7 +9312,7 @@ router.get("/anime/sources-stream", async (req, res) => {
   const title     = ((req.query.title   as string) || "").trim();
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
-  const anilistId = parseInt((req.query.anime as string) || "0") || undefined;
+  const anilistId = parseInt((req.query.anime as string) || (req.query.anilistId as string) || "0") || undefined;
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT";
 
@@ -9586,7 +9592,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   const title     = ((req.query.title   as string) || "").trim();
   const english   = ((req.query.english as string) || "").trim() || null;
   const ep        = parseInt((req.query.ep    as string) || "1");
-  const anilistId = parseInt((req.query.anime as string) || "0") || undefined;
+  const anilistId = parseInt((req.query.anime as string) || (req.query.anilistId as string) || "0") || undefined;
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovieParam = (req.query.isMovie as string) === "true";
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;
@@ -12606,6 +12612,26 @@ router.get("/anime/new-episodes", async (req, res) => {
     console.warn("[new-episodes] error:", e.message);
     res.setHeader("Cache-Control", "public, max-age=60");
     res.json(_awNewEpsCache.items);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  /api/cfproxy/:endpoint — يعيد توجيه الطلبات لـ cf_proxy.py المحلي
+//  يُستخدم من Replit عبر NOVA_PROXY_BASE=https://animenovaa.duckdns.org
+//  مثال: GET /api/cfproxy/fetch?url=https://...
+// ════════════════════════════════════════════════════════════════════
+router.get("/cfproxy/:endpoint", async (req: Request, res: Response) => {
+  const endpoint = req.params.endpoint;
+  const query = new URLSearchParams(req.query as Record<string, string>).toString();
+  const localBase = `http://localhost:${process.env.CF_PROXY_PORT || "8000"}`;
+  try {
+    const r = await fetch(`${localBase}/${endpoint}${query ? `?${query}` : ""}`, {
+      signal: AbortSignal.timeout(38_000),
+    });
+    const body = await r.text();
+    res.status(r.status).set("Content-Type", "text/plain; charset=utf-8").send(body);
+  } catch (e: any) {
+    res.status(502).json({ error: `cfproxy: ${e.message}` });
   }
 });
 
