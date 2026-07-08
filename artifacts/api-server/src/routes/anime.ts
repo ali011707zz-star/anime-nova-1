@@ -7909,7 +7909,9 @@ async function getMXPlayerSources(title: string, english: string | null, ep: num
 }
 
 // ── VidLink via enc-dec.app (TMDB-native, auth-token IP-tied → hls-proxy) ──
+// DISABLED 2026-07-08: enc-dec.app/api/enc-vidlink is suspended — service returns errors consistently
 async function getVidLinkAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
+  return []; // enc-dec.app suspended
   const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
   try {
