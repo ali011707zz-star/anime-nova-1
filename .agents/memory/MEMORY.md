@@ -13,6 +13,7 @@
 - [Source playback fixes — DU AK AN HI SC AT](source-playback-fixes-2026-07.md) — parseVidHls JSON scanner, dulo CDN probe, starcima expiry filter, anineko direct-fetch fallback.
 - [Source fixes July 2026](source-fixes-2026-07.md) — AW timeout 25-28s; SC label الثريا→StarCima; SP/MO disabled (API dead); AF/AT working.
 - [Source fixes 2026-07-08](source-fixes-2026-07-08.md) — CinePro VidApi→hls-proxy fix; Hexa+VidLink disabled (enc-dec.app down); deploy=node build.mjs+pm2 restart.
+- [External repo analysis](repo-analysis-external.md) — HIGH: baha-anime-skip (skip OP/ED), MovieVerse (Kawaii API+Phoenix decoder); MEDIUM: anime-mapper (all IDs CDN), MyDubList (321 Arabic dubs JSON), trailerdb (TMDB→YT trailers); SKIP: ani-desk (same project), kurozora (PHP).
 - [MovieBox integration](moviebox-integration.md) — h5-api.aoneroom.com; JWT auth via search-suggest; signed MP4 URLs expire (10min TTL); dubbed filter + race guard.
 - [Bandwidth proxy removal](bandwidth-proxy-removal.md) — seg-proxy+video-proxy→307 redirect; hls-proxy→directSegs=true; headers field added to source responses for CDN auth.
 - [WebView removal + dubbed streamUrl fix](videasy-dubbed-fixes.md) — WebView removed from all 3 mobile watch screens; dubbed streamUrl changed to rawUrl-first (foupix blocks VPS, allows residential IPs); cinepro tag fixed to "CP".
