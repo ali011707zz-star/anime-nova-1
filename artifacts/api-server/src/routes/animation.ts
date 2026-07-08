@@ -3928,6 +3928,78 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
+      // ── Xyra (api.xyra.stream) — TMDB-native, freekey, بدون ترجمة مدمجة ────────
+      scrapeAnimCached("xyra", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "Xyra: جاري البحث…" });
+          const xyraType = type === "movie" ? "movie" : "series";
+          const url = `https://api.xyra.stream/v1/streamhub/streams?api_key=freekey&tmdb_id=${tmdbId}&type=${xyraType}&season=${season}&episode=${epNum}`;
+          const r = await fetch(url, {
+            headers: { "User-Agent": UA, "Accept": "application/json" },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!r.ok) { console.warn(`[Xyra/anim] HTTP ${r.status} tmdb:${tmdbId}`); return; }
+          const data: any = await r.json();
+          const streams: any[] = Array.isArray(data?.streams) ? data.streams : [];
+          let sent = 0;
+          for (const s of streams) {
+            if (sent >= 5) break;
+            // Strict URL validation — must be a valid http(s) URL
+            let validUrl: URL;
+            try { validUrl = new URL(s.url); } catch { continue; }
+            if (validUrl.protocol !== "https:" && validUrl.protocol !== "http:") continue;
+            const rawUrl  = s.url as string;
+            const isHls   = rawUrl.includes(".m3u8");
+            const hdrs    = s.headers && typeof s.headers === "object" ? s.headers as Record<string, string> : {};
+            const referer = hdrs["Referer"] || hdrs["referer"] || "https://xyra.stream/";
+            const label   = `Xyra · ${s.name || s.provider || "HD"} · ${s.quality || "HD"}`;
+            const proxyUrl = isHls ? wrapHls(rawUrl, referer) : undefined;
+            sendSource(rawUrl, label, rawUrl, proxyUrl);
+            sent++;
+          }
+          console.log(`[Xyra/anim] tmdb:${tmdbId} → ${sent} streams`);
+        } catch (e: any) {
+          console.warn("[Xyra/anim]", e?.message);
+        }
+      }),
+
+      // ── Notorrent (Stremio addon) — IMDB via TMDB, بدون ترجمة مدمجة ───────────
+      scrapeAnimCached("notorrent", async () => {
+        if (!imdbId) return;
+        try {
+          send("status", { msg: "Notorrent: جاري البحث…" });
+          const ntPath = type === "movie"
+            ? `movie/${imdbId}.json`
+            : `series/${imdbId}:${season}:${epNum}.json`;
+          // onrender.com cold start: 15-30s — timeout extended accordingly
+          const r = await fetch(`https://addon-osvh.onrender.com/stream/${ntPath}`, {
+            headers: { "User-Agent": UA, "Accept": "application/json" },
+            signal: AbortSignal.timeout(35_000),
+          });
+          if (!r.ok) { console.warn(`[Notorrent] HTTP ${r.status} imdb:${imdbId}`); return; }
+          const data: any = await r.json();
+          const streamList: any[] = Array.isArray(data?.streams) ? data.streams : [];
+          let sent = 0;
+          for (const s of streamList) {
+            if (sent >= 4) break;
+            // Strict URL validation
+            let validUrl: URL;
+            try { validUrl = new URL(s.url); } catch { continue; }
+            if (validUrl.protocol !== "https:" && validUrl.protocol !== "http:") continue;
+            const rawUrl = s.url as string;
+            const isHls  = rawUrl.includes(".m3u8");
+            const label  = `Notorrent · ${s.title || s.name || "HD"}`;
+            const proxyUrl = isHls ? wrapHls(rawUrl, "https://addon-osvh.onrender.com/") : undefined;
+            sendSource(rawUrl, label, rawUrl, proxyUrl);
+            sent++;
+          }
+          console.log(`[Notorrent] imdb:${imdbId} → ${sent} streams`);
+        } catch (e: any) {
+          console.warn("[Notorrent]", e?.message);
+        }
+      }),
+
     ]);
 
     clearTimeout(forceClose);
