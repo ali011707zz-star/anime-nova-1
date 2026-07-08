@@ -35,3 +35,4 @@
 - [EgyDead domain rotation](egydead-domain.md) — tv9→tv10.egydead.live; VPS+Replit CF-blocked; scraper silently fails.
 - [AniPm + WeCima my_player + FaselHD fallback](sources-july2026-additions.md) — ani.pm added to anime.ts; my_player param added to decodeMyCimaWrap; FaselHD got direct-fetch+Orkestr fallbacks.
 - [Proxy VPS fallback](proxy-vps-fallback.md) — hls/video/seg-proxy: CF Worker أولاً ثم VPS fallback؛ _cfh.ok=false مبدئياً؛ OPTIONS health check كل 45s.
+- [apps-anime.com API analysis](apps-anime-analysis.md) — PHP API على apps-player.com/Anime_Cartoon_Full/API/ محمي؛ AgentsAndCookies/getData.php مفتوح يرجع OK.ru cookies؛ 4000+ أنمي؛ auth لم يُكتشف.
