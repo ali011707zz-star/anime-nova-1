@@ -2970,8 +2970,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── VidLink via enc-dec.app — TMDB-native HLS + Arabic captions ─────────────
+      // ── VidLink via enc-dec.app — DISABLED 2026-07-08: enc-dec.app/api/enc-vidlink suspended ──
       scrapeAnimCached("vidlink_encdec", async () => {
+        return; // enc-dec.app suspended — re-enable when service recovers
         if (!tmdbId) return;
         try {
           send("status", { msg: "VidLink: جاري التشفير…" });
@@ -3663,9 +3664,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             }
             if (!realUrl.startsWith("http")) continue;
             // VidApi URLs use /pl/ or /playlist/ paths (not .m3u8 extension) but ARE HLS M3U8
+            // VidApi may also serve M3U8 from paths that don't match any extension pattern —
+            // detect by provider name as a fallback.
             // VidRock URLs return single '.' byte — skip them
+            const provLower = provName.toLowerCase();
             const isHls = realUrl.includes(".m3u8") || realUrl.includes("manifest")
-              || realUrl.includes("/pl/") || realUrl.includes("/playlist/");
+              || realUrl.includes("/pl/") || realUrl.includes("/playlist/")
+              || provLower.includes("vidapi"); // VidApi always returns M3U8 streams
             const proxied = isHls
               ? `/api/anime/hls-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://vidapi.cc/")}`
               : `/api/anime/video-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`;
@@ -3676,6 +3681,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       }),
 
       scrapeAnimCached("hexa", async () => {
+        return; // DISABLED 2026-07-08: enc-dec.app/api/enc-hexa returns HTTP 500 consistently — broken on their end
         if (!tmdbId) return;
         if (Date.now() < _hexaFailUntil) return; // cooldown active — enc-dec.app مشغول
         try {
