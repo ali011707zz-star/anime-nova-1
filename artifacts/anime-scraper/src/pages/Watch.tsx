@@ -982,10 +982,14 @@ function ScraperPicker({
   onPlaySrc: (src: FetchedSrc) => void;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
 }) {
-  /* Check if all scrapers have finished (ready or failed) */
-  const allDone = SCRAPER_DEFS.every(d =>
-    slotStatus[d.site] === "ready" || slotStatus[d.site] === "failed"
-  );
+  /* anyFetching: true while at least one scraper is actively running
+     hasIdleScrapers: true whenever any scraper is still untried (idle)
+     allScrapersComplete: all scrapers done — none fetching, none idle
+     allDone: scrapers not actively running (idle counts as "not started", not "running") */
+  const anyFetching        = SCRAPER_DEFS.some(d => slotStatus[d.site] === "fetching");
+  const hasIdleScrapers    = SCRAPER_DEFS.some(d => slotStatus[d.site] === "idle");
+  const allScrapersComplete = !anyFetching && !hasIdleScrapers;
+  const allDone = !anyFetching;
 
   /* Next-episode guard: use nextAiringEpisode when totalEps is unknown (999 fallback) */
   const nextAiringEp = anime?.nextAiringEpisode?.episode;
@@ -1126,9 +1130,8 @@ function ScraperPicker({
     </>
   );
 
-  /* ── While scrapers are still running AND no sources yet: show loading screen ── */
-  /* If sources already arrived (from a previous run or fast scraper), skip loading screen */
-  if (!allDone && !hasSources && !hasBackupSources) {
+  /* ── Show loading screen only when scrapers are actively fetching (not idle/lazy mode) ── */
+  if (anyFetching && !hasSources && !hasBackupSources) {
     return (
       <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl">
         {/* Blurred poster background */}
@@ -1309,6 +1312,67 @@ function ScraperPicker({
               </div>
             )}
           </>
+        ) : hasIdleScrapers ? (
+          /* Lazy mode: untried scrapers remain — show scraper selection grid */
+          <div className="px-4 mt-2 pb-4">
+            <p className="text-white/40 text-[11px] font-['Cairo'] text-center mb-4">
+              اختر مصدراً لبدء التشغيل
+            </p>
+            <div className="grid grid-cols-2 gap-2.5">
+              {SCRAPER_DEFS.map(d => {
+                const st = slotStatus[d.site];
+                const isFetching = st === "fetching";
+                const isFailed   = st === "failed";
+                return (
+                  <button
+                    key={d.site}
+                    onClick={() => onFetchSite(d.site)}
+                    disabled={isFetching}
+                    className="relative flex flex-col items-start gap-1 px-3 py-3 rounded-2xl active:scale-95 transition-transform disabled:opacity-50"
+                    style={{
+                      background: isFailed ? "rgba(239,68,68,0.07)" : "rgba(255,255,255,0.04)",
+                      border: isFailed ? "1px solid rgba(239,68,68,0.22)" : "1px solid rgba(255,255,255,0.09)",
+                    }}
+                    dir="rtl"
+                  >
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="text-[10px] font-black font-mono px-1.5 py-0.5 rounded"
+                        style={{ background: "rgba(139,92,246,0.20)", color: "rgba(196,181,253,0.90)" }}>
+                        {d.tag}
+                      </span>
+                      <span className="text-[11.5px] font-black font-['Cairo'] text-white/80 truncate flex-1">
+                        {d.name}
+                      </span>
+                      {isFetching && (
+                        <motion.div
+                          className="w-3.5 h-3.5 rounded-full border border-transparent border-t-violet-400 border-r-violet-400/40 shrink-0"
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                        />
+                      )}
+                      {isFailed && <span className="text-[9px] text-red-400/70 font-['Cairo'] shrink-0">فشل</span>}
+                    </div>
+                    <span className="text-[9px] text-white/25 font-['Cairo'] leading-tight">{d.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : anyFetching ? (
+          /* All remaining scrapers are fetching but no playable results yet */
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="flex flex-col items-center gap-3 py-10 px-8">
+            <div className="relative w-8 h-8">
+              <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
+              <motion.div
+                className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+              />
+            </div>
+            <p className="text-white/55 text-[12px] font-['Cairo'] text-center">جاري البحث عن مصادر...</p>
+          </motion.div>
         ) : (
           <motion.div
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
