@@ -95,6 +95,7 @@ jobs:
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m -Dorg.gradle.warning.mode=none"
         run: |
+          set -o pipefail
           chmod +x gradlew
           ./gradlew assembleRelease \
             --no-daemon \
@@ -102,8 +103,8 @@ jobs:
             --stacktrace \
             2>&1 | tee build.log || {
               echo ""
-              echo "══════ آخر 50 سطر من سجل البناء ══════"
-              tail -50 build.log
+              echo "══════ آخر 80 سطر من سجل البناء ══════"
+              tail -80 build.log
               exit 1
             }
 
