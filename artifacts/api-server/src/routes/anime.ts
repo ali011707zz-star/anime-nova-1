@@ -93,6 +93,7 @@ const DEAD_FILE_HOSTS = [
   ".css",".png",".jpg",".jpeg",".gif",".svg",".ico",
   "favicon","robots.txt","sitemap",
   "larhu.net","larhu.website","larhu.tv","larhu.me","larhu.io","larhu.org","larhu.co",
+  "hubcloud.cx","hubcloud.co","hubcloud.fun",
   "file-upload.com","file-upload.org","file-upload.net","fileupload.pw","fileupload.net",
   "uptobox.com","uptobox.fr","upstream.to",
   "flashx.tv","gostream.site","embedrise.com",
@@ -7888,6 +7889,7 @@ const _mxpSrcCache = new Map<string, { sources: UnifiedSource[]; ts: number }>()
 const MXP_TTL = 2 * 3_600_000; // 2 hours
 
 async function getMXPlayerSources(title: string, english: string | null, ep: number): Promise<UnifiedSource[]> {
+  return []; // [2026-07-09] DISABLED: MXPlayer service (port 8002) not running
   const q  = (english || title).trim();
   const ck = `mxp:${q.toLowerCase()}:${ep}`;
   const hit = _mxpSrcCache.get(ck);
@@ -9426,6 +9428,87 @@ async function getXyraAnimeSources(
 //    - sample-videos.com = حلقة غير مرفوعة → تجاهله
 //    - ep.epName هو integer
 // ════════════════════════════════════════════════════════════════════
+
+// ── Notorrent (addon-osvh.onrender.com) — IMDB-based streams for anime ──
+const NOTORRENT_ANIM_TTL = 4 * 3_600_000;
+const _notorrentAnimCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+async function getNotorrentAnimeSources(
+  anilistId: number | undefined, ep: number = 1,
+): Promise<UnifiedSource[]> {
+  const ck = `notorrent_anim:${anilistId}:${ep}`;
+  const hit = _notorrentAnimCache.get(ck);
+  if (hit && Date.now() - hit.ts < NOTORRENT_ANIM_TTL) return hit.sources;
+  const empty: UnifiedSource[] = [];
+
+  let imdbId = "";
+
+  // animeapi.my.id: AniList ID → IMDB مباشرة (يعمل من VPS، أسرع من AniList GraphQL)
+  if (anilistId) {
+    try {
+      const apiR = await fetch("https://animeapi.my.id/anilist/" + anilistId, {
+        headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (apiR.ok) {
+        const apiData = await apiR.json() as any;
+        if (apiData.imdb) imdbId = apiData.imdb;
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (!imdbId) { _notorrentAnimCache.set(ck, { sources: empty, ts: Date.now() }); return empty; }
+
+  const out: UnifiedSource[] = [];
+  try {
+    const ntPath = "series/" + imdbId + ":1:" + ep + ".json";
+    const r = await fetch("https://addon-osvh.onrender.com/stream/" + ntPath, {
+      headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
+      signal: AbortSignal.timeout(22_000),
+    });
+    if (!r.ok) {
+      console.warn("[Notorrent-anim] HTTP " + r.status + " imdb:" + imdbId);
+    } else {
+      const data: any = await r.json();
+      const streamList: any[] = Array.isArray(data?.streams) ? data.streams : [];
+      let sent = 0;
+      for (const s of streamList) {
+        if (sent >= 4) break;
+        let validUrl: URL;
+        try { validUrl = new URL(s.url); } catch { continue; }
+        if (validUrl.protocol !== "https:" && validUrl.protocol !== "http:") continue;
+        const rawUrl = s.url as string;
+        const isHls  = rawUrl.includes(".m3u8");
+        const label  = "Notorrent · " + (s.title || s.name || "HD");
+        const proxyUrl = isHls
+          ? "/api/anime/hls-proxy?url=" + encodeURIComponent(rawUrl) + "&ref=" + encodeURIComponent("https://addon-osvh.onrender.com/")
+          : undefined;
+        out.push({
+          name:        label,
+          url:         rawUrl,
+          quality:     "HD",
+          qualityRank: 10,
+          site:        "notorrent",
+          directUrl:   proxyUrl || rawUrl,
+          directType:  isHls ? "hls" as const : "mp4" as const,
+          corsOk:      false,
+        });
+        sent++;
+      }
+      console.log("[Notorrent-anim] imdb:" + imdbId + " ep" + ep + " -> " + out.length + " streams");
+    }
+  } catch (e: any) {
+    console.warn("[Notorrent-anim]", e?.message);
+  }
+
+  // Success: use full TTL (4h); for empty (no IMDB or no streams) use short TTL (2min) to allow retry
+  const cacheTtl = out.length > 0 ? NOTORRENT_ANIM_TTL : 2 * 60_000;
+  _notorrentAnimCache.set(ck, { sources: out, ts: Date.now() - (NOTORRENT_ANIM_TTL - cacheTtl) });
+  return out;
+}
+
+
+
 const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
 const SANIME_CDN  = "https://server.sanime.net/Video";
 const SANIME_UA   = "IBRAHIMSEVEN";
@@ -9441,8 +9524,8 @@ async function getSAnimeSources(
 
   const out: UnifiedSource[] = [];
   try {
-    // 1. بحث بالعنوان الإنجليزي أولاً ثم العربي
-    const query = encodeURIComponent(english || title);
+    // 1. بحث بالروماجي أولاً (SAnime يستخدم أسماء يابانية مرومجة) ثم الإنجليزي
+    const query = encodeURIComponent(title || english || "");
     const searchRes = await fetch(`${SANIME_API}search&name=${query}`, {
       headers: { "User-Agent": SANIME_UA, "Accept": "application/json" },
       signal: AbortSignal.timeout(10_000),
@@ -10078,6 +10161,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
+      scrapeCached("notorrent",  () => getNotorrentAnimeSources(anilistId, ep),              false, 27000),
     ]);
 
   } catch (e: any) {
@@ -10226,6 +10310,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
+      case "notorrent":    (await race(getNotorrentAnimeSources(anilistId, ep),              35_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
