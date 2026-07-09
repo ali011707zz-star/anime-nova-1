@@ -1,36 +1,32 @@
 ---
-name: New source requests pending (2026-07-09)
-description: User-requested new backup sources not yet implemented — anime section (AnimeTime, AnimeRoco) and animation section (Akwam, Moviz Time/وقت الأفلام). Research in progress, paused mid-task.
+name: New source requests 2026-07-09 — resolved
+description: Outcome of investigating AnimeTime/AnimeRoco/Akwam/MovizTime candidate domains for mega.nz-style ad-free iframes; Akwam implemented as direct-MP4 backup.
 ---
 
-## User's request (verbatim intent)
-1. **أنمي section**: add "أنمي تايم" (AnimeTime) as a backup source — good ad-free iframe, must have
-   the SAME features as the current mega.nz iframe integration (ad-block + prevent leaving the app,
-   i.e. sandboxed iframe like the existing `mega.nz/embed` allowlist pattern in `collectSrc`).
-2. **أنمي section**: check whether "أنمي روكو" (AnimeRoco) offers an iframe for anime playback —
-   NOT YET CONFIRMED. Web search only surfaced "Animerco" (already known CF/Turnstile-blocked per
-   `repo-analysis-2026-07.md`) and "RistoAnime" (needs CDP per `lightpanda-deep-dive`), NOT an exact
-   "AnimeRoco" domain. Need to ask the user for the exact domain/URL before proceeding — do not
-   assume Animerco is the same site.
-3. **Animation section**: add "أكوام" (Akwam) as a backup source, shown at the bottom of the source
-   list (i.e. low qualityRank / not prioritized).
-4. **Animation section**: add "وقت الأفلام" (Moviz Time) with the SAME iframe features as the anime
-   section's mega.nz iframe handling.
+## Outcome
+- **Akwam** — IMPLEMENTED. Real live domain is `akwam.it` (akwam.to is now a parked domain-sale
+  page; `ak.sv` 301→`akwam.it`). No mega.nz/iframe — it serves direct MP4 download links via
+  `*.downet.net`. Added to `animation.ts` as `scrapeAnimCached("akwam", ...)`: search →
+  first movie match → download page → `downet.net` mp4 links. Movies only (series need a
+  different URL scheme, not yet mapped). Deployed + verified live on VPS.
+- **MovizTime** (`moviz-time.vip`/`.org`) — already integrated; confirmed `.vip` is a live mirror
+  of `.org` (same content, includes an `/anime/` section too). Uses `vidhls.com` custom JW-player
+  iframe (anti-devtools/right-click-block script, ad overlay `div.rek`), **not mega.nz** — does not
+  meet the user's "ad-free like mega.nz" requirement.
+- **AnimeTime candidate `anime-time.live`** — checked one full anime post page: also uses
+  `vidhls.com` player (same anti-devtools/ad pattern as MovizTime), not mega.nz. Does not meet
+  the ad-free requirement as specified. Not added.
+- **AnimeRoco** — still unconfirmed exact domain; `eta.animerco.org` returns HTTP 403 from the VPS
+  (same CF block as known Animerco/Animerco.org per repo-analysis-2026-07). Not added.
+- Other domains from the user's batch list (anime-phoenix.com, animedar.net, animelek.top,
+  shahiid-anime.net, witanime.life, anime3rb.com, ristoanime.co→.me) were already integrated
+  in `anime.ts`/`extractors.ts` prior to this session; Animedar's extractor already emits a
+  genuine `mega.nz/embed#!...` source (type `"mega"` in `extractDirectAnimedar`), so that
+  ad-free requirement is already satisfied there.
+- `4h.y9x3c6v.shop` is a shortlink → `w1.anime4up.rest` (Anime4up, already covered).
 
-## Research done so far (this session, not yet implemented)
-- `akwam.to` → reachable from VPS, HTTP 200 (curl, plain fetch, no CF challenge hit yet — untested
-  for actual episode/embed extraction).
-- `moviz-time.cam` → reachable, HTTP 301 (redirect, likely to canonical URL — untested further).
-  Also seen: `moviz-time.net` (parking page, avoid), `moviz.pics` (mirror).
-- `animetime.xyz` → DNS resolution failed from VPS (curl code 000) — likely wrong/dead domain.
-- `anime-time.co` → HTTP 302 redirect (needs to follow to find real target before using).
-- Candidates seen for "وقت الأنمي" / AnimeTime brand: `anime-time.pages.dev`, `mitanime.com`,
-  `anime-time.co` — none confirmed yet as the exact site the user means.
-
-## Status: PAUSED — not implemented
-No code changes were made for any of these 4 sources yet. Before resuming: confirm exact domains
-(especially AnimeRoco, and disambiguate which "AnimeTime" domain) with the user, then extend
-`anime.ts` (AnimeTime, AnimeRoco) and `animation.ts` (Akwam as low-priority/backup, Moviz Time with
-mega-iframe-style sandboxed embed) following the existing `mega.nz/embed` sandboxed-iframe allowlist
-pattern (`collectSrc` iframe policy, `VIDMOLY_HOSTS`-style allowlist) so new iframe sources get the
-same ad-block/no-app-exit treatment already applied to mega.nz embeds.
+## If resuming ad-free-iframe search later
+No new mega.nz source was found beyond the existing Animedar one. If the user still wants an
+AnimeTime/AnimeRoco-equivalent, either accept the vidhls.com player (ads/anti-devtools) as a
+fallback source, or get the exact intended domain from the user directly — web search keeps
+surfacing similarly-named but different sites.
