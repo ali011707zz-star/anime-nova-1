@@ -28,7 +28,7 @@
 - [HLS CF Worker routing](hls-cf-worker-routing.md) — hls-proxy is now pure 307 redirect; CF Worker fetches manifest + rewrites segment URLs to go through itself; zero VPS video bandwidth.
 - [Animation mobile playback](animation-mobile-playback.md) — شاشة سوداء صامتة: garbage Referer في sendSource + Dulo raw fallback بلا Referer + no onError handler + CF Worker لا يكتشف M3U8 بـ #EXTM3U content sniff.
 - [Orkestr removal](orkestr-removal.md) — Orkestr أُزيل كلياً من animation.ts+anime.ts; كل calls صارت cfProxy (localhost:8000); CINESRC_BASE=http://localhost:13004 أُضيف لـ ecosystem.
-- [AniTaku APK Analysis](anitaku-apk-analysis.md) — EasyPlex base, hasalaty.com API (auth=Laravel Passport), StreamSB streaming hosts, client_secret unknown.
+- [AniTaku APK Analysis](anitaku-apk-analysis.md) — EasyPlex base; static token found (GxoNdPhOrskWYZfSw2d9hgeXToSlUBal); DB empty; client_secret not in APK; routes mapped.
 
 - [New sources July 2026](new-sources-2026-07.md) — nekowatch(anineko/AniList/HLS✅) + xyra(freekey/TMDB/17streams✅) + notorrent(IMDB/9streams✅) + spencerdevs(srv1✅); implementation plan inside.
 - [New sources implementation July 2026](new-sources-impl-2026-07.md) — nekowatch+xyra+notorrent اُضيفت واختُبرت على VPS؛ spencerdevs تحتاج decrypt مستقل.
