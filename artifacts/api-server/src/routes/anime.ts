@@ -3102,212 +3102,7 @@ async function getOkAnimeSources(
 }
 
 
-// ════════════════════════════════════════════════════════════════════
-//  ANIME-TIME.LIVE scraper  (Arabic anime — عربي مترجم)
-//  Search: GET /?s={title} → /series/{slug}/ links
-//  Series page: → /anime/{arc-slug}/ sub-pages
-//  Arc page: buttons onclick="...iframe_area.location.href='URL'..."
-//            Button text contains: "الحلقة N" (Arabic episode number)
-// ════════════════════════════════════════════════════════════════════
-
-const ATIME_BASE = "https://anime-time.live";
-const ATIME_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: "https://anime-time.live/" };
-
-const atimeSeriesCache = new Map<string, { urls: string[]; ts: number }>();
-const atimeSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
-
-/**
- * Search anime-time.live and return ALL matching arc (/anime/) URLs for this title.
- * Multi-arc anime (e.g. One Piece with 20+ seasons) have one /anime/ URL per arc.
- * Returns all arcs so episodes in any arc can be found.
- */
-async function searchAnimeTimeArcs(title: string, english: string | null): Promise<string[]> {
-  const ck = (title + "|" + (english || "")).toLowerCase();
-  const hit = atimeSeriesCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.urls;
-
-  const allArcs: string[] = [];
-  const seriesUrls: string[] = [];
-
-  for (const q of [english, title].filter(Boolean) as string[]) {
-    try {
-      const r = await fetch(
-        `${ATIME_BASE}/?s=${encodeURIComponent(q as string)}`,
-        { headers: ATIME_HDRS, signal: AbortSignal.timeout(8000), redirect: "follow" },
-      );
-      if (!r.ok) continue;
-      const html = await r.text();
-      if (isCloudflareBlock(html)) continue;
-
-      // Collect /series/ parent pages (contain links to all arc pages)
-      for (const m of html.matchAll(/href="(https:\/\/anime-time\.live\/series\/[^"]+)"/g)) {
-        const u = m[1];
-        if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
-        const slug = decodeURIComponent(u.replace(ATIME_BASE + "/series/", "").replace(/\/$/, ""));
-        const score = Math.max(
-          similarity(slug, title), english ? similarity(slug, english) : 0,
-          asciiSimilarity(slug, title), english ? asciiSimilarity(slug, english) : 0,
-        );
-        if (score > 0.15 && !seriesUrls.includes(u)) seriesUrls.push(u);
-      }
-
-      // Also collect /anime/ arc pages shown directly in search results
-      for (const m of html.matchAll(/href="(https:\/\/anime-time\.live\/anime\/[^"]+)"/g)) {
-        const u = m[1];
-        if (u.includes("/page/") || u.includes("/feed/") || u.includes("download")) continue;
-        const rawSlug = decodeURIComponent(u.replace(ATIME_BASE + "/anime/", "").replace(/\/$/, ""));
-        // Strip Arabic prefix (e.g. "أنمي-") and Arabic suffix terms before scoring
-        const slug = rawSlug
-          .replace(/^[\u0600-\u06FF\s-]+/, "")
-          .replace(/[-\u0600-\u06FF\s]+مترجم.*$/u, "")
-          .replace(/[-_]+/g, " ").trim();
-        const score = Math.max(
-          similarity(slug, title), english ? similarity(slug, english) : 0,
-          asciiSimilarity(slug, title), english ? asciiSimilarity(slug, english) : 0,
-          asciiSimilarity(rawSlug, title), english ? asciiSimilarity(rawSlug, english) : 0,
-        );
-        if (score > 0.10 && !allArcs.includes(u)) allArcs.push(u);
-      }
-
-      if (seriesUrls.length > 0 || allArcs.length > 0) break;
-    } catch {}
-  }
-
-  // Expand each /series/ page to collect ALL its arc (/anime/) links
-  await Promise.allSettled(seriesUrls.map(async (seriesUrl) => {
-    try {
-      const sR = await fetch(seriesUrl, {
-        headers: ATIME_HDRS, signal: AbortSignal.timeout(9000), redirect: "follow",
-      });
-      if (!sR.ok) return;
-      const sHtml = await sR.text();
-      if (isCloudflareBlock(sHtml)) return;
-      for (const m of sHtml.matchAll(/href="(https:\/\/anime-time\.live\/anime\/[^"]+)"/g)) {
-        const u = m[1];
-        if (!allArcs.includes(u) && !u.includes("/page/") && !u.includes("download")) {
-          allArcs.push(u);
-        }
-      }
-    } catch {}
-  }));
-
-  atimeSeriesCache.set(ck, { urls: allArcs, ts: Date.now() });
-  return allArcs;
-}
-
-/** Parse episode buttons from an anime-time arc/season page → Map<epNumber, embedUrls[]> */
-function parseAtimeEpButtons(html: string): Map<number, string[]> {
-  const epMap = new Map<number, string[]>();
-
-  function addEntry(url: string, text: string) {
-    if (!url.startsWith("http")) return;
-    const numM = text.match(/(\d+)/);
-    if (!numM) return;
-    const n = parseInt(numM[1]);
-    if (!n) return;
-    if (!epMap.has(n)) epMap.set(n, []);
-    const arr = epMap.get(n)!;
-    if (!arr.includes(url)) arr.push(url);
-  }
-
-  // Pattern 1: onclick="...iframe_area.location.href='URL'..."
-  const re1 = /onclick="[^"]*?iframe_area\.location\.href='([^']+)'[^"]*"[^>]*>([\s\S]*?)<\/button>/gi;
-  for (const m of html.matchAll(re1)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
-
-  // Pattern 2: data-src="URL" on button/a tags with episode text
-  const re2 = /<(?:button|a)[^>]+data-src="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/(?:button|a)>/gi;
-  for (const m of html.matchAll(re2)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
-
-  // Pattern 3: data-url="URL" on button/a tags
-  const re3 = /<(?:button|a)[^>]+data-url="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/(?:button|a)>/gi;
-  for (const m of html.matchAll(re3)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
-
-  // Pattern 4: data-embed="URL" on button/a tags
-  const re4 = /<(?:button|a)[^>]+data-embed="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/(?:button|a)>/gi;
-  for (const m of html.matchAll(re4)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
-
-  // Pattern 5: setServer('URL') in onclick (OkAnime-style buttons on atime)
-  const re5 = /onclick="[^"]*?setServer\('(https?:\/\/[^']+)'\)[^"]*"[^>]*>([\s\S]*?)<\/(?:button|a)>/gi;
-  for (const m of html.matchAll(re5)) addEntry(m[1].trim(), m[2].replace(/<[^>]+>/g, "").trim());
-
-  return epMap;
-}
-
-async function getAnimeTimeSources(
-  title: string, english: string | null, ep: number,
-): Promise<UnifiedSource[]> {
-  const ck = `atime:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
-  const hit = atimeSrcCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
-
-  try {
-    // Get ALL arc URLs for this title — searchAnimeTimeArcs expands /series/ parent pages
-    const arcUrls = await searchAnimeTimeArcs(title, english);
-    if (!arcUrls.length) return [];
-
-    // Build global episode map by fetching all arc pages in parallel (up to 12)
-    const globalEpMap = new Map<number, string[]>();
-
-    await Promise.allSettled(arcUrls.slice(0, 12).map(async (arcUrl) => {
-      try {
-        const r = await fetch(arcUrl, {
-          headers: ATIME_HDRS, signal: AbortSignal.timeout(9000), redirect: "follow",
-        });
-        if (!r.ok) return;
-        const h = await r.text();
-        if (isCloudflareBlock(h)) return;
-        for (const [n, urls] of parseAtimeEpButtons(h)) {
-          if (!globalEpMap.has(n)) globalEpMap.set(n, []);
-          globalEpMap.get(n)!.push(...urls);
-        }
-      } catch {}
-    }));
-
-    const epUrls = globalEpMap.get(ep);
-    if (!epUrls || !epUrls.length) return [];
-
-    const uniqueUrls = [...new Set(epUrls)];
-    const sources: UnifiedSource[] = [];
-    await Promise.allSettled(uniqueUrls.map(async (url, i) => {
-      try {
-        const result = await Promise.race([
-          extractVideoDeep(url, url),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), 12000)),
-        ]);
-        if (result?.url) {
-          const directUrl = result.type === "hls"
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(url)}`
-            : result.url;
-          sources.push({
-            name: `أنمي تايم · سيرفر ${i + 1}`,
-            url,
-            quality: "HD",
-            qualityRank: 9,
-            site: "animetime",
-            directUrl,
-            directType: result.type,
-          });
-        } else if (url && url.includes("vidhls.com")) {
-          // AT fallback: استخراج فشل → أرسل embed URL لـ iframe
-          sources.push({
-            name: `أنمي تايم · سيرفر ${i + 1}`,
-            url,
-            quality: "HD",
-            qualityRank: 7,
-            site: "animetime",
-            directUrl: url,
-            directType: "embed" as any,
-          });
-        }
-      } catch { /* skip on error */ }
-    }));
-    sources.sort((a, b) => uniqueUrls.indexOf(a.url) - uniqueUrls.indexOf(b.url));
-
-    atimeSrcCache.set(ck, { sources, ts: Date.now() });
-    return sources;
-  } catch { return []; }
-}
-
+// animetime (AT / anime-time.live): أُزيل كلياً بطلب المستخدم 2026-07-09
 
 // ════════════════════════════════════════════════════════════════════
 //  RISTOANIME.CO scraper  (Arabic anime — WordPress TopAnime theme)
@@ -9429,86 +9224,7 @@ async function getXyraAnimeSources(
 //    - ep.epName هو integer
 // ════════════════════════════════════════════════════════════════════
 
-// ── Notorrent (addon-osvh.onrender.com) — IMDB-based streams for anime ──
-const NOTORRENT_ANIM_TTL = 4 * 3_600_000;
-const _notorrentAnimCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
-
-async function getNotorrentAnimeSources(
-  anilistId: number | undefined, ep: number = 1,
-): Promise<UnifiedSource[]> {
-  const ck = `notorrent_anim:${anilistId}:${ep}`;
-  const hit = _notorrentAnimCache.get(ck);
-  if (hit && Date.now() - hit.ts < NOTORRENT_ANIM_TTL) return hit.sources;
-  const empty: UnifiedSource[] = [];
-
-  let imdbId = "";
-
-  // animeapi.my.id: AniList ID → IMDB مباشرة (يعمل من VPS، أسرع من AniList GraphQL)
-  if (anilistId) {
-    try {
-      const apiR = await fetch("https://animeapi.my.id/anilist/" + anilistId, {
-        headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (apiR.ok) {
-        const apiData = await apiR.json() as any;
-        if (apiData.imdb) imdbId = apiData.imdb;
-      }
-    } catch { /* ignore */ }
-  }
-
-  if (!imdbId) { _notorrentAnimCache.set(ck, { sources: empty, ts: Date.now() }); return empty; }
-
-  const out: UnifiedSource[] = [];
-  try {
-    const ntPath = "series/" + imdbId + ":1:" + ep + ".json";
-    const r = await fetch("https://addon-osvh.onrender.com/stream/" + ntPath, {
-      headers: { "User-Agent": BROWSER_UA, "Accept": "application/json" },
-      signal: AbortSignal.timeout(22_000),
-    });
-    if (!r.ok) {
-      console.warn("[Notorrent-anim] HTTP " + r.status + " imdb:" + imdbId);
-    } else {
-      const data: any = await r.json();
-      const streamList: any[] = Array.isArray(data?.streams) ? data.streams : [];
-      let sent = 0;
-      for (const s of streamList) {
-        if (sent >= 4) break;
-        let validUrl: URL;
-        try { validUrl = new URL(s.url); } catch { continue; }
-        if (validUrl.protocol !== "https:" && validUrl.protocol !== "http:") continue;
-        const rawUrl = s.url as string;
-        const isHls  = rawUrl.includes(".m3u8");
-        const label  = "Notorrent · " + (s.title || s.name || "HD");
-        const ntRef  = "https://addon-osvh.onrender.com/";
-        const directUrl = isHls
-          ? "/api/anime/hls-proxy?url=" + encodeURIComponent(rawUrl) + "&ref=" + encodeURIComponent(ntRef)
-          : "/api/anime/video-proxy?url=" + encodeURIComponent(rawUrl) + "&ref=" + encodeURIComponent(ntRef);
-        out.push({
-          name:        label,
-          url:         rawUrl,
-          quality:     "HD",
-          qualityRank: 10,
-          site:        "notorrent",
-          directUrl,
-          directType:  isHls ? "hls" as const : "mp4" as const,
-          corsOk:      false,
-        });
-        sent++;
-      }
-      console.log("[Notorrent-anim] imdb:" + imdbId + " ep" + ep + " -> " + out.length + " streams");
-    }
-  } catch (e: any) {
-    console.warn("[Notorrent-anim]", e?.message);
-  }
-
-  // Success: use full TTL (4h); for empty (no IMDB or no streams) use short TTL (2min) to allow retry
-  const cacheTtl = out.length > 0 ? NOTORRENT_ANIM_TTL : 2 * 60_000;
-  _notorrentAnimCache.set(ck, { sources: out, ts: Date.now() - (NOTORRENT_ANIM_TTL - cacheTtl) });
-  return out;
-}
-
-
+// notorrent (NO / addon-osvh.onrender.com): أُزيل كلياً بطلب المستخدم 2026-07-09
 
 const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
 const SANIME_CDN  = "https://server.sanime.net/Video";
@@ -10120,7 +9836,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("animelek",     () => getAnimelekSources(title, english, ep, isMovie, matchCtx)),
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
       scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx)),
-      scrapeCached("ristoanime",   () => getRistoAnimeSources(title, english, ep)),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -10129,7 +9844,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
       scrapeCached("egybest",      () => getEgyBestSources(title, english, ep, isMovie)),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
-      scrapeCached("animephoenix", () => getAnimePhoenixSources(title, english, ep, isMovie, matchCtx)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
       scrapeCached("anikoto",      () => getAniKotoSources(title, english, ep, anilistId),      false),
@@ -10146,13 +9860,12 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("2dhive",       () => get2DhiveSources(title, english, ep),                  true,  20000),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 28000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
-      scrapeCached("mitanime",     () => getMitanimeSources(title, english, ep),  false),
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
       // scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
-      scrapeCached("videasy_anim",  () => getVideasyAnimeSources(title, english, ep, anilistId),  false, 28000),
-      scrapeCached("vidlink_anim",  () => getVidLinkAnimeSources(title, english, ep, anilistId),  false, 25000),
-      scrapeCached("mxplayer",      () => getMXPlayerSources(title, english, ep),                 false),
+      // videasy_anim: معطّل — api.videasy.to غيّر بنية الـ API (STREAMCRYPTO_SEED_INVALID)
+      // vidlink_anim: معطّل — enc-dec.app/api/enc-vidlink معلَّق منذ 2026-07-08
+      // mxplayer: معطّل — خدمة mxplayer_service.py (المنفذ 8002) غير مُشغَّلة
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
       // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
       scrapeCached("vidfast",       () => getVidFastAnimeSources(title, english, ep, anilistId),  false, 22000),
@@ -10162,7 +9875,6 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("witanime_db",  () => getWitanimeDBSources(title, english, ep, anilistId), false, 25000),
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
       scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
-      scrapeCached("animetime",    () => getAnimeTimeSources(title, english, ep),           true, 20000),
       scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 22000),
       scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 22000),
       scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
@@ -10186,7 +9898,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
-      scrapeCached("notorrent",  () => getNotorrentAnimeSources(anilistId, ep),              false, 27000),
+      // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
 
   } catch (e: any) {
@@ -10282,7 +9994,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // scrapers that use probe-only (no deep extraction)
-  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anineko","anizone","mitanime"]);
+  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anineko","anizone"]);
 
   try {
     switch (site) {
@@ -10290,7 +10002,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
-      case "ristoanime":   await runExtract(await race(getRistoAnimeSources(title, english, ep), SCRAPER_MS, [])); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
@@ -10311,13 +10022,9 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
       case "anizone":       (await race(getAniZoneSources(title, english, ep),               18_000,     [])).forEach(collectSrc); break;
       case "2dhive":        await runExtract(await race(get2DhiveSources(title, english, ep), 20_000, [])); break;
-      case "mitanime":      (await race(getMitanimeSources(title, english, ep),               SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animephoenix":  await runExtract(await race(getAnimePhoenixSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       // ── TMDB-native (StarCima محذوف من الأنمي — مصادر إنجليزية) ─────────────────────
       // case "starcima_anim": محذوف — يرسل صوتاً هندياً في قسم الأنمي
-      case "videasy_anim":  (await race(getVideasyAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "vidlink_anim":  (await race(getVidLinkAnimeSources(title, english, ep),  SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "mxplayer":      (await race(getMXPlayerSources(title, english, ep),      15_000, [])).forEach(collectSrc); break;
+      // videasy_anim / vidlink_anim / mxplayer / animephoenix / mitanime / ristoanime: معطّلة — أُزيلت من دورة السكرابر (لا تعمل)
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
@@ -10325,7 +10032,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "cinesrc_anim": (await race(getCineSrcAnimeSources(title, english, ep, anilistId), 35_000, [])).forEach(collectSrc); break;
       case "witanime_db":  (await race(getWitanimeDBSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
-      case "animetime":    (await race(getAnimeTimeSources(title, english, ep), 20_000, [])).forEach(collectSrc); break;
       case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep), 22_000, [])); break;
       case "reanime":      (await race(getReanímeSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
@@ -10336,7 +10042,6 @@ router.get("/anime/fetch-source", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
-      case "notorrent":    (await race(getNotorrentAnimeSources(anilistId, ep),              35_000, [])).forEach(collectSrc); break;
       default: break;
     }
 

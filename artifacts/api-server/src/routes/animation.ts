@@ -1362,47 +1362,10 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
   }
 
 
-  // ── CinePro subtitles — مصدر ترجمات خارجي (VTT/SRT) ─────────────────────
-  const cineproItems: Track[] = [];
-  try {
-    const cpUrl = type === "tv"
-      ? `http://localhost:3000/v1/tv/${tmdbId}/seasons/${season}/episodes/${ep}`
-      : `http://localhost:3000/v1/movies/${tmdbId}`;
-    const cpR = await fetch(cpUrl, {
-      headers: { "User-Agent": "AnimeNOVA/1.0" },
-      signal: AbortSignal.timeout(12_000),
-    });
-    if (cpR.ok) {
-      const cpData = await cpR.json() as { subtitles?: any[] };
-      const WANTED_LANGS: Record<string, string> = {
-        "arabic": "ar", "arabic 2": "ar", "arabic2": "ar",
-        "english": "en", "english 2": "en",
-      };
-      (cpData.subtitles || []).forEach((s: any, i: number) => {
-        const lbl: string = (s.label || s.language || "").toLowerCase();
-        const lang = WANTED_LANGS[lbl];
-        if (!lang) return;
-        let url: string = s.url || "";
-        // فك تشفير proxy URL لاستخراج الرابط الحقيقي
-        if (url.includes("/v1/proxy?data=")) {
-          try {
-            const enc = url.split("data=")[1]?.split("&")[0] || "";
-            const inner = JSON.parse(decodeURIComponent(enc)) as { url?: string };
-            url = inner.url || url;
-          } catch { /* keep */ }
-        }
-        if (!url.startsWith("http")) return;
-        const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "vtt";
-        const labelAr = lang === "ar"
-          ? (lbl.includes("2") ? "عربي · CinePro 2" : "عربي · CinePro")
-          : (lbl.includes("2") ? "إنجليزي · CinePro 2" : "إنجليزي · CinePro");
-        cineproItems.push({ id: `cinepro-${lang}-${i}`, lang, label: labelAr, url });
-      });
-    }
-  } catch (e: any) { console.warn(`[CinePro-subs] error tmdbId=${tmdbId} type=${type}:`, e?.message); }
+  // CinePro subtitles (CP): أُزيلت كلياً بطلب المستخدم 2026-07-09
 
   // ── Merge, sort Arabic-first, deduplicate by URL ──
-  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems, ...kitsunekkoItems, ...cineproItems];
+  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems, ...kitsunekkoItems];
   all.sort((a, b) => (a.lang === "ar" && b.lang !== "ar" ? -1 : a.lang !== "ar" && b.lang === "ar" ? 1 : 0));
   const seen = new Set<string>();
   const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
@@ -3630,56 +3593,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // cooldown: enc-dec.app/api/enc-hexa يعيد 500 مع "Next retry: N minutes"
       //           → نتجنب الـ hammering بحفظ _hexaFailUntil
 
-      // ── CinePro — مجمّع مصادر إنجليزي (14 مزود: VidSrc, VidApi, Icefy, FshareTV, VixSrc...) ──
-      // يعمل محلياً على المنفذ 3000 (OMSS-compliant API)
-      scrapeAnimCached("cinepro", async () => {
-        if (!tmdbId) return;
-        try {
-          send("status", { msg: "CinePro: جاري جلب المصادر…" });
-          const cpUrl = type === "movie"
-            ? `http://localhost:3000/v1/movies/${tmdbId}`
-            : `http://localhost:3000/v1/tv/${tmdbId}/seasons/${season}/episodes/${epNum}`;
-          const r = await fetch(cpUrl, {
-            headers: { "User-Agent": "AnimeNOVA/1.0", "Accept": "application/json" },
-            signal: AbortSignal.timeout(22_000),
-          });
-          if (!r.ok) { console.warn(`[CinePro] HTTP ${r.status} for tmdbId=${tmdbId}`); return; }
-          const data = await r.json() as { sources?: any[]; subtitles?: any[] };
-          // حد أقصى 2 سيرفر لكل جودة — CinePro يرسل أحياناً 10+ روابط بنفس الجودة وأغلبها معطّل
-          const MAX_PER_QUALITY = 2;
-          const qualityCounts: Record<string, number> = {};
-          for (const src of (data.sources || [])) {
-            const provName = typeof src.provider === "object"
-              ? (src.provider?.name || "CinePro")
-              : (src.provider || "CinePro");
-            const quality = src.quality || "HD";
-            if ((qualityCounts[quality] || 0) >= MAX_PER_QUALITY) continue;
-            let realUrl: string = src.url || "";
-            // فك تشفير proxy URL الداخلي للحصول على الرابط الحقيقي
-            if (realUrl.includes("/v1/proxy?data=")) {
-              try {
-                const encoded = realUrl.split("data=")[1]?.split("&")[0] || "";
-                const inner = JSON.parse(decodeURIComponent(encoded)) as { url?: string };
-                realUrl = inner.url || realUrl;
-              } catch { /* keep proxied URL */ }
-            }
-            if (!realUrl.startsWith("http")) continue;
-            // VidApi URLs use /pl/ or /playlist/ paths (not .m3u8 extension) but ARE HLS M3U8
-            // VidApi may also serve M3U8 from paths that don't match any extension pattern —
-            // detect by provider name as a fallback.
-            // VidRock URLs return single '.' byte — skip them
-            const provLower = provName.toLowerCase();
-            const isHls = realUrl.includes(".m3u8") || realUrl.includes("manifest")
-              || realUrl.includes("/pl/") || realUrl.includes("/playlist/")
-              || provLower.includes("vidapi"); // VidApi always returns M3U8 streams
-            const proxied = isHls
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://vidapi.cc/")}`
-              : `/api/anime/video-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`;
-            sendSource(realUrl, `CinePro · ${provName} · ${quality}`, realUrl, proxied);
-            qualityCounts[quality] = (qualityCounts[quality] || 0) + 1;
-          }
-        } catch (e: any) { console.warn(`[CinePro] sources error tmdbId=${tmdbId} type=${type}:`, e?.message); }
-      }),
+      // CinePro (CP): أُزيل كلياً بطلب المستخدم 2026-07-09 — راجع memory: cinepro-self-hosted.md
 
       scrapeAnimCached("hexa", async () => {
         return; // DISABLED 2026-07-08: enc-dec.app/api/enc-hexa returns HTTP 500 consistently — broken on their end
