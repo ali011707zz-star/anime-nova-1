@@ -31,6 +31,7 @@
 
 - [New sources July 2026](new-sources-2026-07.md) — nekowatch(anineko/AniList/HLS✅) + xyra(freekey/TMDB/17streams✅) + notorrent(IMDB/9streams✅) + spencerdevs(srv1✅); implementation plan inside.
 - [New sources implementation July 2026](new-sources-impl-2026-07.md) — nekowatch+xyra+notorrent اُضيفت واختُبرت على VPS؛ spencerdevs تحتاج decrypt مستقل.
+- [SAnime + Notorrent fixes](sanime-notorrent-fixes-2026-07.md) — romaji-first search؛ MXPlayer disabled؛ Notorrent+animeapi.my.id IMDB lookup؛ hubcloud dead؛ /api/ prefix required.
 - [SAnime APK Analysis](sanime-apk-analysis.md) — WebView wrapper لـ app.sanime.net؛ API: h10.php?page=؛ ~12,000 أنمي؛ لا DB محلي؛ multi-brand (OtakuTime/SnoAnime).
 - [SAnime Deep Analysis](sanime-deep-analysis.md) — UA=IBRAHIMSEVEN يفتح ep[]; Video: server.sanime.net/Video/{id}/{ep}.mp4; 289 anime مع حلقات; scraper blueprint كامل.
 - [Lazy source loading](lazy-source-loading.md) — Web+Mobile: user picks scraper first → only that one fetches → auto-plays → rest loads in background; witanime_db re-enabled.
