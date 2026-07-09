@@ -246,7 +246,7 @@ export default function AnimationWatchScreen() {
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
   const autoplay  = params.autoplay === "1";
 
-  const [screen, setScreen]       = useState<Screen>("loading");
+  const [screen, setScreen]       = useState<Screen>("picker");
   const [sources, setSources]     = useState<AnimSrc[]>([]);
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
