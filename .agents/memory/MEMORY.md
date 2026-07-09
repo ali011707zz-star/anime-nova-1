@@ -43,3 +43,4 @@
 - [Proxy VPS fallback](proxy-vps-fallback.md) — hls/video/seg-proxy: CF Worker أولاً ثم VPS fallback؛ _cfh.ok=false مبدئياً؛ OPTIONS health check كل 45s.
 - [apps-anime.com API analysis](apps-anime-analysis.md) — PHP API على apps-player.com/Anime_Cartoon_Full/API/ محمي؛ AgentsAndCookies/getData.php مفتوح يرجع OK.ru cookies؛ 4000+ أنمي؛ auth لم يُكتشف.
 - [Animatoo app analysis](animatoo-analysis.md) — Supabase مفتوح بـ anon key؛ 6339 أنمي + 77395 حلقة كلها anime3rb slugs؛ tmdb_id→slug lookup قيّم لـ anime3rb scraper.
+- [Lazy picker stuck-loading fix](lazy-picker-fix.md) — showPicker=true+allDone ignored idle→infinite loading; fix: anyFetching+allScrapersIdle+scraper grid calling onFetchSite.
