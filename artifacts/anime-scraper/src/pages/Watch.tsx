@@ -168,16 +168,13 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "EK", isArabic: true },
   { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD", isArabic: true },
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK", isArabic: true },
-  { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
   { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY", isArabic: true },
   { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS", isArabic: true },
   { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U", isArabic: true },
   { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC", isArabic: true },
   { site: "topcinemaa",   name: "توب سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "TC", isArabic: true },
-  { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH", isArabic: true },
   { site: "faselhd_db",  name: "فاصل HD",      desc: "عربي مترجم · GitHub DB",   tag: "FH",  isArabic: true },
-  { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم · HLS",         tag: "AT", isArabic: true },
   { site: "witanime",     name: "ويتأنمي",      desc: "عربي مترجم · CycleTLS",     tag: "WI", isArabic: true },
   { site: "sanime",       name: "S أنمي",       desc: "عربي مدبلج/مترجم · MP4",   tag: "SA", isArabic: true },
   // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
@@ -190,14 +187,10 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
-  { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
-  { site: "videasy_anim",  name: "Videasy",       desc: "TMDB · HLS · ترجمة عربية", tag: "VE", audioLang: "en" },
-  { site: "vidlink_anim",  name: "VidLink",       desc: "TMDB · HLS · ترجمة عربية", tag: "VL", audioLang: "en" },
   { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
-  { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/عربي · HLS مباشر",  tag: "DL" },
+  { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/إنجليزي · HLS مباشر", tag: "DL", audioLang: "en" },
   // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
-  { site: "notorrent",     name: "Notorrent",      desc: "IMDB · MP4 مباشر",          tag: "NO", audioLang: "en" },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -220,7 +213,7 @@ const PRIORITY_FETCH_SITES = new Set([
  * بواسطة تأثير subtitleUrl الحالي — لا تحتاج لإدراجها هنا.
  */
 const PROVIDER_WANTS_SMART_SUB = new Set([
-  "hianime", "animepahe", "anineko", "mitanime",
+  "hianime", "animepahe", "anineko",
   "anikototv", "animekai", "dulo_anim",
 ]);
 
@@ -875,9 +868,9 @@ function getCdnDisplayName(url: string): string {
 }
 
 const SITE_SHORT: Record<string, string> = {
-  animephoenix: "فينكس", shahiid: "شاهيد", animelek: "أنمي ليك",
-  animedar: "أنمي دار", okanime: "أوك أنمي", ristoanime: "ريستو",
-  animetime: "أنمي تايم", toonstream: "تون ستريم", mitanime: "ميتا أنمي", animeify: "أنمي فاي",
+  shahiid: "شاهيد", animelek: "أنمي ليك",
+  animedar: "أنمي دار", okanime: "أوك أنمي",
+  toonstream: "تون ستريم", animeify: "أنمي فاي",
 };
 
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string; icon: string }> = {

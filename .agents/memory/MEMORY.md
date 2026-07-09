@@ -44,3 +44,6 @@
 - [apps-anime.com API analysis](apps-anime-analysis.md) — PHP API على apps-player.com/Anime_Cartoon_Full/API/ محمي؛ AgentsAndCookies/getData.php مفتوح يرجع OK.ru cookies؛ 4000+ أنمي؛ auth لم يُكتشف.
 - [Animatoo app analysis](animatoo-analysis.md) — Supabase مفتوح بـ anon key؛ 6339 أنمي + 77395 حلقة كلها anime3rb slugs؛ tmdb_id→slug lookup قيّم لـ anime3rb scraper.
 - [Lazy picker stuck-loading fix](lazy-picker-fix.md) — showPicker=true+allDone ignored idle→infinite loading; fix: anyFetching+allScrapersIdle+scraper grid calling onFetchSite.
+- [Anime watch auto-fetch-all](anime-watch-autofetch.md) — Watch.tsx now auto-fetches all SCRAPER_DEFS on mount (mirrors AnimationWatch) instead of waiting for user tap; keep SCRAPER_DEFS free of dead/removed sites or it wastes calls.
+- [CinePro self-hosted](cinepro-self-hosted.md) — install/run steps for cinepro-org/core (pm2 @ /opt/cinepro:3000); removed as active animation source 2026-07 by user request, kept for future reintegration.
+- [Source cleanup 2026-07-09](source-cleanup-2026-07-09.md) — RS/PH/MT/VE/VL removed from anime scraper cycle; AT/NO/CP deleted entirely; DL got audioLang flag; api-server build is esbuild (no tsc gate).
