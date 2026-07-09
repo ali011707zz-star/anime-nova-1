@@ -105,6 +105,10 @@ const DEAD_FILE_HOSTS = [
 // ── Embed-only hosts (skip server-side extraction) ──
 // Hosts allowed as sandboxed iframe embed (vidmoly has Cloudflare Turnstile — can't extract server-side)
 const VIDMOLY_HOSTS = ["vidmoly.biz","vidmoly.to","vidmoly.net"];
+/** مواقع محمية بـ Cloudflare/Turnstile — مسموح بتمرير مصادرها كـ isEmbed لأن تطبيق
+ * الموبايل يحاول حلها عبر WebView مخفي (IP سكني) قبل عرض بطاقة "يحتاج تطبيق أصلي".
+ * بدون هذه القائمة تُحذف هذه المصادر بالكامل بواسطة سياسة iframe (mega/vidmoly فقط). */
+const HIDDEN_RESOLVE_EMBED_HOSTS = ["fasel-hd.cam", "animelek.top", "animedar.com", "anime-phoenix.com", "anime3rb.com", "ristoanime"];
 
 // Hosts that cannot be extracted AND are NOT allowed as embed → skip entirely
 const EMBED_ONLY_HOSTS = [
@@ -1826,7 +1830,7 @@ async function extractAndCollect(
     // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
     if (s.isEmbed) {
       const eu = (s.directUrl || s.url).toLowerCase();
-      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h))) return;
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h))) return;
     }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
@@ -9789,7 +9793,7 @@ router.get("/anime/sources-stream", async (req, res) => {
     // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
     if (s.isEmbed) {
       const eu = (s.directUrl || s.url).toLowerCase();
-      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h))) return;
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h))) return;
     }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
@@ -10087,7 +10091,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     if (!s.directUrl && !s.isEmbed) return;
     if (s.isEmbed) {
       const eu = (s.directUrl || s.url).toLowerCase();
-      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h))) return;
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h))) return;
     }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
