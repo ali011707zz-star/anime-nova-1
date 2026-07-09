@@ -60,3 +60,24 @@ longer contains the links. This is a structural site change, not a scraping tech
 **How to apply:** for these two, the next step is Lightpanda's CDP serve mode (`lightpanda serve
 --port 9222`) with explicit navigation-complete/network-idle wait, or capturing the underlying
 XHR/fetch call directly (inspect Network tab equivalent) rather than parsing rendered HTML.
+
+## Re-check round 2 (same session) — imovietime.bond + AKWAM
+- **imovietime.bond** — `SslConnectError` from the VPS on the bare domain (`play.imovietime.bond/`)
+  — TLS handshake itself fails, not a 403/Turnstile. Either the cert is misconfigured, the VPS IP is
+  network-level blocked (not just CF), or the domain is dead. Needs testing from a non-VPS IP to
+  distinguish "domain dead" from "VPS blocked at TLS layer."
+- **AKWAM (as.akwam.tube)** — confirmed real SPA: home page (93KB) has zero `/api/` string hints and
+  loads via `mv-boost` JS bundle (jsdelivr) + Google Analytics/ads scripts only — no inline API calls
+  visible in static markup. Lightpanda's plain `fetch --dump html` mode renders the shell but not the
+  post-mount data (same limitation as RISTO/ANIMEDAR). All three need the same fix: CDP serve mode
+  with network-idle wait, or manually watch the site's real browser Network tab once to find the API
+  endpoint, then hit that endpoint directly forever after (no need for headless browser per-request).
+- **4XANIME / ANIMERCO** — unchanged, still Cloudflare Turnstile-gated; confirmed out of reach for
+  both Lightpanda and plain HTTP — genuinely needs a real Chrome + nodriver/patchright, which is a
+  different tool entirely, not a Lightpanda config issue.
+
+**Summary of all 9 originally-open items:** FaselHD/fastvip chain ✅ solved and verified end-to-end.
+PHOENIX ⚠️ source found, delivery blocked by Cloudflare (untested from non-VPS IP). RISTO, ANIMEDAR,
+AKWAM ❌ all converged on the same root cause — JS-rendered/AJAX content Lightpanda's static dump
+mode can't see — solvable with the same CDP-mode fix, not three separate investigations. imovietime
+❌ TLS-level failure, likely IP-blocked or dead. 4XANIME/ANIMERCO ❌ need real Chrome, not Lightpanda.
