@@ -30,6 +30,7 @@
 - [Orkestr removal](orkestr-removal.md) — Orkestr أُزيل كلياً من animation.ts+anime.ts; كل calls صارت cfProxy (localhost:8000); CINESRC_BASE=http://localhost:13004 أُضيف لـ ecosystem.
 - [AniTaku APK Analysis](anitaku-apk-analysis.md) — EasyPlex base; static token found (GxoNdPhOrskWYZfSw2d9hgeXToSlUBal); DB empty; client_secret not in APK; routes mapped.
 
+- [Lightpanda sources research](lightpanda-sources-research.md) — FaselHD ✅ data-url→scdns.io M3U8; fastvip /stream/?json=1 ✅ untested; PHOENIX/ANIMEDAR/RISTO/ANIMETIME جزئية; 4XANIME/ANIMERCO Turnstile محجوبة.
 - [New sources July 2026](new-sources-2026-07.md) — nekowatch(anineko/AniList/HLS✅) + xyra(freekey/TMDB/17streams✅) + notorrent(IMDB/9streams✅) + spencerdevs(srv1✅); implementation plan inside.
 - [New sources implementation July 2026](new-sources-impl-2026-07.md) — nekowatch+xyra+notorrent اُضيفت واختُبرت على VPS؛ spencerdevs تحتاج decrypt مستقل.
 - [SAnime + Notorrent fixes](sanime-notorrent-fixes-2026-07.md) — romaji-first search؛ MXPlayer disabled؛ Notorrent+animeapi.my.id IMDB lookup؛ hubcloud dead؛ /api/ prefix required.
