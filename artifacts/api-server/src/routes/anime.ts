@@ -9391,7 +9391,7 @@ async function getXyraAnimeSources(
       const label  = `Xyra · ${s.name || s.provider || "HD"} · ${s.quality || "HD"}`;
       const directUrl = isHls
         ? `/api/anime/hls-proxy?url=${encodeURIComponent(s.url)}&ref=${encodeURIComponent(referer)}`
-        : s.url;
+        : `/api/anime/video-proxy?url=${encodeURIComponent(s.url)}&ref=${encodeURIComponent(referer)}`;
       out.push({
         name:        label,
         url:         s.url,
@@ -9480,16 +9480,17 @@ async function getNotorrentAnimeSources(
         const rawUrl = s.url as string;
         const isHls  = rawUrl.includes(".m3u8");
         const label  = "Notorrent · " + (s.title || s.name || "HD");
-        const proxyUrl = isHls
-          ? "/api/anime/hls-proxy?url=" + encodeURIComponent(rawUrl) + "&ref=" + encodeURIComponent("https://addon-osvh.onrender.com/")
-          : undefined;
+        const ntRef  = "https://addon-osvh.onrender.com/";
+        const directUrl = isHls
+          ? "/api/anime/hls-proxy?url=" + encodeURIComponent(rawUrl) + "&ref=" + encodeURIComponent(ntRef)
+          : "/api/anime/video-proxy?url=" + encodeURIComponent(rawUrl) + "&ref=" + encodeURIComponent(ntRef);
         out.push({
           name:        label,
           url:         rawUrl,
           quality:     "HD",
           qualityRank: 10,
           site:        "notorrent",
-          directUrl:   proxyUrl || rawUrl,
+          directUrl,
           directType:  isHls ? "hls" as const : "mp4" as const,
           corsOk:      false,
         });
@@ -9572,6 +9573,9 @@ async function getSAnimeSources(
     // 5. Direct CDN URL (HEAD check)
     const directHD = `${SANIME_CDN}/${bestId}/${ep}.mp4`;
     const directSD = `${SANIME_CDN}/${bestId}/${ep}SD.mp4`;
+    const SANIME_REF = "https://app.sanime.net/";
+    const proxiedHD = `/api/anime/video-proxy?url=${encodeURIComponent(directHD)}&ref=${encodeURIComponent(SANIME_REF)}`;
+    const proxiedSD = `/api/anime/video-proxy?url=${encodeURIComponent(directSD)}&ref=${encodeURIComponent(SANIME_REF)}`;
     let usedDirect = false;
     try {
       const headRes = await fetch(directHD, {
@@ -9586,8 +9590,9 @@ async function getSAnimeSources(
           quality:     "HD",
           qualityRank: 14,
           site:        "sanime",
-          directUrl:   directHD,
+          directUrl:   proxiedHD,
           directType:  "mp4",
+          headers:     { Referer: SANIME_REF },
           corsOk:      false,
         });
         // تحقق من SD قبل الإضافة
@@ -9604,8 +9609,9 @@ async function getSAnimeSources(
               quality:     "SD",
               qualityRank: 6,
               site:        "sanime",
-              directUrl:   directSD,
+              directUrl:   proxiedSD,
               directType:  "mp4",
+              headers:     { Referer: SANIME_REF },
               corsOk:      false,
             });
           }
@@ -9634,8 +9640,9 @@ async function getSAnimeSources(
             quality:     "HD",
             qualityRank: 14,
             site:        "sanime",
-            directUrl:   hdUrl,
+            directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(hdUrl)}&ref=${encodeURIComponent(SANIME_REF)}`,
             directType:  "mp4",
+            headers:     { Referer: SANIME_REF },
             corsOk:      false,
           });
         }
@@ -9646,8 +9653,9 @@ async function getSAnimeSources(
             quality:     "SD",
             qualityRank: 6,
             site:        "sanime",
-            directUrl:   sdUrl,
+            directUrl:   `/api/anime/video-proxy?url=${encodeURIComponent(sdUrl)}&ref=${encodeURIComponent(SANIME_REF)}`,
             directType:  "mp4",
+            headers:     { Referer: SANIME_REF },
             corsOk:      false,
           });
         }
