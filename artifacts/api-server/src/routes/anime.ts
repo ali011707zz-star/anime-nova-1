@@ -727,26 +727,131 @@ async function safeHead(url: string, headers: Record<string, string>): Promise<n
 //  VIDEO EXTRACTION ENGINE
 // ════════════════════════════════════════════════════════════════════
 
+/**
+ * Find the substring inside the balanced parens/braces/brackets that open right after
+ * `str[openCharIdx]` (which must be `(`, `{`, or `[`). Respects string literals so
+ * quoted parens/braces inside packed JS strings don't throw off the scan. Never
+ * executes anything — pure text scanning.
+ */
+function extractBalanced(str: string, openCharIdx: number): string | null {
+  const open = str[openCharIdx];
+  const close = open === "(" ? ")" : open === "{" ? "}" : open === "[" ? "]" : null;
+  if (!close) return null;
+  let depth = 1;
+  let inStr: string | null = null;
+  for (let i = openCharIdx + 1; i < str.length; i++) {
+    const ch = str[i];
+    if (inStr) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; continue; }
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return str.slice(openCharIdx + 1, i);
+    }
+  }
+  return null;
+}
+
+/** Split a top-level comma-separated argument list, ignoring commas inside strings/parens/brackets. */
+function splitTopLevelArgs(argsStr: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let inStr: string | null = null;
+  let cur = "";
+  for (let i = 0; i < argsStr.length; i++) {
+    const ch = argsStr[i];
+    if (inStr) {
+      cur += ch;
+      if (ch === "\\") { i++; cur += argsStr[i] ?? ""; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { inStr = ch; cur += ch; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; cur += ch; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; cur += ch; continue; }
+    if (ch === "," && depth === 0) { parts.push(cur); cur = ""; continue; }
+    cur += ch;
+  }
+  if (cur.trim().length) parts.push(cur);
+  return parts;
+}
+
+/** Unescape a single-quoted or double-quoted JS string literal (no eval). */
+function unquoteJsString(literal: string): string | null {
+  const t = literal.trim();
+  if (t.length < 2) return null;
+  const q = t[0];
+  if ((q !== "'" && q !== '"') || t[t.length - 1] !== q) return null;
+  const body = t.slice(1, -1);
+  // Minimal, safe unescape — no code execution, just character substitution.
+  return body.replace(/\\(.)/g, (_, c) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
+}
+
+/**
+ * Unpack Dean-Edwards-style `eval(function(p,a,c,k,e,d){...}('...',a,c,'...'.split('|')[,e,d]))`
+ * packed JS blocks purely by text-parsing the packer's own arguments — never executes the
+ * scraped payload (avoids remote-code-execution risk from untrusted third-party HTML).
+ * Uses balanced-paren/brace scanning (not a fixed-shape regex) because real-world payloads
+ * (e.g. fastvip.space/StreamHG) often carry extra trailing args like `,0,{}` before the
+ * closing parens, which a regex anchored on `.split('|')))` silently fails to match.
+ */
 function unpackPacked(html: string): string | null {
-  const re = /eval\(function\(p,a,c,k,e,d\)\{[^}]+\}\('([\s\S]+?)',(\d+),(\d+),'([\s\S]+?)'\.split\('\|'\)\)\)/g;
-  let m: RegExpExecArray | null;
   let result = html;
   let found = false;
-  while ((m = re.exec(html)) !== null) {
+  let searchFrom = 0;
+  const marker = "function(p,a,c,k,e,d)";
+  while (true) {
+    const fnIdx = result.indexOf(marker, searchFrom);
+    if (fnIdx === -1) break;
+    const evalIdx = result.lastIndexOf("eval(", fnIdx);
+    if (evalIdx === -1 || evalIdx < searchFrom) { searchFrom = fnIdx + marker.length; continue; }
+
+    // Locate the function body { ... } right after the params list, then the call args ( ... ) after it.
+    const bodyOpenIdx = result.indexOf("{", fnIdx + marker.length);
+    if (bodyOpenIdx === -1) { searchFrom = fnIdx + marker.length; continue; }
+    const body = extractBalanced(result, bodyOpenIdx);
+    if (body === null) { searchFrom = fnIdx + marker.length; continue; }
+    const bodyCloseIdx = bodyOpenIdx + 1 + body.length; // index of closing "}"
+    const callOpenIdx = result.indexOf("(", bodyCloseIdx + 1);
+    if (callOpenIdx === -1) { searchFrom = fnIdx + marker.length; continue; }
+    const argsStr = extractBalanced(result, callOpenIdx);
+    if (argsStr === null) { searchFrom = fnIdx + marker.length; continue; }
+    const callCloseIdx = callOpenIdx + 1 + argsStr.length; // index of matching ")"
+    // The whole eval(...) call ends at the closing ")" that matches "eval(".
+    const evalArgsStr = extractBalanced(result, evalIdx + "eval".length);
+    if (evalArgsStr === null) { searchFrom = fnIdx + marker.length; continue; }
+    const evalEndIdx = evalIdx + "eval(".length + evalArgsStr.length + 1; // one past matching ")"
+
     try {
-      const packed = m[1], base = parseInt(m[2]), count = parseInt(m[3]);
-      const k = m[4].split("|");
-      const toS = (n: number, b: number): string => {
-        const c = "0123456789abcdefghijklmnopqrstuvwxyz";
-        return n < b ? c[n] : toS(Math.floor(n / b), b) + c[n % b];
-      };
-      let unpacked = packed;
-      for (let i = count - 1; i >= 0; i--) {
-        if (k[i]) unpacked = unpacked.replace(new RegExp("\\b" + toS(i, base) + "\\b", "g"), k[i]);
+      const args = splitTopLevelArgs(argsStr);
+      // args[0]="'...'"  args[1]=base(number)  args[2]=count(number)  args[3]="'...'.split('|')" [,e,d]
+      const packed = args[0] !== undefined ? unquoteJsString(args[0]) : null;
+      const base = args[1] !== undefined ? parseInt(args[1].trim(), 10) : NaN;
+      const count = args[2] !== undefined ? parseInt(args[2].trim(), 10) : NaN;
+      const keywordsLiteralMatch = args[3] !== undefined ? args[3].match(/^\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/) : null;
+      const keywordsStr = keywordsLiteralMatch ? unquoteJsString(keywordsLiteralMatch[1]) : null;
+
+      if (packed !== null && keywordsStr !== null && Number.isFinite(base) && Number.isFinite(count)) {
+        const k = keywordsStr.split("|");
+        const toS = (n: number, b: number): string => {
+          const c = "0123456789abcdefghijklmnopqrstuvwxyz";
+          return n < b ? c[n] : toS(Math.floor(n / b), b) + c[n % b];
+        };
+        let unpacked = packed;
+        for (let i = count - 1; i >= 0; i--) {
+          if (k[i]) unpacked = unpacked.replace(new RegExp("\\b" + toS(i, base) + "\\b", "g"), k[i]);
+        }
+        result = result.slice(0, evalIdx) + unpacked + result.slice(evalEndIdx);
+        found = true;
+        searchFrom = evalIdx + unpacked.length;
+        continue;
       }
-      result = result.replace(m[0], unpacked);
-      found = true;
     } catch {}
+    searchFrom = Math.max(callCloseIdx, fnIdx + marker.length);
   }
   return found ? result : null;
 }
@@ -2369,7 +2474,14 @@ async function getAnimePhoenixSources(
   title: string, english: string | null, ep: number, isMovie = false,
   ctx?: MatchCtx,
 ): Promise<UnifiedSource[]> {
-  return []; // anime-phoenix.com: domain parked / site dead 2026-07
+  // anime-phoenix.com (2026-07 investigation): site is alive and the video IS extractable —
+  // it hides inside an inert <template> tag (needs innerHTML injection to reveal), pointing to
+  // a *.phoenixpr.workers.dev Cloudflare Worker. BUT that Worker returns HTTP 403 to our VPS's
+  // IP even with the correct Referer, and video-proxy/hls-proxy fetch server-side (not a client
+  // redirect) — so every real user would hit the same 403 through our own server. Keeping this
+  // disabled until either the Worker stops blocking the VPS IP range or we route this source
+  // through a different egress. See .agents/memory/lightpanda-deep-dive-2026-07-09.md.
+  return [];
   const cKey = `phoenix:${title}|${english ?? ""}|${ep}`;
   const cached = aphSrcCache.get(cKey);
   if (cached && Date.now() - cached.ts < SRC_TTL) return cached.sources;
