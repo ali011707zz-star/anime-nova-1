@@ -3913,6 +3913,50 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         }
       }),
 
+      // ── Akwam (akwam.it) — روابط تحميل مباشرة (downet.net), مصدر احتياطي بأولوية منخفضة ──
+      // ملاحظة: akwam.to أصبح صفحة بيع نطاق؛ النطاق الفعلي الحالي هو akwam.it (301 عبر ak.sv)
+      scrapeAnimCached("akwam", async () => {
+        const q = enTitlePrefetched || title;
+        if (!q || type !== "movie") return; // أفلام فقط حالياً — المسلسلات تحتاج بنية روابط مختلفة
+        try {
+          send("status", { msg: "Akwam: جاري البحث…" });
+          const AK_BASE = "https://akwam.it";
+          const sr = await fetch(`${AK_BASE}/search?q=${encodeURIComponent(q)}`, {
+            headers: { "User-Agent": UA },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!sr.ok) return;
+          const searchHtml = await sr.text();
+          const linkRe = /href="(https:\/\/akwam\.it\/movie\/\d+\/[^"]+)"/g;
+          const candidates: string[] = [];
+          let lm: RegExpExecArray | null;
+          while ((lm = linkRe.exec(searchHtml)) && candidates.length < 5) candidates.push(lm[1]);
+          if (!candidates.length) return;
+          const movieUrl = candidates[0];
+
+          const mr = await fetch(movieUrl, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12_000) });
+          if (!mr.ok) return;
+          const movieHtml = await mr.text();
+          const dlMatch = movieHtml.match(/href="(https:\/\/akwam\.it\/download\/\d+\/\d+\/[^"]+)"/);
+          if (!dlMatch) return;
+
+          const dr = await fetch(dlMatch[1], { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12_000) });
+          if (!dr.ok) return;
+          const dlHtml = await dr.text();
+          const mp4Re = /href="(https:\/\/[a-z0-9.]*downet\.net\/download\/[^"]+\.mp4)"/gi;
+          let mm: RegExpExecArray | null;
+          let sent = 0;
+          while ((mm = mp4Re.exec(dlHtml)) && sent < 3) {
+            const u = mm[1];
+            sendSource(u, `Akwam · MP4`, u, u);
+            sent++;
+          }
+          console.log(`[Akwam] "${q}" → ${sent} streams`);
+        } catch (e: any) {
+          console.warn("[Akwam]", e?.message);
+        }
+      }),
+
     ]);
 
     clearTimeout(forceClose);

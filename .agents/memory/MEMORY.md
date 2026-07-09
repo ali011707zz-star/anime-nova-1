@@ -50,4 +50,4 @@
 - [Source cleanup 2026-07-09](source-cleanup-2026-07-09.md) — RS/PH/MT/VE/VL removed from anime scraper cycle; AT/NO/CP deleted entirely; DL got audioLang flag; api-server build is esbuild (no tsc gate).
 - [Lightpanda deep-dive 2026-07-09](lightpanda-deep-dive-2026-07-09.md) — fastvip/FaselHD chain fully solved (packed-JS unpack via Node); PHOENIX direct source found but CF-blocked from VPS; RISTO/ANIMEDAR now AJAX-rendered, need CDP mode not static fetch.
 - [unpackPacked fastvip fix](unpackpacked-fastvip-fix.md) — Dean-Edwards decoder rewritten as balanced-paren text-parser, not eval/Function (RCE risk on untrusted scraped HTML); regex missed trailing packer args.
-- [New source requests 2026-07-09](new-sources-requests-2026-07-09.md) — PAUSED: AnimeTime+AnimeRoco (anime) + Akwam+Moviz Time (animation) requested; domains unconfirmed, not yet implemented.
+- [New source requests 2026-07-09 — resolved](new-sources-requests-2026-07-09.md) — Akwam (akwam.it, direct MP4) implemented; MovizTime/AnimeTime candidates use vidhls.com (ads, not mega.nz); AnimeRoco still unconfirmed/blocked.
