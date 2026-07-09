@@ -47,7 +47,7 @@ const SITE_TAG: Record<string, string> = {
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
-  xyra_anim: "XY", notorrent: "NO", sanime: "SA",
+  notorrent: "NO", sanime: "SA",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -62,7 +62,7 @@ const SITE_LABEL: Record<string, string> = {
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   animephoenix: "AnimePhoenix", faselhd_db: "FaselHD", animetime: "AnimeTime",
   witanime: "WITanime", witanime_db: "WIT مدبلج",
-  xyra_anim: "Xyra", notorrent: "Notorrent", sanime: "SAnime",
+  notorrent: "Notorrent", sanime: "SAnime",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -164,8 +164,8 @@ const ANIME_SITES = [
   "mycima", "topcinemaa", "animephoenix",
   // قاعدة بيانات FaselHD + AnimeTime + WITanime + WITanime-DB (مدبلج)
   "faselhd_db", "animetime", "witanime", "witanime_db",
-  // مصادر جديدة يوليو 2026
-  "xyra_anim", "notorrent", "sanime",
+  // مصادر جديدة يوليو 2026 (xyra_anim معطّل مؤقتاً — خادمهم يرجع 502 دائماً)
+  "notorrent", "sanime",
 ] as const;
 const SITE_TIMEOUT_MS = 28_000;
 

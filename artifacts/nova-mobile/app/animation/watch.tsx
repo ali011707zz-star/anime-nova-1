@@ -393,6 +393,10 @@ export default function AnimationWatchScreen() {
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    const myAbort = abortRef.current;
+    /* شبكة صمّاء (انقطاع اتصال بدون خطأ/بدون "done") تُبقي الشاشة عالقة للأبد —
+       مهلة أمان من طرف العميل مستقلة عن الـ 30s الخاصة بالسيرفر */
+    const clientTimeout = setTimeout(() => myAbort.abort(), 40_000);
 
     const base = getBaseUrl();
     const url = `${base}/api/animation/sources-stream?title=${encodeURIComponent(titleStr)}&type=${type}&id=${tmdbId}&ep=${ep}&season=${season}`;
@@ -495,8 +499,13 @@ export default function AnimationWatchScreen() {
       if (e?.name !== "AbortError") {
         setLoading(false);
         setScreen(s => s === "loading" ? "picker" : s);
+      } else {
+        /* AbortError من مهلة الأمان (40s) — لا تترك الشاشة عالقة، انتقل لـ picker */
+        setLoading(false);
+        setScreen(s => s === "loading" ? "picker" : s);
       }
     } finally {
+      clearTimeout(clientTimeout);
       setLoading(false);
       setSources(prev => {
         if (prev.length === 0) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);

@@ -196,7 +196,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "vidlink_anim",  name: "VidLink",       desc: "TMDB · HLS · ترجمة عربية", tag: "VL", audioLang: "en" },
   { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
   { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/عربي · HLS مباشر",  tag: "DL" },
-  { site: "xyra_anim",     name: "Xyra",           desc: "TMDB · HLS/MP4",            tag: "XY", audioLang: "en" },
+  // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
   { site: "notorrent",     name: "Notorrent",      desc: "IMDB · MP4 مباشر",          tag: "NO", audioLang: "en" },
 ];
 

@@ -9516,6 +9516,18 @@ const SANIME_UA   = "IBRAHIMSEVEN";
 const _sanimeCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 const SANIME_TTL  = 4 * 3_600_000;
 
+// يستخرج رقم الموسم من العنوان (Season 4 / 4th Season / S4) — الافتراضي 1
+function sanimeSeasonNum(s: string | null | undefined): number {
+  if (!s) return 1;
+  let m = s.match(/season\s*(\d+)/i);
+  if (m) return parseInt(m[1], 10);
+  m = s.match(/(\d+)(?:st|nd|rd|th)\s*season/i);
+  if (m) return parseInt(m[1], 10);
+  m = s.match(/\bs(\d+)\b/i);
+  if (m) return parseInt(m[1], 10);
+  return 1;
+}
+
 async function getSAnimeSources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
@@ -9535,19 +9547,23 @@ async function getSAnimeSources(
     const results: any[] = await searchRes.json().catch(() => []);
     if (!Array.isArray(results) || results.length === 0) return out;
 
-    // 2. similarity match
+    // 2. similarity match — مع ترجيح رقم الموسم (SAnime يفصل كل موسم كمُدخل مستقل)
+    const targetSeason = sanimeSeasonNum(english) !== 1 ? sanimeSeasonNum(english) : sanimeSeasonNum(title);
     let bestId: string | null = null;
     let bestScore = 0;
     for (const r of results) {
       const label = r.name ?? "";
-      const score = Math.max(
+      let score = Math.max(
         similarity(label, title),
         english ? similarity(label, english) : 0,
       );
+      // بدون هذا الترجيح، مطابقة "Re:Zero...4th Season" تُطابق خطأً الموسم الأول (تشابه نصي أعلى لكن موسم خاطئ)
+      const labelSeason = sanimeSeasonNum(label);
+      score += labelSeason === targetSeason ? 0.15 : -0.25;
       if (score > bestScore) { bestScore = score; bestId = String(r.id); }
     }
     if (!bestId || bestScore < 0.42) {
-      console.log(`[SAnime] no match for "${english || title}" (best=${bestScore.toFixed(2)})`);
+      console.log(`[SAnime] no match for "${english || title}" (best=${bestScore.toFixed(2)}, targetSeason=${targetSeason})`);
       return out;
     }
 
@@ -10167,7 +10183,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
-      scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
+      // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
+      // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
       scrapeCached("notorrent",  () => getNotorrentAnimeSources(anilistId, ep),              false, 27000),
     ]);
@@ -10316,7 +10333,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
-      case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
+      // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
+      // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
       case "notorrent":    (await race(getNotorrentAnimeSources(anilistId, ep),              35_000, [])).forEach(collectSrc); break;
       default: break;
