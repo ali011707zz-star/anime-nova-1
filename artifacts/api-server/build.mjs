@@ -10,8 +10,9 @@ globalThis.require = createRequire(import.meta.url);
 
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
+const distDir = path.resolve(artifactDir, "dist");
+
 async function buildAll() {
-  const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
@@ -128,6 +129,21 @@ buildAll()
     const distData = path.resolve(artifactDir, "dist/data");
     await mkdir(distData, { recursive: true });
     await cp(srcData, distData, { recursive: true, force: true });
+
+    // CycleTLS Go binary — must live next to the bundled dist/index.mjs
+    // because esbuild sets __dirname = dist/, so cycletls resolves its binary there.
+    try {
+      const req    = createRequire(import.meta.url);
+      const ctPath = req.resolve("cycletls");                          // .../cycletls/dist/index.js
+      const ctBin  = path.join(path.dirname(ctPath), "index");        // Go binary (no extension)
+      const dstBin = path.join(distDir, "index");
+      await cp(ctBin, dstBin, { force: true });
+      const { chmod } = await import("node:fs/promises");
+      await chmod(dstBin, 0o755);
+      console.log("[build] CycleTLS binary copied →", dstBin);
+    } catch (e) {
+      console.warn("[build] CycleTLS binary not found — skipping:", e.message);
+    }
   })
   .catch((err) => {
     console.error(err);

@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
@@ -16,7 +17,14 @@ import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
-type Screen     = "loading" | "picker" | "native" | "embed";
+type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
+
+/* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
+   نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
+const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "animephoenix", "anime3rb", "ristoanime"]);
+function needsHiddenResolve(s: Src): boolean {
+  return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site);
+}
 
 interface Src {
   url?: string;
@@ -46,7 +54,23 @@ const SITE_TAG: Record<string, string> = {
   anineko: "AN", mitanime: "MT",
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
-  faselhd_db: "FH",
+  faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
+  notorrent: "NO", sanime: "SA",
+};
+
+/* ── اسم عرض لكل موقع في منتقي المصادر ── */
+const SITE_LABEL: Record<string, string> = {
+  kawaii: "Kawaii", hianime: "HiAnime", animewitcher: "AnimeWitcher",
+  dulo_anim: "Dulo", anineko: "Anineko", anikoto: "AniKoto",
+  anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
+  videasy_anim: "Videasy", vidlink_anim: "VidLink", animekai: "AnimeKai",
+  animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
+  animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
+  animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
+  anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
+  animephoenix: "AnimePhoenix", faselhd_db: "FaselHD", animetime: "AnimeTime",
+  witanime: "WITanime", witanime_db: "WIT مدبلج",
+  notorrent: "Notorrent", sanime: "SAnime",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -119,18 +143,9 @@ function extractProxyHeaders(url: string): Record<string, string> | undefined {
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
-  let resolved = url.startsWith("/") ? base + url : url;
-  /* على الأجهزة: أضف mobile=1 لـ:
-     - hls-proxy  → السيرفر يختار H.264 + segments تذهب مباشرة للـ CDN (صفر bandwidth proxy)
-     - video-proxy → السيرفر يُرسل 307 redirect للـ CDN بدلاً من تمرير الملف كاملاً */
-  if (
-    Platform.OS !== "web" &&
-    (resolved.includes("hls-proxy") || resolved.includes("video-proxy")) &&
-    !resolved.includes("mobile=1")
-  ) {
-    resolved += (resolved.includes("?") ? "&" : "?") + "mobile=1";
-  }
-  return resolved;
+  /* hls-proxy يُعيد 307 → CF Worker مباشرة (يجلب M3U8 + يُعيد كتابة الـ segments عبره)
+     video-proxy يُعيد 307 → CF Worker أيضاً — لا حاجة لـ mobile=1 بعد الآن */
+  return url.startsWith("/") ? base + url : url;
 }
 
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
@@ -141,6 +156,7 @@ const SITE_PRIORITY: Record<string, number> = {
   dulo_anim: 70, videasy_anim: 60, vidlink_anim: 55,
   anineko: 50, mitanime: 45, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20,
+  witanime: 12,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
@@ -154,8 +170,10 @@ const ANIME_SITES = [
   "shahiid", "animelek", "animedar", "okanime", "ristoanime",
   "animeify", "animeday", "arabseed", "anime4up2",
   "mycima", "topcinemaa", "animephoenix",
-  // قاعدة بيانات FaselHD + AnimeTime
-  "faselhd_db", "animetime",
+  // قاعدة بيانات FaselHD + AnimeTime + WITanime + WITanime-DB (مدبلج)
+  "faselhd_db", "animetime", "witanime", "witanime_db",
+  // مصادر جديدة يوليو 2026 (xyra_anim معطّل مؤقتاً — خادمهم يرجع 502 دائماً)
+  "notorrent", "sanime",
 ] as const;
 const SITE_TIMEOUT_MS = 28_000;
 
@@ -237,13 +255,16 @@ export default function WatchScreen() {
   const displayTitle = titleArStr || englishStr || titleStr;
 
   /* ── State ── */
-  const [screen,      setScreen]      = useState<Screen>("loading");
+  const [screen,      setScreen]      = useState<Screen>("picker"); // يعرض picker فوراً
   const [sources,     setSources]     = useState<Src[]>([]);
-  const [loading,     setLoading]     = useState(true);
+  const [loading,     setLoading]     = useState(false); // لا تحميل تلقائي عند الفتح
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
+  const [resolveFailed, setResolveFailed] = useState(false); // آخر محاولة WebView مخفي فشلت → نعرض بطاقة "يحتاج تطبيق أصلي"
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
   const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
+  /* slotStatus: حالة كل مصدر في المنتقي */
+  const [slotStatus,  setSlotStatus]  = useState<Record<string, "idle" | "fetching" | "ready" | "failed">>({});
 
   const abortRef          = useRef<AbortController | null>(null);
   const seenKeys          = useRef(new Set<string>());
@@ -253,6 +274,9 @@ export default function WatchScreen() {
   const isMountedRef      = useRef(true);
   const fetchEpochRef     = useRef(0);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightSitesRef  = useRef<Set<string>>(new Set());
+  const fetchedSitesRef   = useRef<Set<string>>(new Set()); // يمنع إعادة جلب نفس المصدر مرتين (فقط الناجحة)
+  const bgTimersRef       = useRef<ReturnType<typeof setTimeout>[]>([]); // background-load timers للإلغاء عند تغيير الحلقة
 
   /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
   useEffect(() => {
@@ -440,12 +464,19 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, srcCacheKey]);
 
-  useEffect(() => {
-    fetchSources();
-    return () => abortRef.current?.abort();
-  }, [fetchSources]);
+  /* لا تحميل تلقائي — المستخدم يختار المصدر أولاً عبر handlePickSite.
+     fetchSources تُستخدم فقط عند الضغط على زر "إعادة المحاولة / تحميل الكل". */
 
-  /* ── 30-second hard timeout ── */
+  /* ── Cleanup bgTimers on unmount/episode-change ── */
+  useEffect(() => {
+    return () => {
+      bgTimersRef.current.forEach(clearTimeout);
+      bgTimersRef.current = [];
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anime, ep]);
+
+  /* ── 30-second hard timeout (only for "loading" screen — not used in lazy mode) ── */
   useEffect(() => {
     const t = setTimeout(() => { setScreen(s => s === "loading" ? "picker" : s); setLoading(false); }, 30000);
     return () => clearTimeout(t);
@@ -472,10 +503,36 @@ export default function WatchScreen() {
     saveProgress();
     setSources([]);
     seenKeys.current.clear();
-    setScreen("loading");
+    autoPlayFiredRef.current = false;
+    inFlightSitesRef.current.clear();
+    fetchedSitesRef.current.clear();
+    /* إلغاء background timers من الحلقة السابقة — يمنع stale fetches */
+    bgTimersRef.current.forEach(clearTimeout);
+    bgTimersRef.current = [];
+    setSlotStatus({});
+    setScreen("picker");
     const coverParam = coverUrl ? `&cover=${encodeURIComponent(coverUrl)}` : "";
     const arParam    = titleArStr ? `&titleAr=${encodeURIComponent(titleArStr)}` : "";
     router.replace(`/watch?anime=${anime}&ep=${n}&title=${encodeURIComponent(titleStr)}&english=${encodeURIComponent(englishStr)}&format=${encodeURIComponent(format || "")}${coverParam}${arParam}${auto ? "&autoplay=1" : ""}`);
+  }
+
+  /* ── إعادة تحميل كل المصادر (زر تحديث) ── */
+  function refreshAllSources() {
+    bgTimersRef.current.forEach(clearTimeout);
+    bgTimersRef.current = [];
+    setSources([]);
+    seenKeys.current.clear();
+    autoPlayFiredRef.current = false;
+    inFlightSitesRef.current.clear();
+    fetchedSitesRef.current.clear();
+    hasCachedRef.current = false;
+    setSlotStatus({});
+    setScreen("picker");
+    /* تحميل كل المصادر الآن بالتوازي */
+    ANIME_SITES.forEach((site, i) => {
+      const tid = setTimeout(() => { handlePickSite(site, i === 0); }, i * 80);
+      bgTimersRef.current.push(tid);
+    });
   }
 
   /* ── Play a source ── */
@@ -484,13 +541,111 @@ export default function WatchScreen() {
     if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: thumb, updatedAt: Date.now() });
 
     setPlayingSrc(src);
+    setResolveFailed(false);
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
     if (Platform.OS === "web") {
       setScreen(isEmbedSrc(src) ? "embed" : "native");
-    } else {
-      setScreen(isDirectPlayable(src) ? "native" : "embed");
+      return;
     }
+    if (isDirectPlayable(src)) { setScreen("native"); return; }
+    /* مواقع محمية (Cloudflare/Turnstile) — حاول استخراج رابط الفيديو الحقيقي
+       عبر WebView مخفي (IP الجهاز السكني) قبل عرض بطاقة "يحتاج تطبيق أصلي" */
+    if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
+    setScreen("embed");
   }, [anime, epNum, titleStr, englishStr, coverUrl]); // eslint-disable-line
+
+  /* ── نتيجة استخراج WebView المخفي ── */
+  const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
+    if (!playingSrc) return;
+    const resolved: Src = {
+      ...playingSrc,
+      directUrl: stream.url,
+      url: stream.url,
+      isEmbed: false,
+      headers: stream.headers || playingSrc.headers,
+      directType: stream.type,
+    };
+    setPlayingSrc(resolved);
+    setScreen("native");
+  }, [playingSrc]);
+
+  const handleHiddenFailed = useCallback(() => {
+    setResolveFailed(true);
+    setScreen("embed");
+  }, []);
+
+  /* ── جلب مصدر واحد عند اختيار المستخدم ──
+     autoPlayResult=true → يشغّل أول مصدر جاهز تلقائياً ثم يُحمّل الباقي خلفياً.
+     autoPlayResult=false → تحميل خلفي فقط (يُضيف المصادر للـ picker). ── */
+  const handlePickSite = useCallback(async (site: string, autoPlayResult = true) => {
+    /* fetchedSitesRef يمنع re-fetch بعد إتمام الجلب (يحل stale-closure في setTimeout) */
+    if (inFlightSitesRef.current.has(site) || fetchedSitesRef.current.has(site)) return;
+
+    inFlightSitesRef.current.add(site);
+    /* لا نضيف لـ fetchedSitesRef هنا — فقط نضيفه عند النجاح لنسمح بإعادة المحاولة عند الفشل */
+    setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
+
+    const base = getBaseUrl();
+    const qs = new URLSearchParams({
+      anime: anime || "0", ep: String(epNum), title: titleStr,
+      english: englishStr, format: format || "",
+      year: year || "", episodes: episodes || "", native: native || "",
+    });
+
+    try {
+      await warmAuthToken();
+      const siteCtrl = new AbortController();
+      const tid = setTimeout(() => siteCtrl.abort(), 28000);
+      const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
+      clearTimeout(tid);
+
+      if (!res.ok || !isMountedRef.current) throw new Error("fetch failed");
+      const data = await res.json();
+      const rawSrcs: Src[] = data.sources || [];
+
+      if (!rawSrcs.length) {
+        setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+        return;
+      }
+
+      const newSrcs = rawSrcs
+        .map((s): Src => ({ ...s, site: s.site || site, directUrl: resolveUrl(s.directUrl, base), url: resolveUrl(s.url, base) }))
+        .filter(s => { const k = getPlayUrl(s); if (!k || seenKeys.current.has(k)) return false; seenKeys.current.add(k); return true; });
+
+      if (newSrcs.length) {
+        fetchedSitesRef.current.add(site); // ✓ نجح — امنع الإعادة
+        setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
+        setSources(prev => [...prev, ...newSrcs]);
+      } else {
+        setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+        // لا نضيف لـ fetchedSitesRef — يسمح بإعادة المحاولة يدوياً
+      }
+
+      /* شغّل أفضل مصدر فوراً */
+      if (autoPlayResult && !autoPlayFiredRef.current && newSrcs.length) {
+        const direct = newSrcs.filter(isDirectPlayable);
+        const best = direct.find(s => s.site === "kawaii") ??
+                     direct.find(s => s.site === "hianime") ??
+                     direct.find(s => s.site === "animewitcher") ??
+                     direct[0];
+        if (best) {
+          autoPlayFiredRef.current = true;
+          playSrc(best);
+          /* تحميل خلفي لبقية المواقع — نتتبع الـ timers لإلغائها عند تغيير الحلقة */
+          ANIME_SITES.filter(s => s !== site).forEach((s, i) => {
+            const tid = setTimeout(() => { handlePickSite(s, false); }, 400 + i * 100);
+            bgTimersRef.current.push(tid);
+          });
+        }
+      }
+    } catch {
+      if (isMountedRef.current) setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
+      // لا نضيف لـ fetchedSitesRef عند الخطأ — يسمح بإعادة المحاولة
+    } finally {
+      inFlightSitesRef.current.delete(site);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, playSrc]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
@@ -530,7 +685,7 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     const srcs = directSrcs;
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
-    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime"]);
+    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime","witanime_db","sanime"]);
     return srcs.map(s => {
       const url = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
@@ -628,6 +783,30 @@ export default function WatchScreen() {
     );
   }
 
+  /* ══════════════ RESOLVING (WebView مخفي — لا يُعرض للمستخدم) ══════════════ */
+  if (screen === "resolving" && playingSrc) {
+    const resolveUrl2 = getPlayUrl(playingSrc);
+    return (
+      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <Pressable onPress={() => { setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </Pressable>
+        <SpinRing />
+        <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
+          ⏳ جاري تجهيز المصدر…
+        </Text>
+        {/* WebView مخفي 100% — يزور الصفحة المحمية خلفياً ثم يُستبدل تلقائياً بالمشغّل الداخلي */}
+        {resolveUrl2 ? (
+          <HiddenResolverWebView
+            pageUrl={resolveUrl2}
+            onResolved={handleHiddenResolved}
+            onFailed={handleHiddenFailed}
+          />
+        ) : null}
+      </View>
+    );
+  }
+
   /* ══════════════ EMBED (WebView) ══════════════ */
   if (screen === "embed" && playingSrc) {
     const embedUrl = getPlayUrl(playingSrc);
@@ -688,9 +867,7 @@ export default function WatchScreen() {
             <Text style={[d.epNavText, { color: "#c4b5fd" }]}>التالية</Text>
             <Ionicons name="chevron-back" size={12} color="rgba(196,181,253,0.9)" />
           </Pressable>
-          <Pressable
-            onPress={() => { setSources([]); seenKeys.current.clear(); hasCachedRef.current = false; setScreen("loading"); fetchSources(); }}
-            style={d.headerRefreshBtn}>
+          <Pressable onPress={refreshAllSources} style={d.headerRefreshBtn}>
             <Ionicons name="refresh" size={13} color="#8B5CF6" />
           </Pressable>
         </View>
@@ -729,17 +906,39 @@ export default function WatchScreen() {
           </View>
         </View>
 
-        {/* ── Empty state ── */}
-        {!loading && allSrcs.length === 0 && (
-          <View style={d.empty}>
-            <View style={d.emptyIcon}>
-              <Ionicons name="warning-outline" size={32} color="rgba(239,68,68,0.55)" />
+        {/* ── Site selector: اختر مصدراً لبدء التشغيل ── */}
+        {allSrcs.length === 0 && !loading && (
+          <View style={d.siteSelectorCard}>
+            <View style={d.siteSelectorHeader}>
+              <Ionicons name="play-circle" size={16} color="#a78bfa" />
+              <Text style={d.siteSelectorTitle}>اختر مصدراً للتشغيل</Text>
             </View>
-            <Text style={d.emptyTitle}>الحلقة {epNum} غير متوفرة بعد</Text>
-            <Text style={d.emptySub}>المصادر العربية تتأخر عادةً ٢–٣ حلقات عن البث الأصلي.</Text>
-            <Pressable onPress={() => { setSources([]); seenKeys.current.clear(); hasCachedRef.current = false; setScreen("loading"); fetchSources(); }} style={d.retryBtn}>
-              <Ionicons name="refresh" size={15} color="#c4b5fd" />
-              <Text style={d.retryBtnText}>إعادة المحاولة</Text>
+            {(ANIME_SITES as readonly string[]).map(site => {
+              const st = slotStatus[site] || "idle";
+              const isActive = st === "fetching";
+              return (
+                <Pressable
+                  key={site}
+                  style={[d.siteRow, isActive && d.siteRowActive]}
+                  onPress={() => handlePickSite(site, true)}
+                  disabled={isActive}
+                >
+                  <View style={[d.siteTagBadge, st === "ready" ? { backgroundColor: "rgba(52,211,153,0.14)", borderColor: "rgba(52,211,153,0.3)" } : st === "failed" ? { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.22)" } : {}]}>
+                    <Text style={[d.siteTagText, st === "ready" ? { color: "#34d399" } : st === "failed" ? { color: "rgba(239,68,68,0.65)" } : {}]}>{getSiteTag(site)}</Text>
+                  </View>
+                  <Text style={d.siteName} numberOfLines={1}>{SITE_LABEL[site] || site}</Text>
+                  <View style={{ marginLeft: "auto" }}>
+                    {st === "fetching" && <SpinRing size={16} />}
+                    {st === "ready"    && <Ionicons name="checkmark-circle" size={17} color="#34d399" />}
+                    {st === "failed"   && <Ionicons name="close-circle" size={17} color="rgba(239,68,68,0.5)" />}
+                    {st === "idle"     && <Ionicons name="chevron-back" size={15} color="rgba(139,92,246,0.6)" />}
+                  </View>
+                </Pressable>
+              );
+            })}
+            <Pressable style={d.loadAllBtn} onPress={refreshAllSources}>
+              <Ionicons name="flash" size={13} color="#c4b5fd" />
+              <Text style={d.loadAllText}>تحميل كل المصادر</Text>
             </Pressable>
           </View>
         )}
@@ -863,6 +1062,18 @@ const d = StyleSheet.create({
   srcQText:      { fontSize: 8, fontFamily: "Cairo_800ExtraBold" },
   srcPlayBtn:    { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: "rgba(109,40,217,0.88)", borderWidth: 1, borderColor: "rgba(167,139,250,0.28)" },
   srcPlayText:   { fontSize: 10, fontFamily: "Cairo_800ExtraBold", color: "#fff" },
+
+  /* Site selector */
+  siteSelectorCard: { backgroundColor: "rgba(14,12,24,0.92)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.18)", overflow: "hidden" },
+  siteSelectorHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.07)" },
+  siteSelectorTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa" },
+  siteRow:       { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.04)" },
+  siteRowActive: { backgroundColor: "rgba(139,92,246,0.06)" },
+  siteTagBadge:  { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7, backgroundColor: "rgba(109,40,217,0.16)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
+  siteTagText:   { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.9)" },
+  siteName:      { flex: 1, fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)", textAlign: "right" },
+  loadAllBtn:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.07)" },
+  loadAllText:   { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
 
   /* Empty state */
   empty:         { alignItems: "center", justifyContent: "center", gap: 14, paddingVertical: 50 },
