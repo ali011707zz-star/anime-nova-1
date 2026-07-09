@@ -1,76 +1,84 @@
 ---
-name: AniTaku APK Analysis
-description: نتائج تحليل AniTaku.apk (EasyPlex) — API endpoints، auth mechanism، streaming hosts
+name: AniTaku APK Deep Analysis
+description: Complete analysis of AniTaku v0.1 APK — auth system, API routes, DB status, streaming hosts, static token found
 ---
 
-# AniTaku APK Analysis
+## Summary
+AniTaku is an EasyPlex-based (CodeCanyon/Y0BEX) Android app targeting `anitakuapp.hasalaty.com`.
 
-## الملف
-- MediaFire: https://www.mediafire.com/file/oagei8xmumk08if/AniTaku.apk/file
-- الحجم: 85.8MB، الإصدار: 0.1
+## Auth System
+- **OAuth2 password grant** via `POST https://anitakuapp.hasalaty.com/public/oauth/token`
+- `client_id = 2`
+- `client_secret = NOT FOUND` — not in APK string table, bytecode, or any DEX binary scan
+- Auth class: `Lk9/k;` (obfuscated) — uses `Authorization: Basic base64(client_id:client_secret)` pattern
 
-## الإطار المستخدم
-- **EasyPlex** by Y0bEX — https://codecanyon.net/user/yobex
-- Laravel backend + Passport OAuth
-- Android Kotlin + Retrofit + OkHttp + Room DB
-
-## API الرئيسي
+## Static Bearer Token (FOUND)
+String `QmVhcmVyIEd4b05kUGhPcnNrV1laZlN3MmQ5aGdlWFRvU2xVQmFs` in classes.dex (index 24948) base64-decodes to:
 ```
-Base URL: https://anitakuapp.hasalaty.com/public/api/
-OAuth:    https://anitakuapp.hasalaty.com/public/oauth/token
-Admin:    https://anitakuapp.hasalaty.com/public/admin
+Bearer GxoNdPhOrskWYZfSw2d9hgeXToSlUBal
 ```
+This token reaches Laravel (bypasses Cloudflare) but returns `{"error":"Unauthenticated."}` for user routes.
+It works as an app-level token for public (non-user) routes only.
 
-## Endpoints المكتشفة (من DEX strings)
+## API Routes (from DEX bytecode scan)
+Base URL: `https://anitakuapp.hasalaty.com/public/api/`
+
+### Public routes (no user auth needed):
+- `animes/season/{season_id}/{code}` → Returns DB query error if ID not found (route EXISTS)
+- `animes/seasons/{season_id}/{code}` → Same
+
+### User-auth routes (HTTP 401 with static token):
+- `animes/latestadded/{code}` → HTTP 401
+- `animes/byrating/{code}` → HTTP 401
+- `animes/byviews/{code}` → HTTP 401
+- `genres/list/{code}` → HTTP 401
+- `genres/animes/all/{code}` → HTTP 401
+- `series/latestadded/{code}` → HTTP 401
+
+### Route doesn't exist (this version):
+- `casterslist`, `genreslist`, `animes`, `series`, `home`, `trending`
+- Routes with TMDB IDs in `animes/show/{id}/{code}` pattern → 404
+
+### Other routes found in DEX:
 ```
-GET  animes/byrating/{code}          ← 401 (يحتاج auth)
-GET  animes/byviews/{code}
-GET  animes/byyear/{code}
-GET  animes/latestadded/{code}
-GET  animes/relateds/{id}/{code}
-GET  animes/show/{id}/{code}
-POST anime/addtofav/{movieid}
-POST anime/removefromfav/{movieid}
-GET  series/byrating/{code}
-GET  series/byviews/{code}
-GET  series/byyear/{code}
-GET  series/episode/{episode_imdb}/{code}
-GET  stream/show/{id}/{code}
-GET  cast/detail/{id}/{code}
-GET  casterslist / allgenres / slider
-POST user/avatar / user/device/create / user/device/delete/{id}
-POST user/logout / user/profile/create / user/profile/delete/{profile_id}
-GET  userprofile_history / user/settings
-POST login   ← حقل: username (وليس email)
-POST register
-```
-
-## المصادقة
-- نوع: Laravel Passport OAuth (password grant)
-- حقل الدخول: **username** (وليس email)
-- endpoint: POST /public/oauth/token
-  - grant_type=password, client_id=2, client_secret=???
-- client_secret مخزّن في DB — لم يُكتشف بعد (client_id=2 → "invalid_client")
-
-## TMDB API Key
-- string `tmdb_api_key` موجود في DEX لكن القيمة لم تُستخرج بعد
-
-## مواقع البث (StreamSB-family — كلها نمط /api/source/)
-```
-7pow.me, kawaiifansub.com, api.saruch.co, api.streamsb.com,
-easyplex.xyz, ff-dns.xyz, gavid.xyz, gdstream.net, iplhd.cyou,
-kanavid.xyz, ll-dns.xyz, manasx.xyz, mifilm.xyz, mrdhan.com,
-otcplay.fun, playto1.com, pp-dns.xyz, psadns.xyz, purefiles.in,
-sbplay.xyz, suzihaza.com, vanfem.com, zapurl.xyz,
-vps.putmovies.com, asianembed.io, cdn3.k-cdn.online,
-bittube.video/api/v1/videos/, uptobox.com/api/
+anime/addtofav/{movieid}
+anime/removefromfav/{movieid}
+animes/show/{id}/{code}
+cast/detail/{id}/{code}
+categories/streaming/show/{id}/{code}
+genres/animes/show/{id}/{code}
+genres/movies/all/{code}
+genres/series/all/{code}
+series/show/{tmdb}/{code}
+series/season/{seasons_id}/{code}
+stream/show/{id}/{code}
+upcoming/latest/{code}
+user, user/avatar, user/device/create, user/device/delete/{id}
+user/logout, user/profile/create, user/profile/delete/{profile_id}
+plans/plans/{code}
 ```
 
-## الخطوات المتبقية للتكملة
-1. إيجاد client_secret (MITM أو قراءة من DB الـ VPS)
-2. استخراج TMDB API key من classes2-7.dex
-3. تجربة endpoints بعد الحصول على Bearer token
-4. فحص vps.putmovies.com كمصدر محتوى
+## Database Status
+**EMPTY** — `AnimeSeason` table has no records (IDs 1-50 all "No query results"). The app is installed but no anime content has been populated. This makes API integration impractical.
 
-## Deep Links
-- com.anitaku.app/animes/ | /movies/ | /series/ | /streaming/
+## Streaming Hosts (from DEX)
+StreamSB-family CDNs hardcoded:
+- `easyplex.xyz/api/source/`
+- `easyplex.yobdev.live/p2lbgWkFrykA/`
+- `7pow.me`, `kawaiifansub.com`, `ff-dns.xyz`, `gavid.xyz`, `gdstream.net`
+- `iplhd.cyou`, `kanavid.xyz`, `ll-dns.xyz`, `manasx.xyz`, `mifilm.xyz`
+- `mrdhan.com`, `otcplay.fun`, `playto1.com`, `pp-dns.xyz`, `sbplay.xyz`
+- `suzihaza.com`, `vanfem.com`, `zapurl.xyz`, `diampokusy.com`
+
+## Google API Key
+`AIzaSyDRKQ9d6kfsoZT2lUnZcZnBYvH69HExNPE` in classes4.dex (Firebase, not TMDB)
+
+## Conclusion
+**Cannot integrate AniTaku** because:
+1. `client_secret` not in APK binary (needs runtime MITM on real device)
+2. Server DB is empty (no anime content to query)
+3. StreamSB hosts require video IDs from authenticated API
+
+**Why:** Client secret is ProGuard-obfuscated or fetched remotely; DB likely unpopulated intentionally (demo/dev server).
+
+**Next if needed:** Install app on physical Android device, capture OAuth traffic via Burp Suite with root certificate or custom ROM.
