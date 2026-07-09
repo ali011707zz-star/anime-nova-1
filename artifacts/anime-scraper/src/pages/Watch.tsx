@@ -2803,6 +2803,7 @@ export default function WatchPage() {
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { slotStatusRef.current = slotStatus; }, [slotStatus]);
 
   /* ── Stop all audio/video when leaving Watch page ── */
   useEffect(() => {
@@ -2821,6 +2822,12 @@ export default function WatchPage() {
 
   const autoFetchedRef    = useRef(false);
   const autoPlayedRef     = useRef(false);
+  /* true once the mount-time "fetch all scrapers" wave has been scheduled — prevents
+     handleFetchSite from scheduling a redundant second wave of the same sites */
+  const autoFetchAllRef   = useRef(false);
+  /* mirrors slotStatus for use inside setTimeout closures (avoids stale-state reads
+     when a scheduled fetch fires after several re-renders) */
+  const slotStatusRef     = useRef<Record<string, SlotStatus>>(EMPTY_SLOTS);
   const upgradedToFhdRef  = useRef(false);
   const phaseRef          = useRef<"picker" | "player">("picker");
   /* تتبع طلبات fetch-source الجارية + المؤقتات المعلَّقة — لإلغائها فور اختيار مصدر التشغيل
@@ -3124,9 +3131,12 @@ export default function WatchPage() {
      bgLoad=true  → background loading after player started (no auto-play, no re-trigger)
      bgLoad=false → user tapped this scraper → auto-play first result + background-load rest */
   async function handleFetchSite(site: string, bgLoad = false) {
-    /* Guard: skip if already fetching or ready */
+    /* Guard: skip if already fetching/ready/failed — reads slotStatusRef (not the closed-over
+       slotStatus state) so delayed/scheduled calls never re-fetch a site that already
+       resolved between the time they were scheduled and the time they fire. */
     if (inFlightRef.current.has(site)) return;
-    if (slotStatus[site] === "fetching" || slotStatus[site] === "ready") return;
+    const knownStatus = slotStatusRef.current[site];
+    if (knownStatus === "fetching" || knownStatus === "ready" || knownStatus === "failed") return;
 
     inFlightRef.current.add(site);
     setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
@@ -3155,11 +3165,14 @@ export default function WatchPage() {
           if (playable) {
             autoPlayedRef.current = true;
             handlePlaySrc(playable);
-            /* تحميل خلفي لبقية المصادر لملء الـ picker داخل المشغّل */
-            SCRAPER_DEFS.filter(d => d.site !== site).forEach((def, i) => {
-              const id = window.setTimeout(() => handleFetchSite(def.site, true), 300 + i * 80);
-              pendingTimeoutsRef.current.push(id);
-            });
+            /* تحميل خلفي لبقية المصادر لملء الـ picker داخل المشغّل — فقط إذا لم تكن موجة
+               auto-fetch-all (mount effect) قد جدولت كل المواقع مسبقاً، لتجنّب موجتين مكررتين. */
+            if (!autoFetchAllRef.current) {
+              SCRAPER_DEFS.filter(d => d.site !== site).forEach((def, i) => {
+                const id = window.setTimeout(() => handleFetchSite(def.site, true), 300 + i * 80);
+                pendingTimeoutsRef.current.push(id);
+              });
+            }
           }
         }
       } else {
@@ -3202,9 +3215,24 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── النظام الجديد: لا auto-fetch ولا auto-play — المستخدم يختار المصدر أولاً ──
-     فور وصول أول مصدر لمصدر اختاره المستخدم يُشغَّل تلقائياً (في handleFetchSite).
-     المصادر المحفوظة في الكاش تُشغَّل فوراً عبر _resume (في الـ useEffect أدناه). ── */
+  /* ── Auto-fetch على غرار قسم الأنميشن: يبدأ تحميل كل السكربرز تلقائياً دون انتظار
+     اختيار المستخدم — أول مصدر جاهز يُشغَّل تلقائياً فوراً (نفس منطق handleFetchSite
+     الحالي عند bgLoad=false)، والباقي يستمر بالتحميل خلفياً ليظهر في قائمة السيرفرات
+     الكاملة (مثل شاشة "مصادر المشاهدة" بعد فتح المشغّل في قسم الأنميشن). ── */
+  useEffect(() => {
+    if (!animeId || !titleParam) return;
+    autoFetchAllRef.current = true;
+    SCRAPER_DEFS.forEach((def, i) => {
+      const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
+      pendingTimeoutsRef.current.push(id);
+    });
+    /* Cancel any still-queued (not-yet-started) fetches on episode change/unmount */
+    return () => {
+      pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
+      pendingTimeoutsRef.current = [];
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animeId, ep]);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
@@ -3274,6 +3302,10 @@ export default function WatchPage() {
 
   /* ── Play a specific source — show loading modal then switch to player ── */
   function handlePlaySrc(src: FetchedSrc) {
+    /* Playback is starting — stop any not-yet-fired scheduled fetches from the auto-fetch-all
+       wave to cap unnecessary scraper traffic (in-flight requests are left to finish so they
+       can still populate the full server list). */
+    cancelRemainingScrapers();
     const clickedUrl  = src.directUrl || src.url;
     const clickedTier = getSrcQualityTier(src);
 
