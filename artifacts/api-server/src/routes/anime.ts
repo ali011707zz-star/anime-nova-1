@@ -8768,6 +8768,7 @@ async function getFaselhdDbSources(
           quality: "HD",
           qualityRank: 8,
           site: "faselhd_db",
+          isEmbed: true, // صفحة iframe (video_player?player_token=) — ليست ملف فيديو مباشر
         });
       }
       // Download links — T7meel
@@ -8778,6 +8779,7 @@ async function getFaselhdDbSources(
           quality: "HD",
           qualityRank: 6,
           site: "faselhd_db",
+          isEmbed: true, // صفحة تحميل وسيطة — ليست ملف فيديو مباشر
         });
       }
     }

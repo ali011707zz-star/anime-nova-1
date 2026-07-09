@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useApp } from "@/context/AppContext";
@@ -16,7 +17,14 @@ import * as ScreenOrientation from "expo-screen-orientation";
 
 /* ── Types ── */
 type Quality    = "1080p FHD" | "720p HD" | "360p SD";
-type Screen     = "loading" | "picker" | "native" | "embed";
+type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
+
+/* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
+   نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
+const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "animephoenix", "anime3rb", "ristoanime"]);
+function needsHiddenResolve(s: Src): boolean {
+  return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site);
+}
 
 interface Src {
   url?: string;
@@ -252,6 +260,7 @@ export default function WatchScreen() {
   const [loading,     setLoading]     = useState(false); // لا تحميل تلقائي عند الفتح
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
+  const [resolveFailed, setResolveFailed] = useState(false); // آخر محاولة WebView مخفي فشلت → نعرض بطاقة "يحتاج تطبيق أصلي"
   const [globalSubUrl, setGlobalSubUrl] = useState<string | undefined>();
   const [arEpTitle,   setArEpTitle]   = useState<string | undefined>();
   /* slotStatus: حالة كل مصدر في المنتقي */
@@ -532,13 +541,38 @@ export default function WatchScreen() {
     if (anime) addToHistory({ animeId: parseInt(anime), ep: epNum, title: titleStr, english: englishStr, thumbnail: thumb, updatedAt: Date.now() });
 
     setPlayingSrc(src);
+    setResolveFailed(false);
     /* على web: HLS → embed WebView مع hls-proxy URL مباشرة */
     if (Platform.OS === "web") {
       setScreen(isEmbedSrc(src) ? "embed" : "native");
-    } else {
-      setScreen(isDirectPlayable(src) ? "native" : "embed");
+      return;
     }
+    if (isDirectPlayable(src)) { setScreen("native"); return; }
+    /* مواقع محمية (Cloudflare/Turnstile) — حاول استخراج رابط الفيديو الحقيقي
+       عبر WebView مخفي (IP الجهاز السكني) قبل عرض بطاقة "يحتاج تطبيق أصلي" */
+    if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
+    setScreen("embed");
   }, [anime, epNum, titleStr, englishStr, coverUrl]); // eslint-disable-line
+
+  /* ── نتيجة استخراج WebView المخفي ── */
+  const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
+    if (!playingSrc) return;
+    const resolved: Src = {
+      ...playingSrc,
+      directUrl: stream.url,
+      url: stream.url,
+      isEmbed: false,
+      headers: stream.headers || playingSrc.headers,
+      directType: stream.type,
+    };
+    setPlayingSrc(resolved);
+    setScreen("native");
+  }, [playingSrc]);
+
+  const handleHiddenFailed = useCallback(() => {
+    setResolveFailed(true);
+    setScreen("embed");
+  }, []);
 
   /* ── جلب مصدر واحد عند اختيار المستخدم ──
      autoPlayResult=true → يشغّل أول مصدر جاهز تلقائياً ثم يُحمّل الباقي خلفياً.
@@ -746,6 +780,30 @@ export default function WatchScreen() {
         onPrevEpisode={epNum > 1 ? () => goEp(epNum - 1) : undefined}
         onEpisodeSelect={(n) => goEp(n)}
       />
+    );
+  }
+
+  /* ══════════════ RESOLVING (WebView مخفي — لا يُعرض للمستخدم) ══════════════ */
+  if (screen === "resolving" && playingSrc) {
+    const resolveUrl2 = getPlayUrl(playingSrc);
+    return (
+      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <Pressable onPress={() => { setScreen("picker"); }} style={[d.playerBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </Pressable>
+        <SpinRing />
+        <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
+          ⏳ جاري تجهيز المصدر…
+        </Text>
+        {/* WebView مخفي 100% — يزور الصفحة المحمية خلفياً ثم يُستبدل تلقائياً بالمشغّل الداخلي */}
+        {resolveUrl2 ? (
+          <HiddenResolverWebView
+            pageUrl={resolveUrl2}
+            onResolved={handleHiddenResolved}
+            onFailed={handleHiddenFailed}
+          />
+        ) : null}
+      </View>
     );
   }
 
