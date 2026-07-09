@@ -3,6 +3,26 @@
  * يتصل مباشرة بـ Supabase عبر متغيرات البيئة (SUPABASE_URL + SUPABASE_SERVICE_KEY)
  */
 
+// ── حماية العملية من الانهيار بسبب أخطاء غير معالجة (TimeoutError على Readable streams إلخ) ──
+process.on("uncaughtException", (err: any) => {
+  // نتجاهل TimeoutError المعتادة من AbortSignal.timeout() على Streams
+  const name = err?.name || err?.constructor?.name || "";
+  if (name === "TimeoutError" || name === "AbortError" || err?.code === "ABORT_ERR") {
+    console.warn("[uncaughtException] تجاهل TimeoutError/AbortError على stream:", err?.message);
+    return;
+  }
+  console.error("[uncaughtException] خطأ غير متوقع:", err);
+});
+
+process.on("unhandledRejection", (reason: any) => {
+  const name = reason?.name || reason?.constructor?.name || "";
+  if (name === "TimeoutError" || name === "AbortError" || reason?.code === "ABORT_ERR") {
+    console.warn("[unhandledRejection] تجاهل TimeoutError/AbortError:", reason?.message);
+    return;
+  }
+  console.error("[unhandledRejection] وعد مرفوض:", reason);
+});
+
 const rawPort = process.env["PORT"] ?? "5000";
 const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${rawPort}"`);
