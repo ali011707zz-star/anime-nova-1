@@ -168,16 +168,15 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "EK", isArabic: true },
   { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD", isArabic: true },
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK", isArabic: true },
-  { site: "ristoanime",   name: "ريستو أنمي",    desc: "عربي مترجم",              tag: "RS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
   { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY", isArabic: true },
   { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS", isArabic: true },
   { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U", isArabic: true },
   { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC", isArabic: true },
   { site: "topcinemaa",   name: "توب سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "TC", isArabic: true },
-  { site: "animephoenix", name: "فينكس أنمي",   desc: "1080p · MKV مباشر",        tag: "PH", isArabic: true },
   { site: "faselhd_db",  name: "فاصل HD",      desc: "عربي مترجم · GitHub DB",   tag: "FH",  isArabic: true },
-  { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم · HLS",         tag: "AT", isArabic: true },
+  { site: "witanime",     name: "ويتأنمي",      desc: "عربي مترجم · CycleTLS",     tag: "WI", isArabic: true },
+  { site: "sanime",       name: "S أنمي",       desc: "عربي مدبلج/مترجم · MP4",   tag: "SA", isArabic: true },
   // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
@@ -188,12 +187,10 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
-  { site: "mitanime",     name: "ميتا أنمي",    desc: "ياباني مترجم",             tag: "MT" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
-  { site: "videasy_anim",  name: "Videasy",       desc: "TMDB · HLS · ترجمة عربية", tag: "VE", audioLang: "en" },
-  { site: "vidlink_anim",  name: "VidLink",       desc: "TMDB · HLS · ترجمة عربية", tag: "VL", audioLang: "en" },
   { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
-  { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/عربي · HLS مباشر",  tag: "DL" },
+  { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/إنجليزي · HLS مباشر", tag: "DL", audioLang: "en" },
+  // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -216,7 +213,7 @@ const PRIORITY_FETCH_SITES = new Set([
  * بواسطة تأثير subtitleUrl الحالي — لا تحتاج لإدراجها هنا.
  */
 const PROVIDER_WANTS_SMART_SUB = new Set([
-  "hianime", "animepahe", "anineko", "mitanime",
+  "hianime", "animepahe", "anineko",
   "anikototv", "animekai", "dulo_anim",
 ]);
 
@@ -871,9 +868,9 @@ function getCdnDisplayName(url: string): string {
 }
 
 const SITE_SHORT: Record<string, string> = {
-  animephoenix: "فينكس", shahiid: "شاهيد", animelek: "أنمي ليك",
-  animedar: "أنمي دار", okanime: "أوك أنمي", ristoanime: "ريستو",
-  animetime: "أنمي تايم", toonstream: "تون ستريم", mitanime: "ميتا أنمي", animeify: "أنمي فاي",
+  shahiid: "شاهيد", animelek: "أنمي ليك",
+  animedar: "أنمي دار", okanime: "أوك أنمي",
+  toonstream: "تون ستريم", animeify: "أنمي فاي",
 };
 
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string; icon: string }> = {
@@ -978,10 +975,14 @@ function ScraperPicker({
   onPlaySrc: (src: FetchedSrc) => void;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
 }) {
-  /* Check if all scrapers have finished (ready or failed) */
-  const allDone = SCRAPER_DEFS.every(d =>
-    slotStatus[d.site] === "ready" || slotStatus[d.site] === "failed"
-  );
+  /* anyFetching: true while at least one scraper is actively running
+     hasIdleScrapers: true whenever any scraper is still untried (idle)
+     allScrapersComplete: all scrapers done — none fetching, none idle
+     allDone: scrapers not actively running (idle counts as "not started", not "running") */
+  const anyFetching        = SCRAPER_DEFS.some(d => slotStatus[d.site] === "fetching");
+  const hasIdleScrapers    = SCRAPER_DEFS.some(d => slotStatus[d.site] === "idle");
+  const allScrapersComplete = !anyFetching && !hasIdleScrapers;
+  const allDone = !anyFetching;
 
   /* Next-episode guard: use nextAiringEpisode when totalEps is unknown (999 fallback) */
   const nextAiringEp = anime?.nextAiringEpisode?.episode;
@@ -1122,9 +1123,8 @@ function ScraperPicker({
     </>
   );
 
-  /* ── While scrapers are still running AND no sources yet: show loading screen ── */
-  /* If sources already arrived (from a previous run or fast scraper), skip loading screen */
-  if (!allDone && !hasSources && !hasBackupSources) {
+  /* ── Show loading screen only when scrapers are actively fetching (not idle/lazy mode) ── */
+  if (anyFetching && !hasSources && !hasBackupSources) {
     return (
       <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl">
         {/* Blurred poster background */}
@@ -1305,6 +1305,67 @@ function ScraperPicker({
               </div>
             )}
           </>
+        ) : hasIdleScrapers ? (
+          /* Lazy mode: untried scrapers remain — show scraper selection grid */
+          <div className="px-4 mt-2 pb-4">
+            <p className="text-white/40 text-[11px] font-['Cairo'] text-center mb-4">
+              اختر مصدراً لبدء التشغيل
+            </p>
+            <div className="grid grid-cols-2 gap-2.5">
+              {SCRAPER_DEFS.map(d => {
+                const st = slotStatus[d.site];
+                const isFetching = st === "fetching";
+                const isFailed   = st === "failed";
+                return (
+                  <button
+                    key={d.site}
+                    onClick={() => onFetchSite(d.site)}
+                    disabled={isFetching}
+                    className="relative flex flex-col items-start gap-1 px-3 py-3 rounded-2xl active:scale-95 transition-transform disabled:opacity-50"
+                    style={{
+                      background: isFailed ? "rgba(239,68,68,0.07)" : "rgba(255,255,255,0.04)",
+                      border: isFailed ? "1px solid rgba(239,68,68,0.22)" : "1px solid rgba(255,255,255,0.09)",
+                    }}
+                    dir="rtl"
+                  >
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="text-[10px] font-black font-mono px-1.5 py-0.5 rounded"
+                        style={{ background: "rgba(139,92,246,0.20)", color: "rgba(196,181,253,0.90)" }}>
+                        {d.tag}
+                      </span>
+                      <span className="text-[11.5px] font-black font-['Cairo'] text-white/80 truncate flex-1">
+                        {d.name}
+                      </span>
+                      {isFetching && (
+                        <motion.div
+                          className="w-3.5 h-3.5 rounded-full border border-transparent border-t-violet-400 border-r-violet-400/40 shrink-0"
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                        />
+                      )}
+                      {isFailed && <span className="text-[9px] text-red-400/70 font-['Cairo'] shrink-0">فشل</span>}
+                    </div>
+                    <span className="text-[9px] text-white/25 font-['Cairo'] leading-tight">{d.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : anyFetching ? (
+          /* All remaining scrapers are fetching but no playable results yet */
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="flex flex-col items-center gap-3 py-10 px-8">
+            <div className="relative w-8 h-8">
+              <div className="absolute inset-0 rounded-full border-2 border-violet-500/15" />
+              <motion.div
+                className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+              />
+            </div>
+            <p className="text-white/55 text-[12px] font-['Cairo'] text-center">جاري البحث عن مصادر...</p>
+          </motion.div>
         ) : (
           <motion.div
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
@@ -2729,12 +2790,13 @@ export default function WatchPage() {
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey,      setPlayKey]      = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
-  // showPicker: false on initial load (auto-fetch + auto-play), true only when coming back from player
-  const [showPicker,   setShowPicker]   = useState(false);
+  // showPicker: true — picker shown immediately, user picks scraper first
+  const [showPicker,   setShowPicker]   = useState(true);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { slotStatusRef.current = slotStatus; }, [slotStatus]);
 
   /* ── Stop all audio/video when leaving Watch page ── */
   useEffect(() => {
@@ -2753,13 +2815,19 @@ export default function WatchPage() {
 
   const autoFetchedRef    = useRef(false);
   const autoPlayedRef     = useRef(false);
+  /* true once the mount-time "fetch all scrapers" wave has been scheduled — prevents
+     handleFetchSite from scheduling a redundant second wave of the same sites */
+  const autoFetchAllRef   = useRef(false);
+  /* mirrors slotStatus for use inside setTimeout closures (avoids stale-state reads
+     when a scheduled fetch fires after several re-renders) */
+  const slotStatusRef     = useRef<Record<string, SlotStatus>>(EMPTY_SLOTS);
   const upgradedToFhdRef  = useRef(false);
   const phaseRef          = useRef<"picker" | "player">("picker");
   /* تتبع طلبات fetch-source الجارية + المؤقتات المعلَّقة — لإلغائها فور اختيار مصدر التشغيل
      (يمنع بقية السكربرز من إكمال طلباتهم بلا فائدة بعد بدء التشغيل، يقلل استهلاك السيرفر) */
   const fetchControllersRef = useRef<Record<string, AbortController>>({});
   const pendingTimeoutsRef  = useRef<number[]>([]);
-  const [autoPlayReady,   setAutoPlayReady]   = useState(false);
+  // autoPlayReady removed — يُفعَّل الـ auto-play الآن داخل handleFetchSite مباشرةً
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -3052,11 +3120,16 @@ export default function WatchPage() {
   /* ── Track in-flight fetches to prevent duplicate calls ── */
   const inFlightRef = useRef<Set<string>>(new Set());
 
-  /* ── Per-site on-demand fetch ── */
-  async function handleFetchSite(site: string) {
-    /* Guard: skip if already fetching or ready (check both state snapshot and in-flight ref) */
+  /* ── Per-site on-demand fetch ──
+     bgLoad=true  → background loading after player started (no auto-play, no re-trigger)
+     bgLoad=false → user tapped this scraper → auto-play first result + background-load rest */
+  async function handleFetchSite(site: string, bgLoad = false) {
+    /* Guard: skip if already fetching/ready/failed — reads slotStatusRef (not the closed-over
+       slotStatus state) so delayed/scheduled calls never re-fetch a site that already
+       resolved between the time they were scheduled and the time they fire. */
     if (inFlightRef.current.has(site)) return;
-    if (slotStatus[site] === "fetching" || slotStatus[site] === "ready") return;
+    const knownStatus = slotStatusRef.current[site];
+    if (knownStatus === "fetching" || knownStatus === "ready" || knownStatus === "failed") return;
 
     inFlightRef.current.add(site);
     setSlotStatus(prev => ({ ...prev, [site]: "fetching" }));
@@ -3064,8 +3137,6 @@ export default function WatchPage() {
     const resolvedTitle   = anime?.title?.romaji   || titleParam;
     const resolvedEnglish = anime?.title?.english  || englishParam || "";
 
-    /* AbortController مستقل لكل موقع — يُلغى فوراً بمجرد اختيار مصدر التشغيل
-       (بدلاً من ترك بقية المواقع تكمل طلباتها بلا فائدة بعد بدء التشغيل) */
     const ctrl = new AbortController();
     fetchControllersRef.current[site] = ctrl;
     const timeoutId = window.setTimeout(() => ctrl.abort(), 22000);
@@ -3079,8 +3150,24 @@ export default function WatchPage() {
       if (srcs.length > 0) {
         setSlotSources(prev => ({ ...prev, [site]: srcs }));
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-        /* احفظ في الكاش لفتح فوري في المرة القادمة */
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
+
+        /* المستخدم اختار هذا المصدر — شغّل أول نتيجة فوراً وابدأ تحميل الباقي خلفياً */
+        if (!bgLoad && !autoPlayedRef.current && phaseRef.current === "picker") {
+          const playable = srcs.find(s => shouldShowSrc(s));
+          if (playable) {
+            autoPlayedRef.current = true;
+            handlePlaySrc(playable);
+            /* تحميل خلفي لبقية المصادر لملء الـ picker داخل المشغّل — فقط إذا لم تكن موجة
+               auto-fetch-all (mount effect) قد جدولت كل المواقع مسبقاً، لتجنّب موجتين مكررتين. */
+            if (!autoFetchAllRef.current) {
+              SCRAPER_DEFS.filter(d => d.site !== site).forEach((def, i) => {
+                const id = window.setTimeout(() => handleFetchSite(def.site, true), 300 + i * 80);
+                pendingTimeoutsRef.current.push(id);
+              });
+            }
+          }
+        }
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
@@ -3103,128 +3190,42 @@ export default function WatchPage() {
     // لا تُلغِ fetchControllersRef — اتركها تكمل وتُضيف مصادرها للـ picker
   }
 
-  /* ── Quick-resume + كاش المصادر: تحميل فوري من localStorage عند فتح الصفحة ── */
+  /* ── Quick-resume: إذا كان هناك آخر مصدر شُغِّل وتقدُّم محفوظ → شغّله فوراً ── */
   useEffect(() => {
     if (!animeId || !titleParam) return;
-
-    /* 1. آخر مصدر شُغِّل (للاستئناف من آخر نقطة) */
     const savedProgress = parseFloat(localStorage.getItem(`wp-${animeId}-${ep}`) || "0");
-    if (savedProgress > 30) {
-      const lastSrc = loadLastSrc(animeId, ep);
-      if (lastSrc && !isIframeUrl(lastSrc.url)) {
-        const resumeSrc: FetchedSrc = {
-          url: lastSrc.url, directUrl: lastSrc.url,
-          qualityRank: lastSrc.qualityRank, site: "_resume", name: "آخر مصدر",
-        };
-        setSlotSources(prev => ({ ...prev, _resume: [resumeSrc] }));
-        setSlotStatus(prev => ({ ...prev, _resume: "ready" }));
-      }
-    }
+    if (savedProgress <= 30) return;
+    const lastSrc = loadLastSrc(animeId, ep);
+    if (!lastSrc || isIframeUrl(lastSrc.url)) return;
 
-    /* 2. كاش المصادر — حقن ما يوجد من مصادر محفوظة فوراً (يشغّل auto-play بدون انتظار scrapers) */
-    const PRIORITY_SITES = ["kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto"];
-    let injectedAny = false;
-    for (const site of PRIORITY_SITES) {
-      const cached = loadAnimeSrcs(animeId, ep, site);
-      if (cached) {
-        setSlotSources(prev => ({ ...prev, [site]: cached }));
-        setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
-        injectedAny = true;
-      }
-    }
-    if (injectedAny) {
-      /* إذا وُجد كاش → أخفِ picker وانتقل للمشغّل فوراً عبر auto-play */
-      /* auto-play effect يلتقط التغيير ويشغّل أفضل مصدر متاح */
-    }
+    const resumeSrc: FetchedSrc = {
+      url: lastSrc.url, directUrl: lastSrc.url,
+      qualityRank: lastSrc.qualityRank, site: "_resume", name: "آخر مصدر",
+    };
+    /* شغّل مصدر الاستئناف مباشرةً بدون انتظار المستخدم */
+    autoPlayedRef.current = true;
+    handlePlaySrc(resumeSrc);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── auto-play enabled immediately ── */
-  useEffect(() => { setAutoPlayReady(true); }, []);
-
-  /* ── Auto-fetch: موجة أولى فقط من أسرع/أوثق المصادر فوراً — الباقي يُجرَّب فقط لو ما لقينا
-     مصدر شغّال خلال 1.8 ثانية. هذا يقلل الطلبات الخارجية من السيرفر (28 موقع → 8 غالباً)
-     بدون أي تأخير محسوس بتجربة المستخدم (auto-play ما زال فورياً). ── */
+  /* ── Auto-fetch على غرار قسم الأنميشن: يبدأ تحميل كل السكربرز تلقائياً دون انتظار
+     اختيار المستخدم — أول مصدر جاهز يُشغَّل تلقائياً فوراً (نفس منطق handleFetchSite
+     الحالي عند bgLoad=false)، والباقي يستمر بالتحميل خلفياً ليظهر في قائمة السيرفرات
+     الكاملة (مثل شاشة "مصادر المشاهدة" بعد فتح المشغّل في قسم الأنميشن). ── */
   useEffect(() => {
-    if (autoFetchedRef.current) return;
-    autoFetchedRef.current = true;
-
-    const priorityDefs = SCRAPER_DEFS.filter(d => PRIORITY_FETCH_SITES.has(d.site));
-    const restDefs     = SCRAPER_DEFS.filter(d => !PRIORITY_FETCH_SITES.has(d.site));
-
-    priorityDefs.forEach((def, i) => {
-      const id = window.setTimeout(() => handleFetchSite(def.site), i * 25);
+    if (!animeId || !titleParam) return;
+    autoFetchAllRef.current = true;
+    SCRAPER_DEFS.forEach((def, i) => {
+      const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
       pendingTimeoutsRef.current.push(id);
     });
-
-    const secondWaveId = window.setTimeout(() => {
-      if (autoPlayedRef.current) return; // مصدر شغّال بالفعل — لا داعي لتجربة بقية الـ 20 موقع
-      restDefs.forEach((def, i) => {
-        const id = window.setTimeout(() => handleFetchSite(def.site), i * 25);
-        pendingTimeoutsRef.current.push(id);
-      });
-    }, 1800);
-    pendingTimeoutsRef.current.push(secondWaveId);
+    /* Cancel any still-queued (not-yet-started) fetches on episode change/unmount */
+    return () => {
+      pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
+      pendingTimeoutsRef.current = [];
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ── Auto-play: فور وصول أول مصدر جاهز، شغّله تلقائياً فوراً بدلاً من انتظار المستخدم ──
-     يبقى بإمكان المستخدم فتح قائمة السيرفرات من داخل المشغل لتبديل المصدر متى شاء. */
-  useEffect(() => {
-    if (autoPlayedRef.current) return;
-    if (!autoPlayReady) return;
-    if (phase !== "picker") return;
-    const allSrcs: FetchedSrc[] = [];
-    const seenKeys = new Set<string>();
-    for (const srcs of Object.values(slotSources)) {
-      for (const s of srcs) {
-        if (!shouldShowSrc(s)) continue;
-        const key = s.directUrl || s.url;
-        if (!key || seenKeys.has(key)) continue;
-        seenKeys.add(key);
-        allSrcs.push(s);
-      }
-    }
-
-    if (allSrcs.length > 0) {
-      autoPlayedRef.current = true;
-      /* مصدر التشغيل تحدَّد الآن — ألغِ بقية طلبات fetch-source الجارية/المعلَّقة فوراً،
-         لا داعي أن تكمل ~20 موقع آخر طلباتهم بالخلفية بلا فائدة */
-      cancelRemainingScrapers();
-      /* _resume: شغّله مباشرة (رابط محفوظ سابقاً — سريع وموثوق) */
-      const resumeSrc = allSrcs.find(s => s.site === "_resume");
-      if (resumeSrc && allSrcs.length === 1) {
-        const clickedUrl = resumeSrc.directUrl || resumeSrc.url;
-        const clickedTier = getSrcQualityTier(resumeSrc);
-        const srvMap: Record<Quality, string[]> = { "1080p FHD": [], "720p HD": [], "360p SD": [] };
-        srvMap[clickedTier].push(clickedUrl);
-        setPlayerDlUrl(undefined);
-        const skipSub = ARABIC_SITES.has(resumeSrc.site || "");
-        setPlayerSubUrl(skipSub ? undefined : (resumeSrc.subtitleUrl || undefined));
-        if (skipSub) setKawaiiSubUrl(undefined);
-        playerSrcSiteRef.current = resumeSrc.site || "";
-        setPlayerSrcSite(resumeSrc.site || "");
-        setPlayerServers(srvMap);
-        setQuality(clickedTier);
-        setInitialSrv(0);
-        setPlayKey(k => k + 1);
-        setPhase("player");
-        return;
-      }
-      /* شغّل أفضل مصدر متاح تلقائياً — أولوية: KW → HI → AW → الأعلى جودة */
-      const nonResume = allSrcs.filter(s => s.site !== "_resume");
-      const animePriority = (s: FetchedSrc): number => {
-        const site = s.site || "";
-        if (site === "kawaii")       return 1000;
-        if (site === "hianime")      return 900;
-        if (site === "animewitcher") return 800;
-        return s.qualityRank ?? 0;
-      };
-      const best = [...nonResume].sort((a, b) => animePriority(b) - animePriority(a))[0];
-      if (best) handlePlaySrc(best);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slotSources, phase, autoPlayReady]);
+  }, [animeId, ep]);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
@@ -3294,6 +3295,10 @@ export default function WatchPage() {
 
   /* ── Play a specific source — show loading modal then switch to player ── */
   function handlePlaySrc(src: FetchedSrc) {
+    /* Playback is starting — stop any not-yet-fired scheduled fetches from the auto-fetch-all
+       wave to cap unnecessary scraper traffic (in-flight requests are left to finish so they
+       can still populate the full server list). */
+    cancelRemainingScrapers();
     const clickedUrl  = src.directUrl || src.url;
     const clickedTier = getSrcQualityTier(src);
 

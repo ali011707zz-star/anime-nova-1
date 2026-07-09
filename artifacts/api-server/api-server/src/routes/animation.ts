@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, createHash, createDecipheriv } from "node:crypto";
-import { encryptParam, encryptProxyUrl, isEncrypted } from "../lib/security.js";
 import {
   makeAnimCacheKey,
   getFromSourceCache,
@@ -15,7 +14,7 @@ const TMDB_KEY  = process.env.TMDB_API_KEY || "8265bd1679663a7ea12ac168da84d2e8"
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const SD_BASE   = "https://watch.stardima.com/watch";
 const SD_AJAX   = "https://watch.stardima.com/watch/wp-admin/admin-ajax.php";
-const MV_BASE   = "https://moviz-time.org"; // was moviz-time.co (301→org as of 2026-07)
+const MV_BASE   = "https://moviz-time.co";
 const AS_CDN_B  = "https://as-cdn21.top";
 const RUBY_B    = "https://rubystm.com";
 
@@ -96,7 +95,7 @@ async function scrapeVidFastAnim(
       try { const j = _animVfDecJson(b64); url = j.url; if (!url) return; } catch { return; }
       if (seenVF.has(url)) return;
       seenVF.add(url);
-      const proxied = `/api/anime/hls-proxy?url=${encryptParam(url)}&ref=${encryptParam(_VF_ORIGIN + "/")}`;
+      const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(_VF_ORIGIN + "/")}`;
       sendSource(proxied, `VidFast · ${srv.name}`, url, proxied);
     }),
   );
@@ -171,53 +170,6 @@ async function spGetSources(
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 // ── Dulo.tv shared client (module-level session cache, 7h TTL) ────────────────
-// ── MovieBox auth state (h5-api.aoneroom.com) ────────────────────────────────
-const _MBX_API_ANIM    = "https://h5-api.aoneroom.com";
-const _MBX_REF_ANIM    = "https://videodownloader.site/";
-const _MBX_UA_ANIM     = "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0";
-const _MBX_SUGGEST_ANIM  = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/search-suggest`;
-const _MBX_SEARCH_ANIM   = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/search`;
-const _MBX_DOWNLOAD_ANIM = `${_MBX_API_ANIM}/wefeed-h5api-bff/subject/download`;
-const _MBX_TOKEN_TTL_ANIM = 7 * 24 * 3_600_000;
-const _MBX_DUBBED_RE_ANIM = /(?:\[\s*|\b)(?:hindi|arabic|tamil|telugu|spanish|french|portuguese|korean|turkish|urdu|norwegian|italian|german|dual[\s-]?audio|dubbed|dub)(?:\s*\]|\b)/i;
-interface MbxAuthAnim { token: string; cookies: string; fetchedAt: number; }
-let _mbxAuthAnim: MbxAuthAnim | null = null;
-let _mbxAuthAnimPending: Promise<{ token: string; cookies: string } | null> | null = null;
-
-async function getMbxAuthAnim(): Promise<{ token: string; cookies: string } | null> {
-  const now = Date.now();
-  if (_mbxAuthAnim && now - _mbxAuthAnim.fetchedAt < _MBX_TOKEN_TTL_ANIM) {
-    return { token: _mbxAuthAnim.token, cookies: _mbxAuthAnim.cookies };
-  }
-  // حارس: تجنّب إرسال طلبات auth متعددة في آنٍ واحد (race condition)
-  if (_mbxAuthAnimPending) return _mbxAuthAnimPending;
-  _mbxAuthAnimPending = (async () => {
-    try {
-      const r = await fetch(_MBX_SUGGEST_ANIM, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "User-Agent": _MBX_UA_ANIM,
-          "Referer": _MBX_REF_ANIM,
-        },
-        body: JSON.stringify({ keyword: "avatar", perPage: 0 }),
-        signal: AbortSignal.timeout(12_000),
-      });
-      if (!r.ok) return null;
-      const xUser = r.headers.get("x-user");
-      if (!xUser) return null;
-      const userInfo = JSON.parse(xUser);
-      const setCookies = r.headers.getSetCookie?.() ?? [];
-      const cookies = setCookies.map((c: string) => c.split(";")[0]).filter(Boolean).join("; ");
-      _mbxAuthAnim = { token: userInfo.token, cookies, fetchedAt: Date.now() };
-      return { token: userInfo.token, cookies };
-    } catch { return null; }
-    finally { _mbxAuthAnimPending = null; }
-  })();
-  return _mbxAuthAnimPending;
-}
-
 const DULO_TV_BASE    = "https://dulo.tv";
 const DULO_TV_API_KEY = "WDNUNBUB3HR983Y9ISBADK4O82";
 let _duloAnimCookie   = "";
@@ -280,19 +232,11 @@ function asDecode(raw: string): string {
             .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  CF_PROXY_BASE — مشابه لـ anime.ts
-//  VPS: localhost:8000 | Replit: NOVA_PROXY_BASE/api/cfproxy
-// ════════════════════════════════════════════════════════════════════
-const CF_PROXY_PORT = process.env.CF_PROXY_PORT || "8000";
-const _NOVA_PROXY_BASE = process.env.NOVA_PROXY_BASE;
-const CF_PROXY_BASE = _NOVA_PROXY_BASE
-  ? `${_NOVA_PROXY_BASE}/api/cfproxy`
-  : `http://localhost:${CF_PROXY_PORT}`;
-
-// CF proxy helper — يمرر الطلب عبر curl_cffi
+// CF proxy helper — يمرر الطلب عبر curl_cffi (يتجاوز حجب IP من Replit)
 async function cfProxyGet(url: string): Promise<string> {
-  const r = await fetch(`${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}`, {
+  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
+  const proxyUrl = `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}`;
+  const r = await fetch(proxyUrl, {
     headers: { "User-Agent": UA },
     signal: AbortSignal.timeout(12_000),
   });
@@ -300,52 +244,73 @@ async function cfProxyGet(url: string): Promise<string> {
   return r.text();
 }
 
-// cfOrOrkestGet — يستخدم cfProxy فقط
+// CF + Orkestr fallback — يجرب cfProxyGet أولاً، إذا حجبه CF يجرب خادم Orkestr الخارجي (EU IP)
 async function cfOrOrkestGet(url: string): Promise<string> {
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
-  const html = await cfProxyGet(url);
-  if (isCfPage(html)) throw new Error("CF blocked via cfProxy");
+  try {
+    const html = await cfProxyGet(url);
+    if (!isCfPage(html)) return html;
+  } catch { /* fall through */ }
+  // Fallback: Orkestr relay (EU IP, not Replit datacenter)
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
+  const r = await fetch(
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
+    { headers: orkHeaders, signal: AbortSignal.timeout(25_000) }
+  );
+  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
+  const html = await r.text();
+  if (isCfPage(html)) throw new Error("CF still blocked via Orkestr");
   return html;
 }
 
-// orkestDirectGet — يستخدم CF_PROXY_BASE
+// Orkestr direct GET — يتجاوز CF proxy تماماً (مفيد للمواقع التي تحجب Replit IPs وcf_proxy معاً)
 async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string> {
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
   const r = await fetch(
-    `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}`,
-    { signal: AbortSignal.timeout(timeoutMs) }
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}`,
+    { headers: orkHeaders, signal: AbortSignal.timeout(timeoutMs) }
   );
-  if (!r.ok) throw new Error(`cfProxy HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`Orkestr HTTP ${r.status}`);
   const html = await r.text();
   if (html.length < 500 || html.includes("Just a moment") || html.includes("Attention Required")) {
-    throw new Error("CF blocked via cfProxy");
+    throw new Error("Orkestr: CF blocked");
   }
   return html;
 }
 
-// cfProxyChainFetch — يجلب url1 ثم url2 بنفس الجلسة (cookies مشتركة)
-async function cfProxyChainFetch(url1: string, url2: string, ref1?: string, timeoutMs = 20_000): Promise<string> {
-  const params = new URLSearchParams({ url1, url2, timeout: String(Math.floor(timeoutMs / 1000)) });
-  if (ref1) params.set("ref1", ref1);
-  const r = await fetch(`${CF_PROXY_BASE}/chain-fetch?${params}`, {
-    signal: AbortSignal.timeout(timeoutMs + 5_000),
-  });
-  if (!r.ok) throw new Error(`chain-fetch HTTP ${r.status}`);
-  return r.text();
-}
-
-// cfOrOrkestPost — يستخدم CF_PROXY_BASE POST
+// CF proxy POST — يرسل POST عبر curl_cffi مع Orkestr fallback
 async function cfOrOrkestPost(url: string): Promise<string> {
+  const CF_PORT = process.env["CF_PROXY_PORT"] || "8000";
   const isCfPage = (h: string) =>
     h.includes("Just a moment") || h.includes("cf-browser-verification") || h.length < 300;
-  const r = await fetch(
-    `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}&method=POST`,
-    { signal: AbortSignal.timeout(18_000) }
+  try {
+    const r = await fetch(
+      `http://localhost:${CF_PORT}/fetch?url=${encodeURIComponent(url)}&method=POST`,
+      { signal: AbortSignal.timeout(18_000) }
+    );
+    if (r.ok) {
+      const html = await r.text();
+      if (!isCfPage(html)) return html;
+    }
+  } catch { /* fall through */ }
+  // Fallback: Orkestr POST relay
+  const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
+  const ORKESTR_API_KEY = process.env["ORKESTR_API_KEY"] || "";
+  const orkHeaders2: Record<string, string> = {};
+  if (ORKESTR_API_KEY) orkHeaders2["Authorization"] = `Bearer ${ORKESTR_API_KEY}`;
+  const r2 = await fetch(
+    `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(url)}&method=POST`,
+    { headers: orkHeaders2, signal: AbortSignal.timeout(25_000) }
   );
-  if (!r.ok) throw new Error(`cfProxy POST HTTP ${r.status}`);
-  const html = await r.text();
-  if (isCfPage(html)) throw new Error("CF blocked via cfProxy POST");
-  return html;
+  if (!r2.ok) throw new Error(`Orkestr POST HTTP ${r2.status}`);
+  return r2.text();
 }
 
 async function asFetchPosts(params: string): Promise<Array<{ id: number; link: string; title: { rendered: string } }>> {
@@ -560,21 +525,21 @@ async function sdDoopPlayerAjax(postId: string, nonce: string, referer: string):
   return out;
 }
 
-// ── moviz-time.org helpers (was moviz-time.co — 301→org 2026-07) ─────────────
+// ── moviz-time.co helpers ─────────────────────────────────────────────────────
 
 function parseMVLinks(html: string): { url: string; title: string }[] {
   const seen = new Set<string>();
   const out: { url: string; title: string }[] = [];
-  // Match any moviz-time.org (or .co redirect) page links
-  const re = /href="(https?:\/\/moviz-time\.(?:org|co)\/[^"]+)"[^>]*(?:title="([^"]*)")?/gi;
+  // Match any moviz-time.co page links (case-insensitive percent encoding)
+  const re = /href="(https?:\/\/moviz-time\.co\/[^"]+)"[^>]*(?:title="([^"]*)")?/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
-    let url  = m[1].replace("moviz-time.co", "moviz-time.org");
+    const url  = m[1];
     const title = m[2] || decodeURIComponent(url).split("/").filter(Boolean).pop() || url;
     if (seen.has(url)) continue;
     // Skip pagination, category, feed, contact, tag pages
     if (/\/(category|page|feed|tag|contact|about|wp-|wp-json)\//i.test(url)) continue;
-    if (url === "https://moviz-time.org/" || url === "https://moviz-time.org") continue;
+    if (url === "https://moviz-time.co/" || url === "https://moviz-time.co") continue;
     seen.add(url);
     out.push({ url, title });
   }
@@ -589,12 +554,12 @@ async function mvScrapeMovie(url: string): Promise<string[]> {
   } catch { return []; }
 }
 
-// For moviz-time.org series: find episode links
+// For moviz-time.co series: find episode links
 async function mvFindEpisode(seriesUrl: string, epNum: number): Promise<string | null> {
   try {
     const html = await cfGet(seriesUrl, MV_BASE + "/");
-    // Look for episode links (match both .org and .co domains)
-    const re = /href="(https:\/\/moviz-time\.(?:org|co)\/[^"]+(?:الحلقة|حلقة|episode)[^"]+)"/g;
+    // Look for episode links
+    const re = /href="(https:\/\/moviz-time\.co\/[^"]+(?:الحلقة|حلقة|episode)[^"]+)"/g;
     const episodes: { url: string; num: number }[] = [];
     let m: RegExpExecArray | null;
     while ((m = re.exec(html)) !== null) {
@@ -856,12 +821,12 @@ async function callExtractApi(url: string): Promise<{ directUrl?: string } | nul
 
 // Wrap m3u8 in hls-proxy (relative path → works for client)
 function wrapHls(url: string, ref: string): string {
-  return `/api/anime/hls-proxy?url=${encryptParam(url)}&ref=${encryptParam(ref)}`;
+  return `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
 }
 
 // Wrap MP4/video through video-proxy (needed for IP-tied sources like Streamtape, Sendvid, CDNs)
 function wrapMp4(url: string, ref: string): string {
-  return `/api/anime/video-proxy?url=${encryptParam(url)}&ref=${encryptParam(ref)}`;
+  return `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
 }
 
 // Hexa cooldown — enc-dec.app returns "Next retry: N minutes" on 500; don't hammer it
@@ -1362,10 +1327,47 @@ router.get("/animation/subtitle-tracks", async (req: Request, res: Response) => 
   }
 
 
-  // CinePro subtitles (CP): أُزيلت كلياً بطلب المستخدم 2026-07-09
+  // ── CinePro subtitles — مصدر ترجمات خارجي (VTT/SRT) ─────────────────────
+  const cineproItems: Track[] = [];
+  try {
+    const cpUrl = type === "tv"
+      ? `http://localhost:3000/v1/tv/${tmdbId}/seasons/${season}/episodes/${ep}`
+      : `http://localhost:3000/v1/movies/${tmdbId}`;
+    const cpR = await fetch(cpUrl, {
+      headers: { "User-Agent": "AnimeNOVA/1.0" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (cpR.ok) {
+      const cpData = await cpR.json() as { subtitles?: any[] };
+      const WANTED_LANGS: Record<string, string> = {
+        "arabic": "ar", "arabic 2": "ar", "arabic2": "ar",
+        "english": "en", "english 2": "en",
+      };
+      (cpData.subtitles || []).forEach((s: any, i: number) => {
+        const lbl: string = (s.label || s.language || "").toLowerCase();
+        const lang = WANTED_LANGS[lbl];
+        if (!lang) return;
+        let url: string = s.url || "";
+        // فك تشفير proxy URL لاستخراج الرابط الحقيقي
+        if (url.includes("/v1/proxy?data=")) {
+          try {
+            const enc = url.split("data=")[1]?.split("&")[0] || "";
+            const inner = JSON.parse(decodeURIComponent(enc)) as { url?: string };
+            url = inner.url || url;
+          } catch { /* keep */ }
+        }
+        if (!url.startsWith("http")) return;
+        const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "vtt";
+        const labelAr = lang === "ar"
+          ? (lbl.includes("2") ? "عربي · CinePro 2" : "عربي · CinePro")
+          : (lbl.includes("2") ? "إنجليزي · CinePro 2" : "إنجليزي · CinePro");
+        cineproItems.push({ id: `cinepro-${lang}-${i}`, lang, label: labelAr, url });
+      });
+    }
+  } catch (e: any) { console.warn(`[CinePro-subs] error tmdbId=${tmdbId} type=${type}:`, e?.message); }
 
   // ── Merge, sort Arabic-first, deduplicate by URL ──
-  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems, ...kitsunekkoItems];
+  const all = [...adItems, ...cdnFound, ...wyzieItems, ...vidzeeItems, ...vylaItems, ...osItems, ...kitsunekkoItems, ...cineproItems];
   all.sort((a, b) => (a.lang === "ar" && b.lang !== "ar" ? -1 : a.lang !== "ar" && b.lang === "ar" ? 1 : 0));
   const seen = new Set<string>();
   const tracks = all.filter(t => { if (seen.has(t.url)) return false; seen.add(t.url); return true; });
@@ -1438,11 +1440,12 @@ router.get("/animation/quick-check", async (req: Request, res: Response) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 6_500);
 
-  // Quick probe via Icefy (movie only) — fast cfProxy check
+  // Quick probe via Icefy (movie only) — fast EU relay check
   try {
     if (type === "movie") {
+      const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
       const raw = await fetch(
-        `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(`https://streams.icefy.top/movie/${tmdbId}`)}`,
+        `${ORKESTR}/api/anime/proxy-text?url=${encodeURIComponent(`https://streams.icefy.top/movie/${tmdbId}`)}`,
         { signal: controller.signal }
       ).then(r => r.ok ? r.text() : "{}").catch(() => "{}");
       const data = JSON.parse(raw) as { stream?: string };
@@ -1717,34 +1720,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     if (!url || seenUrls.has(url)) return;
     seenUrls.add(url);
     sourceCount++;
-
-    /* استخراج Referer/Origin من رابط الـ proxyUrl (ref= param) وتضمينهم في الاستجابة.
-       ExoPlayer/AVPlayer يُرسلهم مع segments وredirects مباشرةً للـ CDN.
-       ملاحظة: نتجاهل الـ ref المشفَّر (encryptParam) — hls-proxy يفكّ التشفير داخلياً
-       ونُرسل الـ headers فقط للروابط الخام (encodeURIComponent أو plain URLs) */
-    let headers: Record<string, string> | undefined;
-    const proxyLookup = proxyUrl || directUrl;
-    if (proxyLookup) {
-      try {
-        const pu = new URL(proxyLookup.startsWith("/") ? `http://x.com${proxyLookup}` : proxyLookup);
-        const ref = pu.searchParams.get("ref");
-        /* تجاهل ref المشفَّر بـ encryptParam (hex خالص) — إرسال headers فقط للقيم الواضحة */
-        if (ref && !isEncrypted(ref)) {
-          let origin = "";
-          try { origin = new URL(ref).origin; } catch {}
-          headers = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
-        }
-      } catch { /* ignore */ }
-    }
-
-    const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}), ...(headers ? { headers } : {}) };
-    // تشفير params في روابط الـ proxy قبل إرسالها للعميل — يمنع كشف CDN URLs في devtools
-    const safeProxyUrl  = proxyUrl  ? encryptProxyUrl(proxyUrl)  : proxyUrl;
-    const safeDirectUrl = directUrl ? encryptProxyUrl(directUrl) : directUrl;
-    send("source", { url, label, directUrl: safeDirectUrl, proxyUrl: safeProxyUrl, ...extra });
+    const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}) };
+    send("source", { url, label, directUrl, proxyUrl, ...extra });
     // capture for caching — isolated per async context (no race condition)
     const captureArr = captureStorage.getStore();
-    if (captureArr) captureArr.push({ url, label, directUrl: safeDirectUrl, proxyUrl: safeProxyUrl, ...extra });
+    if (captureArr) captureArr.push({ url, label, directUrl, proxyUrl, ...extra });
   };
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
@@ -1892,31 +1872,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     // ── Run all scrapers in parallel ──────────────────────────────────────────
     await Promise.allSettled([
 
-      // ── 11. vidsrc.to → VPS-only (Replit IP مُعاق، VPS يعمل) ───────────────
-      // يُرجع embed iframe لـ vsembed.ru الذي يُشغّل cloudorchestranova.com
-      scrapeAnimCached("vidsrc_to", async () => {
-        if (!tmdbId) return;
-        try {
-          send("status", { msg: "VidSrc.to…" });
-          const embedUrl = type === "tv"
-            ? `https://vidsrc.to/embed/tv/${tmdbId}/${season}-${epNum}`
-            : `https://vidsrc.to/embed/movie/${tmdbId}`;
-          const r = await fetch(embedUrl, {
-            headers: { "User-Agent": UA, "Referer": "https://vidsrc.to/" },
-            signal: AbortSignal.timeout(12_000),
-          });
-          if (!r.ok) return;
-          const html = await r.text();
-          if (!html || html.length < 200) return;
-          // Extract vsembed.ru iframe — the actual video player
-          // Accept single/double quotes, protocol-relative URLs, and data-src
-          const ifrMatch = html.match(/<iframe[^>]+(?:src|data-src)\s*=\s*["']((?:https?:)?\/\/vsembed\.ru\/[^"']+)["']/i);
-          if (!ifrMatch?.[1]) return;
-          // Normalise protocol-relative URLs to https
-          const vsEmbedUrl = ifrMatch[1].startsWith("//") ? `https:${ifrMatch[1]}` : ifrMatch[1];
-          await sendExtracted(vsEmbedUrl, "VidSrc.to");
-        } catch { /* silent */ }
-      }),
+      // ── 11. vidsrc.xyz + vidsrc.me → DISABLED (DNS failure from Replit datacenter) ─
+      Promise.resolve(),
 
       // ── 12. vidsrc.pro → DISABLED (redirects to embed.su, already handled below) ─
       Promise.resolve(),
@@ -2146,13 +2103,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
                 await Promise.allSettled(ordered.map(async (srv: any) => {
                   if (!srv.embedUrl) return;
-                  // Try server-side extraction; fallback to embed if extraction fails
-                  await sendExtracted(srv.embedUrl, `StarCima · ${srv.name || "عربي"}`);
-                  // Embed fallback: يُرسَل embed URL إذا فشل الاستخراج (browser iframe)
-                  if (!seenUrls.has(srv.embedUrl)) {
-                    seenUrls.add(srv.embedUrl);
-                    sendSource(srv.embedUrl, `StarCima · ${srv.name || "عربي"}`, srv.embedUrl, srv.embedUrl);
-                  }
+                  // Try server-side extraction only — no iframe fallback
+                  await sendExtracted(srv.embedUrl, `الثريا · ${srv.name || "عربي"}`);
                 }));
               } catch (e) { console.error("[StarCima/arabic] error:", e); }
             })(),
@@ -2529,11 +2481,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         if (type !== "movie") return; // TV endpoint format غير مكتشف
         try {
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           send("status", { msg: "Icefy: جاري الاستخراج…" });
           const raw = await orkestDirectGet(`https://streams.icefy.top/movie/${tmdbId}`, 12_000);
           const data = JSON.parse(raw) as { stream?: string };
           if (!data.stream) return;
-          const proxied = wrapHls(data.stream, "https://icefy.top/");
+          // HLS عبر Orkestr hls-proxy (EU IP يصل CDN بدون حجب)
+          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(data.stream)}&ref=${encodeURIComponent("https://icefy.top/")}`;
           sendSource(proxied, "Icefy · FHD", data.stream, proxied);
         } catch { /* silent */ }
       }),
@@ -2544,6 +2498,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       scrapeAnimCached("nebula", async () => {
         if (!tmdbId) return;
         try {
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           send("status", { msg: "Nebula: جاري الاستخراج…" });
           const apiUrl = type === "movie"
             ? `https://nebula.aether.cx/movie/${tmdbId}?ser=tik`
@@ -2551,7 +2506,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const raw = await orkestDirectGet(apiUrl, 12_000);
           const data = JSON.parse(raw) as { stream_url?: string };
           if (!data.stream_url) return;
-          const proxied = wrapHls(data.stream_url, "https://nebula.aether.cx/");
+          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(data.stream_url)}&ref=${encodeURIComponent("https://nebula.aether.cx/")}`;
           sendSource(proxied, "Nebula · HD", data.stream_url, proxied);
         } catch { /* silent */ }
       }),
@@ -2704,8 +2659,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── SeePanal — DISABLED: API dead (panel.seepanel.top/api returns 404) ─────
-      Promise.resolve() || scrapeAnimCached("seepanel", async () => {
+      // ── SeePanal — أنيميشن وكرتون مدبلج عربي ─────────────────────────────────
+      scrapeAnimCached("seepanel", async () => {
         if (!title) return;
         try {
           send("status", { msg: "SeePanal: جاري البحث…" });
@@ -2865,8 +2820,45 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── EzVidAPI — DISABLED (api.ezvidapi.com returns Bad Gateway 502 as of 2026-07) ─
-      Promise.resolve(),
+      // ── EzVidAPI (api.ezvidapi.com) — free HLS multi-quality TMDB-native ────────
+      scrapeAnimCached("2embed", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "EzVidAPI: جاري الاستخراج…" });
+          // vidnest: TV-only (times out for movies); vidlink works for both; vidrock removed (broken)
+          const providers = type === "tv"
+            ? ["vidnest", "vidlink"]
+            : ["vidlink"];
+          await Promise.allSettled(providers.map(async (prov) => {
+            try {
+              const apiUrl = type === "tv"
+                ? `https://api.ezvidapi.com/tv/${prov}/${tmdbId}?season=${season}&episode=${epNum}`
+                : `https://api.ezvidapi.com/movie/${prov}/${tmdbId}`;
+              const r = await fetch(apiUrl, {
+                headers: { "User-Agent": UA },
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (!r.ok) return;
+              const data = await r.json() as { stream_url?: string };
+              if (!data.stream_url) return;
+              const streamUrl = data.stream_url;
+              if (seenUrls.has(streamUrl)) return;
+              const ezRef = `https://www.${prov}.pro/`;
+              // Wrap HLS streams through hls-proxy for segment rewriting; MP4 through video-proxy
+              const proxiedStream = streamUrl.includes(".m3u8") ? wrapHls(streamUrl, ezRef) : wrapMp4(streamUrl, ezRef);
+              // Skip probe — EzVidAPI URLs are valid, probe adds latency and may falsely fail
+              seenUrls.add(streamUrl);
+              sourceCount++;
+              send("source", {
+                url: proxiedStream,
+                label: `EzVidAPI · ${prov}`,
+                directUrl: streamUrl,
+                proxyUrl: proxiedStream,
+              });
+            } catch { /* silent per provider */ }
+          }));
+        } catch { /* silent */ }
+      }),
 
       // ── Videasy (api.videasy.to) — TMDB-native HLS multi-quality + Arabic subtitle ─
       scrapeAnimCached("videasy3", async () => {
@@ -2934,9 +2926,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── VidLink via enc-dec.app — DISABLED 2026-07-08: enc-dec.app/api/enc-vidlink suspended ──
+      // ── VidLink via enc-dec.app — TMDB-native HLS + Arabic captions ─────────────
       scrapeAnimCached("vidlink_encdec", async () => {
-        return; // enc-dec.app suspended — re-enable when service recovers
         if (!tmdbId) return;
         try {
           send("status", { msg: "VidLink: جاري التشفير…" });
@@ -3045,26 +3036,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 // Probe CDN — some CDNs block datacenter IPs (403) → send raw URL for direct mobile access
                 let finalUrl = proxied;
                 let finalRaw = src.url;
-                let useRawFallback = false;
                 try {
                   const probe = await fetch(`http://127.0.0.1:${DULO_PROBE_PORT}${proxied}`, {
-                    signal: AbortSignal.timeout(6_000),
+                    signal: AbortSignal.timeout(5_000),
                   });
                   if (!probe.ok && probe.status !== 206) {
-                    // CDN blocks server IP → raw URL for direct client access
+                    // CDN blocks server IP → raw URL for mobile to fetch directly
                     finalUrl = src.url;
-                    useRawFallback = true;
                   }
                 } catch {
                   finalUrl = src.url;
-                  useRawFallback = true;
                 }
-                /* للروابط الخام (بدون proxy): أرسل Referer/Origin الصحيح حتى يُرسله ExoPlayer
-                   مباشرةً للـ CDN (لأنه لا يمر عبر CF Worker في هذه الحالة) */
-                const duloExtra = useRawFallback
-                  ? { headers: { Referer: `${DULO_TV_BASE}/`, Origin: DULO_TV_BASE } }
-                  : undefined;
-                sendSource(finalUrl, label, finalRaw, finalUrl, duloExtra);
+                sendSource(finalUrl, label, finalRaw, finalUrl);
               }
             } catch (err: any) { console.warn(`[dulo_anim] ${prov} error: ${err?.message}`); }
           }));
@@ -3078,6 +3061,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         if (!tmdbId) return;
         if (type !== "movie") return;
         try {
+          const ORKESTR = process.env["ORKESTR_URL"] || "https://animenovaa.duckdns.org";
           const VIXSRC_BASE = "https://vixsrc.to";
           send("status", { msg: "VixSrc: جاري الاستخراج…" });
           // Step 1: Get embed URL with token/expires from API
@@ -3095,7 +3079,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (!token || !expires || !playlist) return;
           const sep = playlist.includes("?") ? "&" : "?";
           const masterUrl = `${playlist}${sep}token=${token}&expires=${expires}&h=1&lang=en`;
-          const proxied = wrapHls(masterUrl, `${VIXSRC_BASE}/`);
+          const proxied = `${ORKESTR}/api/anime/hls-proxy?url=${encodeURIComponent(masterUrl)}&ref=${encodeURIComponent(`${VIXSRC_BASE}/`)}`;
           sendSource(proxied, "VixSrc · FHD", masterUrl, proxied);
         } catch { /* silent */ }
       }),
@@ -3124,7 +3108,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const u = src.directUrl || src.url;
             if (!u) continue;
             const proxied = u.startsWith("/api/") ? u
-              : u.includes(".m3u8") ? wrapHls(u, "https://wecima.gold/")
+              : u.includes(".m3u8") ? wrapHls(u, "https://mycima.gripe/")
               : u;
             sendSource(proxied, `MyCima · ${src.name || "Arabic Dubbed"}`, proxied, proxied);
           }
@@ -3167,38 +3151,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // Animeify (animeify.net) → موقع أنمي ياباني بالعربية — ليس أنيميشن غربي → مُعطَّل من قسم الأنيميشن
       // (متاح في قسم الأنمي عبر /api/anime/fetch-source?site=animeify)
       Promise.resolve(),
-
-      // ── EgyBest (egytbest.live) — أفلام + مسلسلات + أنيميشن عربي مترجم ─────────
-      // الاستراتيجية: WP-JSON بحث مباشر (لا يحتاج proxy) → data-embed-url servers
-      // يستخدم نفس scraper الأنمي (getEgyBestSources) عبر internal API
-      scrapeAnimCached("egybest_anim", async () => {
-        const q = enTitlePrefetched || title;
-        if (!q) return;
-        try {
-          send("status", { msg: "EgyBest: جاري البحث…" });
-          const PORT    = process.env["PORT"] || "5000";
-          const ep      = type === "movie" ? 1 : epNum;
-          const isMovie = type === "movie" ? "true" : "false";
-          const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=egybest`
-            + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMovie}`;
-          const r = await fetch(fsUrl, {
-            headers: { "x-internal": "1" },
-            signal: AbortSignal.timeout(28_000),
-          });
-          if (!r.ok) return;
-          const { sources } = await r.json() as {
-            sources?: Array<{ directUrl?: string; url?: string; name?: string; qualityRank?: number }>;
-          };
-          for (const src of sources || []) {
-            const u = src.directUrl || src.url;
-            if (!u) continue;
-            const proxied = u.startsWith("/api/") ? u
-              : u.includes(".m3u8") ? wrapHls(u, "https://egytbest.live/")
-              : u;
-            sendSource(proxied, `EgyBest · ${src.name || "Arabic"}`, proxied, proxied);
-          }
-        } catch { /* silent */ }
-      }),
 
       // ── FaselHD (www.fasel-hd.cam) — أنمي ومسلسلات مترجمة عربي ─────────────────
       // الاستراتيجية: GitHub pre-scraped JSON → slug → صفحة الحلقة مباشرة (غير محجوبة بـ CF)
@@ -3340,30 +3292,21 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const ifrM = pageHtml.match(/name="player_iframe"[^>]+data-src="([^"]+)"/);
           if (ifrM) {
             const playerUrl = ifrM[1];
-            // الإصلاح 2026-07: الـ player_token مرتبط بـ session cookies من صفحة الحلقة.
-            // الجلب المباشر أو cfProxy (بجلسات مستقلة) يُعيد "Token Expired!" (14 bytes).
-            // الحل: chain-fetch يجلب صفحة الحلقة ثم صفحة الـ player بنفس الجلسة.
+            // جلب صفحة video_player — أولاً مباشر، وإذا حُجب نستخدم cfProxyGet
             try {
               let vpHtml = "";
               try {
-                // محاولة chain-fetch (session persistence)
-                vpHtml = await cfProxyChainFetch(targetUrl, playerUrl, FASEL_BASE + "/", 20_000);
+                const vpr = await fetch(playerUrl, {
+                  headers: { ...faselHeaders, Referer: targetUrl },
+                  signal: AbortSignal.timeout(10_000),
+                });
+                if (vpr.ok) vpHtml = await vpr.text();
               } catch { /* silent */ }
-              // fallback: جلب مباشر إذا فشل chain-fetch أو أعاد CF challenge أو "Token Expired"
-              const vpInvalid = (h: string) =>
-                !h || h.length < 100 || h.includes("Token Expired") ||
-                h.includes("Just a moment") || h.includes("cf-browser-verification") ||
-                h.includes("Attention Required") || isCfBlocked(h);
-              if (vpInvalid(vpHtml)) {
-                try {
-                  const vpr = await fetch(playerUrl, {
-                    headers: { ...faselHeaders, Referer: targetUrl },
-                    signal: AbortSignal.timeout(10_000),
-                  });
-                  if (vpr.ok) vpHtml = await vpr.text();
-                } catch { /* silent */ }
+              if (!vpHtml || isCfBlocked(vpHtml)) {
+                vpHtml = await cfProxyGet(playerUrl);
               }
-              if (vpHtml && !vpInvalid(vpHtml)) {
+              if (vpHtml) {
+                // البحث عن روابط HLS/MP4 مباشرة في HTML
                 const m3u8 = vpHtml.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*?)["']/);
                 if (m3u8) {
                   const proxied = wrapHls(m3u8[1], playerUrl);
@@ -3379,8 +3322,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }
 
           // ── الخطوة 5: روابط التحميل (downloadLinks) → جرب عبر cfProxy ─────────
-          // إصلاح 2026-07: الـ class يحتوي trailing space → نستخدم [^"]*
-          const dlM = pageHtml.match(/class="downloadLinks[^"]*"[\s\S]{0,1000}?<a[^>]+href="(https?:\/\/[^"]+)"/);
+          const dlM = pageHtml.match(/class="downloadLinks"[\s\S]{0,1000}?<a[^>]+href="(https?:\/\/[^"]+)"/);
           if (dlM) {
             try {
               const dlHtml = await cfProxyGet(dlM[1]);
@@ -3400,159 +3342,75 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── EgyDead (tv10.egydead.live) — قسم الأنمي العربي ──────────────────────────
-      // الإصلاح 2026-07: البحث القديم ?s={q} يُعيد صفحات JS-loaded فارغة.
-      // الحل الجديد: ?s={q}&post_type=episode يُعيد روابط /episode/ مباشرة في HTML.
-      // روابط السيرفرات (data-link) لا تزال JS-loaded — نستخرج أي iframe حقيقي.
+      // ── EgyDead (tv9.egydead.live) — قسم الأنمي العربي ──────────────────────────
+      // الوضع: صفحة الحلقة قابلة للوصول عبر Orkestr (EU IP، غير CF-محجوبة من Orkestr)
+      // القيد: روابط السيرفرات (data-link) محملة عبر JS فقط — لا توجد في HTML الثابت
+      // المحاولة: استخراج أي iframe/رابط src/data-link مباشرة من الـ HTML
       scrapeAnimCached("egydead", async () => {
-        const ED_BASE = "https://tv10.egydead.live";
+        const ED_BASE = "https://tv9.egydead.live";
         send("status", { msg: "EgyDead: جاري البحث…" });
         try {
-          // الخطوة 1: بحث مباشر (VPS يمكنه الوصول لـ EgyDead) بنمط post_type=episode
-          // الذي يُعيد روابط الحلقات مباشرة في HTML الثابت بدون JS
+          // الخطوة 1: البحث عن الحلقة (صفحات الحلقات مرتبة بالرابط /episode/{slug}-e{N}/)
           const q = encodeURIComponent(title);
-          let searchHtml = "";
-          try {
-            const sr = await fetch(`${ED_BASE}/?s=${q}&post_type=episode`, {
-              headers: { "User-Agent": UA, "Referer": `${ED_BASE}/`, "Accept-Language": "ar,en;q=0.9" },
-              signal: AbortSignal.timeout(15_000),
-            });
-            if (sr.ok) searchHtml = await sr.text();
-          } catch { /* silent */ }
+          const searchHtml = await orkestDirectGet(
+            `${ED_BASE}/?s=${q}`, 15_000
+          );
 
-          if (!searchHtml || searchHtml.length < 500) return;
-
-          // استخراج روابط الحلقات من href (النمط الجديد: /episode/{slug}/)
-          const epLinkRe = /href="(https?:\/\/tv10\.egydead\.live\/episode\/([^"/?#]+))\/?"/g;
-          const epLinks: Array<{ url: string; rawSlug: string; epNum: number }> = [];
-          let elm: RegExpExecArray | null;
-          while ((elm = epLinkRe.exec(searchHtml))) {
-            const url = elm[1];
-            const rawSlug = elm[2];
-            if (rawSlug === "feed" || !rawSlug) continue;
-
-            // استخراج رقم الحلقة — النمط A: يَنتهي بـ -e{N}
-            const typeA = rawSlug.match(/-e(\d+)$/);
-            if (typeA) {
-              epLinks.push({ url, rawSlug, epNum: parseInt(typeA[1]) });
-              continue;
-            }
-            // النمط B: يحتوي على الكلمة العربية "الحلقة" (URL-encoded أو plain)
-            const decoded = (() => { try { return decodeURIComponent(rawSlug); } catch { return rawSlug; } })();
-            const typeB = decoded.match(/الحلقة[^\d]*(\d+)/);
-            if (typeB) {
-              epLinks.push({ url, rawSlug, epNum: parseInt(typeB[1]) });
-            }
+          // استخراج نتائج البحث (li.movieItem)
+          const itemRe = /<li[^>]+class="[^"]*movieItem[^"]*"[\s\S]*?href="([^"]+)"[\s\S]*?class="[^"]*BottomTitle[^"]*"[^>]*>([^<]+)</g;
+          const results: Array<{ url: string; ttl: string }> = [];
+          let srm: RegExpExecArray | null;
+          while ((srm = itemRe.exec(searchHtml))) {
+            results.push({ url: srm[1], ttl: srm[2].trim() });
           }
+          if (!results.length) return;
 
-          if (!epLinks.length) return;
+          // أفضل تطابق — حماية: لا نستخدم enTitlePrefetched الفارغ (يعطي مطابقة خاطئة)
+          const best = results
+            .map(r => {
+              let sc = titleSim(title, r.ttl);
+              if (enTitlePrefetched) sc = Math.max(sc, titleSim(enTitlePrefetched, r.ttl));
+              return { ...r, sc };
+            })
+            .filter(r => r.sc > 0.4)
+            .sort((a, b) => b.sc - a.sc)[0];
+          if (!best) return;
 
-          // تحديد الـ representative slug بعد تصفية بالـ title similarity
-          // هذا يمنع اختيار سيريال خاطئ إذا أعاد البحث نتائج متنوعة (مثلاً: Naruto + Boruto)
-          const safeDecodeSlug = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
+          // استخراج slug من رابط الحلقة: /episode/{animeslug}-e{N}/
+          const slugM = best.url.match(/\/episode\/([^/]+)-e\d+/);
+          const animeSlug = slugM ? slugM[1] : null;
+          if (!animeSlug) return;
 
-          // استخراج السيريال الأفضل تطابقاً من النتائج
-          // نُشكّل "slug title" بإزالة رقم الحلقة ورموز الترميز لأخذ اسم السيريال فقط
-          const scoredLinks = epLinks.map(e => {
-            const decoded = safeDecodeSlug(e.rawSlug);
-            // استخراج اسم السيريال: نحذف الجزء الخاص بالحلقة
-            const showName = decoded
-              .replace(/-e\d+$/, "")
-              .replace(/-الحلقة-[\d]+.*$/, "")
-              .replace(/-/g, " ")
-              .trim();
-            let sc = titleSim(title, showName);
-            if (enTitlePrefetched) sc = Math.max(sc, titleSim(enTitlePrefetched, showName));
-            return { ...e, showName, sc };
-          });
+          // الخطوة 2: بناء رابط الحلقة المطلوبة
+          const epVariants = [
+            `${ED_BASE}/episode/${animeSlug}-e${epNum}/`,
+            `${ED_BASE}/episode/${animeSlug}-e${String(epNum).padStart(2, "0")}/`,
+            `${ED_BASE}/episode/${animeSlug}-e${epNum}-1/`,
+          ];
 
-          // نحتفظ فقط بالنتائج التي لها تشابه معقول مع العنوان المطلوب
-          const goodLinks = scoredLinks.filter(e => e.sc > 0.3).sort((a, b) => b.sc - a.sc);
-          const workingLinks = goodLinks.length ? goodLinks : scoredLinks; // fallback لكل النتائج
-
-          // البحث عن رابط الحلقة المطلوبة في النتائج أو بناؤه من الـ base slug
-          let targetUrls: string[] = [];
-
-          // أولاً: ابحث عن تطابق مباشر بين النتائج الجيدة
-          const directMatch = workingLinks.find(e => e.epNum === epNum);
-          if (directMatch) {
-            targetUrls = [directMatch.url + "/", directMatch.url];
-          } else {
-            // استخراج الـ base slug من أفضل نتيجة وبناء الرابط للحلقة المطلوبة
-            const sampleSlug = workingLinks[0].rawSlug;
-            const typeA = sampleSlug.match(/^(.+?)-e\d+$/);
-            if (typeA) {
-              const base = typeA[1];
-              targetUrls = [
-                `${ED_BASE}/episode/${base}-e${epNum}/`,
-                `${ED_BASE}/episode/${base}-e${String(epNum).padStart(2, "0")}/`,
-              ];
-            } else {
-              // النمط B: يحتوي على "الحلقة" بالعربية
-              // مثال: "انمي-naruto-shippuden-الحلقة-332-مترجمة"
-              // نُعيد البناء: prefix + "-" + "الحلقة" + "-" + N + suffix
-              // الحذر: نتجنب double separator إذا كان suffix يبدأ بـ "-"
-              const decoded = safeDecodeSlug(sampleSlug);
-              const typeB = decoded.match(/^(.+?)-الحلقة-\d+(-.*)?$/);
-              if (typeB) {
-                const prefix = typeB[1];                  // "انمي-naruto-shippuden"
-                const suffix = typeB[2] || "";            // "-مترجمة" أو ""
-                // suffix يبدأ بـ "-" بالفعل، لذا لا نُضيف "-" إضافياً
-                const encPre = encodeURIComponent(prefix);
-                const encHalqa = encodeURIComponent("الحلقة");
-                const encSuf = suffix ? encodeURIComponent(suffix.slice(1)) : ""; // نحذف الـ "-" الأولى
-                const buildUrl = (n: number | string) =>
-                  encSuf
-                    ? `${ED_BASE}/episode/${encPre}-${encHalqa}-${n}-${encSuf}/`
-                    : `${ED_BASE}/episode/${encPre}-${encHalqa}-${n}/`;
-                targetUrls = [
-                  buildUrl(epNum),
-                  buildUrl(String(epNum).padStart(2, "0")),
-                ];
-              }
-            }
-          }
-
-          if (!targetUrls.length) return;
-
-          // الخطوة 2: جلب صفحة الحلقة مباشرة (VPS يصل لـ EgyDead)
-          const baseLabel = (() => {
-            try { return safeDecodeSlug(workingLinks[0].rawSlug.replace(/-e\d+$/, "").replace(/-الحلقة-\d+.*$/, "")); }
-            catch { return workingLinks[0].rawSlug.split("-e")[0]; }
-          })();
-
-          for (const epUrl of targetUrls) {
+          for (const epUrl of epVariants) {
             try {
-              const epR = await fetch(epUrl, {
-                headers: { "User-Agent": UA, "Referer": `${ED_BASE}/`, "Accept-Language": "ar,en;q=0.9" },
-                signal: AbortSignal.timeout(12_000),
-              });
-              if (!epR.ok) continue;
-              const epHtml = await epR.text();
-              if (!epHtml || epHtml.length < 500) continue;
+              const epHtml = await orkestDirectGet(epUrl, 12_000);
 
-              // data-link في li.serversList — إذا كانت موجودة (قد تكون JS-loaded)
+              // البحث عن data-link في li.serversList (إن وُجد في HTML)
               const dataLinks = [...epHtml.matchAll(/data-link=["']([^"']+)["']/g)].map(m => m[1]);
               for (const dl of dataLinks) {
-                await sendExtracted(dl, `EgyDead · ${baseLabel}`);
+                await sendExtracted(dl, `EgyDead · ${animeSlug}`);
               }
 
-              // iframe src مباشرة — نتجاهل يوتيوب/جوجل وملفات JS
+              // البحث عن iframe src مباشرة (ليس data-src)
               const iframes = [...epHtml.matchAll(/<iframe[^>]+src=["']([^"']+)["']/g)].map(m => m[1]);
-              const realIframes = iframes.filter(ifr =>
-                ifr.startsWith("http") &&
-                !ifr.includes("youtube") && !ifr.includes("google") &&
-                !ifr.includes("egydead") && !ifr.endsWith(".js") &&
-                !ifr.includes("cloudflare") && !ifr.includes("c4u1r.sbs")
-              );
-              for (const ifr of realIframes) {
-                await sendExtracted(ifr, `EgyDead · embed`);
+              for (const ifr of iframes) {
+                if (!ifr.includes("youtube") && !ifr.includes("google")) {
+                  await sendExtracted(ifr, `EgyDead · embed`);
+                }
               }
 
-              if (dataLinks.length || realIframes.length) break;
+              // إذا وجدنا شيئاً، انتهينا
+              if (dataLinks.length || iframes.some(i => !i.includes("youtube"))) break;
             } catch { continue; }
           }
-        } catch { /* silent */ }
+        } catch { /* silent — CF أو timeout */ }
       }),
 
       // ── Aether / Nebula (nebula.aether.cx) — TMDB-native، CDN مفتوح ────────
@@ -3593,10 +3451,45 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // cooldown: enc-dec.app/api/enc-hexa يعيد 500 مع "Next retry: N minutes"
       //           → نتجنب الـ hammering بحفظ _hexaFailUntil
 
-      // CinePro (CP): أُزيل كلياً بطلب المستخدم 2026-07-09 — راجع memory: cinepro-self-hosted.md
+      // ── CinePro — مجمّع مصادر إنجليزي (14 مزود: VidSrc, VidApi, Icefy, FshareTV, VixSrc...) ──
+      // يعمل محلياً على المنفذ 3000 (OMSS-compliant API)
+      scrapeAnimCached("cinepro", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "CinePro: جاري جلب المصادر…" });
+          const cpUrl = type === "movie"
+            ? `http://localhost:3000/v1/movies/${tmdbId}`
+            : `http://localhost:3000/v1/tv/${tmdbId}/seasons/${season}/episodes/${epNum}`;
+          const r = await fetch(cpUrl, {
+            headers: { "User-Agent": "AnimeNOVA/1.0", "Accept": "application/json" },
+            signal: AbortSignal.timeout(22_000),
+          });
+          if (!r.ok) { console.warn(`[CinePro] HTTP ${r.status} for tmdbId=${tmdbId}`); return; }
+          const data = await r.json() as { sources?: any[]; subtitles?: any[] };
+          for (const src of (data.sources || [])) {
+            const provName = typeof src.provider === "object"
+              ? (src.provider?.name || "CinePro")
+              : (src.provider || "CinePro");
+            const quality = src.quality || "HD";
+            let realUrl: string = src.url || "";
+            // فك تشفير proxy URL الداخلي للحصول على الرابط الحقيقي
+            if (realUrl.includes("/v1/proxy?data=")) {
+              try {
+                const encoded = realUrl.split("data=")[1]?.split("&")[0] || "";
+                const inner = JSON.parse(decodeURIComponent(encoded)) as { url?: string };
+                realUrl = inner.url || realUrl;
+              } catch { /* keep proxied URL */ }
+            }
+            if (!realUrl.startsWith("http")) continue;
+            const proxied = realUrl.includes(".m3u8") || realUrl.includes("manifest")
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`
+              : `/api/anime/video-proxy?url=${encodeURIComponent(realUrl)}&ref=${encodeURIComponent("https://cinepro.cc/")}`;
+            sendSource(realUrl, `CinePro · ${provName} · ${quality}`, realUrl, proxied);
+          }
+        } catch (e: any) { console.warn(`[CinePro] sources error tmdbId=${tmdbId} type=${type}:`, e?.message); }
+      }),
 
       scrapeAnimCached("hexa", async () => {
-        return; // DISABLED 2026-07-08: enc-dec.app/api/enc-hexa returns HTTP 500 consistently — broken on their end
         if (!tmdbId) return;
         if (Date.now() < _hexaFailUntil) return; // cooldown active — enc-dec.app مشغول
         try {
@@ -3667,7 +3560,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
-      // ── vidsrc.cc — TMDB-native free API, روuted through cfProxy (VPS IP blocked directly) ─
+      // ── vidsrc.cc — TMDB-native free API, accessible from datacenter IPs ─────
       scrapeAnimCached("vidsrc_cc", async () => {
         if (!tmdbId) return;
         try {
@@ -3675,39 +3568,36 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const apiUrl = type === "tv"
             ? `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${epNum}`
             : `https://vidsrc.cc/v2/embed/movie/${tmdbId}`;
-          // VPS datacenter IPs blocked by vidsrc.cc → must route through CF proxy
-          let html = "";
-          try {
-            html = await cfProxyGet(apiUrl);
-          } catch {
-            // cfProxy unavailable → skip (direct fetch times out from datacenter IP)
-            return;
-          }
-          if (!html || html.length < 100) return;
+          const r = await fetch(apiUrl, {
+            headers: { "User-Agent": UA, "Referer": "https://vidsrc.cc/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!r.ok) return;
+          const html = await r.text();
           // Extract data-id for API call
           const dataId = html.match(/data-id=["']([^"']+)["']/)?.[1]
-                      || html.match(/\/e\/([a-zA-Z0-9]{6,})/)?.[1];
+                      || html.match(/\/e\/([a-zA-Z0-9]+)/)?.[1];
           if (!dataId) return;
-          // Fetch sources JSON — also via cfProxy since same IP restriction applies
+          // Fetch sources JSON
           const srcUrl = `https://vidsrc.cc/v2/sources?id=${dataId}`;
-          let srcData: { sources?: Array<{ url?: string; label?: string }> } = {};
-          try {
-            const srcHtml = await cfProxyGet(srcUrl);
-            srcData = JSON.parse(srcHtml);
-          } catch { return; }
-          for (const src of (srcData.sources || [])) {
+          const sr = await fetch(srcUrl, {
+            headers: { "User-Agent": UA, "Referer": apiUrl },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!sr.ok) return;
+          const data = await sr.json() as { sources?: Array<{ url?: string; label?: string }> };
+          for (const src of (data.sources || [])) {
             if (!src?.url) continue;
             const isHls = src.url.includes(".m3u8");
             const proxied = isHls
-              ? wrapHls(src.url, "https://vidsrc.cc/")
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://vidsrc.cc/")}`
               : src.url;
             sendSource(proxied, `VidSrc · ${src.label || "HD"}`, src.url, proxied);
           }
         } catch { /* silent */ }
       }),
 
-      // ── superembed.stream — TMDB-native iframe, routed through cfProxy ──────────
-      // محتوى الصفحة محمّل عبر JavaScript — cfProxy يُنفّذه (مقارنةً بـ fetch المباشر)
+      // ── superembed.stream — TMDB-native iframe with JSON API ─────────────────
       scrapeAnimCached("superembed", async () => {
         if (!tmdbId) return;
         try {
@@ -3715,28 +3605,19 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const apiUrl = type === "tv"
             ? `https://superembed.stream/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${epNum}`
             : `https://superembed.stream/embed/movie?tmdb=${tmdbId}`;
-          // cfProxy (curl_cffi) can handle JS-rendered pages better than raw fetch
-          let html = "";
-          try {
-            html = await cfProxyGet(apiUrl);
-          } catch {
-            // Fall back to direct fetch
-            const r = await fetch(apiUrl, {
-              headers: { "User-Agent": UA, "Referer": "https://superembed.stream/" },
-              signal: AbortSignal.timeout(12_000),
-            });
-            if (!r.ok) return;
-            html = await r.text();
-          }
-          if (!html || html.length < 100) return;
-          // Extract HLS URL from inline JS — multiple patterns for different SuperEmbed versions
+          const r = await fetch(apiUrl, {
+            headers: { "User-Agent": UA, "Referer": "https://superembed.stream/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!r.ok) return;
+          const html = await r.text();
+          // Extract HLS URL from JS
           const hlsMatch = html.match(/source\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/i)
                         || html.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)/i)
-                        || html.match(/playlist\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/i)
                         || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)/);
           if (!hlsMatch?.[1]) return;
           const hlsUrl = hlsMatch[1];
-          const proxied = wrapHls(hlsUrl, "https://superembed.stream/");
+          const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://superembed.stream/")}`;
           sendSource(proxied, "SuperEmbed · HLS", hlsUrl, proxied);
         } catch { /* silent */ }
       }),
@@ -3781,180 +3662,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             }),
           );
         } catch { /* silent */ }
-      }),
-
-      // ── MovieBox — مُعاد تفعيله (Streamrip API) ──────────────────────────────
-      scrapeAnimCached("moviebox_anim", async () => {
-        if (!title) return;
-        const auth = await getMbxAuthAnim();
-        if (!auth) return;
-        const { token, cookies } = auth;
-        const hdrs: Record<string, string> = {
-          "Accept": "application/json",
-          "User-Agent": _MBX_UA_ANIM,
-          "Referer": _MBX_REF_ANIM,
-          "Authorization": `Bearer ${token}`,
-          "Cookie": cookies,
-        };
-        try {
-          const sr = await fetch(_MBX_SEARCH_ANIM, {
-            method: "POST",
-            headers: { ...hdrs, "Content-Type": "application/json" },
-            body: JSON.stringify({ keyword: title, page: 1, perPage: 12, subjectType: 0 }),
-            signal: AbortSignal.timeout(10_000),
-          });
-          if (!sr.ok) return;
-          const sData: any = await sr.json();
-          const items: any[] = sData?.data?.items || [];
-          if (!items.length) return;
-
-          // فلتر: استبعد المدبلج أولاً
-          const nonDubbed = items.filter((it: any) => !_MBX_DUBBED_RE_ANIM.test(it.title || ""));
-          const candidates = nonDubbed.length ? nonDubbed : items;
-          const qLow = title.toLowerCase();
-          candidates.sort((a: any, b: any) => {
-            const aHit = (a.title || "").toLowerCase().includes(qLow) ? 1 : 0;
-            const bHit = (b.title || "").toLowerCase().includes(qLow) ? 1 : 0;
-            return bHit - aHit;
-          });
-          const item = candidates[0];
-          if (!item?.subjectId || !item?.detailPath) return;
-
-          // الموسم والحلقة: فيلم → se=0&ep=0، مسلسل → se=season&ep=epNum
-          const se = type === "movie" ? 0 : season;
-          const epP = type === "movie" ? 0 : epNum;
-          const dr = await fetch(
-            `${_MBX_DOWNLOAD_ANIM}?subjectId=${encodeURIComponent(item.subjectId)}&se=${se}&ep=${epP}&detailPath=${encodeURIComponent(item.detailPath)}`,
-            { headers: hdrs, signal: AbortSignal.timeout(10_000) },
-          );
-          if (!dr.ok) return;
-          const dData: any = await dr.json();
-          const downloads: any[] = dData?.data?.downloads || [];
-          if (!downloads.length) return;
-
-          downloads.sort((a: any, b: any) => (b.resolution || 0) - (a.resolution || 0));
-          for (const dl of downloads.slice(0, 3)) {
-            const res = Number(dl.resolution) || 0;
-            if (!dl.url || res <= 0) continue;
-            const label = `MovieBox · ${res}p`;
-            sendSource(String(dl.url), label, String(dl.url), undefined, { headers: { Referer: _MBX_REF_ANIM } });
-          }
-        } catch { /* silent */ }
-      }),
-
-      // ── Xyra (api.xyra.stream) — معطّل مؤقتاً: خادمهم يرجع 502 (Cloudflare) دائماً منذ 2026-07-09 ──
-      // scrapeAnimCached("xyra", async () => {
-      //   if (!tmdbId) return;
-      //   try {
-      //     send("status", { msg: "Xyra: جاري البحث…" });
-      //     const xyraType = type === "movie" ? "movie" : "series";
-      //     const url = `https://api.xyra.stream/v1/streamhub/streams?api_key=freekey&tmdb_id=${tmdbId}&type=${xyraType}&season=${season}&episode=${epNum}`;
-      //     const r = await fetch(url, {
-      //       headers: { "User-Agent": UA, "Accept": "application/json" },
-      //       signal: AbortSignal.timeout(15_000),
-      //     });
-      //     if (!r.ok) { console.warn(`[Xyra/anim] HTTP ${r.status} tmdb:${tmdbId}`); return; }
-      //     const data: any = await r.json();
-      //     const streams: any[] = Array.isArray(data?.streams) ? data.streams : [];
-      //     let sent = 0;
-      //     for (const s of streams) {
-      //       if (sent >= 5) break;
-      //       let validUrl: URL;
-      //       try { validUrl = new URL(s.url); } catch { continue; }
-      //       if (validUrl.protocol !== "https:" && validUrl.protocol !== "http:") continue;
-      //       const rawUrl  = s.url as string;
-      //       const isHls   = rawUrl.includes(".m3u8");
-      //       const hdrs    = s.headers && typeof s.headers === "object" ? s.headers as Record<string, string> : {};
-      //       const referer = hdrs["Referer"] || hdrs["referer"] || "https://xyra.stream/";
-      //       const label   = `Xyra · ${s.name || s.provider || "HD"} · ${s.quality || "HD"}`;
-      //       const proxyUrl = isHls ? wrapHls(rawUrl, referer) : undefined;
-      //       sendSource(rawUrl, label, rawUrl, proxyUrl);
-      //       sent++;
-      //     }
-      //     console.log(`[Xyra/anim] tmdb:${tmdbId} → ${sent} streams`);
-      //   } catch (e: any) {
-      //     console.warn("[Xyra/anim]", e?.message);
-      //   }
-      // }),
-
-      // ── Notorrent (Stremio addon) — IMDB via TMDB, بدون ترجمة مدمجة ───────────
-      scrapeAnimCached("notorrent", async () => {
-        if (!imdbId) return;
-        try {
-          send("status", { msg: "Notorrent: جاري البحث…" });
-          const ntPath = type === "movie"
-            ? `movie/${imdbId}.json`
-            : `series/${imdbId}:${season}:${epNum}.json`;
-          // onrender.com cold start: 15-30s — timeout extended accordingly
-          const r = await fetch(`https://addon-osvh.onrender.com/stream/${ntPath}`, {
-            headers: { "User-Agent": UA, "Accept": "application/json" },
-            signal: AbortSignal.timeout(35_000),
-          });
-          if (!r.ok) { console.warn(`[Notorrent] HTTP ${r.status} imdb:${imdbId}`); return; }
-          const data: any = await r.json();
-          const streamList: any[] = Array.isArray(data?.streams) ? data.streams : [];
-          let sent = 0;
-          for (const s of streamList) {
-            if (sent >= 4) break;
-            // Strict URL validation
-            let validUrl: URL;
-            try { validUrl = new URL(s.url); } catch { continue; }
-            if (validUrl.protocol !== "https:" && validUrl.protocol !== "http:") continue;
-            const rawUrl = s.url as string;
-            const isHls  = rawUrl.includes(".m3u8");
-            const label  = `Notorrent · ${s.title || s.name || "HD"}`;
-            const proxyUrl = isHls ? wrapHls(rawUrl, "https://addon-osvh.onrender.com/") : undefined;
-            sendSource(rawUrl, label, rawUrl, proxyUrl);
-            sent++;
-          }
-          console.log(`[Notorrent] imdb:${imdbId} → ${sent} streams`);
-        } catch (e: any) {
-          console.warn("[Notorrent]", e?.message);
-        }
-      }),
-
-      // ── Akwam (akwam.it) — روابط تحميل مباشرة (downet.net), مصدر احتياطي بأولوية منخفضة ──
-      // ملاحظة: akwam.to أصبح صفحة بيع نطاق؛ النطاق الفعلي الحالي هو akwam.it (301 عبر ak.sv)
-      scrapeAnimCached("akwam", async () => {
-        const q = enTitlePrefetched || title;
-        if (!q || type !== "movie") return; // أفلام فقط حالياً — المسلسلات تحتاج بنية روابط مختلفة
-        try {
-          send("status", { msg: "Akwam: جاري البحث…" });
-          const AK_BASE = "https://akwam.it";
-          const sr = await fetch(`${AK_BASE}/search?q=${encodeURIComponent(q)}`, {
-            headers: { "User-Agent": UA },
-            signal: AbortSignal.timeout(12_000),
-          });
-          if (!sr.ok) return;
-          const searchHtml = await sr.text();
-          const linkRe = /href="(https:\/\/akwam\.it\/movie\/\d+\/[^"]+)"/g;
-          const candidates: string[] = [];
-          let lm: RegExpExecArray | null;
-          while ((lm = linkRe.exec(searchHtml)) && candidates.length < 5) candidates.push(lm[1]);
-          if (!candidates.length) return;
-          const movieUrl = candidates[0];
-
-          const mr = await fetch(movieUrl, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12_000) });
-          if (!mr.ok) return;
-          const movieHtml = await mr.text();
-          const dlMatch = movieHtml.match(/href="(https:\/\/akwam\.it\/download\/\d+\/\d+\/[^"]+)"/);
-          if (!dlMatch) return;
-
-          const dr = await fetch(dlMatch[1], { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12_000) });
-          if (!dr.ok) return;
-          const dlHtml = await dr.text();
-          const mp4Re = /href="(https:\/\/[a-z0-9.]*downet\.net\/download\/[^"]+\.mp4)"/gi;
-          let mm: RegExpExecArray | null;
-          let sent = 0;
-          while ((mm = mp4Re.exec(dlHtml)) && sent < 3) {
-            const u = mm[1];
-            sendSource(u, `Akwam · MP4`, u, u);
-            sent++;
-          }
-          console.log(`[Akwam] "${q}" → ${sent} streams`);
-        } catch (e: any) {
-          console.warn("[Akwam]", e?.message);
-        }
       }),
 
     ]);

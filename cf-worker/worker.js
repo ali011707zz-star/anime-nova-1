@@ -1,17 +1,18 @@
 /**
  * Nova Anime — Cloudflare Worker
- * يعمل كـ proxy شفّاف للـ CDN: يُضيف Referer/Origin فقط.
- * يُستخدم حصراً من متصفح الويب (hls.js + video MP4)؛ الموبايل يتصل بالـ CDN مباشرةً.
+ * يعمل كـ proxy كامل للـ CDN:
+ *   - يُضيف Referer/Origin لجميع الطلبات
+ *   - يكتشف M3U8 manifests ويُعيد كتابة روابط الـ segments لتمر عبره
+ *   - النتيجة: VPS لا يستهلك أي bandwidth — فقط 307 redirect للـ Worker
  *
- * الاستخدام (الجديد — مُشفَّر بـ AES-256-GCM):
+ * الاستخدام (مُشفَّر بـ AES-256-GCM):
  *   https://<worker>.workers.dev?t=<hex-token>
- *   الـ token صيغته: iv(24 hex = 12B) + ciphertext(N hex) + authTag(32 hex = 16B)
  *
  * الاستخدام (قديم — للتوافقية فقط):
  *   https://<worker>.workers.dev?url=<encoded-cdn-url>&ref=<encoded-referer>&key=<CF_PROXY_KEY>
  *
  * المتغيّرات (Secrets في Cloudflare Dashboard):
- *   CF_PROXY_KEY  — مفتاح AES-256-GCM (يجب ضبطه؛ بدونه يُرفض الطلب بـ 401)
+ *   CF_PROXY_KEY  — مفتاح AES-256-GCM
  */
 
 // ── مساعد: hex → Uint8Array ──────────────────────────────────────────────────
@@ -24,42 +25,130 @@ function hexToBytes(hex) {
   return buf;
 }
 
+// ── مساعد: Uint8Array → hex ──────────────────────────────────────────────────
+function bytesToHex(buf) {
+  return [...buf].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 /**
  * فك تشفير توكن CF Worker (AES-256-GCM)
- * صيغة التوكن: iv(24 hex = 12B) + ciphertext(N hex) + authTag(32 hex = 16B)
- *
- * @param {string} token
- * @param {string} keyStr  — CF_PROXY_KEY (يجب أن يكون مضبوطاً)
- * @returns {{ url: string, ref: string }}
- * @throws إذا كان الـ token غير صالح أو انتهت صلاحيته
  */
 async function decryptCfToken(token, keyStr) {
   if (!keyStr) throw new Error("CF_PROXY_KEY not configured");
-
-  // إعداد المفتاح: أول 32 بايت من CF_PROXY_KEY مُرتّب على 32 حرف
   const rawKey = new TextEncoder().encode(keyStr.padEnd(32, "0").slice(0, 32));
   const key = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["decrypt"]);
-
-  // تقسيم التوكن: iv(24) + ciphertext(N) + authTag(32)
-  const iv       = hexToBytes(token.slice(0, 24));           // 12 bytes
-  const authTag  = hexToBytes(token.slice(token.length - 32)); // آخر 16 bytes
-  const ctHex    = token.slice(24, token.length - 32);
-  const ctBytes  = hexToBytes(ctHex);
-
-  // Web Crypto API: AES-GCM يتوقع ciphertext + authTag كـ buffer واحد
+  const iv      = hexToBytes(token.slice(0, 24));
+  const authTag = hexToBytes(token.slice(token.length - 32));
+  const ctBytes = hexToBytes(token.slice(24, token.length - 32));
   const combined = new Uint8Array(ctBytes.length + authTag.length);
   combined.set(ctBytes);
   combined.set(authTag, ctBytes.length);
-
-  // فك التشفير — يرمي خطأ إذا كان authTag غير صحيح (بيانات مزوّرة)
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv, tagLength: 128 }, key, combined);
   const parsed = JSON.parse(new TextDecoder().decode(plain));
-
-  // التحقق من انتهاء الصلاحية
   if (parsed.exp && Math.floor(Date.now() / 1000) > parsed.exp) {
     throw new Error("token expired");
   }
   return { url: parsed.url, ref: parsed.ref || "" };
+}
+
+/**
+ * تشفير توكن CF Worker (AES-256-GCM) — لإنشاء روابط segments داخل M3U8
+ * TTL افتراضي 6 ساعات (كافٍ للـ segments)
+ */
+async function encryptCfToken(url, ref, keyStr, expSeconds = 21600) {
+  if (!keyStr) throw new Error("CF_PROXY_KEY not configured");
+  const rawKey = new TextEncoder().encode(keyStr.padEnd(32, "0").slice(0, 32));
+  const key = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const payload = JSON.stringify({ url, ref, exp: Math.floor(Date.now() / 1000) + expSeconds });
+  const encoded = new TextEncoder().encode(payload);
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv, tagLength: 128 }, key, encoded);
+  const combined = new Uint8Array(cipher);
+  return bytesToHex(iv) + bytesToHex(combined);
+}
+
+/**
+ * حلّ رابط نسبي إلى مطلق
+ */
+function resolveUrl(relOrAbs, base) {
+  if (!relOrAbs) return relOrAbs;
+  try {
+    return new URL(relOrAbs, base).toString();
+  } catch {
+    return relOrAbs;
+  }
+}
+
+/**
+ * اكتشاف هل المحتوى هو M3U8 manifest
+ */
+function isHlsManifest(contentType, urlStr) {
+  if (!contentType) contentType = "";
+  return (
+    contentType.includes("mpegurl") ||
+    contentType.includes("x-mpegURL") ||
+    urlStr.includes(".m3u8") ||
+    urlStr.includes(".m3u")
+  );
+}
+
+/**
+ * إعادة كتابة M3U8 manifest:
+ * كل رابط segment/playlist يُحوَّل لـ https://worker?t=<token>
+ * الـ Worker يُضيف Referer/Origin عند جلب الـ CDN.
+ */
+async function rewriteM3u8(body, baseUrl, workerOrigin, ref, keyStr) {
+  const lines = body.split("\n");
+  const out = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      out.push(line);
+      continue;
+    }
+
+    if (trimmed.startsWith("#")) {
+      // أعِد كتابة URI= داخل tags مثل #EXT-X-KEY و #EXT-X-MAP
+      if (trimmed.includes('URI="')) {
+        const newLine = await replaceUriAttr(line, baseUrl, workerOrigin, ref, keyStr);
+        out.push(newLine);
+      } else {
+        out.push(line);
+      }
+      continue;
+    }
+
+    // سطر URL (segment أو sub-playlist)
+    try {
+      const absUrl = resolveUrl(trimmed, baseUrl);
+      new URL(absUrl); // تحقق من صحة الرابط
+      const tok = await encryptCfToken(absUrl, ref, keyStr);
+      out.push(`${workerOrigin}?t=${tok}`);
+    } catch {
+      out.push(line); // لا يمكن معالجته، اتركه كما هو
+    }
+  }
+
+  return out.join("\n");
+}
+
+/**
+ * إعادة كتابة URI= داخل سطر M3U8 tag
+ */
+async function replaceUriAttr(line, baseUrl, workerOrigin, ref, keyStr) {
+  const match = line.match(/URI="([^"]+)"/);
+  if (!match) return line;
+  try {
+    const absUri = resolveUrl(match[1], baseUrl);
+    new URL(absUri);
+    const tok = await encryptCfToken(absUri, ref, keyStr);
+    return line.replace(/URI="([^"]+)"/, `URI="${workerOrigin}?t=${tok}"`);
+  } catch {
+    return line;
+  }
 }
 
 export default {
@@ -77,11 +166,11 @@ export default {
     }
 
     const reqUrl = new URL(request.url);
+    const workerOrigin = reqUrl.origin; // https://nova-cdn-proxy.ali011707zz.workers.dev
     let targetRaw, ref;
 
     const token = reqUrl.searchParams.get("t");
     if (token) {
-      // ── الصيغة الجديدة: توكن AES-256-GCM مُشفَّر ────────────────
       if (!env.CF_PROXY_KEY) {
         return new Response("Worker misconfigured: CF_PROXY_KEY not set", { status: 500 });
       }
@@ -93,10 +182,10 @@ export default {
         return new Response("Invalid or expired token", { status: 401 });
       }
     } else {
-      // ── الصيغة القديمة: للتوافقية مع clients قديمة فقط ─────────
+      // ── الصيغة القديمة: للتوافقية فقط ──────────────────────────
       targetRaw = reqUrl.searchParams.get("url");
       ref       = reqUrl.searchParams.get("ref") || "";
-      const legacyKey  = reqUrl.searchParams.get("key") || "";
+      const legacyKey   = reqUrl.searchParams.get("key") || "";
       const expectedKey = env.CF_PROXY_KEY || "";
       if (expectedKey && legacyKey !== expectedKey) {
         return new Response("Unauthorized", { status: 401 });
@@ -116,32 +205,23 @@ export default {
       return new Response("invalid url", { status: 400 });
     }
 
-    // ── السماح فقط بـ http/https ────────────────────────────────────
     if (!["http:", "https:"].includes(target.protocol)) {
       return new Response("protocol not allowed", { status: 400 });
     }
 
-    // ── استخراج Origin من الـ ref ───────────────────────────────────
     let origin = "";
-    if (ref) {
-      try { origin = new URL(ref).origin; } catch {}
-    }
-    if (!origin) {
-      try { origin = target.origin; } catch {}
-    }
+    if (ref) { try { origin = new URL(ref).origin; } catch {} }
+    if (!origin) { try { origin = target.origin; } catch {} }
 
-    // ── بناء الـ headers ────────────────────────────────────────────
     const headers = {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     };
     if (ref)    headers["Referer"] = ref;
     if (origin) headers["Origin"]  = origin;
 
-    // دعم Range للـ video seeking
     const rangeHeader = request.headers.get("Range");
     if (rangeHeader) headers["Range"] = rangeHeader;
 
-    // ── الطلب للـ CDN ───────────────────────────────────────────────
     let cdnRes;
     try {
       cdnRes = await fetch(target.toString(), {
@@ -153,13 +233,41 @@ export default {
       return new Response("upstream fetch failed: " + e.message, { status: 502 });
     }
 
-    // ── إعادة الاستجابة مع CORS headers ────────────────────────────
+    const ct = cdnRes.headers.get("content-type") || "";
+
+    // ── اكتشاف M3U8: إذا كان manifest → أعِد كتابة الـ segments ──
+    if (cdnRes.ok && isHlsManifest(ct, target.toString())) {
+      try {
+        const body = await cdnRes.text();
+        const finalRef = ref || target.toString();
+        const rewritten = await rewriteM3u8(
+          body,
+          target.toString(),
+          workerOrigin,
+          finalRef,
+          env.CF_PROXY_KEY,
+        );
+        return new Response(rewritten, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/vnd.apple.mpegurl",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Range",
+            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type",
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+          },
+        });
+      } catch (e) {
+        // فشل إعادة الكتابة → أعِد خطأ
+        return new Response("m3u8 rewrite failed: " + e.message, { status: 500 });
+      }
+    }
+
+    // ── غير M3U8: مرور مباشر (MP4 segments وغيرها) ──────────────
     const resHeaders = new Headers(cdnRes.headers);
     resHeaders.set("Access-Control-Allow-Origin", "*");
     resHeaders.set("Access-Control-Allow-Headers", "Range");
     resHeaders.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type");
-
-    // أبقِ Cache-Control من الـ CDN أو اضبطه افتراضياً
     if (!resHeaders.has("Cache-Control")) {
       resHeaders.set("Cache-Control", "public, max-age=3600");
     }

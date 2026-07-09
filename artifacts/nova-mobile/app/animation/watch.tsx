@@ -59,16 +59,9 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
-  let resolved = url.startsWith("/") ? base + url : url;
-  /* موبايل: hls-proxy → H.264 + direct CDN segments | video-proxy → 307 redirect للـ CDN */
-  if (
-    Platform.OS !== "web" &&
-    (resolved.includes("hls-proxy") || resolved.includes("video-proxy")) &&
-    !resolved.includes("mobile=1")
-  ) {
-    resolved += (resolved.includes("?") ? "&" : "?") + "mobile=1";
-  }
-  return resolved;
+  /* hls-proxy يُعيد 307 → CF Worker (يجلب M3U8 + يُعيد كتابة segments عبره)
+     video-proxy يُعيد 307 → CF Worker — لا حاجة لـ mobile=1 بعد الآن */
+  return url.startsWith("/") ? base + url : url;
 }
 
 function getSrcQuality(src: AnimSrc): Quality {
@@ -153,30 +146,50 @@ function SpinRing() {
 /* ── 2-letter tag from animation source label (mirrors web AnimationWatch) ── */
 function getAnimTag(label: string): string {
   const l = label.toLowerCase();
-  if (l.startsWith("vyla"))        return "VY";
-  if (l.startsWith("videasy"))     return "VE";
-  if (l.startsWith("vidlink"))     return "VL";
-  if (l.startsWith("lordflix"))    return "LF";
-  if (l.startsWith("starcima"))    return "SC";
-  if (l.startsWith("stardima"))    return "SD";
+  // ─── المصادر الرئيسية ───
+  if (l.startsWith("vyla"))           return "VY";
+  if (l.startsWith("videasy"))        return "VE";
+  if (l.startsWith("vidlink"))        return "VL";
+  if (l.startsWith("vidfast"))        return "VF";
+  if (l.startsWith("vidcore"))        return "VC";
+  if (l.startsWith("lordflix"))       return "LF";
+  if (l.startsWith("starcima"))       return "SC";
+  if (l.startsWith("stardima"))       return "SD";
+  if (l.startsWith("dulo"))           return "DL";  // Dulo.tv
+  // ─── مصادر عربية ───
   if (l.startsWith("mycima") || l.startsWith("ماي سيما") || l.startsWith("maycima")) return "MC";
-  if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "MG";
+  if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "AF";
   if (l.includes("ميغا") || l.startsWith("mega"))        return "MG";
-  if (l.startsWith("aflaam"))      return "AF";
-  if (l.startsWith("arabseed"))    return "AS";
-  if (l.startsWith("ezvidapi"))    return "EZ";
-  if (l.startsWith("topcinema"))   return "TC";
-  if (l.startsWith("moviz"))       return "MV";
-  if (l.startsWith("seepan"))      return "SP";
-  if (l.startsWith("animewitcher")) return "AW";
-  if (l.startsWith("toonstream"))  return "TS";
-  if (l.startsWith("anikoto"))     return "AK";
-  if (l.startsWith("anineko"))     return "AN";
-  if (l.startsWith("kawaii"))      return "KW";
+  if (l.startsWith("aflaam"))         return "AL";
+  if (l.startsWith("arabseed"))       return "AS";
+  if (l.startsWith("ezvidapi"))       return "EZ";
+  if (l.startsWith("topcinema"))      return "TC";
+  if (l.startsWith("moviz"))          return "MV";
+  if (l.startsWith("faselhd"))        return "FH";  // FaselHD
+  if (l.startsWith("seepan"))         return "SP";
+  if (l.startsWith("animewitcher"))   return "AW";
+  if (l.startsWith("toonstream"))     return "TS";
+  if (l.startsWith("anikoto"))        return "AK";
+  if (l.startsWith("anineko"))        return "AN";
+  if (l.startsWith("kawaii"))         return "KW";
   if (l.startsWith("animephoenix") || l.startsWith("phoenix")) return "PH";
-  if (l.startsWith("animehub"))    return "AH";
-  if (l.startsWith("streamrip"))   return "SR";
-  if (l.startsWith("cinepro"))     return "CP";
+  if (l.startsWith("animehub"))       return "AH";
+  if (l.startsWith("streamrip"))      return "SR";
+  if (l.startsWith("cinepro"))        return "CP";
+  // ─── مصادر إنجليزية / دولية ───
+  if (l.startsWith("icefy"))          return "IF";
+  if (l.startsWith("nebula"))         return "NB";
+  if (l.startsWith("superembed"))     return "SE";
+  if (l.startsWith("cinesrc"))        return "CS";
+  if (l.startsWith("moviebox"))       return "MB";
+  if (l.startsWith("vidsrc"))         return "VS";
+  if (l.startsWith("vixsrc"))         return "VX";
+  if (l.startsWith("hexa"))           return "HX";
+  if (l.startsWith("mxplayer") || l.startsWith("mx player")) return "MX";
+  if (l.startsWith("aether"))         return "AE";
+  if (l.startsWith("egydeadnet") || l.startsWith("egydead")) return "EG";
+  if (l.startsWith("animetime"))      return "AT";
+  // ─── fallback: أول حرفان من label ───
   const word = label.replace(/[^a-zA-Z\u0621-\u064a]/g, "").slice(0, 2).toUpperCase();
   return word || "??";
 }
@@ -233,7 +246,7 @@ export default function AnimationWatchScreen() {
   const epTitle   = params.etitle ? decodeURIComponent(params.etitle) : undefined;
   const autoplay  = params.autoplay === "1";
 
-  const [screen, setScreen]       = useState<Screen>("loading");
+  const [screen, setScreen]       = useState<Screen>("picker");
   const [sources, setSources]     = useState<AnimSrc[]>([]);
   const [loading, setLoading]     = useState(true);
   const [playingSrc, setPlayingSrc] = useState<AnimSrc | null>(null);
@@ -380,6 +393,10 @@ export default function AnimationWatchScreen() {
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    const myAbort = abortRef.current;
+    /* شبكة صمّاء (انقطاع اتصال بدون خطأ/بدون "done") تُبقي الشاشة عالقة للأبد —
+       مهلة أمان من طرف العميل مستقلة عن الـ 30s الخاصة بالسيرفر */
+    const clientTimeout = setTimeout(() => myAbort.abort(), 40_000);
 
     const base = getBaseUrl();
     const url = `${base}/api/animation/sources-stream?title=${encodeURIComponent(titleStr)}&type=${type}&id=${tmdbId}&ep=${ep}&season=${season}`;
@@ -482,8 +499,13 @@ export default function AnimationWatchScreen() {
       if (e?.name !== "AbortError") {
         setLoading(false);
         setScreen(s => s === "loading" ? "picker" : s);
+      } else {
+        /* AbortError من مهلة الأمان (40s) — لا تترك الشاشة عالقة، انتقل لـ picker */
+        setLoading(false);
+        setScreen(s => s === "loading" ? "picker" : s);
       }
     } finally {
+      clearTimeout(clientTimeout);
       setLoading(false);
       setSources(prev => {
         if (prev.length === 0) setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
@@ -654,6 +676,11 @@ export default function AnimationWatchScreen() {
         initialPosition={resumeTime}
         onBack={() => setScreen("picker")}
         onProgress={(pos, _dur) => handleTimeUpdate(pos)}
+        onError={() => {
+          /* جميع المصادر فشلت → العودة للـ picker حتى يرى المستخدم ماذا حدث */
+          console.warn("[Animation] جميع المصادر فشلت — العودة للـ picker");
+          setScreen("picker");
+        }}
         onNextEpisode={type === "tv" ? () => {
           const t = encodeURIComponent(titleStr);
           const p = encodeURIComponent(posterUrl);
