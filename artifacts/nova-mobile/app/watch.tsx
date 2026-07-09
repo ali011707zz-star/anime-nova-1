@@ -47,6 +47,7 @@ const SITE_TAG: Record<string, string> = {
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
+  xyra_anim: "XY", notorrent: "NO", sanime: "SA",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -61,6 +62,7 @@ const SITE_LABEL: Record<string, string> = {
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   animephoenix: "AnimePhoenix", faselhd_db: "FaselHD", animetime: "AnimeTime",
   witanime: "WITanime", witanime_db: "WIT مدبلج",
+  xyra_anim: "Xyra", notorrent: "Notorrent", sanime: "SAnime",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -162,6 +164,8 @@ const ANIME_SITES = [
   "mycima", "topcinemaa", "animephoenix",
   // قاعدة بيانات FaselHD + AnimeTime + WITanime + WITanime-DB (مدبلج)
   "faselhd_db", "animetime", "witanime", "witanime_db",
+  // مصادر جديدة يوليو 2026
+  "xyra_anim", "notorrent", "sanime",
 ] as const;
 const SITE_TIMEOUT_MS = 28_000;
 
@@ -647,7 +651,7 @@ export default function WatchScreen() {
     const base = getBaseUrl();
     const srcs = directSrcs;
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
-    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime"]);
+    const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime","witanime_db","sanime"]);
     return srcs.map(s => {
       const url = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،

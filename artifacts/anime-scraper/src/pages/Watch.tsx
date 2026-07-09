@@ -179,6 +179,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "faselhd_db",  name: "فاصل HD",      desc: "عربي مترجم · GitHub DB",   tag: "FH",  isArabic: true },
   { site: "animetime",    name: "أنمي تايم",    desc: "عربي مترجم · HLS",         tag: "AT", isArabic: true },
   { site: "witanime",     name: "ويتأنمي",      desc: "عربي مترجم · CycleTLS",     tag: "WI", isArabic: true },
+  { site: "sanime",       name: "S أنمي",       desc: "عربي مدبلج/مترجم · MP4",   tag: "SA", isArabic: true },
   // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
@@ -195,6 +196,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "vidlink_anim",  name: "VidLink",       desc: "TMDB · HLS · ترجمة عربية", tag: "VL", audioLang: "en" },
   { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
   { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/عربي · HLS مباشر",  tag: "DL" },
+  { site: "xyra_anim",     name: "Xyra",           desc: "TMDB · HLS/MP4",            tag: "XY", audioLang: "en" },
+  { site: "notorrent",     name: "Notorrent",      desc: "IMDB · MP4 مباشر",          tag: "NO", audioLang: "en" },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
