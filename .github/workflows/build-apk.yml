@@ -58,15 +58,17 @@ jobs:
         working-directory: artifacts/nova-mobile
         run: npx expo prebuild --platform android --clean --no-install
 
-      # ── إصلاح Gradle: تثبيت 8.10.2 + تعطيل الأخطاء الإهمالية ──────────────
+      # ── إصلاح Gradle: تثبيت 8.13 + تعطيل الأخطاء الإهمالية ──────────────
       # RN 0.81.5 يستخدم deprecated Gradle APIs تُعتبر أخطاءً في 8.8+.
-      # الحل: تثبيت 8.10.2 (آخر 8.x مستقر) + org.gradle.warning.mode=none
+      # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى (8.10.2 صار يفشل البناء بـ
+      # "Minimum supported Gradle version is 8.13. Current version is 8.10.2.")
+      # الحل: تثبيت 8.13 + org.gradle.warning.mode=none (لا يزال يمنع أخطاء deprecation)
       - name: 🔧 Fix Gradle compatibility
         working-directory: artifacts/nova-mobile/android
         run: |
-          # تثبيت Gradle wrapper على 8.10.2 (متوافق مع Expo SDK 54 + AGP 8.7)
+          # تثبيت Gradle wrapper على 8.13 (متوافق مع Expo SDK 54 + AGP الحالي)
           sed -i \
-            's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.10.2-all.zip|' \
+            's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' \
             gradle/wrapper/gradle-wrapper.properties
 
           # تعطيل أخطاء الإهمال وتسريع البناء
@@ -87,8 +89,8 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-8.10.2-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
-          restore-keys: gradle-${{ runner.os }}-8.10.2-
+          key: gradle-${{ runner.os }}-8.13-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
+          restore-keys: gradle-${{ runner.os }}-8.13-
 
       - name: 🔨 Build APK
         working-directory: artifacts/nova-mobile/android

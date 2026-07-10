@@ -3337,6 +3337,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
           // ── الخطوة 4: استخراج player_iframe (data-src) ─────────────────────────
           // الموقع يستخدم lazy loading: data-src لا src
+          let faselhdSentAny = false;
           const ifrM = pageHtml.match(/name="player_iframe"[^>]+data-src="([^"]+)"/);
           if (ifrM) {
             const playerUrl = ifrM[1];
@@ -3368,14 +3369,25 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (m3u8) {
                   const proxied = wrapHls(m3u8[1], playerUrl);
                   sendSource(proxied, "FaselHD · HLS", m3u8[1], proxied);
+                  faselhdSentAny = true;
                 }
                 const mp4 = vpHtml.match(/["'](https?:\/\/[^"']+\.mp4[^"']*?)["']/);
                 if (mp4) {
                   const proxied = wrapMp4(mp4[1], playerUrl);
                   sendSource(proxied, "FaselHD · MP4", mp4[1], proxied);
+                  faselhdSentAny = true;
                 }
               }
             } catch { /* silent */ }
+
+            // ── fallback: الصفحة مُبهمة (obfuscated JW player) ولم نستطع استخراج
+            // رابط الفيديو ثابتاً — أرسل صفحة الـ player نفسها كمصدر isEmbed.
+            // نوفا موبايل يحلّها عبر HiddenResolverWebView (يُنفّذ الـ JS فعلياً في
+            // WebView مخفي ثم يلتقط رابط الفيديو الحقيقي من الشبكة/عنصر <video>).
+            if (!faselhdSentAny) {
+              sendSource(playerUrl, "FaselHD · Player", undefined, undefined, { isEmbed: true, site: "faselhd_db" });
+              faselhdSentAny = true;
+            }
           }
 
           // ── الخطوة 5: روابط التحميل (downloadLinks) → جرب عبر cfProxy ─────────

@@ -507,7 +507,7 @@ export default function AnimeDetail() {
       </div>
 
       {/* ══ NEXT EPISODE COUNTDOWN ═══════════════════════════════ */}
-      {countdown && (
+      {countdown && anime?.nextAiringEpisode?.episode != null && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
           className="mx-4 mt-5 rounded-2xl px-4 py-3"
           style={{ background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.22)" }}>
