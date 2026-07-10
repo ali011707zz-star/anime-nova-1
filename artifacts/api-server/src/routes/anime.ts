@@ -1232,7 +1232,8 @@ async function extractVideoDeep(
       if (url.includes("streamtape.com") || url.includes("streamtape.net")) {
         const v = parseStreamtape(html); if (v) return v;
       }
-      if (url.includes("streamwish") || url.includes("wishembed") || url.includes("filemoon") ||
+      if (url.includes("streamwish") || url.includes("wishembed") || url.includes("embedwish") ||
+          url.includes("filemoon") ||
           url.includes("swdyu") || url.includes("awish") || url.includes("playerwish") ||
           url.includes("hlswish.com") || url.includes("vidspeed.org") ||
           url.includes("luluvdo.com") || url.includes("darkibox.com") || url.includes("hydracker.com") ||
@@ -1247,7 +1248,9 @@ async function extractVideoDeep(
           url.includes("vidspeed.cyou") || url.includes("anafast.cyou") ||
           url.includes("hgcloud.to") || url.includes("stmruby.com") ||
           url.includes("bysekoze.com") || url.includes("vidaraa.cc") ||
-          url.includes("playmogo.com") || url.includes("mixdrop.top")) {
+          url.includes("playmogo.com") || url.includes("mixdrop.top") ||
+          url.includes("mixdrop.ag") || url.includes("mixdrop.ch") ||
+          url.includes("mixdrop.co")) {
         const v = parseStreamwish(html); if (v) return v;
       }
       if (url.includes("share4max.com/iframe/") || url.includes("megamax.me/iframe/")) {
@@ -1260,8 +1263,9 @@ async function extractVideoDeep(
           break;
         }
       }
-      // vidhidepro.com = FileLions CDN: packed JS with var links={hls4,hls2}
-      if (url.includes("vidhidepro.com/v/") || url.includes("filelions.online/v/") || url.includes("filelions.to/v/")) {
+      // vidhidepro.com / vidhidefast.com / filelions family = packed JS with var links={hls4,hls2}
+      if (url.includes("vidhidepro.com/v/") || url.includes("filelions.online/v/") || url.includes("filelions.to/v/") ||
+          url.includes("vidhidefast.com/v/") || url.includes("filelions.live/v/") || url.includes("vidhide.com/v/")) {
         const m3u8 = parseVidhidePro(html);
         if (m3u8) return { url: m3u8, type: "hls" };
       }

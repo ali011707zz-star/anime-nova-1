@@ -2663,8 +2663,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             if (!sn.includes(showNamePart.split(" ")[0])) return false;
             if (type === "tv") {
               // Use regex with word boundary so ep 5 doesn't match ep 50/55
-              return sn.includes(`season ${season}`) &&
-                     new RegExp(`\\beps\\s+${epNum}(?:\\s|$)`).test(sn);
+              const epMatch = new RegExp(`\\beps\\s+${epNum}(?:\\s|$)`).test(sn);
+              if (!epMatch) return false;
+              // Some shows (e.g. Sym-Bionic Titan) have no "season N" in server names
+              const hasSeasonTag = /\bseason\s+\d+\b/.test(sn);
+              if (hasSeasonTag) return sn.includes(`season ${season}`);
+              // No season tag → assume season 1
+              return season === 1;
             }
             return sn.includes(showNamePart.slice(0, 12));
           });
