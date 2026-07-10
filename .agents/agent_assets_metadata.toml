@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "SN-QxikEub7y8AEaq_2W-"
+uri = "file://tmp_out/anime-rift-patched.apk"
+type = "unspecified"
+title = "Anime Rift - نسخة معدّلة (تثق بشهادات mitmproxy)"
+
+[[outputs]]
+id = "fnWAFoKSVWXll6VcYAF-O"
+uri = "file://tmp_out/mitmproxy-ca-cert.cer"
+type = "unspecified"
+title = "شهادة mitmproxy CA (لازم تنصيبها على الجهاز)"
