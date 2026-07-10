@@ -5177,25 +5177,48 @@ async function getStardimaSources(
       return buildStardimaSources(md);
     }
 
-    // المسلسلات: نبحث عن الحلقة المطابقة برقمها بين حلقات العرض
-    const epR = await fetch(`${SR_BASE}/wp-json/wp/v2/episodes?serie_id=${showId}&per_page=100`, {
+    // ── جلب عنوان العرض من post لبناء search term مميز للحلقات ──────────────
+    // serie_id في WP REST API لـ stardima معطّل (يُرجع حلقات عشوائية) —
+    // نجلب بدلاً منه عنوان المسلسل ونستخدمه كـ search term للحلقات
+    const showR = await fetch(`${SR_BASE}/wp-json/wp/v2/tvshows/${showId}?_fields=title`, {
       headers: { ...BASE_HDRS, Authorization: SR_AUTH },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(10000),
     }).catch(() => null);
-    let episodes = epR?.ok ? await epR.json().catch(() => []) as any[] : [];
-    if (!episodes?.length) {
-      // بعض النسخ لا تدعم فلترة serie_id — نجرب البحث بالاسم كخطة بديلة
-      const q = english || title;
-      const r2 = await fetch(`${SR_BASE}/wp-json/wp/v2/episodes?search=${encodeURIComponent(q)}&per_page=100`, {
-        headers: { ...BASE_HDRS, Authorization: SR_AUTH },
-        signal: AbortSignal.timeout(15000),
-      }).catch(() => null);
-      episodes = r2?.ok ? await r2.json().catch(() => []) as any[] : [];
-    }
+    const showData = showR?.ok ? await showR.json().catch(() => null) as any : null;
+    const showTitle: string = showData?.title?.rendered || english || title;
+
+    // استخرج الجزء الإنجليزي من العنوان كـ search term (مثال: "Dragon Ball Z مدبلج")
+    // أو خذ العنوان كاملاً إذا لم يوجد فاصل "|"
+    const pipePart = showTitle.includes("|") ? showTitle.split("|").slice(1).join("|").trim() : showTitle;
+    const srSearchQ = pipePart || english || title;
+
+    // نبحث بـ per_page=200 ثم نفلتر بـ episodio — نتائج البحث قد تحتوي عروض مختلفة
+    // لذا نتحقق أيضاً أن عنوان الحلقة يحتوي على جزء من اسم العرض
+    const epR2 = await fetch(
+      `${SR_BASE}/wp-json/wp/v2/episodes?search=${encodeURIComponent(srSearchQ)}&per_page=200`,
+      { headers: { ...BASE_HDRS, Authorization: SR_AUTH }, signal: AbortSignal.timeout(18000) },
+    ).catch(() => null);
+    const episodes: any[] = epR2?.ok ? await epR2.json().catch(() => []) as any[] : [];
     if (!episodes?.length) return [];
-    const epObj = episodes.find((e: any) => String(e.episodio) === String(ep))
-      || episodes.find((e: any) => Number(e.episodio) === Number(ep));
-    if (!epObj) return [];
+
+    // فلتر الحلقات: رقم الحلقة يجب أن يطابق ep
+    // إذا كان هناك أكثر من نتيجة لنفس رقم الحلقة، نختار الأقرب لعنوان العرض
+    const matchingEps = episodes.filter((e: any) =>
+      String(e.episodio) === String(ep) || Number(e.episodio) === Number(ep),
+    );
+    if (!matchingEps.length) return [];
+
+    // اختر الحلقة التي تحتوي عنوانها على أكبر قدر من التشابه مع srSearchQ
+    const epObj = matchingEps.length === 1
+      ? matchingEps[0]
+      : matchingEps.sort((a: any, b: any) => {
+          const aT = a.title?.rendered || "";
+          const bT = b.title?.rendered || "";
+          // مشاركة ASCII chars مع العنوان البحثي → أعلى = أفضل
+          const scoreA = asciiSimilarity(srSearchQ, aT);
+          const scoreB = asciiSimilarity(srSearchQ, bT);
+          return scoreB - scoreA;
+        })[0];
     return buildStardimaSources(epObj);
   } catch { return []; }
 }
@@ -10104,8 +10127,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
       // allmanga:     clock.json→500, fast4speed→401
-      // reanime:      أُعيد تفعيله 2026-07-06 — CF challenge لم يعد يحجب /api/flix + cfProxyGet لصفحة FlixCloud
-      scrapeCached("reanime", () => getReanímeSources(title, english, ep, anilistId), false, 25000),
+      // reanime: DEAD — reanime.net أوقف خدمته تماماً 2026-07 (REANIME_DISABLED=true)
+      // scrapeCached("reanime", () => getReanímeSources(title, english, ep, anilistId), false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
@@ -10248,7 +10271,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "witanime_db":  (await race(getWitanimeDBSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
       case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep), 22_000, [])); break;
-      case "reanime":      (await race(getReanímeSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
+      // case "reanime": DEAD — reanime.net أوقف خدمته 2026-07
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;

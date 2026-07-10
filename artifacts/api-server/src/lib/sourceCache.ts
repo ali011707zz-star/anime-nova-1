@@ -11,6 +11,7 @@
  */
 
 import { cacheSelect, cacheUpsert, cacheDelete, isCacheDbReady } from "./supabaseCacheClient.js";
+import { isSupabaseReady } from "./supabaseClient.js";
 
 // ── TTL بالميلي ثانية لكل موقع ──────────────────────────────────
 export const SITE_TTL: Record<string, number> = {
@@ -133,8 +134,8 @@ async function sbUpsertCache(cacheKey: string, site: string, sources: any[], exp
       // deep-clone to strip any undefined/non-serializable values
       sources: JSON.parse(JSON.stringify(sources)),
       fetched_at: Date.now(),
-      // expires_at column is "timestamp with time zone" — pass ISO string, not milliseconds
-      expires_at: new Date(expiresAt).toISOString(),
+      // Supabase cloud has expires_at BIGINT (ms epoch), local PostgreSQL has TIMESTAMPTZ (ISO string)
+      expires_at: isSupabaseReady() ? expiresAt : new Date(expiresAt).toISOString(),
     }, "cache_key");
   } catch (err) {
     console.error(`[sourceCache] upsert failed for ${site}:${cacheKey}`, err instanceof Error ? err.message : err);
@@ -144,8 +145,9 @@ async function sbUpsertCache(cacheKey: string, site: string, sources: any[], exp
 async function sbDeleteExpired(): Promise<void> {
   if (!isCacheDbReady()) return;
   try {
-    // expires_at is TIMESTAMPTZ — must compare with ISO string, not ms epoch
-    await cacheDelete("source_cache", { expires_at: `lt.${new Date().toISOString()}` });
+    // Supabase: compare ms epoch (bigint); PostgreSQL: compare ISO string (timestamptz)
+    const expFilter = isSupabaseReady() ? `lt.${Date.now()}` : `lt.${new Date().toISOString()}`;
+    await cacheDelete("source_cache", { expires_at: expFilter });
   } catch { /* silent */ }
 }
 
