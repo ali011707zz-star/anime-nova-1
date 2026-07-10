@@ -51,3 +51,4 @@
 - [Lightpanda deep-dive 2026-07-09](lightpanda-deep-dive-2026-07-09.md) — fastvip/FaselHD chain fully solved (packed-JS unpack via Node); PHOENIX direct source found but CF-blocked from VPS; RISTO/ANIMEDAR now AJAX-rendered, need CDP mode not static fetch.
 - [unpackPacked fastvip fix](unpackpacked-fastvip-fix.md) — Dean-Edwards decoder rewritten as balanced-paren text-parser, not eval/Function (RCE risk on untrusted scraped HTML); regex missed trailing packer args.
 - [New source requests 2026-07-09 — resolved](new-sources-requests-2026-07-09.md) — Akwam (akwam.it, direct MP4) implemented; MovizTime/AnimeTime candidates use vidhls.com (ads, not mega.nz); AnimeRoco still unconfirmed/blocked.
+- [check-arabic endpoint source swap](check-arabic-animelek-dead.md) — animelek.top fully dead (timeout from VPS+Replit); homepage "latest episodes" gate now matches against FaselHD-DB instead.
