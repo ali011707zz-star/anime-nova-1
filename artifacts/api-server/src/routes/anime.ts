@@ -7136,8 +7136,8 @@ function animeDayResolveUrl(server: any): string | null {
   if (!url) return null;
   if (url.startsWith("https://")) return url; // direct URL
 
-  // ── /v/{code} → FileLions (vidhidepro.com) ──────────────────────────────
-  if (url.startsWith("/v/")) return `https://vidhidepro.com${url}`;
+  // ── /v/{code} → FileLions (vidhidefast.com — vidhidepro redirects here) ──
+  if (url.startsWith("/v/")) return `https://vidhidefast.com${url}`;
 
   // ── /e/{code}[.html] → بحسب المزود ──────────────────────────────────────
   if (/^\/e\//.test(url)) {
@@ -7155,15 +7155,14 @@ function animeDayResolveUrl(server: any): string | null {
   // ── /embed-{code}.html → بحسب المزود ────────────────────────────────────
   if (/^\/embed-[^/]+\.html$/.test(url)) {
     if (provider === "upstream")  return `https://upstream.to${url}`;
-    if (provider === "uqload")    return `https://uqload.co${url}`;
-    if (provider === "vadbam")    return `https://vadbam.net${url}`;
-    if (provider === "viidshar")  return `https://viidshar.com${url}`;
-    if (provider === "segavid")   return `https://segavid.com${url}`;
+    if (provider === "uqload")    return `https://uqload.is${url}`;   // uqload.co → uqload.is
     if (provider === "mp4upload") return `https://www.mp4upload.com${url}`;
+    // vadbam / viidshar / segavid → ميتة (000 timeout) → تجاهل
+    if (provider === "vadbam" || provider === "viidshar" || provider === "segavid") return null;
     return `https://upstream.to${url}`; // افتراضي
   }
 
-  // ── /ajax/ , /tv/ , /watch/ → كلها ميتة أو JS-rendered ──────────────────
+  // ── /ajax/ , /tv/ , /watch/ → JS-rendered أو ميتة ──────────────────────
   return null;
 }
 
@@ -7184,11 +7183,12 @@ async function getAnimeDaySources(
     let bestScore = 0;
 
     for (const anime of animeList) {
-      // حاول المطابقة عبر second_name (بدائل إنجليزية/عربية)
+      // second_name يحتوي بدائل إنجليزية وعربية (مثال JJK: "Jujutsu Kaisen جوجوتسو كايسن")
       const sn = (anime.second_name || "").toLowerCase().replace(/[^a-z0-9\s\u0600-\u06ff]/g, " ");
-      // وأيضًا الاسم الرئيسي بعد حذف "الموسم/Season N"
-      const nm = (anime.name || "").toLowerCase().replace(/\s*(season|الموسم)\s+\d+.*/i, "").replace(/[^a-z0-9\s\u0600-\u06ff]/g, " ").trim();
-      const sc = Math.max(similarity(searchQ, sn), similarity(searchQ, nm));
+      // الاسم الرئيسي بعد حذف "الموسم/Season N"
+      const nm = (anime.name || "").toLowerCase().replace(/\s*(season|الموسم)\s+.*/i, "").replace(/[^a-z0-9\s\u0600-\u06ff]/g, " ").trim();
+      // استخدم asciiSimilarity أيضاً لمطابقة "jujutsu kaisen" مع second_name الذي يحتوي "Jujutsu Kaisen"
+      const sc = Math.max(similarity(searchQ, sn), similarity(searchQ, nm), asciiSimilarity(searchQ, sn));
       if (sc > bestScore) { bestScore = sc; bestAnime = anime; }
     }
 
@@ -7204,9 +7204,18 @@ async function getAnimeDaySources(
     let epStr: string;
     if (isArabic) {
       // اسم عربي مثل "جوجوتسو كايسن" — servers تطابق بـ "الحلقة N"
-      // نستخدم 3 كلمات عربية على الأقل لتجنب التقاطع بين عناوين متشابهة
-      const arabicWords = animeName.split(/\s+/).filter((w: string) => /[\u0600-\u06FF]/.test(w));
-      matchPrefix = arabicWords.slice(0, Math.min(4, arabicWords.length)).join(" ");
+      // نستبعد كلمات الموسم/الترجمة (الموسم، الأول، مدبلج…) لأن servers لا تحتوي عليها
+      const ANIMEDAY_STOP = new Set([
+        "الموسم","مدبلج","مترجم","مترجمة",
+        "الأول","الاول","الأولى","الأولي",
+        "الثاني","الثانى","الثانية",
+        "الثالث","الثالثة","الرابع","الرابعة",
+        "الخامس","السادس","السابع","الثامن","التاسع","العاشر",
+      ]);
+      const arabicWords = animeName.split(/\s+/).filter((w: string) =>
+        /[\u0600-\u06FF]/.test(w) && !ANIMEDAY_STOP.has(w),
+      );
+      matchPrefix = arabicWords.slice(0, 3).join(" ");
       epStr = `الحلقة ${ep}`;
     } else {
       // اسم إنجليزي مثل "Regular Show" — servers: "regular show season N eps M"
@@ -7249,10 +7258,11 @@ async function getAnimeDaySources(
 
       const provName = (server.name || "").split(" ").pop() || "";
       const quality  = isArabic ? "مدبلج HD" : "HD";
-      const qRank    = fullUrl.includes("vidhidepro") ? 9
-                     : fullUrl.includes("filemoon")   ? 8
-                     : fullUrl.includes("dood")        ? 7
-                     : fullUrl.includes("mixdrop")     ? 7
+      const qRank    = fullUrl.includes("vidhidefast") ? 9
+                     : fullUrl.includes("filemoon")    ? 8
+                     : fullUrl.includes("uqload")      ? 8
+                     : fullUrl.includes("dood")         ? 7
+                     : fullUrl.includes("mixdrop")      ? 7
                      : 6;
 
       sources.push({

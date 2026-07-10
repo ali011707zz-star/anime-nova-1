@@ -2570,7 +2570,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const p: string = ((srv.name || "").toLowerCase().split(" ").pop() || "");
             if (!u) return null;
             if (u.startsWith("https://")) return u;
-            if (u.startsWith("/v/"))          return `https://vidhidepro.com${u}`;
+            if (u.startsWith("/v/"))          return `https://vidhidefast.com${u}`; // vidhidepro → vidhidefast
             if (/^\/e\//.test(u)) {
               if (p === "dood")     return `https://dood.to${u}`;
               if (p === "mixdrop")  return `https://mixdrop.ag${u}`;
@@ -2581,10 +2581,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             }
             if (/^\/embed-[^/]+\.html$/.test(u)) {
               if (p === "upstream")  return `https://upstream.to${u}`;
-              if (p === "uqload")    return `https://uqload.co${u}`;
-              if (p === "vadbam")    return `https://vadbam.net${u}`;
-              if (p === "viidshar")  return `https://viidshar.com${u}`;
+              if (p === "uqload")    return `https://uqload.is${u}`;  // uqload.co → uqload.is
               if (p === "mp4upload") return `https://www.mp4upload.com${u}`;
+              // vadbam / viidshar → ميتة (timeout) → تجاهل
+              if (p === "vadbam" || p === "viidshar") return null;
               return `https://upstream.to${u}`;
             }
             return null;
