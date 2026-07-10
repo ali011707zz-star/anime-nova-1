@@ -52,3 +52,4 @@
 - [unpackPacked fastvip fix](unpackpacked-fastvip-fix.md) — Dean-Edwards decoder rewritten as balanced-paren text-parser, not eval/Function (RCE risk on untrusted scraped HTML); regex missed trailing packer args.
 - [New source requests 2026-07-09 — resolved](new-sources-requests-2026-07-09.md) — Akwam (akwam.it, direct MP4) implemented; MovizTime/AnimeTime candidates use vidhls.com (ads, not mega.nz); AnimeRoco still unconfirmed/blocked.
 - [check-arabic endpoint source swap](check-arabic-animelek-dead.md) — animelek.top fully dead (timeout from VPS+Replit); homepage "latest episodes" gate now matches against FaselHD-DB instead.
+- [Fresh-import setup fixes](import-setup-fixes.md) — after re-import: pip needs --break-system-packages for uv-broken venv; clear anime-scraper .vite cache (jsxDEV error); leave standalone api-server workflow stopped (port conflict with Start application).
