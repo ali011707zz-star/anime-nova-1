@@ -10203,7 +10203,9 @@ const _arabicCheckCache = new Map<string, { time: number; ok: boolean }>();
 const ARABIC_CACHE_TTL = 12 * 3600 * 1000; // 12h
 
 router.get("/anime/check-arabic", async (req, res) => {
-  // فحص حقيقي لتوفر الأنمي في المصادر العربية (animelek.top)
+  // فحص حقيقي لتوفر الأنمي في المصادر العربية.
+  // animelek.top معطّل/محجوب (timeout كامل من VPS والـ Replit) لذا استبدلناه
+  // بـ FaselHD-DB (كتالوج GitHub JSON مباشر + مصدر موثوق مُختبر عملياً).
   // Handle both t=x&t=y and t[]=x&t[]=y patterns
   const q = req.query as Record<string, unknown>;
   const raw = q["t"] ?? q["t[]"];
@@ -10215,21 +10217,42 @@ router.get("/anime/check-arabic", async (req, res) => {
 
   if (!titles.length) { res.json({ available: [] }); return; }
 
-  // فحص موازي لجميع العناوين مع cache مضمن في searchAnimelek
-  const available: string[] = [];
-  await Promise.allSettled(
-    titles.map(async (title) => {
-      try {
-        const slug = await Promise.race([
-          searchAnimelek(title, null),
-          new Promise<null>(r => setTimeout(() => r(null), 4_000)),
-        ]);
-        if (slug) available.push(title);
-      } catch { /* silent */ }
-    })
-  );
+  const cacheKey = "arabic-check-" + titles.join("|");
+  const cached = _arabicCheckCache.get(cacheKey);
+  if (cached && Date.now() - cached.time < ARABIC_CACHE_TTL) {
+    res.json({ available: cached.ok ? titles : [] });
+    return;
+  }
 
-  res.json({ available });
+  try {
+    const [animeItems, movieItems] = await Promise.all([
+      faselhdDbFetchSection("anime"),
+      faselhdDbFetchSection("anime-movies"),
+    ]);
+    const allItems = [...animeItems, ...movieItems];
+
+    const available: string[] = [];
+    if (allItems.length) {
+      for (const title of titles) {
+        const q1 = normalize(title || "");
+        const best = allItems.reduce((max, item) => {
+          const clean = faselhdStripName(item.name || "");
+          const slug  = (item.slug || "").replace(/-/g, " ");
+          const sc = Math.max(
+            similarity(q1, normalize(clean)),
+            asciiSimilarity(slug, q1),
+          );
+          return sc > max ? sc : max;
+        }, 0);
+        if (best > 0.42) available.push(title);
+      }
+    }
+
+    _arabicCheckCache.set(cacheKey, { time: Date.now(), ok: available.length > 0 });
+    res.json({ available });
+  } catch {
+    res.json({ available: [] });
+  }
 });
 
 // ════════════════════════════════════════════════════════════════════

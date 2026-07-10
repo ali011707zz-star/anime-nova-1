@@ -208,6 +208,7 @@ export default function Schedule() {
 
       const ADULT_BLOCKED = new Set(["Hentai"]);
       const items = allItems.filter((s: any) => {
+        if (!s.media?.id) return false;
         if (s.media?.isAdult) return false;
         const genres: string[] = s.media?.genres || [];
         return !genres.some((g: string) => ADULT_BLOCKED.has(g));
