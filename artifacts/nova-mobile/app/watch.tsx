@@ -55,7 +55,7 @@ const SITE_TAG: Record<string, string> = {
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
-  notorrent: "NO", sanime: "SA",
+  notorrent: "NO", sanime: "SA", anipm: "PM",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -70,7 +70,7 @@ const SITE_LABEL: Record<string, string> = {
   anime4up2: "Anime4Up", mycima: "MyCima", topcinemaa: "TopCinema",
   animephoenix: "AnimePhoenix", faselhd_db: "FaselHD", animetime: "AnimeTime",
   witanime: "WITanime", witanime_db: "WIT مدبلج",
-  notorrent: "Notorrent", sanime: "SAnime",
+  notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -155,7 +155,7 @@ const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, hianime: 95, animewitcher: 90,
   dulo_anim: 70, videasy_anim: 60, vidlink_anim: 55,
   anineko: 50, mitanime: 45, anikoto: 40, vidfast: 35,
-  anikototv: 30, animekai: 25, animepahe: 20,
+  anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
   witanime: 12,
 };
 
@@ -165,7 +165,7 @@ const ANIME_SITES = [
   "kawaii", "animewitcher", "hianime", "dulo_anim",
   // مصادر سريعة (ياباني مترجم / إنجليزي)
   "videasy_anim", "vidlink_anim", "anineko", "anikoto",
-  "mitanime", "vidfast", "anikototv", "animekai", "animepahe",
+  "mitanime", "vidfast", "anikototv", "animekai", "animepahe", "anipm",
   // مصادر عربية (تحتاج extraction)
   "shahiid", "animelek", "animedar", "okanime", "ristoanime",
   "animeify", "animeday", "arabseed", "anime4up2",

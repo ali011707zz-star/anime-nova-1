@@ -188,6 +188,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
+  { site: "anipm",        name: "AniPm",          desc: "ياباني مترجم · 37 سيرفر/حلقة", tag: "PM" },
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
   { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
   { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/إنجليزي · HLS مباشر", tag: "DL", audioLang: "en" },
