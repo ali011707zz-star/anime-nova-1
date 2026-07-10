@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -17,7 +18,7 @@ const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
-type Screen = "loading" | "picker" | "native" | "embed";
+type Screen = "loading" | "picker" | "native" | "embed" | "resolving";
 
 interface AnimSrc {
   url?: string;
@@ -28,9 +29,18 @@ interface AnimSrc {
   status?: string;
   tier?: string;
   isEmbed?: boolean;
+  site?: string;
   directType?: string;  // "hls" | "mp4" — used to filter on web
   /** Referer/Origin headers مطلوبة للـ CDN — مُعادة من الخادم مباشرةً */
   headers?: Record<string, string>;
+}
+
+/* ── مواقع محمية بـ Cloudflare يفشل الخادم (VPS) باستخراج فيديوها ثابتاً —
+   نحاول أولاً حلّها عبر WebView مخفي (JS ينفَّذ فعلياً + IP الجهاز) قبل عرض
+   بطاقة "يحتاج تطبيق أصلي" ── */
+const WEBVIEW_RESOLVE_SITES = new Set(["faselhd_db"]);
+function needsHiddenResolve(s: AnimSrc): boolean {
+  return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site) && Platform.OS !== "web";
 }
 
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string; label: string }> = {
@@ -542,7 +552,22 @@ export default function AnimationWatchScreen() {
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
-    setScreen(isDirectPlayable(src) ? "native" : "embed");
+    if (isDirectPlayable(src)) { setScreen("native"); return; }
+    if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
+    setScreen("embed");
+  }, []);
+
+  /* ── نتيجة استخراج WebView المخفي ── */
+  const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
+    setPlayingSrc(prev => {
+      if (!prev) return prev;
+      return { ...prev, directUrl: stream.url, url: stream.url, isEmbed: false, headers: stream.headers || prev.headers, directType: stream.type };
+    });
+    setScreen("native");
+  }, []);
+
+  const handleHiddenFailed = useCallback(() => {
+    setScreen("embed");
   }, []);
 
   /* ── Group sources by quality ── */
@@ -692,6 +717,29 @@ export default function AnimationWatchScreen() {
           router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&title=${t}&poster=${p}`);
         } : undefined}
       />
+    );
+  }
+
+  /* ══════════════ RESOLVING (WebView مخفي — لا يُعرض للمستخدم) ══════════════ */
+  if (screen === "resolving" && playingSrc) {
+    const resolveUrl2 = getPlayUrl(playingSrc);
+    return (
+      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </Pressable>
+        <SpinRing />
+        <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
+          ⏳ جاري تجهيز المصدر…
+        </Text>
+        {resolveUrl2 ? (
+          <HiddenResolverWebView
+            pageUrl={resolveUrl2}
+            onResolved={handleHiddenResolved}
+            onFailed={handleHiddenFailed}
+          />
+        ) : null}
+      </View>
     );
   }
 
