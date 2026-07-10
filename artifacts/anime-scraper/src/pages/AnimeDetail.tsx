@@ -340,13 +340,25 @@ export default function AnimeDetail() {
     const existing = getFavChars();
     const animeName = anime?.title?.arabic || anime?.title?.english || anime?.title?.romaji || "";
     const animeId = params.id || "";
-    const already = existing.some((c: any) => c.id === charNode.id);
+    const charId = Number(charNode.id);
+    const already = existing.some((c: any) => Number(c.id) === charId);
     const upd = already
-      ? existing.filter((c: any) => c.id !== charNode.id)
-      : [...existing, { id: charNode.id, name: charNode.name?.full, image: charNode.image?.large, animeName, animeId }];
+      ? existing.filter((c: any) => Number(c.id) !== charId)
+      : [...existing, { id: charId, name: charNode.name?.full, image: charNode.image?.large, animeName, animeId }];
     saveFavChars(upd);
     setFavChars(upd);
+    window.dispatchEvent(new CustomEvent("favchars-updated"));
   };
+
+  useEffect(() => {
+    const onFavCharsUpdated = () => setFavChars(getFavChars());
+    window.addEventListener("favchars-updated", onFavCharsUpdated);
+    window.addEventListener("storage", onFavCharsUpdated);
+    return () => {
+      window.removeEventListener("favchars-updated", onFavCharsUpdated);
+      window.removeEventListener("storage", onFavCharsUpdated);
+    };
+  }, []);
 
 
   // ── Loading / Error ──
@@ -746,7 +758,7 @@ export default function AnimeDetail() {
                 <p className="text-[12px] font-black text-white/60 font-['Cairo'] mb-3 text-center">الشخصيات الرئيسية</p>
                 <div className="grid grid-cols-4 gap-2.5">
                   {mainChars.map((e: any) => <CharCard key={e.node.id} e={e} main
-                    isFav={favChars.some((f: any) => f.id === e.node.id)}
+                    isFav={favChars.some((f: any) => Number(f.id) === Number(e.node.id))}
                     onToggleFav={() => toggleCharFav(e.node)} />)}
                 </div>
               </div>
@@ -756,7 +768,7 @@ export default function AnimeDetail() {
                 <p className="text-[12px] font-black text-white/60 font-['Cairo'] mb-3 text-center">الشخصيات المساعدة</p>
                 <div className="grid grid-cols-4 gap-2.5">
                   {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e}
-                    isFav={favChars.some((f: any) => f.id === e.node.id)}
+                    isFav={favChars.some((f: any) => Number(f.id) === Number(e.node.id))}
                     onToggleFav={() => toggleCharFav(e.node)} />)}
                 </div>
               </div>

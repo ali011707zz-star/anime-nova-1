@@ -103,6 +103,17 @@ export default function Library() {
   /* ── Refresh favChars from localStorage on every mount ── */
   useEffect(() => { setFavChars(loadFavChars()); }, []);
 
+  /* ── Live-sync favChars when toggled from AnimeDetail (same tab) ── */
+  useEffect(() => {
+    const onFavCharsUpdated = () => setFavChars(loadFavChars());
+    window.addEventListener("favchars-updated", onFavCharsUpdated);
+    window.addEventListener("storage", onFavCharsUpdated);
+    return () => {
+      window.removeEventListener("favchars-updated", onFavCharsUpdated);
+      window.removeEventListener("storage", onFavCharsUpdated);
+    };
+  }, []);
+
   /* ── Reset visible count when filter/search changes ── */
   useEffect(() => { setSavedVisible(12); }, [sortBy, searchQuery]);
 

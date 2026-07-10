@@ -1123,8 +1123,12 @@ function ScraperPicker({
     </>
   );
 
-  /* ── Show loading screen only when scrapers are actively fetching (not idle/lazy mode) ── */
-  if (anyFetching && !hasSources && !hasBackupSources) {
+  /* ── Show loading screen while the auto-fetch-all wave is in progress (fetching OR
+     still-idle-but-scheduled scrapers), not only while one happens to be "fetching" right
+     this instant. Gating on `anyFetching` alone caused a flicker back to the bare site grid
+     whenever a fast scraper resolved before the next staggered one had started (~70ms gap),
+     producing "servers list → loading → servers list → player". ── */
+  if ((anyFetching || hasIdleScrapers) && !hasSources && !hasBackupSources) {
     return (
       <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl">
         {/* Blurred poster background */}
