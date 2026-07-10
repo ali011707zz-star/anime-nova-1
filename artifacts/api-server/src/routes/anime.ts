@@ -5127,6 +5127,100 @@ async function getKawaiiAnimeSources(
 }
 
 
+// ════════════════════════════════════════════════════════════════════
+//  STARDIMA (SR) — WordPress REST API, مدبلج بشكل حصري
+//  Base: https://ap45.wiib.top  (auth: Bearer tok3n-MyApp-987654321)
+//  Flow: /wp/v2/tvshows?search=  → /wp/v2/episodes?search=  → repeatable_fields[].url (MP4 مباشر)
+//  كاتالوج ضخم: ~2700 مسلسل، ~93000 حلقة، ~3000 فيلم — كله مدبلج عربي/كرتون
+// ════════════════════════════════════════════════════════════════════
+const SR_BASE = "https://ap45.wiib.top";
+const SR_AUTH = "Bearer tok3n-MyApp-987654321";
+const srSlugCache = new Map<string, { id: number | null; ts: number }>();
+
+async function getStardimaSources(
+  title: string, english: string | null, ep: number, isMovie?: boolean,
+): Promise<UnifiedSource[]> {
+  try {
+    const queries = [english, title].filter(Boolean) as string[];
+    const postType = isMovie ? "movies" : "tvshows";
+    const ck = `sr:${postType}:${(english || title).toLowerCase()}`;
+    const cached = srSlugCache.get(ck);
+    let showId: number | null = (cached && Date.now() - cached.ts < SEARCH_TTL) ? cached.id : undefined as any;
+
+    if (showId === undefined) {
+      showId = null;
+      for (const q of queries) {
+        const r = await fetch(`${SR_BASE}/wp-json/wp/v2/${postType}?search=${encodeURIComponent(q)}&per_page=10`, {
+          headers: { ...BASE_HDRS, Authorization: SR_AUTH },
+          signal: AbortSignal.timeout(12000),
+        }).catch(() => null);
+        if (!r?.ok) continue;
+        const hits = await r.json() as Array<{ id: number; title?: { rendered?: string } }>;
+        if (!hits?.length) continue;
+        const scored = hits.map(h => ({
+          id: h.id,
+          score: Math.max(similarity(q, h.title?.rendered || ""), asciiSimilarity(q, h.title?.rendered || "")),
+        })).sort((a, b) => b.score - a.score);
+        if (scored[0] && scored[0].score >= 0.4) { showId = scored[0].id; break; }
+      }
+      srSlugCache.set(ck, { id: showId, ts: Date.now() });
+    }
+    if (!showId) return [];
+    if (isMovie) {
+      // الأفلام: الفيديو مباشرة في repeatable_fields للمنشور نفسه
+      const mr = await fetch(`${SR_BASE}/wp-json/wp/v2/movies/${showId}`, {
+        headers: { ...BASE_HDRS, Authorization: SR_AUTH },
+        signal: AbortSignal.timeout(12000),
+      }).catch(() => null);
+      if (!mr?.ok) return [];
+      const md = await mr.json() as any;
+      return buildStardimaSources(md);
+    }
+
+    // المسلسلات: نبحث عن الحلقة المطابقة برقمها بين حلقات العرض
+    const epR = await fetch(`${SR_BASE}/wp-json/wp/v2/episodes?serie_id=${showId}&per_page=100`, {
+      headers: { ...BASE_HDRS, Authorization: SR_AUTH },
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => null);
+    let episodes = epR?.ok ? await epR.json().catch(() => []) as any[] : [];
+    if (!episodes?.length) {
+      // بعض النسخ لا تدعم فلترة serie_id — نجرب البحث بالاسم كخطة بديلة
+      const q = english || title;
+      const r2 = await fetch(`${SR_BASE}/wp-json/wp/v2/episodes?search=${encodeURIComponent(q)}&per_page=100`, {
+        headers: { ...BASE_HDRS, Authorization: SR_AUTH },
+        signal: AbortSignal.timeout(15000),
+      }).catch(() => null);
+      episodes = r2?.ok ? await r2.json().catch(() => []) as any[] : [];
+    }
+    if (!episodes?.length) return [];
+    const epObj = episodes.find((e: any) => String(e.episodio) === String(ep))
+      || episodes.find((e: any) => Number(e.episodio) === Number(ep));
+    if (!epObj) return [];
+    return buildStardimaSources(epObj);
+  } catch { return []; }
+}
+
+function buildStardimaSources(post: any): UnifiedSource[] {
+  const fields = (post?.repeatable_fields || []) as Array<{ name?: string; select?: string; url?: string }>;
+  const sources: UnifiedSource[] = [];
+  for (const f of fields) {
+    if (!f?.url || !/^https?:\/\//.test(f.url)) continue;
+    const isHls = f.url.includes(".m3u8");
+    sources.push({
+      name: `ستارديما · مدبلج${f.select ? " · " + f.select.toUpperCase() : ""}`,
+      url: f.url,
+      quality: "720p",
+      qualityRank: 18,
+      site: "stardima",
+      directUrl: f.url,
+      directType: isHls ? "hls" : "mp4",
+      corsOk: false,
+    });
+  }
+  return sources;
+}
+
+
 // ── GET /api/anime/kawaii-meta ──────────────────────────────────────
 // Returns Arabic subtitle URL + intro/outro skip times from kawaii.
 // Used by the frontend to enrich ALL sources (not just kawaii) so that
@@ -9977,6 +10071,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("anizone",      () => getAniZoneSources(title, english, ep),                 false, 18000),
       scrapeCached("2dhive",       () => get2DhiveSources(title, english, ep),                  true,  20000),
       scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 28000),
+      // ── مدبلج عربي/كرتون (WordPress REST) ───────────────────────────
+      scrapeCached("stardima",     () => getStardimaSources(title, english, ep, isMovie),      false, 20000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
       // scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
@@ -10112,7 +10208,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // scrapers that use probe-only (no deep extraction)
-  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anineko","anizone"]);
+  const probeOnly = new Set(["animeify","kawaii","anikoto","anikototv","animewitcher","anineko","anizone","stardima"]);
 
   try {
     switch (site) {
@@ -10136,6 +10232,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // anivault: محذوف
       case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),28000, [])).forEach(collectSrc); break;
+      case "stardima":    (await race(getStardimaSources(title, english, ep, isMovie),       20000, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
       case "anizone":       (await race(getAniZoneSources(title, english, ep),               18_000,     [])).forEach(collectSrc); break;
