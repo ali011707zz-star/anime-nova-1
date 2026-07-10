@@ -470,6 +470,26 @@ export async function runSupabaseMigration(): Promise<void> {
 
   const allMissing = [...new Set([...missingFromHttp])];
 
+  // ── تصحيح نوع expires_at: BIGINT → TIMESTAMPTZ إن كان خاطئاً ─────────────
+  // السبب: الجدول كان يُنشأ يدوياً في Supabase بـ BIGINT بدلاً من TIMESTAMPTZ
+  try {
+    const colUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/sql`;
+    // نستخدم information_schema للتحقق من النوع
+    const checkUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1/source_cache?select=expires_at&limit=1`;
+    const checkRes = await fetch(checkUrl, {
+      headers: { "apikey": serviceKey, "Authorization": `Bearer ${serviceKey}`, "Accept": "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (checkRes.ok) {
+      const rows = await checkRes.json().catch(() => []);
+      if (Array.isArray(rows) && rows.length > 0 && typeof rows[0]?.expires_at === "number") {
+        // الحقل bigint (رقم) بدلاً من timestamptz (نص ISO) → نصحح عبر RPC
+        logger.warn("[migrate] ⚠️ source_cache.expires_at نوعه BIGINT — يجب تغييره إلى TIMESTAMPTZ في Supabase SQL Editor:");
+        logger.warn("[migrate] ALTER TABLE source_cache ALTER COLUMN expires_at TYPE TIMESTAMPTZ USING to_timestamp(expires_at/1000.0) AT TIME ZONE 'UTC';");
+      }
+    }
+  } catch { /* not critical */ }
+
   if (allMissing.length === 0) {
     logger.info("[migrate] ✅ كل الجداول موجودة في Supabase");
     return;
