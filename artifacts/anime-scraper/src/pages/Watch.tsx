@@ -3237,10 +3237,14 @@ export default function WatchPage() {
     const singleSite = sp.get("single") === "1" ? sp.get("site") : null;
     const defs = singleSite ? SCRAPER_DEFS.filter(d => d.site === singleSite) : SCRAPER_DEFS;
     autoFetchAllRef.current = true;
-    /* KW (kawaii) تُجلب أولاً بدون تأخير → أول مصدر جاهز يُشغَّل فوراً */
-    const kawaiiDef = defs.find(d => d.site === "kawaii");
-    const restDefs  = defs.filter(d => d.site !== "kawaii");
-    const orderedDefs = kawaiiDef ? [kawaiiDef, ...restDefs] : defs;
+    /* أحدث حلقة (لم تُبثّ بعد كحلقات قديمة) → أولوية AW أولاً.
+       الحلقات العادية/القديمة → أولوية KW (kawaii) كما هو معتاد.
+       المصدر ذو الأولوية يُجلب أولاً بدون تأخير → أول مصدر جاهز يُشغَّل فوراً */
+    const isLatestEp = totalEps > 0 && totalEps < 999 && ep >= totalEps;
+    const priorityTag = isLatestEp ? "animewitcher" : "kawaii";
+    const priorityDef = defs.find(d => d.site === priorityTag);
+    const restDefs  = defs.filter(d => d.site !== priorityTag);
+    const orderedDefs = priorityDef ? [priorityDef, ...restDefs] : defs;
     orderedDefs.forEach((def, i) => {
       const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
       pendingTimeoutsRef.current.push(id);
