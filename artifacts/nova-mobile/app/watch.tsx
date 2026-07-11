@@ -326,6 +326,9 @@ export default function WatchScreen() {
   const inFlightSitesRef  = useRef<Set<string>>(new Set());
   const fetchedSitesRef   = useRef<Set<string>>(new Set()); // يمنع إعادة جلب نفس المصدر مرتين (فقط الناجحة)
   const bgTimersRef       = useRef<ReturnType<typeof setTimeout>[]>([]); // background-load timers للإلغاء عند تغيير الحلقة
+  /* true بعد جدولة موجة "تحميل كل المصادر" عند فتح الشاشة — يمنع handlePickSite من
+     جدولة موجة ثانية مكرّرة عند نجاح أول مصدر (نفس منطق autoFetchAllRef في نظام الويب) */
+  const autoFetchAllRef   = useRef(false);
 
   /* ── ترجمة عنوان الحلقة من الإنجليزية للعربية ── */
   useEffect(() => {
@@ -513,8 +516,28 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, srcCacheKey]);
 
-  /* لا تحميل تلقائي — المستخدم يختار المصدر أولاً عبر handlePickSite.
-     fetchSources تُستخدم فقط عند الضغط على زر "إعادة المحاولة / تحميل الكل". */
+  /* ── تحميل تلقائي عند فتح الشاشة — يطابق نظام الويب تماماً:
+     تُجدوَل كل مواقع ANIME_SITES بالتوازي (فارق 70ms بينها لتخفيف الضغط على الـ VPS)،
+     أول مصدر مباشر جاهز يُشغَّل تلقائياً فوراً (autoPlayFiredRef يمنع التشغيل المزدوج)،
+     والباقي يستمر بالتحميل خلفياً ليظهر في قائمة "مصادر المشاهدة" الكاملة.
+     لا حاجة لضغط المستخدم على مصدر لبدء البث. ── */
+  useEffect(() => {
+    if (!anime) return;
+    /* إن وُجد كاش صالح فالمصادر المحفوظة معروضة بالفعل — لا تُعِد الجلب فوراً،
+       اترك المستخدم يضغط "تحديث" إن رغب (يطابق سلوك الكاش القديم). */
+    if (hasCachedRef.current) return;
+    autoFetchAllRef.current = true;
+    ANIME_SITES.forEach((site, i) => {
+      const tid = setTimeout(() => { handlePickSite(site, true); }, i * 70);
+      bgTimersRef.current.push(tid);
+    });
+    return () => {
+      bgTimersRef.current.forEach(clearTimeout);
+      bgTimersRef.current = [];
+      autoFetchAllRef.current = false;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anime, epNum]);
 
   /* ── Cleanup bgTimers on unmount/episode-change ── */
   useEffect(() => {
@@ -680,11 +703,14 @@ export default function WatchScreen() {
         if (best) {
           autoPlayFiredRef.current = true;
           playSrc(best);
-          /* تحميل خلفي لبقية المواقع — نتتبع الـ timers لإلغائها عند تغيير الحلقة */
-          ANIME_SITES.filter(s => s !== site).forEach((s, i) => {
-            const tid = setTimeout(() => { handlePickSite(s, false); }, 400 + i * 100);
-            bgTimersRef.current.push(tid);
-          });
+          /* تحميل خلفي لبقية المواقع — فقط إذا لم تكن موجة "تحميل الكل" (mount effect)
+             قد جدولت كل المواقع مسبقاً، لتجنّب موجتين مكررتين تستهلكان الـ VPS مرتين. */
+          if (!autoFetchAllRef.current) {
+            ANIME_SITES.filter(s => s !== site).forEach((s, i) => {
+              const tid = setTimeout(() => { handlePickSite(s, false); }, 400 + i * 100);
+              bgTimersRef.current.push(tid);
+            });
+          }
         }
       }
     } catch {
@@ -761,11 +787,17 @@ export default function WatchScreen() {
   const riftSourcesRef = useRef<PlayerSource[]>([]);
   useEffect(() => { riftSourcesRef.current = riftSources; }, [riftSources]);
 
-  /* مسح frozenSources عند الخروج من المشغّل (picker/embed/loading) */
+  /* تجميد قائمة المصادر لحظة دخول المشغّل، ومسحها عند الخروج (picker/embed/loading).
+     بدون هذا، أي مصدر خلفي جديد يصل أثناء التشغيل (من موجة التحميل الكلي) يُعيد حساب
+     riftSources بمصفوفة جديدة (ترتيب مختلف) → RiftPlayer يستقبل sources prop جديد
+     أثناء التشغيل الفعلي مما يُسبِّب توقف/إعادة تعيين غير متوقعة والعودة لشاشة الـ picker. */
   useEffect(() => {
-    if (screen !== "native") {
+    if (screen === "native") {
+      if (frozenSources.length === 0 && riftSources.length > 0) setFrozenSources(riftSources);
+    } else {
       setFrozenSources([]);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
 
   /* ── Grouped by quality for picker ── */
@@ -820,6 +852,12 @@ export default function WatchScreen() {
         initialPosition={resumeTime}
         totalEps={totalEpsCount}
         onBack={() => { saveProgress(); setScreen("picker"); }}
+        onError={() => {
+          /* جميع مصادر المشغّل فشلت → العودة للـ picker حتى يرى المستخدم بقية المصادر */
+          console.warn("[Anime Watch] جميع المصادر فشلت — العودة للـ picker");
+          saveProgress();
+          setScreen("picker");
+        }}
         onProgress={(pos, dur) => {
           lastTimeRef.current = pos;
           if (pos > 10) AsyncStorage.setItem(progressKey, String(Math.floor(pos))).catch(() => { });
