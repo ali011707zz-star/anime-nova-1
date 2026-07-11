@@ -1,5 +1,5 @@
 import { secureFetch } from "@/utils/secureApi";
-import { getBaseUrl } from "./baseUrl";
+import { getBaseUrl } from "@/utils/baseUrl";
 export { getBaseUrl };
 
 export async function fetchRemoteConfig() {
