@@ -4683,7 +4683,8 @@ async function searchWitanimeYou(title: string): Promise<number | null> {
       );
       if (!best || score > best.score) best = { id: a.id, score };
     }
-    return best && best.score > 0.1 ? best.id : (data[0]?.id ?? null);
+    // عتبة مرتفعة — لا نرجع data[0] بشكل أعمى إذا كان التشابه منخفضاً جداً
+    return best && best.score > 0.35 ? best.id : null;
   } catch { return null; }
 }
 
@@ -4732,13 +4733,8 @@ function decodeWitaYouServer(
 /** جلب صفحة الحلقة → فك تشفير _zX/_zK → embed URLs */
 async function fetchWitaYouServers(epUrl: string): Promise<string[]> {
   let html: string | null = null;
-  try {
-    const r = await fetch(epUrl, {
-      headers: { ...BASE_HDRS, Referer: WITANIME_YOU_BASE + "/" },
-      signal: AbortSignal.timeout(12000),
-    });
-    if (r.ok) html = await r.text();
-  } catch {}
+  // صفحات الحلقات محمية بـ Cloudflare — نستخدم cfProxy (curl_cffi)
+  html = await smartFetch(epUrl, { referer: WITANIME_YOU_BASE + "/", timeoutMs: 14000 });
   if (!html) return [];
 
   const zXm = html.match(/var\s+_zX\s*=\s*"([^"]+)"/);
@@ -10288,7 +10284,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("witanime_db",  () => getWitanimeDBSources(title, english, ep, anilistId), false, 25000),
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
       scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
-      scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 22000),
+      scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   true, 22000),
       scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 22000),
       scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
