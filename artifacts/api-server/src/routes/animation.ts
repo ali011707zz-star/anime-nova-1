@@ -1945,38 +1945,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── 23. vidbinge → DISABLED (timeout from datacenter IPs) ───────────────
       Promise.resolve(),
 
-      // ── Streamrip — روابط MP4 مباشرة إنجليزية (MovieBox) ──────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const SRIP = "https://streamrip-website-production.up.railway.app";
-          const SRIP_REF = "https://fmoviesunblocked.net/";
-          const SRIP_ORIGIN = "https://fmoviesunblocked.net";
-          const endpoint = type === "tv"
-            ? `${SRIP}/api/download/tv/${tmdbId}`
-            : `${SRIP}/api/download/movie/${tmdbId}`;
-          const r = await fetch(endpoint, { signal: AbortSignal.timeout(12_000) });
-          if (!r.ok) return;
-          const data: any = await r.json();
-          const downloads: any[] = data?.downloads || [];
-          // فلتر: إنجليزي فقط (MovieBox [English]) — يستبعد Hindi/Telugu/Norwegian
-          const english = downloads.filter((d: any) => {
-            const srv = (d.server || "").toLowerCase();
-            return srv.includes("english") &&
-              !srv.includes("hindi") &&
-              !srv.includes("telugu") &&
-              !srv.includes("norwegian") &&
-              typeof d.url === "string" && d.url.startsWith("http");
-          });
-          for (const dl of english) {
-            const q = Number(dl.quality) || 0;
-            if (q <= 0) continue; // skip invalid quality
-            const label = `Streamrip · ${q}p`;
-            const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(dl.url)}&ref=${encodeURIComponent(SRIP_REF)}&origin=${encodeURIComponent(SRIP_ORIGIN)}`;
-            sendSource(dl.url, label, dl.url, proxyUrl);
-          }
-        } catch { /* silent */ }
-      })(),
+      // ── Streamrip — DISABLED 2026-07-11: Railway API returns 404 (server shutdown) ──
+      Promise.resolve(),
 
       // ── 16. 2embed.skin (TMDB-based, tries streamwish/filemoon extraction) ─────
       (async () => {
@@ -3610,7 +3580,56 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // cooldown: enc-dec.app/api/enc-hexa يعيد 500 مع "Next retry: N minutes"
       //           → نتجنب الـ hammering بحفظ _hexaFailUntil
 
-      // CinePro (CP): أُزيل كلياً بطلب المستخدم 2026-07-09 — راجع memory: cinepro-self-hosted.md
+      // ── CinePro (CP) — self-hosted microservice على VPS (port 3000) ──────────────
+      // TMDB-native, ~14 provider (VixSrc/VidApi/Icefy/…), movie+TV
+      // API: GET /v1/movies/{id}  أو  /v1/tv/{id}/seasons/{s}/episodes/{e}
+      // Response: { sources: [{ id:{id,name}, quality, url }], subtitles: [] }
+      // proxy URLs: /v1/proxy?data=<json-encoded-{url}> → يجب فك ترميزها
+      scrapeAnimCached("cinepro", async () => {
+        if (!tmdbId) return;
+        try {
+          const CP_BASE = "http://localhost:3000";
+          const endpoint = type === "tv"
+            ? `${CP_BASE}/v1/tv/${tmdbId}/seasons/${season}/episodes/${epNum}`
+            : `${CP_BASE}/v1/movies/${tmdbId}`;
+          const r = await fetch(endpoint, { signal: AbortSignal.timeout(40_000) });
+          if (!r.ok) return;
+          const cpData: any = await r.json().catch(() => null);
+          if (!cpData?.sources?.length) return;
+
+          for (const src of cpData.sources as any[]) {
+            let rawUrl: string = src.url || "";
+            if (!rawUrl) continue;
+
+            // فك ترميز proxy URL الداخلية: /v1/proxy?data=<json>
+            if (rawUrl.startsWith("/v1/proxy") || rawUrl.includes("/v1/proxy?")) {
+              try {
+                const proxyParams = new URL(rawUrl.startsWith("http") ? rawUrl : `http://x.com${rawUrl}`).searchParams;
+                const dataStr = proxyParams.get("data");
+                if (dataStr) {
+                  const decoded = JSON.parse(decodeURIComponent(dataStr)) as { url?: string };
+                  if (decoded?.url) rawUrl = decoded.url;
+                }
+              } catch { continue; }
+            }
+            if (!rawUrl.startsWith("http")) continue;
+
+            const providerName = (typeof src.id === "object" ? src.id?.name : src.id) || "CP";
+            const quality = src.quality || "720p";
+            const label = `CinePro · ${providerName} · ${quality}`;
+
+            // VidApi يستخدم مسارات غير تقليدية (/pl/ أو /playlist/) — يُعدّ HLS
+            const isHls = rawUrl.includes(".m3u8") || /\/(pl|playlist)\//i.test(rawUrl);
+            if (isHls) {
+              const proxied = toHlsProxy(rawUrl, rawUrl);
+              sendSource(rawUrl, label, rawUrl, proxied);
+            } else {
+              const proxied = `/api/anime/video-proxy?url=${encryptParam(rawUrl)}&ref=${encryptParam(rawUrl)}`;
+              sendSource(rawUrl, label, rawUrl, proxied);
+            }
+          }
+        } catch { /* silent */ }
+      }),
 
       scrapeAnimCached("hexa", async () => {
         return; // DISABLED 2026-07-08: enc-dec.app/api/enc-hexa returns HTTP 500 consistently — broken on their end
