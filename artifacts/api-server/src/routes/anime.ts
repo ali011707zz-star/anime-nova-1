@@ -9572,7 +9572,23 @@ async function getAnimeSlayerSources(
           continue;
         }
         if (link.includes("drive.google.com")) continue; // Google Drive غير مدعوم كمصدر مباشر
-        // mixdrop / streamtape / filemoon / ok.ru / streamwish-family → extractVideoDeep
+        if (link.includes("ok.ru")) {
+          const oid = link.match(/ok\.ru\/video\/(\d+)/)?.[1] || link.match(/ok\.ru\/videoembed\/(\d+)/)?.[1];
+          if (oid) {
+            const vids = await extractOkRuVideo(oid);
+            const bestVid = vids.sort((a, b) => (parseInt(b.name) || 0) - (parseInt(a.name) || 0))[0];
+            if (bestVid) {
+              out.push({
+                name: "AnimeSlayer · OK.ru", url: link, quality: bestVid.name || "SD", qualityRank: 10,
+                site: "anslayer",
+                directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(bestVid.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
+                directType: "mp4",
+              });
+            }
+          }
+          continue;
+        }
+        // mixdrop / streamtape / filemoon / streamwish-family → extractVideoDeep
         const extracted = await extractVideoDeep(link, link);
         if (extracted?.url) {
           const host = link.includes("mixdrop") ? "MixDrop"
