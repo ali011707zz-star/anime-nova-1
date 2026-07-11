@@ -9531,24 +9531,29 @@ async function anslayerGet(path: string, params: Record<string, any>): Promise<a
 }
 
 async function getAnimeSlayerSources(
-  title: string, english: string | null, ep: number,
+  title: string, english: string | null, ep: number, directAnimeId?: number,
 ): Promise<UnifiedSource[]> {
-  const ck = `anslayer:${english || title}:${ep}`;
+  const ck = directAnimeId ? `anslayer:id:${directAnimeId}:${ep}` : `anslayer:${english || title}:${ep}`;
   const hit = _anslayerCacheMap.get(ck);
   if (hit && Date.now() - hit.ts < ANSLAYER_TTL) return hit.sources;
 
   const out: UnifiedSource[] = [];
   try {
-    // ── 1) بحث + أفضل تطابق ──
-    const queries = [...new Set([english, title].filter(Boolean) as string[])];
-    let best: { score: number; id: number; name: string } | null = null;
-    for (const q of queries) {
-      const data = await anslayerGet("animes/get-published-animes", { list_type: "filter", anime_name: q, page: 1 });
-      const list: any[] = data?.response?.data || [];
-      for (const item of list) {
-        const s = similarity(q, String(item.anime_name || ""));
-        if (s > 0.55 && (!best || s > best.score)) {
-          best = { score: s, id: parseInt(item.anime_id, 10), name: item.anime_name };
+    // ── 1) معرّف مباشر (من كتالوج anslayer نفسه — يُستخدم لقسم "أحدث الحلقات" على
+    //      الواجهة الرئيسية) أو بحث + أفضل تطابق بالاسم ──
+    let best: { score: number; id: number; name: string } | null = directAnimeId
+      ? { score: 1, id: directAnimeId, name: title || english || "" }
+      : null;
+    if (!best) {
+      const queries = [...new Set([english, title].filter(Boolean) as string[])];
+      for (const q of queries) {
+        const data = await anslayerGet("animes/get-published-animes", { list_type: "filter", anime_name: q, page: 1 });
+        const list: any[] = data?.response?.data || [];
+        for (const item of list) {
+          const s = similarity(q, String(item.anime_name || ""));
+          if (s > 0.55 && (!best || s > best.score)) {
+            best = { score: s, id: parseInt(item.anime_id, 10), name: item.anime_name };
+          }
         }
       }
     }
@@ -10338,6 +10343,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   const format    = ((req.query.format  as string) || "").trim().toUpperCase();
   const isMovieParam = (req.query.isMovie as string) === "true";
   const isMovie   = format === "MOVIE" || format === "MOVIE_SHORT" || isMovieParam;
+  const anslayerId = parseInt((req.query.anslayerId as string) || "0") || undefined;
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
@@ -10455,7 +10461,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
-      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep),          20_000, [])).forEach(collectSrc); break;
+      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       default: break;
     }
@@ -10549,6 +10555,43 @@ router.get("/anime/check-arabic", async (req, res) => {
     res.json({ available });
   } catch {
     res.json({ available: [] });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  AnimeSlayer latest episodes  GET /api/anime/anslayer-latest
+//  يُستخدم في قسم "أحدث الحلقات" على الواجهة الرئيسية — كتالوج anslayer
+//  الخاص به مباشرةً (anime_id + latest_episode_name + cover) بلا أي
+//  اعتماد على AniList أو مصادر أخرى، لأن التشغيل مقيّد بمصدر anslayer فقط.
+// ════════════════════════════════════════════════════════════════════
+let _anslayerLatestCache: any[] | null = null;
+let _anslayerLatestTs = 0;
+const ANSLAYER_LATEST_TTL = 15 * 60_000; // 15 دقيقة — قائمة "آخر تحديث" تتغيّر بسرعة
+
+router.get("/anime/anslayer-latest", async (req, res) => {
+  try {
+    if (_anslayerLatestCache && Date.now() - _anslayerLatestTs < ANSLAYER_LATEST_TTL) {
+      res.json({ items: _anslayerLatestCache });
+      return;
+    }
+    const data = await anslayerGet("animes/get-published-animes", { list_type: "latest_updated_episode_new", page: 1 });
+    const list: any[] = data?.response?.data || [];
+    const items = list.map((item: any) => {
+      const epMatch = String(item.latest_episode_name || "").match(/(\d+)/);
+      return {
+        animeId: parseInt(item.anime_id, 10),
+        name: item.anime_name || "",
+        episode: epMatch ? parseInt(epMatch[1], 10) : null,
+        cover: item.anime_cover_image_url || "",
+        year: item.anime_release_year || "",
+      };
+    }).filter((it: any) => it.animeId && it.episode);
+
+    _anslayerLatestCache = items;
+    _anslayerLatestTs = Date.now();
+    res.json({ items });
+  } catch (e: any) {
+    res.json({ items: _anslayerLatestCache || [], error: e?.message });
   }
 });
 

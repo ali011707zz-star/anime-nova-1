@@ -47,7 +47,7 @@ interface Src {
 /* ── Site → 2-letter tag (mirrors web SCRAPER_DEFS tags exactly) ── */
 const SITE_TAG: Record<string, string> = {
   shahiid: "SH", animelek: "EK", animedar: "AD", okanime: "OK",
-  ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AS",
+  ristoanime: "RS", animeify: "AF", animeday: "DY", arabseed: "AR",
   anime4up2: "4U", mycima: "MC", topcinemaa: "TC", animephoenix: "PH",
   animewitcher: "AW", kawaii: "KW",
   anikoto: "AK", anikototv: "ATV", animekai: "KI", hianime: "HI",
@@ -55,7 +55,7 @@ const SITE_TAG: Record<string, string> = {
   videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
-  notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "ASL",
+  notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
