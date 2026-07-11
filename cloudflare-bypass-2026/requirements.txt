@@ -1,0 +1,4 @@
+# Cloudflare Turnstile 绕过工具 - 核心依赖
+# Python 3.9+
+
+seleniumbase>=4.28.0    # SeleniumBase UC Mode (核心)
