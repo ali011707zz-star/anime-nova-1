@@ -274,6 +274,10 @@ export default function AnimationWatchScreen() {
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
+  /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
+     التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
+     يُسبِّب توقف التشغيل والعودة غير المتوقعة لشاشة الـ picker. */
+  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
@@ -549,6 +553,16 @@ export default function AnimationWatchScreen() {
     // "native" orientation is handled by RiftPlayer itself
   }, [screen]);
 
+  /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker) ── */
+  useEffect(() => {
+    if (screen === "native") {
+      if (frozenSources.length === 0 && riftSources.length > 0) setFrozenSources(riftSources);
+    } else {
+      setFrozenSources([]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
@@ -689,11 +703,12 @@ export default function AnimationWatchScreen() {
   }
 
   /* ═══════════════════ RIFT PLAYER ═══════════════════ */
-  if (screen === "native" && riftSources.length > 0) {
-    const startIdx = Math.max(0, riftSources.findIndex(s => s.url === getPlayUrl(playingSrc!)));
+  const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
+  if (screen === "native" && playerSources.length > 0) {
+    const startIdx = Math.max(0, playerSources.findIndex(s => s.url === getPlayUrl(playingSrc!)));
     return (
       <RiftPlayer
-        sources={riftSources}
+        sources={playerSources}
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
