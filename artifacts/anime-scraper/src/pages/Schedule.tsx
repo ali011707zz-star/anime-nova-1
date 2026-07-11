@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, Clock, Tv2, CalendarDays, Zap } from 'lucide-react';
+import { Loader2, Clock, Tv2, CalendarDays, Zap, ChevronRight } from 'lucide-react';
 import { Link } from 'wouter';
 
 const SCHEDULE_QUERY = `
@@ -278,13 +278,23 @@ export default function Schedule() {
       {/* ── Header ── */}
       <div className="px-4 pt-5 pb-3">
         <div className="flex items-end justify-between mb-1">
-          <div>
+          <div className="flex items-center gap-2.5">
+            <Link href="/">
+              <button
+                className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl active:scale-90 transition-transform"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+              >
+                <ChevronRight className="w-4 h-4 text-white/55" />
+              </button>
+            </Link>
+            <div>
             <h1 className="text-[22px] font-black leading-tight tracking-tight">جدول البث</h1>
             <p className="text-white/35 text-[12px] mt-0.5">
               {isUpdates
                 ? `${dayItems.length} حلقة بُثّت اليوم`
                 : `${dayItems.length} حلقة ${isToday ? "اليوم" : `يوم ${activeDay}`}`}
             </p>
+          </div>
           </div>
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
             style={{ background: "rgba(139,92,246,0.14)", border: "1px solid rgba(139,92,246,0.25)" }}>

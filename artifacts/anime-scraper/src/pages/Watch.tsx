@@ -3241,13 +3241,9 @@ export default function WatchPage() {
       const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
       pendingTimeoutsRef.current.push(id);
     });
-    /* شاشة السيرفرات تبدأ مخفية (showPicker=false) — إن لم ينجح أي مصدر بالتشغيل
-       التلقائي خلال 900ms تُعرض الشاشة كخيار يدوي؛ إن نجح مصدر أسرع من ذلك (الحالة
-       الغالبة) فلن تظهر الشاشة نهائياً ولن يحدث "الفلاش" السابق. */
-    const showId = window.setTimeout(() => {
-      if (phaseRef.current === "picker") setShowPicker(true);
-    }, 900);
-    pendingTimeoutsRef.current.push(showId);
+    /* شاشة السيرفرات تبدأ مخفية (showPicker=false) — تظهر تلقائياً فقط إن فشلت جميع
+       المصادر (handleTierExhausted) أو إن ضغط المستخدم "رجوع" من المشغّل.
+       لا تظهر بمؤقت تلقائي قبل بدء البث لتجنب الـ flash. */
     /* Cancel any still-queued (not-yet-started) fetches on episode change/unmount */
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));

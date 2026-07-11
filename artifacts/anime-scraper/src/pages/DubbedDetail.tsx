@@ -1,7 +1,7 @@
 import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation, useSearch } from "wouter";
-import { ChevronRight, Play, Clock, Loader2 } from "lucide-react";
+import { ChevronRight, Play, Clock, Loader2, MessageCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import SEO from "@/components/SEO";
@@ -288,10 +288,19 @@ export default function DubbedDetail() {
                   )}
                 </div>
 
-                {/* Play button */}
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                  style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
-                  <Play className="w-3.5 h-3.5 text-[#A78BFA] fill-[#A78BFA]" />
+                {/* Buttons */}
+                <div className="flex flex-col gap-1.5 shrink-0">
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+                    style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
+                    <Play className="w-3.5 h-3.5 text-[#A78BFA] fill-[#A78BFA]" />
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); navigate(watchUrl(ep) + "#comments"); }}
+                    className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
+                  >
+                    <MessageCircle className="w-3.5 h-3.5 text-white/40" />
+                  </button>
                 </div>
               </motion.div>
             );
