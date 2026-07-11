@@ -170,7 +170,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
   { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY", isArabic: true },
-  { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS", isArabic: true },
+  { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AR", isArabic: true },
   { site: "stardima",     name: "ستارديما",       desc: "عربي مدبلج · MP4 مباشر",   tag: "SR", isArabic: true },
   { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U", isArabic: true },
   { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC", isArabic: true },
@@ -178,7 +178,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "faselhd_db",  name: "فاصل HD",      desc: "عربي مترجم · GitHub DB",   tag: "FH",  isArabic: true },
   { site: "witanime",     name: "ويتأنمي",      desc: "عربي مترجم · CycleTLS",     tag: "WI", isArabic: true },
   { site: "sanime",       name: "S أنمي",       desc: "عربي مدبلج/مترجم · MP4",   tag: "SA", isArabic: true },
-  { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "ASL", isArabic: true },
+  { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "ristoanime",   name: "ريستو أنمي",   desc: "عربي مترجم · MP4 مباشر",   tag: "RA", isArabic: true },
   // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
@@ -970,6 +970,7 @@ function ScraperPicker({
   slotStatus, slotSources,
   onFetchSite, onPlaySrc,
   onBack, onNextEp, onPrevEp,
+  singleSite,
 }: {
   cover: string; title: string; ep: number; totalEps: number; animeId: number;
   anime?: any;
@@ -978,13 +979,16 @@ function ScraperPicker({
   onFetchSite: (site: string) => void;
   onPlaySrc: (src: FetchedSrc) => void;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
+  /* عند التحديد — قسم "أحدث الحلقات" يقيّد التشغيل بمصدر واحد فقط، فلا نعرض زر أي مصدر آخر */
+  singleSite?: string | null;
 }) {
+  const VISIBLE_DEFS = singleSite ? SCRAPER_DEFS.filter(d => d.site === singleSite) : SCRAPER_DEFS;
   /* anyFetching: true while at least one scraper is actively running
      hasIdleScrapers: true whenever any scraper is still untried (idle)
      allScrapersComplete: all scrapers done — none fetching, none idle
      allDone: scrapers not actively running (idle counts as "not started", not "running") */
-  const anyFetching        = SCRAPER_DEFS.some(d => slotStatus[d.site] === "fetching");
-  const hasIdleScrapers    = SCRAPER_DEFS.some(d => slotStatus[d.site] === "idle");
+  const anyFetching        = VISIBLE_DEFS.some(d => slotStatus[d.site] === "fetching");
+  const hasIdleScrapers    = VISIBLE_DEFS.some(d => slotStatus[d.site] === "idle");
   const allScrapersComplete = !anyFetching && !hasIdleScrapers;
   const allDone = !anyFetching;
 
@@ -1320,7 +1324,7 @@ function ScraperPicker({
               اختر مصدراً لبدء التشغيل
             </p>
             <div className="grid grid-cols-2 gap-2.5">
-              {SCRAPER_DEFS.map(d => {
+              {VISIBLE_DEFS.map(d => {
                 const st = slotStatus[d.site];
                 const isFetching = st === "fetching";
                 const isFailed   = st === "failed";
@@ -3151,6 +3155,9 @@ export default function WatchPage() {
 
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
+      /* anslayerId: يمرَّر من قسم "أحدث الحلقات" (معرّف anslayer المباشر من كتالوجه —
+         يتجاوز البحث بالاسم ويحدّد الأنمي الصحيح 100%). */
+      if (site === "anslayer" && sp.get("anslayerId")) params.set("anslayerId", sp.get("anslayerId")!);
       const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: ctrl.signal, headers: { "X-App-Token": await getAppToken() } });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
@@ -3221,9 +3228,13 @@ export default function WatchPage() {
      الحالي عند bgLoad=false)، والباقي يستمر بالتحميل خلفياً ليظهر في قائمة السيرفرات
      الكاملة (مثل شاشة "مصادر المشاهدة" بعد فتح المشغّل في قسم الأنميشن). ── */
   useEffect(() => {
-    if (!animeId || !titleParam) return;
+    if (!titleParam) return;
+    /* single=1 → آتٍ من قسم "أحدث الحلقات" (مصدر anslayer مباشرةً بمعرّفه الخاص) —
+       يجب ألا يجلب أي مصدر آخر سوى anslayer نفسه. */
+    const singleSite = sp.get("single") === "1" ? sp.get("site") : null;
+    const defs = singleSite ? SCRAPER_DEFS.filter(d => d.site === singleSite) : SCRAPER_DEFS;
     autoFetchAllRef.current = true;
-    SCRAPER_DEFS.forEach((def, i) => {
+    defs.forEach((def, i) => {
       const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
       pendingTimeoutsRef.current.push(id);
     });
@@ -3376,6 +3387,7 @@ export default function WatchPage() {
               animeId={animeId}
               onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
               onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
+              singleSite={sp.get("single") === "1" ? sp.get("site") : null}
             />
             {/* ── Failed source toast notification ── */}
             <AnimatePresence>
