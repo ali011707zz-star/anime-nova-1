@@ -918,6 +918,119 @@ export default function AnimeDetail() {
         )}
       </AnimatePresence>
 
+      {/* ── نافذة التعليقات ── */}
+      <AnimatePresence>
+        {showComments && (
+          <div className="fixed inset-0 z-[200]" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/75 backdrop-blur-md"
+              onClick={() => setShowComments(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", stiffness: 380, damping: 36 }}
+              className="absolute inset-x-0 bottom-0 flex flex-col"
+              style={{
+                maxHeight: "85dvh",
+                background: "linear-gradient(180deg,#0F0D1B 0%,#09090B 100%)",
+                borderRadius: "1.75rem 1.75rem 0 0",
+                border: "1.5px solid rgba(139,92,246,0.18)",
+                borderBottom: "none",
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-2.5 pb-1 shrink-0">
+                <div className="w-9 h-[3px] rounded-full bg-white/10" />
+              </div>
+              <div className="flex items-center justify-between px-5 pb-3.5 pt-1 shrink-0"
+                style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                <p className="text-[14.5px] font-black font-['Cairo'] text-white">
+                  التعليقات
+                  {comments.length > 0 && (
+                    <span className="mr-1.5 text-[10px] text-violet-400/80 font-black bg-violet-500/10 px-1.5 py-0.5 rounded-lg">
+                      {comments.length}
+                    </span>
+                  )}
+                </p>
+                <button onClick={() => setShowComments(false)}
+                  className="w-8 h-8 rounded-2xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <X className="w-4 h-4 text-white/40" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {comments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3">
+                    <MessageSquare className="w-7 h-7 text-violet-400/30" />
+                    <p className="text-[13px] font-black font-['Cairo'] text-white/40">لا تعليقات بعد</p>
+                    <p className="text-[11px] text-white/20 font-['Cairo']">كن أول من يشارك رأيه!</p>
+                  </div>
+                ) : (
+                  <div className="py-2">
+                    {comments.map((c: any) => {
+                      const isMe = c.username === getMyName() || c.author === getMyName();
+                      return (
+                        <div key={c.id} className="flex gap-3 px-4 py-3.5">
+                          {c.avatarUrl ? (
+                            <img src={c.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0 border border-white/10" />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full flex items-center justify-center font-black text-white text-[13px] shrink-0"
+                              style={{ background: avatarColor(c.username || c.author || "?") }}>
+                              {(c.username || c.author || "?").charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[12.5px] font-black font-['Cairo'] text-white/90">{c.username || c.author}</span>
+                              {isMe && (
+                                <button onClick={() => deleteComment(c.id)}
+                                  className="w-6 h-6 flex items-center justify-center active:scale-90 transition-transform">
+                                  <Flag className="w-3.5 h-3.5 text-white/15" style={{ display: "none" }} />
+                                </button>
+                              )}
+                            </div>
+                            <div className="rounded-2xl rounded-tr-sm px-3.5 py-2.5 mb-2"
+                              style={{ background: isMe ? "rgba(124,58,237,0.12)" : "rgba(255,255,255,0.04)", border: isMe ? "1px solid rgba(124,58,237,0.18)" : "1px solid rgba(255,255,255,0.06)" }}>
+                              <p className="text-[13px] text-white/85 font-['Cairo'] leading-relaxed">{c.text}</p>
+                            </div>
+                            <motion.button whileTap={{ scale: 0.85 }} onClick={() => toggleLike(c.id)}
+                              className="flex items-center gap-1.5 text-[11px] font-bold transition-colors"
+                              style={{ color: c.liked ? "#EC4899" : "rgba(255,255,255,0.25)" }}>
+                              <Heart className={`w-3.5 h-3.5 ${c.liked ? "fill-current" : ""}`} />
+                              {c.likes > 0 && <span>{c.likes}</span>}
+                            </motion.button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="shrink-0 px-4 py-3"
+                style={{ borderTop: "1px solid rgba(255,255,255,0.05)", background: "rgba(9,9,11,0.95)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 flex items-center gap-2 rounded-2xl px-4 py-2.5"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                    <input value={newComment} onChange={e => setNewComment(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && addComment()}
+                      placeholder={user ? "شارك رأيك..." : "سجّل دخولك للتعليق"}
+                      readOnly={!user}
+                      className="flex-1 bg-transparent text-white text-[13px] outline-none font-['Cairo'] placeholder:text-white/20" />
+                  </div>
+                  <motion.button whileTap={{ scale: 0.9 }} onClick={addComment}
+                    disabled={!newComment.trim() || !user || sendingComment}
+                    className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 disabled:opacity-30 transition-all"
+                    style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)" }}>
+                    <Send className="w-4 h-4 text-white" />
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </main>
   );
 }
