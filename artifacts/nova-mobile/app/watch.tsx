@@ -172,6 +172,31 @@ function resolveUrl(url: string | undefined, base: string): string {
   return url.startsWith("/") ? base + url : url;
 }
 
+/**
+ * يضمن أن رابط الفيديو يمرّ عبر VPS proxy لضمان التوافق مع ExoPlayer/AVPlayer.
+ * إذا كان الرابط بالفعل عبر /api/ → يتركه كما هو.
+ * إذا كان رابطاً مباشراً للـ CDN → يلفّه في hls-proxy أو video-proxy.
+ */
+function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
+  if (!url) return url;
+  // بالفعل proxy عبر VPS
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
+  // روابط embed (mega / vidmoly) — لا نلفّها
+  if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
+  if (url.includes("mp4upload")) return url;
+  const ref = headers?.Referer || "";
+  const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
+  if (isHls) {
+    return ref
+      ? `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`
+      : `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
+  }
+  if (ref) {
+    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+  }
+  return url; // لا Referer متاح — استخدم كما هو
+}
+
 /* ── مصادر تُشغَّل native مباشرةً عبر RiftPlayer (seg-proxy يُعيد روابط مطلقة الآن) ── */
 
 /* ── أولويات المصادر: KW → HI → AW → DU → rest ── */
@@ -279,9 +304,9 @@ export default function WatchScreen() {
   const displayTitle = titleArStr || englishStr || titleStr;
 
   /* ── State ── */
-  const [screen,      setScreen]      = useState<Screen>("picker"); // يعرض picker فوراً
+  const [screen,      setScreen]      = useState<Screen>("loading"); // يبدأ بـ loading ثم يشغّل تلقائياً
   const [sources,     setSources]     = useState<Src[]>([]);
-  const [loading,     setLoading]     = useState(false); // لا تحميل تلقائي عند الفتح
+  const [loading,     setLoading]     = useState(true);
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
   const [resolveFailed, setResolveFailed] = useState(false); // آخر محاولة WebView مخفي فشلت → نعرض بطاقة "يحتاج تطبيق أصلي"
