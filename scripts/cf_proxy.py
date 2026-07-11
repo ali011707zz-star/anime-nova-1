@@ -215,34 +215,40 @@ def fetch_url():
     status, body_text, engine_used = 0, "", "none"
     error_msg = ""
 
-    # ── المحاولة 1: curl_cffi ─────────────────────────────────────────────────
+    # ── المحاولة 1: curl_cffi (مع retry على profile مختلف إذا فشل الأول) ──────
     if force_engine != "primp":
-        imp = random.choice(CURL_IMPERSONATES)
-        hdrs = _build_headers(imp, referer, extra_hdrs)
+        imps_to_try = random.sample(CURL_IMPERSONATES, len(CURL_IMPERSONATES))
+        hdrs = _build_headers(imps_to_try[0], referer, extra_hdrs)
         if method == "POST":
             hdrs.setdefault("Content-Type",
                             request.content_type or "application/x-www-form-urlencoded")
-        try:
-            # زيارة تمهيدية لو طُلبت (تحسّن الـ behavioral score)
-            if warmup:
-                try:
-                    sess = cf.Session(impersonate=imp)
-                    warmup_hdrs = _build_headers(imp)
-                    sess.get(warmup, headers=warmup_hdrs, timeout=8,
-                             allow_redirects=True, verify=False)
-                    hdrs["Referer"] = warmup
-                    resp = sess.get(url, headers=hdrs, timeout=timeout,
-                                    allow_redirects=True, verify=False)
-                    status, body_text = resp.status_code, resp.text
-                except Exception:
+        for imp in imps_to_try:
+            try:
+                hdrs = _build_headers(imp, referer, extra_hdrs)
+                # زيارة تمهيدية لو طُلبت (تحسّن الـ behavioral score)
+                if warmup:
+                    try:
+                        sess = cf.Session(impersonate=imp)
+                        warmup_hdrs = _build_headers(imp)
+                        sess.get(warmup, headers=warmup_hdrs, timeout=8,
+                                 allow_redirects=True, verify=False)
+                        hdrs["Referer"] = warmup
+                        resp = sess.get(url, headers=hdrs, timeout=timeout,
+                                        allow_redirects=True, verify=False)
+                        status, body_text = resp.status_code, resp.text
+                    except Exception:
+                        status, body_text, imp = fetch_curl(
+                            url, hdrs, method, post_body, timeout, imp)
+                else:
                     status, body_text, imp = fetch_curl(
                         url, hdrs, method, post_body, timeout, imp)
-            else:
-                status, body_text, imp = fetch_curl(
-                    url, hdrs, method, post_body, timeout, imp)
-            engine_used = f"curl/{imp}"
-        except Exception as e:
-            error_msg = str(e)
+                engine_used = f"curl/{imp}"
+                error_msg = ""
+                break  # نجح — أوقف المحاولات
+            except (ValueError, Exception) as e:
+                error_msg = str(e)
+                # ValueError = profile غير مدعوم — جرب profile التالي
+                continue
 
     # ── المحاولة 2: primp fallback ────────────────────────────────────────────
     if PRIMP_AVAILABLE and (force_engine == "primp" or

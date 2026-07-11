@@ -4688,33 +4688,73 @@ async function searchWitanimeYou(title: string): Promise<number | null> {
   } catch { return null; }
 }
 
-/** جلب رابط الحلقة عبر REST API (anime taxonomy ID + ep number) */
-async function getWitanimeYouEpisodeUrl(animeId: number, ep: number): Promise<string | null> {
-  try {
-    for (let page = 1; page <= 6; page++) {
-      const r = await fetch(
-        `${WITANIME_YOU_BASE}/wp-json/wp/v2/episode?anime=${animeId}&per_page=100&page=${page}&order=asc&orderby=date`,
-        { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) },
-      );
-      if (!r.ok) break;
-      const episodes = await r.json() as Array<{
-        id: number; slug: string; link: string; title: { rendered: string };
-      }>;
-      if (!episodes.length) break;
+/** استخرج رقم الحلقة من slug أو عنوان حلقة witanime */
+function extractWitaEpNum(slug: string, label: string): number | null {
+  const m = slug.match(/(?:الحلقة|episode)[- _]?(\d+)/i)
+         ?? slug.match(/[-_](\d+)$/)
+         ?? label.match(/(?:الحلقة|episode)[- _]?(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
+}
 
-      for (const epData of episodes) {
-        const slug  = decodeURIComponent(epData.slug);
-        const label = epData.title?.rendered ?? "";
-        // نستخرج رقم الحلقة من الـ slug أو العنوان
-        const m = slug.match(/(?:الحلقة|episode)[- ]?(\d+)/i)
-               ?? slug.match(/[- ](\d+)$/)
-               ?? label.match(/(?:الحلقة|episode)[- ]?(\d+)/i);
-        if (m && parseInt(m[1], 10) === ep) return epData.link;
+/** جلب رابط الحلقة عبر REST API (anime taxonomy ID + ep number)
+ *  استراتيجية: بحث مباشر أولاً (سريع) → ثم مسح موازي لكل الصفحات */
+async function getWitanimeYouEpisodeUrl(animeId: number, ep: number): Promise<string | null> {
+  const BASE = `${WITANIME_YOU_BASE}/wp-json/wp/v2/episode?anime[]=${animeId}`;
+
+  // ── المسار السريع: بحث مباشر بـ ?search=الحلقة+{ep} ─────────────────────
+  try {
+    const query = encodeURIComponent(`الحلقة ${ep}`);
+    const r = await fetch(`${BASE}&search=${query}&per_page=20`, {
+      headers: BASE_HDRS, signal: AbortSignal.timeout(8000),
+    });
+    if (r.ok) {
+      const hits = await r.json() as Array<{ id: number; slug: string; link: string; title: { rendered: string } }>;
+      for (const h of hits) {
+        if (extractWitaEpNum(decodeURIComponent(h.slug), h.title?.rendered ?? "") === ep)
+          return h.link;
       }
-      if (episodes.length < 100) break;
     }
-    return null;
-  } catch { return null; }
+  } catch { /* silent — نكمل للمسح الكامل */ }
+
+  // ── المسار الشامل: جلب الصفحات بالتوازي (لا sequential) ─────────────────
+  try {
+    // أولاً: اجلب page=1 لمعرفة عدد الصفحات (X-WP-TotalPages header)
+    const firstRes = await fetch(`${BASE}&per_page=100&page=1&orderby=date&order=asc`, {
+      headers: BASE_HDRS, signal: AbortSignal.timeout(8000),
+    });
+    if (!firstRes.ok) return null;
+    const totalPages = Math.min(
+      parseInt(firstRes.headers.get("X-WP-TotalPages") ?? "1", 10) || 1,
+      13,
+    );
+    const firstEps = await firstRes.json() as Array<{ id: number; slug: string; link: string; title: { rendered: string } }>;
+
+    // افحص page 1 مباشرة
+    for (const e of firstEps) {
+      if (extractWitaEpNum(decodeURIComponent(e.slug), e.title?.rendered ?? "") === ep) return e.link;
+    }
+
+    if (totalPages <= 1) return null;
+
+    // الصفحات 2..N بالتوازي
+    const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+    const results = await Promise.allSettled(
+      remaining.map(page => fetch(
+        `${BASE}&per_page=100&page=${page}&orderby=date&order=asc`,
+        { headers: BASE_HDRS, signal: AbortSignal.timeout(8000) },
+      ).then(r => r.ok ? r.json() : [])),
+    );
+
+    for (const res of results) {
+      if (res.status !== "fulfilled") continue;
+      const eps = res.value as Array<{ id: number; slug: string; link: string; title: { rendered: string } }>;
+      for (const e of eps) {
+        if (extractWitaEpNum(decodeURIComponent(e.slug), e.title?.rendered ?? "") === ep) return e.link;
+      }
+    }
+  } catch { /* silent */ }
+
+  return null;
 }
 
 /** فك تشفير URL واحد من resourceRegistry + configRegistry — خوارزمية gh100.js */
@@ -10284,7 +10324,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("witanime_db",  () => getWitanimeDBSources(title, english, ep, anilistId), false, 25000),
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
       scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
-      scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   true, 22000),
+      scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   true, 45000),
       scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 22000),
       scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
@@ -10444,7 +10484,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "cinesrc_anim": (await race(getCineSrcAnimeSources(title, english, ep, anilistId), 35_000, [])).forEach(collectSrc); break;
       case "witanime_db":  (await race(getWitanimeDBSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
-      case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep), 22_000, [])); break;
+      case "witanime":     await runExtract(await race(getWitanimeSources(title, english, ep), 45_000, [])); break;
       // case "reanime": DEAD — reanime.net أوقف خدمته 2026-07
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;

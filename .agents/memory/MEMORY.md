@@ -61,3 +61,4 @@
 - [AnimeSlayer catalog-verified retest](anslayer-catalog-verified-retest.md) — cracked-auth API still works correctly; retested with a real catalog title (Naruto Shippuuden) and its own embed links (mediafire/ok.ru) are still dead — source-data problem, not integration bug.
 - [Anime Arab APK — investigation CLOSED](anime-arab-apk-investigation-status.md) — real backend found: Firebase RTDB danyah-58729.firebaseio.com, confirmed permanently deactivated. Not a viable source; don't resume without a new lead.
 - [AnimeSlayer direct-id + tag collision](anslayer-latest-direct-id.md) — getAnimeSlayerSources(...,directAnimeId?) skips fuzzy search when the catalog id is already known; arabseed/anslayer short tags AR/AS fixed after a collision.
+- [WitAnime scraper fixes](witanime-you-fixes.md) — WP6 ?anime[]= fix; cfProxy retry; parallel page scan; 45s timeout; x-internal:1 needed for localhost testing; recent eps work (mega.nz), old eps may be dead.
