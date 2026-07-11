@@ -2802,8 +2802,11 @@ export default function WatchPage() {
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey,      setPlayKey]      = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
-  // showPicker: true — picker shown immediately, user picks scraper first
-  const [showPicker,   setShowPicker]   = useState(true);
+  /* showPicker: يبدأ false — إن وُجد مصدر جاهز للتشغيل التلقائي سريعاً (أقل من ~900ms)
+     فلن تظهر شاشة السيرفرات مطلقاً؛ إن لم يُعثر على أي مصدر بهذه السرعة تظهر الشاشة
+     لتسمح للمستخدم باختيار مصدر يدوياً. هذا يمنع "الفلاش" السابق (ظهور الشاشة لثوانٍ
+     ثم اختفاؤها فجأة عند نجاح أول مصدر). */
+  const [showPicker,   setShowPicker]   = useState(false);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
@@ -3238,6 +3241,13 @@ export default function WatchPage() {
       const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
       pendingTimeoutsRef.current.push(id);
     });
+    /* شاشة السيرفرات تبدأ مخفية (showPicker=false) — إن لم ينجح أي مصدر بالتشغيل
+       التلقائي خلال 900ms تُعرض الشاشة كخيار يدوي؛ إن نجح مصدر أسرع من ذلك (الحالة
+       الغالبة) فلن تظهر الشاشة نهائياً ولن يحدث "الفلاش" السابق. */
+    const showId = window.setTimeout(() => {
+      if (phaseRef.current === "picker") setShowPicker(true);
+    }, 900);
+    pendingTimeoutsRef.current.push(showId);
     /* Cancel any still-queued (not-yet-started) fetches on episode change/unmount */
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
