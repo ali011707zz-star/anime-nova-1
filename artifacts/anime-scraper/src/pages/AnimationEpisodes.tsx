@@ -2,8 +2,9 @@ import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { useParams, useLocation, useSearch, Link } from "wouter";
-import { ChevronRight, Play, Clock, MessageCircle } from "lucide-react";
-import { motion } from "framer-motion";
+import { ChevronRight, Play, Clock, MessageCircle, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import EpComments from "@/components/EpComments";
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
 const IMG_S = "https://image.tmdb.org/t/p/w185";
