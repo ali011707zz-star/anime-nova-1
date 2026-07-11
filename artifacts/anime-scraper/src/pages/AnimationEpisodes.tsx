@@ -6,6 +6,8 @@ import { ChevronRight, Play, Clock, MessageCircle, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import EpComments from "@/components/EpComments";
 
+interface CommentEpItem { episode_number: number; }
+
 const IMG_W = "https://image.tmdb.org/t/p/w500";
 const IMG_S = "https://image.tmdb.org/t/p/w185";
 
@@ -31,6 +33,7 @@ export default function AnimationEpisodes() {
   const [episodes, setEpisodes]   = useState<Episode[]>([]);
   const [epLoading, setEpLoading] = useState(true);
   const [epProgress, setEpProgress] = useState<Record<number, number>>({});
+  const [commentEp, setCommentEp] = useState<CommentEpItem | null>(null);
 
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -88,6 +91,7 @@ export default function AnimationEpisodes() {
   };
 
   return (
+    <>
     <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
 
       {/* ── Sticky Header ── */}
@@ -279,7 +283,7 @@ export default function AnimationEpisodes() {
                       <Play className="w-3.5 h-3.5 text-primary fill-primary" />
                     </div>
                     <button
-                      onClick={e => { e.preventDefault(); e.stopPropagation(); navigate(watchUrl(epItem.episode_number) + "#comments"); }}
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); setCommentEp({ episode_number: epItem.episode_number }); }}
                       className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
                       style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
                     >
@@ -293,5 +297,30 @@ export default function AnimationEpisodes() {
         )}
       </div>
     </main>
+
+    {/* ── نافذة التعليقات ── */}
+    <AnimatePresence>
+      {commentEp && (
+        <div className="fixed inset-0 z-[70] bg-black/70 flex flex-col justify-end" onClick={() => setCommentEp(null)}>
+          <motion.div
+            initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            className="bg-[#0e0e12] rounded-t-3xl overflow-hidden max-h-[80vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-white/6 shrink-0">
+              <h3 className="text-sm font-black font-['Cairo'] text-white">تعليقات الحلقة {commentEp.episode_number}</h3>
+              <button onClick={() => setCommentEp(null)} className="w-7 h-7 rounded-full bg-white/6 flex items-center justify-center">
+                <X className="w-3.5 h-3.5 text-white/50" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-3">
+              <EpComments commKey={`anim-${type}-${id}-s${selSeason}-ep${commentEp.episode_number}`} />
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+    </>
   );
 }
