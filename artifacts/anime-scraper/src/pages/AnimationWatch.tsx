@@ -408,7 +408,17 @@ export default function AnimationWatch() {
       arr.find(s => s.label?.startsWith(prefix) && (s.proxyUrl?.startsWith("/api/") || s.directUrl?.startsWith("/api/"))) ??
       arr.find(s => s.label?.startsWith(prefix));
 
-    // ── الأولوية القصوى: DU (Dulo) — يُشغَّل فور وصوله ──
+    // ── الأولوية القصوى: AW (AnimeWitcher) — يُشغَّل فور وصوله ──
+    const witcher = okSources.find(s => s.label?.includes("AnimeWitcher") || s.label?.toLowerCase().startsWith("aw·"));
+    if (witcher) {
+      if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
+      autoPlayAttemptsRef.current += 1;
+      autoPlayedRef.current = true;
+      playSource(witcher);
+      return;
+    }
+
+    // ── ثاني أولوية: DU (Dulo) ──
     const dulo = okSources.find(s => s.label?.toLowerCase().startsWith("dulo"));
     if (dulo) {
       if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
@@ -436,8 +446,7 @@ export default function AnimationWatch() {
     const ezv          = prefProxy(okSources, "EzVidAPI");
     const aflaam       = okSources.find(s => s.label?.startsWith("aflaam") || s.label?.includes("أفلام"));
     const seepanel     = okSources.find(s => s.label?.startsWith("SeePanal"));
-    const witcher      = okSources.find(s => s.label?.includes("AnimeWitcher"));
-    const slowSrc      = starcima ?? icefy ?? ezv ?? aflaam ?? seepanel ?? witcher;
+    const slowSrc      = starcima ?? icefy ?? ezv ?? aflaam ?? seepanel;
 
     // If SSE done → play best slow source now (fast sources never arrived)
     if (sseDone) {
@@ -455,8 +464,9 @@ export default function AnimationWatch() {
         autoPlayTimerRef.current = null;
         if (autoPlayedRef.current) return;
         const stillOk = sources.filter(s => s.status === "ok");
+        const witcherNow = stillOk.find(s => s.label?.includes("AnimeWitcher") || s.label?.toLowerCase().startsWith("aw·"));
         const duloNow = stillOk.find(s => s.label?.toLowerCase().startsWith("dulo"));
-        const fastNow = duloNow ?? prefProxy(stillOk, "VidLink") ?? prefProxy(stillOk, "Videasy");
+        const fastNow = witcherNow ?? duloNow ?? prefProxy(stillOk, "VidLink") ?? prefProxy(stillOk, "Videasy");
         if (fastNow) {
           autoPlayAttemptsRef.current += 1;
           autoPlayedRef.current = true;

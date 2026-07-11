@@ -3237,7 +3237,11 @@ export default function WatchPage() {
     const singleSite = sp.get("single") === "1" ? sp.get("site") : null;
     const defs = singleSite ? SCRAPER_DEFS.filter(d => d.site === singleSite) : SCRAPER_DEFS;
     autoFetchAllRef.current = true;
-    defs.forEach((def, i) => {
+    /* KW (kawaii) تُجلب أولاً بدون تأخير → أول مصدر جاهز يُشغَّل فوراً */
+    const kawaiiDef = defs.find(d => d.site === "kawaii");
+    const restDefs  = defs.filter(d => d.site !== "kawaii");
+    const orderedDefs = kawaiiDef ? [kawaiiDef, ...restDefs] : defs;
+    orderedDefs.forEach((def, i) => {
       const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
       pendingTimeoutsRef.current.push(id);
     });
