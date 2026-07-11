@@ -49,7 +49,7 @@ function Avatar({ username }: { username: string }) {
 export default function CommentsPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ animeId?: string; tmdbId?: string; ep?: string; title?: string }>();
+  const params = useLocalSearchParams<{ animeId?: string; tmdbId?: string; ep?: string; title?: string; type?: string }>();
 
   const animeId = params.animeId ? parseInt(params.animeId) : undefined;
   const tmdbId  = params.tmdbId || undefined;
@@ -107,7 +107,7 @@ export default function CommentsPage() {
       const body: any = {
         text: text.trim(),
         username: myUsername || myDisplayName || "مستخدم",
-        animeType: tmdbId ? "animation" : "anime",
+        animeType: params.type || (tmdbId ? "animation" : "anime"),
       };
       if (animeId) body.animeId = animeId;
       if (tmdbId)  body.tmdbId = tmdbId;
