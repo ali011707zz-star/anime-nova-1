@@ -76,6 +76,30 @@ function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
 }
 
+/* ── وصف قصير لكل مصدر في شبكة الاختيار (يطابق نظام الويب) ── */
+const SITE_DESC: Record<string, string> = {
+  kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
+  hianime: "ياباني مترجم · HLS نظيف", dulo_anim: "ياباني/إنجليزي · HLS مباشر",
+  videasy_anim: "ياباني مترجم · مباشر", vidlink_anim: "ياباني مترجم · مباشر",
+  anineko: "ياباني مترجم · HLS", anikoto: "ياباني مترجم · 1080p",
+  mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
+  anikototv: "ياباني مترجم · skip مدمج", animekai: "ياباني مترجم · DB مباشر",
+  animepahe: "ياباني مترجم · HLS نظيف", anipm: "ياباني مترجم · 37 سيرفر/حلقة",
+  shahiid: "عربي مدبلج / مترجم", animelek: "عربي مدبلج / مترجم",
+  animedar: "عربي مترجم", okanime: "عربي مترجم",
+  ristoanime: "عربي مترجم · MP4 مباشر", animeify: "عربي · ميغا",
+  animeday: "عربي مدبلج · HLS مباشر", arabseed: "عربي مدبلج/مترجم · MP4",
+  anime4up2: "عربي مترجم · HLS/ميغا", mycima: "عربي مترجم · HLS/فيديو",
+  topcinemaa: "عربي مترجم · HLS/فيديو", animephoenix: "عربي مترجم · مباشر",
+  faselhd_db: "عربي مترجم · GitHub DB", animetime: "عربي مترجم · مباشر",
+  witanime: "عربي مترجم · CycleTLS", witanime_db: "عربي مدبلج · WP",
+  notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
+  anslayer: "مشغلات خارجية · MixDrop/MediaFire",
+};
+function getSiteDesc(site: string): string {
+  return SITE_DESC[site] || "";
+}
+
 /* ── Quality helpers ── */
 const TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p SD": 1 };
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string }> = {
@@ -913,29 +937,34 @@ export default function WatchScreen() {
               <Ionicons name="play-circle" size={16} color="#a78bfa" />
               <Text style={d.siteSelectorTitle}>اختر مصدراً للتشغيل</Text>
             </View>
-            {(ANIME_SITES as readonly string[]).map(site => {
-              const st = slotStatus[site] || "idle";
-              const isActive = st === "fetching";
-              return (
-                <Pressable
-                  key={site}
-                  style={[d.siteRow, isActive && d.siteRowActive]}
-                  onPress={() => handlePickSite(site, true)}
-                  disabled={isActive}
-                >
-                  <View style={[d.siteTagBadge, st === "ready" ? { backgroundColor: "rgba(52,211,153,0.14)", borderColor: "rgba(52,211,153,0.3)" } : st === "failed" ? { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.22)" } : {}]}>
-                    <Text style={[d.siteTagText, st === "ready" ? { color: "#34d399" } : st === "failed" ? { color: "rgba(239,68,68,0.65)" } : {}]}>{getSiteTag(site)}</Text>
-                  </View>
-                  <Text style={d.siteName} numberOfLines={1}>{SITE_LABEL[site] || site}</Text>
-                  <View style={{ marginLeft: "auto" }}>
-                    {st === "fetching" && <SpinRing size={16} />}
-                    {st === "ready"    && <Ionicons name="checkmark-circle" size={17} color="#34d399" />}
-                    {st === "failed"   && <Ionicons name="close-circle" size={17} color="rgba(239,68,68,0.5)" />}
-                    {st === "idle"     && <Ionicons name="chevron-back" size={15} color="rgba(139,92,246,0.6)" />}
-                  </View>
-                </Pressable>
-              );
-            })}
+            <View style={d.siteGrid}>
+              {(ANIME_SITES as readonly string[]).map(site => {
+                const st = slotStatus[site] || "idle";
+                const isFetching = st === "fetching";
+                const isFailed = st === "failed";
+                return (
+                  <Pressable
+                    key={site}
+                    style={[d.siteCard, isFailed && d.siteCardFailed]}
+                    onPress={() => handlePickSite(site, true)}
+                    disabled={isFetching}
+                  >
+                    <View style={d.siteCardTopRow}>
+                      <View style={d.siteTagBadge}>
+                        <Text style={d.siteTagText}>{getSiteTag(site)}</Text>
+                      </View>
+                      <Text style={d.siteCardName} numberOfLines={1}>{SITE_LABEL[site] || site}</Text>
+                      {isFetching && <SpinRing size={14} />}
+                      {st === "ready" && <Ionicons name="checkmark-circle" size={14} color="#34d399" />}
+                      {isFailed && <Text style={d.siteCardFailedText}>فشل</Text>}
+                    </View>
+                    {!!getSiteDesc(site) && (
+                      <Text style={d.siteCardDesc} numberOfLines={1}>{getSiteDesc(site)}</Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
             <Pressable style={d.loadAllBtn} onPress={refreshAllSources}>
               <Ionicons name="flash" size={13} color="#c4b5fd" />
               <Text style={d.loadAllText}>تحميل كل المصادر</Text>
@@ -1067,11 +1096,15 @@ const d = StyleSheet.create({
   siteSelectorCard: { backgroundColor: "rgba(14,12,24,0.92)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(139,92,246,0.18)", overflow: "hidden" },
   siteSelectorHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.07)" },
   siteSelectorTitle: { fontSize: 12, fontFamily: "Cairo_700Bold", color: "#a78bfa" },
-  siteRow:       { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.04)" },
-  siteRowActive: { backgroundColor: "rgba(139,92,246,0.06)" },
-  siteTagBadge:  { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7, backgroundColor: "rgba(109,40,217,0.16)", borderWidth: 1, borderColor: "rgba(139,92,246,0.28)" },
+  siteGrid:      { flexDirection: "row", flexWrap: "wrap", gap: 10, padding: 12 },
+  siteCard:      { width: "47%", flexDirection: "column", alignItems: "flex-start", gap: 4, paddingHorizontal: 12, paddingVertical: 11, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)" },
+  siteCardFailed:{ backgroundColor: "rgba(239,68,68,0.07)", borderColor: "rgba(239,68,68,0.22)" },
+  siteCardTopRow:{ flexDirection: "row-reverse", alignItems: "center", gap: 6, width: "100%" },
+  siteTagBadge:  { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: "rgba(139,92,246,0.20)" },
   siteTagText:   { fontSize: 9, fontFamily: "Cairo_800ExtraBold", color: "rgba(196,181,253,0.9)" },
-  siteName:      { flex: 1, fontSize: 12, fontFamily: "Cairo_700Bold", color: "rgba(255,255,255,0.75)", textAlign: "right" },
+  siteCardName:  { flex: 1, fontSize: 11.5, fontFamily: "Cairo_800ExtraBold", color: "rgba(255,255,255,0.8)", textAlign: "right" },
+  siteCardFailedText: { fontSize: 9, fontFamily: "Cairo_700Bold", color: "rgba(248,113,113,0.7)" },
+  siteCardDesc:  { fontSize: 9, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.25)", textAlign: "right", width: "100%" },
   loadAllBtn:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.07)" },
   loadAllText:   { fontSize: 11, fontFamily: "Cairo_700Bold", color: "#c4b5fd" },
 
