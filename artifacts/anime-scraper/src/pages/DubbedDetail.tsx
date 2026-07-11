@@ -43,6 +43,7 @@ export default function DubbedDetail() {
   const [selSeason, setSelSeason] = useState(0);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [epLoading, setEpLoading] = useState(false);
+  const [commentEp, setCommentEp] = useState<Episode | null>(null);
   const [epProgress, setEpProgress] = useState<Record<number, number>>({});
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -96,6 +97,7 @@ export default function DubbedDetail() {
   };
 
   return (
+    <>
     <main className="bg-[#09090B] min-h-screen text-white pb-28" dir="rtl">
       <SEO
         title={`${title} مدبلج`}
@@ -296,7 +298,7 @@ export default function DubbedDetail() {
                     <Play className="w-3.5 h-3.5 text-[#A78BFA] fill-[#A78BFA]" />
                   </div>
                   <button
-                    onClick={e => { e.stopPropagation(); navigate(watchUrl(ep) + "#comments"); }}
+                    onClick={e => { e.stopPropagation(); setCommentEp(ep); }}
                     className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
                     style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
                   >
@@ -309,5 +311,27 @@ export default function DubbedDetail() {
         )}
       </div>
     </main>
+
+    {/* ── نافذة التعليقات ── */}
+    {commentEp && (
+      <div className="fixed inset-0 z-[70] bg-black/70 flex flex-col justify-end" onClick={() => setCommentEp(null)}>
+        <motion.div
+          initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+          transition={{ type: "spring", damping: 28, stiffness: 300 }}
+          className="bg-[#0e0e12] rounded-t-3xl overflow-hidden max-h-[80vh] flex flex-col"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-white/6 shrink-0">
+            <h3 className="text-sm font-black font-['Cairo'] text-white">تعليقات الحلقة {commentEp.number}</h3>
+            <button onClick={() => setCommentEp(null)} className="w-7 h-7 rounded-full bg-white/6 flex items-center justify-center">
+              <X className="w-3.5 h-3.5 text-white/50" />
+            </button>
+          </div>
+          <div className="overflow-y-auto flex-1 p-3">
+            <EpComments commKey={`dubbed-${key}-ep${commentEp.number}`} />
+          </div>
+        </motion.div>
+      </div>
+    )}
   );
 }
