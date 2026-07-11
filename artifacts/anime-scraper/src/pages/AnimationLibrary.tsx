@@ -2,7 +2,7 @@ import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { Link, useLocation } from "wouter";
-import { Search, Film, Star, ChevronDown, Loader2, SlidersHorizontal, X, Calendar, Flame, Award } from "lucide-react";
+import { Search, Film, Star, ChevronDown, Loader2, SlidersHorizontal, X, Calendar, Flame, Award, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const IMG = "https://image.tmdb.org/t/p/w342";
@@ -194,9 +194,18 @@ export default function AnimationLibrary() {
 
           {/* Title row */}
           <div className="flex items-center justify-between mb-3">
-            <div>
-              <h1 className="text-[22px] font-black text-white font-['Cairo'] leading-none">رسوم متحركة</h1>
-              <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">{type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}</p>
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => navigate("/")}
+                className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl active:scale-90 transition-transform"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+              >
+                <ChevronRight className="w-4 h-4 text-white/55" />
+              </button>
+              <div>
+                <h1 className="text-[22px] font-black text-white font-['Cairo'] leading-none">رسوم متحركة</h1>
+                <p className="text-[11px] text-white/30 font-['Cairo'] mt-0.5">{type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}</p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button

@@ -9316,13 +9316,10 @@ async function getAniPmSources(
     // حسب priority اللي يرجعه ani.pm نفسه.
     const MAX_ANIPM_SOURCES = 5;
 
+    // نستخدم فقط dubList (مدبلج) ونتجاهل subList (ياباني + ترجمة إنجليزية مدمجة)
+    // لأن المنصة عربية ومصادر "sub" تعرض نصاً إنجليزياً على الشاشة.
     type Candidate = { src: AniPmEntry; isDub: boolean };
     const candidates: Candidate[] = [];
-    for (const src of subList) {
-      if (!src.url) continue;
-      if (src.kind === "embed") continue; // استبعاد الروابط اللي تحتاج iframe
-      candidates.push({ src, isDub: false });
-    }
     for (const src of dubList) {
       if (!src.url) continue;
       if (src.kind === "embed") continue;

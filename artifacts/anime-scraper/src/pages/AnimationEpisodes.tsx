@@ -2,7 +2,7 @@ import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { useParams, useLocation, useSearch, Link } from "wouter";
-import { ChevronRight, Play, Clock } from "lucide-react";
+import { ChevronRight, Play, Clock, MessageCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
@@ -271,10 +271,19 @@ export default function AnimationEpisodes() {
                     </div>
                   </div>
 
-                  {/* Play icon */}
-                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-                    style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
-                    <Play className="w-3.5 h-3.5 text-primary fill-primary" />
+                  {/* Buttons */}
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+                      style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
+                      <Play className="w-3.5 h-3.5 text-primary fill-primary" />
+                    </div>
+                    <button
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); navigate(watchUrl(epItem.episode_number) + "#comments"); }}
+                      className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 text-white/40" />
+                    </button>
                   </div>
                 </motion.div>
               </Link>
