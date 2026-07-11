@@ -4658,7 +4658,7 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
 //  Episode page: _zX + _zK → gh100.js decryption → embed URLs
 //  Servers: yonaplay · videa · playerwish
 // ════════════════════════════════════════════════════════════════════
-const WITANIME_YOU_BASE = "https://witanime.you";
+const WITANIME_YOU_BASE = "https://witanime.life";
 // API key من gh100.js: FRAMEWORK_HASH = _m1+_m2+_m3+_m4
 const YONAPLAY_API_KEY  = "23a97133-caf3-4eb4-9466-93d0a4ff8198";
 
