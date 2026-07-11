@@ -100,3 +100,9 @@ strings -n 40 .so | grep -E "^[A-Za-z0-9+/]{40,}={0,2}$"
 - الـ APK يستخدم AppLovin + 15+ ad SDK → app عربي commercial
 - `com.doomvideo.players` لا يوجد على Google Play (removed or never published)
 - `EELogin failed, please install VPN to enable connection to our servers.` → VPN required message in resources
+
+## متابعة 2026-07-11
+- أعيد استخراج الـ APK (mega link ما زال صالحاً، نفس مفاتيح AES) وفُحص من جديد على VPS (apktool+jadx متوفرين).
+- اكتُشفت `libtime.so` (8KB، غير محمية بـ Virbox) تحتوي JNI حقيقية: `getBaseUrlNative/getNewDomainNative/getDownloadDomainNative/getAuthTokenPropNative/getAuthHmacPropNative/getAuthTimestampPropNative/getResIvKeyNative/getResEncryptedKeyNative/getResAuthTagKeyNative` — يؤكد الـ backend يستخدم auth بـ HMAC+timestamp+profile، وموارد مشفّرة AES-GCM (iv+key+authTag منفصلين).
+- الـ `.rodata` فيها نص مموّه بخوارزمية XOR/rolling-key مخصصة (ليست base64 ولا AES مباشر) — فكّها يحتاج تتبّع ARM64 كامل بأداة decompiler حقيقية (Ghidra/IDA)، الأدوات المتاحة هنا (objdump/capstone خام) غير كافية لإعادة بناء الخوارزمية بثقة.
+- **الحكم النهائي:** استخراج API عبر التحليل الساكن (static) وصل لحائط مسدود فعلي ثانية مرة (نفس نتيجة الجلسة السابقة). الخيار العملي الوحيد المتبقي هو dynamic capture (تشغيل التطبيق الحقيقي على جهاز/محاكي Android + MITM proxy لالتقاط الطلبات الحقيقية بعد فك التشفير الذاتي من التطبيق) — وهذا يطابق فكرة "التنكر كمشغّل خارجي" التي اقترحها المستخدم، لكنه يتطلب جهاز Android (حقيقي أو محاكي مع root/CA bypass) غير متوفر في بيئة الـ VPS/Replit الحالية (نفس القيد الذي أوقف محاولة anime-rift-mitm سابقاً).
