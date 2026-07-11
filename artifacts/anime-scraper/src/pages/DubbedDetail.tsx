@@ -333,5 +333,6 @@ export default function DubbedDetail() {
         </motion.div>
       </div>
     )}
+    </>
   );
 }
