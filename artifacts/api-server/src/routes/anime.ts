@@ -9309,35 +9309,52 @@ async function getAniPmSources(
       subList = (rawAny as any).sources as AniPmEntry[];
     }
 
-    const processEntries = (entries: AniPmEntry[], isDub: boolean) => {
-      for (const src of entries) {
-        if (!src.url) continue;
-        const absUrl = src.url.startsWith("http") ? src.url : `${ANI_PM_BASE}${src.url}`;
-        const isHls = absUrl.includes(".m3u8") || src.kind === "hls" || src.url.includes("/hls");
-        const providerName = src.provider || src.name || (isDub ? "Dub" : "Sub");
-        const label = `AniPm · ${providerName}${isDub ? " [مدبلج]" : ""}`;
+    // ── فلترة صارمة: نستبعد أي مصدر "embed" (يحتاج iframe/صفحة خارجية —
+    // هذا هو مصدر مشكلة "ifrom" التي اشتكى منها المستخدم) ونُبقي فقط
+    // hls/file (روابط فيديو مباشرة نقدر نبثّها/نبروكسيها بأنفسنا).
+    // كمان نحدد سقف 5 سيرفرات كحد أقصى إجمالاً (sub+dub) — أفضلها فقط
+    // حسب priority اللي يرجعه ani.pm نفسه.
+    const MAX_ANIPM_SOURCES = 5;
 
-        const directUrl = isHls
-          ? `/api/anime/hls-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ANI_PM_BASE + "/")}`
-          : absUrl;
+    type Candidate = { src: AniPmEntry; isDub: boolean };
+    const candidates: Candidate[] = [];
+    for (const src of subList) {
+      if (!src.url) continue;
+      if (src.kind === "embed") continue; // استبعاد الروابط اللي تحتاج iframe
+      candidates.push({ src, isDub: false });
+    }
+    for (const src of dubList) {
+      if (!src.url) continue;
+      if (src.kind === "embed") continue;
+      candidates.push({ src, isDub: true });
+    }
 
-        out.push({
-          name: label,
-          url:  absUrl,
-          quality:     "HD",
-          qualityRank: 11,
-          site:        "anipm",
-          directUrl,
-          directType:  isHls ? "hls" : "mp4",
-          corsOk:      false,
-        });
-      }
-    };
+    // الأعلى priority أولاً (ani.pm يرتّب المصادر المباشرة بـ priority 100+)
+    candidates.sort((a, b) => (b.src.priority ?? 0) - (a.src.priority ?? 0));
 
-    processEntries(subList, false);
-    processEntries(dubList, true);
+    for (const { src, isDub } of candidates.slice(0, MAX_ANIPM_SOURCES)) {
+      const absUrl = src.url!.startsWith("http") ? src.url! : `${ANI_PM_BASE}${src.url}`;
+      const isHls = absUrl.includes(".m3u8") || src.kind === "hls" || src.url!.includes("/hls");
+      const providerName = src.provider || src.name || (isDub ? "Dub" : "Sub");
+      const label = `AniPm · ${providerName}${isDub ? " [مدبلج]" : ""}`;
 
-    console.log(`[AniPm] "${english || title}" ep${ep} → ${out.length} sources (sub:${subList.length} dub:${dubList.length})`);
+      const directUrl = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(absUrl)}&ref=${encodeURIComponent(ANI_PM_BASE + "/")}`
+        : absUrl;
+
+      out.push({
+        name: label,
+        url:  absUrl,
+        quality:     "HD",
+        qualityRank: 11,
+        site:        "anipm",
+        directUrl,
+        directType:  isHls ? "hls" : "mp4",
+        corsOk:      false,
+      });
+    }
+
+    console.log(`[AniPm] "${english || title}" ep${ep} → ${out.length}/${MAX_ANIPM_SOURCES} direct sources (candidates sub:${subList.length} dub:${dubList.length}, embed-filtered)`);
     aniPmCache.set(ck, { sources: out, ts: Date.now() });
   } catch (e: any) {
     console.warn("[AniPm]", e?.message);
