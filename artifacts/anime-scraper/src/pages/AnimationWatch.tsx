@@ -1555,6 +1555,7 @@ function getAnimTag(label: string): string {
   if (l.startsWith("vidlink"))    return "VL";
   if (l.startsWith("lordflix"))   return "LF";
   if (l.startsWith("starcima"))   return "SC";
+  if (l.startsWith("cinepro"))     return "CP";
   if (l.startsWith("streamrip"))  return "SR";
   if (l.startsWith("stardima"))   return "??"; // StarDima removed
   if (l.includes("أنمي فاي") || l.startsWith("animeif")) return "MG";

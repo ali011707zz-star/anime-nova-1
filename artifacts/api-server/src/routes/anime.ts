@@ -5335,10 +5335,18 @@ async function getAniKotoSources(
   if (!anilistId) return [];
   try {
     const embedUrl = `${MEGAPLAY_BASE}/stream/ani/${anilistId}/${ep}/sub`;
+    const megaHdrs = { ...BASE_HDRS, Referer: MEGAPLAY_SPOOF_REF, "Accept-Language": "en-US,en;q=0.9" };
+
+    // جلب صفحة الـ embed — مع fallback عبر cfProxy إذا حجبت CF الطلب المباشر
     let html = await fetch(embedUrl, {
-      headers: { ...BASE_HDRS, Referer: MEGAPLAY_SPOOF_REF, "Accept-Language": "en-US,en;q=0.9" },
+      headers: megaHdrs,
       signal: AbortSignal.timeout(10000),
     }).then(r => r.ok ? r.text() : "").catch(() => "");
+
+    if (!html || (!html.match(/data-id="[^"]+?"/) && !html.match(/<iframe\b/i))) {
+      // حاول عبر cfProxy (يتجاوز Cloudflare bot-check من الـ VPS IP)
+      html = await cfProxyGet(embedUrl, MEGAPLAY_SPOOF_REF, 12000) || "";
+    }
 
     // تتبع iframe داخلي إذا لزم الأمر
     const frameSrc = html.match(/<iframe\b[^>]*src="([^"]+)"/i)?.[1];
@@ -5349,34 +5357,48 @@ async function getAniKotoSources(
         headers: { ...BASE_HDRS, Referer: MEGAPLAY_SPOOF_REF },
         signal: AbortSignal.timeout(8000),
       }).then(r => r.ok ? r.text() : "").catch(() => "");
+      if (!html || !html.match(/data-id="[^"]+?"/)) {
+        html = await cfProxyGet(actualEmbedUrl, MEGAPLAY_SPOOF_REF, 10000) || "";
+      }
     }
 
     const fileId = html.match(/data-id="([^"]+)"/)?.[1];
     if (!fileId) return [];
 
     const origin = new URL(actualEmbedUrl).origin;
-    const data = await fetch(`${origin}/stream/getSources?id=${fileId}`, {
-      headers: {
-        ...BASE_HDRS,
-        Referer: `${origin}/`,
-        "X-Requested-With": "XMLHttpRequest",
-        Accept: "application/json, */*",
-      },
+    // جلب مصادر الفيديو — مع fallback عبر cfProxy
+    let data: any = null;
+    const sourcesUrl = `${origin}/stream/getSources?id=${fileId}`;
+    const sourcesHdrs = {
+      ...BASE_HDRS,
+      Referer: `${origin}/`,
+      "X-Requested-With": "XMLHttpRequest",
+      Accept: "application/json, */*",
+    };
+    data = await fetch(sourcesUrl, {
+      headers: sourcesHdrs,
       signal: AbortSignal.timeout(8000),
-    }).then(r => r.ok ? r.json() : null).catch(() => null) as {
+    }).then(r => r.ok ? r.json() : null).catch(() => null);
+    if (!data?.sources?.file) {
+      const txt = await cfProxyGet(sourcesUrl, `${origin}/`, 10000);
+      if (txt) {
+        try { data = JSON.parse(txt); } catch {}
+      }
+    }
+    const typedData = data as {
       sources?: { file?: string };
       tracks?: Array<{ file: string; label?: string; kind?: string; default?: boolean }>;
     } | null;
 
-    if (!data?.sources?.file) return [];
+    if (!typedData?.sources?.file) return [];
 
-    const m3u8Url = data.sources.file;
+    const m3u8Url = typedData.sources.file;
 
     // اختر الـ subtitle المتاحة
     const subTrack =
-      data.tracks?.find(t => t.kind !== "thumbnails" && /(arabic|arab|\bar\b)/i.test(t.label || "")) ||
-      data.tracks?.find(t => t.kind !== "thumbnails" && /(english|eng)/i.test(t.label || "")) ||
-      data.tracks?.find(t => t.kind !== "thumbnails");
+      typedData.tracks?.find(t => t.kind !== "thumbnails" && /(arabic|arab|\bar\b)/i.test(t.label || "")) ||
+      typedData.tracks?.find(t => t.kind !== "thumbnails" && /(english|eng)/i.test(t.label || "")) ||
+      typedData.tracks?.find(t => t.kind !== "thumbnails");
     const subtitleUrl = subTrack?.file
       ? `/api/anime/proxy-text?url=${encodeURIComponent(subTrack.file)}&ref=${encodeURIComponent(origin + "/")}`
       : undefined;
