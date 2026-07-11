@@ -54,3 +54,5 @@
 - [check-arabic endpoint source swap](check-arabic-animelek-dead.md) — animelek.top fully dead (timeout from VPS+Replit); homepage "latest episodes" gate now matches against FaselHD-DB instead.
 - [Fresh-import setup fixes](import-setup-fixes.md) — after re-import: pip needs --break-system-packages for uv-broken venv; clear anime-scraper .vite cache (jsxDEV error); leave standalone api-server workflow stopped (port conflict with Start application).
 - [VPS manual deploy](vps-manual-deploy-2026-07.md) — app runs only on VPS via pm2, never on Replit; diff files vs VPS working copy before overwriting (VPS had unique unpushed commits); rebuild both frontend+backend after sync.
+- [AnimeSlayer practical test](anslayer-practical-test.md) — API works but 0/10 tested titles play; mixdrop.co sold, ok.ru blocks datacenter IPs, filemoon.sx repurposed, mediafire/streamtape links dead.
+- [mobiltna.com anime-arab investigation](mobiltna-anime-arab.md) — not a scraping source; it's a WP APK-download blog for a generic ad-SDK WebView wrapper app (com.alarabs.alanime), no discoverable backend API.
