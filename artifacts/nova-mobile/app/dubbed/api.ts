@@ -1,4 +1,4 @@
-import { secureFetch } from "./secureApi";
+import { secureFetch } from "@/utils/secureApi";
 import { getBaseUrl } from "./baseUrl";
 export { getBaseUrl };
 
