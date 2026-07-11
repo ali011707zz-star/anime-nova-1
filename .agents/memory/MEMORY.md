@@ -63,3 +63,5 @@
 - [AnimeSlayer direct-id + tag collision](anslayer-latest-direct-id.md) — getAnimeSlayerSources(...,directAnimeId?) skips fuzzy search when the catalog id is already known; arabseed/anslayer short tags AR/AS fixed after a collision.
 - [TimeMovies APK Analysis](timemovies-apk-analysis.md) — tmovies.app APK تحليل جزئي؛ Virbox-protected؛ timemovies.net=admin panel؛ API base URL غير مكتشف بعد.
 - [WitAnime scraper fixes](witanime-you-fixes.md) — WP6 ?anime[]= fix; cfProxy retry; parallel page scan; 45s timeout; x-internal:1 needed for localhost testing; recent eps work (mega.nz), old eps may be dead.
+- [Comments-button VPS sync lesson](comments-button-vps-sync.md) — local repo fixes for VPS-deployed pages must be diffed+copied per-file; git 'modified' status on VPS ≠ a specific fix is present.
+- [TimeMovies MITM plan](timemovies-mitm-plan.md) — Android phone, no root: HTTP Toolkit + manual Wi-Fi proxy + CA cert install chosen; not yet executed by user.
