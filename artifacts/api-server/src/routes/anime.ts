@@ -9473,6 +9473,133 @@ async function getXyraAnimeSources(
 //    - ep.epName هو integer
 // ════════════════════════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════════════════════════
+//  ANIMESLAYER (anslayer.com) — عربي/إنجليزي، سيرفرات مشغّلات خارجية
+//
+//  الموقع الظاهر animeslayer.to محمي بـ Cloudflare Turnstile + بصمة متصفح،
+//  لكن الـ API الحقيقي وراءه (anslayer.com — تطبيق أندرويد com.anslayer)
+//  غير محمي، فقط يحتاج هيدرز Client-Id/Client-Secret (من فك تشفير الـ APK).
+//
+//  Flow:
+//    1. GET animes/get-published-animes?json={list_type:"filter",anime_name}
+//    2. أفضل تطابق بالاسم (similarity)
+//    3. GET episodes/get-episodes?json={anime_id} → episode_urls[]
+//       - server "cdn" (vq.php): غير مستقر (404 أحياناً) — نتجاهله
+//       - server "muilt" (a-reslayer.com/la/public/api/f?n=): مصفوفة روابط
+//         مشغّلات خارجية جاهزة (mixdrop, streamtape, filemoon, mediafire, ok.ru)
+//    4. كل رابط يُمرَّر لـ extractVideoDeep (embeds) أو extractMediafireDirect
+// ════════════════════════════════════════════════════════════════════
+const ANSLAYER_BASE   = "https://anslayer.com/anime/public";
+const ANSLAYER_CID    = "android-app2";
+const ANSLAYER_CSEC   = "7befba6263cc14c90d2f1d6da2c5cf9b251bfbbd";
+const _anslayerCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const ANSLAYER_TTL    = 4 * 3_600_000;
+
+async function anslayerGet(path: string, params: Record<string, any>): Promise<any | null> {
+  try {
+    const json = encodeURIComponent(JSON.stringify(params));
+    const url = `${ANSLAYER_BASE}/${path}?json=${json}`;
+    const r = await fetch(url, {
+      headers: {
+        "Client-Id":     ANSLAYER_CID,
+        "Client-Secret": ANSLAYER_CSEC,
+        "User-Agent":    "okhttp/4.9.3",
+        "Accept":        "application/json",
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function getAnimeSlayerSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  const ck = `anslayer:${english || title}:${ep}`;
+  const hit = _anslayerCacheMap.get(ck);
+  if (hit && Date.now() - hit.ts < ANSLAYER_TTL) return hit.sources;
+
+  const out: UnifiedSource[] = [];
+  try {
+    // ── 1) بحث + أفضل تطابق ──
+    const queries = [...new Set([english, title].filter(Boolean) as string[])];
+    let best: { score: number; id: number; name: string } | null = null;
+    for (const q of queries) {
+      const data = await anslayerGet("animes/get-published-animes", { list_type: "filter", anime_name: q, page: 1 });
+      const list: any[] = data?.response?.data || [];
+      for (const item of list) {
+        const s = similarity(q, String(item.anime_name || ""));
+        if (s > 0.55 && (!best || s > best.score)) {
+          best = { score: s, id: parseInt(item.anime_id, 10), name: item.anime_name };
+        }
+      }
+    }
+    if (!best) return out;
+
+    // ── 2) قائمة الحلقات ──
+    const epData = await anslayerGet("episodes/get-episodes", { anime_id: best.id });
+    const episodes: any[] = epData?.response?.data || [];
+    const epItem = episodes.find((e: any) => parseInt(e.episode_number, 10) === ep);
+    if (!epItem) return out;
+
+    const urls: any[] = Array.isArray(epItem.episode_urls) ? epItem.episode_urls : [];
+    const muiltUrl = urls.find((u: any) => u.episode_server_name === "muilt")?.episode_url;
+    if (!muiltUrl) return out;
+
+    // ── 3) روابط المشغلات الخارجية ──
+    const r = await fetch(muiltUrl, {
+      headers: { "User-Agent": "okhttp/4.9.3" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!r.ok) return out;
+    const embedLinks: string[] = await r.json().catch(() => []);
+    if (!Array.isArray(embedLinks)) return out;
+
+    for (const link of embedLinks.slice(0, 6)) {
+      if (typeof link !== "string" || !link.startsWith("http")) continue;
+      try {
+        if (link.includes("mediafire.com")) {
+          const direct = await extractMediafireDirect(link);
+          if (direct) {
+            out.push({
+              name: "AnimeSlayer · MediaFire", url: link, quality: "HD", qualityRank: 12,
+              site: "anslayer",
+              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://www.mediafire.com/")}`,
+              directType: "mp4",
+            });
+          }
+          continue;
+        }
+        if (link.includes("drive.google.com")) continue; // Google Drive غير مدعوم كمصدر مباشر
+        // mixdrop / streamtape / filemoon / ok.ru / streamwish-family → extractVideoDeep
+        const extracted = await extractVideoDeep(link, link);
+        if (extracted?.url) {
+          const host = link.includes("mixdrop") ? "MixDrop"
+            : link.includes("streamtape") ? "Streamtape"
+            : link.includes("filemoon") ? "FileMoon"
+            : link.includes("ok.ru") ? "OK.ru"
+            : "External";
+          out.push({
+            name: `AnimeSlayer · ${host}`, url: link, quality: "HD", qualityRank: 10,
+            site: "anslayer",
+            directUrl: extracted.type === "hls"
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(link)}`
+              : `/api/anime/video-proxy?url=${encodeURIComponent(extracted.url)}&ref=${encodeURIComponent(link)}`,
+            directType: extracted.type,
+          });
+        }
+      } catch { /* skip this link */ }
+    }
+
+    console.log(`[AnimeSlayer] "${best.name}" ep${ep} → ${out.length} sources`);
+    if (out.length) _anslayerCacheMap.set(ck, { sources: out, ts: Date.now() });
+  } catch (e: any) {
+    console.warn("[AnimeSlayer]", e?.message);
+  }
+  return out;
+}
+
 // notorrent (NO / addon-osvh.onrender.com): أُزيل كلياً بطلب المستخدم 2026-07-09
 
 const SANIME_API  = "https://app.sanime.net/function/h10.php?page=";
@@ -10149,6 +10276,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
+      scrapeCached("anslayer",   () => getAnimeSlayerSources(title, english, ep),             false, 20000),
       // animetime / notorrent: أُزيلت كلياً بطلب المستخدم (2026-07-09)
     ]);
 
@@ -10294,6 +10422,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
+      case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep),          20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       default: break;
     }
