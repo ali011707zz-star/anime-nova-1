@@ -298,27 +298,25 @@ export default function AnimationEpisodes() {
       </div>
     </main>
 
-    {/* ── نافذة التعليقات ── */}
+    {/* ── صفحة التعليقات الكاملة ── */}
     <AnimatePresence>
       {commentEp && (
-        <div className="fixed inset-0 z-[70] bg-black/70 flex flex-col justify-end" onClick={() => setCommentEp(null)}>
-          <motion.div
-            initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 28, stiffness: 300 }}
-            className="bg-[#0e0e12] rounded-t-3xl overflow-hidden max-h-[80vh] flex flex-col"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-white/6 shrink-0">
-              <h3 className="text-sm font-black font-['Cairo'] text-white">تعليقات الحلقة {commentEp.episode_number}</h3>
-              <button onClick={() => setCommentEp(null)} className="w-7 h-7 rounded-full bg-white/6 flex items-center justify-center">
-                <X className="w-3.5 h-3.5 text-white/50" />
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1 p-3">
-              <EpComments commKey={`anim-${type}-${id}-s${selSeason}-ep${commentEp.episode_number}`} />
-            </div>
-          </motion.div>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }}
+          transition={{ type: "spring", damping: 28, stiffness: 300 }}
+          className="fixed inset-0 z-[70] bg-[#07070a] flex flex-col"
+          dir="rtl"
+        >
+          <div className="flex items-center gap-3 px-4 shrink-0" style={{ paddingTop: "calc(env(safe-area-inset-top,0px) + 14px)", paddingBottom: 14, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <button onClick={() => setCommentEp(null)} className="w-9 h-9 rounded-xl bg-white/6 flex items-center justify-center shrink-0">
+              <ChevronRight className="w-4 h-4 text-white/70" />
+            </button>
+            <h3 className="text-[15px] font-black font-['Cairo'] text-white flex-1 truncate">تعليقات الحلقة {commentEp.episode_number}</h3>
+          </div>
+          <div className="overflow-y-auto flex-1 p-3">
+            <EpComments commKey={`anim-${type}-${id}-s${selSeason}-ep${commentEp.episode_number}`} />
+          </div>
+        </motion.div>
       )}
     </AnimatePresence>
     </>
