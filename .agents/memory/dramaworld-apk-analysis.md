@@ -153,22 +153,20 @@ sources: ?\["(.*?)"]
 - ✅ okhttp3/internal/tls/OkHostnameVerifier patch
 - ⏳ Encoding APK (بطيء بسبب smaling 4 DEX files)
 
+## ✅ الحالة النهائية (2026-07-12)
+- apk-mitm انتهت بنجاح (patched APK جاهز، 21MB) — تحذير عن Android App Bundle ظهر لكن التوقيع والمحاذاة نجحا.
+- mitmdump يعمل على 8888، http.server يعمل على 9999 من `/root/.mitmproxy`.
+- نسخنا `DramaWorld_V4.2a-patched.apk` إلى `/root/.mitmproxy/` ليصير متاحاً مع الشهادة من نفس السيرفر.
+- روابط التحميل الجاهزة للمستخدم:
+  - الشهادة: `http://95.182.93.105:9999/mitmproxy-ca-cert.pem`
+  - الـ APK المُرقّع: `http://95.182.93.105:9999/DramaWorld_V4.2a-patched.apk`
+
 ## للمتابعة عند العودة
-1. تحقق من انتهاء apk-mitm:
-   ```bash
-   ssh root@95.182.93.105 'ls -lh /opt/dw-capture/DramaWorld_V4.2a-patched.apk'
-   ```
-2. إذا انتهت → شغّل HTTP server لتحميل الـ APK المُرقّع:
-   ```bash
-   ls -lh /opt/dw-capture/*.apk
-   # رابط التحميل: http://95.182.93.105:9999/DramaWorld_V4.2a-patched.apk
-   ```
-3. إذا انتهت بخطأ → فحص اللوج:
-   ```bash
-   cat /opt/dw-capture/apkmitm_run.log | tail -30
-   ```
-4. المستخدم يثبّت الـ APK المُرقّع → يضبط proxy → يتصفح DramaWorld
-5. نسحب traffic من: `/opt/dw-capture/traffic.mitm`
+1. المستخدم يثبّت الشهادة (CA) على الهاتف ثم الـ APK المُرقّع.
+2. يضبط Wi-Fi proxy على الهاتف → `95.182.93.105:8888`.
+3. يتصفح داخل DramaWorld (فتح أفلام/مسلسلات، تسجيل دخول، بحث).
+4. نسحب traffic من: `/opt/dw-capture/traffic.mitm` أو نتابع `mitmdump.log` مباشرة لرؤية endpoints جديدة (خصوصاً /api/movie/by/filtres و /api/search المحجوبة من السيرفرات).
+5. إذا فشل التثبيت بسبب "App Bundle" (تحذير ظهر في اللوج) → نحتاج xapk/apks كامل من apkpure وإعادة apk-mitm عليه.
 
 ## Keystore للتوقيع (موجود على VPS)
 - الملف: `/opt/dw-capture/dw-signing.keystore`
