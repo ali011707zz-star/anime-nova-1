@@ -8284,6 +8284,85 @@ async function getVidFastAnimeSources(title: string, english: string | null, ep:
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  VidSrc.cc + SuperEmbed — TMDB-native embed providers already proven to
+//  work for animation (see animation.ts "vidsrc_cc" / "superembed" blocks).
+//  Anime titles usually also exist on TMDB as TV shows, so the exact same
+//  extraction logic applies here — no new decryption needed, just reused.
+//  Both require cfProxy (VPS-local curl_cffi service) since vidsrc.cc/
+//  superembed.stream block plain datacenter-IP fetches.
+// ════════════════════════════════════════════════════════════════════
+async function getVidsrcCcAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+  const sources: UnifiedSource[] = [];
+  try {
+    const embedUrl = `https://vidsrc.cc/v2/embed/tv/${tmdbId}/1/${ep}`;
+    let html = "";
+    try { html = await cfProxyGet(embedUrl); } catch { return []; }
+    if (!html || html.length < 100) return [];
+
+    const dataId = html.match(/data-id=["']([^"']+)["']/)?.[1]
+                || html.match(/\/e\/([a-zA-Z0-9]{6,})/)?.[1];
+    if (!dataId) return [];
+
+    const srcUrl = `https://vidsrc.cc/v2/sources?id=${dataId}`;
+    let srcData: { sources?: Array<{ url?: string; label?: string }> } = {};
+    try {
+      const srcHtml = await cfProxyGet(srcUrl);
+      srcData = JSON.parse(srcHtml);
+    } catch { return []; }
+
+    for (const src of (srcData.sources || [])) {
+      if (!src?.url) continue;
+      const isHls = src.url.includes(".m3u8");
+      const proxied = isHls
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://vidsrc.cc/")}`
+        : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://vidsrc.cc/")}`;
+      sources.push({
+        name: `VidSrc · ${src.label || "HD"}`, url: src.url, quality: src.label || "HD", qualityRank: 12,
+        site: "vidsrc_cc_anim",
+        directUrl: proxied,
+        directType: isHls ? "hls" : "mp4",
+      });
+    }
+  } catch { /* silent */ }
+  return sources;
+}
+
+async function getSuperEmbedAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+  try {
+    const embedUrl = `https://superembed.stream/embed/tv?tmdb=${tmdbId}&season=1&episode=${ep}`;
+    let html = "";
+    try {
+      html = await cfProxyGet(embedUrl);
+    } catch {
+      const r = await fetch(embedUrl, {
+        headers: { "User-Agent": BROWSER_UA, Referer: "https://superembed.stream/" },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!r.ok) return [];
+      html = await r.text();
+    }
+    if (!html || html.length < 100) return [];
+
+    const hlsMatch = html.match(/source\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/i)
+                  || html.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)/i)
+                  || html.match(/playlist\s*[:=]\s*["']([^"']+\.m3u8[^"']*)/i)
+                  || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)/);
+    if (!hlsMatch?.[1]) return [];
+    const hlsUrl = hlsMatch[1];
+    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent("https://superembed.stream/")}`;
+    return [{
+      name: "SuperEmbed · HLS", url: hlsUrl, quality: "HD", qualityRank: 12,
+      site: "superembed_anim",
+      directUrl: proxied, directType: "hls",
+    }];
+  } catch { return []; }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  DULO.TV — multi-provider aggregator (TMDB-native HLS, anime TV)
 //  API key: WDNUNBUB3HR983Y9ISBADK4O82
 //  Confirmed working providers: vidrock, purstream (tested 2026-07-03)
@@ -9664,12 +9743,25 @@ async function getAnimeSlayerSources(
           const oid = link.match(/ok\.ru\/video\/(\d+)/)?.[1] || link.match(/ok\.ru\/videoembed\/(\d+)/)?.[1];
           if (oid) {
             const vids = await extractOkRuVideo(oid);
-            const bestVid = vids.sort((a, b) => (parseInt(b.name) || 0) - (parseInt(a.name) || 0))[0];
-            if (bestVid) {
+            // Prefer the adaptive HLS master (mirror-raced — more resilient to
+            // a blocked primary CDN host) over a single fixed-quality MP4.
+            const hlsMaster = vids.find(v => v.type === "hls" && v.name === "auto");
+            const bestMp4 = vids
+              .filter(v => v.type !== "hls")
+              .sort((a, b) => (parseInt(b.name) || 0) - (parseInt(a.name) || 0))[0];
+
+            if (hlsMaster) {
               out.push({
-                name: "AnimeSlayer · OK.ru", url: link, quality: bestVid.name || "SD", qualityRank: 10,
+                name: "AnimeSlayer · OK.ru", url: link, quality: "HD", qualityRank: 11,
                 site: "anslayer",
-                directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(bestVid.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
+                directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(hlsMaster.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
+                directType: "hls",
+              });
+            } else if (bestMp4) {
+              out.push({
+                name: "AnimeSlayer · OK.ru", url: link, quality: bestMp4.name || "SD", qualityRank: 10,
+                site: "anslayer",
+                directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(bestMp4.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
                 directType: "mp4",
               });
             }
@@ -9931,15 +10023,83 @@ async function getOkRuCreds(): Promise<{ cookie: string; agent: string } | null>
   }
 }
 
-// Extract OK.ru video direct URLs using cookies from the open endpoint
+// Rank a CDN host the way ok.ru-direct-resolver does: okcdn.ru first, then
+// generic hosts, then vkuser.net mirrors last (historically least reliable).
+function okRuHostRank(host: string): number {
+  if (host.includes("okcdn.ru")) return 0;
+  if (host.includes("vkuser.net")) return 2;
+  return 1;
+}
+
+// Try opening an HLS master playlist across every known mirror host in
+// parallel and keep whichever responds first with a valid #EXTM3U body.
+// This is the ok.ru-direct-resolver technique: a single primary host can be
+// geo/IP-blocked while a mirror still works, so racing them beats picking one.
+async function okRuOpenHlsMaster(
+  masterUrl: string,
+  mirrorHosts: string[],
+  hdrs: Record<string, string>,
+): Promise<{ url: string; body: string } | null> {
+  let primaryHost = "";
+  try { primaryHost = new URL(masterUrl).host; } catch { return null; }
+
+  const hosts = Array.from(new Set([primaryHost, ...mirrorHosts]))
+    .sort((a, b) => okRuHostRank(a) - okRuHostRank(b));
+
+  const attempts = hosts.map(async (host) => {
+    let candidate = masterUrl;
+    try {
+      const u = new URL(masterUrl);
+      u.host = host;
+      candidate = u.toString();
+    } catch { /* keep original */ }
+    const r = await fetch(candidate, {
+      headers: hdrs,
+      signal: AbortSignal.timeout(4000),
+      redirect: "follow",
+    });
+    if (!r.ok) throw new Error(`${host} -> ${r.status}`);
+    const body = await r.text();
+    if (!body.startsWith("#EXTM3U")) throw new Error(`${host} -> not m3u8`);
+    return { url: candidate, body };
+  });
+
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    return null;
+  }
+}
+
+// Parse #EXT-X-STREAM-INF lines into per-quality variant entries.
+function okRuQualitiesFromMaster(masterUrl: string, body: string): Array<{ name: string; url: string }> {
+  const lines = body.split(/\r?\n/);
+  const out: Array<{ name: string; url: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.startsWith("#EXT-X-STREAM-INF")) continue;
+    const next = lines[i + 1]?.trim();
+    if (!next || next.startsWith("#")) continue;
+    const res = line.match(/RESOLUTION=\d+x(\d+)/)?.[1];
+    const variantUrl = /^https?:\/\//.test(next) ? next : new URL(next, masterUrl).toString();
+    out.push({ name: res ? `${res}p` : "auto", url: variantUrl });
+  }
+  return out;
+}
+
+// Extract OK.ru video direct URLs using cookies from the open endpoint.
+// Returns MP4 entries (as before) plus, when available, an HLS master
+// playlist entry (type "hls") found by racing mirror CDN hosts — mirrors the
+// approach from https://github.com/sharoon7171/ok.ru-direct-resolver.
 async function extractOkRuVideo(
   videoId: string,
-): Promise<Array<{ name: string; url: string }>> {
+): Promise<Array<{ name: string; url: string; type?: "mp4" | "hls" }>> {
   const creds = await getOkRuCreds();
   const embedUrl = `https://ok.ru/videoembed/${videoId}`;
   const hdrs: Record<string, string> = {
     "User-Agent":      creds?.agent || BROWSER_UA,
     Referer:           "https://ok.ru/",
+    Origin:            "https://ok.ru",
     Accept:            "text/html,application/xhtml+xml,*/*;q=0.9",
     "Accept-Language": "ar,en;q=0.9",
   };
@@ -9964,15 +10124,40 @@ async function extractOkRuVideo(
     let options: { flashvars?: { metadata?: string } };
     try { options = JSON.parse(raw); } catch { return []; }
 
-    let videos: Array<{ name: string; url: string }> = [];
+    let metadata: {
+      videos?: Array<{ name: string; url: string }>;
+      hlsManifestUrl?: string;
+      ondemandHls?: string;
+      failoverHosts?: string[];
+    } = {};
     try {
-      const metadata = JSON.parse(options.flashvars?.metadata || "{}") as {
-        videos?: Array<{ name: string; url: string }>;
-      };
-      videos = metadata.videos || [];
+      metadata = JSON.parse(options.flashvars?.metadata || "{}");
     } catch { return []; }
 
-    return videos.filter(v => v.url?.startsWith("http"));
+    const mp4s = (metadata.videos || []).filter(v => v.url?.startsWith("http"));
+    const results: Array<{ name: string; url: string; type?: "mp4" | "hls" }> =
+      mp4s.map(v => ({ ...v, type: "mp4" as const }));
+
+    const masterUrl = metadata.hlsManifestUrl || metadata.ondemandHls;
+    if (masterUrl) {
+      const mirrorHosts: string[] = [];
+      for (const v of metadata.videos || []) {
+        try { mirrorHosts.push(new URL(v.url).host); } catch { /* skip */ }
+      }
+      for (const h of metadata.failoverHosts || []) mirrorHosts.push(h);
+
+      const master = await okRuOpenHlsMaster(masterUrl, mirrorHosts, hdrs);
+      if (master) {
+        // Master playlist itself (adaptive — let the HLS player pick quality)
+        results.push({ name: "auto", url: master.url, type: "hls" });
+        // Individual quality variants, in case a caller wants one directly
+        for (const q of okRuQualitiesFromMaster(master.url, master.body)) {
+          results.push({ ...q, type: "hls" });
+        }
+      }
+    }
+
+    return results;
   } catch { return []; }
 }
 
@@ -10078,6 +10263,7 @@ async function getAppsAnimeSources(
     await Promise.allSettled(okIds.slice(0, 3).map(async (id) => {
       const videos = await extractOkRuVideo(id);
       for (const v of videos) {
+        if (v.type === "hls") continue; // this caller only builds mp4 video-proxy URLs
         const embedUrl = `https://ok.ru/videoembed/${id}`;
         const name = v.name || "";
         const qual =
@@ -10351,6 +10537,10 @@ router.get("/anime/sources-stream", async (req, res) => {
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
       // scrapeCached("vyla_anim", () => getVylaAnimeSources(title, english, ep, anilistId), false), // DEAD: missourimonster-vyla.hf.space returns 404 (2026-06)
       scrapeCached("vidfast",       () => getVidFastAnimeSources(title, english, ep, anilistId),  false, 22000),
+      // vidsrc_cc_anim / superembed_anim: TMDB-native embeds already proven for animation,
+      // reused here for anime (2026-07-12) — see getVidsrcCcAnimeSources/getSuperEmbedAnimeSources
+      scrapeCached("vidsrc_cc_anim", () => getVidsrcCcAnimeSources(title, english, ep, anilistId),  false, 20000),
+      scrapeCached("superembed_anim", () => getSuperEmbedAnimeSources(title, english, ep, anilistId), false, 20000),
       scrapeCached("dulo_anim",    () => getDuloAnimeSources(title, english, ep, anilistId),      false, 18000),
       scrapeCached("cinesrc_anim", () => getCineSrcAnimeSources(title, english, ep, anilistId),   false, 35000),
       // ── WITanime-DB — محتوى عربي مدبلج (hlswish/luluvdo/darkibox) ─────
