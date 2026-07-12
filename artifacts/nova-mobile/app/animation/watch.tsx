@@ -38,7 +38,7 @@ interface AnimSrc {
 /* ── مواقع محمية بـ Cloudflare يفشل الخادم (VPS) باستخراج فيديوها ثابتاً —
    نحاول أولاً حلّها عبر WebView مخفي (JS ينفَّذ فعلياً + IP الجهاز) قبل عرض
    بطاقة "يحتاج تطبيق أصلي" ── */
-const WEBVIEW_RESOLVE_SITES = new Set(["faselhd_db", "mycima", "anime3rb"]);
+const WEBVIEW_RESOLVE_SITES = new Set(["faselhd_db", "mycima", "anime3rb", "starcima_ar"]);
 function needsHiddenResolve(s: AnimSrc): boolean {
   return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site) && Platform.OS !== "web";
 }
@@ -459,47 +459,16 @@ export default function AnimationWatchScreen() {
               seenKeys.current.add(key);
               freshSrcs.push(src);
 
-              setSources(prev => {
-                const next = [...prev, src];
-                const isGoodSrc = isDirectPlayable(src);
-                if (!isGoodSrc || autoPlayFiredRef.current) return next;
-
-                /* أولوية الأنيميشن: DU → SC (StarCima) → SP (SeePanal) → SR (Streamrip) → أي مصدر */
-                autoPlayFiredRef.current = true;
-                const animPriority = (s: AnimSrc): number => {
-                  const l = (s.label || "").toLowerCase();
-                  if (l.startsWith("dulo"))       return 100;
-                  if (l.startsWith("starcima"))   return 90;
-                  if (l.startsWith("seepan"))     return 80;
-                  if (l.startsWith("streamrip"))  return 70;
-                  return 0;
-                };
-                const isDuloNow = (src.label || "").toLowerCase().startsWith("dulo");
-                /* تأخير 1.2s — يمنح DU فرصة الوصول قبل الاختيار النهائي */
-                setTimeout(() => {
-                  setSources(latest => {
-                    const best =
-                      latest
-                        .filter(s => isDirectPlayable(s))
-                        .sort((a, b) => animPriority(b) - animPriority(a))[0] ??
-                      src;
-                    setPlayingSrc(best);
-                    setScreen("native");
-                    return latest;
-                  });
-                }, isDuloNow ? 0 : 1200);
-                return next;
-              });
+              // أضف المصدر للقائمة — لا تشغيل تلقائي، المستخدم يختار
+              setSources(prev => [...prev, src]);
 
             } else if (isDone) {
               setLoading(false);
               setSources(prev => {
-                if (prev.length === 0) setTimeout(() => setScreen("picker"), 0);
-                else {
-                  /* حفظ المصادر الجديدة في الكاش المحلي */
-                  if (animSrcCacheKey && freshSrcs.length > 0) {
-                    AsyncStorage.setItem(animSrcCacheKey, JSON.stringify({ sources: freshSrcs, ts: Date.now() })).catch(() => {});
-                  }
+                /* عند اكتمال الجلب — انتقل دائماً للـ picker ليختار المستخدم المصدر بنفسه */
+                setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
+                if (animSrcCacheKey && freshSrcs.length > 0) {
+                  AsyncStorage.setItem(animSrcCacheKey, JSON.stringify({ sources: freshSrcs, ts: Date.now() })).catch(() => {});
                 }
                 return prev;
               });
