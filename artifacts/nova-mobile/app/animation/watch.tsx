@@ -69,8 +69,6 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
-  /* hls-proxy يُعيد 307 → CF Worker (يجلب M3U8 + يُعيد كتابة segments عبره)
-     video-proxy يُعيد 307 → CF Worker — لا حاجة لـ mobile=1 بعد الآن */
   return url.startsWith("/") ? base + url : url;
 }
 
