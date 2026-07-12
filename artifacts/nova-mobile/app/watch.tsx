@@ -21,7 +21,7 @@ type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
 
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
-const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "animephoenix", "anime3rb", "ristoanime", "faselhd_db"]);
+const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "animephoenix", "anime3rb", "ristoanime", "faselhd_db", "witanime", "witanime_db", "mycima"]);
 function needsHiddenResolve(s: Src): boolean {
   return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site);
 }
