@@ -170,6 +170,53 @@ async function spGetSources(
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// ── DramaWorld (dwapp.arabypros.com) — كتالوج الأنيميشن الغربي مُخزَّن مؤقتاً ──────
+// الـ API محمي بكلاوفلير لكن يقبل أي طلب يطابق هيدرز تطبيق أندرويد الرسمي فقط
+// (User-Agent: okhttp/x.x + Accept-Encoding: gzip) — لا حاجة لتجاوز TLS/JS.
+// endpoint البحث /search/ غير موثوق (يُعيد نتائج عشوائية لا تطابق الاستعلام)،
+// لذا نجلب كتالوج فئتي الأنيميشن كاملاً (id=61 أفلام، id=87 مسلسلات) ونطابق محلياً.
+const DW_BASE    = "https://dwapp.arabypros.com/api";
+const DW_KEY     = "4F5A9C3D9A86FA54EACEDDD635185/d506abfd-9fe2-4b71-b979-feff21bcad13";
+const DW_HEADERS = { "User-Agent": "okhttp/4.12.0", "Accept-Encoding": "gzip" };
+let dwCatalogCache: { movies: any[]; series: any[]; ts: number } | null = null;
+
+async function dwFetch(path: string): Promise<any> {
+  try {
+    const r = await fetch(`${DW_BASE}${path}`, { headers: DW_HEADERS, signal: AbortSignal.timeout(15_000) });
+    if (!r.ok) return null;
+    const raw = Buffer.from(await r.arrayBuffer()).toString("utf-8");
+    // بعض endpoints (genre/years) ترجع JSON مباشر بدون base64
+    try { return JSON.parse(raw); } catch { /* not plain JSON, fall through */ }
+    // الرد المعتاد = base64(JSON) بمقدمة عشوائية الطول
+    for (let start = 0; start < Math.min(raw.length, 60); start++) {
+      try { return JSON.parse(Buffer.from(raw.slice(start), "base64").toString("utf-8")); } catch { /* try next offset */ }
+    }
+    return null;
+  } catch { return null; }
+}
+
+async function dwFetchAllPages(kind: "movie" | "serie", genreId: number): Promise<any[]> {
+  const out: any[] = [];
+  for (let page = 1; page <= 60; page++) {
+    const items = await dwFetch(`/${kind}/by/filtres/${genreId}/created/${page}/${DW_KEY}/`);
+    if (!Array.isArray(items) || !items.length) break;
+    out.push(...items);
+    if (items.length < 30) break; // آخر صفحة
+  }
+  return out;
+}
+
+async function getDwCatalog(): Promise<{ movies: any[]; series: any[] }> {
+  const TTL_MS = 6 * 60 * 60 * 1000; // 6 ساعات
+  if (dwCatalogCache && Date.now() - dwCatalogCache.ts < TTL_MS) return dwCatalogCache;
+  const [movies, series] = await Promise.all([
+    dwFetchAllPages("movie", 61),
+    dwFetchAllPages("serie", 87),
+  ]);
+  dwCatalogCache = { movies, series, ts: Date.now() };
+  return dwCatalogCache;
+}
+
 // ── Dulo.tv shared client (module-level session cache, 7h TTL) ────────────────
 // ── MovieBox auth state (h5-api.aoneroom.com) ────────────────────────────────
 const _MBX_API_ANIM    = "https://h5-api.aoneroom.com";
@@ -3517,6 +3564,58 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             } catch { continue; }
           }
         } catch { /* silent */ }
+      }),
+
+      // ── DramaWorld (dwapp.arabypros.com) — أفلام ومسلسلات أنيميشن غربية ─────
+      // نستخدم كتالوج فئتي الأنيميشن المُخزَّن مؤقتاً (getDwCatalog) بدل endpoint
+      // /search/ لأنه غير موثوق (يُعيد نتائج عشوائية لا علاقة لها بالاستعلام).
+      scrapeAnimCached("dramaworld", async () => {
+        send("status", { msg: "DramaWorld: جاري البحث…" });
+        try {
+          const wantType = type === "movie" ? "movie" : "serie";
+          const catalog = await getDwCatalog();
+          const posters: any[] = wantType === "movie" ? catalog.movies : catalog.series;
+          console.error(`[dramaworld] catalog movies=${catalog.movies.length} series=${catalog.series.length} wantType=${wantType} title="${title}"`);
+          if (!posters.length) return;
+
+          const scored = posters
+            .map(p => ({ p, sc: Math.max(titleSim(title, p.title || ""), enTitlePrefetched ? titleSim(enTitlePrefetched, p.title || "") : 0) }))
+            .filter(x => x.sc > 0.6)
+            .sort((a, b) => b.sc - a.sc);
+          console.error(`[dramaworld] scored matches=${scored.length} best=${scored[0]?.p?.title} id=${scored[0]?.p?.id} sc=${scored[0]?.sc}`);
+          if (!scored.length) return;
+          const best = scored[0].p;
+
+          let mirrors: any[] = [];
+          if (best.type === "movie") {
+            mirrors = await dwFetch(`/movie/source/by/${best.id}/${DW_KEY}/`) || [];
+          } else {
+            const seasons = await dwFetch(`/season/by/serie/${best.id}/${DW_KEY}/`);
+            const seasonObj = Array.isArray(seasons) ? (seasons[season - 1] || seasons[0]) : null;
+            const episodeObj = seasonObj?.episodes?.[epNum - 1];
+            if (!episodeObj) return;
+            mirrors = await dwFetch(`/episode/source/by/${episodeObj.id}/${DW_KEY}/`) || [];
+          }
+          console.error(`[dramaworld] mirrors=${Array.isArray(mirrors) ? mirrors.length : "not-array"} sample=${JSON.stringify(mirrors?.[0])}`);
+          if (!Array.isArray(mirrors) || !mirrors.length) return;
+
+          // ترتيب المرايا: المضيفات المؤكد نجاحها بالتحليل العملي أولاً
+          const PRIORITY = ["uqload", "luluvid", "vidaraa", "fasel-hd", "qzz.io", "adsmoloco", "kwcdn"];
+          const ordered = mirrors
+            .filter((m: any) => m?.url && m.type !== "embed" && !m.url.includes("mediafire") && !m.url.includes("mega.nz"))
+            .sort((a: any, b: any) => {
+              const pa = PRIORITY.findIndex(h => a.url.includes(h));
+              const pb = PRIORITY.findIndex(h => b.url.includes(h));
+              return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+            })
+            .slice(0, 6);
+          console.error(`[dramaworld] ordered=${ordered.length} urls=${JSON.stringify(ordered.map((m: any) => m.url))}`);
+
+          for (const m of ordered) {
+            const ok = await sendExtracted(m.url, "DramaWorld");
+            console.error(`[dramaworld] sendExtracted ${m.url} -> ${ok}`);
+          }
+        } catch (e) { console.error(`[dramaworld] EXCEPTION: ${e}`); }
       }),
 
       // ── Aether / Nebula (nebula.aether.cx) — TMDB-native، CDN مفتوح ────────
