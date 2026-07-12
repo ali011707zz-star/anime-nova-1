@@ -1859,7 +1859,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
       const needProxy = !isHls && MP4_PROXY_HOSTS.some(h => d.includes(h));
       const proxy = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : needProxy ? wrapMp4(d, embedUrl) : d;
-      seenUrls.add(embedUrl);
+      // ملاحظة: sendSource(embedUrl, …) نفسها تضيف embedUrl إلى seenUrls عبر مفتاحها
+      // الداخلي — إضافته هنا يدويًا قبل استدعائها كانت تُسبّب رفض الإرسال فورًا
+      // (seenUrls.has(url) صحيح مسبقًا) فلا يصل أي مصدر عبر مسار الاستخراج المباشر.
       sendSource(embedUrl, label, d, proxy);
       return true;
     }
@@ -3611,10 +3613,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             .slice(0, 6);
           console.error(`[dramaworld] ordered=${ordered.length} urls=${JSON.stringify(ordered.map((m: any) => m.url))}`);
 
-          for (const m of ordered) {
+          // كانت هذه الحلقة تسلسلية (await واحد تلو الآخر) — حتى 6 مرايا × حتى 5 ثوانٍ
+          // فحص HEAD لكل واحدة = حتى 30 ثانية، ما يخسر السباق مع مهلة الـ30 ثانية
+          // القاسية لكل الـSSE stream. صارت متوازية لتصل قبل انتهاء المهلة.
+          await Promise.allSettled(ordered.map(async (m: any) => {
             const ok = await sendExtracted(m.url, "DramaWorld");
             console.error(`[dramaworld] sendExtracted ${m.url} -> ${ok}`);
-          }
+          }));
         } catch (e) { console.error(`[dramaworld] EXCEPTION: ${e}`); }
       }),
 
