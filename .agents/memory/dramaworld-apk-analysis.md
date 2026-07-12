@@ -168,6 +168,17 @@ sources: ?\["(.*?)"]
 4. نسحب traffic من: `/opt/dw-capture/traffic.mitm` أو نتابع `mitmdump.log` مباشرة لرؤية endpoints جديدة (خصوصاً /api/movie/by/filtres و /api/search المحجوبة من السيرفرات).
 5. إذا فشل التثبيت بسبب "App Bundle" (تحذير ظهر في اللوج) → نحتاج xapk/apks كامل من apkpure وإعادة apk-mitm عليه.
 
+## 🎬 تشخيص "فشل إعادة المحاولة" عند تشغيل فيلم/حلقة (2026-07-12)
+سحبنا traffic.mitm بعد أول محاولة تشغيل فيلم (poster id=30475) وحللناه بـ mitmproxy FlowReader:
+
+- `GET /api/movie/source/by/{id}/{KEY}/` يرجع 200 مع قائمة مرايا (mirrors) بصيغة base64، كل واحدة `{id,title,type,url}`. مثال حقيقي: fasel-hd.cam (عبر dwapp.qzz.io proxy), morencius.com, luluvid.com, lalalala.store, playmogo.com, miixdrop.net, megatuktuk.store.
+- **معظم المرايا فاشلة من VPS**:
+  - `morencius.com` و`lalalala.store`: التطبيق يبني الرابط بشكل خاطئ (`/embed-v.html` أو `/embed-` بدون الـ id) → **404 دائماً**. يبدو أن التطبيق يفشل باستخراج fragment/id من رابط الـ API لهذين المضيفين تحديداً (مشكلة في منطق التطبيق نفسه، ليست بسبب MITM).
+  - `playmogo.com`: **403 مباشر** — يبدو محجوب من VPS IP (نفس نمط الحجب المتكرر documented في الذاكرة لعدة CDNs أخرى).
+  - `miixdrop.net`: يعمل لكنه يمرّر بسلسلة تحويلات إعلانية طويلة (miiiixdrop.net → applovin pixel 403 → mixdrop.ag) قبل الوصول للفيديو الحقيقي — لو الـ WebView الداخلي للتطبيق يحتاج تنفيذ JS/تفاعل إعلانات، قد تفشل هذه السلسلة أحياناً خصوصاً من IP مركز بيانات.
+- **خلاصة**: الفشل ليس بسبب إعداد MITM أو الشهادة، بل لأن أغلب مرايا هذا الفيلم بالتحديد معطوبة (رابط خاطئ) أو محجوبة من IP الـ VPS. يحتاج تأكيد: هل يفشل التشغيل أيضاً بدون بروكسي (على IP الهاتف نفسه مباشرة)؟ إذا نجح بدون بروكسي → المشكلة 100% بسبب IP الـ VPS وليست خلل حقيقي في التطبيق.
+- ⚠️ **ملاحظة أمان**: mitmdump مربوط على `0.0.0.0:8888` بدون أي مصادقة — لاحظنا حركة عشوائية من الإنترنت (Replit platform, Stripe, LaunchDarkly, Sentry...) تعبر البروكسي، أي إنه **بروكسي مفتوح للعالم**. يفضّل تقييده بـ firewall لـ IP الهاتف فقط أو إضافة auth، خصوصاً لأنه يُستخدم بشكل مؤقت للتحليل فقط.
+
 ## Keystore للتوقيع (موجود على VPS)
 - الملف: `/opt/dw-capture/dw-signing.keystore`
 - Password: `dramaworld123`
