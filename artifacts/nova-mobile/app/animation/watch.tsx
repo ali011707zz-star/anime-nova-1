@@ -38,7 +38,7 @@ interface AnimSrc {
 /* ── مواقع محمية بـ Cloudflare يفشل الخادم (VPS) باستخراج فيديوها ثابتاً —
    نحاول أولاً حلّها عبر WebView مخفي (JS ينفَّذ فعلياً + IP الجهاز) قبل عرض
    بطاقة "يحتاج تطبيق أصلي" ── */
-const WEBVIEW_RESOLVE_SITES = new Set(["faselhd_db"]);
+const WEBVIEW_RESOLVE_SITES = new Set(["faselhd_db", "mycima", "anime3rb"]);
 function needsHiddenResolve(s: AnimSrc): boolean {
   return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site) && Platform.OS !== "web";
 }

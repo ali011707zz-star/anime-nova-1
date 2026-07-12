@@ -65,3 +65,4 @@
 - [WitAnime scraper fixes](witanime-you-fixes.md) — WP6 ?anime[]= fix; cfProxy retry; parallel page scan; 45s timeout; x-internal:1 needed for localhost testing; recent eps work (mega.nz), old eps may be dead.
 - [Comments-button VPS sync lesson](comments-button-vps-sync.md) — local repo fixes for VPS-deployed pages must be diffed+copied per-file; git 'modified' status on VPS ≠ a specific fix is present.
 - [TimeMovies MITM plan](timemovies-mitm-plan.md) — Android phone, no root: HTTP Toolkit + manual Wi-Fi proxy + CA cert install chosen; not yet executed by user.
+- [Hidden-resolve embed sites](hidden-resolve-embed-sites.md) — 3 independent gates (isEmbed flag, backend SSE allowlist, mobile WEBVIEW_RESOLVE_SITES Set) must all list a site or its hidden-WebView extraction silently breaks.
