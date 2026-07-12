@@ -7934,59 +7934,152 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
   } catch { _kawaiiSubCache.set(cKey, { val: undefined, ts: Date.now() }); return undefined; }
 }
 
-// ── Videasy anime sources (api.videasy.to, TMDB-native multi-quality HLS) ──
-// [2026-07-04] DISABLED: api.videasy.to غيّر بنية الـ API → STREAMCRYPTO_SEED_INVALID
-// سيُعاد التفعيل عند إيجاد مفتاح التشفير الجديد.
+// ════════════════════════════════════════════════════════════════════
+//  Videasy / Vidking "STREAMCRYPTO" engine — reverse-engineered natively
+//  [2026-07-12] api.videasy.to itself is dead (now redirects to unrelated
+//  TMDB readme docs). The real backend moved to api.wingsdatabase.com —
+//  discovered by inspecting vidking.net (an official Videasy sub-brand,
+//  loads users.videasy.to/api/script.js) whose Vite bundle ships the full
+//  plain-JS decrypt algorithm (not WASM). Reimplemented below — no
+//  external decryptor service (enc-dec.app) needed at all.
+//  Algorithm: fetch a short-lived seed from /seed?mediaId=, then a custom
+//  PRNG-based XOR stream cipher (RC4 KSA when seed length is odd, else a
+//  bespoke 61-slot LCG-like generator) keyed by the seed + tmdbId,
+//  verified via a 4-byte "mvm1" magic prefix on the decrypted payload.
+// ════════════════════════════════════════════════════════════════════
+const WINGS_BASE = "https://api.wingsdatabase.com";
+const WINGS_SERVERS: Record<string, string> = {
+  Hydrogen: "cdn/sources-with-title",
+  Titanium: "tejo/sources-with-title",
+  Oxygen:   "neon2/sources-with-title",
+  Lithium:  "downloader2/sources-with-title",
+  Helium:   "1movies/sources-with-title",
+};
+const WINGS_HDRS = {
+  "User-Agent": BROWSER_UA,
+  "Referer": "https://www.vidking.net/",
+  "Origin": "https://www.vidking.net",
+};
+const WC_Hl = [1116352408,1899447441,3049323471,3921009573,961987163,1508970993,2453635748,2870763221,3624381080,310598401,607225278,1426881987,1925078388,2162078206,2614888103,3248222580];
+const WC_f0 = 1732584193, WC_Js = 61, WC_Sf = 8, WC_ms = 2654435769, WC_Ys = [109,118,109,49]; // "mvm1"
+const wcBf = (l: number) => (l * (l + 1) & 1) === 0;
+const wcIf = (l: number) => (l * (l + 1) & 1) === 1;
+function wcUi(l: number): number { l >>>= 0; l ^= l >>> 16; l = Math.imul(l, 2246822507) >>> 0; l ^= l >>> 13; l = Math.imul(l, 3266489909) >>> 0; l ^= l >>> 16; return l >>> 0; }
+function wcPs(l: number, o: number): number { l >>>= 0; o &= 31; return o === 0 ? l >>> 0 : (l << o | l >>> 32 - o) >>> 0; }
+function wcAf(l: string): number { let o = WC_f0 >>> 0; for (let e = 0; e < l.length; e++) o = wcPs((o ^ Math.imul(l.charCodeAt(e), WC_Hl[e & 15])) >>> 0, 5); return wcUi(o); }
+function wcWf(l: string): number[] { const o = new Array(256); for (let i = 0; i < 256; i++) o[i] = i; let e = 0; for (let i = 0; i < 256; i++) { e = e + o[i] + l.charCodeAt(i % l.length) & 255; const r = o[i]; o[i] = o[e]; o[e] = r; } return o; }
+function wcVf(l: string): number { let o = 2166136261; for (let e = 0; e < l.length; e++) o = Math.imul(o ^ l.charCodeAt(e), 16777619) >>> 0; return wcUi(o); }
+function wcNf(l: number, o: number, e: number): number { return ((l ^ o) >>> 0 | (l & o & e) >>> 0) >>> 0; }
+function wcRf(l: string, o: number): { S: number[]; acc: number } {
+  if (wcIf(l.length)) return { S: wcWf(l), acc: wcAf(l) };
+  const e = new Array(WC_Js);
+  let i = wcUi(wcVf(l) ^ wcUi(o >>> 0 ^ WC_ms)) >>> 0;
+  for (let r = 0; r < WC_Sf; r++) {
+    if (wcBf(r)) {
+      const n = i % WC_Js;
+      i = wcPs(i + WC_ms >>> 0, 7 + (r & 7));
+      e[n] = (i ^ wcUi(i)) >>> 0;
+      i = wcUi(i + n >>> 0);
+    } else {
+      e[r] = WC_Hl[r & 15];
+    }
+  }
+  return { S: e, acc: wcUi(i ^ 2779096485) >>> 0 };
+}
+function wcCf(l: { S: number[]; acc: number }, o: number): number {
+  const e = l.S; let i = l.acc;
+  const r = i % WC_Js;
+  const n = 0 - +(r in e);
+  const u = e[r] >>> 0;
+  const d = Math.imul(WC_ms, o + 1) >>> 0;
+  let g = wcNf(i, (u ^ d) >>> 0, n);
+  g = (wcPs(g + i >>> 0, r & 31) ^ wcPs(i, Math.imul(r, 7) & 31)) >>> 0;
+  i = wcUi(g + WC_ms >>> 0);
+  e[r] = i >>> 0;
+  l.acc = i;
+  return i >>> 0;
+}
+function wcXf(l: string, o: number, e: number): Buffer {
+  const i = wcRf(l, o);
+  const r = Buffer.alloc(e);
+  let n = 0;
+  for (let u = 0; u < e;) {
+    const d = wcCf(i, n++);
+    r[u++] = d & 255;
+    if (u < e) r[u++] = (d >>> 8) & 255;
+    if (u < e) r[u++] = (d >>> 16) & 255;
+    if (u < e) r[u++] = (d >>> 24) & 255;
+  }
+  return r;
+}
+function wcDf(l: string): Buffer {
+  const o = l.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(l.length / 4) * 4, "=");
+  return Buffer.from(o, "base64");
+}
+function wcDecrypt(cipherB64Url: string, seed: string, mediaIdNum: number): string {
+  const ct = wcDf(cipherB64Url);
+  const ks = wcXf(seed, mediaIdNum, ct.length);
+  const out = Buffer.alloc(ct.length);
+  for (let n = 0; n < ct.length; n++) out[n] = ct[n] ^ ks[n];
+  for (let n = 0; n < WC_Ys.length; n++) if (out[n] !== WC_Ys[n]) throw new Error("bad seed or tampered payload");
+  return out.subarray(WC_Ys.length).toString("utf8");
+}
+const _wingsSeedCache = new Map<string, { seed: string; expiresAt: number }>();
+async function wingsFetchSeed(mediaId: string | number): Promise<string> {
+  const key = `${WINGS_BASE}|${mediaId}`;
+  const hit = _wingsSeedCache.get(key);
+  if (hit && hit.expiresAt - 5000 > Date.now()) return hit.seed;
+  const r = await fetch(`${WINGS_BASE}/seed?mediaId=${encodeURIComponent(String(mediaId))}`, { headers: WINGS_HDRS, signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error(`seed request failed: ${r.status}`);
+  const d = await r.json() as { seed: string; ttlMs?: number };
+  _wingsSeedCache.set(key, { seed: d.seed, expiresAt: Date.now() + (d.ttlMs ?? 30000) });
+  return d.seed;
+}
+
 async function getVideasyAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
-  return []; // مؤقتاً معطّل
   const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
   const sources: UnifiedSource[] = [];
-  const encTitle = encodeURIComponent(encodeURIComponent(english || title));
-  const VEA_HDRS = {
-    "User-Agent": BROWSER_UA,
-    "Accept": "application/json, */*; q=0.01",
-    "Referer": "https://player.videasy.to/",
-    "Origin": "https://player.videasy.to",
-  };
-  // FMHY-Indexers v0.4 — Neon(mb-flix) + Yoru(cdn) — بدون ترجمة مدمجة
-  await Promise.allSettled(["mb-flix", "cdn"].map(async (server) => {
+  const kawaiiSub = await getKawaiiSubForSource(anilistId, ep);
+
+  await Promise.allSettled(Object.entries(WINGS_SERVERS).map(async ([serverName, endpoint]) => {
     try {
-      const params = `title=${encTitle}&mediaType=tv&year=&tmdbId=${tmdbId}&imdbId=&episodeId=${ep}&seasonId=1`;
-      const r = await fetch(`https://api.videasy.to/${server}/sources-with-title?${params}`,
-        { headers: VEA_HDRS, signal: AbortSignal.timeout(12_000) });
+      const seed = await wingsFetchSeed(tmdbId);
+      const url = new URL(`${WINGS_BASE}/${endpoint}`);
+      url.searchParams.set("title", english || title);
+      url.searchParams.set("mediaType", "tv");
+      url.searchParams.set("year", "");
+      url.searchParams.set("episodeId", String(ep));
+      url.searchParams.set("seasonId", "1");
+      url.searchParams.set("tmdbId", String(tmdbId));
+      url.searchParams.set("imdbId", "");
+      url.searchParams.set("enc", "2");
+      url.searchParams.set("seed", seed);
+      const r = await fetch(url, { headers: { ...WINGS_HDRS, "Cache-Control": "no-cache" }, signal: AbortSignal.timeout(12_000) });
       if (!r.ok) return;
-      const blob = await r.text();
-      if (!blob || blob.length < 20) return;
+      const ciphertext = await r.text();
+      if (!ciphertext || ciphertext.length < 10) return;
+      const decrypted = wcDecrypt(ciphertext, seed, tmdbId);
+      const data = JSON.parse(decrypted) as { sources?: Array<{ url?: string; type?: string; quality?: string }>; subtitles?: Array<{ lang?: string; language?: string; url?: string }> };
+      if (!data.sources?.length) return;
 
-      // Try decryption — downloader2 may use a different key derivation:
-      // attempt 1: with tmdbId, attempt 2: with empty id (fallback for downloader2)
-      const tryDecrypt = async (id: string) =>
-        fetch("https://enc-dec.app/api/dec-videasy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: blob, id, server }),
-          signal: AbortSignal.timeout(10_000),
-        }).then(r2 => r2.ok ? r2.json() : null).catch(() => null) as
-        Promise<{ status: number; result?: { sources?: any[]; subtitles?: any[] } } | null>;
+      const araSub = (data.subtitles ?? []).find(s => /arabic|^ar$/i.test(s.lang || s.language || ""));
+      const chosenSub = kawaiiSub || (araSub?.url ? `/api/anime/proxy-text?url=${encodeURIComponent(araSub.url)}` : undefined);
 
-      let dec = await tryDecrypt(String(tmdbId));
-      if (!dec || dec.status !== 200 || !dec.result?.sources?.length) {
-        // Fallback for downloader2: try without id
-        dec = await tryDecrypt("");
-      }
-      if (!dec || dec.status !== 200 || !dec.result?.sources) return;
-
-      // kawaii subtitle (EN→AR) يُفضَّل على CDN Videasy — الجودة أفضل
-      const kawaiiSub = await getKawaiiSubForSource(anilistId, ep);
-      const araSub    = (dec.result.subtitles ?? []).find((s: any) => s.lang === "ara" || s.lang === "ar");
-      const fallbackSub = araSub?.url ? `/api/anime/translate-vtt?url=${encodeURIComponent(araSub.url)}&from=ar&to=ar` : undefined;
-      const chosenSub = kawaiiSub || fallbackSub;
-      for (const src of (dec.result.sources ?? [])) {
+      for (const src of data.sources) {
         if (!src?.url) continue;
+        const isHls = src.type === "hls" || src.url.includes(".m3u8");
+        const isDash = src.type === "dash" || src.url.toLowerCase().includes(".mpd");
+        if (isDash) continue; // no DASH support in our player pipeline
         const q = src.quality || "HD";
-        const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
-        sources.push({ name: `Videasy · ${server} · ${q}`, url: proxied, quality: q, qualityRank: 19, site: "videasy_anim", directUrl: proxied, directType: "hls", ...(chosenSub ? { subtitleUrl: chosenSub } : {}) });
+        const proxied = isHls
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://www.vidking.net/")}`
+          : `/api/anime/video-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://www.vidking.net/")}`;
+        sources.push({
+          name: `Videasy · ${serverName} · ${q}`, url: proxied, quality: q, qualityRank: 19,
+          site: "videasy_anim", directUrl: proxied, directType: isHls ? "hls" : "mp4",
+          ...(chosenSub ? { subtitleUrl: chosenSub } : {}),
+        });
       }
     } catch { /* silent per server */ }
   }));
@@ -10531,7 +10624,9 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
       // scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
-      // videasy_anim: معطّل — api.videasy.to غيّر بنية الـ API (STREAMCRYPTO_SEED_INVALID)
+      // videasy_anim: أُعيد تفعيله 2026-07-12 — backend الحقيقي انتقل إلى api.wingsdatabase.com
+      // (اكتُشف عبر vidking.net)، وفكّ التشفير أُعيد بناؤه محليًا بدون enc-dec.app.
+      scrapeCached("videasy_anim", () => getVideasyAnimeSources(title, english, ep, anilistId), false, 20000),
       // vidlink_anim: معطّل — enc-dec.app/api/enc-vidlink معلَّق منذ 2026-07-08
       // mxplayer: معطّل — خدمة mxplayer_service.py (المنفذ 8002) غير مُشغَّلة
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
