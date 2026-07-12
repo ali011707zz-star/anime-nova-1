@@ -109,6 +109,10 @@ const VIDMOLY_HOSTS = ["vidmoly.biz","vidmoly.to","vidmoly.net"];
  * الموبايل يحاول حلها عبر WebView مخفي (IP سكني) قبل عرض بطاقة "يحتاج تطبيق أصلي".
  * بدون هذه القائمة تُحذف هذه المصادر بالكامل بواسطة سياسة iframe (mega/vidmoly فقط). */
 const HIDDEN_RESOLVE_EMBED_HOSTS = ["fasel-hd.cam", "animelek.top", "animedar.com", "anime-phoenix.com", "anime3rb.com", "ristoanime"];
+// مواقع تُحلَّل عبر متصفح خفي على جهاز المستخدم (WEBVIEW_RESOLVE_SITES في التطبيق) —
+// روابط سيرفراتها متنوّعة (mp4plus/anafast/vidoba/... لماي سيما، عدة CDNs لويت أنمي)
+// لذا نسمح بها بالاعتماد على site بدل مطابقة hostname واحد.
+const HIDDEN_RESOLVE_EMBED_SITES = ["mycima", "witanime"];
 
 // Hosts that cannot be extracted AND are NOT allowed as embed → skip entirely
 const EMBED_ONLY_HOSTS = [
@@ -1834,7 +1838,7 @@ async function extractAndCollect(
     // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
     if (s.isEmbed) {
       const eu = (s.directUrl || s.url).toLowerCase();
-      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h))) return;
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_SITES.includes(s.site || "")) return;
     }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
@@ -10151,7 +10155,7 @@ router.get("/anime/sources-stream", async (req, res) => {
     // iframe policy: only mega.nz and vidmoly allowed as sandboxed embed
     if (s.isEmbed) {
       const eu = (s.directUrl || s.url).toLowerCase();
-      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h))) return;
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_SITES.includes(s.site || "")) return;
     }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
@@ -10453,7 +10457,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     if (!s.directUrl && !s.isEmbed) return;
     if (s.isEmbed) {
       const eu = (s.directUrl || s.url).toLowerCase();
-      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h))) return;
+      if (!eu.includes("mega.nz") && !eu.includes("mega.co.nz") && !VIDMOLY_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_HOSTS.some(h => eu.includes(h)) && !HIDDEN_RESOLVE_EMBED_SITES.includes(s.site || "")) return;
     }
     const checkUrl = s.directUrl || s.url;
     const isOwnProxy = checkUrl.startsWith("/api/");
