@@ -1,3 +1,4 @@
+- [DramaWorld APK Analysis](dramaworld-apk-analysis.md) — API=app.arabypros.com/api; KEY=4F5A9C3D.../d506abfd; filtres محجوبة من servers; apk-mitm تعمل على VPS لتجاوز SSL pinning.
 - [CineSrc integration](cinesrc-integration.md) — cinesrc.st in animation.ts+anime.ts; VPS IP blocked for server actions (graceful fail); SubtleCrypto Proxy patch documented.
 - [Anime NOVA startup fix](anime-nova-startup.md) — DB migration must run AFTER server starts listening, not before, or the workflow port-open timeout fails.
 - [VPS Deployment](vps-deployment.md) — خادم 95.182.93.105 Ubuntu 24.04; Telegram webhook uses self-signed cert uploaded to Telegram API; CHANNEL_ID in .env + DB; token DB-only via config-sync.
