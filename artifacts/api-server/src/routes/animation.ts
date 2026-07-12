@@ -2087,8 +2087,25 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
             })(),
 
-            // ── arabic-sources: DISABLED — مدبلج عربي أو ترجمة مدمجة، لا يلبي شرط "صوت خام + روابط مباشرة"
-            Promise.resolve(),
+            // ── arabic-sources: re-enabled — أنيميشن مترجم عربي (embeds تُحلّ عبر HiddenResolverWebView موبايل)
+            (async () => {
+              try {
+                const r = await fetch(
+                  `${SC_ARABIC}?tmdbId=${tmdbId}&type=${type}&title=${encodeURIComponent(title)}${tvExtra}`,
+                  { headers: scHeaders, signal: AbortSignal.timeout(12_000) }
+                );
+                if (!r.ok) return;
+                const data: any = await r.json();
+                const servers: any[] = data.servers || data.sources || data.embeds || data.links || [];
+                for (const s of servers.slice(0, 5)) {
+                  const embedUrl = s.url || s.link || s.embed || s.src;
+                  if (!embedUrl || typeof embedUrl !== "string") continue;
+                  const serverName = s.name || s.server || s.label || "عربي";
+                  const label = `StarCima عربي · ${serverName}`;
+                  send("source", { url: embedUrl, directUrl: embedUrl, label, site: "starcima_ar", isEmbed: true });
+                }
+              } catch (e) { console.error("[StarCima/arabic-sources]", e); }
+            })(),
           ]);
 
         } catch { /* silent */ }
@@ -3041,7 +3058,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── AnimePhoenix (anime-phoenix.com) — أنمي مدبلج عربي x265/HEVC ─────────
       // ── MyCima / WeCima — أفلام وكرتون مترجم ──────────────────────────────
       scrapeAnimCached("mycima_anim", async () => {
-        return; // DISABLED: مدبلج عربي — لا يلبي شرط "صوت خام بدون ترجمة مدمجة"
         const q = enTitlePrefetched || title;
         if (!q) return;
         try {
@@ -3075,7 +3091,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       Promise.resolve(),
 
       scrapeAnimCached("topcinemaa_anim", async () => {
-        return; // DISABLED: مدبلج عربي — لا يلبي شرط "صوت خام بدون ترجمة مدمجة"
         const q = enTitlePrefetched || title;
         if (!q) return;
         try {
@@ -3112,7 +3127,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // الاستراتيجية: WP-JSON بحث مباشر (لا يحتاج proxy) → data-embed-url servers
       // يستخدم نفس scraper الأنمي (getEgyBestSources) عبر internal API
       scrapeAnimCached("egybest_anim", async () => {
-        return; // DISABLED: ترجمة عربية مدمجة أو مدبلج — لا يلبي شرط "صوت خام"
         const q = enTitlePrefetched || title;
         if (!q) return;
         try {
@@ -3321,11 +3335,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               }
             } catch { /* silent */ }
 
-            // ── fallback: isEmbed DISABLED — المستخدم يريد روابط مباشرة فقط، لا iframes
-            // if (!faselhdSentAny) {
-            //   sendSource(playerUrl, "FaselHD · Player", undefined, undefined, { isEmbed: true, site: "faselhd_db" });
-            //   faselhdSentAny = true;
-            // }
+            // ── fallback: isEmbed — إذا لم يُستخرج رابط مباشر، أرسل embed يُحلّ عبر HiddenResolverWebView موبايل
+            if (!faselhdSentAny) {
+              send("source", { url: playerUrl, directUrl: playerUrl, label: "FaselHD · Player", site: "faselhd_db", isEmbed: true });
+              faselhdSentAny = true;
+            }
           }
 
           // ── الخطوة 5: روابط التحميل (downloadLinks) → جرب عبر cfProxy ─────────
@@ -3743,7 +3757,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── CineSrc (cinesrc.st, TMDB-native, 15 providers, multi-quality HLS) ─────
       // يعمل كـ microservice على VPS (port 13004) — يُتخطّى إذا لم تكن CINESRC_BASE مُعيَّنة
       scrapeAnimCached("cinesrc", async () => {
-        return; // DISABLED: لا يعمل بشكل موثوق — CINESRC_BASE غير مضمون + VPS IP blocked
         if (!tmdbId) return;
         const CINESRC_BASE = process.env.CINESRC_BASE;
         if (!CINESRC_BASE) return;
@@ -3916,7 +3929,6 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── Akwam (akwam.it) — روابط تحميل مباشرة (downet.net), مصدر احتياطي بأولوية منخفضة ──
       // ملاحظة: akwam.to أصبح صفحة بيع نطاق؛ النطاق الفعلي الحالي هو akwam.it (301 عبر ak.sv)
       scrapeAnimCached("akwam", async () => {
-        return; // DISABLED: روابط downet.net هي روابط تحميل (redirect) لا تعمل كـ streams مباشرة + المحتوى مدبلج عربي
         const q = enTitlePrefetched || title;
         if (!q || type !== "movie") return;
         try {

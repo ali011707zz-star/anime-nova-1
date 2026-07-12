@@ -56,6 +56,7 @@ const SITE_TAG: Record<string, string> = {
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
+  anime3rb: "A3", akwam: "AQ",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -71,6 +72,7 @@ const SITE_LABEL: Record<string, string> = {
   animephoenix: "AnimePhoenix", faselhd_db: "FaselHD", animetime: "AnimeTime",
   witanime: "WITanime", witanime_db: "WIT مدبلج",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
+  anime3rb: "Anime3rb", akwam: "Akwam",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -95,6 +97,7 @@ const SITE_DESC: Record<string, string> = {
   witanime: "عربي مترجم · CycleTLS", witanime_db: "عربي مدبلج · WP",
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
+  anime3rb: "عربي مترجم · embed مباشر", akwam: "عربي مترجم · MP4 مباشر",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -217,8 +220,10 @@ const ANIME_SITES = [
   "mycima", "topcinemaa", "animephoenix",
   // قاعدة بيانات FaselHD + AnimeTime + WITanime + WITanime-DB (مدبلج)
   "faselhd_db", "animetime", "witanime", "witanime_db",
-  // مصادر جديدة يوليو 2026 (xyra_anim معطّل مؤقتاً — خادمهم يرجع 502 دائماً)
+  // مصادر جديدة يوليو 2026
   "notorrent", "sanime", "anslayer",
+  // مصادر عربية مُستعادة
+  "anime3rb", "akwam",
 ] as const;
 const SITE_TIMEOUT_MS = 28_000;
 
@@ -305,9 +310,9 @@ export default function WatchScreen() {
   const displayTitle = titleArStr || englishStr || titleStr;
 
   /* ── State ── */
-  const [screen,      setScreen]      = useState<Screen>("loading"); // يبدأ بـ loading ثم يشغّل تلقائياً
+  const [screen,      setScreen]      = useState<Screen>("picker"); // يبدأ بـ picker مباشرة — المستخدم يختار المصدر
   const [sources,     setSources]     = useState<Src[]>([]);
-  const [loading,     setLoading]     = useState(true);
+  const [loading,     setLoading]     = useState(false);
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
   const [resumeTime,  setResumeTime]  = useState(0);
   const [resolveFailed, setResolveFailed] = useState(false); // آخر محاولة WebView مخفي فشلت → نعرض بطاقة "يحتاج تطبيق أصلي"
@@ -517,29 +522,9 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, srcCacheKey]);
 
-  /* ── تحميل تلقائي عند فتح الشاشة — يطابق نظام الويب تماماً:
-     تُجدوَل كل مواقع ANIME_SITES بالتوازي (فارق 70ms بينها لتخفيف الضغط على الـ VPS)،
-     أول مصدر مباشر جاهز يُشغَّل تلقائياً فوراً (autoPlayFiredRef يمنع التشغيل المزدوج)،
-     والباقي يستمر بالتحميل خلفياً ليظهر في قائمة "مصادر المشاهدة" الكاملة.
-     لا حاجة لضغط المستخدم على مصدر لبدء البث. ── */
-  useEffect(() => {
-    if (!anime) return;
-    /* إن وُجد كاش صالح فالمصادر المحفوظة معروضة بالفعل — لا تُعِد الجلب فوراً،
-       اترك المستخدم يضغط "تحديث" إن رغب (يطابق سلوك الكاش القديم). */
-    if (hasCachedRef.current) return;
-    autoFetchAllRef.current = true;
-    const sitesToLoad = singleSite ? [singleSite] : ANIME_SITES;
-    sitesToLoad.forEach((site, i) => {
-      const tid = setTimeout(() => { handlePickSite(site, true); }, i * 70);
-      bgTimersRef.current.push(tid);
-    });
-    return () => {
-      bgTimersRef.current.forEach(clearTimeout);
-      bgTimersRef.current = [];
-      autoFetchAllRef.current = false;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum, singleSite]);
+  /* ── لا تحميل تلقائي — المستخدم يختار المصدر بنفسه لتقليل الضغط على VPS ──
+     الـ picker يظهر فوراً عند فتح الشاشة. عند الضغط على مصدر:
+       handlePickSite(site, true) → يجلب ذلك المصدر → يُشغّل أول نتيجة → يُحمّل الباقي خلفياً. ── */
 
   /* ── Cleanup bgTimers on unmount/episode-change ── */
   useEffect(() => {
