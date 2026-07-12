@@ -3884,6 +3884,8 @@ function parseMyCimaDataWatch(html: string, siteName: string): UnifiedSource[] {
     sources.push({
       name: `ماي سيما · ${labelRaw || "سيرفر"}`,
       url, quality: "HD", qualityRank: 10, site: siteName,
+      // صفحة سيرفر مضمّنة (iframe) وليست ملف فيديو مباشر
+      isEmbed: true,
     });
   }
   return sources;
@@ -3987,6 +3989,8 @@ async function getMyCimaSources(
                 sources.push({
                   name: `ماي سيما · ${n}`,
                   url: em[0], quality: "HD", qualityRank: 9, site: "mycima",
+                  // صفحة سيرفر مضمّنة (iframe) وليست ملف فيديو مباشر
+                  isEmbed: true,
                 });
               }
             }
@@ -4851,6 +4855,9 @@ async function getWitanimeSources(
       quality:     "HD",
       qualityRank: 9,
       site:        "witanime",
+      // صفحات سيرفر مضمّنة (iframe) وليست ملفات فيديو مباشرة — تحتاج استخراج
+      // عبر متصفح خفي (HiddenResolverWebView) على جهاز المستخدم.
+      isEmbed:     true,
     }));
 
     witaSrcCache.set(ck, { sources, ts: Date.now() });
