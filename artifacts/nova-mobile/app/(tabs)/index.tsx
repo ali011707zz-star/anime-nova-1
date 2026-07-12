@@ -87,33 +87,19 @@ export default function HomeScreen() {
     queryFn: () => anilistQuery<{ Page: { media: AnilistMedia[] } }>(MOVIES_QUERY),
   });
 
-  /* حلقات اليوم — جلب كل الصفحات مثل تطبيق الويب */
-  const todayStart = (() => {
-    const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000);
-  })();
-  const todayEnd = todayStart + 86399;
-
-  type TodayEp = { episode: number; airingAt: number; media: { id: number; title: { romaji: string; english: string | null }; coverImage: { large: string }; averageScore: number | null; popularity: number } };
+  /* أحدث الحلقات — مباشرةً من كتالوج anslayer نفسه (نفس مصدر تطبيق الويب تماماً،
+     بدلاً من جدول بث AniList) لضمان تطابق الحلقات المعروضة بين الويب والموبايل. */
+  type TodayEp = { animeId: number; name: string; episode: number; cover: string; year?: string };
   const [todayEps, setTodayEps] = useState<TodayEp[]>([]);
   useEffect(() => {
     let cancelled = false;
-    fetchAllTodayEpisodes(todayStart, todayEnd).then(eps => {
-      if (!cancelled) {
-        const ADULT_GENRES = new Set(["Hentai"]);
-        const filtered = eps
-          .filter((e: any) => {
-            if (!e.media?.id || e.media?.isAdult) return false;
-            if (e.media?.countryOfOrigin && e.media.countryOfOrigin !== "JP") return false;
-            if (e.media.title.romaji?.toLowerCase().includes("(")) return false;
-            const genres: string[] = e.media?.genres || [];
-            return !genres.some((g: string) => ADULT_GENRES.has(g));
-          })
-          .sort((a: any, b: any) => b.airingAt - a.airingAt);
-        setTodayEps(filtered);
-      }
-    }).catch(() => {});
+    fetch(`${getBaseUrl()}/api/anime/anslayer-latest`)
+      .then(r => r.json())
+      .then((d: { items?: TodayEp[] }) => {
+        if (!cancelled) setTodayEps(d.items || []);
+      }).catch(() => {});
     return () => { cancelled = true; };
-  }, [todayStart]);
+  }, []);
 
   const isLoading = loadingT || loadingP || loadingA;
 
@@ -214,31 +200,36 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* حلقات اليوم */}
+        {/* أحدث الحلقات — نفس مصدر anslayer المستخدم على الويب */}
         {todayEps.length > 0 && (
           <View style={{ marginTop: 24 }}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionLeft}>
                 <View style={[styles.sectionDot, { backgroundColor: "#f43f5e" }]} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>📅 حلقات اليوم</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>📺 أحدث الحلقات</Text>
               </View>
               <Pressable onPress={() => router.push("/schedule" as any)} style={styles.seeAllBtn}>
-                <Text style={[styles.seeAllText, { color: colors.primary }]}>الجدول الكامل</Text>
+                <Text style={[styles.seeAllText, { color: colors.primary }]}>عرض المزيد</Text>
                 <Ionicons name="chevron-back" size={13} color={colors.primary} />
               </Pressable>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-              {todayEps.map((ep) => (
+              {todayEps.map((ep, i) => (
                 <Pressable
-                  key={`${ep.media.id}-${ep.episode}`}
-                  onPress={() => router.push(`/watch?anilistId=${ep.media.id}&ep=${ep.episode}&title=${encodeURIComponent(ep.media.title.romaji)}&english=${encodeURIComponent(ep.media.title.english || ep.media.title.romaji)}&cover=${encodeURIComponent(ep.media.coverImage.large)}` as any)}
+                  key={`${ep.animeId}-${ep.episode}-${i}`}
+                  onPress={() => router.push(`/watch?anime=0&ep=${ep.episode}&title=${encodeURIComponent(ep.name || "")}&english=${encodeURIComponent(ep.name || "")}&cover=${encodeURIComponent(ep.cover || "")}&site=anslayer&anslayerId=${ep.animeId}&single=1` as any)}
                   style={[todayEpStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
-                  <Image source={{ uri: ep.media.coverImage.large }} style={todayEpStyles.img} resizeMode="cover" />
+                  {ep.cover ? (
+                    <Image source={{ uri: ep.cover }} style={todayEpStyles.img} resizeMode="cover" />
+                  ) : (
+                    <View style={[todayEpStyles.img, { backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }]}>
+                      <Ionicons name="tv" size={28} color="rgba(255,255,255,0.2)" />
+                    </View>
+                  )}
                   <LinearGradient colors={["transparent", "rgba(0,0,0,0.95)"]} style={todayEpStyles.grad}>
                     <Text style={todayEpStyles.ep}>حلقة {ep.episode}</Text>
-                    <Text style={todayEpStyles.title} numberOfLines={2}>{ep.media.title.english || ep.media.title.romaji}</Text>
-                    <Text style={todayEpStyles.time}>{formatAiringTime(ep.airingAt)}</Text>
+                    <Text style={todayEpStyles.title} numberOfLines={2}>{ep.name}</Text>
                   </LinearGradient>
                 </Pressable>
               ))}
