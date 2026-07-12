@@ -127,6 +127,12 @@ export default function DubbedScreen() {
     <View style={[styles.container, { paddingTop: topPad }]}>
       {/* Header */}
       <View style={styles.header}>
+        <Pressable
+          onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
+          style={styles.iconBtn}
+        >
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+        </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>كرتون مدبلج</Text>
           <Text style={styles.headerSub}>كرتون وأنمي مدبلج للعربية</Text>

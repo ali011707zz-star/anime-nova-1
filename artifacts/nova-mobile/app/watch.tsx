@@ -284,11 +284,16 @@ export default function WatchScreen() {
   const {
     anime, ep, title, english, format, etitle,
     totalEps: totalEpsParam, year, episodes, native, titleAr,
+    site: singleSiteParam, anslayerId, single,
   } = useLocalSearchParams<{
     anime: string; ep: string; title: string; english: string;
     format?: string; etitle?: string; totalEps?: string;
     year?: string; episodes?: string; native?: string; titleAr?: string;
+    site?: string; anslayerId?: string; single?: string;
   }>();
+  /* single=1 → آتٍ من قسم "أحدث الحلقات" (مصدر anslayer مباشرةً بمعرّفه الخاص من
+     كتالوجه) — يطابق نظام الويب: يجب ألا يُجلب أي مصدر آخر سوى anslayer نفسه. */
+  const singleSite = single === "1" && singleSiteParam ? singleSiteParam : null;
   const insets   = useSafeAreaInsets();
   const router   = useRouter();
   const { addToHistory } = useApp();
@@ -527,7 +532,8 @@ export default function WatchScreen() {
        اترك المستخدم يضغط "تحديث" إن رغب (يطابق سلوك الكاش القديم). */
     if (hasCachedRef.current) return;
     autoFetchAllRef.current = true;
-    ANIME_SITES.forEach((site, i) => {
+    const sitesToLoad = singleSite ? [singleSite] : ANIME_SITES;
+    sitesToLoad.forEach((site, i) => {
       const tid = setTimeout(() => { handlePickSite(site, true); }, i * 70);
       bgTimersRef.current.push(tid);
     });
@@ -537,7 +543,7 @@ export default function WatchScreen() {
       autoFetchAllRef.current = false;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum]);
+  }, [anime, epNum, singleSite]);
 
   /* ── Cleanup bgTimers on unmount/episode-change ── */
   useEffect(() => {
@@ -663,6 +669,9 @@ export default function WatchScreen() {
       english: englishStr, format: format || "",
       year: year || "", episodes: episodes || "", native: native || "",
     });
+    /* anslayerId: يمرَّر من قسم "أحدث الحلقات" — معرّف anslayer المباشر من كتالوجه
+       يتجاوز البحث بالاسم ويحدّد الأنمي الصحيح 100% (يطابق نظام الويب). */
+    if (site === "anslayer" && anslayerId) qs.set("anslayerId", anslayerId);
 
     try {
       await warmAuthToken();
@@ -720,7 +729,7 @@ export default function WatchScreen() {
       inFlightSitesRef.current.delete(site);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, playSrc]);
+  }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, playSrc, anslayerId]);
 
   /* ── Handle back ── */
   const handleBack = useCallback(() => {
