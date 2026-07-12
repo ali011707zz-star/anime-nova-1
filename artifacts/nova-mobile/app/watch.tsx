@@ -145,9 +145,7 @@ function getPlayUrl(s: Src): string {
 
 /**
  * استخراج Referer/Origin من رابط proxy (hls-proxy أو video-proxy).
- * يُمرَّران لـ ExoPlayer/AVPlayer كـ HTTP headers مع كل طلب:
- * - segments مباشرة (mobile=1 + directSegs=true)
- * - MP4 بعد 307 redirect (mobile=1 + video-proxy)
+ * يُمرَّران لـ ExoPlayer/AVPlayer كـ HTTP headers مع كل طلب.
  * بدون هذه الـ headers يعيد CDN 403 لأن الطلب يبدو من مصدر مجهول.
  */
 function extractProxyHeaders(url: string): Record<string, string> | undefined {
@@ -167,8 +165,6 @@ function extractProxyHeaders(url: string): Record<string, string> | undefined {
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
-  /* hls-proxy يُعيد 307 → CF Worker مباشرة (يجلب M3U8 + يُعيد كتابة الـ segments عبره)
-     video-proxy يُعيد 307 → CF Worker أيضاً — لا حاجة لـ mobile=1 بعد الآن */
   return url.startsWith("/") ? base + url : url;
 }
 
