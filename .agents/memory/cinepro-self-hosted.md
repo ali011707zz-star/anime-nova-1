@@ -1,19 +1,23 @@
 ---
 name: CinePro self-hosted service (install/usage reference)
-description: How CinePro (cinepro-org/core) is installed and run as a local pm2 service on the VPS, kept for reference after removing it as an active animation source.
+description: How CinePro (cinepro-org/core) was installed and run as a local pm2 service on the VPS. PERMANENTLY DELETED from VPS on 2026-07-13 to reclaim RAM.
 ---
 
-## What it is
-`cinepro-org/core` (`@cinepro/core`) — OMSS-compliant Node.js 20+ scraping backend, TMDB-native.
-Aggregates ~14+ providers (VidSrc, VidApi, Icefy, FshareTV, VixSrc, etc.) for movie/TV streams — not anime-specific.
+## ⚠️ الحالة: محذوف من VPS نهائياً (2026-07-13)
+`/opt/cinepro` و pm2 process `cinepro` حُذفا من الـ VPS. الملف هذا للمرجعية فقط.
 
-## Install (on VPS)
+## ما هو
+`cinepro-org/core` (`@cinepro/core`) — Node.js 20+ scraping backend متوافق مع OMSS، TMDB-native.
+يجمع ~14+ provider (VidSrc, VidApi, Icefy, FshareTV, VixSrc...) للأفلام والمسلسلات — ليس مخصصاً للأنمي.
+
+## إعادة التثبيت (لو احتجته لاحقاً)
 ```bash
 git clone https://github.com/cinepro-org/core /opt/cinepro
 cd /opt/cinepro
 npm install
 ```
-`.env` (in `/opt/cinepro/.env`):
+
+`.env` في `/opt/cinepro/.env`:
 ```
 PORT=3000
 HOST=0.0.0.0
@@ -26,18 +30,21 @@ TMDB_API_KEY=<tmdb_v3_key>
 TMDB_CACHE_TTL=86400
 CACHE_TYPE=memory
 ```
-Build + run: `npm run build` (tsc → `dist/server.js`), then run via pm2:
+
+بناء وتشغيل:
 ```bash
+cd /opt/cinepro
+npm run build
 pm2 start dist/server.js --name cinepro --cwd /opt/cinepro
 pm2 save
 ```
 
-## API shape (as consumed by animation.ts before removal)
-- Movie: `GET http://localhost:3000/v1/movies/{tmdbId}`
-- TV:    `GET http://localhost:3000/v1/tv/{tmdbId}/seasons/{season}/episodes/{epNum}`
-- Response: `{ sources: [{ provider, quality, url }], subtitles: [...] }`
-- Some `url` values are internally proxied as `/v1/proxy?data=<json-encoded-{url}>` — must be decoded to get the real URL.
-- VidApi-provided URLs are HLS (`.m3u8`) but use non-standard paths (`/pl/`, `/playlist/`) — detect by provider name, not just URL extension.
+## شكل الـ API (كما كان يُستخدم في animation.ts)
+- فيلم: `GET http://localhost:3000/v1/movies/{tmdbId}`
+- مسلسل: `GET http://localhost:3000/v1/tv/{tmdbId}/seasons/{season}/episodes/{epNum}`
+- الرد: `{ sources: [{ provider, quality, url }], subtitles: [...] }`
+- بعض الـ `url` مُوكَّلة داخلياً كـ `/v1/proxy?data=<json-encoded-{url}>` — فكّها لتحصل على الرابط الحقيقي.
+- روابط VidApi هي HLS (`.m3u8`) لكن بمسارات غير قياسية (`/pl/`, `/playlist/`) — اكتشفها باسم الـ provider لا بامتداد الـ URL.
 
-## Why it was removed as an active source (2026-07)
-Removed by user request from the animation section's live scraping list (`scrapeAnimCached("cinepro", …)` in `animation.ts`). The pm2 process (`cinepro`, `/opt/cinepro`) is still running on the VPS but no longer called by the app — kept only for potential future reintegration. Delete/stop the pm2 process separately if VPS resources need reclaiming.
+## لماذا أُزيل
+أُزيل بطلب المستخدم من قائمة scraping الحية في `animation.ts`. استهلك 70MB RAM بدون فائدة.
