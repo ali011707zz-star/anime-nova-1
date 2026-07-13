@@ -3152,10 +3152,15 @@ export default function WatchPage() {
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
 
-        /* المستخدم اختار هذا المصدر — شغّل أول نتيجة فوراً وابدأ تحميل الباقي خلفياً */
+        /* المستخدم اختار هذا المصدر — شغّل أول نتيجة فوراً وابدأ تحميل الباقي خلفياً.
+           شرط: لا يُشغَّل تلقائياً إلا مصدر بجودة 1080p فأعلى (qualityRank >= 13) —
+           إن كانت أفضل نتيجة من هذا المصدر أقل من ذلك، ننتظر مصدراً آخر يصل بجودة أعلى
+           (الـ fallback effect أدناه يتكفَّل بالتشغيل بأفضل المتاح إن لم يظهر 1080p إطلاقاً). */
         if (!bgLoad && !autoPlayedRef.current && phaseRef.current === "picker") {
-          const playable = srcs.find(s => shouldShowSrc(s));
-          if (playable) {
+          const playable = srcs
+            .filter(s => shouldShowSrc(s))
+            .sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0];
+          if (playable && (playable.qualityRank ?? 0) >= 13) {
             autoPlayedRef.current = true;
             handlePlaySrc(playable);
             /* تحميل خلفي لبقية المصادر لملء الـ picker داخل المشغّل — فقط إذا لم تكن موجة
@@ -3241,6 +3246,28 @@ export default function WatchPage() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animeId, ep]);
+
+  /* ── Fallback auto-play: التشغيل التلقائي يشترط جودة 1080p فأعلى (أعلاه في handleFetchSite).
+     إن انتهت جميع السكربرزات من الجلب دون أن يصل أي مصدر بجودة 1080p، نُشغِّل أفضل مصدر
+     متوفر بأي جودة — لتجنّب بقاء المستخدم عالقاً في شاشة الاختيار بلا تشغيل تلقائي إطلاقاً. */
+  useEffect(() => {
+    if (phase !== "picker") return;
+    if (autoPlayedRef.current) return;
+    const singleSite2 = sp.get("single") === "1" ? sp.get("site") : null;
+    const activeDefs = singleSite2 ? SCRAPER_DEFS.filter(d => d.site === singleSite2) : SCRAPER_DEFS;
+    const stillFetching = activeDefs.some(d => slotStatus[d.site] === "fetching" || !slotStatus[d.site] || slotStatus[d.site] === "idle");
+    if (stillFetching) return; // بعض المصادر لم تنتهِ بعد — استمر بالانتظار لمصدر 1080p
+
+    const allFlat: FetchedSrc[] = [];
+    for (const srcs of Object.values(slotSources)) {
+      for (const s of srcs) { if (shouldShowSrc(s)) allFlat.push(s); }
+    }
+    if (allFlat.length === 0) return; // لا مصادر متاحة — تبقى شاشة الاختيار/الفشل كما هي
+    allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+    autoPlayedRef.current = true;
+    handlePlaySrc(allFlat[0]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotStatus, slotSources, phase]);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
