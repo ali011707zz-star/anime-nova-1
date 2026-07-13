@@ -76,4 +76,4 @@
 - [Embed-decrypt research method + queue](embed-decrypt-research-2026-07-12.md) — reverse-engineering method (official site → JS chunks → grep for host+crypto); VidLink in-progress (fu.wasm+libsodium suspect); full list of untested embed providers for next session.
 - [Anime Rift fake auth + real API](anime-rift-fake-auth.md) — integrity JWT signature unchecked, device registration accepts fabricated info; full curl-only scrape flow confirmed working.
 - [APK RE playbook](apk-re-playbook.md) — generalized method: try direct curl first, then forge "integrity"/attestation tokens to test if signature checks are real before doing native RE.
-- [Anime Rift bypass closed 2026-07-13](anime-rift-bypass-closed-2026-07-13.md) — the fake-integrity-JWT curl bypass stopped working; ACCESS_DENIED now identical regardless of headers, likely VPS-IP/bot-management block, not fixable by header tweaking.
+- [Anime Rift Play Integrity confirmed real](anime-rift-bypass-closed-2026-07-13.md) — decompiled current APK (v3.13.13): genuine Google Play Integrity wired into Firebase App Check; anime-rift-fake-auth.md's "signature unchecked" claim is wrong/stale, not bypassable via curl.
