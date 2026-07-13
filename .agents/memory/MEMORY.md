@@ -79,3 +79,4 @@
 - [Anime Rift Play Integrity confirmed real](anime-rift-bypass-closed-2026-07-13.md) — decompiled current APK (v3.13.13): genuine Google Play Integrity wired into Firebase App Check; anime-rift-fake-auth.md's "signature unchecked" claim is wrong/stale, not bypassable via curl.
 - [Anime Rift second capture](anime-rift-second-capture-2026-07-13.md) — reconfirms dead end; new lead: "rift-streamer"/VRV provider (never seen before) may be a scrapeable third party, no sample captured yet.
 - [Session checkpoint 2026-07-13 continued](anime-nova-session-2026-07-13-continued.md) — AniTaku anti-tamper patch abandoned (no logcat access); Videasy/VidKing UI fix (missing from Watch.tsx SCRAPER_DEFS, not a scraper bug); Xpass CDN links dead-on-arrival; next: 2 more embed sources RE.
+- [Source priority plan](source-priority-plan.md) — WitAnime=أساسي أنمي؛ FaselHD=أساسي أنيميشن؛ نظام auto-select+background؛ تجديد كوكيز تلقائي مُقرَّر؛ مصادر الأنمي تعمل ✅
