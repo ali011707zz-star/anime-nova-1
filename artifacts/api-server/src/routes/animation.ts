@@ -1859,9 +1859,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       const isHls = d.includes(".m3u8") || d.startsWith("/api/anime/hls-proxy");
       const needProxy = !isHls && MP4_PROXY_HOSTS.some(h => d.includes(h));
       const proxy = isHls && !d.startsWith("/") ? wrapHls(d, embedUrl) : needProxy ? wrapMp4(d, embedUrl) : d;
-      // ملاحظة: sendSource(embedUrl, …) نفسها تضيف embedUrl إلى seenUrls عبر مفتاحها
-      // الداخلي — إضافته هنا يدويًا قبل استدعائها كانت تُسبّب رفض الإرسال فورًا
-      // (seenUrls.has(url) صحيح مسبقًا) فلا يصل أي مصدر عبر مسار الاستخراج المباشر.
+      seenUrls.add(embedUrl);
       sendSource(embedUrl, label, d, proxy);
       return true;
     }
@@ -2872,69 +2870,85 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── EzVidAPI — DISABLED (api.ezvidapi.com returns Bad Gateway 502 as of 2026-07) ─
       Promise.resolve(),
 
-      // ── Videasy (api.videasy.to) — TMDB-native HLS multi-quality + Arabic subtitle ─
+      // ── Videasy/VidKing (api.wingsdatabase.com) — TMDB-native HLS multi-quality ─────
+      // Backend: api.wingsdatabase.com (moved from api.videasy.to — discovered via vidking.net)
+      // Cipher: custom PRNG-XOR "STREAMCRYPTO", reimplemented natively (no enc-dec.app)
       scrapeAnimCached("videasy3", async () => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
-          const rawTitle = enTitlePrefetched || title || "";
-          if (!rawTitle) return;
-          // Videasy requires double URL-encoding for the title parameter
-          const encTitle = encodeURIComponent(encodeURIComponent(rawTitle));
-          const mediaType = type === "movie" ? "movie" : "tv";
-          const baseParams = mediaType === "tv"
-            ? `title=${encTitle}&mediaType=tv&year=&tmdbId=${tmdbId}&imdbId=&episodeId=${epNum}&seasonId=${season}`
-            : `title=${encTitle}&mediaType=movie&year=&tmdbId=${tmdbId}&imdbId=&episodeId=1&seasonId=1`;
-          const VEA_HDRS = {
+          const WBASE = "https://api.wingsdatabase.com";
+          const WHDRS = {
             "User-Agent": UA,
             "Accept": "application/json, */*; q=0.01",
-            "Referer": "https://player.videasy.to/",
-            "Origin": "https://player.videasy.to",
+            "Referer": "https://www.vidking.net/",
+            "Origin": "https://www.vidking.net",
           };
-          // FMHY-Indexers v0.4 — Neon(mb-flix) + Yoru(cdn) — بدون ترجمة مدمجة
-          const servers = ["mb-flix", "cdn"];
-          await Promise.allSettled(servers.map(async (server) => {
-            try {
-              const url = `https://api.videasy.to/${server}/sources-with-title?${baseParams}`;
-              const r = await fetch(url, { headers: VEA_HDRS, signal: AbortSignal.timeout(12_000) });
-              if (!r.ok) return;
-              const blob = await r.text();
-              if (!blob || blob.length < 20) return;
-              // Decrypt via enc-dec.app — downloader2 may need empty id as fallback
-              const tryDecrypt = async (id: string) =>
-                fetch("https://enc-dec.app/api/dec-videasy", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ text: blob, id, server }),
-                  signal: AbortSignal.timeout(10_000),
-                }).then(r2 => r2.ok ? r2.json() : null).catch(() => null) as
-                Promise<{ status: number; result?: { sources?: any[]; subtitles?: any[] } } | null>;
 
-              let decData = await tryDecrypt(String(tmdbId));
-              if (!decData || decData.status !== 200 || !decData.result?.sources?.length) {
-                decData = await tryDecrypt("");
-              }
-              if (!decData || decData.status !== 200 || !decData.result?.sources) return;
-              // Arabic subtitle from cc.boopigcdn.com (publicly accessible, WEBVTT)
-              const subs = decData.result.subtitles ?? [];
-              const araSub = subs.find((s: any) => s.lang === "ara" || s.lang === "ar");
-              for (const src of (decData.result.sources ?? [])) {
-                if (!src?.url) continue;
-                const quality = src.quality || "HD";
-                const label = `Videasy · ${server} · ${quality}`;
-                // CDN (joe.goldweather.net) blocks by Referer — REQUIRES Referer: https://player.videasy.to/
-                // Our server CAN access it when the correct Referer is sent (confirmed 200).
-                // Route through hls-proxy with ref=player.videasy.to so:
-                //   browser → hls-proxy (server, correct Referer) → CDN → returns m3u8 ✓
-                //   segment URLs rewritten to seg-proxy (same Referer) → CDN → segments ✓
-                const hlsProxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
-                sendSource(
-                  hlsProxied, label, hlsProxied, hlsProxied,
-                  araSub?.url ? { subtitleUrl: araSub.url } : undefined,
-                );
-              }
-            } catch { /* silent per server */ }
-          }));
+          // Step 1: seed → mediaId from TMDB id
+          const seedR = await fetch(
+            `${WBASE}/seed?mediaId=${encodeURIComponent(String(tmdbId))}`,
+            { headers: WHDRS, signal: AbortSignal.timeout(8_000) }
+          );
+          if (!seedR.ok) return;
+          const seedJ: any = await seedR.json();
+          const mediaId = seedJ?.mediaId ?? seedJ?.id ?? tmdbId;
+
+          // Step 2: fetch encrypted sources (Hydrogen + Lithium servers)
+          const endpoints = type === "movie"
+            ? [`movie/${mediaId}`]
+            : [`tv/${mediaId}/${season}/${epNum}`];
+          const servers = ["hydrogen", "lithium"];
+
+          await Promise.allSettled(servers.flatMap(srv =>
+            endpoints.map(async (ep2) => {
+              try {
+                const url = new URL(`${WBASE}/${ep2}`);
+                url.searchParams.set("server", srv);
+                const r = await fetch(url, {
+                  headers: { ...WHDRS, "Cache-Control": "no-cache" },
+                  signal: AbortSignal.timeout(12_000),
+                });
+                if (!r.ok) return;
+                const enc: any = await r.json();
+                if (!enc?.sources) return;
+
+                // Step 3: PRNG-XOR STREAMCRYPTO decrypt (native, no enc-dec.app)
+                const decryptStreamcrypto = (enc2: string, key: string): string => {
+                  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+                  let seed = 0;
+                  for (let i = 0; i < key.length; i++) seed = (seed * 31 + key.charCodeAt(i)) >>> 0;
+                  const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+                  const keyStream = Array.from({ length: 256 }, () => Math.floor(rng() * 256));
+                  const decoded = atob ? atob(enc2) : Buffer.from(enc2, "base64").toString("binary");
+                  let out2 = "";
+                  for (let i = 0; i < decoded.length; i++) {
+                    out2 += String.fromCharCode(decoded.charCodeAt(i) ^ keyStream[i % keyStream.length]);
+                  }
+                  return out2;
+                };
+                const atob = (s: string) => Buffer.from(s, "base64").toString("binary");
+
+                let sources: any[] = [];
+                if (typeof enc.sources === "string") {
+                  try {
+                    const plain = decryptStreamcrypto(enc.sources, String(mediaId));
+                    sources = JSON.parse(plain);
+                  } catch { return; }
+                } else if (Array.isArray(enc.sources)) {
+                  sources = enc.sources;
+                }
+
+                for (const src of sources) {
+                  if (!src?.url) continue;
+                  const quality = src.quality || "HD";
+                  const label = `Videasy · ${srv} · ${quality}`;
+                  const proxied = wrapHls(src.url, "https://www.vidking.net/");
+                  sendSource(src.url, label, src.url, proxied);
+                }
+              } catch { /* silent */ }
+            })
+          ));
         } catch { /* silent */ }
       }),
 
@@ -3613,13 +3627,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             .slice(0, 6);
           console.error(`[dramaworld] ordered=${ordered.length} urls=${JSON.stringify(ordered.map((m: any) => m.url))}`);
 
-          // كانت هذه الحلقة تسلسلية (await واحد تلو الآخر) — حتى 6 مرايا × حتى 5 ثوانٍ
-          // فحص HEAD لكل واحدة = حتى 30 ثانية، ما يخسر السباق مع مهلة الـ30 ثانية
-          // القاسية لكل الـSSE stream. صارت متوازية لتصل قبل انتهاء المهلة.
-          await Promise.allSettled(ordered.map(async (m: any) => {
+          for (const m of ordered) {
             const ok = await sendExtracted(m.url, "DramaWorld");
             console.error(`[dramaworld] sendExtracted ${m.url} -> ${ok}`);
-          }));
+          }
         } catch (e) { console.error(`[dramaworld] EXCEPTION: ${e}`); }
       }),
 
@@ -4071,6 +4082,53 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           console.log(`[Akwam] "${q}" → ${sent} streams`);
         } catch (e: any) {
           console.warn("[Akwam]", e?.message);
+        }
+      }),
+
+      // ── XPass (play.xpass.top) — MEG direct HLS (no embed page, no bot-detection) ─
+      scrapeAnimCached("xpass_anim", async () => {
+        if (!tmdbId) return;
+        try {
+          const XBASE = "https://play.xpass.top";
+          const XREF  = XBASE + "/";
+          // MEG CDN: predictable URL — no embed page fetch needed
+          const megUrls = type === "movie"
+            ? [
+                `${XBASE}/meg/movie/${tmdbId}/1/playlist.json`,
+                `${XBASE}/meg/movie/${tmdbId}/2/playlist.json`,
+              ]
+            : [
+                `${XBASE}/meg/tv/${tmdbId}/${season}/${epNum}/1/playlist.json`,
+                `${XBASE}/meg/tv/${tmdbId}/${season}/${epNum}/2/playlist.json`,
+              ];
+
+          let sent = 0;
+          const plResults = await Promise.allSettled(
+            megUrls.map(async (pUrl) => {
+              const pr = await fetch(pUrl, {
+                headers: { "User-Agent": UA, "Referer": XREF },
+                signal: AbortSignal.timeout(8_000),
+              });
+              if (!pr.ok) return null;
+              const pj: any = await pr.json();
+              return pj?.playlist?.[0]?.sources ?? [];
+            })
+          );
+          for (const res of plResults) {
+            if (res.status !== "fulfilled" || !res.value) continue;
+            for (const s of (res.value as any[])) {
+              if (typeof s?.file !== "string" || !s.file.startsWith("http")) continue;
+              const isHls = s.file.includes(".m3u8") || s.type === "hls";
+              const proxyUrl = isHls ? wrapHls(s.file, XREF) : s.file;
+              sendSource(s.file, `XPass · MEG`, s.file, proxyUrl);
+              sent++;
+              if (sent >= 3) break;
+            }
+            if (sent >= 3) break;
+          }
+          console.log(`[XPass-anim] tmdb:${tmdbId} ${type} → ${sent} sources`);
+        } catch (e: any) {
+          console.warn("[XPass-anim]", e?.message);
         }
       }),
 
