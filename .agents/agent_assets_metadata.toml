@@ -12,3 +12,9 @@ id = "fnWAFoKSVWXll6VcYAF-O"
 uri = "file://tmp_out/mitmproxy-ca-cert.cer"
 type = "unspecified"
 title = "شهادة mitmproxy CA (لازم تنصيبها على الجهاز)"
+
+[[outputs]]
+id = "MqPLzpHZcPtnxDqRhdo-F"
+uri = "file://attached_assets/output/AniTaku_patched.apk"
+type = "unspecified"
+title = "AniTaku (معدّل - يتجاوز فحص PCAPdroid)"
