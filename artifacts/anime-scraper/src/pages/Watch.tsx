@@ -268,10 +268,14 @@ function shouldShowSrc(src: FetchedSrc): boolean {
   return true;
 }
 
-/* ── Embed fallback: mega/vidmoly shown only when no direct sources exist ── */
+/* ── Embed fallback: mega/vidmoly/witanime/mycima shown only when no direct sources exist ──
+   witanime + mycima مسموح لهم بالباك-إند (HIDDEN_RESOLVE_EMBED_SITES) لكن الفرونتند كان
+   يستثنيهم من هذا الفلتر لأن روابطهم (yonaplay.net/videa.hu/wishonly.site/...) متغيّرة ولا
+   تُطابق أي host ثابت — النتيجة: مصادرهم تُجلب بنجاح من الباك-إند ثم تُختفى تماماً بدون سبب. */
 function isEmbedFallback(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   if (!src.isEmbed) return false;
+  if (src.site === "witanime" || src.site === "mycima") return true;
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 
