@@ -9710,45 +9710,86 @@ async function getXyraAnimeSources(
   return out;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  SANIME (app.sanime.net / server.sanime.net) — عربي مدبلج + مترجم
-//
-//  UA Gate: User-Agent: IBRAHIMSEVEN (مطلوب لعرض الحلقات)
-//  Flow:
-//    1. GET h10.php?page=search&name={english}  → [{id, name, year, status}]
-//    2. similarity match على العنوان
-//    3. GET h10.php?page=info&id={id}           → {ep[][], ...}  (2D array صفحات 25)
-//    4. ep.flat().find(e => e.epName === ep)
-//    5. Direct: https://server.sanime.net/Video/{id}/{ep}.mp4  (HEAD check)
-//    6. Fallback: h10.php?page=openAnd&id={b64(JSON(epObj))}  → {hd, sd}
-//  Notes:
-//    - server.sanime.net لا يحجب VPS IP ✅
-//    - لا يحتاج Referer أو auth للـ CDN ✅
-//    - sample-videos.com = حلقة غير مرفوعة → تجاهله
-//    - ep.epName هو integer
-// ════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════════════
-//  ANIMESLAYER (anslayer.com) — عربي/إنجليزي، سيرفرات مشغّلات خارجية
-//
-//  الموقع الظاهر animeslayer.to محمي بـ Cloudflare Turnstile + بصمة متصفح،
-//  لكن الـ API الحقيقي وراءه (anslayer.com — تطبيق أندرويد com.anslayer)
-//  غير محمي، فقط يحتاج هيدرز Client-Id/Client-Secret (من فك تشفير الـ APK).
-//
-//  Flow:
-//    1. GET animes/get-published-animes?json={list_type:"filter",anime_name}
-//    2. أفضل تطابق بالاسم (similarity)
-//    3. GET episodes/get-episodes?json={anime_id} → episode_urls[]
-//       - server "cdn" (vq.php): غير مستقر (404 أحياناً) — نتجاهله
-//       - server "muilt" (a-reslayer.com/la/public/api/f?n=): مصفوفة روابط
-//         مشغّلات خارجية جاهزة (mixdrop, streamtape, filemoon, mediafire, ok.ru)
-//    4. كل رابط يُمرَّر لـ extractVideoDeep (embeds) أو extractMediafireDirect
+//  XPASS (play.xpass.top) — ANIME + ANIMATION (TMDB ID)
+//  TV:    /e/tv/{tmdbId}/{season}/{episode} → backups[] → playlist.json → HLS
+//  Movie: /e/movie/{tmdbId} → backups[] → playlist.json → HLS
+//  CDN:   tik.1x2.space / vip.1x2.space / ps1.1x2.space (MEG)
+//  Skip:  VXR (returns /video/error)
 // ════════════════════════════════════════════════════════════════════
-const ANSLAYER_BASE   = "https://anslayer.com/anime/public";
-const ANSLAYER_CID    = "android-app2";
-const ANSLAYER_CSEC   = "7befba6263cc14c90d2f1d6da2c5cf9b251bfbbd";
-const _anslayerCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
-const ANSLAYER_TTL    = 4 * 3_600_000;
+const XPASS_BASE = "https://play.xpass.top";
+const _xpassCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const XPASS_TTL = 4 * 3_600_000;
+
+async function getXpassAnimeSources(
+  title: string, english: string | null, ep: number, anilistId?: number, isMovie = false,
+): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+  const ck = `xpass:${tmdbId}:${ep}:${isMovie}`;
+  const hit = _xpassCache.get(ck);
+  if (hit && Date.now() - hit.ts < XPASS_TTL) return hit.sources;
+
+  const out: UnifiedSource[] = [];
+  try {
+    // MEG CDN: direct predictable URL, no embed page needed (bypasses bot detection)
+    const XBASE = XPASS_BASE;
+    const XREF  = `${XBASE}/`;
+    const megUrls = isMovie
+      ? [
+          `${XBASE}/meg/movie/${tmdbId}/1/playlist.json`,
+          `${XBASE}/meg/movie/${tmdbId}/2/playlist.json`,
+        ]
+      : [
+          `${XBASE}/meg/tv/${tmdbId}/1/${ep}/1/playlist.json`,
+          `${XBASE}/meg/tv/${tmdbId}/1/${ep}/2/playlist.json`,
+        ];
+
+    const results = await Promise.allSettled(
+      megUrls.map(async (pUrl) => {
+        const pr = await fetch(pUrl, {
+          headers: { "User-Agent": BROWSER_UA, "Referer": XREF },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (!pr.ok) return null;
+        const pj: any = await pr.json();
+        const srcs: any[] = pj?.playlist?.[0]?.sources ?? [];
+        const slot = pUrl.includes("/meg/") ? "MEG" : "VIP";
+        return { slot, srcs };
+      })
+    );
+
+    for (const res of results) {
+      if (res.status !== "fulfilled" || !res.value) continue;
+      const { slot, srcs } = res.value;
+      for (const s of srcs) {
+        if (typeof s?.file !== "string" || !s.file.startsWith("http")) continue;
+        const isHls = s.file.includes(".m3u8") || s.type === "hls";
+        out.push({
+          name:        `Xpass · ${slot}`,
+          url:         s.file,
+          quality:     "HD",
+          qualityRank: 11,
+          site:        "xpass_anim",
+          directUrl:   isHls
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(s.file)}&ref=${encodeURIComponent(XREF)}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(s.file)}&ref=${encodeURIComponent(XREF)}`,
+          directType:  isHls ? "hls" : "mp4",
+          headers:     { Referer: XREF },
+          corsOk:      false,
+        });
+        if (out.length >= 3) break;
+      }
+      if (out.length >= 3) break;
+    }
+    console.log(`[Xpass] tmdb:${tmdbId} ep${ep} → ${out.length} sources`);
+    if (out.length) _xpassCache.set(ck, { sources: out, ts: Date.now() });
+  } catch (e: any) {
+    console.warn("[Xpass]", e?.message);
+  }
+  return out;
+}
 
 async function anslayerGet(path: string, params: Record<string, any>): Promise<any | null> {
   try {
@@ -10662,6 +10703,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
+      scrapeCached("xpass_anim", () => getXpassAnimeSources(title, english, ep, anilistId), false, 20000),
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
@@ -10797,6 +10839,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // videasy_anim / vidlink_anim / mxplayer / animephoenix / mitanime / ristoanime: معطّلة — أُزيلت من دورة السكرابر (لا تعمل)
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
+      case "videasy_anim": (await race(getVideasyAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       case "dulo_anim":    (await race(getDuloAnimeSources(title, english, ep, anilistId),     18_000, [])).forEach(collectSrc); break;
       case "cinesrc_anim": (await race(getCineSrcAnimeSources(title, english, ep, anilistId), 35_000, [])).forEach(collectSrc); break;
@@ -10809,6 +10852,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
+      case "xpass_anim":   (await race(getXpassAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
