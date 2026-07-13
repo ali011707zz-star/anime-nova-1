@@ -29,3 +29,10 @@ Decoded the real `integrity` JWTs from the HAR (e.g. `{"scope":"ANIME.LIBRARY.EP
 **Even in the most optimistic case (signature is somehow not checked and only expiry matters), Anime Rift cannot be a server-side scraper source at all** — a fresh integrity token must be minted by a real Android device roughly every 10 seconds, per request. There is no "session"/refresh-token pattern to cache and reuse; it would require the user's real phone live-relaying a freshly-generated token within a ~10s window for every single catalog/source/play call, which defeats the entire purpose of an automated backend integration. This is a structural dead end, not a remaining format/auth puzzle.
 
 **How to apply:** If asked to revisit Anime Rift again, lead with this fact — it settles the question regardless of whether the signature check is real, without needing further probing.
+
+## Second opinion (independent subagent review, same day) — confirmed, plus the real actionable finding
+An independent review confirmed the 10s-token conclusion and additionally answered "what about impersonating a different supported platform (web/TV)?" — dead end, Play Integrity is Android-only and the server already enforces `x-platform` strictly (`UNSUPPORTED_PLATFORM` for bad values), no evidence of a weaker web/TV auth path.
+
+**The actually valuable finding**: Anime Rift's `/library/episode/sources` response is itself just an aggregation over public third-party embed providers — e.g. `{"server_name":"ANKO","provider":"anineko_realtime"}`, `{"server_name":"ANW","provider":"animeworld_realtime"}`. Checked NOVA's own scraper coverage of those same providers:
+- **anineko.to (ANKO)** — already fully scraped natively in `anime.ts` (`getAninekoSources()`), so Rift adds zero value here.
+- **animeworld (ANW)** — **zero coverage in NOVA**, no scraper exists at all. This is the one real, closeable gap Rift's aggregation was surfacing — worth building a direct `animeworld` scraper (mirroring the anineko pattern) instead of chasing Rift's gateway.
