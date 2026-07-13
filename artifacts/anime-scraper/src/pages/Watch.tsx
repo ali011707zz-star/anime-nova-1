@@ -194,6 +194,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
   { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
   { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/إنجليزي · HLS مباشر", tag: "DL", audioLang: "en" },
+  { site: "videasy_anim",  name: "Videasy/VidKing", desc: "TMDB · HLS · متعدد الخوادم", tag: "VE", audioLang: "en" },
   // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
 ];
 
