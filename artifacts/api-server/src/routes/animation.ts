@@ -1794,11 +1794,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     if (captureArr) captureArr.push({ url, label, directUrl: safeDirectUrl, proxyUrl: safeProxyUrl, ...extra });
   };
 
+  // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر الأنميشن ما عدا
+  //    Dulo (dulo_anim) و StarCima (starcima) — السكرابر لا يمر بأي مصدر آخر إطلاقاً.
+  //    لإعادة التفعيل: احذف/عدّل ANIM_SOURCE_ALLOWLIST بالأسفل. ─────────────────
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima"]);
+
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
     site: string,
     scrape: () => Promise<void>,
   ) {
+    if (ANIM_SOURCE_ALLOWLIST && !ANIM_SOURCE_ALLOWLIST.has(site)) return;
     const cKey = makeAnimCacheKey(site, tmdbId || title.slice(0, 20), type, season, epNum);
     const hit  = await getFromSourceCache(cKey);
 
@@ -4131,6 +4137,90 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch (e: any) {
           console.warn("[XPass-anim]", e?.message);
         }
+
+      }),
+      // -- vixsrc.to -- TMDB-native movie+TV, direct HLS
+      scrapeAnimCached("vixsrc_anim", async () => {
+        if (!tmdbId) return;
+        try {
+          const VBASE = "https://vixsrc.to";
+          const apiPath = type === "movie"
+            ? `/api/movie/${tmdbId}`
+            : `/api/tv/${tmdbId}/${season}/${epNum}`;
+          const apiR = await fetch(VBASE + apiPath, {
+            headers: { "User-Agent": UA, "Referer": VBASE + "/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!apiR.ok) { console.error(`[vixsrc_anim] API ${apiR.status}`); return; }
+          const apiData: any = await apiR.json();
+          if (!apiData?.src) { console.error("[vixsrc_anim] no src"); return; }
+          const embedUrl = VBASE + (apiData.src as string);
+          const embedR = await fetch(embedUrl, {
+            headers: { "User-Agent": UA, "Referer": VBASE + "/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!embedR.ok) { console.error(`[vixsrc_anim] embed ${embedR.status}`); return; }
+          const html = await embedR.text();
+          const urlM    = html.match(/masterPlaylist[\s\S]*?url:\s*'([^']+)'/);
+          const tokenM  = html.match(/'token':\s*'([^']+)'/);
+          const expireM = html.match(/'expires':\s*'([^']+)'/);
+          if (!urlM || !tokenM || !expireM) { console.error("[vixsrc_anim] parse failed"); return; }
+          const playlistUrl = `${urlM[1]}&token=${tokenM[1]}&expires=${expireM[1]}&h=1&lang=en`;
+          const m3u8R = await fetch(playlistUrl, {
+            headers: { "User-Agent": UA, "Referer": embedUrl, "Origin": VBASE },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!m3u8R.ok) { console.error(`[vixsrc_anim] playlist ${m3u8R.status}`); return; }
+          const m3u8 = await m3u8R.text();
+          if (!m3u8.startsWith("#EXTM3U")) { console.error("[vixsrc_anim] bad m3u8"); return; }
+          const proxied = wrapHls(playlistUrl, embedUrl);
+          sendSource(playlistUrl, "VixSrc · HLS", playlistUrl, proxied);
+          console.log(`[vixsrc_anim] tmdb:${tmdbId} ${type} -> ok`);
+        } catch (e: any) { console.warn("[vixsrc_anim]", e?.message); }
+      }),
+
+      // -- primesrc.me -- 85k movies+TV via Filemoon/Streamwish/Filelions
+      scrapeAnimCached("primesrc_anim", async () => {
+        try {
+          const PBASE = "https://primesrc.me";
+          const apiUrl = type === "movie"
+            ? (imdbId ? `${PBASE}/api/v1/s?type=movie&imdb=${imdbId}` : null)
+            : (tmdbId ? `${PBASE}/api/v1/s?type=tv&tmdb=${tmdbId}&season=${season}&episode=${epNum}` : null);
+          if (!apiUrl) return;
+          const apiR = await fetch(apiUrl, {
+            headers: { "User-Agent": UA, "Referer": PBASE + "/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!apiR.ok) { console.error(`[primesrc_anim] API ${apiR.status}`); return; }
+          const data: any = await apiR.json();
+          const servers: any[] = data?.servers ?? [];
+          if (!servers.length) { console.log("[primesrc_anim] no servers"); return; }
+          const EMBED_MAP: Record<string, string> = {
+            Filemoon:   "https://filemoon.sx/e/KEY",
+            Filelions:  "https://filelions.to/e/KEY",
+            Streamwish: "https://streamwish.to/e/KEY",
+            Streamplay: "https://streamplay.to/e/KEY",
+            Vidmoly:    "https://vidmoly.to/embed-KEY.html",
+            Luluvdoo:   "https://luluvdo.com/e/KEY",
+          };
+          let sent = 0;
+          const seenKeys = new Set<string>();
+          const picks = servers
+            .filter((s: any) => EMBED_MAP[s.name] && s.key && !seenKeys.has(s.key) && !!seenKeys.add(s.key))
+            .slice(0, 6);
+          await Promise.allSettled(picks.map(async (srv: any) => {
+            const embedUrl = EMBED_MAP[srv.name].replace("KEY", srv.key);
+            try {
+              const html = await cfGet(embedUrl, PBASE + "/");
+              const m = html.match(/"file"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/) || html.match(/"file":\s*"(https?:\/\/[^"]+\.mp4[^"]*)"/);
+              if (!m?.[1]) return;
+              const hls = m[1];
+              sendSource(hls, `PrimeSrc · ${srv.name}`, hls, wrapHls(hls, embedUrl));
+              sent++;
+            } catch { /* skip */ }
+          }));
+          console.log(`[primesrc_anim] ${type} -> ${sent} sources`);
+        } catch (e: any) { console.warn("[primesrc_anim]", e?.message); }
       }),
 
     ]);
