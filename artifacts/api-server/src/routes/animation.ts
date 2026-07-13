@@ -1996,7 +1996,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       Promise.resolve(),
 
       // ── 16. 2embed.skin (TMDB-based, tries streamwish/filemoon extraction) ─────
-      (async () => {
+      // معطّل مؤقتاً (بطلب المستخدم 2026-07-13) — يبقى فقط Dulo/StarCima عاملين
+      Promise.resolve() || (async () => {
         try {
           const url = type === "tv"
             ? `https://www.2embed.skin/embedtv/${tmdbId}&s=${season}&e=${epNum}`
