@@ -9772,12 +9772,10 @@ async function getXpassAnimeSources(
           quality:     "HD",
           qualityRank: 11,
           site:        "xpass_anim",
-          directUrl:   isHls
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(s.file)}&ref=${encodeURIComponent(XREF)}`
-            : `/api/anime/video-proxy?url=${encodeURIComponent(s.file)}&ref=${encodeURIComponent(XREF)}`,
+          // ps1.1x2.space blocks VPS/CF IPs — let mobile fetch directly (residential IP)
           directType:  isHls ? "hls" : "mp4",
           headers:     { Referer: XREF },
-          corsOk:      false,
+          corsOk:      true,
         });
         if (out.length >= 3) break;
       }
@@ -10740,6 +10738,19 @@ router.get("/anime/fetch-source", async (req, res) => {
 
   if (!site || !title) {
     res.status(400).json({ error: "site and title required", sources: [] });
+    return;
+  }
+
+  // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر قسم الأنمي ما عدا
+  //    كواي(kawaii) / أنمي سلاير(anslayer) / أنيمينيكو(anineko) / AniKoto(anikoto) /
+  //    HiAnime(hianime) / AnimeWitcher(animewitcher) / أنمي فاي(animeify) —
+  //    السكرابر لا يمر بأي موقع آخر إطلاقاً، نفس نظام قسم الأنيميشن (ANIM_SOURCE_ALLOWLIST).
+  //    لإعادة التفعيل: احذف/عدّل ANIME_SOURCE_ALLOWLIST بالأسفل. ─────────────────
+  const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
+    "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
+  ]);
+  if (ANIME_SOURCE_ALLOWLIST && !ANIME_SOURCE_ALLOWLIST.has(site)) {
+    res.json({ sources: [] });
     return;
   }
 
