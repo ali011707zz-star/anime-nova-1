@@ -74,3 +74,4 @@
 - [Important repos July 2026 batch](important-repos-2026-07.md) — vidfast VM-resolver + cinesrc PoW-resolver + ok.ru zero-dep + trawl CF-bypass(330★) + chromiumfish stealth-Chromium(91★); defer integration to later session.
 - [Videasy/Vidking real backend + native decrypt](videasy-wingsdatabase-decrypt.md) — api.videasy.to dead → real API is api.wingsdatabase.com (found via vidking.net sub-brand); custom PRNG-XOR "STREAMCRYPTO" cipher fully reimplemented natively, no enc-dec.app needed.
 - [Embed-decrypt research method + queue](embed-decrypt-research-2026-07-12.md) — reverse-engineering method (official site → JS chunks → grep for host+crypto); VidLink in-progress (fu.wasm+libsodium suspect); full list of untested embed providers for next session.
+- [Anime Rift fake auth + real API](anime-rift-fake-auth.md) — integrity JWT signature unchecked, device registration accepts fabricated info; full curl-only scrape flow confirmed working.
