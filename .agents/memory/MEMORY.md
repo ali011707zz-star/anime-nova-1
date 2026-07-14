@@ -86,3 +86,4 @@
 - [WitAnime mega/direct-only filter](witanime-mega-only-filter-2026-07-13.md) — removed from HIDDEN_RESOLVE_EMBED_SITES; now returns ~zero results since it never has mega/vidmoly servers and never attempts extraction.
 - [Moviz-Time integration](moviztime-integration-2026-07-13.md) — new anime+animation source; movie vs TV page structures differ; long series split into non-overlapping ep-range "part" pages, must try all candidates.
 - [Domain checks 2026-07-13](domain-checks-2026-07-13.md) — mycima/starcima.cc/faselhd-mirror all confirmed to be same already-integrated backends under different aliases, not new sources.
+- [Fresh import vs VPS divergence](fresh-import-vs-vps-divergence.md) — a re-imported repo's git history can be far behind the VPS's real running state; check divergence via SSH before trusting local as current.
