@@ -173,9 +173,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
-  { site: "witanime",     name: "ويتأنمي",      desc: "عربي مترجم · CycleTLS",     tag: "WI", isArabic: true },
-  { site: "faselhd_db",  name: "فاصل HD",      desc: "عربي مترجم · GitHub DB",   tag: "FH",  isArabic: true },
-  { site: "moviz_time",  name: "وقت الأفلام",  desc: "عربي مترجم · MovizTime",   tag: "MT",  isArabic: true },
+  // witanime (WI) / faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -188,7 +186,8 @@ const ARABIC_SITES = new Set(SCRAPER_DEFS.filter(d => d.isArabic).map(d => d.sit
  * دون التأثير على سرعة تجربة المستخدم (auto-play يبقى فورياً).
  */
 const PRIORITY_FETCH_SITES = new Set([
-  "kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto", "shahiid", "animelek",
+  "kawaii", "hianime", "animewitcher", "dulo_anim", "anineko", "anikoto",
+  // shahiid/animelek: أُزيلت — معطّلة بطلب المستخدم 2026-07-14
 ]);
 
 /**
