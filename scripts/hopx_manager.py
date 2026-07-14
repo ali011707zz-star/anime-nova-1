@@ -29,6 +29,22 @@ with open(_PROXY_FILE, 'rb') as _f:
 _state = {'sandbox': None, 'proxy_url': None, 'lock': threading.Lock()}
 
 
+def cleanup_old_sandboxes(current_id: str | None = None):
+    """حذف كل الـ sandboxes عدا الحالي عند التشغيل"""
+    try:
+        boxes = Sandbox.list(api_key=API_KEY, status='running', limit=100)
+        log.info(f'Found {len(boxes)} running sandboxes, cleaning up old ones...')
+        for b in boxes:
+            if b.sandbox_id != current_id:
+                try:
+                    b.kill()
+                    log.info(f'Killed old sandbox: {b.sandbox_id}')
+                except Exception as e:
+                    log.warning(f'Could not kill {b.sandbox_id}: {e}')
+    except Exception as e:
+        log.warning(f'Cleanup check failed: {e}')
+
+
 def create_sandbox():
     log.info('Creating Hopx sandbox...')
     sb = Sandbox.create(
@@ -171,6 +187,7 @@ def main():
         sys.exit(1)
 
     log.info('Starting hopx-manager...')
+    cleanup_old_sandboxes()  # حذف sandboxes قديمة عند التشغيل
     ensure_sandbox()
 
     threading.Thread(target=monitor_loop, daemon=True).start()

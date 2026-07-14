@@ -10935,7 +10935,9 @@ router.get("/anime/fetch-source", async (req, res) => {
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
   ]);
-  if (ANIME_SOURCE_ALLOWLIST && !ANIME_SOURCE_ALLOWLIST.has(site)) {
+  // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
+  const isInternalCall = req.headers["x-internal"] === "1";
+  if (ANIME_SOURCE_ALLOWLIST && !ANIME_SOURCE_ALLOWLIST.has(site) && !isInternalCall) {
     res.json({ sources: [] });
     return;
   }
