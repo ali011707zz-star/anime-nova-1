@@ -1565,7 +1565,7 @@ function getAnimTag(label: string): string {
   if (l.startsWith("mycima"))     return "MY";
   if (l.startsWith("ezvidapi"))   return "EZ";
   if (l.startsWith("topcinema"))  return "TC";
-  if (l.startsWith("moviz"))      return "MV";
+  if (l.startsWith("moviz") || l.includes("وقت الأفلام")) return "MV";
   if (l.startsWith("seepan"))     return "SP";
   if (l.startsWith("animewitcher")) return "AW";
   if (l.startsWith("toonstream")) return "TS";
