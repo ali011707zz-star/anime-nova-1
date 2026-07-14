@@ -86,6 +86,26 @@ def create_sandbox():
         log.error(f'curl_cffi import failed: {r_check.stderr.strip()[:300]}')
         raise RuntimeError('curl_cffi failed to install/import')
 
+    # Install playwright (for browser-extract endpoint)
+    log.info('Installing playwright in sandbox...')
+    r_pw = sb.commands.run(
+        'pip install playwright -q --break-system-packages 2>&1 | tail -5',
+        timeout=120,
+    )
+    log.info(f'playwright pip: {r_pw.stdout.strip()[-200:]}')
+    # Install Chromium + system dependencies (libnspr4 etc.)
+    r_cr = sb.commands.run(
+        'playwright install --with-deps chromium 2>&1 | tail -8',
+        timeout=300,
+    )
+    log.info(f'chromium install: {r_cr.stdout.strip()[-400:]}')
+    # Quick playwright smoke test
+    r_pw_check = sb.commands.run(
+        'python3 -c "from playwright.sync_api import sync_playwright; print(\'playwright OK\')"',
+        timeout=15,
+    )
+    log.info(f'playwright check: {r_pw_check.stdout.strip()}')
+
     # Start the server in background
     sb.commands.run(
         'nohup python3 /workspace/proxy_server.py > /workspace/proxy.log 2>&1 &',

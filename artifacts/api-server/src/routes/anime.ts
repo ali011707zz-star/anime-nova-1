@@ -506,6 +506,38 @@ async function hopxProxyGet(
   } catch { return null; }
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  hopxBrowserExtract — استخراج رابط فيديو مباشر عبر متصفح Playwright
+//  في Hopx sandbox (headless Chromium يُنفّذ JS ويعترض طلبات الشبكة)
+// ════════════════════════════════════════════════════════════════════
+async function hopxBrowserExtract(
+  url: string,
+  referer?: string,
+  timeoutMs = 25000,
+): Promise<{ url: string; type: "hls" | "mp4" } | null> {
+  // نتحقق أولاً أن الـ sandbox حي وأن playwright متاح
+  try {
+    const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(4000) });
+    if (!h.ok) return null;
+    const hj = await h.json() as { ok?: boolean; playwright?: boolean };
+    if (!hj.ok || !hj.playwright) return null;
+  } catch { return null; }
+
+  try {
+    const params = new URLSearchParams({ url, timeout: String(timeoutMs) });
+    if (referer) params.set("ref", referer);
+    const r = await fetch(`${HOPX_PROXY_BASE}/browser-extract?${params}`, {
+      signal: AbortSignal.timeout(timeoutMs + 12000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as { ok?: boolean; urls?: Array<{ url: string; type: string }>; error?: string };
+    if (data.error) { console.warn("[hopxBrowser]", data.error); return null; }
+    if (!data.ok || !data.urls?.length) return null;
+    const first = data.urls[0];
+    return { url: first.url, type: first.type === "hls" ? "hls" : "mp4" };
+  } catch { return null; }
+}
+
 //  smartFetch — جلب ذكي يجرب كل الوسائل بالترتيب (تلقائياً)
 //  1. cfProxy (curl_cffi + primp محلي)
 //  2. hopxProxy (Hopx sandbox IP مختلف)
@@ -5302,7 +5334,31 @@ async function getAkoamSources(
 
     if (!epUrl) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
 
-    // نُرجع رابط صفحة الحلقة كـ isEmbed — الفيديو يُحمَّل عبر JS في متصفح المستخدم
+    // استخراج رابط الفيديو مباشرة عبر Playwright (hopxBrowserExtract)
+    // صفحة الحلقة تحمّل الفيديو عبر JS — المتصفح يعترض طلبات .m3u8 ويُعيدها مباشرة
+    const browserVideo = await hopxBrowserExtract(epUrl, AKOAM_BASE + "/", 25_000);
+    if (browserVideo?.url.startsWith("http")) {
+      console.log(`[akoam] browser-extract → ${browserVideo.url.slice(0, 80)}`);
+      const akRef = encodeURIComponent(epUrl);
+      const directUrl = browserVideo.type === "hls"
+        ? `/api/anime/hls-proxy?url=${encodeURIComponent(browserVideo.url)}&ref=${akRef}`
+        : `/api/anime/video-proxy?url=${encodeURIComponent(browserVideo.url)}&ref=${akRef}`;
+      const sources: UnifiedSource[] = [{
+        name: "أكوام",
+        url: browserVideo.url,
+        quality: "HD",
+        qualityRank: 8,
+        site: "akoam",
+        directUrl,
+        directType: browserVideo.type,
+      }];
+      akoamSrcCache.set(ck, { sources, ts: Date.now() });
+      return sources;
+    }
+
+    // fallback: إذا لم يُتح Playwright — نُرجع رابط الصفحة كـ isEmbed
+    // (أكوام يحجب الـ iframe لكن على الأقل يظهر المصدر)
+    console.warn("[akoam] browser-extract failed, falling back to isEmbed");
     const sources: UnifiedSource[] = [{
       name: "أكوام",
       url: epUrl, quality: "HD", qualityRank: 8, site: "akoam",
@@ -9322,21 +9378,36 @@ async function getFaselhdDbSources(
       } catch { return null; }
     });
 
-    // 9. Try video_player token pages: chain-fetch (session-persistent) → parseVideoUrl
-    // الإصلاح 2026-07: player_token مرتبط بـ session cookies من صفحة الحلقة/السيريال.
-    // cfProxyGet (stateless) يُعيد "Token Expired!". chain-fetch يجلب epHtml أولاً لتأسيس
-    // الكوكيز ثم يجلب player URL بنفس الجلسة.
+    // 9. Try video_player token pages:
+    //    الأولوية: hopxBrowserExtract (Playwright — ينفّذ JS ويعترض طلبات .m3u8)
+    //    fallback:  cfProxyChainFetch + parseVideoUrl (إذا browser غير متاح)
     const playerAttempts = playerTokens.slice(0, 2).map(async (pUrl): Promise<UnifiedSource | null> => {
       try {
-        // نستخدم epHtml (صفحة الحلقة التي استُخرج منها الـ token) كـ url1 لتأسيس الجلسة
-        // epPageUrl مُعرَّف في الخارج — يُشير لصفحة الحلقة أو صفحة السيريال (للأفلام)
+        // ① محاولة المتصفح الكامل (Playwright داخل Hopx sandbox)
+        const browserVideo = await hopxBrowserExtract(pUrl, FASELHD_DB_BASE + "/", 22_000);
+        if (browserVideo?.url.startsWith("http")) {
+          const faRef = encodeURIComponent(pUrl);
+          const directUrl = browserVideo.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(browserVideo.url)}&ref=${faRef}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(browserVideo.url)}&ref=${faRef}`;
+          console.log(`[FaselhdDB] browser-extract → ${browserVideo.url.slice(0, 80)}`);
+          return {
+            name: `FaselHD · ${isMovie ? "فيلم" : `ح${ep}`} · JW`,
+            url:  browserVideo.url,
+            quality: "HD",
+            qualityRank: 9,
+            site: "faselhd_db",
+            directUrl,
+            directType: browserVideo.type,
+          };
+        }
+
+        // ② fallback: chain-fetch + parseVideoUrl (static HTML)
         let pHtml = await cfProxyChainFetch(epPageUrl, pUrl, best.link, 18_000);
-        // fallback: cfProxyGet مباشر (إذا لم يكن chain-fetch متاحاً)
         if (!pHtml || pHtml.length < 100 || (pHtml.includes("Token Expired") && pHtml.length < 50)) {
           pHtml = await cfProxyGet(pUrl, best.link, 15_000);
         }
         if (!pHtml || pHtml.length < 100) return null;
-        // تجاهل "Token Expired!" الصريح
         if (pHtml.trim() === "Token Expired!" || pHtml.length < 20) return null;
         const video = parseVideoUrl(pHtml);
         if (!video || !video.url.startsWith("http")) return null;
