@@ -1797,7 +1797,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر الأنميشن ما عدا
   //    Dulo (dulo_anim) و StarCima (starcima) — السكرابر لا يمر بأي مصدر آخر إطلاقاً.
   //    لإعادة التفعيل: احذف/عدّل ANIM_SOURCE_ALLOWLIST بالأسفل. ─────────────────
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima"]);
+  // moviz_time_anim أُضيف للسماح به 2026-07-13 (مصدر جديد بطلب المستخدم)
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -3193,22 +3194,28 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // (متاح في قسم الأنمي عبر /api/anime/fetch-source?site=animeify)
       Promise.resolve(),
 
-      // ── EgyBest (egytbest.live) — أفلام + مسلسلات + أنيميشن عربي مترجم ─────────
-      // الاستراتيجية: WP-JSON بحث مباشر (لا يحتاج proxy) → data-embed-url servers
-      // يستخدم نفس scraper الأنمي (getEgyBestSources) عبر internal API
-      scrapeAnimCached("egybest_anim", async () => {
+      // ── EgyBest (egytbest.live) — مُستبعد بطلب المستخدم 2026-07-13 ─────────────
+      // منطق الاستخراج نفسه مؤكَّد يعمل (بحث WP-JSON + data-embed-url) لكن غير
+      // مُفعَّل حالياً؛ محفوظ بالذاكرة (egybest-exclusion-2026-07-13.md) لإعادة
+      // النظر لاحقاً. أيضاً مستبعد فعلياً عبر ANIM_SOURCE_ALLOWLIST بالأسفل.
+      // scrapeAnimCached("egybest_anim", async () => { ... }),
+
+      // ── Moviz-Time (moviz-time.vip) — أنمي + أنيميشن عربي مترجم ─────────────
+      // نفس الـ scraper الموجود بقسم الأنمي (getMovizTimeSources) عبر internal API؛
+      // صفحات موسم فيها أزرار <button class='ep-item'> لكل الحلقات + سيرفراتها.
+      scrapeAnimCached("moviz_time_anim", async () => {
         const q = enTitlePrefetched || title;
         if (!q) return;
         try {
-          send("status", { msg: "EgyBest: جاري البحث…" });
+          send("status", { msg: "Moviz-Time: جاري البحث…" });
           const PORT    = process.env["PORT"] || "5000";
           const ep      = type === "movie" ? 1 : epNum;
           const isMovie = type === "movie" ? "true" : "false";
-          const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=egybest`
+          const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=moviz_time`
             + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMovie}`;
           const r = await fetch(fsUrl, {
             headers: { "x-internal": "1" },
-            signal: AbortSignal.timeout(28_000),
+            signal: AbortSignal.timeout(22_000),
           });
           if (!r.ok) return;
           const { sources } = await r.json() as {
@@ -3217,10 +3224,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           for (const src of sources || []) {
             const u = src.directUrl || src.url;
             if (!u) continue;
-            const proxied = u.startsWith("/api/") ? u
-              : u.includes(".m3u8") ? wrapHls(u, "https://egytbest.live/")
-              : u;
-            sendSource(proxied, `EgyBest · ${src.name || "Arabic"}`, proxied, proxied);
+            sendSource(u, `وقت الأفلام · ${src.name || "Arabic"}`, u, u);
           }
         } catch { /* silent */ }
       }),
