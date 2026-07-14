@@ -81,3 +81,7 @@
 - [Session checkpoint 2026-07-13 continued](anime-nova-session-2026-07-13-continued.md) — AniTaku anti-tamper patch abandoned (no logcat access); Videasy/VidKing UI fix (missing from Watch.tsx SCRAPER_DEFS, not a scraper bug); Xpass CDN links dead-on-arrival; next: 2 more embed sources RE.
 - [WitAnime frontend fallback bug](witanime-frontend-fallback-bug.md) — isEmbedFallback() in Watch.tsx only whitelisted mega/vidmoly hosts, silently hiding witanime/mycima sources fetched fine by backend; fixed+deployed.
 - [Source priority plan](source-priority-plan.md) — WitAnime=أساسي أنمي؛ FaselHD=أساسي أنيميشن؛ نظام auto-select+background؛ تجديد كوكيز تلقائي مُقرَّر؛ مصادر الأنمي تعمل ✅
+- [EgyBest exclusion](egybest-exclusion-2026-07-13.md) — disabled/commented (not deleted) in anime.ts+animation.ts by user request; slow (~8s), logic still works.
+- [WitAnime mega/direct-only filter](witanime-mega-only-filter-2026-07-13.md) — removed from HIDDEN_RESOLVE_EMBED_SITES; now returns ~zero results since it never has mega/vidmoly servers and never attempts extraction.
+- [Moviz-Time integration](moviztime-integration-2026-07-13.md) — new anime+animation source; movie vs TV page structures differ; long series split into non-overlapping ep-range "part" pages, must try all candidates.
+- [Domain checks 2026-07-13](domain-checks-2026-07-13.md) — mycima/starcima.cc/faselhd-mirror all confirmed to be same already-integrated backends under different aliases, not new sources.

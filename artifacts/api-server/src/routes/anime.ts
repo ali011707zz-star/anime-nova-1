@@ -112,7 +112,9 @@ const HIDDEN_RESOLVE_EMBED_HOSTS = ["fasel-hd.cam", "animelek.top", "animedar.co
 // مواقع تُحلَّل عبر متصفح خفي على جهاز المستخدم (WEBVIEW_RESOLVE_SITES في التطبيق) —
 // روابط سيرفراتها متنوّعة (mp4plus/anafast/vidoba/... لماي سيما، عدة CDNs لويت أنمي)
 // لذا نسمح بها بالاعتماد على site بدل مطابقة hostname واحد.
-const HIDDEN_RESOLVE_EMBED_SITES = ["mycima", "witanime"];
+// witanime أُزيل من هذه القائمة بطلب المستخدم 2026-07-13 — يُسمح فقط بروابط
+// مباشرة (extraction ناجح) أو iframe من مضيفي mega/vidmoly القياسيين لهذا المصدر.
+const HIDDEN_RESOLVE_EMBED_SITES = ["mycima", "moviz_time"];
 
 // Hosts that cannot be extracted AND are NOT allowed as embed → skip entirely
 const EMBED_ONLY_HOSTS = [
@@ -4106,6 +4108,129 @@ async function getEgyBestSources(
   } catch {
     return cache([]);
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Moviz-Time scraper (moviz-time.vip — WordPress "pinthis" theme)
+//  أنمي (صفحات موسم تحتوي أزرار <button class='ep-item'> فيها كل الحلقات
+//  مع سيرفراتها كـ onclick=".../href='URL'" + عنوان "الحلقة N") +
+//  أفلام (WP-JSON posts search عادي، أول iframe_area زر).
+// ════════════════════════════════════════════════════════════════════
+const MOVIZTIME_BASE = "https://moviz-time.vip";
+const movizTimeSeriesCache = new Map<string, { link: string | null; ts: number }>();
+const movizTimeSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+
+/** استخرج كل أزرار الحلقات (رقم الحلقة + رابط السيرفر) من صفحة موسم/فيلم */
+async function getMovizTimeEpisodeButtons(pageUrl: string): Promise<Array<{ ep: number; url: string }>> {
+  try {
+    const r = await fetch(pageUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: `${MOVIZTIME_BASE}/` },
+      signal: AbortSignal.timeout(14_000),
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+    const out: Array<{ ep: number; url: string }> = [];
+    for (const m of html.matchAll(/<button class='ep-item' onclick="[^"]*?href='([^']+)'[^"]*">\s*الحلقة\s*(\d+)/gs)) {
+      out.push({ url: m[1], ep: parseInt(m[2], 10) });
+    }
+    return out;
+  } catch { return []; }
+}
+
+/** لفيلم بلا ترقيم حلقات — صفحات الأفلام تستخدم بنية مختلفة عن المسلسلات:
+ *  <div class="single_tab" data-tab-id="server_00N" is-iframe="true"><iframe data-src="URL">
+ *  (بعض المسلسلات القديمة تستخدم iframe_area.location.href= أيضاً — نجرّب الاثنين) */
+async function getMovizTimeMovieButtons(pageUrl: string): Promise<string[]> {
+  try {
+    const r = await fetch(pageUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: `${MOVIZTIME_BASE}/` },
+      signal: AbortSignal.timeout(14_000),
+    });
+    if (!r.ok) return [];
+    const html = await r.text();
+    if (isCloudflareBlock(html)) return [];
+    const urls = [...html.matchAll(/<iframe[^>]*\sdata-src=["']([^"']+)["']/gi)].map(m => m[1]);
+    if (urls.length) return urls;
+    return [...html.matchAll(/iframe_area\.location\.href='([^']+)'/g)].map(m => m[1]);
+  } catch { return []; }
+}
+
+async function getMovizTimeSources(
+  title: string, english: string | null, ep: number, isMovie = false,
+): Promise<UnifiedSource[]> {
+  const ck = `moviz_time:${(title + "|" + (english ?? "")).toLowerCase()}:${ep}:${isMovie}`;
+  const hit = movizTimeSrcCache.get(ck);
+  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+  const cache = (s: UnifiedSource[]) => { movizTimeSrcCache.set(ck, { sources: s, ts: Date.now() }); return s; };
+  const mainTitle = english || title;
+
+  try {
+    if (isMovie) {
+      const apiUrl = `${MOVIZTIME_BASE}/wp-json/wp/v2/posts?search=${encodeURIComponent(mainTitle)}&per_page=10&_fields=id,link,title`;
+      const sr = await fetch(apiUrl, { headers: { "User-Agent": BROWSER_UA }, signal: AbortSignal.timeout(12_000) });
+      if (!sr.ok) return cache([]);
+      const posts = await sr.json() as Array<{ id: number; link: string; title: { rendered: string } }>;
+      if (!Array.isArray(posts) || !posts.length) return cache([]);
+      let best: { link: string; score: number } | null = null;
+      for (const p of posts) {
+        const t = p.title?.rendered ?? "";
+        const score = Math.max(similarity(mainTitle, t), asciiSimilarity(mainTitle, t));
+        if (!best || score > best.score) best = { link: p.link, score };
+      }
+      if (!best || best.score < 0.3) return cache([]);
+      const urls = await getMovizTimeMovieButtons(best.link);
+      if (!urls.length) return cache([]);
+      const sources = urls.slice(0, 6).map((url, i) => ({
+        name: `وقت الأفلام · سيرفر ${i + 1}`, url, quality: "HD", qualityRank: 8, site: "moviz_time", isEmbed: true,
+      }));
+      return cache(sources);
+    }
+
+    // ── أنمي (مسلسل): بحث HTML → كل روابط /anime/ المطابقة، مرتّبة بالتشابه ──
+    // ملاحظة مهمة: المسلسلات الطويلة (366+ حلقة) تُقسَّم على عدة صفحات "موسم"
+    // بروابط شبه متطابقة (فرق حرف/تشكيل فقط) لكن كل صفحة تغطي مدى حلقات مختلف
+    // تماماً (مثال: bleach → 3 صفحات تغطي 1-122 / 123-244 / 245-366) — لذا يجب
+    // تجربة كل الروابط المرشّحة (وليس الأفضل تشابهاً فقط) حتى نجد الحلقة المطلوبة.
+    const sCacheKey = mainTitle.toLowerCase();
+    let candidates: string[] = [];
+    const sHit = movizTimeSeriesCache.get(sCacheKey);
+    if (sHit && Date.now() - sHit.ts < SRC_TTL) {
+      candidates = sHit.link ? JSON.parse(sHit.link) : [];
+    } else {
+      const sr = await fetch(`${MOVIZTIME_BASE}/?s=${encodeURIComponent(mainTitle)}`, {
+        headers: { "User-Agent": BROWSER_UA, Referer: `${MOVIZTIME_BASE}/` },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (sr.ok) {
+        const html0 = await sr.text();
+        const links = [...new Set(
+          [...html0.matchAll(/href="(https:\/\/moviz-time\.vip\/anime\/[^"]+)"/g)].map(m => decodeURIComponent(m[1])),
+        )];
+        const scored = links
+          .map(link => {
+            const slug = (link.split("/").filter(Boolean).pop() || "").replace(/-/g, " ");
+            return { link, score: Math.max(similarity(mainTitle, slug), asciiSimilarity(mainTitle, slug)) };
+          })
+          .filter(x => x.score > 0.2)
+          .sort((a, b) => b.score - a.score);
+        candidates = scored.map(x => x.link);
+      }
+      movizTimeSeriesCache.set(sCacheKey, { link: candidates.length ? JSON.stringify(candidates) : null, ts: Date.now() });
+    }
+    if (!candidates.length) return cache([]);
+
+    let match: { ep: number; url: string } | undefined;
+    for (const link of candidates.slice(0, 5)) {
+      match = (await getMovizTimeEpisodeButtons(link)).find(b => b.ep === ep);
+      if (match) break;
+    }
+    if (!match) return cache([]);
+
+    return cache([{
+      name: "وقت الأفلام", url: match.url, quality: "HD", qualityRank: 8, site: "moviz_time", isEmbed: true,
+    }]);
+  } catch { return cache([]); }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -10640,7 +10765,11 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("arabseed",     () => getArabSeedSources(title, english, ep, isMovie)),
       scrapeCached("anime4up2",    () => getAnime4up2Sources(title, english, ep),   true, 22000),
       scrapeCached("mycima",       () => getMyCimaSources(title, english, ep, isMovie)),
-      scrapeCached("egybest",      () => getEgyBestSources(title, english, ep, isMovie)),
+      // egybest: مُستبعد بطلب المستخدم 2026-07-13 — منطق الاستخراج نفسه مؤكَّد يعمل
+      // (بحث WP-JSON + data-embed-url) لكن جودة/أولوية النتائج غير مرضية حالياً؛
+      // محفوظ بالذاكرة (egybest-exclusion-2026-07-13.md) لإعادة النظر لاحقاً.
+      // scrapeCached("egybest",   () => getEgyBestSources(title, english, ep, isMovie)),
+      scrapeCached("moviz_time",   () => getMovizTimeSources(title, english, ep, isMovie), false, 20000),
       scrapeCached("topcinemaa",   () => getTopCimaaSources(title, english, ep, isMovie)),
       // ── ياباني مترجم (AniList ID) ─────────────────────────────────
       scrapeCached("kawaii",       () => getKawaiiAnimeSources(title, english, ep, anilistId), false),
@@ -10831,6 +10960,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anime4up2":    await runExtract(await race(getAnime4up2Sources(title, english, ep),  25000, [])); break;
       case "mycima":       await runExtract(await race(getMyCimaSources(title, english, ep, isMovie), 30000, [])); break;
       case "egybest":      await runExtract(await race(getEgyBestSources(title, english, ep, isMovie), 30000, [])); break;
+      case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
