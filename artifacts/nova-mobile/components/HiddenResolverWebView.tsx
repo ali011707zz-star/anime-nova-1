@@ -132,20 +132,73 @@ const SNIFF_SCRIPT = `
     return s.includes(".m3u8") || s.includes(".mp4") || s.includes(".mkv");
   }
 
+  // مواقع وسيطة (relay) تحتوي على iframe داخلها يخدم الفيديو الحقيقي
+  var RELAY_DOMAINS = [
+    "ifrom.net", "myframe.to", "vidsrc.in", "vidsrc.xyz", "vidsrc.rip",
+    "vidsrc.me", "filemoon", "streamwish", "embedsb", "embed.su",
+    "vidplay", "smashystream", "novembed", "4dsply", "play.streamhd",
+    "uqload", "mixdrop", "doodstream",
+  ];
+  function isRelayDomain(u) {
+    if (!u || typeof u !== "string") return false;
+    var s = u.toLowerCase();
+    for (var i = 0; i < RELAY_DOMAINS.length; i++) {
+      if (s.indexOf(RELAY_DOMAINS[i]) !== -1) return true;
+    }
+    return false;
+  }
+
   var reported = false;
+  var iframeFollowed = false;
+
+  function sendMsg(obj) {
+    try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch (e) {}
+  }
+
   function report(url, type) {
     if (reported || !url) return;
     reported = true;
+    sendMsg({
+      kind: "resolved",
+      url: url,
+      type: type || (url.toLowerCase().includes(".m3u8") ? "hls" : "mp4"),
+      referer: location.href,
+      origin: location.origin,
+    });
+  }
+
+  // اكتشاف iframes تشير لمواقع وسيطة — أرسل follow_iframe ليُتابعها المكوّن
+  function checkIframeSrc(src) {
+    if (!src || iframeFollowed || reported) return;
+    if (isRelayDomain(src)) {
+      iframeFollowed = true;
+      sendMsg({ kind: "follow_iframe", url: src });
+    }
+  }
+  function watchIframe(el) {
+    if (!el || el.__novaIframeWatched) return;
+    el.__novaIframeWatched = true;
     try {
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        kind: "resolved",
-        url: url,
-        type: type || (url.toLowerCase().includes(".m3u8") ? "hls" : "mp4"),
-        referer: location.href,
-        origin: location.origin,
-      }));
+      var cur = el.getAttribute("src") || el.src || "";
+      if (cur) checkIframeSrc(cur);
     } catch (e) {}
   }
+  document.querySelectorAll("iframe").forEach(watchIframe);
+  // اعترض setAttribute لالتقاط iframes المُحمَّلة كسولاً
+  var origSetAttr = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function(name, value) {
+    if (name === "src" && this.tagName === "IFRAME") checkIframeSrc(value);
+    return origSetAttr.apply(this, arguments);
+  };
+  var iframeObs = new MutationObserver(function(muts) {
+    muts.forEach(function(m) {
+      (m.addedNodes || []).forEach(function(n) {
+        if (n.tagName === "IFRAME") watchIframe(n);
+        if (n.querySelectorAll) n.querySelectorAll("iframe").forEach(watchIframe);
+      });
+    });
+  });
+  iframeObs.observe(document.documentElement, { childList: true, subtree: true });
 
   // 1) اعترض تعيين src على أي <video>/<source> موجود أو يُنشأ لاحقاً
   function watchEl(el) {
@@ -210,9 +263,12 @@ const SNIFF_SCRIPT = `
 })();
 `;
 
-export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 16000, onResolved, onFailed }: Props) {
-  const doneRef = useRef(false);
-  const webRef = useRef<WebView>(null);
+export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 22000, onResolved, onFailed }: Props) {
+  const doneRef       = useRef(false);
+  const followedRef   = useRef(false);
+  const webRef        = useRef<WebView>(null);
+  // currentUrl يتغيّر عند متابعة iframe وسيط — يُعيد تحميل WebView للصفحة الداخلية
+  const [currentUrl, setCurrentUrl] = React.useState(pageUrl);
 
   const finish = useCallback((fn: () => void) => {
     if (doneRef.current) return;
@@ -229,6 +285,10 @@ export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 16
           type: data.type,
           headers: data.referer ? { Referer: data.referer, Origin: data.origin || data.referer } : undefined,
         }));
+      } else if (data?.kind === "follow_iframe" && data.url && !followedRef.current && !doneRef.current) {
+        // رابط iframe وسيط (مثل ifrom.net) — تابعه ليتمكن SNIFF_SCRIPT من الاعتراض داخله
+        followedRef.current = true;
+        setCurrentUrl(data.url);
       }
     } catch {
       // رسالة غير متوقعة — تُتجاهل
@@ -246,7 +306,7 @@ export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 16
   return (
     <WebView
       ref={webRef}
-      source={{ uri: pageUrl, headers: refererOverride ? { Referer: refererOverride } : undefined }}
+      source={{ uri: currentUrl, headers: refererOverride ? { Referer: refererOverride } : undefined }}
       style={styles.hidden}
       containerStyle={styles.hidden}
       pointerEvents="none"

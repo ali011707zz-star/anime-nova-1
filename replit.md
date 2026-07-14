@@ -58,8 +58,15 @@ scp -i ~/.ssh/deploy_key \
   root@95.182.93.105:/opt/anime-nova/artifacts/api-server/src/routes/anime.ts
 
 ssh -i ~/.ssh/deploy_key root@95.182.93.105 \
-  "cd /opt/anime-nova && pnpm --filter @workspace/api-server run build && pm2 restart anime-nova-api"
+  "cd /opt/anime-nova && pnpm --filter @workspace/api-server run build && \
+   pm2 delete anime-nova-api && pm2 start ecosystem.config.cjs --only anime-nova-api && pm2 save"
 ```
+
+> **⚠️ قاعدة حرجة — لا تنساها أبداً:**
+> استخدم **`pm2 delete + pm2 start`** وليس **`pm2 restart`**.
+> `pm2 restart` لا يُعيد تحميل متغيرات البيئة من `ecosystem.config.cjs` — يبقى الـ process بالـ env القديم.
+> هذا تسبَّب في **شاشة سوداء شاملة** (503 على كل hls-proxy/video-proxy) لأن `CF_WORKER_URL` لم يُحمَّل.
+> الحل الوحيد: `pm2 delete <name> && pm2 start ecosystem.config.cjs --only <name> && pm2 save`
 
 للفرونتيند (static build — لا يحتاج إعادة تشغيل PM2، Nginx يخدّمه مباشرة):
 ```bash

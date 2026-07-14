@@ -1,16 +1,21 @@
+- [DramaWorld APK Analysis](dramaworld-apk-analysis.md) — API=app.arabypros.com/api; KEY=4F5A9C3D.../d506abfd; filtres محجوبة من servers; apk-mitm تعمل على VPS لتجاوز SSL pinning.
 - [CineSrc integration](cinesrc-integration.md) — cinesrc.st in animation.ts+anime.ts; VPS IP blocked for server actions (graceful fail); SubtleCrypto Proxy patch documented.
 - [Anime NOVA startup fix](anime-nova-startup.md) — DB migration must run AFTER server starts listening, not before, or the workflow port-open timeout fails.
 - [VPS Deployment](vps-deployment.md) — خادم 95.182.93.105 Ubuntu 24.04; Telegram webhook uses self-signed cert uploaded to Telegram API; CHANNEL_ID in .env + DB; token DB-only via config-sync.
 - [MXPlayer service search approach](mxplayer-search.md) — use /search/result (not /search/suggest); tvshow needs season→episode chain; CDN prefix is isa-1.mxplay.com.
-- [ScraperAPI integration](scraperapi-integration.md) — scraperApiGet is the last-resort proxy fallback; key stored as SCRAPERAPI_KEY shared env var; integrated in 5 points across witanime + ristoanime scrapers.
+- [ScraperAPI removed](scraperapi-removed.md) — scraperApiGet + SCRAPERAPI_KEY حُذفا كلياً من anime.ts؛ smartFetch يستخدم cfProxy ثم ScrapingAnt فقط.
 - [Streamrip integration](streamrip-integration.md) — MovieBox [English] MP4 source added to animation sources-stream; video-proxy supports optional &origin= override with validation.
 - [HLS & Translation optimizations](hls-translation-opts.md) — seg-proxy was 1-1.7s; translate-vtt-stream was 40s; fixed with Nginx cache + Google Translate API + hls.js 1.6.2 config.
-- [Dulo.tv integration](dulo-integration.md) — public API key WDNUNBUB3HR983Y9ISBADK4O82; vidrock+purstream confirmed working for anime TMDB IDs; session cookie cached 7h.
+- [Dulo.tv integration](dulo-integration.md) — API key configured via env/code; vidrock+purstream confirmed working for anime TMDB IDs; session cookie cached 7h.
 - [7-repo deep analysis](repo-analysis-2026-07.md) — ani.pm ✅ excellent (37 sub sources per ep); anineko.to ✅ M3U8 verified; Miruro/Videasy/EncDecEndpoints/MovieBox all dead/blocked from VPS; staticine+hls-downloader irrelevant.
 - [Videasy disable + Dubbed foupix fix](videasy-dubbed-fixes.md) — videasy disabled (STREAMCRYPTO_SEED_INVALID); dubbed 403 = datacenter IP block by foupix CDN; fix: rawUrl direct streaming from mobile; SSRF fix in watch-src.
 - [Web vs Mobile source sync](web-mobile-source-sync.md) — VPS IP gives more sources than Replit IP; dead sites removed from web SCRAPER_DEFS; mobile ANIME_SITES synced; vidmoly embed bug fixed; mp4upload filtered on mobile.
 - [Anime Rift MITM capture attempt](anime-rift-mitm.md) — Android system-CA-trust wall blocks non-rooted MITM; failed-handshake domains still revealed it uses the same vidsrc/embed.su/TMDB ecosystem already in Anime NOVA.
 - [Source playback fixes — DU AK AN HI SC AT](source-playback-fixes-2026-07.md) — parseVidHls JSON scanner, dulo CDN probe, starcima expiry filter, anineko direct-fetch fallback.
+- [Source fixes July 2026](source-fixes-2026-07.md) — AW timeout 25-28s; SC label الثريا→StarCima; SP/MO disabled (API dead); AF/AT working.
+- [Source fixes 2026-07-08](source-fixes-2026-07-08.md) — CinePro VidApi→hls-proxy fix; Hexa+VidLink disabled (enc-dec.app down); deploy=node build.mjs+pm2 restart.
+- [External repo analysis](repo-analysis-external.md) — HIGH: baha-anime-skip (skip OP/ED), MovieVerse (Kawaii API+Phoenix decoder); MEDIUM: anime-mapper (all IDs CDN), MyDubList (321 Arabic dubs JSON), trailerdb (TMDB→YT trailers); SKIP: ani-desk (same project), kurozora (PHP).
+- [Repo analysis batch 2](repo-analysis-batch2.md) — NEW SOURCES: 2dhive (WP AJAX, raw JP audio), AniZone (anizone.to REST+HLS, soft AR subs); TECHNIQUE: AllAnime AES-GCM key=Xot36i3lK3:v1 (not yet implemented); AnimeKai already done; 4 repos are NOVA forks (skip).
 - [MovieBox integration](moviebox-integration.md) — h5-api.aoneroom.com; JWT auth via search-suggest; signed MP4 URLs expire (10min TTL); dubbed filter + race guard.
 - [Bandwidth proxy removal](bandwidth-proxy-removal.md) — seg-proxy+video-proxy→307 redirect; hls-proxy→directSegs=true; headers field added to source responses for CDN auth.
 - [WebView removal + dubbed streamUrl fix](videasy-dubbed-fixes.md) — WebView removed from all 3 mobile watch screens; dubbed streamUrl changed to rawUrl-first (foupix blocks VPS, allows residential IPs); cinepro tag fixed to "CP".
@@ -19,3 +24,65 @@
 - [PM2 stale env vars](pm2-stale-env-vars.md) — editing ecosystem.config.cjs/.env on VPS does nothing until pm2 delete+start; caused universal web black-screen bug (broken CF_WORKER_URL never reloaded).
 - [Source picker 1-source fix](source-picker-fix.md) — cancelRemainingScrapers must NOT abort fetchControllersRef (in-flight); only clear pendingTimeoutsRef (queued). Aborting in-flight prevents sources from accumulating in picker.
 - [PG JSON serialization](pg-json-serialization.md) — pg (node-postgres) treats JS arrays as PostgreSQL ARRAY syntax, not jsonb. Must JSON.stringify() objects/arrays before parameterized inserts into jsonb columns. Also: timestamps stored as "timestamptz" need ISO string (not ms epoch); read back with new Date(val).getTime().
+- [CF Worker token encryption](cf-token-encryption.md) — AES-256-GCM replaces plain ?url=&key=; encryptCfToken null=fail-closed; wrangler name=nova-cdn-proxy.
+- [Nova Mobile themes fix](mobile-themes-fix.md) — useColors() reads AppContext theme now; 5 palettes in colors.ts; needs EAS rebuild for users.
+- [HLS CF Worker routing](hls-cf-worker-routing.md) — hls-proxy is now pure 307 redirect; CF Worker fetches manifest + rewrites segment URLs to go through itself; zero VPS video bandwidth.
+- [Animation mobile playback](animation-mobile-playback.md) — شاشة سوداء صامتة: garbage Referer في sendSource + Dulo raw fallback بلا Referer + no onError handler + CF Worker لا يكتشف M3U8 بـ #EXTM3U content sniff.
+- [Orkestr removal](orkestr-removal.md) — Orkestr أُزيل كلياً من animation.ts+anime.ts; كل calls صارت cfProxy (localhost:8000); CINESRC_BASE=http://localhost:13004 أُضيف لـ ecosystem.
+- [AniTaku APK Analysis](anitaku-apk-analysis.md) — EasyPlex base; static token found (GxoNdPhOrskWYZfSw2d9hgeXToSlUBal); DB empty; client_secret not in APK; routes mapped.
+
+- [Lightpanda sources research](lightpanda-sources-research.md) — FaselHD ✅ data-url→scdns.io M3U8; fastvip /stream/?json=1 ✅ untested; PHOENIX/ANIMEDAR/RISTO/ANIMETIME جزئية; 4XANIME/ANIMERCO Turnstile محجوبة.
+- [New sources July 2026](new-sources-2026-07.md) — nekowatch(anineko/AniList/HLS✅) + xyra(freekey/TMDB/17streams✅) + notorrent(IMDB/9streams✅) + spencerdevs(srv1✅); implementation plan inside.
+- [New sources implementation July 2026](new-sources-impl-2026-07.md) — nekowatch+xyra+notorrent اُضيفت واختُبرت على VPS؛ spencerdevs تحتاج decrypt مستقل.
+- [SAnime + Notorrent fixes](sanime-notorrent-fixes-2026-07.md) — romaji-first search؛ MXPlayer disabled؛ Notorrent+animeapi.my.id IMDB lookup؛ hubcloud dead؛ /api/ prefix required.
+- [SAnime APK Analysis](sanime-apk-analysis.md) — WebView wrapper لـ app.sanime.net؛ API: h10.php?page=؛ ~12,000 أنمي؛ لا DB محلي؛ multi-brand (OtakuTime/SnoAnime).
+- [SAnime Deep Analysis](sanime-deep-analysis.md) — UA=IBRAHIMSEVEN يفتح ep[]; Video: server.sanime.net/Video/{id}/{ep}.mp4; 289 anime مع حلقات; scraper blueprint كامل.
+- [Lazy source loading](lazy-source-loading.md) — Web+Mobile: user picks scraper first → only that one fetches → auto-plays → rest loads in background; witanime_db re-enabled.
+- [EgyBest scraper](egybest-scraper.md) — egytbest.live WP-JSON+data-embed-url; hgcloud/stmruby via parseStreamwish; no CF proxy needed.
+- [WeCima domain 2026-07](wecima-domain-2026-07.md) — mycima.gripe→wecima.gold; data-watch+mycimafsd unchanged; fastvip.space/cdn-centaurus.com.
+- [EgyDead domain rotation](egydead-domain.md) — tv9→tv10.egydead.live; VPS+Replit CF-blocked; scraper silently fails.
+- [AniPm + WeCima my_player + FaselHD fallback](sources-july2026-additions.md) — ani.pm added to anime.ts; my_player param added to decodeMyCimaWrap; FaselHD got direct-fetch+Orkestr fallbacks.
+- [Proxy VPS fallback](proxy-vps-fallback.md) — hls/video/seg-proxy: CF Worker أولاً ثم VPS fallback؛ _cfh.ok=false مبدئياً؛ OPTIONS health check كل 45s.
+- [apps-anime.com API analysis](apps-anime-analysis.md) — PHP API على apps-player.com/Anime_Cartoon_Full/API/ محمي؛ AgentsAndCookies/getData.php مفتوح يرجع OK.ru cookies؛ 4000+ أنمي؛ auth لم يُكتشف.
+- [Animatoo app analysis](animatoo-analysis.md) — Supabase مفتوح بـ anon key؛ 6339 أنمي + 77395 حلقة كلها anime3rb slugs؛ tmdb_id→slug lookup قيّم لـ anime3rb scraper.
+- [Lazy picker stuck-loading fix](lazy-picker-fix.md) — showPicker=true+allDone ignored idle→infinite loading; fix: anyFetching+allScrapersIdle+scraper grid calling onFetchSite.
+- [Anime watch auto-fetch-all](anime-watch-autofetch.md) — Watch.tsx now auto-fetches all SCRAPER_DEFS on mount (mirrors AnimationWatch) instead of waiting for user tap; keep SCRAPER_DEFS free of dead/removed sites or it wastes calls.
+- [CinePro self-hosted](cinepro-self-hosted.md) — install/run steps for cinepro-org/core (pm2 @ /opt/cinepro:3000); removed as active animation source 2026-07 by user request, kept for future reintegration.
+- [Source cleanup 2026-07-09](source-cleanup-2026-07-09.md) — RS/PH/MT/VE/VL removed from anime scraper cycle; AT/NO/CP deleted entirely; DL got audioLang flag; api-server build is esbuild (no tsc gate).
+- [Lightpanda deep-dive 2026-07-09](lightpanda-deep-dive-2026-07-09.md) — fastvip/FaselHD chain fully solved (packed-JS unpack via Node); PHOENIX direct source found but CF-blocked from VPS; RISTO/ANIMEDAR now AJAX-rendered, need CDP mode not static fetch.
+- [unpackPacked fastvip fix](unpackpacked-fastvip-fix.md) — Dean-Edwards decoder rewritten as balanced-paren text-parser, not eval/Function (RCE risk on untrusted scraped HTML); regex missed trailing packer args.
+- [New source requests 2026-07-09 — resolved](new-sources-requests-2026-07-09.md) — Akwam (akwam.it, direct MP4) implemented; MovizTime/AnimeTime candidates use vidhls.com (ads, not mega.nz); AnimeRoco still unconfirmed/blocked.
+- [check-arabic endpoint source swap](check-arabic-animelek-dead.md) — animelek.top fully dead (timeout from VPS+Replit); homepage "latest episodes" gate now matches against FaselHD-DB instead.
+- [Fresh-import setup fixes](import-setup-fixes.md) — after re-import: pip needs --break-system-packages for uv-broken venv; clear anime-scraper .vite cache (jsxDEV error); leave standalone api-server workflow stopped (port conflict with Start application).
+- [VPS manual deploy](vps-manual-deploy-2026-07.md) — app runs only on VPS via pm2, never on Replit; diff files vs VPS working copy before overwriting (VPS had unique unpushed commits); rebuild both frontend+backend after sync.
+- [AnimeSlayer practical test](anslayer-practical-test.md) — SUPERSEDED by anslayer-freshness-confirmed-2026-07-11.md — the "0/10" sample was unlucky/old titles, not a systemic failure.
+- [AnimeSlayer freshness confirmed](anslayer-freshness-confirmed-2026-07-11.md) — pipeline has no bug; fresh catalog episodes' mediafire/file_premium links play end-to-end via sources-stream; older back-catalog links rot like any embed aggregator.
+- [mobiltna.com anime-arab investigation](mobiltna-anime-arab.md) — SUPERSEDED, see anime-arab-apk-investigation-status.md: app actually shows real Spacetoon-era Arabic content, first-pass analysis was too shallow.
+- [AniPm embed filter + cap](anipm-embed-filter-cap.md) — filters out iframe-only "embed" kind sources (user's "ifrom" complaint), caps output at 5 direct sources by priority. Deployed.
+- [AnimeSlayer catalog-verified retest](anslayer-catalog-verified-retest.md) — cracked-auth API still works correctly; retested with a real catalog title (Naruto Shippuuden) and its own embed links (mediafire/ok.ru) are still dead — source-data problem, not integration bug.
+- [Anime Arab APK — investigation CLOSED](anime-arab-apk-investigation-status.md) — real backend found: Firebase RTDB danyah-58729.firebaseio.com, confirmed permanently deactivated. Not a viable source; don't resume without a new lead.
+- [AnimeSlayer direct-id + tag collision](anslayer-latest-direct-id.md) — getAnimeSlayerSources(...,directAnimeId?) skips fuzzy search when the catalog id is already known; arabseed/anslayer short tags AR/AS fixed after a collision.
+- [TimeMovies APK Analysis](timemovies-apk-analysis.md) — tmovies.app APK تحليل جزئي؛ Virbox-protected؛ timemovies.net=admin panel؛ API base URL غير مكتشف بعد.
+- [WitAnime scraper fixes](witanime-you-fixes.md) — WP6 ?anime[]= fix; cfProxy retry; parallel page scan; 45s timeout; x-internal:1 needed for localhost testing; recent eps work (mega.nz), old eps may be dead.
+- [Comments-button VPS sync lesson](comments-button-vps-sync.md) — local repo fixes for VPS-deployed pages must be diffed+copied per-file; git 'modified' status on VPS ≠ a specific fix is present.
+- [TimeMovies MITM plan](timemovies-mitm-plan.md) — Android phone, no root: HTTP Toolkit + manual Wi-Fi proxy + CA cert install chosen; not yet executed by user.
+- [Hidden-resolve embed sites](hidden-resolve-embed-sites.md) — 3 independent gates (isEmbed flag, backend SSE allowlist, mobile WEBVIEW_RESOLVE_SITES Set) must all list a site or its hidden-WebView extraction silently breaks.
+- [VPS-only deployment policy](vps-only-deployment-policy.md) — user explicitly forbids running/installing the app in Replit workspace; it runs only on the VPS via pm2. Replit is code-editing only; verify via SSH+pm2 logs, not local workflows.
+- [Direct-API-key pattern vs true external-player auth](direct-api-key-vs-oauth-apps.md) — DramaWorld/SAnime/Animatoo work because they use one static API key baked into the APK (no per-device auth) — we just call it directly; Anime Rift/AniTaku/TimeMovies need real per-user OAuth or undiscovered secrets, so the same trick doesn't apply to them yet.
+- [Supabase source_cache schema fix](supabase-source-cache-schema-fix.md) — real prod DB is Supabase (not VPS's local legacy Postgres); sandbox has no IPv6 + pooler rejects this project, but VPS reaches db.<ref>.supabase.co directly.
+- [pkill self-match over SSH](pkill-self-match-ssh.md) — `pkill -f <pattern>` run via one-shot ssh command can match its own argv (the remote command line contains the pattern text) and kill the session before it replies, causing a misleading ssh exit 255 with no output; kill by PID instead.
+- [Important repos July 2026 batch](important-repos-2026-07.md) — vidfast VM-resolver + cinesrc PoW-resolver + ok.ru zero-dep + trawl CF-bypass(330★) + chromiumfish stealth-Chromium(91★); defer integration to later session.
+- [Videasy/Vidking real backend + native decrypt](videasy-wingsdatabase-decrypt.md) — api.videasy.to dead → real API is api.wingsdatabase.com (found via vidking.net sub-brand); custom PRNG-XOR "STREAMCRYPTO" cipher fully reimplemented natively, no enc-dec.app needed.
+- [Embed-decrypt research method + queue](embed-decrypt-research-2026-07-12.md) — reverse-engineering method (official site → JS chunks → grep for host+crypto); VidLink in-progress (fu.wasm+libsodium suspect); full list of untested embed providers for next session.
+- [Anime Rift fake auth + real API](anime-rift-fake-auth.md) — integrity JWT signature unchecked, device registration accepts fabricated info; full curl-only scrape flow confirmed working.
+- [APK RE playbook](apk-re-playbook.md) — generalized method: try direct curl first, then forge "integrity"/attestation tokens to test if signature checks are real before doing native RE.
+- [Anime Rift Play Integrity confirmed real](anime-rift-bypass-closed-2026-07-13.md) — decompiled current APK (v3.13.13): genuine Google Play Integrity wired into Firebase App Check; anime-rift-fake-auth.md's "signature unchecked" claim is wrong/stale, not bypassable via curl.
+- [Anime Rift second capture](anime-rift-second-capture-2026-07-13.md) — reconfirms dead end; new lead: "rift-streamer"/VRV provider (never seen before) may be a scrapeable third party, no sample captured yet.
+- [Hopx Proxy System](hopx-proxy-system.md) — Hopx sandbox كـ proxy لتجاوز CF-block؛ egydead+witanime يعملان من Hopx IP؛ anime3rb لا يزال محجوباً؛ port 7777 محجوز، استخدم 3000؛ معمارية hopx_manager+hopx_proxy_server.
+- [Session checkpoint 2026-07-13 continued](anime-nova-session-2026-07-13-continued.md) — AniTaku anti-tamper patch abandoned (no logcat access); Videasy/VidKing UI fix (missing from Watch.tsx SCRAPER_DEFS, not a scraper bug); Xpass CDN links dead-on-arrival; next: 2 more embed sources RE.
+- [WitAnime frontend fallback bug](witanime-frontend-fallback-bug.md) — isEmbedFallback() in Watch.tsx only whitelisted mega/vidmoly hosts, silently hiding witanime/mycima sources fetched fine by backend; fixed+deployed.
+- [Source priority plan](source-priority-plan.md) — WitAnime=أساسي أنمي؛ FaselHD=أساسي أنيميشن؛ نظام auto-select+background؛ تجديد كوكيز تلقائي مُقرَّر؛ مصادر الأنمي تعمل ✅
+- [EgyBest exclusion](egybest-exclusion-2026-07-13.md) — disabled/commented (not deleted) in anime.ts+animation.ts by user request; slow (~8s), logic still works.
+- [WitAnime mega/direct-only filter](witanime-mega-only-filter-2026-07-13.md) — removed from HIDDEN_RESOLVE_EMBED_SITES; now returns ~zero results since it never has mega/vidmoly servers and never attempts extraction.
+- [Moviz-Time integration](moviztime-integration-2026-07-13.md) — new anime+animation source; movie vs TV page structures differ; long series split into non-overlapping ep-range "part" pages, must try all candidates.
+- [Domain checks 2026-07-13](domain-checks-2026-07-13.md) — mycima/starcima.cc/faselhd-mirror all confirmed to be same already-integrated backends under different aliases, not new sources.
