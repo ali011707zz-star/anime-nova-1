@@ -220,7 +220,7 @@ const ANIME_SITES = [
   "mycima", "topcinemaa", "animephoenix",
   // قاعدة بيانات FaselHD + AnimeTime + WITanime + WITanime-DB (مدبلج)
   "faselhd_db", "animetime", "witanime", "witanime_db",
-  // مصادر جديدة يوليو 2026
+  // مصادر جديدة يوليو 2026 (xyra_anim معطّل مؤقتاً — خادمهم يرجع 502 دائماً)
   "notorrent", "sanime", "anslayer",
   // مصادر عربية مُستعادة
   "anime3rb", "akwam",
