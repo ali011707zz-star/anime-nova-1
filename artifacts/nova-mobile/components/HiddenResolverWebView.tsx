@@ -37,6 +37,90 @@ interface Props {
  * 2) أي طلب fetch()/XHR لرابط m3u8 أو mp4
  * ثم يبلّغ التطبيق فوراً عبر postMessage بأول رابط فيديو حقيقي يجده.
  */
+/**
+ * حظر مبكر للصور/الإعلانات — الصفحة أصلاً غير مرئية (WebView مخفي 1×1) لذا لا حاجة
+ * لتحميل أي صورة إطلاقاً، وحظر شبكات الإعلانات المعروفة يقلّل حجم/زمن التحميل بشكل
+ * كبير قبل وصولنا لرابط الفيديو الحقيقي.
+ */
+const AD_BLOCK_SCRIPT = `
+(function () {
+  if (window.__novaAdBlockInstalled) return;
+  window.__novaAdBlockInstalled = true;
+
+  var AD_PATTERNS = [
+    "doubleclick.net","googlesyndication","google-analytics","googletagmanager",
+    "adservice.", "adsystem", "/ads/", "popads", "propellerads", "juicyads",
+    "exoclick", "adnxs.com", "taboola", "outbrain", "criteo", "moatads",
+    "histats.com", "yandex.ru/metrika", "facebook.net/tr", "hotjar.com",
+  ];
+  function isAdUrl(u) {
+    if (!u || typeof u !== "string") return false;
+    var s = u.toLowerCase();
+    for (var i = 0; i < AD_PATTERNS.length; i++) if (s.indexOf(AD_PATTERNS[i]) !== -1) return true;
+    return false;
+  }
+  function isImageUrl(u) {
+    if (!u || typeof u !== "string") return false;
+    return /\\.(jpe?g|png|gif|webp|bmp|svg|ico)(\\?|$)/i.test(u);
+  }
+
+  // امنع تحميل الصور كلياً (الصفحة غير مرئية أساساً)
+  try {
+    var imgDesc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+    if (imgDesc && imgDesc.set) {
+      Object.defineProperty(HTMLImageElement.prototype, "src", {
+        get: imgDesc.get,
+        set: function (v) { if (isImageUrl(v)) return; return imgDesc.set.call(this, v); },
+        configurable: true,
+      });
+    }
+  } catch (e) {}
+
+  // امنع إنشاء عناصر <img> جديدة من التحميل + احظر iframes/سكربتات الإعلانات
+  var origCreateElement = document.createElement;
+  document.createElement = function (tag) {
+    var el = origCreateElement.apply(document, arguments);
+    try {
+      var t = String(tag).toLowerCase();
+      if (t === "img") {
+        Object.defineProperty(el, "src", { set: function (v) { if (!isImageUrl(v)) el.setAttribute("data-blocked-src", v); }, get: function () { return ""; }, configurable: true });
+      } else if (t === "iframe" || t === "script") {
+        var origSetAttr = el.setAttribute.bind(el);
+        el.setAttribute = function (name, value) {
+          if (name === "src" && isAdUrl(value)) return;
+          return origSetAttr(name, value);
+        };
+      }
+    } catch (e) {}
+    return el;
+  };
+
+  // احظر fetch/XHR لشبكات الإعلانات (لا يمس روابط الفيديو)
+  var origFetchAd = window.fetch;
+  if (origFetchAd) {
+    window.fetch = function (input, init) {
+      var url = typeof input === "string" ? input : (input && input.url) || "";
+      if (isAdUrl(url)) return Promise.reject(new Error("blocked"));
+      return origFetchAd.apply(this, arguments);
+    };
+  }
+  var origOpenAd = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    if (isAdUrl(url)) { this.__blocked = true; url = "about:blank"; }
+    return origOpenAd.apply(this, arguments);
+  };
+
+  // CSS: أخفِ أي صور/iframes متبقية فوراً (احتياطي)
+  try {
+    var st = document.createElement("style");
+    st.textContent = "img,iframe[src*='ads']{display:none!important}";
+    (document.head || document.documentElement).appendChild(st);
+  } catch (e) {}
+
+  true;
+})();
+`;
+
 const SNIFF_SCRIPT = `
 (function () {
   if (window.__novaHiddenSniffInstalled) return;
@@ -167,7 +251,7 @@ export function HiddenResolverWebView({ pageUrl, refererOverride, timeoutMs = 16
       containerStyle={styles.hidden}
       pointerEvents="none"
       injectedJavaScript={SNIFF_SCRIPT}
-      injectedJavaScriptBeforeContentLoaded={SNIFF_SCRIPT}
+      injectedJavaScriptBeforeContentLoaded={AD_BLOCK_SCRIPT + SNIFF_SCRIPT}
       onMessage={handleMessage}
       onError={() => finish(() => onFailed("load-error"))}
       onHttpError={() => { /* لا نفشل فوراً — قد تكون صفحة وسيطة قبل التحدي */ }}

@@ -170,6 +170,53 @@ async function spGetSources(
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// ── DramaWorld (dwapp.arabypros.com) — كتالوج الأنيميشن الغربي مُخزَّن مؤقتاً ──────
+// الـ API محمي بكلاوفلير لكن يقبل أي طلب يطابق هيدرز تطبيق أندرويد الرسمي فقط
+// (User-Agent: okhttp/x.x + Accept-Encoding: gzip) — لا حاجة لتجاوز TLS/JS.
+// endpoint البحث /search/ غير موثوق (يُعيد نتائج عشوائية لا تطابق الاستعلام)،
+// لذا نجلب كتالوج فئتي الأنيميشن كاملاً (id=61 أفلام، id=87 مسلسلات) ونطابق محلياً.
+const DW_BASE    = "https://dwapp.arabypros.com/api";
+const DW_KEY     = "4F5A9C3D9A86FA54EACEDDD635185/d506abfd-9fe2-4b71-b979-feff21bcad13";
+const DW_HEADERS = { "User-Agent": "okhttp/4.12.0", "Accept-Encoding": "gzip" };
+let dwCatalogCache: { movies: any[]; series: any[]; ts: number } | null = null;
+
+async function dwFetch(path: string): Promise<any> {
+  try {
+    const r = await fetch(`${DW_BASE}${path}`, { headers: DW_HEADERS, signal: AbortSignal.timeout(15_000) });
+    if (!r.ok) return null;
+    const raw = Buffer.from(await r.arrayBuffer()).toString("utf-8");
+    // بعض endpoints (genre/years) ترجع JSON مباشر بدون base64
+    try { return JSON.parse(raw); } catch { /* not plain JSON, fall through */ }
+    // الرد المعتاد = base64(JSON) بمقدمة عشوائية الطول
+    for (let start = 0; start < Math.min(raw.length, 60); start++) {
+      try { return JSON.parse(Buffer.from(raw.slice(start), "base64").toString("utf-8")); } catch { /* try next offset */ }
+    }
+    return null;
+  } catch { return null; }
+}
+
+async function dwFetchAllPages(kind: "movie" | "serie", genreId: number): Promise<any[]> {
+  const out: any[] = [];
+  for (let page = 1; page <= 60; page++) {
+    const items = await dwFetch(`/${kind}/by/filtres/${genreId}/created/${page}/${DW_KEY}/`);
+    if (!Array.isArray(items) || !items.length) break;
+    out.push(...items);
+    if (items.length < 30) break; // آخر صفحة
+  }
+  return out;
+}
+
+async function getDwCatalog(): Promise<{ movies: any[]; series: any[] }> {
+  const TTL_MS = 6 * 60 * 60 * 1000; // 6 ساعات
+  if (dwCatalogCache && Date.now() - dwCatalogCache.ts < TTL_MS) return dwCatalogCache;
+  const [movies, series] = await Promise.all([
+    dwFetchAllPages("movie", 61),
+    dwFetchAllPages("serie", 87),
+  ]);
+  dwCatalogCache = { movies, series, ts: Date.now() };
+  return dwCatalogCache;
+}
+
 // ── Dulo.tv shared client (module-level session cache, 7h TTL) ────────────────
 // ── MovieBox auth state (h5-api.aoneroom.com) ────────────────────────────────
 const _MBX_API_ANIM    = "https://h5-api.aoneroom.com";
@@ -289,6 +336,42 @@ const _NOVA_PROXY_BASE = process.env.NOVA_PROXY_BASE;
 const CF_PROXY_BASE = _NOVA_PROXY_BASE
   ? `${_NOVA_PROXY_BASE}/api/cfproxy`
   : `http://localhost:${CF_PROXY_PORT}`;
+
+
+// ════════════════════════════════════════════════════════════════════
+//  hopxProxyGet — جلب عبر Hopx sandbox (IP مختلف يتجاوز CF-block)
+// ════════════════════════════════════════════════════════════════════
+const HOPX_PROXY_BASE_ANIM = process.env.HOPX_PROXY_URL || "http://localhost:8001";
+let _hopxAliveAnim: boolean | null = null;
+let _hopxCheckedAtAnim = 0;
+
+async function hopxProxyGet(
+  url: string,
+  referer?: string,
+  timeoutMs = 25000,
+): Promise<string | null> {
+  const now = Date.now();
+  if (_hopxAliveAnim === null || now - _hopxCheckedAtAnim > 60_000) {
+    try {
+      const h = await fetch(`${HOPX_PROXY_BASE_ANIM}/health`, { signal: AbortSignal.timeout(3000) });
+      const body = await h.json() as { ok?: boolean };
+      _hopxAliveAnim = h.ok && body.ok === true;
+    } catch { _hopxAliveAnim = false; }
+    _hopxCheckedAtAnim = now;
+  }
+  if (!_hopxAliveAnim) return null;
+  try {
+    const params = new URLSearchParams({ url });
+    if (referer) params.set("ref", referer);
+    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/fetch?${params}`, {
+      signal: AbortSignal.timeout(timeoutMs + 5000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as { status?: number; html?: string; error?: string };
+    if (data.error || !data.html || (data.status !== undefined && data.status >= 400)) return null;
+    return data.html;
+  } catch { return null; }
+}
 
 // CF proxy helper — يمرر الطلب عبر curl_cffi
 async function cfProxyGet(url: string): Promise<string> {
@@ -1747,11 +1830,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     if (captureArr) captureArr.push({ url, label, directUrl: safeDirectUrl, proxyUrl: safeProxyUrl, ...extra });
   };
 
+  // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر الأنميشن ما عدا
+  //    Dulo (dulo_anim) و StarCima (starcima) — السكرابر لا يمر بأي مصدر آخر إطلاقاً.
+  //    لإعادة التفعيل: احذف/عدّل ANIM_SOURCE_ALLOWLIST بالأسفل. ─────────────────
+  // moviz_time_anim أُضيف للسماح به 2026-07-13 (مصدر جديد بطلب المستخدم)
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim"]);
+
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
     site: string,
     scrape: () => Promise<void>,
   ) {
+    if (ANIM_SOURCE_ALLOWLIST && !ANIM_SOURCE_ALLOWLIST.has(site)) return;
     const cKey = makeAnimCacheKey(site, tmdbId || title.slice(0, 20), type, season, epNum);
     const hit  = await getFromSourceCache(cKey);
 
@@ -1945,41 +2035,12 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── 23. vidbinge → DISABLED (timeout from datacenter IPs) ───────────────
       Promise.resolve(),
 
-      // ── Streamrip — روابط MP4 مباشرة إنجليزية (MovieBox) ──────────────────────
-      (async () => {
-        if (!tmdbId) return;
-        try {
-          const SRIP = "https://streamrip-website-production.up.railway.app";
-          const SRIP_REF = "https://fmoviesunblocked.net/";
-          const SRIP_ORIGIN = "https://fmoviesunblocked.net";
-          const endpoint = type === "tv"
-            ? `${SRIP}/api/download/tv/${tmdbId}`
-            : `${SRIP}/api/download/movie/${tmdbId}`;
-          const r = await fetch(endpoint, { signal: AbortSignal.timeout(12_000) });
-          if (!r.ok) return;
-          const data: any = await r.json();
-          const downloads: any[] = data?.downloads || [];
-          // فلتر: إنجليزي فقط (MovieBox [English]) — يستبعد Hindi/Telugu/Norwegian
-          const english = downloads.filter((d: any) => {
-            const srv = (d.server || "").toLowerCase();
-            return srv.includes("english") &&
-              !srv.includes("hindi") &&
-              !srv.includes("telugu") &&
-              !srv.includes("norwegian") &&
-              typeof d.url === "string" && d.url.startsWith("http");
-          });
-          for (const dl of english) {
-            const q = Number(dl.quality) || 0;
-            if (q <= 0) continue; // skip invalid quality
-            const label = `Streamrip · ${q}p`;
-            const proxyUrl = `/api/anime/video-proxy?url=${encodeURIComponent(dl.url)}&ref=${encodeURIComponent(SRIP_REF)}&origin=${encodeURIComponent(SRIP_ORIGIN)}`;
-            sendSource(dl.url, label, dl.url, proxyUrl);
-          }
-        } catch { /* silent */ }
-      })(),
+      // ── Streamrip — DISABLED 2026-07-11: Railway API returns 404 (server shutdown) ──
+      Promise.resolve(),
 
       // ── 16. 2embed.skin (TMDB-based, tries streamwish/filemoon extraction) ─────
-      (async () => {
+      // معطّل مؤقتاً (بطلب المستخدم 2026-07-13) — يبقى فقط Dulo/StarCima عاملين
+      Promise.resolve() || (async () => {
         try {
           const url = type === "tv"
             ? `https://www.2embed.skin/embedtv/${tmdbId}&s=${season}&e=${epNum}`
@@ -2117,44 +2178,24 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               } catch (e) { console.error("[StarCima/vidzee] error:", e); }
             })(),
 
-            // ── arabic-sources: many embed servers (streamwish, filemoon …) ─
+            // ── arabic-sources: re-enabled — أنيميشن مترجم عربي (embeds تُحلّ عبر HiddenResolverWebView موبايل)
             (async () => {
-              if (!tmdbId || tmdbId === "0") return; // بدون TMDB ID لا فائدة من الاستعلام
               try {
-                const sp = new URLSearchParams({
-                  title : title,
-                  type,
-                  tmdbId,
-                  ...(type === "tv" ? { season: String(season), episode: String(epNum) } : {}),
-                });
-                const r = await fetch(`${SC_ARABIC}?${sp.toString()}`, {
-                  headers: scHeaders,
-                  signal : AbortSignal.timeout(25_000),
-                });
-                if (!r.ok) {
-                  console.error(`[StarCima/arabic] HTTP ${r.status}`);
-                  return;
-                }
+                const r = await fetch(
+                  `${SC_ARABIC}?tmdbId=${tmdbId}&type=${type}&title=${encodeURIComponent(title)}${tvExtra}`,
+                  { headers: scHeaders, signal: AbortSignal.timeout(12_000) }
+                );
+                if (!r.ok) return;
                 const data: any = await r.json();
-                const servers: any[] = (data.servers || []);
-                if (!servers.length) console.warn("[StarCima/arabic] No arabic servers returned");
-
-                // isTopPriority first (streamwish, filemoon, dood …) — run ALL in parallel (no cap)
-                const priority = servers.filter((s: any) => s.isTopPriority);
-                const rest     = servers.filter((s: any) => !s.isTopPriority);
-                const ordered  = [...priority, ...rest];
-
-                await Promise.allSettled(ordered.map(async (srv: any) => {
-                  if (!srv.embedUrl) return;
-                  // Try server-side extraction; fallback to embed if extraction fails
-                  await sendExtracted(srv.embedUrl, `StarCima · ${srv.name || "عربي"}`);
-                  // Embed fallback: يُرسَل embed URL إذا فشل الاستخراج (browser iframe)
-                  if (!seenUrls.has(srv.embedUrl)) {
-                    seenUrls.add(srv.embedUrl);
-                    sendSource(srv.embedUrl, `StarCima · ${srv.name || "عربي"}`, srv.embedUrl, srv.embedUrl);
-                  }
-                }));
-              } catch (e) { console.error("[StarCima/arabic] error:", e); }
+                const servers: any[] = data.servers || data.sources || data.embeds || data.links || [];
+                for (const s of servers.slice(0, 5)) {
+                  const embedUrl = s.url || s.link || s.embed || s.src;
+                  if (!embedUrl || typeof embedUrl !== "string") continue;
+                  const serverName = s.name || s.server || s.label || "عربي";
+                  const label = `StarCima عربي · ${serverName}`;
+                  send("source", { url: embedUrl, directUrl: embedUrl, label, site: "starcima_ar", isEmbed: true });
+                }
+              } catch (e) { console.error("[StarCima/arabic-sources]", e); }
             })(),
           ]);
 
@@ -2570,7 +2611,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             const p: string = ((srv.name || "").toLowerCase().split(" ").pop() || "");
             if (!u) return null;
             if (u.startsWith("https://")) return u;
-            if (u.startsWith("/v/"))          return `https://vidhidepro.com${u}`;
+            if (u.startsWith("/v/"))          return `https://vidhidefast.com${u}`; // vidhidepro → vidhidefast
             if (/^\/e\//.test(u)) {
               if (p === "dood")     return `https://dood.to${u}`;
               if (p === "mixdrop")  return `https://mixdrop.ag${u}`;
@@ -2581,10 +2622,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             }
             if (/^\/embed-[^/]+\.html$/.test(u)) {
               if (p === "upstream")  return `https://upstream.to${u}`;
-              if (p === "uqload")    return `https://uqload.co${u}`;
-              if (p === "vadbam")    return `https://vadbam.net${u}`;
-              if (p === "viidshar")  return `https://viidshar.com${u}`;
+              if (p === "uqload")    return `https://uqload.is${u}`;  // uqload.co → uqload.is
               if (p === "mp4upload") return `https://www.mp4upload.com${u}`;
+              // vadbam / viidshar → ميتة (timeout) → تجاهل
+              if (p === "vadbam" || p === "viidshar") return null;
               return `https://upstream.to${u}`;
             }
             return null;
@@ -2663,8 +2704,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             if (!sn.includes(showNamePart.split(" ")[0])) return false;
             if (type === "tv") {
               // Use regex with word boundary so ep 5 doesn't match ep 50/55
-              return sn.includes(`season ${season}`) &&
-                     new RegExp(`\\beps\\s+${epNum}(?:\\s|$)`).test(sn);
+              const epMatch = new RegExp(`\\beps\\s+${epNum}(?:\\s|$)`).test(sn);
+              if (!epMatch) return false;
+              // Some shows (e.g. Sym-Bionic Titan) have no "season N" in server names
+              const hasSeasonTag = /\bseason\s+\d+\b/.test(sn);
+              if (hasSeasonTag) return sn.includes(`season ${season}`);
+              // No season tag → assume season 1
+              return season === 1;
             }
             return sn.includes(showNamePart.slice(0, 12));
           });
@@ -2868,69 +2914,85 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── EzVidAPI — DISABLED (api.ezvidapi.com returns Bad Gateway 502 as of 2026-07) ─
       Promise.resolve(),
 
-      // ── Videasy (api.videasy.to) — TMDB-native HLS multi-quality + Arabic subtitle ─
+      // ── Videasy/VidKing (api.wingsdatabase.com) — TMDB-native HLS multi-quality ─────
+      // Backend: api.wingsdatabase.com (moved from api.videasy.to — discovered via vidking.net)
+      // Cipher: custom PRNG-XOR "STREAMCRYPTO", reimplemented natively (no enc-dec.app)
       scrapeAnimCached("videasy3", async () => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
-          const rawTitle = enTitlePrefetched || title || "";
-          if (!rawTitle) return;
-          // Videasy requires double URL-encoding for the title parameter
-          const encTitle = encodeURIComponent(encodeURIComponent(rawTitle));
-          const mediaType = type === "movie" ? "movie" : "tv";
-          const baseParams = mediaType === "tv"
-            ? `title=${encTitle}&mediaType=tv&year=&tmdbId=${tmdbId}&imdbId=&episodeId=${epNum}&seasonId=${season}`
-            : `title=${encTitle}&mediaType=movie&year=&tmdbId=${tmdbId}&imdbId=&episodeId=1&seasonId=1`;
-          const VEA_HDRS = {
+          const WBASE = "https://api.wingsdatabase.com";
+          const WHDRS = {
             "User-Agent": UA,
             "Accept": "application/json, */*; q=0.01",
-            "Referer": "https://player.videasy.to/",
-            "Origin": "https://player.videasy.to",
+            "Referer": "https://www.vidking.net/",
+            "Origin": "https://www.vidking.net",
           };
-          // FMHY-Indexers v0.4 — Neon(mb-flix) + Yoru(cdn) — بدون ترجمة مدمجة
-          const servers = ["mb-flix", "cdn"];
-          await Promise.allSettled(servers.map(async (server) => {
-            try {
-              const url = `https://api.videasy.to/${server}/sources-with-title?${baseParams}`;
-              const r = await fetch(url, { headers: VEA_HDRS, signal: AbortSignal.timeout(12_000) });
-              if (!r.ok) return;
-              const blob = await r.text();
-              if (!blob || blob.length < 20) return;
-              // Decrypt via enc-dec.app — downloader2 may need empty id as fallback
-              const tryDecrypt = async (id: string) =>
-                fetch("https://enc-dec.app/api/dec-videasy", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ text: blob, id, server }),
-                  signal: AbortSignal.timeout(10_000),
-                }).then(r2 => r2.ok ? r2.json() : null).catch(() => null) as
-                Promise<{ status: number; result?: { sources?: any[]; subtitles?: any[] } } | null>;
 
-              let decData = await tryDecrypt(String(tmdbId));
-              if (!decData || decData.status !== 200 || !decData.result?.sources?.length) {
-                decData = await tryDecrypt("");
-              }
-              if (!decData || decData.status !== 200 || !decData.result?.sources) return;
-              // Arabic subtitle from cc.boopigcdn.com (publicly accessible, WEBVTT)
-              const subs = decData.result.subtitles ?? [];
-              const araSub = subs.find((s: any) => s.lang === "ara" || s.lang === "ar");
-              for (const src of (decData.result.sources ?? [])) {
-                if (!src?.url) continue;
-                const quality = src.quality || "HD";
-                const label = `Videasy · ${server} · ${quality}`;
-                // CDN (joe.goldweather.net) blocks by Referer — REQUIRES Referer: https://player.videasy.to/
-                // Our server CAN access it when the correct Referer is sent (confirmed 200).
-                // Route through hls-proxy with ref=player.videasy.to so:
-                //   browser → hls-proxy (server, correct Referer) → CDN → returns m3u8 ✓
-                //   segment URLs rewritten to seg-proxy (same Referer) → CDN → segments ✓
-                const hlsProxied = `/api/anime/hls-proxy?url=${encodeURIComponent(src.url)}&ref=${encodeURIComponent("https://player.videasy.to/")}`;
-                sendSource(
-                  hlsProxied, label, hlsProxied, hlsProxied,
-                  araSub?.url ? { subtitleUrl: araSub.url } : undefined,
-                );
-              }
-            } catch { /* silent per server */ }
-          }));
+          // Step 1: seed → mediaId from TMDB id
+          const seedR = await fetch(
+            `${WBASE}/seed?mediaId=${encodeURIComponent(String(tmdbId))}`,
+            { headers: WHDRS, signal: AbortSignal.timeout(8_000) }
+          );
+          if (!seedR.ok) return;
+          const seedJ: any = await seedR.json();
+          const mediaId = seedJ?.mediaId ?? seedJ?.id ?? tmdbId;
+
+          // Step 2: fetch encrypted sources (Hydrogen + Lithium servers)
+          const endpoints = type === "movie"
+            ? [`movie/${mediaId}`]
+            : [`tv/${mediaId}/${season}/${epNum}`];
+          const servers = ["hydrogen", "lithium"];
+
+          await Promise.allSettled(servers.flatMap(srv =>
+            endpoints.map(async (ep2) => {
+              try {
+                const url = new URL(`${WBASE}/${ep2}`);
+                url.searchParams.set("server", srv);
+                const r = await fetch(url, {
+                  headers: { ...WHDRS, "Cache-Control": "no-cache" },
+                  signal: AbortSignal.timeout(12_000),
+                });
+                if (!r.ok) return;
+                const enc: any = await r.json();
+                if (!enc?.sources) return;
+
+                // Step 3: PRNG-XOR STREAMCRYPTO decrypt (native, no enc-dec.app)
+                const decryptStreamcrypto = (enc2: string, key: string): string => {
+                  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+                  let seed = 0;
+                  for (let i = 0; i < key.length; i++) seed = (seed * 31 + key.charCodeAt(i)) >>> 0;
+                  const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+                  const keyStream = Array.from({ length: 256 }, () => Math.floor(rng() * 256));
+                  const decoded = atob ? atob(enc2) : Buffer.from(enc2, "base64").toString("binary");
+                  let out2 = "";
+                  for (let i = 0; i < decoded.length; i++) {
+                    out2 += String.fromCharCode(decoded.charCodeAt(i) ^ keyStream[i % keyStream.length]);
+                  }
+                  return out2;
+                };
+                const atob = (s: string) => Buffer.from(s, "base64").toString("binary");
+
+                let sources: any[] = [];
+                if (typeof enc.sources === "string") {
+                  try {
+                    const plain = decryptStreamcrypto(enc.sources, String(mediaId));
+                    sources = JSON.parse(plain);
+                  } catch { return; }
+                } else if (Array.isArray(enc.sources)) {
+                  sources = enc.sources;
+                }
+
+                for (const src of sources) {
+                  if (!src?.url) continue;
+                  const quality = src.quality || "HD";
+                  const label = `Videasy · ${srv} · ${quality}`;
+                  const proxied = wrapHls(src.url, "https://www.vidking.net/");
+                  sendSource(src.url, label, src.url, proxied);
+                }
+              } catch { /* silent */ }
+            })
+          ));
         } catch { /* silent */ }
       }),
 
@@ -3168,22 +3230,28 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // (متاح في قسم الأنمي عبر /api/anime/fetch-source?site=animeify)
       Promise.resolve(),
 
-      // ── EgyBest (egytbest.live) — أفلام + مسلسلات + أنيميشن عربي مترجم ─────────
-      // الاستراتيجية: WP-JSON بحث مباشر (لا يحتاج proxy) → data-embed-url servers
-      // يستخدم نفس scraper الأنمي (getEgyBestSources) عبر internal API
-      scrapeAnimCached("egybest_anim", async () => {
+      // ── EgyBest (egytbest.live) — مُستبعد بطلب المستخدم 2026-07-13 ─────────────
+      // منطق الاستخراج نفسه مؤكَّد يعمل (بحث WP-JSON + data-embed-url) لكن غير
+      // مُفعَّل حالياً؛ محفوظ بالذاكرة (egybest-exclusion-2026-07-13.md) لإعادة
+      // النظر لاحقاً. أيضاً مستبعد فعلياً عبر ANIM_SOURCE_ALLOWLIST بالأسفل.
+      // scrapeAnimCached("egybest_anim", async () => { ... }),
+
+      // ── Moviz-Time (moviz-time.vip) — أنمي + أنيميشن عربي مترجم ─────────────
+      // نفس الـ scraper الموجود بقسم الأنمي (getMovizTimeSources) عبر internal API؛
+      // صفحات موسم فيها أزرار <button class='ep-item'> لكل الحلقات + سيرفراتها.
+      scrapeAnimCached("moviz_time_anim", async () => {
         const q = enTitlePrefetched || title;
         if (!q) return;
         try {
-          send("status", { msg: "EgyBest: جاري البحث…" });
+          send("status", { msg: "Moviz-Time: جاري البحث…" });
           const PORT    = process.env["PORT"] || "5000";
           const ep      = type === "movie" ? 1 : epNum;
           const isMovie = type === "movie" ? "true" : "false";
-          const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=egybest`
+          const fsUrl   = `http://localhost:${PORT}/api/anime/fetch-source?site=moviz_time`
             + `&title=${encodeURIComponent(q)}&english=${encodeURIComponent(q)}&ep=${ep}&isMovie=${isMovie}`;
           const r = await fetch(fsUrl, {
             headers: { "x-internal": "1" },
-            signal: AbortSignal.timeout(28_000),
+            signal: AbortSignal.timeout(22_000),
           });
           if (!r.ok) return;
           const { sources } = await r.json() as {
@@ -3192,10 +3260,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           for (const src of sources || []) {
             const u = src.directUrl || src.url;
             if (!u) continue;
-            const proxied = u.startsWith("/api/") ? u
-              : u.includes(".m3u8") ? wrapHls(u, "https://egytbest.live/")
-              : u;
-            sendSource(proxied, `EgyBest · ${src.name || "Arabic"}`, proxied, proxied);
+            sendSource(u, `وقت الأفلام · ${src.name || "Arabic"}`, u, u);
           }
         } catch { /* silent */ }
       }),
@@ -3337,6 +3402,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
           // ── الخطوة 4: استخراج player_iframe (data-src) ─────────────────────────
           // الموقع يستخدم lazy loading: data-src لا src
+          let faselhdSentAny = false;
           const ifrM = pageHtml.match(/name="player_iframe"[^>]+data-src="([^"]+)"/);
           if (ifrM) {
             const playerUrl = ifrM[1];
@@ -3368,14 +3434,22 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (m3u8) {
                   const proxied = wrapHls(m3u8[1], playerUrl);
                   sendSource(proxied, "FaselHD · HLS", m3u8[1], proxied);
+                  faselhdSentAny = true;
                 }
                 const mp4 = vpHtml.match(/["'](https?:\/\/[^"']+\.mp4[^"']*?)["']/);
                 if (mp4) {
                   const proxied = wrapMp4(mp4[1], playerUrl);
                   sendSource(proxied, "FaselHD · MP4", mp4[1], proxied);
+                  faselhdSentAny = true;
                 }
               }
             } catch { /* silent */ }
+
+            // ── fallback: isEmbed — إذا لم يُستخرج رابط مباشر، أرسل embed يُحلّ عبر HiddenResolverWebView موبايل
+            if (!faselhdSentAny) {
+              send("source", { url: playerUrl, directUrl: playerUrl, label: "FaselHD · Player", site: "faselhd_db", isEmbed: true });
+              faselhdSentAny = true;
+            }
           }
 
           // ── الخطوة 5: روابط التحميل (downloadLinks) → جرب عبر cfProxy ─────────
@@ -3419,6 +3493,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             });
             if (sr.ok) searchHtml = await sr.text();
           } catch { /* silent */ }
+
+          // إذا فشل الـ fetch المباشر أو حُجب بـ CF، جرّب Hopx proxy
+          if (!searchHtml || searchHtml.length < 500 || searchHtml.includes("Just a moment")) {
+            const hopxHtml = await hopxProxyGet(
+              `${ED_BASE}/?s=${q}&post_type=episode`, `${ED_BASE}/`
+            ).catch(() => null);
+            if (hopxHtml && hopxHtml.length >= 500) searchHtml = hopxHtml;
+          }
 
           if (!searchHtml || searchHtml.length < 500) return;
 
@@ -3555,6 +3637,58 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch { /* silent */ }
       }),
 
+      // ── DramaWorld (dwapp.arabypros.com) — أفلام ومسلسلات أنيميشن غربية ─────
+      // نستخدم كتالوج فئتي الأنيميشن المُخزَّن مؤقتاً (getDwCatalog) بدل endpoint
+      // /search/ لأنه غير موثوق (يُعيد نتائج عشوائية لا علاقة لها بالاستعلام).
+      scrapeAnimCached("dramaworld", async () => {
+        send("status", { msg: "DramaWorld: جاري البحث…" });
+        try {
+          const wantType = type === "movie" ? "movie" : "serie";
+          const catalog = await getDwCatalog();
+          const posters: any[] = wantType === "movie" ? catalog.movies : catalog.series;
+          console.error(`[dramaworld] catalog movies=${catalog.movies.length} series=${catalog.series.length} wantType=${wantType} title="${title}"`);
+          if (!posters.length) return;
+
+          const scored = posters
+            .map(p => ({ p, sc: Math.max(titleSim(title, p.title || ""), enTitlePrefetched ? titleSim(enTitlePrefetched, p.title || "") : 0) }))
+            .filter(x => x.sc > 0.6)
+            .sort((a, b) => b.sc - a.sc);
+          console.error(`[dramaworld] scored matches=${scored.length} best=${scored[0]?.p?.title} id=${scored[0]?.p?.id} sc=${scored[0]?.sc}`);
+          if (!scored.length) return;
+          const best = scored[0].p;
+
+          let mirrors: any[] = [];
+          if (best.type === "movie") {
+            mirrors = await dwFetch(`/movie/source/by/${best.id}/${DW_KEY}/`) || [];
+          } else {
+            const seasons = await dwFetch(`/season/by/serie/${best.id}/${DW_KEY}/`);
+            const seasonObj = Array.isArray(seasons) ? (seasons[season - 1] || seasons[0]) : null;
+            const episodeObj = seasonObj?.episodes?.[epNum - 1];
+            if (!episodeObj) return;
+            mirrors = await dwFetch(`/episode/source/by/${episodeObj.id}/${DW_KEY}/`) || [];
+          }
+          console.error(`[dramaworld] mirrors=${Array.isArray(mirrors) ? mirrors.length : "not-array"} sample=${JSON.stringify(mirrors?.[0])}`);
+          if (!Array.isArray(mirrors) || !mirrors.length) return;
+
+          // ترتيب المرايا: المضيفات المؤكد نجاحها بالتحليل العملي أولاً
+          const PRIORITY = ["uqload", "luluvid", "vidaraa", "fasel-hd", "qzz.io", "adsmoloco", "kwcdn"];
+          const ordered = mirrors
+            .filter((m: any) => m?.url && m.type !== "embed" && !m.url.includes("mediafire") && !m.url.includes("mega.nz"))
+            .sort((a: any, b: any) => {
+              const pa = PRIORITY.findIndex(h => a.url.includes(h));
+              const pb = PRIORITY.findIndex(h => b.url.includes(h));
+              return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+            })
+            .slice(0, 6);
+          console.error(`[dramaworld] ordered=${ordered.length} urls=${JSON.stringify(ordered.map((m: any) => m.url))}`);
+
+          for (const m of ordered) {
+            const ok = await sendExtracted(m.url, "DramaWorld");
+            console.error(`[dramaworld] sendExtracted ${m.url} -> ${ok}`);
+          }
+        } catch (e) { console.error(`[dramaworld] EXCEPTION: ${e}`); }
+      }),
+
       // ── Aether / Nebula (nebula.aether.cx) — TMDB-native، CDN مفتوح ────────
       // nebula.aether.cx/movie/{id} → {stream_url:"..."} مباشرة بدون proxy
       scrapeAnimCached("aether", async () => {
@@ -3593,7 +3727,56 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // cooldown: enc-dec.app/api/enc-hexa يعيد 500 مع "Next retry: N minutes"
       //           → نتجنب الـ hammering بحفظ _hexaFailUntil
 
-      // CinePro (CP): أُزيل كلياً بطلب المستخدم 2026-07-09 — راجع memory: cinepro-self-hosted.md
+      // ── CinePro (CP) — self-hosted microservice على VPS (port 3000) ──────────────
+      // TMDB-native, ~14 provider (VixSrc/VidApi/Icefy/…), movie+TV
+      // API: GET /v1/movies/{id}  أو  /v1/tv/{id}/seasons/{s}/episodes/{e}
+      // Response: { sources: [{ id:{id,name}, quality, url }], subtitles: [] }
+      // proxy URLs: /v1/proxy?data=<json-encoded-{url}> → يجب فك ترميزها
+      scrapeAnimCached("cinepro", async () => {
+        if (!tmdbId) return;
+        try {
+          const CP_BASE = "http://localhost:3000";
+          const endpoint = type === "tv"
+            ? `${CP_BASE}/v1/tv/${tmdbId}/seasons/${season}/episodes/${epNum}`
+            : `${CP_BASE}/v1/movies/${tmdbId}`;
+          const r = await fetch(endpoint, { signal: AbortSignal.timeout(40_000) });
+          if (!r.ok) return;
+          const cpData: any = await r.json().catch(() => null);
+          if (!cpData?.sources?.length) return;
+
+          for (const src of cpData.sources as any[]) {
+            let rawUrl: string = src.url || "";
+            if (!rawUrl) continue;
+
+            // فك ترميز proxy URL الداخلية: /v1/proxy?data=<json>
+            if (rawUrl.startsWith("/v1/proxy") || rawUrl.includes("/v1/proxy?")) {
+              try {
+                const proxyParams = new URL(rawUrl.startsWith("http") ? rawUrl : `http://x.com${rawUrl}`).searchParams;
+                const dataStr = proxyParams.get("data");
+                if (dataStr) {
+                  const decoded = JSON.parse(decodeURIComponent(dataStr)) as { url?: string };
+                  if (decoded?.url) rawUrl = decoded.url;
+                }
+              } catch { continue; }
+            }
+            if (!rawUrl.startsWith("http")) continue;
+
+            const providerName = (typeof src.id === "object" ? src.id?.name : src.id) || "CP";
+            const quality = src.quality || "720p";
+            const label = `CinePro · ${providerName} · ${quality}`;
+
+            // VidApi يستخدم مسارات غير تقليدية (/pl/ أو /playlist/) — يُعدّ HLS
+            const isHls = rawUrl.includes(".m3u8") || /\/(pl|playlist)\//i.test(rawUrl);
+            if (isHls) {
+              const proxied = toHlsProxy(rawUrl, rawUrl);
+              sendSource(rawUrl, label, rawUrl, proxied);
+            } else {
+              const proxied = `/api/anime/video-proxy?url=${encryptParam(rawUrl)}&ref=${encryptParam(rawUrl)}`;
+              sendSource(rawUrl, label, rawUrl, proxied);
+            }
+          }
+        } catch { /* silent */ }
+      }),
 
       scrapeAnimCached("hexa", async () => {
         return; // DISABLED 2026-07-08: enc-dec.app/api/enc-hexa returns HTTP 500 consistently — broken on their end
@@ -3917,7 +4100,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ملاحظة: akwam.to أصبح صفحة بيع نطاق؛ النطاق الفعلي الحالي هو akwam.it (301 عبر ak.sv)
       scrapeAnimCached("akwam", async () => {
         const q = enTitlePrefetched || title;
-        if (!q || type !== "movie") return; // أفلام فقط حالياً — المسلسلات تحتاج بنية روابط مختلفة
+        if (!q || type !== "movie") return;
         try {
           send("status", { msg: "Akwam: جاري البحث…" });
           const AK_BASE = "https://akwam.it";
@@ -3955,6 +4138,137 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch (e: any) {
           console.warn("[Akwam]", e?.message);
         }
+      }),
+
+      // ── XPass (play.xpass.top) — MEG direct HLS (no embed page, no bot-detection) ─
+      scrapeAnimCached("xpass_anim", async () => {
+        if (!tmdbId) return;
+        try {
+          const XBASE = "https://play.xpass.top";
+          const XREF  = XBASE + "/";
+          // MEG CDN: predictable URL — no embed page fetch needed
+          const megUrls = type === "movie"
+            ? [
+                `${XBASE}/meg/movie/${tmdbId}/1/playlist.json`,
+                `${XBASE}/meg/movie/${tmdbId}/2/playlist.json`,
+              ]
+            : [
+                `${XBASE}/meg/tv/${tmdbId}/${season}/${epNum}/1/playlist.json`,
+                `${XBASE}/meg/tv/${tmdbId}/${season}/${epNum}/2/playlist.json`,
+              ];
+
+          let sent = 0;
+          const plResults = await Promise.allSettled(
+            megUrls.map(async (pUrl) => {
+              const pr = await fetch(pUrl, {
+                headers: { "User-Agent": UA, "Referer": XREF },
+                signal: AbortSignal.timeout(8_000),
+              });
+              if (!pr.ok) return null;
+              const pj: any = await pr.json();
+              return pj?.playlist?.[0]?.sources ?? [];
+            })
+          );
+          for (const res of plResults) {
+            if (res.status !== "fulfilled" || !res.value) continue;
+            for (const s of (res.value as any[])) {
+              if (typeof s?.file !== "string" || !s.file.startsWith("http")) continue;
+              const isHls = s.file.includes(".m3u8") || s.type === "hls";
+              const proxyUrl = isHls ? wrapHls(s.file, XREF) : s.file;
+              sendSource(s.file, `XPass · MEG`, s.file, proxyUrl);
+              sent++;
+              if (sent >= 3) break;
+            }
+            if (sent >= 3) break;
+          }
+          console.log(`[XPass-anim] tmdb:${tmdbId} ${type} → ${sent} sources`);
+        } catch (e: any) {
+          console.warn("[XPass-anim]", e?.message);
+        }
+
+      }),
+      // -- vixsrc.to -- TMDB-native movie+TV, direct HLS
+      scrapeAnimCached("vixsrc_anim", async () => {
+        if (!tmdbId) return;
+        try {
+          const VBASE = "https://vixsrc.to";
+          const apiPath = type === "movie"
+            ? `/api/movie/${tmdbId}`
+            : `/api/tv/${tmdbId}/${season}/${epNum}`;
+          const apiR = await fetch(VBASE + apiPath, {
+            headers: { "User-Agent": UA, "Referer": VBASE + "/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!apiR.ok) { console.error(`[vixsrc_anim] API ${apiR.status}`); return; }
+          const apiData: any = await apiR.json();
+          if (!apiData?.src) { console.error("[vixsrc_anim] no src"); return; }
+          const embedUrl = VBASE + (apiData.src as string);
+          const embedR = await fetch(embedUrl, {
+            headers: { "User-Agent": UA, "Referer": VBASE + "/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!embedR.ok) { console.error(`[vixsrc_anim] embed ${embedR.status}`); return; }
+          const html = await embedR.text();
+          const urlM    = html.match(/masterPlaylist[\s\S]*?url:\s*'([^']+)'/);
+          const tokenM  = html.match(/'token':\s*'([^']+)'/);
+          const expireM = html.match(/'expires':\s*'([^']+)'/);
+          if (!urlM || !tokenM || !expireM) { console.error("[vixsrc_anim] parse failed"); return; }
+          const playlistUrl = `${urlM[1]}&token=${tokenM[1]}&expires=${expireM[1]}&h=1&lang=en`;
+          const m3u8R = await fetch(playlistUrl, {
+            headers: { "User-Agent": UA, "Referer": embedUrl, "Origin": VBASE },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!m3u8R.ok) { console.error(`[vixsrc_anim] playlist ${m3u8R.status}`); return; }
+          const m3u8 = await m3u8R.text();
+          if (!m3u8.startsWith("#EXTM3U")) { console.error("[vixsrc_anim] bad m3u8"); return; }
+          const proxied = wrapHls(playlistUrl, embedUrl);
+          sendSource(playlistUrl, "VixSrc · HLS", playlistUrl, proxied);
+          console.log(`[vixsrc_anim] tmdb:${tmdbId} ${type} -> ok`);
+        } catch (e: any) { console.warn("[vixsrc_anim]", e?.message); }
+      }),
+
+      // -- primesrc.me -- 85k movies+TV via Filemoon/Streamwish/Filelions
+      scrapeAnimCached("primesrc_anim", async () => {
+        try {
+          const PBASE = "https://primesrc.me";
+          const apiUrl = type === "movie"
+            ? (imdbId ? `${PBASE}/api/v1/s?type=movie&imdb=${imdbId}` : null)
+            : (tmdbId ? `${PBASE}/api/v1/s?type=tv&tmdb=${tmdbId}&season=${season}&episode=${epNum}` : null);
+          if (!apiUrl) return;
+          const apiR = await fetch(apiUrl, {
+            headers: { "User-Agent": UA, "Referer": PBASE + "/" },
+            signal: AbortSignal.timeout(12_000),
+          });
+          if (!apiR.ok) { console.error(`[primesrc_anim] API ${apiR.status}`); return; }
+          const data: any = await apiR.json();
+          const servers: any[] = data?.servers ?? [];
+          if (!servers.length) { console.log("[primesrc_anim] no servers"); return; }
+          const EMBED_MAP: Record<string, string> = {
+            Filemoon:   "https://filemoon.sx/e/KEY",
+            Filelions:  "https://filelions.to/e/KEY",
+            Streamwish: "https://streamwish.to/e/KEY",
+            Streamplay: "https://streamplay.to/e/KEY",
+            Vidmoly:    "https://vidmoly.to/embed-KEY.html",
+            Luluvdoo:   "https://luluvdo.com/e/KEY",
+          };
+          let sent = 0;
+          const seenKeys = new Set<string>();
+          const picks = servers
+            .filter((s: any) => EMBED_MAP[s.name] && s.key && !seenKeys.has(s.key) && !!seenKeys.add(s.key))
+            .slice(0, 6);
+          await Promise.allSettled(picks.map(async (srv: any) => {
+            const embedUrl = EMBED_MAP[srv.name].replace("KEY", srv.key);
+            try {
+              const html = await cfGet(embedUrl, PBASE + "/");
+              const m = html.match(/"file"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/) || html.match(/"file":\s*"(https?:\/\/[^"]+\.mp4[^"]*)"/);
+              if (!m?.[1]) return;
+              const hls = m[1];
+              sendSource(hls, `PrimeSrc · ${srv.name}`, hls, wrapHls(hls, embedUrl));
+              sent++;
+            } catch { /* skip */ }
+          }));
+          console.log(`[primesrc_anim] ${type} -> ${sent} sources`);
+        } catch (e: any) { console.warn("[primesrc_anim]", e?.message); }
       }),
 
     ]);

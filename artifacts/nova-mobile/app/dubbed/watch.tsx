@@ -49,19 +49,19 @@ export default function DubbedWatchScreen() {
         return;
       }
 
-      // foupix CDN يحجب IPs مراكز البيانات (VPS/Replit).
-      // الأجهزة المحمولة على IPs سكنية يمكنها الوصول لـ rawUrl مباشرةً.
-      // نضيف Referer header لأن foupix CDN يتحقق منه عند التشغيل.
-      const foupixHeaders: Record<string, string> = {
-        Referer: "https://www.arabic-toons.com/",
-        Origin: "https://www.arabic-toons.com",
-      };
+      // foupix CDN يتحقق من UA-hash في الـ token ضد الـ User-Agent الذي أنتجه (سيرفر UA).
+      // الموبايل يستخدم UA مختلف → يجب استخدام proxy السيرفر (/api/dubbed/stream) الذي يبثّ بنفس UA.
       const srcs: PlayerSource[] = [];
-      if (rawUrl) {
-        srcs.push({ url: rawUrl, label: "مدبلج عربي", quality: "720p HD", headers: foupixHeaders });
+      if (proxyUrl) {
+        // المصدر الرئيسي: server-side proxy يتجاوز UA-hash مشكلة foupix
+        srcs.push({ url: proxyUrl, label: "مدبلج عربي", quality: "720p HD" });
       }
-      if (proxyUrl && proxyUrl !== rawUrl) {
-        srcs.push({ url: proxyUrl, label: "مدبلج عربي (بروكسي)", quality: "720p HD", headers: foupixHeaders });
+      if (rawUrl && rawUrl !== proxyUrl) {
+        // احتياطي: rawUrl مباشر (قد يفشل بسبب UA مختلف)
+        srcs.push({ url: rawUrl, label: "مدبلج عربي (مباشر)", quality: "720p HD", headers: {
+          Referer: "https://www.arabic-toons.com/",
+          Origin: "https://www.arabic-toons.com",
+        }});
       }
       setSources(srcs);
       setLoading(false);

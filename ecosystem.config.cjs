@@ -9,7 +9,6 @@ module.exports = {
         NODE_ENV: "production",
         PORT: "5000",
         DATABASE_URL: "postgresql://anime_nova:anime_nova_pass_2024@localhost:5432/anime_nova",
-        CF_WORKER_URL: "https://nova-cdn-proxy.ali011707zz.workers.dev",
         CF_PROXY_KEY: "v2vofszzFo4s40ibQA1ywFbMHK---fx55GX9MMKbe84",
         TELEGRAM_BOT_TOKEN: "8203586223:AAG8qEYt04dPApCbjriGpQAYZUcMQA6s3qs",
         TELEGRAM_CHANNEL_ID: "-1003917929487",
@@ -22,8 +21,11 @@ module.exports = {
         SESSION_SECRET: "7e086706e69291b989ae20d2f0fae40b9c14946369f62638ddee9e651fd4e254",
         APP_SECRET: "648be696460094744b3c856fb58c0cce201815becab1da3ef40de076971f79ef",
         CINESRC_BASE: "http://localhost:13004",
+        SUPABASE_URL: "https://lylapkfnizpjoyutnlin.supabase.co",
+        SUPABASE_SERVICE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5bGFwa2ZuaXpwam95dXRubGluIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQ5NDE0NiwiZXhwIjoyMDk0MDcwMTQ2fQ.qMod_nEbDhkGwNNMRoOWmXt4TMxrk0itA6pnI0SIvTc",
         MXP_SERVICE_PORT: "8002",
         CF_PROXY_PORT: "8000",
+        HOPX_PROXY_URL: "http://localhost:8001",
       },
     },
     {
@@ -32,6 +34,17 @@ module.exports = {
       interpreter: "/opt/cf-proxy-venv/bin/python",
       cwd: "/root",
       env: { CF_PROXY_PORT: "8000", CF_PROXY_KEY: "v2vofszzFo4s40ibQA1ywFbMHK---fx55GX9MMKbe84" },
+    },
+    {
+      name: "hopx-manager",
+      script: "/opt/anime-nova/scripts/hopx_manager.py",
+      interpreter: "/usr/bin/python3",
+      cwd: "/opt/anime-nova/scripts",
+      restart_delay: 10000,
+      env: {
+        HOPX_API_KEY: "hopx_live_B0lYbDI7cxEx.fTp93nJBDWolsq3IrbF5oaIb5pdzVdXmEBkTv8DES4E",
+        HOPX_LOCAL_PORT: "8001",
+      },
     },
   ],
 };

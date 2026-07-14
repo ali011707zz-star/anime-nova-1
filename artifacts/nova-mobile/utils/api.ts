@@ -49,7 +49,7 @@ export const DEFAULT_CONFIG: RemoteConfig = {
     okanime: true, ristoanime: true, animeify: true,
     animeday: true, arabseed: true, anime4up2: true,
     mycima: true, topcinemaa: true, animephoenix: true,
-    faselhd_db: true, animetime: true,
+    faselhd_db: true, animetime: true, stardima: true,
   },
   announcements: [],
   features: {

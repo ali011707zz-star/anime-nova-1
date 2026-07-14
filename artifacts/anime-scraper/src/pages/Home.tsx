@@ -246,9 +246,11 @@ export default function Home() {
   /* Load popular animation movies + TV from TMDB, and trending news from AniList */
   useEffect(() => {
     const key = "8265bd1679663a7ea12ac168da84d2e8";
-    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&with_original_language=ja&include_adult=false&sort_by=popularity.desc&page=1`)
+    // ملاحظة: بدون with_original_language=ja — هذا القسم لعرض أفلام الأنيميشن العالمية
+    // (ديزني/بيكسار/دريمووركس..) وليس أفلام الأنمي الياباني (لها قسم "أفلام أنمي" منفصل أعلاه).
+    fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${key}&language=ar&with_genres=16&include_adult=false&sort_by=popularity.desc&page=1`)
       .then(r => r.json())
-      .then(d => setAnimationMovies((d.results || []).slice(0, 10)))
+      .then(d => setAnimationMovies((d.results || []).filter((m: any) => m.original_language !== "ja").slice(0, 10)))
       .catch(() => {});
   }, []);
 
@@ -282,52 +284,17 @@ export default function Home() {
     post(ISEKAI_QUERY).then(d => setIsekaiList(d.data?.Page?.media || [])).catch(() => {});
   }, []);
 
-  /* Load today's airing episodes (last 72h → next 12h) + verify Arabic availability */
+  /* Load "أحدث الحلقات" — مباشرةً من كتالوج anslayer نفسه (بدون AniList ولا
+     مصادر أخرى)، لأن هذا القسم مخصَّص ليُشغَّل من مصدر anslayer فقط. */
   useEffect(() => {
     if (_cachedTodayEps) return; // already cached — no re-fetch needed
-    const now = Math.floor(Date.now() / 1000);
-    const gt  = now - 72 * 3600;   // آخر 3 أيام
-    const lt  = now + 12 * 3600;   // 12 ساعة قادمة
     setTodayChecking(true);
-    fetch(API_BASE + "/api/anilist", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: TODAY_EPISODES_QUERY, variables: { gt, lt } }),
-    })
+    fetch(`${API_BASE}/api/anime/anslayer-latest`, { signal: AbortSignal.timeout(20_000) })
       .then(r => r.json())
-      .then(async d => {
-        const ECCHI_BLOCKED = new Set(["Hentai"]);
-        const now = Math.floor(Date.now() / 1000);
-        // فقط الحلقات التي بثّت فعلاً (ليس المستقبلية) وأنمي ياباني فقط
-        const arr = (d.data?.Page?.airingSchedules || [])
-          .filter((s: any) => {
-            if (!s.media?.id || s.media?.isAdult) return false;
-            if (s.airingAt > now) return false; // استثنِ الحلقات المستقبلية
-            if (s.media?.countryOfOrigin && s.media.countryOfOrigin !== "JP") return false; // أنمي ياباني فقط
-            const genres: string[] = s.media?.genres || [];
-            return !genres.some((g: string) => ECCHI_BLOCKED.has(g));
-          });
-        if (!arr.length) { setTodayEps([]); setTodayChecking(false); return; }
-        // فحص حقيقي لتوفر المصادر العربية عبر animelek
-        const titles = arr.map((s: any) => s.media?.title?.romaji || s.media?.title?.english || "").filter(Boolean);
-        try {
-          const params = new URLSearchParams();
-          titles.forEach((t: string) => params.append("t", t));
-          const checkRes = await fetch(`${API_BASE}/api/anime/check-arabic?${params}`, { signal: AbortSignal.timeout(20_000) });
-          const { available } = await checkRes.json() as { available: string[] };
-          const availSet = new Set(available.map((t: string) => t.toLowerCase().trim()));
-          // صارم: فقط الحلقات المتوفرة في المصادر العربية — بدون fallback
-          const filtered = arr.filter((s: any) => {
-            const romaji  = (s.media?.title?.romaji  || "").toLowerCase().trim();
-            const english = (s.media?.title?.english || "").toLowerCase().trim();
-            return availSet.has(romaji) || availSet.has(english);
-          });
-          _cachedTodayEps = filtered;
-          setTodayEps(filtered);
-        } catch {
-          // عند فشل الفحص: لا تعرض شيئاً (أفضل من عرض حلقات بدون مصادر عربية)
-          _cachedTodayEps = [];
-          setTodayEps([]);
-        }
+      .then((d: { items?: any[] }) => {
+        const items = d.items || [];
+        _cachedTodayEps = items;
+        setTodayEps(items);
         setTodayChecking(false);
       })
       .catch(() => { setTodayChecking(false); });
@@ -798,20 +765,21 @@ export default function Home() {
           </div>
 
           <div className="flex gap-3 overflow-x-auto px-4 pb-2" style={{ scrollbarWidth: "none" }}>
-            {todayEps.map((s: any, i: number) => {
-              const m = s.media;
-              const aired = s.airingAt * 1000 < Date.now();
-              const accentColor = aired ? "#ef4444" : "#f97316";
-              const accentBg    = aired ? "rgba(239,68,68,0.88)" : "rgba(249,115,22,0.88)";
+            {todayEps.map((it: any, i: number) => {
+              const accentColor = "#ef4444";
+              const accentBg    = "rgba(239,68,68,0.88)";
+              /* site=anslayer + anslayerId + single=1 → صفحة المشاهدة تجلب من anslayer
+                 فقط (بمعرّفه المباشر من كتالوجه)، بدون تشغيل أي مصدر آخر. */
+              const href = `/watch?anime=0&ep=${it.episode}&title=${encodeURIComponent(it.name || "")}&english=${encodeURIComponent(it.name || "")}&cover=${encodeURIComponent(it.cover || "")}&site=anslayer&anslayerId=${it.animeId}`;
               return (
-                <Link href={`/watch?anime=${m.id}&ep=${s.episode}&title=${encodeURIComponent(m.title?.romaji || "")}&english=${encodeURIComponent(m.title?.english || "")}&cover=${encodeURIComponent(m.coverImage?.large || m.coverImage?.medium || "")}`} key={`${m.id}-${s.episode}-${i}`}>
+                <Link href={href} key={`${it.animeId}-${it.episode}-${i}`}>
                   <motion.div whileTap={{ scale: 0.91 }} className="shrink-0 cursor-pointer" style={{ width: 110 }}>
                     {/* البطاقة */}
                     <div className="relative rounded-[18px] overflow-hidden shadow-xl"
                       style={{ width: 110, height: 156, border: `1px solid ${accentColor}22`, background: "#111" }}>
                       {/* البوستر */}
-                      {m.coverImage?.large
-                        ? <img src={m.coverImage.large} alt={m.title?.romaji || ""} className="w-full h-full object-cover" loading="lazy" />
+                      {it.cover
+                        ? <img src={it.cover} alt={it.name || ""} className="w-full h-full object-cover" loading="lazy" />
                         : <div className="w-full h-full flex items-center justify-center" style={{ background: `${accentColor}18` }}>
                             <span className="text-3xl">📺</span>
                           </div>
@@ -823,28 +791,21 @@ export default function Home() {
                       <div className="absolute top-2 right-2">
                         <span className="text-[7px] font-black text-white px-1.5 py-0.5 rounded-lg"
                           style={{ background: accentBg, backdropFilter: "blur(8px)" }}>
-                          ح {s.episode}
+                          ح {it.episode}
                         </span>
                       </div>
                       {/* حالة البث */}
                       <div className="absolute top-8 right-2">
                         <span className="text-[6.5px] font-black px-1.5 py-[3px] rounded-md"
-                          style={{ background: aired ? "rgba(239,68,68,0.18)" : "rgba(249,115,22,0.18)",
-                                   color: aired ? "#fca5a5" : "#fdba74",
-                                   border: `1px solid ${accentColor}33` }}>
-                          {aired ? "✓ نزلت" : "قريباً"}
+                          style={{ background: "rgba(239,68,68,0.18)", color: "#fca5a5", border: `1px solid ${accentColor}33` }}>
+                          ✓ نزلت
                         </span>
                       </div>
                       {/* العنوان أسفل البطاقة */}
                       <div className="absolute bottom-0 inset-x-0 px-2 pb-2.5">
                         <p className="text-[9px] text-white/90 font-black truncate leading-tight font-['Cairo']">
-                          {m.title?.romaji || m.title?.english}
+                          {it.name}
                         </p>
-                        {m.title?.english && m.title.english !== m.title?.romaji && (
-                          <p className="text-[7.5px] text-white/40 truncate leading-tight font-['Cairo'] mt-0.5">
-                            {m.title.english}
-                          </p>
-                        )}
                       </div>
                       {/* Play overlay عند الضغط */}
                       <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"

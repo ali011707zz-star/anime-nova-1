@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { RiftPlayer, PlayerSource } from "@/components/RiftPlayer";
+import { HiddenResolverWebView, ResolvedStream } from "@/components/HiddenResolverWebView";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -17,7 +18,7 @@ const { width: W, height: H } = Dimensions.get("window");
 
 /* ── Types ── */
 type Quality = "1080p FHD" | "720p HD" | "360p SD";
-type Screen = "loading" | "picker" | "native" | "embed";
+type Screen = "loading" | "picker" | "native" | "embed" | "resolving";
 
 interface AnimSrc {
   url?: string;
@@ -28,9 +29,18 @@ interface AnimSrc {
   status?: string;
   tier?: string;
   isEmbed?: boolean;
+  site?: string;
   directType?: string;  // "hls" | "mp4" — used to filter on web
   /** Referer/Origin headers مطلوبة للـ CDN — مُعادة من الخادم مباشرةً */
   headers?: Record<string, string>;
+}
+
+/* ── مواقع محمية بـ Cloudflare يفشل الخادم (VPS) باستخراج فيديوها ثابتاً —
+   نحاول أولاً حلّها عبر WebView مخفي (JS ينفَّذ فعلياً + IP الجهاز) قبل عرض
+   بطاقة "يحتاج تطبيق أصلي" ── */
+const WEBVIEW_RESOLVE_SITES = new Set(["faselhd_db", "mycima", "anime3rb"]);
+function needsHiddenResolve(s: AnimSrc): boolean {
+  return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site) && Platform.OS !== "web";
 }
 
 const QUALITY_STYLE: Record<Quality, { dot: string; badge: string; border: string; text: string; label: string }> = {
@@ -59,8 +69,6 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
 
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
-  /* hls-proxy يُعيد 307 → CF Worker (يجلب M3U8 + يُعيد كتابة segments عبره)
-     video-proxy يُعيد 307 → CF Worker — لا حاجة لـ mobile=1 بعد الآن */
   return url.startsWith("/") ? base + url : url;
 }
 
@@ -264,6 +272,10 @@ export default function AnimationWatchScreen() {
   const autoPlayFiredRef  = useRef(false);
   const autoPlayTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasCachedRef      = useRef(false); // هل تم تحميل مصادر من الكاش المحلي؟
+  /* تجميد مصادر المشغّل لحظة دخول التشغيل — يمنع مصادر SSE الجديدة التي تصل أثناء
+     التشغيل الفعلي من إعادة كتابة مصفوفة sources الممرَّرة لـ RiftPlayer، وهو ما كان
+     يُسبِّب توقف التشغيل والعودة غير المتوقعة لشاشة الـ picker. */
+  const [frozenSources, setFrozenSources] = useState<PlayerSource[]>([]);
 
   const progressKey   = `anim-wp-${tmdbId}-${type}-${season}-${ep}`;
   /* كاش المصادر المحلي لفتح فوري في المرة الثانية */
@@ -539,10 +551,35 @@ export default function AnimationWatchScreen() {
     // "native" orientation is handled by RiftPlayer itself
   }, [screen]);
 
+  /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker) ── */
+  useEffect(() => {
+    if (screen === "native") {
+      if (frozenSources.length === 0 && riftSources.length > 0) setFrozenSources(riftSources);
+    } else {
+      setFrozenSources([]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
     setPlayingSrc(src);
-    setScreen(isDirectPlayable(src) ? "native" : "embed");
+    if (isDirectPlayable(src)) { setScreen("native"); return; }
+    if (needsHiddenResolve(src)) { setScreen("resolving"); return; }
+    setScreen("embed");
+  }, []);
+
+  /* ── نتيجة استخراج WebView المخفي ── */
+  const handleHiddenResolved = useCallback((stream: ResolvedStream) => {
+    setPlayingSrc(prev => {
+      if (!prev) return prev;
+      return { ...prev, directUrl: stream.url, url: stream.url, isEmbed: false, headers: stream.headers || prev.headers, directType: stream.type };
+    });
+    setScreen("native");
+  }, []);
+
+  const handleHiddenFailed = useCallback(() => {
+    setScreen("embed");
   }, []);
 
   /* ── Group sources by quality ── */
@@ -664,11 +701,12 @@ export default function AnimationWatchScreen() {
   }
 
   /* ═══════════════════ RIFT PLAYER ═══════════════════ */
-  if (screen === "native" && riftSources.length > 0) {
-    const startIdx = Math.max(0, riftSources.findIndex(s => s.url === getPlayUrl(playingSrc!)));
+  const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
+  if (screen === "native" && playerSources.length > 0) {
+    const startIdx = Math.max(0, playerSources.findIndex(s => s.url === getPlayUrl(playingSrc!)));
     return (
       <RiftPlayer
-        sources={riftSources}
+        sources={playerSources}
         initialSourceIndex={startIdx}
         title={titleStr}
         episode={type !== "movie" ? ep : undefined}
@@ -692,6 +730,29 @@ export default function AnimationWatchScreen() {
           router.replace(`/animation/watch?id=${tmdbId}&type=${type}&ep=${ep - 1}&season=${season}&title=${t}&poster=${p}`);
         } : undefined}
       />
+    );
+  }
+
+  /* ══════════════ RESOLVING (WebView مخفي — لا يُعرض للمستخدم) ══════════════ */
+  if (screen === "resolving" && playingSrc) {
+    const resolveUrl2 = getPlayUrl(playingSrc);
+    return (
+      <View style={{ flex: 1, backgroundColor: "#07070d", alignItems: "center", justifyContent: "center", gap: 14 }}>
+        <Pressable onPress={() => setScreen("picker")} style={[w.videoBackBtn, { position: "absolute", top: topPad + 4, right: 12 }]}>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </Pressable>
+        <SpinRing />
+        <Text style={{ fontSize: 13, fontFamily: "Cairo_400Regular", color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
+          ⏳ جاري تجهيز المصدر…
+        </Text>
+        {resolveUrl2 ? (
+          <HiddenResolverWebView
+            pageUrl={resolveUrl2}
+            onResolved={handleHiddenResolved}
+            onFailed={handleHiddenFailed}
+          />
+        ) : null}
+      </View>
     );
   }
 
