@@ -4,7 +4,8 @@
  */
 
 // ── حماية العملية من الانهيار بسبب أخطاء غير معالجة (TimeoutError على Readable streams إلخ) ──
-process.on("uncaughtException", (err) => {
+process.on("uncaughtException", (err: any) => {
+  // نتجاهل TimeoutError المعتادة من AbortSignal.timeout() على Streams
   const name = err?.name || err?.constructor?.name || "";
   if (name === "TimeoutError" || name === "AbortError" || err?.code === "ABORT_ERR") {
     console.warn("[uncaughtException] تجاهل TimeoutError/AbortError على stream:", err?.message);
@@ -13,7 +14,7 @@ process.on("uncaughtException", (err) => {
   console.error("[uncaughtException] خطأ غير متوقع:", err);
 });
 
-process.on("unhandledRejection", (reason) => {
+process.on("unhandledRejection", (reason: any) => {
   const name = reason?.name || reason?.constructor?.name || "";
   if (name === "TimeoutError" || name === "AbortError" || reason?.code === "ABORT_ERR") {
     console.warn("[unhandledRejection] تجاهل TimeoutError/AbortError:", reason?.message);

@@ -162,35 +162,17 @@ interface FetchedSrc {
 }
 
 /* ── All known scrapers — shown immediately in picker ── */
+// ── تقييد مؤقت (بطلب المستخدم 2026-07-13): إبقاء 7 مصادر فقط — الباقي مُعطَّل
+//    من الباك-إند أيضاً (ANIME_SOURCE_ALLOWLIST في anime.ts). القائمة الأصلية
+//    الكاملة محفوظة أعلاه في تاريخ Git — لإعادة أي مصدر أضِفه هنا وفي الباك-إند معاً.
 const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; audioLang?: "en"; isArabic?: true }[] = [
-  // ── عربي مدبلج / مترجم (صوت عربي أصلي مدمج — لا ترجمة خارجية) ──────────
-  { site: "shahiid",      name: "شاهيد أنمي",   desc: "عربي مدبلج / مترجم",      tag: "SH", isArabic: true },
-  { site: "animelek",     name: "أنمي ليك",     desc: "عربي مدبلج / مترجم",      tag: "EK", isArabic: true },
-  { site: "animedar",     name: "أنمي دار",     desc: "عربي مترجم",              tag: "AD", isArabic: true },
-  { site: "okanime",      name: "أوك أنمي",     desc: "عربي مترجم",              tag: "OK", isArabic: true },
-  { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
-  { site: "animeday",     name: "أنمي داي",     desc: "عربي مدبلج · HLS مباشر",  tag: "DY", isArabic: true },
-  { site: "arabseed",     name: "عرب سيد",        desc: "عربي مدبلج/مترجم · MP4",   tag: "AS", isArabic: true },
-  { site: "anime4up2",    name: "أنمي فور أب",     desc: "عربي مترجم · HLS/ميغا",    tag: "4U", isArabic: true },
-  { site: "mycima",       name: "ماي سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "MC", isArabic: true },
-  { site: "topcinemaa",   name: "توب سيما",        desc: "عربي مترجم · HLS/فيديو",   tag: "TC", isArabic: true },
-  { site: "faselhd_db",  name: "فاصل HD",      desc: "عربي مترجم · GitHub DB",   tag: "FH",  isArabic: true },
-  { site: "witanime",     name: "ويتأنمي",      desc: "عربي مترجم · CycleTLS",     tag: "WI", isArabic: true },
-  { site: "sanime",       name: "S أنمي",       desc: "عربي مدبلج/مترجم · MP4",   tag: "SA", isArabic: true },
-  // ── ياباني مترجم (AniList ID مطلوب) ──────────────────────────────
   { site: "kawaii",       name: "كواي أنمي",    desc: "1080p · مباشر",            tag: "KW" },
   { site: "anikoto",      name: "AniKoto",       desc: "ياباني مترجم · 1080p",    tag: "AK" },
-  { site: "anikototv",    name: "AniKototv",     desc: "ياباني مترجم · skip مدمج", tag: "ATV" },
-  { site: "animekai",     name: "AnimeKai",      desc: "ياباني مترجم · DB مباشر",  tag: "KI" },
   { site: "hianime",      name: "HiAnime",       desc: "ياباني مترجم · HLS نظيف", tag: "HI" },
-  { site: "animepahe",    name: "AnimePahe",      desc: "ياباني مترجم · HLS نظيف", tag: "AP" },
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
-  // ── ياباني مترجم (بدون ID) ────────────────────────────────────────
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
-  // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ────────────
-  { site: "vidfast",       name: "VidFast",       desc: "TMDB · HLS · متعدد الخوادم", tag: "VF", audioLang: "en" },
-  { site: "dulo_anim",     name: "Dulo.tv",        desc: "ياباني/إنجليزي · HLS مباشر", tag: "DL", audioLang: "en" },
-  // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
+  { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
+  { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
@@ -263,10 +245,14 @@ function shouldShowSrc(src: FetchedSrc): boolean {
   return true;
 }
 
-/* ── Embed fallback: mega/vidmoly shown only when no direct sources exist ── */
+/* ── Embed fallback: mega/vidmoly/witanime/mycima shown only when no direct sources exist ──
+   witanime + mycima مسموح لهم بالباك-إند (HIDDEN_RESOLVE_EMBED_SITES) لكن الفرونتند كان
+   يستثنيهم من هذا الفلتر لأن روابطهم (yonaplay.net/videa.hu/wishonly.site/...) متغيّرة ولا
+   تُطابق أي host ثابت — النتيجة: مصادرهم تُجلب بنجاح من الباك-إند ثم تُختفى تماماً بدون سبب. */
 function isEmbedFallback(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   if (!src.isEmbed) return false;
+  if (src.site === "witanime" || src.site === "mycima") return true;
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 
@@ -966,6 +952,7 @@ function ScraperPicker({
   slotStatus, slotSources,
   onFetchSite, onPlaySrc,
   onBack, onNextEp, onPrevEp,
+  singleSite,
 }: {
   cover: string; title: string; ep: number; totalEps: number; animeId: number;
   anime?: any;
@@ -974,13 +961,16 @@ function ScraperPicker({
   onFetchSite: (site: string) => void;
   onPlaySrc: (src: FetchedSrc) => void;
   onBack: () => void; onNextEp: () => void; onPrevEp: () => void;
+  /* عند التحديد — قسم "أحدث الحلقات" يقيّد التشغيل بمصدر واحد فقط، فلا نعرض زر أي مصدر آخر */
+  singleSite?: string | null;
 }) {
+  const VISIBLE_DEFS = singleSite ? SCRAPER_DEFS.filter(d => d.site === singleSite) : SCRAPER_DEFS;
   /* anyFetching: true while at least one scraper is actively running
      hasIdleScrapers: true whenever any scraper is still untried (idle)
      allScrapersComplete: all scrapers done — none fetching, none idle
      allDone: scrapers not actively running (idle counts as "not started", not "running") */
-  const anyFetching        = SCRAPER_DEFS.some(d => slotStatus[d.site] === "fetching");
-  const hasIdleScrapers    = SCRAPER_DEFS.some(d => slotStatus[d.site] === "idle");
+  const anyFetching        = VISIBLE_DEFS.some(d => slotStatus[d.site] === "fetching");
+  const hasIdleScrapers    = VISIBLE_DEFS.some(d => slotStatus[d.site] === "idle");
   const allScrapersComplete = !anyFetching && !hasIdleScrapers;
   const allDone = !anyFetching;
 
@@ -1123,8 +1113,12 @@ function ScraperPicker({
     </>
   );
 
-  /* ── Show loading screen only when scrapers are actively fetching (not idle/lazy mode) ── */
-  if (anyFetching && !hasSources && !hasBackupSources) {
+  /* ── Show loading screen while the auto-fetch-all wave is in progress (fetching OR
+     still-idle-but-scheduled scrapers), not only while one happens to be "fetching" right
+     this instant. Gating on `anyFetching` alone caused a flicker back to the bare site grid
+     whenever a fast scraper resolved before the next staggered one had started (~70ms gap),
+     producing "servers list → loading → servers list → player". ── */
+  if ((anyFetching || hasIdleScrapers) && !hasSources && !hasBackupSources) {
     return (
       <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl">
         {/* Blurred poster background */}
@@ -1312,7 +1306,7 @@ function ScraperPicker({
               اختر مصدراً لبدء التشغيل
             </p>
             <div className="grid grid-cols-2 gap-2.5">
-              {SCRAPER_DEFS.map(d => {
+              {VISIBLE_DEFS.map(d => {
                 const st = slotStatus[d.site];
                 const isFetching = st === "fetching";
                 const isFailed   = st === "failed";
@@ -2790,8 +2784,11 @@ export default function WatchPage() {
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey,      setPlayKey]      = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
-  // showPicker: true — picker shown immediately, user picks scraper first
-  const [showPicker,   setShowPicker]   = useState(true);
+  /* showPicker: يبدأ false — إن وُجد مصدر جاهز للتشغيل التلقائي سريعاً (أقل من ~900ms)
+     فلن تظهر شاشة السيرفرات مطلقاً؛ إن لم يُعثر على أي مصدر بهذه السرعة تظهر الشاشة
+     لتسمح للمستخدم باختيار مصدر يدوياً. هذا يمنع "الفلاش" السابق (ظهور الشاشة لثوانٍ
+     ثم اختفاؤها فجأة عند نجاح أول مصدر). */
+  const [showPicker,   setShowPicker]   = useState(false);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
@@ -3143,6 +3140,9 @@ export default function WatchPage() {
 
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
+      /* anslayerId: يمرَّر من قسم "أحدث الحلقات" (معرّف anslayer المباشر من كتالوجه —
+         يتجاوز البحث بالاسم ويحدّد الأنمي الصحيح 100%). */
+      if (site === "anslayer" && sp.get("anslayerId")) params.set("anslayerId", sp.get("anslayerId")!);
       const r    = await fetch(`${API_BASE}/api/anime/fetch-source?${params}`, { signal: ctrl.signal, headers: { "X-App-Token": await getAppToken() } });
       const data = await r.json() as { sources?: FetchedSrc[] };
       const srcs: FetchedSrc[] = data.sources || [];
@@ -3213,12 +3213,27 @@ export default function WatchPage() {
      الحالي عند bgLoad=false)، والباقي يستمر بالتحميل خلفياً ليظهر في قائمة السيرفرات
      الكاملة (مثل شاشة "مصادر المشاهدة" بعد فتح المشغّل في قسم الأنميشن). ── */
   useEffect(() => {
-    if (!animeId || !titleParam) return;
+    if (!titleParam) return;
+    /* single=1 → آتٍ من قسم "أحدث الحلقات" (مصدر anslayer مباشرةً بمعرّفه الخاص) —
+       يجب ألا يجلب أي مصدر آخر سوى anslayer نفسه. */
+    const singleSite = sp.get("single") === "1" ? sp.get("site") : null;
+    const defs = singleSite ? SCRAPER_DEFS.filter(d => d.site === singleSite) : SCRAPER_DEFS;
     autoFetchAllRef.current = true;
-    SCRAPER_DEFS.forEach((def, i) => {
+    /* أحدث حلقة (لم تُبثّ بعد كحلقات قديمة) → أولوية AW أولاً.
+       الحلقات العادية/القديمة → أولوية KW (kawaii) كما هو معتاد.
+       المصدر ذو الأولوية يُجلب أولاً بدون تأخير → أول مصدر جاهز يُشغَّل فوراً */
+    const isLatestEp = totalEps > 0 && totalEps < 999 && ep >= totalEps;
+    const priorityTag = isLatestEp ? "animewitcher" : "kawaii";
+    const priorityDef = defs.find(d => d.site === priorityTag);
+    const restDefs  = defs.filter(d => d.site !== priorityTag);
+    const orderedDefs = priorityDef ? [priorityDef, ...restDefs] : defs;
+    orderedDefs.forEach((def, i) => {
       const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
       pendingTimeoutsRef.current.push(id);
     });
+    /* شاشة السيرفرات تبدأ مخفية (showPicker=false) — تظهر تلقائياً فقط إن فشلت جميع
+       المصادر (handleTierExhausted) أو إن ضغط المستخدم "رجوع" من المشغّل.
+       لا تظهر بمؤقت تلقائي قبل بدء البث لتجنب الـ flash. */
     /* Cancel any still-queued (not-yet-started) fetches on episode change/unmount */
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
@@ -3368,6 +3383,7 @@ export default function WatchPage() {
               animeId={animeId}
               onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
               onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
+              singleSite={sp.get("single") === "1" ? sp.get("site") : null}
             />
             {/* ── Failed source toast notification ── */}
             <AnimatePresence>

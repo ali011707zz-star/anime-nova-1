@@ -340,13 +340,25 @@ export default function AnimeDetail() {
     const existing = getFavChars();
     const animeName = anime?.title?.arabic || anime?.title?.english || anime?.title?.romaji || "";
     const animeId = params.id || "";
-    const already = existing.some((c: any) => c.id === charNode.id);
+    const charId = Number(charNode.id);
+    const already = existing.some((c: any) => Number(c.id) === charId);
     const upd = already
-      ? existing.filter((c: any) => c.id !== charNode.id)
-      : [...existing, { id: charNode.id, name: charNode.name?.full, image: charNode.image?.large, animeName, animeId }];
+      ? existing.filter((c: any) => Number(c.id) !== charId)
+      : [...existing, { id: charId, name: charNode.name?.full, image: charNode.image?.large, animeName, animeId }];
     saveFavChars(upd);
     setFavChars(upd);
+    window.dispatchEvent(new CustomEvent("favchars-updated"));
   };
+
+  useEffect(() => {
+    const onFavCharsUpdated = () => setFavChars(getFavChars());
+    window.addEventListener("favchars-updated", onFavCharsUpdated);
+    window.addEventListener("storage", onFavCharsUpdated);
+    return () => {
+      window.removeEventListener("favchars-updated", onFavCharsUpdated);
+      window.removeEventListener("storage", onFavCharsUpdated);
+    };
+  }, []);
 
 
   // ── Loading / Error ──
@@ -507,7 +519,7 @@ export default function AnimeDetail() {
       </div>
 
       {/* ══ NEXT EPISODE COUNTDOWN ═══════════════════════════════ */}
-      {countdown && (
+      {countdown && anime?.nextAiringEpisode?.episode != null && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
           className="mx-4 mt-5 rounded-2xl px-4 py-3"
           style={{ background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.22)" }}>
@@ -577,7 +589,7 @@ export default function AnimeDetail() {
         {/* 3-button action row */}
         <div className="grid grid-cols-3 gap-2 mb-3">
           {[
-            { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => navigate(`/comments?animeId=${params.id}&title=${encodeURIComponent(anime?.title?.romaji || anime?.title?.english || "")}`), sub: comments.length > 0 ? `${comments.length}` : null },
+            { icon: MessageSquare, label: "التعليقات", active: comments.length > 0, activeColor: "#8B5CF6", action: () => setShowComments(true), sub: comments.length > 0 ? `${comments.length}` : null },
             { icon: Plus,          label: "قائمتي",    active: saved,        activeColor: "#8B5CF6", action: toggleSave,                         sub: saved ? "مضاف" : null },
             { icon: Star,          label: "تقييمي",    active: myRating > 0, activeColor: "#EAB308", action: () => setShowRatingPicker(true),    sub: myRating > 0 ? `${myRating}/10` : null },
           ].map(({ icon: Icon, label, active, activeColor, action, sub }) => (
@@ -746,7 +758,7 @@ export default function AnimeDetail() {
                 <p className="text-[12px] font-black text-white/60 font-['Cairo'] mb-3 text-center">الشخصيات الرئيسية</p>
                 <div className="grid grid-cols-4 gap-2.5">
                   {mainChars.map((e: any) => <CharCard key={e.node.id} e={e} main
-                    isFav={favChars.some((f: any) => f.id === e.node.id)}
+                    isFav={favChars.some((f: any) => Number(f.id) === Number(e.node.id))}
                     onToggleFav={() => toggleCharFav(e.node)} />)}
                 </div>
               </div>
@@ -756,7 +768,7 @@ export default function AnimeDetail() {
                 <p className="text-[12px] font-black text-white/60 font-['Cairo'] mb-3 text-center">الشخصيات المساعدة</p>
                 <div className="grid grid-cols-4 gap-2.5">
                   {suppChars.slice(0, 8).map((e: any) => <CharCard key={e.node.id} e={e}
-                    isFav={favChars.some((f: any) => f.id === e.node.id)}
+                    isFav={favChars.some((f: any) => Number(f.id) === Number(e.node.id))}
                     onToggleFav={() => toggleCharFav(e.node)} />)}
                 </div>
               </div>
@@ -903,6 +915,119 @@ export default function AnimeDetail() {
               )}
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* ── نافذة التعليقات ── */}
+      <AnimatePresence>
+        {showComments && (
+          <div className="fixed inset-0 z-[200]" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/75 backdrop-blur-md"
+              onClick={() => setShowComments(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", stiffness: 380, damping: 36 }}
+              className="absolute inset-x-0 bottom-0 flex flex-col"
+              style={{
+                maxHeight: "85dvh",
+                background: "linear-gradient(180deg,#0F0D1B 0%,#09090B 100%)",
+                borderRadius: "1.75rem 1.75rem 0 0",
+                border: "1.5px solid rgba(139,92,246,0.18)",
+                borderBottom: "none",
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-2.5 pb-1 shrink-0">
+                <div className="w-9 h-[3px] rounded-full bg-white/10" />
+              </div>
+              <div className="flex items-center justify-between px-5 pb-3.5 pt-1 shrink-0"
+                style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                <p className="text-[14.5px] font-black font-['Cairo'] text-white">
+                  التعليقات
+                  {comments.length > 0 && (
+                    <span className="mr-1.5 text-[10px] text-violet-400/80 font-black bg-violet-500/10 px-1.5 py-0.5 rounded-lg">
+                      {comments.length}
+                    </span>
+                  )}
+                </p>
+                <button onClick={() => setShowComments(false)}
+                  className="w-8 h-8 rounded-2xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <X className="w-4 h-4 text-white/40" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {comments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3">
+                    <MessageSquare className="w-7 h-7 text-violet-400/30" />
+                    <p className="text-[13px] font-black font-['Cairo'] text-white/40">لا تعليقات بعد</p>
+                    <p className="text-[11px] text-white/20 font-['Cairo']">كن أول من يشارك رأيه!</p>
+                  </div>
+                ) : (
+                  <div className="py-2">
+                    {comments.map((c: any) => {
+                      const isMe = c.username === getMyName() || c.author === getMyName();
+                      return (
+                        <div key={c.id} className="flex gap-3 px-4 py-3.5">
+                          {c.avatarUrl ? (
+                            <img src={c.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0 border border-white/10" />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full flex items-center justify-center font-black text-white text-[13px] shrink-0"
+                              style={{ background: avatarColor(c.username || c.author || "?") }}>
+                              {(c.username || c.author || "?").charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[12.5px] font-black font-['Cairo'] text-white/90">{c.username || c.author}</span>
+                              {isMe && (
+                                <button onClick={() => deleteComment(c.id)}
+                                  className="w-6 h-6 flex items-center justify-center active:scale-90 transition-transform">
+                                  <Flag className="w-3.5 h-3.5 text-white/15" style={{ display: "none" }} />
+                                </button>
+                              )}
+                            </div>
+                            <div className="rounded-2xl rounded-tr-sm px-3.5 py-2.5 mb-2"
+                              style={{ background: isMe ? "rgba(124,58,237,0.12)" : "rgba(255,255,255,0.04)", border: isMe ? "1px solid rgba(124,58,237,0.18)" : "1px solid rgba(255,255,255,0.06)" }}>
+                              <p className="text-[13px] text-white/85 font-['Cairo'] leading-relaxed">{c.text}</p>
+                            </div>
+                            <motion.button whileTap={{ scale: 0.85 }} onClick={() => toggleLike(c.id)}
+                              className="flex items-center gap-1.5 text-[11px] font-bold transition-colors"
+                              style={{ color: c.liked ? "#EC4899" : "rgba(255,255,255,0.25)" }}>
+                              <Heart className={`w-3.5 h-3.5 ${c.liked ? "fill-current" : ""}`} />
+                              {c.likes > 0 && <span>{c.likes}</span>}
+                            </motion.button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="shrink-0 px-4 py-3"
+                style={{ borderTop: "1px solid rgba(255,255,255,0.05)", background: "rgba(9,9,11,0.95)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 flex items-center gap-2 rounded-2xl px-4 py-2.5"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                    <input value={newComment} onChange={e => setNewComment(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && addComment()}
+                      placeholder={user ? "شارك رأيك..." : "سجّل دخولك للتعليق"}
+                      readOnly={!user}
+                      className="flex-1 bg-transparent text-white text-[13px] outline-none font-['Cairo'] placeholder:text-white/20" />
+                  </div>
+                  <motion.button whileTap={{ scale: 0.9 }} onClick={addComment}
+                    disabled={!newComment.trim() || !user || sendingComment}
+                    className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 disabled:opacity-30 transition-all"
+                    style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)" }}>
+                    <Send className="w-4 h-4 text-white" />
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

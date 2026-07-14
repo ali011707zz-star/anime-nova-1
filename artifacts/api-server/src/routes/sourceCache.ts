@@ -126,27 +126,18 @@ async function sbGet(cacheKey: string): Promise<{ sources: any[]; expiresAt: num
 
 async function sbUpsertCache(cacheKey: string, site: string, sources: any[], expiresAt: number): Promise<void> {
   if (!isCacheDbReady()) return;
-  const row = {
-    cache_key:  cacheKey,
-    site,
-    // deep-clone to strip any undefined/non-serializable values
-    sources: JSON.parse(JSON.stringify(sources)),
-    fetched_at: Date.now(),
-    // TIMESTAMPTZ columns expect ISO string; legacy Supabase deployments may have BIGINT
-    expires_at: new Date(expiresAt).toISOString() as any,
-  };
   try {
-    await cacheUpsert("source_cache", row, "cache_key");
-  } catch (err: any) {
-    // Retry with ms-epoch number in case remote DB still has expires_at as BIGINT (legacy schema)
-    const isBigintError = err?.message?.includes("bigint") || err?.code === "22P02";
-    if (isBigintError) {
-      try {
-        await cacheUpsert("source_cache", { ...row, expires_at: expiresAt }, "cache_key");
-      } catch { /* silent on retry */ }
-    } else {
-      console.error(`[sourceCache] upsert failed for ${site}:${cacheKey}`, err instanceof Error ? err.message : err);
-    }
+    await cacheUpsert("source_cache", {
+      cache_key:  cacheKey,
+      site,
+      // deep-clone to strip any undefined/non-serializable values
+      sources: JSON.parse(JSON.stringify(sources)),
+      fetched_at: Date.now(),
+      // Both Supabase and local PG use TIMESTAMPTZ — always send ISO string
+      expires_at: new Date(expiresAt).toISOString(),
+    }, "cache_key");
+  } catch (err) {
+    console.error(`[sourceCache] upsert failed for ${site}:${cacheKey}`, err instanceof Error ? err.message : err);
   }
 }
 

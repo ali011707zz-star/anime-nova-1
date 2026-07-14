@@ -407,6 +407,9 @@ export function RiftPlayer({
   /* ─── Seekbar drag ─── */
   const [isDragging, setIsDragging]     = useState(false);
   const [dragPct, setDragPct]           = useState(0);
+  /* postSeekPct: يُبقي الشريط على الموضع الصحيح لـ 800ms بعد الإفلات ريثما يتحدث polling */
+  const [postSeekPct, setPostSeekPct]   = useState<number | null>(null);
+  const postSeekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ─── Speed ─── */
   const [speed, setSpeed]             = useState(1);
@@ -586,6 +589,7 @@ export function RiftPlayer({
       else if (e.status === "readyToPlay") {
         setBuffering(false);
         setError(false);
+        console.log(`[RiftPlayer] ✅ readyToPlay: ${sources[srcIdx]?.label || "?"} → ${sources[srcIdx]?.url?.slice(0, 100)}`);
         /* ── Restore position on readyToPlay (server-switch or initial resume) ──
            Doing this here (not in the polling timer) ensures we only seek AFTER
            the new stream is actually buffered, preventing conflicts with loading. */
@@ -599,7 +603,12 @@ export function RiftPlayer({
         }
         try { player.play(); } catch {}
       }
-      else if (e.status === "error") { setError(true); setBuffering(false); }
+      else if (e.status === "error") {
+        setError(true);
+        setBuffering(false);
+        /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
+        console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
+      }
     });
     return () => { sub1.remove(); sub2.remove(); };
   }, [player, initialPosition]); // eslint-disable-line
@@ -1239,6 +1248,9 @@ export function RiftPlayer({
         const grantLocX   = e.nativeEvent.locationX; // نسبي للـ View — أدق من pageX للنقرات السريعة
         lastMoveX.current        = grantPageX;
         grantLocationXRef.current = grantLocX;
+        // إلغاء أي timer معلّق من الإفلات السابق
+        if (postSeekTimer.current) { clearTimeout(postSeekTimer.current); postSeekTimer.current = null; }
+        setPostSeekPct(null);
         setIsDragging(true);
 
         /* حساب فوري: نفضّل locationX (لا يعتمد على barPageX) إن كان ضمن حدود الشريط */
@@ -1287,8 +1299,16 @@ export function RiftPlayer({
           const x = gs.moveX > 0 ? gs.moveX : lastMoveX.current;
           safePct = Math.max(0, Math.min(1, _calcPctFromAbsolute(x)));
         }
-        setIsDragging(false);
         seekRef.current(safePct * durationRef.current);
+        // نُبقي على الموضع المطلوب مرئياً 800ms ريثما يتحدث الـ polling (كل 500ms)
+        // هذا يمنع "الخط الوهمي" الذي يملأ ثم يرجع عند الإفلات
+        setPostSeekPct(safePct);
+        setIsDragging(false);
+        if (postSeekTimer.current) clearTimeout(postSeekTimer.current);
+        postSeekTimer.current = setTimeout(() => {
+          setPostSeekPct(null);
+          postSeekTimer.current = null;
+        }, 800);
       },
     })
   ).current;
@@ -1852,7 +1872,7 @@ export function RiftPlayer({
                 مما يجعل left:0%→100% من اليسار الفيزيائي وليس من يمين RTL.
                 هذا يُصلح: (1) ملء الشريط (2) موضع الـ thumb (3) حساب الـ seek */}
             {(() => {
-              const rawFill = (isDragging ? dragPct : progress) * 100;
+              const rawFill = (isDragging ? dragPct : postSeekPct !== null ? postSeekPct : progress) * 100;
               const fillPct = Math.min(Math.max(isFinite(rawFill) ? rawFill : 0, 0), 100);
               const thumbPct = fillPct;
               const tooltipPct = Math.max(4, Math.min(88, fillPct - 6));
