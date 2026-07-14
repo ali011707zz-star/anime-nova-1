@@ -419,9 +419,14 @@ async function denoProxyGet(
 // ════════════════════════════════════════════════════════════════════
 async function orkestGet(
   url: string,
-  _referer?: string,
+  referer?: string,
   timeoutMs = 25000,
 ): Promise<string | null> {
+  // cf-proxy (port 8000) أُوقف نهائياً (استُبدل بـ Hopx لتوفير الموارد) —
+  // orkestGet كان لا يزال يستهدف CF_PROXY_BASE الميت فيفشل فوراً بصمت
+  // (تأثر anineko/RISTO/A4UP2/anikototv). الآن يمر عبر hopxProxyGet مباشرة.
+  const viaHopx = await hopxProxyGet(url, referer, timeoutMs);
+  if (viaHopx) return viaHopx;
   try {
     const r = await fetch(
       `${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}`,
