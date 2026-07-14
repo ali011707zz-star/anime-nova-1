@@ -24,7 +24,7 @@ module.exports = {
         SUPABASE_URL: process.env.SUPABASE_URL || "",
         SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY || "",
         MXP_SERVICE_PORT: "8002",
-        CF_PROXY_PORT: "8000",
+        CF_PROXY_PORT: "8001",   // ← السكرابر الآن عبر Hopx (35Mbps, 2vCPU) بدل cf-proxy
         HOPX_PROXY_URL: "http://localhost:8001",
       },
     },
