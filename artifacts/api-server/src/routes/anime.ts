@@ -4180,16 +4180,30 @@ const movizTimeSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: num
 /** استخرج كل أزرار الحلقات (رقم الحلقة + رابط السيرفر) من صفحة موسم/فيلم */
 async function getMovizTimeEpisodeButtons(pageUrl: string): Promise<Array<{ ep: number; url: string }>> {
   try {
-    const r = await fetch(pageUrl, {
-      headers: { "User-Agent": BROWSER_UA, Referer: `${MOVIZTIME_BASE}/` },
-      signal: AbortSignal.timeout(14_000),
-    });
-    if (!r.ok) return [];
-    const html = await r.text();
-    if (isCloudflareBlock(html)) return [];
+    let html: string | null = null;
+    // حاول plain fetch أولاً
+    try {
+      const r = await fetch(pageUrl, {
+        headers: { "User-Agent": BROWSER_UA, Referer: `${MOVIZTIME_BASE}/` },
+        signal: AbortSignal.timeout(14_000),
+      });
+      if (r.ok) {
+        const t = await r.text();
+        if (!isCloudflareBlock(t) && t.length > 1000) html = t;
+      }
+    } catch { /* silent */ }
+    // fallback: hopxProxy إذا plain fetch فشل أو CF-blocked
+    if (!html) html = await hopxProxyGet(pageUrl, `${MOVIZTIME_BASE}/`, 18_000).catch(() => null);
+    if (!html || html.length < 500) return [];
     const out: Array<{ ep: number; url: string }> = [];
     for (const m of html.matchAll(/<button class='ep-item' onclick="[^"]*?href='([^']+)'[^"]*">\s*الحلقة\s*(\d+)/gs)) {
       out.push({ url: m[1], ep: parseInt(m[2], 10) });
+    }
+    // نمط بديل: iframe_area.location.href= خارج onclick
+    if (!out.length) {
+      for (const m of html.matchAll(/iframe_area\.location\.href='([^']+)'[^<]*<[^>]+>\s*الحلقة\s*(\d+)/gs)) {
+        out.push({ url: m[1], ep: parseInt(m[2], 10) });
+      }
     }
     return out;
   } catch { return []; }
@@ -4857,25 +4871,37 @@ const witaSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }
 
 /** البحث في anime taxonomy → taxonomy ID */
 async function searchWitanimeYou(title: string): Promise<number | null> {
-  try {
-    const r = await fetch(
-      `${WITANIME_YOU_BASE}/wp-json/wp/v2/anime?search=${encodeURIComponent(title)}&per_page=10`,
-      { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) },
-    );
-    if (!r.ok) return null;
-    const data = await r.json() as Array<{ id: number; name: string; slug: string; count: number }>;
-    if (!data.length) return null;
+  const apiUrl = `${WITANIME_YOU_BASE}/wp-json/wp/v2/anime?search=${encodeURIComponent(title)}&per_page=10`;
+  const parseResults = (data: unknown): number | null => {
+    if (!Array.isArray(data) || !data.length) return null;
     let best: { id: number; score: number } | null = null;
-    for (const a of data) {
+    for (const a of data as Array<{ id: number; name: string; slug: string }>) {
       const score = Math.max(
         similarity(a.name, title),
         asciiSimilarity(a.slug.replace(/-/g, " "), title),
       );
       if (!best || score > best.score) best = { id: a.id, score };
     }
-    // عتبة مرتفعة — لا نرجع data[0] بشكل أعمى إذا كان التشابه منخفضاً جداً
     return best && best.score > 0.35 ? best.id : null;
-  } catch { return null; }
+  };
+  try {
+    // direct fetch أولاً
+    const r = await fetch(apiUrl, { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) });
+    if (r.ok) {
+      const data = await r.json();
+      const id = parseResults(data);
+      if (id) return id;
+    }
+  } catch { /* silent */ }
+  // hopx fallback — witanime.you قد يحجب VPS IP أو يحتاج TLS fingerprint
+  try {
+    const hopxHtml = await hopxProxyGet(apiUrl, `${WITANIME_YOU_BASE}/`, 15_000);
+    if (hopxHtml) {
+      const data = JSON.parse(hopxHtml);
+      return parseResults(data);
+    }
+  } catch { /* silent */ }
+  return null;
 }
 
 /** استخرج رقم الحلقة من slug أو عنوان حلقة witanime */
@@ -5168,11 +5194,13 @@ async function getAnime3rbSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  AKOAM (اكوام) scraper — Arabic dubbed/subbed anime
-//  Domain: akoam.com (WP-based, embed servers)
-//  Flow: search /?s={q} → series page → episode link → embed URLs
+//  AKWAM (اكوام) scraper — Arabic dubbed/subbed anime
+//  Domain: akwam.it (Laravel-based, JS player — video loads via JS)
+//  Flow: /search?q={q} → /series/{id}/{slug} → /episode/{id}/{slug}/الحلقة-{N}
+//  NOTE: since video loads via JavaScript, we return the episode page URL as isEmbed
+//        so the user's browser iframe runs the JS and shows the video player.
 // ════════════════════════════════════════════════════════════════════
-const AKOAM_BASE = "https://www.akoam.com";
+const AKOAM_BASE = "https://akwam.it";
 const AKOAM_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: AKOAM_BASE + "/" };
 
 const akoamSeriesCache = new Map<string, { url: string | null; ts: number }>();
@@ -5189,24 +5217,39 @@ async function akoamFetch(url: string, timeoutMs = 10000): Promise<string | null
   return cfProxyGet(url, AKOAM_BASE + "/", timeoutMs + 3000).catch(() => null);
 }
 
+/** بحث عن سيريال في akwam.it — يُرجع رابط صفحة /series/{id}/{slug} */
 async function searchAkoam(query: string): Promise<string | null> {
-  const html = await akoamFetch(AKOAM_BASE + "/?s=" + encodeURIComponent(query));
+  // akwam.it يستخدم /search?q= وليس /?s=
+  const html = await akoamFetch(`${AKOAM_BASE}/search?q=${encodeURIComponent(query)}`);
   if (!html) return null;
-  const candidates: Array<{ url: string; score: number }> = [];
-  for (const m of html.matchAll(/href="(https?:\/\/(?:www\.)?akoam\.com\/(?:anime|series|cartoon|movie)\/([^"/#?]+)\/?)"[^>]*>([\s\S]{2,80}?)(?:<\/|>)/gi)) {
-    const url = m[1]; const slug = decodeURIComponent(m[2]).replace(/-/g, " "); const label = m[3].replace(/<[^>]+>/g, "").trim();
-    if (url.includes("/page/")) continue;
-    const score = Math.max(similarity(label, query), similarity(slug, query), asciiSimilarity(m[2], query));
-    if (score > 0.18) candidates.push({ url, score });
+  const candidates: Array<{ url: string; score: number; rank: number }> = [];
+  let rank = 0;
+  // نمط الروابط: /series/{numeric-id}/{arabic-or-latin-slug}
+  const seen = new Set<string>();
+  for (const m of html.matchAll(/href="(https?:\/\/akwam\.it\/series\/(\d+)\/([^"/#?]+))"[^>]*/gi)) {
+    const url = m[1];
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const rawSlug = m[3];
+    const slug = decodeURIComponent(rawSlug).replace(/-/g, " ");
+    // المقارنة الأساسية بين الأحرف اللاتينية في الـ slug والـ query
+    const latinInSlug = slug.replace(/[^\x00-\x7F]+/g, " ").trim(); // نستخرج الأجزاء اللاتينية فقط
+    const slugNoSeason = slug.replace(/\u0627\u0644\u0645\u0648\u0633\u0645.*$/u, "").trim();
+    const score = Math.max(
+      similarity(slug, query),
+      asciiSimilarity(rawSlug, query),
+      similarity(latinInSlug, query),
+      similarity(slugNoSeason, query),
+      asciiSimilarity(latinInSlug, query),
+    );
+    // نقبل أي نتيجة أرجعها الموقع بدون threshold — الموقع هو من أجرى المطابقة
+    candidates.push({ url, score, rank: rank++ });
   }
-  if (!candidates.length) {
-    for (const m of html.matchAll(/href="(https?:\/\/(?:www\.)?akoam\.com\/[^"#?]+)"[^>]*>([^<]{2,60})<\/a>/gi)) {
-      const score = Math.max(similarity(m[2].trim(), query), asciiSimilarity(m[2].trim(), query));
-      if (score > 0.25) candidates.push({ url: m[1], score });
-    }
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0]?.score > 0.15 ? candidates[0].url : null;
+  if (!candidates.length) return null;
+  // نُفضّل النتيجة ذات highest score، وإذا تعادلوا نُفضّل الأعلى في الصفحة (rank أصغر)
+  candidates.sort((a, b) => b.score - a.score || a.rank - b.rank);
+  // نقبل أي نتيجة أرجعها الموقع (score > 0 أو rank = 0)
+  return candidates[0] ? candidates[0].url : null;
 }
 
 async function getAkoamSources(
@@ -5222,53 +5265,49 @@ async function getAkoamSources(
     if (seriesUrl === undefined) {
       for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
         seriesUrl = await searchAkoam(q);
+        console.log(`[akoam] search "${q}" → ${seriesUrl ?? "null"}`);
         if (seriesUrl) break;
       }
       akoamSeriesCache.set(sCk, { url: seriesUrl ?? null, ts: Date.now() });
     }
-    if (!seriesUrl) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
+    if (!seriesUrl) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); console.log("[akoam] no series URL found"); return []; }
 
     const seriesHtml = await akoamFetch(seriesUrl, 12000);
+    console.log(`[akoam] series page len=${seriesHtml?.length ?? 0}`);
     if (!seriesHtml) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
 
+    // نمط روابط الحلقات: /episode/{id}/{series-slug}/الحلقة-{N}
     const epStr = String(ep);
     let epUrl: string | null = null;
-    const allLinks: string[] = [];
-    for (const m of seriesHtml.matchAll(/href="(https?:\/\/(?:www\.)?akoam\.com\/[^"#?]+)"/gi)) {
-      const l = m[1];
-      if (!l.includes("/page/") && !l.includes("/feed/") && !allLinks.includes(l)) allLinks.push(l);
-    }
-    for (const link of allLinks) {
+    const EP_WORD = "\u0627\u0644\u062d\u0644\u0642\u0629"; // "الحلقة" literal
+    const seenLinks = new Set<string>();
+    let linkCount = 0;
+    for (const m of seriesHtml.matchAll(/href="(https?:\/\/akwam\.it\/episode\/\d+\/[^"#?]+)"/gi)) {
+      const link = m[1];
+      if (seenLinks.has(link)) continue;
+      seenLinks.add(link);
+      linkCount++;
       try {
         const decoded = decodeURIComponent(link);
-        const epMatchRe = new RegExp("[-/]0*" + epStr + "[-/]?$");
-        if (
-          epMatchRe.test(decoded) ||
-          decoded.includes("\u0627\u0644\u062d\u0644\u0642\u0629-" + epStr) ||
-          decoded.includes("episode-" + epStr)
-        ) { epUrl = link; break; }
+        const ep1 = EP_WORD + "-" + epStr;
+        const ep0 = EP_WORD + "-0" + epStr;
+        // بحث مبسّط: هل ينتهي الرابط بـ "الحلقة-N" حرفياً؟
+        if (decoded.endsWith("/" + ep1) || decoded.endsWith("/" + ep0)) {
+          epUrl = link; break;
+        }
       } catch { /* skip */ }
     }
+    console.log(`[akoam] ep${ep} search: ${linkCount} links checked, found=${epUrl !== null}`);
+    if (epUrl) console.log("[akoam] epUrl:", epUrl);
 
     if (!epUrl) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
 
-    const epHtml = await akoamFetch(epUrl, 12000);
-    if (!epHtml) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
-
-    const urls: string[] = [];
-    const seen = new Set<string>();
-    const addU = (u: string) => { if (u?.startsWith("http") && !seen.has(u)) { seen.add(u); urls.push(u); } };
-
-    for (const m of epHtml.matchAll(/data-(?:watch|embed|src|url)=["'](https?:\/\/[^"']{8,})["']/gi)) addU(m[1]);
-    for (const m of epHtml.matchAll(/<iframe[^>]+src=["'](https?:\/\/[^"']{8,})["']/gi)) addU(m[1]);
-    for (const m of epHtml.matchAll(/"(?:file|src|url|link)"\s*:\s*"(https?:\/\/[^"]{8,})"/gi)) addU(m[1]);
-
-    if (!urls.length) { akoamSrcCache.set(ck, { sources: [], ts: Date.now() }); return []; }
-
-    const sources: UnifiedSource[] = urls.map((u, i) => ({
-      name: "\u0627\u0643\u0648\u0627\u0645 \u00b7 \u0633\u064a\u0631\u0641\u0631 " + (i + 1),
-      url: u, quality: "HD", qualityRank: 10, site: "akoam",
-    }));
+    // نُرجع رابط صفحة الحلقة كـ isEmbed — الفيديو يُحمَّل عبر JS في متصفح المستخدم
+    const sources: UnifiedSource[] = [{
+      name: "أكوام",
+      url: epUrl, quality: "HD", qualityRank: 8, site: "akoam",
+      isEmbed: true,
+    }];
 
     akoamSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
@@ -9181,19 +9220,22 @@ async function getFaselhdDbSources(
     const best = scored[0];
     console.log(`[FaselhdDB] best match: "${best.name}" (score ${best._sc.toFixed(2)}) → ${best.link}`);
 
-    // 4. Fetch series/movie page — cfProxy أولاً، ثم direct fetch كـ fallback (fasel-hd.cam مفتوح من VPS)
+    // 4. Fetch series/movie page — cfProxy → direct fetch → hopx (fasel-hd.cam محجوب من VPS أحياناً)
     let pageHtml = await cfProxyGet(best.link, `${FASELHD_DB_BASE}/`, 22_000);
-    if (!pageHtml || pageHtml.length < 1000) {
+    if (!pageHtml || pageHtml.length < 1000 || isCloudflareBlock(pageHtml)) {
       try {
         const dr = await fetch(best.link, {
           headers: { "User-Agent": UA, "Referer": FASELHD_DB_BASE + "/" },
           signal: AbortSignal.timeout(15_000),
         });
-        if (dr.ok) pageHtml = await dr.text();
+        if (dr.ok) { const t = await dr.text(); if (!isCloudflareBlock(t)) pageHtml = t; }
       } catch { /* silent */ }
     }
+    if (!pageHtml || pageHtml.length < 1000 || isCloudflareBlock(pageHtml)) {
+      pageHtml = await hopxProxyGet(best.link, `${FASELHD_DB_BASE}/`, 20_000).catch(() => null);
+    }
     if (!pageHtml || pageHtml.length < 1000) return out;
-    if (pageHtml.includes("Just a moment") || pageHtml.includes("cf-browser-verification")) return out;
+    if (isCloudflareBlock(pageHtml)) return out;
 
     let epHtml: string | null;
     // يُستخدم كـ url1 في chain-fetch لتأسيس session cookies قبل جلب player URL
@@ -9226,14 +9268,17 @@ async function getFaselhdDbSources(
       // 5b. Fetch episode page — cfProxy أولاً، ثم direct fetch
       epPageUrl = target.url; // نحفظه لاستخدامه في chain-fetch لاحقاً
       epHtml = await cfProxyGet(target.url, best.link, 22_000);
-      if (!epHtml || epHtml.length < 1000) {
+      if (!epHtml || epHtml.length < 1000 || isCloudflareBlock(epHtml)) {
         try {
           const er = await fetch(target.url, {
             headers: { "User-Agent": UA, "Referer": best.link },
             signal: AbortSignal.timeout(15_000),
           });
-          if (er.ok) epHtml = await er.text();
+          if (er.ok) { const t = await er.text(); if (!isCloudflareBlock(t)) epHtml = t; }
         } catch { /* silent */ }
+      }
+      if (!epHtml || epHtml.length < 1000 || isCloudflareBlock(epHtml)) {
+        epHtml = await hopxProxyGet(target.url, best.link, 20_000).catch(() => null);
       }
       if (!epHtml || epHtml.length < 1000) return out;
     }
