@@ -71,7 +71,7 @@ StreamSB-family CDNs hardcoded:
 - `suzihaza.com`, `vanfem.com`, `zapurl.xyz`, `diampokusy.com`
 
 ## Google API Key
-`AIzaSyDRKQ9d6kfsoZT2lUnZcZnBYvH69HExNPE` in classes4.dex (Firebase, not TMDB)
+`[REDACTED-Firebase-APIKey]` in classes4.dex (Firebase, not TMDB)
 
 ## Conclusion
 **Cannot integrate AniTaku** because:

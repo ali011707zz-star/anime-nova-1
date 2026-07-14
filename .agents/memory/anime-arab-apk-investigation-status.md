@@ -13,7 +13,7 @@ The app's structure is a generic "WordPress/RSS/YouTube provider" template build
 itself reveals a live domain.
 
 **The real backend was found via `resources.arsc` strings**: a Firebase Realtime Database at
-`https://danyah-58729.firebaseio.com` (plus an associated `AIzaSy...` API key). Queried directly
+`https://danyah-58729.firebaseio.com` (plus an associated `[REDACTED-Firebase-APIKey]...` API key). Queried directly
 (`GET https://danyah-58729.firebaseio.com/.json`) and it returns:
 `{"error":"The Firebase database 'danyah-58729' has been deactivated."}`
 

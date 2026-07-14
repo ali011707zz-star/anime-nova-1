@@ -9,7 +9,7 @@ description: Findings from reversing anime-rift.com Android APK (June 2026) — 
 ## Firebase Config
 - Project: `anime-rift-4142e`, Number: `536921039715`
 - Android App ID: `1:536921039715:android:78825c96b74de921b8e956`
-- API Key: `AIzaSyBiLkiGEm7ruugny3tDFHEZvqli8yv1k7I` (Remote Config only, no API bypass)
+- API Key: `[REDACTED-Firebase-APIKey]` (Remote Config only, no API bypass)
 
 ## API Structure
 - Base URL: `https://gateway.anime-rift.com/api/v4`

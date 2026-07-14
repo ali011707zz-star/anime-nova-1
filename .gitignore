@@ -59,3 +59,11 @@ anime-nova-1/artifacts/api-server/bin/
 # Attached assets (screenshots/videos from chat - not needed in repo)
 attached_assets/
 anime-nova-1/attached_assets/
+
+# Agent memory files — may contain API keys/tokens from research (never commit)
+.agents/
+
+# Environment files with real secrets (use .env.example instead)
+.env
+.env.local
+.env.production

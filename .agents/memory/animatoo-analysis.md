@@ -11,7 +11,7 @@ description: تحليل كامل لتطبيق Animatoo (animatoo.app) — APK، 
 
 ## Backend — Supabase PostgreSQL
 - **URL**: `https://iwccaogufwaqzrodojvh.supabase.co`
-- **Anon Key**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3Y2Nhb2d1ZndhcXpyb2RvanZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTMxNjUsImV4cCI6MjA5NDY4OTE2NX0.hEl_v7cfd1lZMqI3QJAk2eaX-AFw3C_TAAWpkSMMGwk`
+- **Anon Key**: `[REDACTED-JWT-Token]`
 - **REST API**: `https://iwccaogufwaqzrodojvh.supabase.co/rest/v1/{table}?apikey={KEY}`
 
 ## جداول قاعدة البيانات
