@@ -255,7 +255,7 @@ function shouldShowSrc(src: FetchedSrc): boolean {
 function isEmbedFallback(src: FetchedSrc): boolean {
   const url = (src.directUrl || src.url || "").toLowerCase();
   if (!src.isEmbed) return false;
-  if (src.site === "witanime" || src.site === "mycima") return true;
+  if (src.site === "witanime" || src.site === "mycima" || src.site === "moviz_time" || src.site === "faselhd_db" || src.site === "akoam") return true;
   return url.includes("mega.nz") || url.includes("mega.co.nz") || url.includes("vidmoly");
 }
 
