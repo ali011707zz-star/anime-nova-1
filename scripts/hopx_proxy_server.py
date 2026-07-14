@@ -4,11 +4,13 @@ curl_cffi + playwright are pre-installed by the manager before this script is la
 Uses only built-in http.server (no Flask) to avoid blinker/distutils conflicts.
 
 Endpoints:
-  GET /health                   → {"ok":true, "playwright":bool}
-  GET /fetch?url=               → {"status":..,"html":..,"cookies":..,"final_url":..}
-  GET /browser-extract?url=     → {"ok":bool,"urls":[{"url":..,"type":"hls"|"mp4"}]}
-  GET /browser-html?url=&wait=  → {"ok":bool,"html":..,"title":..}
-  POST /post?url=               → {"status":..,"html":..,"cookies":..}
+  GET /health                          → {"ok":true, "playwright":bool}
+  GET /fetch?url=                      → {"status":..,"html":..,"cookies":..,"final_url":..}
+  GET /stream?url=&ref=                → CDN stream proxy (Range-aware, chunked)
+  GET /chain-fetch?url1=&url2=&ref1=   → two-step session fetch (cookies shared)
+  GET /browser-extract?url=            → {"ok":bool,"urls":[{"url":..,"type":"hls"|"mp4"}]}
+  GET /browser-html?url=&wait=         → {"ok":bool,"html":..,"title":..}
+  POST /post?url=                      → {"status":..,"html":..,"cookies":..}
 """
 import asyncio
 import json
@@ -404,6 +406,78 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
+            return
+
+        # ── /stream ───────────────────────────────────────────────────────────
+        # CDN stream proxy مع دعم Range للـ video seeking
+        if parsed.path == "/stream":
+            params = self._parse_qs()
+            url = unquote(params.get("url", ""))
+            ref = params.get("ref", "")
+            if not url:
+                self._send_json(400, {"error": "url required"}); return
+            try:
+                from urllib.parse import urlparse as _urlparse
+                _p = _urlparse(url)
+                origin = f"{_p.scheme}://{_p.netloc}"
+                hdrs = {
+                    "Referer": ref or url,
+                    "Origin": origin,
+                    "Accept": "*/*",
+                    "Accept-Encoding": "identity",
+                }
+                range_hdr = self.headers.get("Range")
+                if range_hdr:
+                    hdrs["Range"] = range_hdr
+                r = session.get(url, impersonate="chrome136", timeout=30,
+                                allow_redirects=True, headers=hdrs, stream=True)
+                self.send_response(r.status_code)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Headers", "Range")
+                self.send_header("Access-Control-Expose-Headers",
+                                 "Content-Length, Content-Range, Content-Type")
+                for h in ("Content-Type", "Content-Length", "Content-Range",
+                          "Accept-Ranges", "Cache-Control"):
+                    v = r.headers.get(h)
+                    if v:
+                        self.send_header(h, v)
+                self.end_headers()
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        self.wfile.write(chunk)
+            except Exception as e:
+                try:
+                    self._send_json(502, {"error": str(e)})
+                except Exception:
+                    pass
+            return
+
+        # ── /chain-fetch ──────────────────────────────────────────────────────
+        # جلب صفحتين بنفس الجلسة (cookies مشتركة) — مطلوب لبعض المصادر
+        if parsed.path == "/chain-fetch":
+            params = self._parse_qs()
+            url1 = unquote(params.get("url1", ""))
+            url2 = unquote(params.get("url2", ""))
+            ref1 = params.get("ref1", "")
+            if not url1 or not url2:
+                self._send_json(400, {"error": "url1 and url2 required"}); return
+            try:
+                sess2 = cf.Session(impersonate="chrome136")
+                hdrs1 = {"Referer": ref1} if ref1 else {}
+                hdrs2 = {"Referer": url1}
+                r1 = sess2.get(url1, headers=hdrs1, timeout=20, allow_redirects=True)
+                r2 = sess2.get(url2, headers=hdrs2, timeout=20, allow_redirects=True)
+                body2 = r2.text.encode("utf-8", errors="replace")
+                self.send_response(r2.status_code)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body2)))
+                self.send_header("X-Chain-Status1", str(r1.status_code))
+                self.send_header("X-Chain-Size1", str(len(r1.text)))
+                self.send_header("X-Chain-Size2", str(len(r2.text)))
+                self.end_headers()
+                self.wfile.write(body2)
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
             return
 
         # ── /browser-extract ─────────────────────────────────────────────────

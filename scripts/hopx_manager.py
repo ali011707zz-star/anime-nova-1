@@ -29,20 +29,48 @@ with open(_PROXY_FILE, 'rb') as _f:
 _state = {'sandbox': None, 'proxy_url': None, 'lock': threading.Lock()}
 
 
-def cleanup_old_sandboxes(current_id: str | None = None):
-    """حذف كل الـ sandboxes عدا الحالي عند التشغيل"""
+def _try_adopt_existing_sandbox() -> bool:
+    """
+    عند إعادة تشغيل المنيجر — يحاول التشبث بأول sandbox صحي موجود
+    بدل حذفه وإنشاء واحد جديد (يوفر 5 دقائق downtime).
+    يقتل أي sandboxes إضافية زيادة عن الواحد المعتمد.
+    """
     try:
         boxes = Sandbox.list(api_key=API_KEY, status='running', limit=100)
-        log.info(f'Found {len(boxes)} running sandboxes, cleaning up old ones...')
+        log.info(f'Found {len(boxes)} running sandbox(es) on startup')
+        adopted = False
         for b in boxes:
-            if b.sandbox_id != current_id:
+            if adopted:
+                # sandbox إضافي — اقتله
                 try:
                     b.kill()
-                    log.info(f'Killed old sandbox: {b.sandbox_id}')
-                except Exception as e:
-                    log.warning(f'Could not kill {b.sandbox_id}: {e}')
+                    log.info(f'Killed extra sandbox: {b.sandbox_id}')
+                except Exception:
+                    pass
+                continue
+            # تحقق من صحة هذا الـ sandbox
+            try:
+                pub_url = b.get_preview_url(3000)
+                r = req.get(pub_url + '/health', timeout=8)
+                if r.status_code == 200 and r.json().get('ok'):
+                    log.info(f'Adopting healthy sandbox: {b.sandbox_id}')
+                    with _state['lock']:
+                        _state['sandbox'] = b
+                        _state['proxy_url'] = pub_url
+                    log.info(f'Sandbox ready at {pub_url}')
+                    adopted = True
+                else:
+                    log.warning(f'Sandbox {b.sandbox_id} unhealthy (HTTP {r.status_code}), killing it')
+                    try: b.kill()
+                    except Exception: pass
+            except Exception as e:
+                log.warning(f'Could not check sandbox {b.sandbox_id}: {e}, killing it')
+                try: b.kill()
+                except Exception: pass
+        return adopted
     except Exception as e:
-        log.warning(f'Cleanup check failed: {e}')
+        log.warning(f'Adopt-existing check failed: {e}')
+        return False
 
 
 def create_sandbox():
@@ -171,22 +199,56 @@ class ProxyHandler(BaseHTTPRequestHandler):
         target = proxy_url.rstrip('/') + parsed.path
         if parsed.query:
             target += '?' + parsed.query
+
+        is_stream = parsed.path == '/stream'
+
         try:
             length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(length) if length else None
+            fwd_headers = {}
             ct = self.headers.get('Content-Type', '')
+            if ct:
+                fwd_headers['Content-Type'] = ct
+            if is_stream:
+                # إعادة توجيه Range header للـ sandbox لدعم video seeking
+                rng = self.headers.get('Range')
+                if rng:
+                    fwd_headers['Range'] = rng
+
             r = req.request(
                 self.command, target,
-                data=body, timeout=40,
-                headers={'Content-Type': ct} if ct else {},
+                data=body, timeout=60,
+                headers=fwd_headers,
+                stream=is_stream,
             )
             self.send_response(r.status_code)
-            self.send_header('Content-Type', 'application/json')
+            if is_stream:
+                # إعادة توجيه headers الضرورية للـ streaming
+                for h in ('Content-Type', 'Content-Length', 'Content-Range',
+                          'Accept-Ranges', 'Cache-Control'):
+                    v = r.headers.get(h)
+                    if v:
+                        self.send_header(h, v)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Headers', 'Range')
+                self.send_header('Access-Control-Expose-Headers',
+                                 'Content-Length, Content-Range, Content-Type')
+            else:
+                self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(r.content)
+
+            if is_stream:
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        self.wfile.write(chunk)
+            else:
+                self.wfile.write(r.content)
         except Exception as e:
             log.error(f'Forward error: {e}')
-            self.send_error(502, str(e))
+            try:
+                self.send_error(502, str(e))
+            except Exception:
+                pass
 
     def do_GET(self):  self._forward()
     def do_POST(self): self._forward()
@@ -207,8 +269,11 @@ def main():
         sys.exit(1)
 
     log.info('Starting hopx-manager...')
-    cleanup_old_sandboxes()  # حذف sandboxes قديمة عند التشغيل
-    ensure_sandbox()
+    # محاولة التشبث بـ sandbox موجود وصحي — بدل الحذف والإنشاء من الصفر
+    adopted = _try_adopt_existing_sandbox()
+    if not adopted:
+        log.info('No healthy sandbox found, creating new one...')
+        ensure_sandbox()
 
     threading.Thread(target=monitor_loop, daemon=True).start()
 
