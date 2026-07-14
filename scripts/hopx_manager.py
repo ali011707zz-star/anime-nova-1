@@ -17,7 +17,7 @@ log = logging.getLogger('hopx-manager')
 
 API_KEY         = os.environ.get('HOPX_API_KEY', '')
 PROXY_PORT      = int(os.environ.get('HOPX_LOCAL_PORT', '8001'))
-SANDBOX_TIMEOUT = 7200   # 2 hours
+SANDBOX_TIMEOUT = None   # بلا حد زمني — sandbox يظل حياً حتى نقتله نحن
 CHECK_INTERVAL  = 60     # health-check every 60s
 
 # Read proxy server code from sibling file at startup
