@@ -13062,7 +13062,12 @@ async function serveMediaVPS(
     const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Content-Type");
-    const ct = r.headers.get("content-type") || "video/MP2T";
+    let ct = r.headers.get("content-type") || "video/MP2T";
+    // بعض CDNs (مثل Akwam) ترجع Content-Type عام (octet-stream/binary) لملفات MP4،
+    // ما يمنع بعض المشغّلات (متصفح/ExoPlayer) من التعرّف على نوع الفيديو
+    if ((ct === "application/octet-stream" || ct === "binary/octet-stream") && /\.mp4(\?|$)/i.test(url)) {
+      ct = "video/mp4";
+    }
     res.setHeader("Content-Type", ct);
     const cl = r.headers.get("content-length");
     if (cl) res.setHeader("Content-Length", cl);
