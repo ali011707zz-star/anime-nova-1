@@ -87,3 +87,6 @@
 - [Moviz-Time integration](moviztime-integration-2026-07-13.md) — new anime+animation source; movie vs TV page structures differ; long series split into non-overlapping ep-range "part" pages, must try all candidates.
 - [Domain checks 2026-07-13](domain-checks-2026-07-13.md) — mycima/starcima.cc/faselhd-mirror all confirmed to be same already-integrated backends under different aliases, not new sources.
 - [Fresh import vs VPS divergence](fresh-import-vs-vps-divergence.md) — a re-imported repo's git history can be far behind the VPS's real running state; check divergence via SSH before trusting local as current.
+- [Source label/tag mismatch](source-label-tag-mismatch.md) — English-prefix tag pickers (getAnimTag etc.) silently mis-render when backend switches a source's label to Arabic; fallback grabs first 2 Arabic letters.
+- [Akwam anime scope](akwam-anime-scope.md) — Akwam scraper only exists in animation.ts; mobile's anime ANIME_SITES lists it too but anime.ts has no matching case, so it always returns empty.
+- [Anime Watch auto-fetch-all — SUPERSEDED](anime-watch-autofetch.md) — corrected 2026-07-14: current merged code uses picker-first lazy fetch (screen defaults "picker"), not auto-fetch-all.

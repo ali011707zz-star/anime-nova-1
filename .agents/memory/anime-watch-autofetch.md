@@ -1,19 +1,25 @@
 ---
-name: Anime Watch auto-fetch-all
-description: Watch.tsx (anime section) fetches every SCRAPER_DEFS entry on mount instead of waiting for a manual tap.
+name: Anime Watch auto-fetch-all (SUPERSEDED)
+description: Historical note on Watch.tsx fetch behavior — corrected 2026-07-14, do not trust the "auto-fetch-all" claim below without checking current code.
 ---
 
-## What changed (2026-07)
+## Status: superseded 2026-07-14
+
+The "auto-fetch-all on mount" behavior described below was a VPS-local reversion that predated a
+GitHub merge. The merge (`a2547e7`) resolved this conflict in favor of **origin/main's picker-first
+lazy behavior**: `nova-mobile/app/watch.tsx` defaults `screen` to `"picker"` — the user taps a source
+before it fetches, it does not stagger-fetch every `SCRAPER_DEFS`/`ANIME_SITES` entry on mount.
+
+**How to apply:** don't assume either behavior — grep the current `screen` default / mount effect in
+`Watch.tsx` (web) and `app/watch.tsx` (mobile) before reasoning about fetch timing or timeout costs.
+
+---
+
+## Original note (2026-07, now stale)
 `Watch.tsx` used to be "lazy": show a grid of scraper names and only fetch the one the user tapped.
-Per user request it now mirrors `AnimationWatch.tsx`: on mount it stagger-fetches **every** entry in
-`SCRAPER_DEFS` (70ms apart) and auto-plays the first source that resolves. The full "مصادر المشاهدة"
-numbered server list is shown once sources arrive / after exiting the player.
+Per a since-superseded user request it mirrored `AnimationWatch.tsx`: on mount it stagger-fetched
+**every** entry in `SCRAPER_DEFS` (70ms apart) and auto-played the first source that resolved.
 
-**Why:** matches the animation section's UX (no more "choose a source name" screen before playback).
-
-**How to apply / gotcha:** because *every* `SCRAPER_DEFS` entry now gets fetched on every episode view,
-any site left in the list that is dead/disabled server-side wastes a full round-trip (up to its timeout,
-often 15–28s) for nothing. Before adding/re-enabling a site in `SCRAPER_DEFS`, confirm the backend
-scraper for it is actually live — and when a backend scraper is disabled/removed, remove its
-`SCRAPER_DEFS` entry (and any matching frontend entry in AnimationWatch's equivalent list) in the same
-change, not just the backend function.
+If auto-fetch-all is ever reintroduced: any site left in the list that is dead/disabled server-side
+wastes a full round-trip (up to its timeout, often 15–28s) for nothing. Before adding/re-enabling a
+site in `SCRAPER_DEFS`, confirm the backend scraper for it is actually live.
