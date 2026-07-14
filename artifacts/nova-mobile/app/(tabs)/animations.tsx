@@ -193,11 +193,19 @@ export default function AnimationsScreen() {
       {/* ── Header ── */}
       <View style={s.header}>
         <View style={s.headerRow}>
-          <View>
-            <Text style={s.headerTitle}>رسوم متحركة</Text>
-            <Text style={s.headerSub}>
-              {type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+            <Pressable
+              onPress={() => (router.canGoBack() ? router.back() : router.push("/"))}
+              style={s.iconBtn}
+            >
+              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.55)" />
+            </Pressable>
+            <View>
+              <Text style={s.headerTitle}>رسوم متحركة</Text>
+              <Text style={s.headerSub}>
+                {type === "movie" ? "أفلام أنيميشن عالمية" : "مسلسلات كرتون عالمية"}
+              </Text>
+            </View>
           </View>
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Pressable
