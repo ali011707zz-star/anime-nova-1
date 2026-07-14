@@ -469,9 +469,47 @@ async function scrapingAntGet(
 }
 
 // ════════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════
+//  hopxProxyGet — جلب عبر Hopx sandbox (IP مختلف يتجاوز CF-block)
+//  يُستخدم كـ fallback للمواقع المحجوبة من VPS IP مباشرة
+// ════════════════════════════════════════════════════════════════════
+const HOPX_PROXY_BASE = process.env.HOPX_PROXY_URL || "http://localhost:8001";
+let _hopxAlive: boolean | null = null;
+let _hopxCheckedAt = 0;
+
+async function hopxProxyGet(
+  url: string,
+  referer?: string,
+  timeoutMs = 25000,
+): Promise<string | null> {
+  const now = Date.now();
+  if (_hopxAlive === null || now - _hopxCheckedAt > 60_000) {
+    try {
+      const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(3000) });
+      const body = await h.json() as { ok?: boolean };
+      _hopxAlive = h.ok && body.ok === true;
+    } catch { _hopxAlive = false; }
+    _hopxCheckedAt = now;
+  }
+  if (!_hopxAlive) return null;
+  try {
+    const params = new URLSearchParams({ url });
+    if (referer) params.set("ref", referer);
+    const r = await fetch(`${HOPX_PROXY_BASE}/fetch?${params}`, {
+      signal: AbortSignal.timeout(timeoutMs + 5000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as { status?: number; html?: string; error?: string };
+    if (data.error || !data.html || (data.status !== undefined && data.status >= 400)) return null;
+    return data.html;
+  } catch { return null; }
+}
+
 //  smartFetch — جلب ذكي يجرب كل الوسائل بالترتيب (تلقائياً)
 //  1. cfProxy (curl_cffi + primp محلي)
-//  2. ScrapingAnt (Chrome headless — آخر خيار لتوفير الكريدت)
+//  2. hopxProxy (Hopx sandbox IP مختلف)
+//  3. ScrapingAnt (Chrome headless — آخر خيار لتوفير الكريدت)
 // ════════════════════════════════════════════════════════════════════
 async function smartFetch(
   url: string,
@@ -483,7 +521,11 @@ async function smartFetch(
   const fromProxy = await cfProxyGet(url, referer, timeoutMs).catch(() => null);
   if (fromProxy && !isCloudflareBlock(fromProxy)) return fromProxy;
 
-  // 2) ScrapingAnt — الأقوى لكن يستهلك كريدت أكثر
+  // 2) hopxProxy — IP مختلف يتجاوز CF-block بدون استهلاك كريدت
+  const fromHopx = await hopxProxyGet(url, referer, timeoutMs).catch(() => null);
+  if (fromHopx && !isCloudflareBlock(fromHopx)) return fromHopx;
+
+  // 3) ScrapingAnt — الأقوى لكن يستهلك كريدت أكثر
   if (SCRAPINGANT_KEY) {
     const fromAnt = await scrapingAntGet(url, { browser: forceAnt, timeoutMs: timeoutMs + 15000 });
     if (fromAnt) return fromAnt;

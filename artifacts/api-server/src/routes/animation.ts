@@ -337,6 +337,42 @@ const CF_PROXY_BASE = _NOVA_PROXY_BASE
   ? `${_NOVA_PROXY_BASE}/api/cfproxy`
   : `http://localhost:${CF_PROXY_PORT}`;
 
+
+// ════════════════════════════════════════════════════════════════════
+//  hopxProxyGet — جلب عبر Hopx sandbox (IP مختلف يتجاوز CF-block)
+// ════════════════════════════════════════════════════════════════════
+const HOPX_PROXY_BASE_ANIM = process.env.HOPX_PROXY_URL || "http://localhost:8001";
+let _hopxAliveAnim: boolean | null = null;
+let _hopxCheckedAtAnim = 0;
+
+async function hopxProxyGet(
+  url: string,
+  referer?: string,
+  timeoutMs = 25000,
+): Promise<string | null> {
+  const now = Date.now();
+  if (_hopxAliveAnim === null || now - _hopxCheckedAtAnim > 60_000) {
+    try {
+      const h = await fetch(`${HOPX_PROXY_BASE_ANIM}/health`, { signal: AbortSignal.timeout(3000) });
+      const body = await h.json() as { ok?: boolean };
+      _hopxAliveAnim = h.ok && body.ok === true;
+    } catch { _hopxAliveAnim = false; }
+    _hopxCheckedAtAnim = now;
+  }
+  if (!_hopxAliveAnim) return null;
+  try {
+    const params = new URLSearchParams({ url });
+    if (referer) params.set("ref", referer);
+    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/fetch?${params}`, {
+      signal: AbortSignal.timeout(timeoutMs + 5000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as { status?: number; html?: string; error?: string };
+    if (data.error || !data.html || (data.status !== undefined && data.status >= 400)) return null;
+    return data.html;
+  } catch { return null; }
+}
+
 // CF proxy helper — يمرر الطلب عبر curl_cffi
 async function cfProxyGet(url: string): Promise<string> {
   const r = await fetch(`${CF_PROXY_BASE}/fetch?url=${encodeURIComponent(url)}`, {
@@ -3457,6 +3493,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             });
             if (sr.ok) searchHtml = await sr.text();
           } catch { /* silent */ }
+
+          // إذا فشل الـ fetch المباشر أو حُجب بـ CF، جرّب Hopx proxy
+          if (!searchHtml || searchHtml.length < 500 || searchHtml.includes("Just a moment")) {
+            const hopxHtml = await hopxProxyGet(
+              `${ED_BASE}/?s=${q}&post_type=episode`, `${ED_BASE}/`
+            ).catch(() => null);
+            if (hopxHtml && hopxHtml.length >= 500) searchHtml = hopxHtml;
+          }
 
           if (!searchHtml || searchHtml.length < 500) return;
 
