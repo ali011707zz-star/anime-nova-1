@@ -3526,6 +3526,21 @@ async function a4upFetchHtml(url: string): Promise<{ ok: boolean; html: string }
     if (html.length > 300 && !isCloudflareBlock(html)) return { ok: true, html };
   } catch { /* fall through */ }
 
+  // ── المسار 3: Hopx proxy (IP مختلف) — يتجاوز IP block لكن لا يحل JS challenge ──────
+  try {
+    const hopxHtml = await hopxProxyGet(url, `${A4UP2_BASE}/`, 18000).catch(() => null);
+    if (hopxHtml && hopxHtml.length > 300 && !isCloudflareBlock(hopxHtml) && !isJwtRedir(hopxHtml))
+      return { ok: true, html: hopxHtml };
+    if (hopxHtml && isJwtRedir(hopxHtml)) {
+      const hopxRedir = hopxHtml.match(/window\.location\.replace\(['"]([^'"]+)['"]\)/)?.[1];
+      if (hopxRedir) {
+        const hopxHtml2 = await hopxProxyGet(hopxRedir, `${A4UP2_BASE}/`, 15000).catch(() => null);
+        if (hopxHtml2 && hopxHtml2.length > 300 && !isCloudflareBlock(hopxHtml2) && !isJwtRedir(hopxHtml2))
+          return { ok: true, html: hopxHtml2 };
+      }
+    }
+  } catch { /* fall through */ }
+
   return { ok: false, html: "" };
 }
 
