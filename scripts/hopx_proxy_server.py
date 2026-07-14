@@ -1,9 +1,18 @@
 """
 hopx_proxy_server.py — runs inside Hopx sandbox on port 3000
-curl_cffi is pre-installed by the manager before this script is launched.
+curl_cffi + playwright are pre-installed by the manager before this script is launched.
 Uses only built-in http.server (no Flask) to avoid blinker/distutils conflicts.
+
+Endpoints:
+  GET /health                   → {"ok":true, "playwright":bool}
+  GET /fetch?url=               → {"status":..,"html":..,"cookies":..,"final_url":..}
+  GET /browser-extract?url=     → {"ok":bool,"urls":[{"url":..,"type":"hls"|"mp4"}]}
+  GET /browser-html?url=&wait=  → {"ok":bool,"html":..,"title":..}
+  POST /post?url=               → {"status":..,"html":..,"cookies":..}
 """
+import asyncio
 import json
+import re
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
@@ -12,10 +21,345 @@ from curl_cffi import requests as cf
 
 session = cf.Session()
 
+# ── Playwright availability ──────────────────────────────────────────────────
+
+_PLAYWRIGHT_OK: bool | None = None
+
+def _check_playwright() -> bool:
+    global _PLAYWRIGHT_OK
+    if _PLAYWRIGHT_OK is not None:
+        return _PLAYWRIGHT_OK
+    try:
+        from playwright.sync_api import sync_playwright  # noqa
+        _PLAYWRIGHT_OK = True
+    except Exception:
+        _PLAYWRIGHT_OK = False
+    return _PLAYWRIGHT_OK
+
+
+# ── Video URL detection ──────────────────────────────────────────────────────
+
+_VIDEO_NOISE = [
+    "ads", "track", "banner", "pixel", "thumb", "poster",
+    "analytics", "gtm", "doubleclick", "facebook", "google",
+    "twitter", "img.", "logo", "icon",
+]
+
+def _is_video_url(u: str) -> "dict | None":
+    if not u.startswith("http"):
+        return None
+    if any(n in u for n in _VIDEO_NOISE):
+        return None
+    if ".m3u8" in u:
+        return {"url": u, "type": "hls"}
+    if ".mp4" in u and len(u) > 30:
+        return {"url": u, "type": "mp4"}
+    return None
+
+_M3U8_RE = re.compile(r"https?://[^\s\"'<>\\]+\.m3u8(?:\?[^\s\"'<>\\]*)?")
+_MP4_RE  = re.compile(r"https?://[^\s\"'<>\\]+\.mp4(?:\?[^\s\"'<>\\]*)?")
+_JSON_KEY_RE = re.compile(
+    r'"(?:file|src|url|source|hls|stream|videoUrl|streamUrl|link|video_url|stream_url|master)"\s*:\s*"(https?://[^"\\]+)"',
+    re.IGNORECASE,
+)
+
+def _extract_from_text(text: str) -> "list[dict]":
+    found: list[dict] = []
+    seen: set[str] = set()
+
+    def add(u: str, t: str):
+        u = u.strip().rstrip("\\,;)")
+        if u not in seen and len(u) > 20 and u.startswith("http"):
+            if not any(n in u for n in _VIDEO_NOISE):
+                seen.add(u)
+                found.append({"url": u, "type": t})
+
+    for m in _M3U8_RE.finditer(text):
+        add(m.group(0), "hls")
+    for m in _MP4_RE.finditer(text):
+        add(m.group(0), "mp4")
+    for m in _JSON_KEY_RE.finditer(text):
+        u = m.group(1)
+        t = "hls" if ".m3u8" in u else "mp4" if ".mp4" in u else None
+        if t:
+            add(u, t)
+    return found
+
+
+# ── Async browser helpers ────────────────────────────────────────────────────
+
+# Selectors to try clicking for Arabic streaming server buttons
+_SERVER_SELECTORS = [
+    # Common patterns on Arabic sites
+    ".server-btn", ".server_btn", ".btn-server",
+    ".tab-server", ".servers-list li", ".servers li",
+    ".watch-btn", ".watch_btn",
+    "a[data-url]", "a[data-src]", "a[data-embed]",
+    ".player-tabs li:first-child", ".player-tab:first-child",
+    ".tab-content .tab-pane:first-child .btn",
+    # Akwam specific (tab plugin: idTabs)
+    ".box-content .tab-link:first-child",
+    "ul.tabs li:first-child a", "ul.tab li:first-child a",
+    # Generic play button fallbacks
+    "button.play", ".play-btn", ".play_btn",
+    "[aria-label*='play' i]", "[title*='play' i]",
+    ".jw-icon-display", ".plyr__control--overlaid",
+    # Any button with "سيرفر" or "مشاهدة" text
+    "a:has-text('سيرفر')", "button:has-text('سيرفر')",
+    "a:has-text('مشاهدة')", "button:has-text('مشاهدة')",
+    "a:has-text('تشغيل')", "button:has-text('تشغيل')",
+]
+
+async def _probe_page(page, video_urls: list, debug_list: "list | None" = None):
+    """Attach request/response interceptors to an already-loaded page."""
+    seen_in_list = {v["url"] for v in video_urls}
+
+    def _add_unique(items: list):
+        for item in items:
+            u = item["url"]
+            if u not in seen_in_list and len(u) > 20:
+                seen_in_list.add(u)
+                video_urls.append(item)
+
+    async def on_request(req):
+        u = req.url
+        if debug_list is not None:
+            debug_list.append(u)
+        v = _is_video_url(u)
+        if v:
+            _add_unique([v])
+
+    async def on_response(resp):
+        u = resp.url
+        ct = (resp.headers.get("content-type") or "").lower()
+        interesting = (
+            any(x in u for x in [".m3u8", ".mp4", "playlist", "stream", "video",
+                                  "play", "source", "embed", "hls", "vod", "/v/"])
+            or "json" in ct or "m3u8" in ct
+        )
+        if interesting:
+            try:
+                body = await resp.body()
+                text = body.decode("utf-8", errors="replace")[:30000]
+                hits = _extract_from_text(text)
+                if hits:
+                    _add_unique(hits)
+            except Exception:
+                pass
+
+    page.on("request", on_request)
+    page.on("response", on_response)
+
+
+async def _js_probe_sources(page) -> "list[dict]":
+    """Probe JS player APIs for source URLs."""
+    try:
+        srcs: list = await page.evaluate("""() => {
+            const r = [];
+            try { const f = jwplayer().getPlaylistItem().file; if (f) r.push(f); } catch(e) {}
+            try { const s = window._player?.src; if (s) r.push(s); } catch(e) {}
+            try { const s = window.playerConfig?.file; if (s) r.push(s); } catch(e) {}
+            try {
+                document.querySelectorAll('video source, video').forEach(v => {
+                    const s = v.src || v.getAttribute('src') || v.currentSrc;
+                    if (s && s.startsWith('http')) r.push(s);
+                });
+            } catch(e) {}
+            try {
+                for (const k of Object.keys(window)) {
+                    const v = window[k];
+                    if (typeof v === 'string' && (v.includes('.m3u8') || v.includes('.mp4')))
+                        r.push(v);
+                }
+            } catch(e) {}
+            return r;
+        }""")
+        hits = []
+        for s in (srcs or []):
+            if isinstance(s, str):
+                hits.extend(_extract_from_text(s))
+        return hits
+    except Exception:
+        return []
+
+
+async def _try_click_server_buttons(page) -> bool:
+    """Try clicking server/play buttons. Returns True if any click succeeded."""
+    clicked = False
+    for sel in _SERVER_SELECTORS:
+        try:
+            el = page.locator(sel).first
+            cnt = await el.count()
+            if cnt > 0:
+                await el.click(timeout=2500)
+                await asyncio.sleep(3)
+                clicked = True
+                break
+        except Exception:
+            continue
+    return clicked
+
+
+# ── Main browser extractor ───────────────────────────────────────────────────
+
+async def _async_browser_extract(
+    url: str, referer: str, timeout_ms: int, debug: bool = False
+) -> dict:
+    from playwright.async_api import async_playwright
+
+    video_urls: list[dict] = []
+    debug_list: "list[str] | None" = [] if debug else None
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                  "--disable-web-security"],
+        )
+        ctx = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/136.0.0.0 Safari/537.36"
+            ),
+            extra_http_headers={"Referer": referer} if referer else {},
+            ignore_https_errors=True,
+        )
+
+        # ── Phase 1: Main page ──────────────────────────────────────────────
+        page = await ctx.new_page()
+        await _probe_page(page, video_urls, debug_list)
+
+        try:
+            await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
+        except Exception:
+            pass
+
+        await asyncio.sleep(4)
+
+        # Probe JS APIs
+        video_urls.extend(await _js_probe_sources(page))
+
+        # ── Phase 2: Click server buttons ───────────────────────────────────
+        if not video_urls:
+            clicked = await _try_click_server_buttons(page)
+            if clicked:
+                await asyncio.sleep(4)
+                video_urls.extend(await _js_probe_sources(page))
+
+        # ── Phase 3: Follow iframes ──────────────────────────────────────────
+        if not video_urls:
+            try:
+                iframe_urls: list = await page.evaluate("""() =>
+                    Array.from(document.querySelectorAll('iframe[src]'))
+                        .map(f => f.src)
+                        .filter(s => s.startsWith('http')
+                            && !s.includes('google')
+                            && !s.includes('facebook')
+                            && !s.includes('twitter')
+                            && !s.includes('ads'))
+                """)
+                for iurl in (iframe_urls or [])[:3]:
+                    if debug_list is not None:
+                        debug_list.append("__iframe__:" + iurl)
+                    ip = await ctx.new_page()
+                    await _probe_page(ip, video_urls, debug_list)
+                    try:
+                        await ip.goto(iurl, timeout=18000, wait_until="domcontentloaded")
+                        await asyncio.sleep(4)
+                        video_urls.extend(await _js_probe_sources(ip))
+                        if not video_urls:
+                            await _try_click_server_buttons(ip)
+                            await asyncio.sleep(3)
+                            video_urls.extend(await _js_probe_sources(ip))
+                    except Exception:
+                        pass
+                    finally:
+                        await ip.close()
+                    if video_urls:
+                        break
+            except Exception:
+                pass
+
+        await browser.close()
+
+    # Deduplicate
+    seen: set[str] = set()
+    unique = []
+    for item in video_urls:
+        u = item["url"]
+        if u not in seen and u.startswith("http") and len(u) > 20:
+            seen.add(u)
+            unique.append(item)
+
+    result: dict = {"ok": bool(unique), "urls": unique}
+    if debug and debug_list is not None:
+        result["all_requests"] = debug_list[:300]
+    return result
+
+
+def browser_extract_sync(
+    url: str, referer: str, timeout_ms: int, debug: bool = False
+) -> dict:
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                _async_browser_extract(url, referer, timeout_ms, debug)
+            )
+        finally:
+            loop.close()
+    except Exception as e:
+        return {"ok": False, "urls": [], "error": str(e)}
+
+
+# ── Browser HTML getter ──────────────────────────────────────────────────────
+
+async def _async_get_html(url: str, referer: str, wait_ms: int) -> dict:
+    from playwright.async_api import async_playwright
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        )
+        ctx = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/136.0.0.0 Safari/537.36"
+            ),
+            extra_http_headers={"Referer": referer} if referer else {},
+            ignore_https_errors=True,
+        )
+        page = await ctx.new_page()
+        try:
+            await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            await asyncio.sleep(wait_ms / 1000)
+            html = await page.content()
+            title = await page.title()
+        except Exception as e:
+            await browser.close()
+            return {"ok": False, "html": "", "error": str(e)}
+        await browser.close()
+    return {"ok": True, "html": html[:100000], "title": title}
+
+
+def get_html_sync(url: str, referer: str, wait_ms: int) -> dict:
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_async_get_html(url, referer, wait_ms))
+        finally:
+            loop.close()
+    except Exception as e:
+        return {"ok": False, "html": "", "error": str(e)}
+
+
+# ── HTTP server ──────────────────────────────────────────────────────────────
 
 class ProxyHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
-        pass  # suppress default access log
+        pass
 
     def _send_json(self, code, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -26,30 +370,32 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _parse_qs(self):
-        parsed = urlparse(self.path)
-        return {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        p = urlparse(self.path)
+        return {k: v[0] for k, v in parse_qs(p.query).items()}
 
     def do_GET(self):
         parsed = urlparse(self.path)
 
+        # ── /health ──────────────────────────────────────────────────────────
         if parsed.path == "/health":
-            self._send_json(200, {"ok": True, "service": "hopx-proxy"})
+            self._send_json(200, {
+                "ok": True, "service": "hopx-proxy",
+                "playwright": _check_playwright(),
+            })
             return
 
+        # ── /fetch ───────────────────────────────────────────────────────────
         if parsed.path == "/fetch":
             params = self._parse_qs()
             url = unquote(params.get("url", ""))
             imp = params.get("imp", "chrome136")
             ref = params.get("ref", "")
             if not url:
-                self._send_json(400, {"error": "no url"})
-                return
+                self._send_json(400, {"error": "no url"}); return
             try:
                 hdrs = {"Referer": ref} if ref else None
-                r = session.get(
-                    url, impersonate=imp, timeout=25,
-                    allow_redirects=True, headers=hdrs,
-                )
+                r = session.get(url, impersonate=imp, timeout=25,
+                                allow_redirects=True, headers=hdrs)
                 self._send_json(200, {
                     "status": r.status_code,
                     "html": r.text[:80000],
@@ -58,6 +404,35 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
+            return
+
+        # ── /browser-extract ─────────────────────────────────────────────────
+        if parsed.path == "/browser-extract":
+            if not _check_playwright():
+                self._send_json(503, {"ok": False, "error": "playwright not available"})
+                return
+            params = self._parse_qs()
+            url = unquote(params.get("url", ""))
+            ref = params.get("ref", "")
+            timeout_ms = int(params.get("timeout", "25000"))
+            debug = params.get("debug", "0") == "1"
+            if not url:
+                self._send_json(400, {"ok": False, "error": "no url"}); return
+            self._send_json(200, browser_extract_sync(url, ref, timeout_ms, debug))
+            return
+
+        # ── /browser-html ─────────────────────────────────────────────────────
+        if parsed.path == "/browser-html":
+            if not _check_playwright():
+                self._send_json(503, {"ok": False, "error": "playwright not available"})
+                return
+            params = self._parse_qs()
+            url = unquote(params.get("url", ""))
+            ref = params.get("ref", "")
+            wait_ms = int(params.get("wait", "4000"))
+            if not url:
+                self._send_json(400, {"ok": False, "error": "no url"}); return
+            self._send_json(200, get_html_sync(url, ref, wait_ms))
             return
 
         self._send_json(404, {"error": "not found"})
@@ -69,16 +444,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
             params = self._parse_qs()
             url = unquote(params.get("url", ""))
             if not url:
-                self._send_json(400, {"error": "no url"})
-                return
+                self._send_json(400, {"error": "no url"}); return
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 raw = self.rfile.read(length) if length else b"{}"
                 body = json.loads(raw) if raw else {}
-                r = session.post(
-                    url, impersonate="chrome136", timeout=25,
-                    data=body.get("data"), json=body.get("json"),
-                )
+                r = session.post(url, impersonate="chrome136", timeout=25,
+                                 data=body.get("data"), json=body.get("json"))
                 self._send_json(200, {
                     "status": r.status_code,
                     "html": r.text[:80000],
