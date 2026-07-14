@@ -16,7 +16,7 @@ description: تحليل شامل لتطبيق عالم الدراما DramaWorld
 
 ## Firebase
 - **Project**: `alamaldrama2022v2`
-- **API Key**: `AIzaSyDgICP_l7w5uHw1C-HGzj0o4ehFCp7BwYc`
+- **API Key**: `[REDACTED-Firebase-APIKey]`
 - **App ID**: `1:462519862201:android:e2b2f8fc6e55730e846c68`
 - الـ BASE_URL مخزّنة **مشفّرة بـ Base64** في Firebase Remote Config (templateVersion: 6)
 

@@ -117,7 +117,7 @@ https://.*\.workers\.dev/.*  ← CF Worker streams
 ## Firebase / بيانات APK
 
 ```
-Firebase API Key: AIzaSyBAFt63-yNEqs2f_P8Db8u8xTXrKHeHaSE
+Firebase API Key: [REDACTED-Firebase-APIKey]
 Firebase Project: (غير مؤكد - remote config معطل)
 APK Package: com.apps.anime.cartoon (مرجّح)
 HTTP Client: OkHttp + Retrofit (Kotlin)
