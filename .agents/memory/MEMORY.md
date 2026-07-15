@@ -91,3 +91,4 @@
 - [Akwam anime scope](akwam-anime-scope.md) — Akwam scraper only exists in animation.ts; mobile's anime ANIME_SITES lists it too but anime.ts has no matching case, so it always returns empty.
 - [Anime Watch auto-fetch-all — SUPERSEDED](anime-watch-autofetch.md) — corrected 2026-07-14: current merged code uses picker-first lazy fetch (screen defaults "picker"), not auto-fetch-all.
 - [vsembed + VidLink research](vsembed-vidlink-research-2026-07-14.md) — vsembed.ru ✅ ready (sendExtracted pattern); videasy3 ✅ implemented but not in allowlist; VidLink ❌ internal Next.js RSC, not a public API.
+- [XPass + VaPlayer sources](xpass-vaplayer-sources.md) — XPass token expires in minutes (TTL=8min); VaPlayer label must contain "FHD" for 1080p; AnimationWatch uses label keywords NOT qualityRank.
