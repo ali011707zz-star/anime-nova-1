@@ -95,3 +95,5 @@
 - [XPass + VaPlayer sources](xpass-vaplayer-sources.md) — XPass token expires in minutes (TTL=8min); VaPlayer label must contain "FHD" for 1080p; AnimationWatch uses label keywords NOT qualityRank.
 - [VidKing Hopx integration](vidking-hopx-integration.md) — Hopx browser-extract على vidking.net/embed يُرجع ironbubble.site HLS URL؛ proxyUrl=rawUrl (لا hls-proxy)؛ vidlux.xyz /api/extract/magic يحتاج session auth؛ خطة التطبيق الكاملة موثّقة.
 - [Videasy disabled 2026-07-15](videasy-speedracelight-move-2026-07-15.md) — videasy3 أُزيل من ANIM_SOURCE_ALLOWLIST؛ ironbubble.site CDN يحجب كل datacenter IPs؛ vidking.net هو البديل عبر Hopx browser.
+- [VidLink multi-quality fix](vidlink-multiQuality-2026-07-15.md) — vidlink_encdec أُعيد تفعيله؛ يُرجع MP4 بـ4 جودات + DASH + عربي؛ subtitles بنص عربي كامل.
+- [Videasy ironbubble rawUrl fix](videasy-ironbubble-rawurl.md) — ironbubble يحجب VPS؛ الحل rawUrl مباشر للمتصفح مع headers Referer/Origin في extra.
