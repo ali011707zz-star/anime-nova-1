@@ -98,3 +98,4 @@
 - [VidLink multi-quality fix](vidlink-multiQuality-2026-07-15.md) — vidlink_encdec أُعيد تفعيله؛ يُرجع MP4 بـ4 جودات + DASH + عربي؛ subtitles بنص عربي كامل.
 - [Videasy ironbubble rawUrl fix](videasy-ironbubble-rawurl.md) — ironbubble يحجب VPS؛ الحل rawUrl مباشر للمتصفح مع headers Referer/Origin في extra.
 - [4KHDHub + HubCloud + Hopx](4khdhub-hubcloud-hopx.md) — 4khdhub pipeline يعمل (browser-html) لكن embeds كلها hubcloud.ist محجوب من Hopx؛ ecosystem.config.cjs .env fix موثّق هنا.
+- [Animation source issues 2026-07-15](animation-source-issues-2026-07-15.md) — VF جودة 360p بدل FHD (fix في AnimationWatch.tsx)؛ VE ironbubble 403 من VPS؛ VL proxy يعمل لكن frontend قد يستخدم directUrl؛ UHD Movies 4K pipeline موثّق.
