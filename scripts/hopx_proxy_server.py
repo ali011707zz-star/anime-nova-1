@@ -319,7 +319,8 @@ async def _async_network_capture(url: str, referer: str, wait_ms: int = 10000) -
         browser = await pw.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                  "--disable-web-security"],
+                  "--disable-web-security",
+                  "--disable-blink-features=AutomationControlled"],
         )
         ctx = await browser.new_context(
             user_agent=(
@@ -330,6 +331,8 @@ async def _async_network_capture(url: str, referer: str, wait_ms: int = 10000) -
             extra_http_headers={"Referer": referer} if referer else {},
             ignore_https_errors=True,
         )
+        # Stealth: hide webdriver fingerprint
+        await ctx.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
         page = await ctx.new_page()
 
         def _interesting(u: str) -> bool:
