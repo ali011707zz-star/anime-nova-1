@@ -389,11 +389,16 @@ async function hopxProxyGet(
 ): Promise<string | null> {
   const now = Date.now();
   if (_hopxAliveAnim === null || now - _hopxCheckedAtAnim > 60_000) {
-    try {
-      const h = await fetch(`${HOPX_PROXY_BASE_ANIM}/health`, { signal: AbortSignal.timeout(3000) });
-      const body = await h.json() as { ok?: boolean };
-      _hopxAliveAnim = h.ok && body.ok === true;
-    } catch { _hopxAliveAnim = false; }
+    // retry مرتين: مرة عادية + مرة بعد 2s عند cold-start
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const h = await fetch(`${HOPX_PROXY_BASE_ANIM}/health`, { signal: AbortSignal.timeout(4000) });
+        const body = await h.json() as { ok?: boolean };
+        if (h.ok && body.ok === true) { _hopxAliveAnim = true; break; }
+      } catch { /* ignore */ }
+      if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); // انتظر 2s ثم جرّب مرة أخرى
+      _hopxAliveAnim = false;
+    }
     _hopxCheckedAtAnim = now;
   }
   if (!_hopxAliveAnim) return null;
@@ -4614,9 +4619,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch (e: any) { console.warn("[multimovies_anim]", e?.message); }
       }),
 
-      // ── 4K HDHub (4khdhub.one) — React SPA: browser-extract للبحث ───────────────
-      // الموقع SPA محمي بـ Cloudflare، لا static HTML → browser-extract لكل خطوة.
-      // السلسلة: browser-extract(search) → روابط فيلم → browser-extract(movie page)
+      // ── 4K HDHub (4khdhub.one) — JS-rendered: browser-html للبحث ───────────────
+      // الموقع يُحمّل نتائج البحث عبر AJAX بعد تحميل الصفحة → browser-html مع wait.
+      // السلسلة: browser-html(search, wait=8s) → روابط فيلم → browser-extract(movie page)
       scrapeAnimCached("fourkhdhub_anim", async () => {
         if (!title) return;
         startCookieAutoRefresh();
@@ -4628,28 +4633,31 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             _4khdDomainCache.url = khBase; _4khdDomainCache.ts = Date.now();
           }
 
-          // Step 2: browser-extract على صفحة البحث (SPA — لا static HTML)
+          // Step 2: browser-html على صفحة البحث — wait=8000ms لتحميل نتائج AJAX
           const q = title.replace(/[:()\[\]]/g, " ").trim();
           const searchUrl = `${khBase}/?s=${encodeURIComponent(q)}`;
-          const bxSearchParams = new URLSearchParams({ url: searchUrl, ref: khBase + "/", timeout: "18000" });
-          const bxSearchR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-extract?${bxSearchParams}`, {
-            signal: AbortSignal.timeout(30_000),
+          const bhSearchParams = new URLSearchParams({ url: searchUrl, ref: khBase + "/", wait: "8000" });
+          const bhSearchR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-html?${bhSearchParams}`, {
+            signal: AbortSignal.timeout(35_000),
           });
-          if (!bxSearchR.ok) { console.log("[4khdhub] browser-extract search failed"); return; }
-          const bxSearchData: any = await bxSearchR.json();
-          const searchRendered: string = bxSearchData.html || "";
+          if (!bhSearchR.ok) { console.log("[4khdhub] browser-html search failed"); return; }
+          const bhSearchData: any = await bhSearchR.json();
+          if (!bhSearchData.ok) { console.log("[4khdhub] browser-html not ok:", bhSearchData.error); return; }
+          const searchRendered: string = bhSearchData.html || "";
 
-          // استخراج رابط الفيلم من الـ HTML المُعالج
-          const movieLinkRe = /href=["'](https?:\/\/4khdhub\.[^"']+)["']/g;
+          // استخراج رابط الفيلم من الـ HTML المُعالج (absolute أو relative URLs)
+          const movieLinkRe = /href=["']((https?:\/\/4khdhub[^"']+|\/[a-z0-9][a-z0-9\-]+\/))["']/g;
           let movieUrl = "";
           let lm: RegExpExecArray | null;
           while ((lm = movieLinkRe.exec(searchRendered)) !== null) {
             const u = lm[1];
-            if (!u.match(/[?#]|category|tag|page|author|feed|search/i)) { movieUrl = u; break; }
+            if (!u.match(/[?#]|category|tag|page|author|feed|search|image|favicon|manifest|js|css/i)) {
+              movieUrl = u.startsWith("http") ? u : `${khBase}${u}`;
+              break;
+            }
           }
           if (!movieUrl) {
-            console.log("[4khdhub] no movie URL in rendered search:", q.slice(0, 40));
-            console.log("[4khdhub] rendered HTML len:", searchRendered.length, "urls:", bxSearchData.urls?.length);
+            console.log("[4khdhub] no movie URL in rendered search:", q.slice(0, 40), "html_len:", searchRendered.length);
             return;
           }
           console.log(`[4khdhub] movie URL: ${movieUrl}`);
@@ -4673,9 +4681,14 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             return;
           }
 
-          // Step 4: fallback — تحليل HTML للـ embed links وتشغيل browser-extract عليها
-          const movieRendered: string = bxMovieData.html || "";
-          const embedRe = /href=["'](https?:\/\/(?:hubcloud|gdmirrorbot|streamwish|filelions|vidhide)[^"']+)["']/gi;
+          // Step 4: fallback — browser-html لصفحة الفيلم + استخراج embed links
+          const bhMovieParams = new URLSearchParams({ url: movieUrl, ref: searchUrl, wait: "6000" });
+          const bhMovieR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-html?${bhMovieParams}`, {
+            signal: AbortSignal.timeout(35_000),
+          });
+          const bhMovieData: any = bhMovieR.ok ? await bhMovieR.json() : {};
+          const movieRendered: string = bhMovieData.html || "";
+          const embedRe = /href=["'](https?:\/\/(?:hubcloud|gdmirrorbot|streamwish|filelions|vidhide)[^"']+)["'']/gi;
           const embedLinks: string[] = [];
           let em: RegExpExecArray | null;
           while ((em = embedRe.exec(movieRendered)) !== null) embedLinks.push(em[1]);
@@ -4700,7 +4713,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               }
             }
           }
-          console.log("[4khdhub] no streams found, HTML len:", movieRendered.length);
+          console.log("[4khdhub] no streams found, html_len:", movieRendered.length);
         } catch (e: any) { console.warn("[fourkhdhub_anim]", e?.message); }
       }),
 
