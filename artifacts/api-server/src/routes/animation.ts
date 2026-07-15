@@ -1973,8 +1973,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   //    لإعادة التفعيل: احذف/عدّل ANIM_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   // moviz_time_anim أُضيف للسماح به 2026-07-13 (مصدر جديد بطلب المستخدم)
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs (2026-07-15)
-  // videasy3: مُخفى 2026-07-15 — ironbubble.site CDN يحجب كل datacenter IPs (VPS+Hopx+Replit)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim"]);
+  // videasy3: أُضيف 2026-07-15 (نُقل من قسم الأنمي بطلب المستخدم؛ backend أُصلح أيضاً)
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -3065,7 +3065,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
           const sources = await getVideasyAnimationSources(String(tmdbId), type === "movie" ? "movie" : "tv", season, epNum, title);
           for (const src of sources) {
-            sendSource(src.url, src.label, src.url, wrapHls(src.url, "https://www.vidking.net/"));
+            sendSource(src.url, src.label, src.url, src.url); // rawUrl: ironbubble CDN blocks VPS datacenter IP
           }
         } catch { /* silent */ }
       }),

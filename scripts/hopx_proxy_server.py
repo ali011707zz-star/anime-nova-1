@@ -300,6 +300,130 @@ async def _async_browser_extract(
     return result
 
 
+
+# ── Network capture (RE tool) ────────────────────────────────────────────────
+
+async def _async_network_capture(url: str, referer: str, wait_ms: int = 10000) -> dict:
+    from playwright.async_api import async_playwright
+    import re as _re
+
+    VIDEO_EXT = (".m3u8", ".mp4", ".ts", ".mkv", ".webm")
+    API_HINTS = ("api", "source", "stream", "proxy", "hls", "token",
+                 "embed", "playlist", "manifest", "cdn", "media")
+
+    reqs: list[dict] = []
+    resps: list[dict] = []
+    video_urls: list[str] = []
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                  "--disable-web-security"],
+        )
+        ctx = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/136.0.0.0 Safari/537.36"
+            ),
+            extra_http_headers={"Referer": referer} if referer else {},
+            ignore_https_errors=True,
+        )
+        page = await ctx.new_page()
+
+        def _interesting(u: str) -> bool:
+            u_lo = u.lower()
+            if any(u_lo.endswith(e) or (e + "?") in u_lo for e in VIDEO_EXT):
+                return True
+            if any(h in u_lo for h in API_HINTS):
+                # skip static assets
+                if any(u_lo.endswith(s) for s in (".js", ".css", ".png", ".jpg", ".svg", ".ico", ".woff")):
+                    return False
+                return True
+            return False
+
+        async def on_request(req):
+            u = req.url
+            if _interesting(u):
+                reqs.append({"method": req.method, "url": u,
+                             "headers": dict(req.headers)})
+
+        async def on_response(resp):
+            u = resp.url
+            u_lo = u.lower()
+            if any(u_lo.endswith(e) or (e + "?") in u_lo for e in VIDEO_EXT):
+                video_urls.append(u)
+            if _interesting(u):
+                try:
+                    body = await resp.body()
+                    txt = body.decode("utf-8", errors="ignore")
+                    # Also look for m3u8 URLs in response body
+                    found = _re.findall(r"https?://[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*", txt)
+                    found += _re.findall(r"https?://[^\s"'<>\\]+\.mp4[^\s"'<>\\]*", txt)
+                    video_urls.extend(found)
+                    resps.append({"status": resp.status, "url": u,
+                                  "body": txt[:400]})
+                except Exception:
+                    resps.append({"status": resp.status, "url": u})
+
+        page.on("request",  on_request)
+        page.on("response", on_response)
+
+        try:
+            await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+        except Exception:
+            pass
+        await asyncio.sleep(wait_ms / 1000)
+
+        # Also check iframes
+        try:
+            iframes = await page.evaluate("""() =>
+                Array.from(document.querySelectorAll('iframe[src]'))
+                    .map(f => f.src).filter(s => s.startsWith('http'))
+            """)
+            for iurl in (iframes or [])[:3]:
+                ip = await ctx.new_page()
+                ip.on("request",  on_request)
+                ip.on("response", on_response)
+                try:
+                    await ip.goto(iurl, timeout=15000, wait_until="domcontentloaded")
+                    await asyncio.sleep(5)
+                except Exception:
+                    pass
+                finally:
+                    await ip.close()
+        except Exception:
+            pass
+
+        await browser.close()
+
+    # deduplicate video URLs
+    seen: set[str] = set()
+    unique_vids = []
+    for v in video_urls:
+        if v not in seen:
+            seen.add(v)
+            unique_vids.append(v)
+
+    return {
+        "ok": True,
+        "video_urls": unique_vids,
+        "requests": reqs[:60],
+        "responses": resps[:60],
+    }
+
+
+def network_capture_sync(url: str, referer: str, wait_ms: int) -> dict:
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_async_network_capture(url, referer, wait_ms))
+        finally:
+            loop.close()
+    except Exception as e:
+        return {"ok": False, "video_urls": [], "requests": [], "responses": [], "error": str(e)}
+
 def browser_extract_sync(
     url: str, referer: str, timeout_ms: int, debug: bool = False
 ) -> dict:
@@ -507,6 +631,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if not url:
                 self._send_json(400, {"ok": False, "error": "no url"}); return
             self._send_json(200, get_html_sync(url, ref, wait_ms))
+            return
+
+
+        # ── /network-capture ─────────────────────────────────────────────────
+        if parsed.path == "/network-capture":
+            if not _check_playwright():
+                self._send_json(503, {"ok": False, "error": "playwright not available"})
+                return
+            params = self._parse_qs()
+            url = unquote(params.get("url", ""))
+            ref = params.get("ref", "")
+            wait_ms = int(params.get("wait", "10000"))
+            if not url:
+                self._send_json(400, {"ok": False, "error": "no url"}); return
+            self._send_json(200, network_capture_sync(url, ref, wait_ms))
             return
 
         self._send_json(404, {"error": "not found"})
