@@ -173,6 +173,9 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
+  { site: "videasy_anim", name: "Videasy",         desc: "FHD · ياباني مترجم · HLS", tag: "VE", audioLang: "en" },
+  { site: "xpass_anim",  name: "XPass",          desc: "FHD · TMDB مباشر · HLS",  tag: "XP", audioLang: "en" },
+  { site: "vaplayer_anim",name: "VaPlayer",       desc: "FHD · TMDB مباشر · HLS",  tag: "VP", audioLang: "en" },
   // witanime (WI) / faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
 ];
 

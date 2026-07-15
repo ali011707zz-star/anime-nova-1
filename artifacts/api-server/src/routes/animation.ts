@@ -1834,7 +1834,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   //    Dulo (dulo_anim) و StarCima (starcima) — السكرابر لا يمر بأي مصدر آخر إطلاقاً.
   //    لإعادة التفعيل: احذف/عدّل ANIM_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   // moviz_time_anim أُضيف للسماح به 2026-07-13 (مصدر جديد بطلب المستخدم)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam"]);
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "xpass_anim", "vaplayer_anim"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -4157,25 +4157,34 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 `${XBASE}/meg/tv/${tmdbId}/${season}/${epNum}/2/playlist.json`,
               ];
 
-          let sent = 0;
-          const plResults = await Promise.allSettled(
-            megUrls.map(async (pUrl) => {
+          // Helper: direct أولاً ثم Hopx fallback
+          async function fetchXpassAnim(pUrl: string): Promise<any[] | null> {
+            try {
               const pr = await fetch(pUrl, {
                 headers: { "User-Agent": UA, "Referer": XREF },
                 signal: AbortSignal.timeout(8_000),
               });
-              if (!pr.ok) return null;
-              const pj: any = await pr.json();
-              return pj?.playlist?.[0]?.sources ?? [];
-            })
-          );
+              if (pr.ok) {
+                const pj: any = await pr.json();
+                const srcs: any[] = pj?.playlist?.[0]?.sources ?? [];
+                if (srcs.length) return srcs;
+              }
+            } catch { /* fallthrough */ }
+            const html = await hopxProxyGet(pUrl, XREF, 12_000);
+            if (!html) return null;
+            try { return JSON.parse(html)?.playlist?.[0]?.sources ?? null; } catch { return null; }
+          }
+
+          let sent = 0;
+          const plResults = await Promise.allSettled(megUrls.map(fetchXpassAnim));
           for (const res of plResults) {
             if (res.status !== "fulfilled" || !res.value) continue;
             for (const s of (res.value as any[])) {
               if (typeof s?.file !== "string" || !s.file.startsWith("http")) continue;
               const isHls = s.file.includes(".m3u8") || s.type === "hls";
               const proxyUrl = isHls ? wrapHls(s.file, XREF) : s.file;
-              sendSource(s.file, `XPass · MEG`, s.file, proxyUrl);
+              // corsOk: mobile plays directUrl with residential IP (ps1.1x2.space blocks VPS/CF IPs)
+              sendSource(s.file, `XPass · FHD`, s.file, proxyUrl, { corsOk: true, headers: { Referer: XREF } });
               sent++;
               if (sent >= 3) break;
             }
@@ -4187,6 +4196,40 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         }
 
       }),
+
+      // ── VaPlayer (streamdata.vaplayer.ru) — TMDB-native, direct HLS ────────────
+      // TV:    /api.php?tmdb={id}&type=tv&season={s}&episode={e}
+      // Movie: /api.php?tmdb={id}&type=movie
+      // Returns: { status_code: "200", data: { stream_urls: ["https://...master.m3u8"] } }
+      scrapeAnimCached("vaplayer_anim", async () => {
+        if (!tmdbId) return;
+        try {
+          const VABASE = "https://streamdata.vaplayer.ru";
+          const p = new URLSearchParams({ tmdb: String(tmdbId), type });
+          if (type !== "movie") { p.set("season", String(season)); p.set("episode", String(epNum)); }
+          const apiR = await fetch(`${VABASE}/api.php?${p}`, {
+            headers: { "User-Agent": UA, "Referer": "https://nextgencloudfabric.com/" },
+            signal: AbortSignal.timeout(14_000),
+          });
+          if (!apiR.ok) { console.warn(`[VaPlayer-anim] API ${apiR.status}`); return; }
+          const apiData: any = await apiR.json();
+          if (apiData?.status_code !== "200") { console.warn("[VaPlayer-anim] status", apiData?.status_code); return; }
+          const urls: string[] = apiData?.data?.stream_urls ?? [];
+          let sent = 0;
+          for (const fileUrl of urls.slice(0, 3)) {
+            if (!fileUrl || !fileUrl.startsWith("http")) continue;
+            const isHls = fileUrl.includes(".m3u8");
+            const proxyUrl = isHls ? wrapHls(fileUrl, "https://nextgencloudfabric.com/") : fileUrl;
+            sendSource(fileUrl, "VaPlayer · FHD", fileUrl, proxyUrl, { corsOk: true });
+            sent++;
+            if (sent >= 2) break;
+          }
+          console.log(`[VaPlayer-anim] tmdb:${tmdbId} ${type} → ${sent} sources`);
+        } catch (e: any) {
+          console.warn("[VaPlayer-anim]", e?.message);
+        }
+      }),
+
       // -- vixsrc.to -- TMDB-native movie+TV, direct HLS
       scrapeAnimCached("vixsrc_anim", async () => {
         if (!tmdbId) return;

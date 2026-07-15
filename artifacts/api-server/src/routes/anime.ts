@@ -10023,7 +10023,7 @@ async function getXyraAnimeSources(
 // ════════════════════════════════════════════════════════════════════
 const XPASS_BASE = "https://play.xpass.top";
 const _xpassCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
-const XPASS_TTL = 4 * 3_600_000;
+const XPASS_TTL = 8 * 60_000; // 8 دقائق — الـ signed token على ps1/vip.1x2.space ينتهي بسرعة
 
 async function getXpassAnimeSources(
   title: string, english: string | null, ep: number, anilistId?: number, isMovie = false,
@@ -10039,45 +10039,76 @@ async function getXpassAnimeSources(
     // MEG CDN: direct predictable URL, no embed page needed (bypasses bot detection)
     const XBASE = XPASS_BASE;
     const XREF  = `${XBASE}/`;
-    const megUrls = isMovie
+    // جلب VIP token من /data endpoint (مع MEG كاحتياطي بدون token)
+    let vipPath: string | null = null;
+    try {
+      const dataPath = isMovie ? `/data/movie/${tmdbId}` : `/data/tv/${tmdbId}/1/${ep}`;
+      const dataR = await fetch(`${XBASE}${dataPath}`, {
+        headers: { "User-Agent": BROWSER_UA, "Referer": XREF },
+        signal: AbortSignal.timeout(6_000),
+      });
+      if (dataR.ok) {
+        const dataArr: any[] = await dataR.json();
+        const vipEntry = dataArr.find((e: any) => e.name?.includes("VIP"));
+        if (vipEntry?.url) vipPath = vipEntry.url;
+      }
+    } catch { /* fallthrough to MEG only */ }
+
+    const megUrls: string[] = isMovie
       ? [
+          ...(vipPath ? [`${XBASE}${vipPath}`] : []),
           `${XBASE}/meg/movie/${tmdbId}/1/playlist.json`,
           `${XBASE}/meg/movie/${tmdbId}/2/playlist.json`,
         ]
       : [
+          ...(vipPath ? [`${XBASE}${vipPath}`] : []),
           `${XBASE}/meg/tv/${tmdbId}/1/${ep}/1/playlist.json`,
           `${XBASE}/meg/tv/${tmdbId}/1/${ep}/2/playlist.json`,
         ];
 
-    const results = await Promise.allSettled(
-      megUrls.map(async (pUrl) => {
+    // Helper: جلب playlist.json — direct أولاً ثم Hopx fallback
+    async function fetchXpassPlaylist(pUrl: string): Promise<any[] | null> {
+      // محاولة مباشرة
+      try {
         const pr = await fetch(pUrl, {
           headers: { "User-Agent": BROWSER_UA, "Referer": XREF },
           signal: AbortSignal.timeout(8_000),
         });
-        if (!pr.ok) return null;
-        const pj: any = await pr.json();
-        const srcs: any[] = pj?.playlist?.[0]?.sources ?? [];
-        const slot = pUrl.includes("/meg/") ? "MEG" : "VIP";
-        return { slot, srcs };
-      })
-    );
+        if (pr.ok) {
+          const pj: any = await pr.json();
+          const srcs: any[] = pj?.playlist?.[0]?.sources ?? [];
+          if (srcs.length) return srcs;
+        }
+      } catch { /* fallthrough */ }
+      // fallback: Hopx proxy (IP سكني يتجاوز حجب CDN)
+      const html = await hopxProxyGet(pUrl, XREF, 12_000);
+      if (!html) return null;
+      try {
+        const pj: any = JSON.parse(html);
+        return pj?.playlist?.[0]?.sources ?? null;
+      } catch { return null; }
+    }
+
+    const results = await Promise.allSettled(megUrls.map(fetchXpassPlaylist));
 
     for (const res of results) {
       if (res.status !== "fulfilled" || !res.value) continue;
-      const { slot, srcs } = res.value;
+      const srcs = res.value;
       for (const s of srcs) {
         if (typeof s?.file !== "string" || !s.file.startsWith("http")) continue;
         const isHls = s.file.includes(".m3u8") || s.type === "hls";
+        const proxyUrl = isHls ? `/api/anime/hls-proxy?url=${encodeURIComponent(s.file)}&ref=${encodeURIComponent(XREF)}` : undefined;
         out.push({
-          name:        `Xpass · ${slot}`,
+          name:        "XPass · FHD",
           url:         s.file,
-          quality:     "HD",
-          qualityRank: 11,
+          quality:     "FHD",
+          qualityRank: 12,
           site:        "xpass_anim",
-          // ps1.1x2.space blocks VPS/CF IPs — let mobile fetch directly (residential IP)
+          directUrl:   s.file,
           directType:  isHls ? "hls" : "mp4",
+          ...(proxyUrl ? { proxyUrl } : {}),
           headers:     { Referer: XREF },
+          // corsOk: mobile plays directUrl with residential IP (ps1/vip.1x2.space blocks VPS datacenter IPs)
           corsOk:      true,
         });
         if (out.length >= 3) break;
@@ -10088,6 +10119,62 @@ async function getXpassAnimeSources(
     if (out.length) _xpassCache.set(ck, { sources: out, ts: Date.now() });
   } catch (e: any) {
     console.warn("[Xpass]", e?.message);
+  }
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  VaPlayer (streamdata.vaplayer.ru) — TMDB-native, direct HLS
+//  TV:    /api.php?tmdb={id}&type=tv&season=1&episode={e}
+//  Movie: /api.php?tmdb={id}&type=movie
+//  Returns: { status_code: "200", data: { stream_urls: ["https://...master.m3u8"] } }
+//  CDN:   scalableimpactgroup.site / futurefocuse... (variable per request)
+// ════════════════════════════════════════════════════════════════════
+const VAPLAYER_BASE = "https://streamdata.vaplayer.ru";
+const _vaplayerCache = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const VAPLAYER_TTL = 4 * 3_600_000;
+
+async function getVaplayerAnimeSources(
+  title: string, english: string | null, ep: number, anilistId?: number, isMovie = false,
+): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+  const ck = `vaplayer:${tmdbId}:${ep}:${isMovie}`;
+  const hit = _vaplayerCache.get(ck);
+  if (hit && Date.now() - hit.ts < VAPLAYER_TTL) return hit.sources;
+
+  const out: UnifiedSource[] = [];
+  try {
+    const params = new URLSearchParams({ tmdb: String(tmdbId), type: isMovie ? "movie" : "tv" });
+    if (!isMovie) { params.set("season", "1"); params.set("episode", String(ep)); }
+    const apiUrl = `${VAPLAYER_BASE}/api.php?${params}`;
+    const r = await fetch(apiUrl, {
+      headers: { "User-Agent": BROWSER_UA, "Referer": "https://nextgencloudfabric.com/" },
+      signal: AbortSignal.timeout(14_000),
+    });
+    if (!r.ok) { console.warn(`[VaPlayer] API ${r.status}`); return []; }
+    const data: any = await r.json();
+    if (data?.status_code !== "200") { console.warn("[VaPlayer] status", data?.status_code); return []; }
+    const urls: string[] = data?.data?.stream_urls ?? [];
+    for (const fileUrl of urls.slice(0, 3)) {
+      if (!fileUrl || !fileUrl.startsWith("http")) continue;
+      const isHls = fileUrl.includes(".m3u8");
+      out.push({
+        name:        "VaPlayer",
+        url:         fileUrl,
+        quality:     "FHD",
+        qualityRank: 12,
+        site:        "vaplayer_anim",
+        directUrl:   fileUrl,
+        directType:  isHls ? "hls" : "mp4",
+        corsOk:      true,
+      });
+      if (out.length >= 2) break;
+    }
+    console.log(`[VaPlayer] tmdb:${tmdbId} ep${ep} → ${out.length} sources`);
+    if (out.length) _vaplayerCache.set(ck, { sources: out, ts: Date.now() });
+  } catch (e: any) {
+    console.warn("[VaPlayer]", e?.message);
   }
   return out;
 }
@@ -11011,7 +11098,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
-      scrapeCached("xpass_anim", () => getXpassAnimeSources(title, english, ep, anilistId), false, 20000),
+      scrapeCached("xpass_anim",   () => getXpassAnimeSources(title, english, ep, anilistId),   false, 20000),
+      scrapeCached("vaplayer_anim",() => getVaplayerAnimeSources(title, english, ep, anilistId), false, 18000),
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
@@ -11058,6 +11146,8 @@ router.get("/anime/fetch-source", async (req, res) => {
   //    لإعادة التفعيل: احذف/عدّل ANIME_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
+    // TMDB-native embed sources (xpass + vaplayer) — no Arabic scraping, pure TMDB lookup
+    "xpass_anim", "vaplayer_anim", "videasy_anim",
     // witanime/faselhd_db/moviz_time: أُزيلت من القائمة — معطّلة بطلب المستخدم 2026-07-14
   ]);
   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
@@ -11180,7 +11270,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
-      case "xpass_anim":   (await race(getXpassAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
+      case "xpass_anim":   (await race(getXpassAnimeSources(title, english, ep, anilistId),    20_000, [])).forEach(collectSrc); break;
+      case "vaplayer_anim":(await race(getVaplayerAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
