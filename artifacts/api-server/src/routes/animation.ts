@@ -947,6 +947,144 @@ function wrapMp4(url: string, ref: string): string {
   return `/api/anime/video-proxy?url=${encryptParam(url)}&ref=${encryptParam(ref)}`;
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  Videasy / Vidking "STREAMCRYPTO" engine — same algorithm as anime.ts's
+//  getVideasyAnimeSources, duplicated here so animation.ts (movies/TV
+//  cartoons) doesn't depend on the anime route module.
+//  [2026-07-15] domain moved again: api.wingsdatabase.com → api.speedracelight.com
+//  (re-discovered via vidking.net's live VideoPlayer-*.js chunk).
+// ════════════════════════════════════════════════════════════════════
+const WINGS_BASE_ANIM = "https://api.speedracelight.com";
+const WINGS_SERVERS_ANIM: Record<string, string> = {
+  Hydrogen: "cdn/sources-with-title",
+  Titanium: "tejo/sources-with-title",
+  Oxygen:   "neon2/sources-with-title",
+  Lithium:  "downloader2/sources-with-title",
+  Helium:   "1movies/sources-with-title",
+};
+const WINGS_HDRS_ANIM = {
+  "User-Agent": UA,
+  "Referer": "https://www.vidking.net/",
+  "Origin": "https://www.vidking.net",
+};
+const WC_Hl_A = [1116352408,1899447441,3049323471,3921009573,961987163,1508970993,2453635748,2870763221,3624381080,310598401,607225278,1426881987,1925078388,2162078206,2614888103,3248222580];
+const WC_f0_A = 1732584193, WC_Js_A = 61, WC_Sf_A = 8, WC_ms_A = 2654435769, WC_Ys_A = [109,118,109,49]; // "mvm1"
+const wcBf_A = (l: number) => (l * (l + 1) & 1) === 0;
+const wcIf_A = (l: number) => (l * (l + 1) & 1) === 1;
+function wcUi_A(l: number): number { l >>>= 0; l ^= l >>> 16; l = Math.imul(l, 2246822507) >>> 0; l ^= l >>> 13; l = Math.imul(l, 3266489909) >>> 0; l ^= l >>> 16; return l >>> 0; }
+function wcPs_A(l: number, o: number): number { l >>>= 0; o &= 31; return o === 0 ? l >>> 0 : (l << o | l >>> 32 - o) >>> 0; }
+function wcAf_A(l: string): number { let o = WC_f0_A >>> 0; for (let e = 0; e < l.length; e++) o = wcPs_A((o ^ Math.imul(l.charCodeAt(e), WC_Hl_A[e & 15])) >>> 0, 5); return wcUi_A(o); }
+function wcWf_A(l: string): number[] { const o = new Array(256); for (let i = 0; i < 256; i++) o[i] = i; let e = 0; for (let i = 0; i < 256; i++) { e = e + o[i] + l.charCodeAt(i % l.length) & 255; const r = o[i]; o[i] = o[e]; o[e] = r; } return o; }
+function wcVf_A(l: string): number { let o = 2166136261; for (let e = 0; e < l.length; e++) o = Math.imul(o ^ l.charCodeAt(e), 16777619) >>> 0; return wcUi_A(o); }
+function wcNf_A(l: number, o: number, e: number): number { return ((l ^ o) >>> 0 | (l & o & e) >>> 0) >>> 0; }
+function wcRf_A(l: string, o: number): { S: number[]; acc: number } {
+  if (wcIf_A(l.length)) return { S: wcWf_A(l), acc: wcAf_A(l) };
+  const e = new Array(WC_Js_A);
+  let i = wcUi_A(wcVf_A(l) ^ wcUi_A(o >>> 0 ^ WC_ms_A)) >>> 0;
+  for (let r = 0; r < WC_Sf_A; r++) {
+    if (wcBf_A(r)) {
+      const n = i % WC_Js_A;
+      i = wcPs_A(i + WC_ms_A >>> 0, 7 + (r & 7));
+      e[n] = (i ^ wcUi_A(i)) >>> 0;
+      i = wcUi_A(i + n >>> 0);
+    } else {
+      e[r] = WC_Hl_A[r & 15];
+    }
+  }
+  return { S: e, acc: wcUi_A(i ^ 2779096485) >>> 0 };
+}
+function wcCf_A(l: { S: number[]; acc: number }, o: number): number {
+  const e = l.S; let i = l.acc;
+  const r = i % WC_Js_A;
+  const n = 0 - +(r in e);
+  const u = e[r] >>> 0;
+  const d = Math.imul(WC_ms_A, o + 1) >>> 0;
+  let g = wcNf_A(i, (u ^ d) >>> 0, n);
+  g = (wcPs_A(g + i >>> 0, r & 31) ^ wcPs_A(i, Math.imul(r, 7) & 31)) >>> 0;
+  i = wcUi_A(g + WC_ms_A >>> 0);
+  e[r] = i >>> 0;
+  l.acc = i;
+  return i >>> 0;
+}
+function wcXf_A(l: string, o: number, e: number): Buffer {
+  const i = wcRf_A(l, o);
+  const r = Buffer.alloc(e);
+  let n = 0;
+  for (let u = 0; u < e;) {
+    const d = wcCf_A(i, n++);
+    r[u++] = d & 255;
+    if (u < e) r[u++] = (d >>> 8) & 255;
+    if (u < e) r[u++] = (d >>> 16) & 255;
+    if (u < e) r[u++] = (d >>> 24) & 255;
+  }
+  return r;
+}
+function wcDf_A(l: string): Buffer {
+  const o = l.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(l.length / 4) * 4, "=");
+  return Buffer.from(o, "base64");
+}
+function wcDecrypt_A(cipherB64Url: string, seed: string, mediaIdNum: number): string {
+  const ct = wcDf_A(cipherB64Url);
+  const ks = wcXf_A(seed, mediaIdNum, ct.length);
+  const out = Buffer.alloc(ct.length);
+  for (let n = 0; n < ct.length; n++) out[n] = ct[n] ^ ks[n];
+  for (let n = 0; n < WC_Ys_A.length; n++) if (out[n] !== WC_Ys_A[n]) throw new Error("bad seed or tampered payload");
+  return out.subarray(WC_Ys_A.length).toString("utf8");
+}
+const _wingsSeedCacheAnim = new Map<string, { seed: string; expiresAt: number }>();
+async function wingsFetchSeedAnim(mediaId: string | number): Promise<string> {
+  const key = `${WINGS_BASE_ANIM}|${mediaId}`;
+  const hit = _wingsSeedCacheAnim.get(key);
+  if (hit && hit.expiresAt - 5000 > Date.now()) return hit.seed;
+  const r = await fetch(`${WINGS_BASE_ANIM}/seed?mediaId=${encodeURIComponent(String(mediaId))}`, { headers: WINGS_HDRS_ANIM, signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error(`seed request failed: ${r.status}`);
+  const d = await r.json() as { seed: string; ttlMs?: number };
+  _wingsSeedCacheAnim.set(key, { seed: d.seed, expiresAt: Date.now() + (d.ttlMs ?? 30000) });
+  return d.seed;
+}
+
+async function getVideasyAnimationSources(
+  tmdbId: string,
+  mediaType: "movie" | "tv",
+  season: number,
+  epNum: number,
+  title: string,
+): Promise<Array<{ url: string; label: string }>> {
+  const out: Array<{ url: string; label: string }> = [];
+  const tmdbIdNum = parseInt(tmdbId, 10);
+  if (!tmdbIdNum) return out;
+  await Promise.allSettled(Object.entries(WINGS_SERVERS_ANIM).map(async ([serverName, endpoint]) => {
+    try {
+      const seed = await wingsFetchSeedAnim(tmdbId);
+      const url = new URL(`${WINGS_BASE_ANIM}/${endpoint}`);
+      url.searchParams.set("title", title || "");
+      url.searchParams.set("mediaType", mediaType);
+      url.searchParams.set("year", "");
+      url.searchParams.set("episodeId", mediaType === "movie" ? "1" : String(epNum));
+      url.searchParams.set("seasonId", mediaType === "movie" ? "1" : String(season));
+      url.searchParams.set("tmdbId", tmdbId);
+      url.searchParams.set("imdbId", "");
+      url.searchParams.set("enc", "2");
+      url.searchParams.set("seed", seed);
+      const r = await fetch(url, { headers: { ...WINGS_HDRS_ANIM, "Cache-Control": "no-cache" }, signal: AbortSignal.timeout(12_000) });
+      if (!r.ok) return;
+      const ciphertext = await r.text();
+      if (!ciphertext || ciphertext.length < 10) return;
+      const decrypted = wcDecrypt_A(ciphertext, seed, tmdbIdNum);
+      const data = JSON.parse(decrypted) as { sources?: Array<{ url?: string; type?: string; quality?: string }> };
+      if (!data.sources?.length) return;
+      for (const src of data.sources) {
+        if (!src?.url) continue;
+        const isDash = src.type === "dash" || src.url.toLowerCase().includes(".mpd");
+        if (isDash) continue;
+        const q = src.quality || "HD";
+        out.push({ url: src.url, label: `Videasy · ${serverName} · ${q}` });
+      }
+    } catch { /* silent per server */ }
+  }));
+  return out;
+}
+
 // Hexa cooldown — enc-dec.app returns "Next retry: N minutes" on 500; don't hammer it
 let _hexaFailUntil = 0;
 
@@ -1835,7 +1973,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   //    لإعادة التفعيل: احذف/عدّل ANIM_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   // moviz_time_anim أُضيف للسماح به 2026-07-13 (مصدر جديد بطلب المستخدم)
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs (2026-07-15)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim"]);
+  // videasy3: أُضيف 2026-07-15 (نُقل من قسم الأنمي بطلب المستخدم؛ backend أُصلح أيضاً)
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -2915,85 +3054,19 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       // ── EzVidAPI — DISABLED (api.ezvidapi.com returns Bad Gateway 502 as of 2026-07) ─
       Promise.resolve(),
 
-      // ── Videasy/VidKing (api.wingsdatabase.com) — TMDB-native HLS multi-quality ─────
-      // Backend: api.wingsdatabase.com (moved from api.videasy.to — discovered via vidking.net)
-      // Cipher: custom PRNG-XOR "STREAMCRYPTO", reimplemented natively (no enc-dec.app)
+      // ── Videasy/VidKing (api.speedracelight.com) — TMDB-native HLS multi-quality ─────
+      // Backend moved 2026-07-15: api.wingsdatabase.com → api.speedracelight.com
+      // (re-discovered by inspecting vidking.net's live VideoPlayer-*.js chunk).
+      // Same "STREAMCRYPTO" cipher as anime.ts's getVideasyAnimeSources — reimplemented
+      // natively below (wc* helpers), no enc-dec.app dependency.
       scrapeAnimCached("videasy3", async () => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
-          const WBASE = "https://api.wingsdatabase.com";
-          const WHDRS = {
-            "User-Agent": UA,
-            "Accept": "application/json, */*; q=0.01",
-            "Referer": "https://www.vidking.net/",
-            "Origin": "https://www.vidking.net",
-          };
-
-          // Step 1: seed → mediaId from TMDB id
-          const seedR = await fetch(
-            `${WBASE}/seed?mediaId=${encodeURIComponent(String(tmdbId))}`,
-            { headers: WHDRS, signal: AbortSignal.timeout(8_000) }
-          );
-          if (!seedR.ok) return;
-          const seedJ: any = await seedR.json();
-          const mediaId = seedJ?.mediaId ?? seedJ?.id ?? tmdbId;
-
-          // Step 2: fetch encrypted sources (Hydrogen + Lithium servers)
-          const endpoints = type === "movie"
-            ? [`movie/${mediaId}`]
-            : [`tv/${mediaId}/${season}/${epNum}`];
-          const servers = ["hydrogen", "lithium"];
-
-          await Promise.allSettled(servers.flatMap(srv =>
-            endpoints.map(async (ep2) => {
-              try {
-                const url = new URL(`${WBASE}/${ep2}`);
-                url.searchParams.set("server", srv);
-                const r = await fetch(url, {
-                  headers: { ...WHDRS, "Cache-Control": "no-cache" },
-                  signal: AbortSignal.timeout(12_000),
-                });
-                if (!r.ok) return;
-                const enc: any = await r.json();
-                if (!enc?.sources) return;
-
-                // Step 3: PRNG-XOR STREAMCRYPTO decrypt (native, no enc-dec.app)
-                const decryptStreamcrypto = (enc2: string, key: string): string => {
-                  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-                  let seed = 0;
-                  for (let i = 0; i < key.length; i++) seed = (seed * 31 + key.charCodeAt(i)) >>> 0;
-                  const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-                  const keyStream = Array.from({ length: 256 }, () => Math.floor(rng() * 256));
-                  const decoded = atob ? atob(enc2) : Buffer.from(enc2, "base64").toString("binary");
-                  let out2 = "";
-                  for (let i = 0; i < decoded.length; i++) {
-                    out2 += String.fromCharCode(decoded.charCodeAt(i) ^ keyStream[i % keyStream.length]);
-                  }
-                  return out2;
-                };
-                const atob = (s: string) => Buffer.from(s, "base64").toString("binary");
-
-                let sources: any[] = [];
-                if (typeof enc.sources === "string") {
-                  try {
-                    const plain = decryptStreamcrypto(enc.sources, String(mediaId));
-                    sources = JSON.parse(plain);
-                  } catch { return; }
-                } else if (Array.isArray(enc.sources)) {
-                  sources = enc.sources;
-                }
-
-                for (const src of sources) {
-                  if (!src?.url) continue;
-                  const quality = src.quality || "HD";
-                  const label = `Videasy · ${srv} · ${quality}`;
-                  const proxied = wrapHls(src.url, "https://www.vidking.net/");
-                  sendSource(src.url, label, src.url, proxied);
-                }
-              } catch { /* silent */ }
-            })
-          ));
+          const sources = await getVideasyAnimationSources(String(tmdbId), type === "movie" ? "movie" : "tv", season, epNum, title);
+          for (const src of sources) {
+            sendSource(src.url, src.label, src.url, wrapHls(src.url, "https://www.vidking.net/"));
+          }
         } catch { /* silent */ }
       }),
 

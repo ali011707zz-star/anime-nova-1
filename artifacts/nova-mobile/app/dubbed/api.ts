@@ -42,8 +42,6 @@ export const DEFAULT_CONFIG: RemoteConfig = {
     // مصادر سريعة (ياباني / إنجليزي)
     vidlink_anim: true, anineko: true, anikoto: true,
     vidfast: true, anikototv: true, animekai: true,
-    // videasy_anim معطّل مؤقتاً: API endpoint تغيّر
-    videasy_anim: false,
     // مصادر عربية
     shahiid: true, animelek: true, animedar: true,
     okanime: true, ristoanime: true, animeify: true,
