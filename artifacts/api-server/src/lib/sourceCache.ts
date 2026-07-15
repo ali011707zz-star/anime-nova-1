@@ -41,8 +41,8 @@ export const SITE_TTL: Record<string, number> = {
   videasy:        2 * 3_600_000,
   videasy3:       2 * 3_600_000,
   videasy_anim:   2 * 3_600_000,
-  vidlink_encdec: 2 * 3_600_000,
-  vidlink_anim:   2 * 3_600_000,
+  vidlink_encdec: 45 * 60_000,  // stormvv.vodvidl.site URLs expire <1h → 45min TTL
+  vidlink_anim:   45 * 60_000,  // stormvv.vodvidl.site URLs expire <1h → 45min TTL
   vyla_anim:      4 * 3_600_000,
   topcinemaa:     4 * 3_600_000,
   animeday_anim:  4 * 3_600_000,

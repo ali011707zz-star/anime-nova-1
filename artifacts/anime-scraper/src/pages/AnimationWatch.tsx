@@ -1077,6 +1077,7 @@ export default function AnimationWatch() {
           key={`anim-${selSrc.url}`}
           src={url}
           isHls={isHls}
+          hlsHeaders={selSrc.headers}
           title={displayTitle}
           ep={type === "tv" ? ep : undefined}
           totalEps={episodes.length || undefined}
