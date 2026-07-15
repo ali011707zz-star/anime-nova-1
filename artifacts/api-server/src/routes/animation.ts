@@ -4609,17 +4609,35 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
             console.log(`[multimovies] server ${num} embed: ${embedUrl.slice(0, 80)}`);
 
-            // browser-extract — يلتقط video URLs من network requests
-            const bxParams = new URLSearchParams({ url: embedUrl, ref: movieUrl, timeout: "22000" });
+            // استخراج الـ video URLs:
+            // gdmirrorbot يُحمّل iframe فرعي عبر JS — browser-extract عليه مباشرة بطيء (>35s).
+            // الحل: browser-html(wait=5s) لتصيير الصفحة ← parse iframe.src ← browser-extract على المشغّل الفعلي
+            let targetUrl = embedUrl;
+            if (embedUrl.includes("gdmirrorbot")) {
+              const bhP = new URLSearchParams({ url: embedUrl, ref: movieUrl, wait: "5000" });
+              const bhR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-html?${bhP}`, {
+                signal: AbortSignal.timeout(20_000),
+              });
+              if (bhR.ok) {
+                const bhD: any = await bhR.json();
+                const iframeM = (bhD.html || "").match(/<iframe[^>]+src=["']([^"']+)["']/i);
+                if (iframeM?.[1]?.startsWith("http")) {
+                  targetUrl = iframeM[1];
+                  console.log(`[multimovies] gdmirrorbot resolved → ${targetUrl.slice(0, 80)}`);
+                }
+              }
+            }
+
+            const bxParams = new URLSearchParams({ url: targetUrl, ref: embedUrl, timeout: "18000" });
             const bxR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-extract?${bxParams}`, {
-              signal: AbortSignal.timeout(35_000),
+              signal: AbortSignal.timeout(28_000),
             });
             if (!bxR.ok) continue;
             const bxData: any = await bxR.json();
             if (bxData.ok && Array.isArray(bxData.urls) && bxData.urls.length > 0) {
               for (const item of (bxData.urls as { url: string; type: string }[]).slice(0, 3)) {
                 const isHls = item.type === "hls" || item.url.includes(".m3u8");
-                const proxy = isHls ? wrapHls(item.url, embedUrl) : item.url;
+                const proxy = isHls ? wrapHls(item.url, targetUrl) : item.url;
                 sendSource(proxy, "MultiMovies", item.url, proxy);
               }
               console.log(`[multimovies] ✅ server ${num} → ${bxData.urls.length} streams`);

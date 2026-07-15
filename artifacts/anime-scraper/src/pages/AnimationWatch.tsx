@@ -222,7 +222,9 @@ function getSourceTier(src: Source): QualityTier {
       lbl.startsWith("Wecima") || lbl.startsWith("TopCinema") ||
       lbl.startsWith("Moviz") ||
       lbl.startsWith("aflaam") || lbl.startsWith("LordFlix") ||
-      lbl.startsWith("ArabSeed") || lbl.startsWith("SeePanal")
+      lbl.startsWith("ArabSeed") || lbl.startsWith("SeePanal") ||
+      lbl.startsWith("MultiMovies") || lbl.startsWith("4K HDHub") ||
+      lbl.startsWith("VidFast") || lbl.startsWith("VidKing")
     ) return "1080p FHD";
     return "720p HD";
   }
@@ -1580,9 +1582,14 @@ function getAnimTag(label: string): string {
   if (l.startsWith("vidcore"))    return "VC";
   if (l.startsWith("aw·"))        return "AW";
   if (l.startsWith("fasel"))      return "FH";
-  if (l.startsWith("dulo"))       return "DU";
-  if (l.startsWith("mycima"))     return "MY";
-  if (l.startsWith("topcin"))     return "TC";
+  if (l.startsWith("dulo"))           return "DU";
+  if (l.startsWith("multimovies"))    return "MM";
+  if (l.startsWith("4k hdhub") || l.startsWith("4k hd")) return "4K";
+  if (l.startsWith("vidfast"))        return "VF";
+  if (l.startsWith("vaplayer"))       return "VA";
+  if (l.startsWith("akwam"))          return "AK";
+  if (l.startsWith("mycima"))         return "MY";
+  if (l.startsWith("topcin"))         return "TC";
   const word = label.replace(/[^a-zA-Zأ-ي]/g, "").slice(0, 2).toUpperCase();
   return word || "??";
 }
