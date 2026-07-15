@@ -4546,19 +4546,30 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           );
           if (!searchHtml) { console.log("[multimovies] search failed"); return; }
 
-          // اكتشاف الـ domain الفعلي من الـ links (قد يختلف عن mmBase بسبب redirect)
-          const actualDomM = searchHtml.match(/href="(https?:\/\/multimovies\.[a-z]+)/);
-          if (actualDomM?.[1] && actualDomM[1] !== mmBase) {
-            mmBase = actualDomM[1];
+          // اعثر على أول رابط فيلم — بدون افتراض أن الاسم "multimovies" لا يزال في الـ domain
+          // (الموقع يُدوّر النطاق بالكامل أحياناً؛ نعتمد على بنية الرابط /movies/slug/ فقط)
+          const mmHost = (() => { try { return new URL(mmBase).host; } catch { return ""; } })();
+          const hostEsc = mmHost.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          // 1) رابط كامل بنفس الـ host الحالي
+          let linkM = hostEsc
+            ? searchHtml.match(new RegExp(`href="(https?:\\/\\/${hostEsc}\\/movies\\/[^"]+\\/)"`))
+            : null;
+          // 2) أي رابط كامل لصفحة /movies/ (يغطي حالة إعادة توجيه لدومين جديد كلياً)
+          if (!linkM) linkM = searchHtml.match(/href="(https?:\/\/[^"]+\/movies\/[^"\/]+\/)"/);
+          let movieUrl = linkM?.[1] || "";
+          // 3) رابط نسبي /movies/slug/ (نفس الدومين الحالي)
+          if (!movieUrl) {
+            const relM = searchHtml.match(/href="(\/movies\/[^"\/]+\/)"/);
+            if (relM?.[1]) movieUrl = `${mmBase}${relM[1]}`;
+          }
+          if (!movieUrl) { console.log("[multimovies] no result:", q.slice(0, 40)); return; }
+
+          // اكتشاف الـ domain الفعلي من رابط الفيلم نفسه — أدق من مطابقة "multimovies\."
+          const movieBase = movieUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || mmBase;
+          if (movieBase !== mmBase) {
+            mmBase = movieBase;
             _mmDomainCache.url = mmBase; _mmDomainCache.ts = Date.now();
           }
-
-          // اعثر على أول رابط فيلم (يدعم multimovies.* من أي domain)
-          const linkM = searchHtml.match(/href="(https?:\/\/multimovies\.[^"]+\/movies\/[^"]+\/)"/);
-          if (!linkM?.[1]) { console.log("[multimovies] no result:", q.slice(0, 40)); return; }
-          const movieUrl = linkM[1];
-          // استخرج base domain من الرابط الفعلي
-          const movieBase = movieUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || mmBase;
 
           // Step 3: movie page → post_id
           const movieHtml = await hopxProxyGet(movieUrl, movieBase + "/");
@@ -4633,31 +4644,43 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             _4khdDomainCache.url = khBase; _4khdDomainCache.ts = Date.now();
           }
 
-          // Step 2: browser-html على صفحة البحث — wait=8000ms لتحميل نتائج AJAX
+          // Step 2: بحث سريع — /?s= يُرجع HTML ثابت فيه نتائج البحث فعلياً (لا حاجة لمتصفح)
+          //   تحقّق ميداني 2026-07-15: fetch مباشر لـ /?s= يُرجع 200 + روابط أفلام كاملة
+          //   بدون تصيير JS. browser-html (وقت 8s) يبقى fallback فقط عند حجب/فشل الجلب المباشر.
           const q = title.replace(/[:()\[\]]/g, " ").trim();
           const searchUrl = `${khBase}/?s=${encodeURIComponent(q)}`;
-          const bhSearchParams = new URLSearchParams({ url: searchUrl, ref: khBase + "/", wait: "8000" });
-          const bhSearchR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-html?${bhSearchParams}`, {
-            signal: AbortSignal.timeout(35_000),
-          });
-          if (!bhSearchR.ok) { console.log("[4khdhub] browser-html search failed"); return; }
-          const bhSearchData: any = await bhSearchR.json();
-          if (!bhSearchData.ok) { console.log("[4khdhub] browser-html not ok:", bhSearchData.error); return; }
-          const searchRendered: string = bhSearchData.html || "";
 
-          // استخراج رابط الفيلم من الـ HTML المُعالج (absolute أو relative URLs)
-          const movieLinkRe = /href=["']((https?:\/\/4khdhub[^"']+|\/[a-z0-9][a-z0-9\-]+\/))["']/g;
-          let movieUrl = "";
-          let lm: RegExpExecArray | null;
-          while ((lm = movieLinkRe.exec(searchRendered)) !== null) {
-            const u = lm[1];
-            if (!u.match(/[?#]|category|tag|page|author|feed|search|image|favicon|manifest|js|css/i)) {
-              movieUrl = u.startsWith("http") ? u : `${khBase}${u}`;
-              break;
+          const extractMovieUrl = (html: string): string => {
+            const re = /href=["']((https?:\/\/4khdhub[^"']+|\/[a-z0-9][a-z0-9\-]+\/))["']/g;
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(html)) !== null) {
+              const u = m[1];
+              if (!u.match(/[?#]|category|tag|page|author|feed|search|image|favicon|manifest|js|css/i)) {
+                return u.startsWith("http") ? u : `${khBase}${u}`;
+              }
             }
-          }
+            return "";
+          };
+
+          let movieUrl = "";
+          const directHtml = await hopxProxyGet(searchUrl, khBase + "/", 12_000);
+          if (directHtml) movieUrl = extractMovieUrl(directHtml);
+
           if (!movieUrl) {
-            console.log("[4khdhub] no movie URL in rendered search:", q.slice(0, 40), "html_len:", searchRendered.length);
+            // fallback: browser-html — wait=8000ms لتحميل نتائج AJAX لو الجلب المباشر مُحجوب
+            console.log("[4khdhub] direct fetch found no link, falling back to browser-html");
+            const bhSearchParams = new URLSearchParams({ url: searchUrl, ref: khBase + "/", wait: "8000" });
+            const bhSearchR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-html?${bhSearchParams}`, {
+              signal: AbortSignal.timeout(35_000),
+            });
+            if (!bhSearchR.ok) { console.log("[4khdhub] browser-html search failed"); return; }
+            const bhSearchData: any = await bhSearchR.json();
+            if (!bhSearchData.ok) { console.log("[4khdhub] browser-html not ok:", bhSearchData.error); return; }
+            movieUrl = extractMovieUrl(bhSearchData.html || "");
+          }
+
+          if (!movieUrl) {
+            console.log("[4khdhub] no movie URL found for:", q.slice(0, 40));
             return;
           }
           console.log(`[4khdhub] movie URL: ${movieUrl}`);
