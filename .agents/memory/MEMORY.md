@@ -93,3 +93,5 @@
 - [Anime Watch auto-fetch-all — SUPERSEDED](anime-watch-autofetch.md) — corrected 2026-07-14: current merged code uses picker-first lazy fetch (screen defaults "picker"), not auto-fetch-all.
 - [vsembed + VidLink research](vsembed-vidlink-research-2026-07-14.md) — vsembed.ru ✅ ready (sendExtracted pattern); videasy3 ✅ implemented but not in allowlist; VidLink ❌ internal Next.js RSC, not a public API.
 - [XPass + VaPlayer sources](xpass-vaplayer-sources.md) — XPass token expires in minutes (TTL=8min); VaPlayer label must contain "FHD" for 1080p; AnimationWatch uses label keywords NOT qualityRank.
+- [VidKing Hopx integration](vidking-hopx-integration.md) — Hopx browser-extract على vidking.net/embed يُرجع ironbubble.site HLS URL؛ proxyUrl=rawUrl (لا hls-proxy)؛ vidlux.xyz /api/extract/magic يحتاج session auth؛ خطة التطبيق الكاملة موثّقة.
+- [Videasy disabled 2026-07-15](videasy-speedracelight-move-2026-07-15.md) — videasy3 أُزيل من ANIM_SOURCE_ALLOWLIST؛ ironbubble.site CDN يحجب كل datacenter IPs؛ vidking.net هو البديل عبر Hopx browser.
