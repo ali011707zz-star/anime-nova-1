@@ -2511,9 +2511,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     // CDN accessible from server → use hls-proxy (handles CORS + seg rewriting)
                     sendSource(proxied, label, sRaw, proxied);
                   } else if (!isTokenExpired(sRaw)) {
-                    // CDN blocks server IPs → send raw URL for direct mobile access
-                    // (skip if URL has already-expired time-limited token)
-                    sendSource(sRaw, label, sRaw, sRaw);
+                    // CDN blocks server IPs → still use hls-proxy (VPS, no bandwidth concern)
+                    sendSource(proxied, label, sRaw, proxied);
                   }
                   // else: expired token URL — skip entirely
                 }
@@ -3267,13 +3266,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
           const sources = await getVideasyAnimationSources(String(tmdbId), type === "movie" ? "movie" : "tv", season, epNum, title);
           for (const src of sources) {
-            // ironbubble.site CDN يحجب datacenter IPs (VPS) — hls-proxy يعمل على VPS فمحجوب أيضاً.
-            // الحل: rawUrl مباشرة — المتصفح يُحضر HLS من IP سكني غير محجوب.
-            // Referer مطلوب: player.videasy.to مسموح به من ironbubble؛ يُمرَّر عبر extra headers.
-            sendSource(
-              src.url, src.label, src.url, src.url,
-              { headers: { Referer: "https://player.videasy.to/", Origin: "https://player.videasy.to" } },
-            );
+            // يمر عبر hls-proxy (VPS) مع Referer صحيح — بطلب المستخدم (لا CF Worker، لا مشكلة في الاستهلاك)
+            const proxied = wrapHls(src.url, "https://player.videasy.to/");
+            sendSource(src.url, src.label, src.url, proxied);
           }
         } catch { /* silent */ }
       }),
@@ -3359,8 +3354,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             String(tmdbId), type === "movie" ? "movie" : "tv", season, epNum,
           );
           for (const src of sources) {
-            // ironwallnet.net CDN — send as rawUrl; browser accesses directly (datacenter IPs blocked)
-            sendSource(src.url, src.label, src.url, src.url);
+            // يمر عبر hls-proxy (VPS) مع Referer — بطلب المستخدم (لا CF Worker)
+            const isHlsSrc = src.url.includes('.m3u8') || src.url.includes('.m3u');
+            const proxiedSrc = isHlsSrc ? wrapHls(src.url, "https://vidfast.vc/") : src.url;
+            sendSource(src.url, src.label, src.url, proxiedSrc);
           }
         } catch (e) { console.error("[vidfast_vc]", (e as Error).message?.slice(0, 80)); }
       }),
