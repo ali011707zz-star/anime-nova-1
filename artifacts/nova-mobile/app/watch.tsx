@@ -52,7 +52,7 @@ const SITE_TAG: Record<string, string> = {
   animewitcher: "AW", kawaii: "KW",
   anikoto: "AK", anikototv: "ATV", animekai: "KI", hianime: "HI",
   anineko: "AN", mitanime: "MT",
-  videasy_anim: "VE", vidlink_anim: "VL", vidfast: "VF",
+  vidlink_anim: "VL", vidfast: "VF",
   animetime: "AT", animepahe: "AP", dulo_anim: "DL",
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
@@ -64,7 +64,7 @@ const SITE_LABEL: Record<string, string> = {
   kawaii: "Kawaii", hianime: "HiAnime", animewitcher: "AnimeWitcher",
   dulo_anim: "Dulo", anineko: "Anineko", anikoto: "AniKoto",
   anikototv: "AniKotoTV", mitanime: "MITanime", vidfast: "VidFast",
-  videasy_anim: "Videasy", vidlink_anim: "VidLink", animekai: "AnimeKai",
+  vidlink_anim: "VidLink", animekai: "AnimeKai",
   animepahe: "AnimePahe", shahiid: "Shahiid", animelek: "Animelek",
   animedar: "Animedar", okanime: "OkAnime", ristoanime: "RistoAnime",
   animeify: "AnimeIfy", animeday: "AnimeDay", arabseed: "ArabSeed",
@@ -82,7 +82,7 @@ function getSiteTag(site: string): string {
 const SITE_DESC: Record<string, string> = {
   kawaii: "1080p · مباشر", animewitcher: "PD/ST · مباشر",
   hianime: "ياباني مترجم · HLS نظيف", dulo_anim: "ياباني/إنجليزي · HLS مباشر",
-  videasy_anim: "ياباني مترجم · مباشر", vidlink_anim: "ياباني مترجم · مباشر",
+  vidlink_anim: "ياباني مترجم · مباشر",
   anineko: "ياباني مترجم · HLS", anikoto: "ياباني مترجم · 1080p",
   mitanime: "ياباني مترجم · مباشر", vidfast: "TMDB · HLS · متعدد الخوادم",
   anikototv: "ياباني مترجم · skip مدمج", animekai: "ياباني مترجم · DB مباشر",
@@ -201,7 +201,7 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
 /* ── أولويات المصادر: KW → HI → AW → DU → rest ── */
 const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, hianime: 95, animewitcher: 90,
-  dulo_anim: 70, videasy_anim: 60, vidlink_anim: 55,
+  dulo_anim: 70, vidlink_anim: 55,
   anineko: 50, mitanime: 45, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
   witanime: 12,
@@ -212,7 +212,7 @@ const ANIME_SITES = [
   // الأولوية القصوى: KW → AW → HI → DU
   "kawaii", "animewitcher", "hianime", "dulo_anim",
   // مصادر سريعة (ياباني مترجم / إنجليزي)
-  "videasy_anim", "vidlink_anim", "anineko", "anikoto",
+  "vidlink_anim", "anineko", "anikoto",
   "mitanime", "vidfast", "anikototv", "animekai", "animepahe", "anipm",
   // مصادر عربية (تحتاج extraction)
   "shahiid", "animelek", "animedar", "okanime", "ristoanime",

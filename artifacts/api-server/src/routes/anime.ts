@@ -8229,7 +8229,9 @@ async function getKawaiiSubForSource(anilistId: number | undefined, ep: number):
 //  bespoke 61-slot LCG-like generator) keyed by the seed + tmdbId,
 //  verified via a 4-byte "mvm1" magic prefix on the decrypted payload.
 // ════════════════════════════════════════════════════════════════════
-const WINGS_BASE = "https://api.wingsdatabase.com";
+// [2026-07-15] domain moved again: api.wingsdatabase.com → api.speedracelight.com
+// (discovered via vidking.net's live VideoPlayer-*.js chunk; same endpoint/query/decrypt shape)
+const WINGS_BASE = "https://api.speedracelight.com";
 const WINGS_SERVERS: Record<string, string> = {
   Hydrogen: "cdn/sources-with-title",
   Titanium: "tejo/sources-with-title",
@@ -11059,9 +11061,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── StarCima — محذوف من قسم الأنمي (يرسل صوتاً هندياً بسبب TMDB ID خاطئ) ──
       // scrapeCached("starcima_anim", () => getStarCimaAnimeSources(title, english, ep), false),
       // ── مصادر إنجليزية + ترجمة عربية (تظهر في قسم منفصل بالأسفل) ─────────────────
-      // videasy_anim: أُعيد تفعيله 2026-07-12 — backend الحقيقي انتقل إلى api.wingsdatabase.com
-      // (اكتُشف عبر vidking.net)، وفكّ التشفير أُعيد بناؤه محليًا بدون enc-dec.app.
-      scrapeCached("videasy_anim", () => getVideasyAnimeSources(title, english, ep, anilistId), false, 20000),
+      // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
+      // (استخدم getVideasyAnimationSources في animation.ts بدلاً منه)
       // vidlink_anim: معطّل — enc-dec.app/api/enc-vidlink معلَّق منذ 2026-07-08
       // mxplayer: معطّل — خدمة mxplayer_service.py (المنفذ 8002) غير مُشغَّلة
       // lordflix_anim: محذوف (Cloudflare browser-challenge)
@@ -11146,8 +11147,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   //    لإعادة التفعيل: احذف/عدّل ANIME_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
-    // TMDB-native embed sources (xpass + vaplayer) — no Arabic scraping, pure TMDB lookup
-    "videasy_anim",
+    // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
     // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن 2026-07-15
     // witanime/faselhd_db/moviz_time: أُزيلت من القائمة — معطّلة بطلب المستخدم 2026-07-14
@@ -11255,10 +11255,10 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "2dhive":        await runExtract(await race(get2DhiveSources(title, english, ep), 20_000, [])); break;
       // ── TMDB-native (StarCima محذوف من الأنمي — مصادر إنجليزية) ─────────────────────
       // case "starcima_anim": محذوف — يرسل صوتاً هندياً في قسم الأنمي
-      // videasy_anim / vidlink_anim / mxplayer / animephoenix / mitanime / ristoanime: معطّلة — أُزيلت من دورة السكرابر (لا تعمل)
+      // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
+      // vidlink_anim / mxplayer / animephoenix / mitanime / ristoanime: معطّلة — أُزيلت من دورة السكرابر (لا تعمل)
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
-      case "videasy_anim": (await race(getVideasyAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
       case "dulo_anim":    (await race(getDuloAnimeSources(title, english, ep, anilistId),     18_000, [])).forEach(collectSrc); break;
       case "cinesrc_anim": (await race(getCineSrcAnimeSources(title, english, ep, anilistId), 35_000, [])).forEach(collectSrc); break;
