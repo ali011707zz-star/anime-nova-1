@@ -2038,8 +2038,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs (2026-07-15)
   // videasy3: أُضيف 2026-07-15 (نُقل من قسم الأنمي بطلب المستخدم؛ backend أُصلح أيضاً)
   // vidfast_vc: أُضيف 2026-07-15 (enc-dec.app flow — Beta server يعمل لبعض الأفلام)
-  // vidlink_encdec: مُعطَّل — vidlink.pro يُرجع empty body من VPS IP (2026-07-15)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3", "vidfast_vc"]);
+  // vidlink_encdec: مُعاد تفعيله — يرجع 200 + MP4 متعددة الجودة من VPS (اختُبر 2026-07-15)
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3", "vidfast_vc", "vidlink_encdec"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -3130,20 +3130,25 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
           const sources = await getVideasyAnimationSources(String(tmdbId), type === "movie" ? "movie" : "tv", season, epNum, title);
           for (const src of sources) {
-            // ironbubble.site blocks browser Origin header → proxy m3u8 through VPS hls-proxy
-            // (VPS fetches without Origin → 200). Referer: player.videasy.to is allowed by ironbubble.
-            const proxy = wrapHls(src.url, "https://player.videasy.to/");
-            sendSource(proxy, src.label, src.url, proxy);
+            // ironbubble.site CDN يحجب datacenter IPs (VPS) — hls-proxy يعمل على VPS فمحجوب أيضاً.
+            // الحل: rawUrl مباشرة — المتصفح يُحضر HLS من IP سكني غير محجوب.
+            // Referer مطلوب: player.videasy.to مسموح به من ironbubble؛ يُمرَّر عبر extra headers.
+            sendSource(
+              src.url, src.label, src.url, src.url,
+              { headers: { Referer: "https://player.videasy.to/", Origin: "https://player.videasy.to" } },
+            );
           }
         } catch { /* silent */ }
       }),
 
-      // ── VidLink via enc-dec.app — re-enabled 2026-07-15: enc-vidlink confirmed working ────────
+      // ── VidLink via enc-dec.app ─────────────────────────────────────────────────────────────────
+      // يُرجع MP4 بجودات متعددة (360/480/720/1080) + DASH + ترجمة عربية من stormvv.vodvidl.site
+      // URLs موقَّعة IP-bound → video-proxy إلزامي (VPS يُحضرها بنفس IP الطلب الأصلي)
       scrapeAnimCached("vidlink_encdec", async () => {
         if (!tmdbId) return;
         try {
           send("status", { msg: "VidLink: جاري التشفير…" });
-          // Step 1: Encrypt TMDB ID via enc-dec.app
+          // الخطوة 1: تشفير TMDB ID عبر enc-dec.app
           const encR = await fetch(`https://enc-dec.app/api/enc-vidlink?text=${tmdbId}`, {
             headers: { "User-Agent": UA },
             signal: AbortSignal.timeout(8_000),
@@ -3152,44 +3157,58 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const encData = await encR.json() as { status?: number; result?: string; data?: string };
           const encrypted = encData.result || encData.data || "";
           if (!encrypted) { console.error("[vidlink_anim] enc-dec no encrypted value", encData); return; }
-          // Step 2: Fetch VidLink API with encrypted ID
+          // الخطوة 2: استدعاء VidLink API بالـ ID المشفَّر
           const vlUrl = type === "movie"
             ? `https://vidlink.pro/api/b/movie/${encrypted}`
             : `https://vidlink.pro/api/b/tv/${encrypted}/${season}/${epNum}`;
           const vlR = await fetch(vlUrl, {
-            headers: {
-              "User-Agent": UA,
-              "Origin": "https://vidlink.pro",
-              "Referer": "https://vidlink.pro/",
-            },
+            headers: { "User-Agent": UA, "Origin": "https://vidlink.pro", "Referer": "https://vidlink.pro/" },
             signal: AbortSignal.timeout(12_000),
           });
           if (!vlR.ok) { console.error(`[vidlink_anim] API ${vlR.status}`); return; }
           const vlData = await vlR.json() as any;
-          let hlsUrl: string = vlData?.stream?.playlist || vlData?.stream?.url || vlData?.playlist || "";
-          // VidLink may return stream.qualities (file type) instead of stream.playlist (HLS)
-          if (!hlsUrl && vlData?.stream?.qualities) {
+          const VL_REF = "https://vidlink.pro/";
+          const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
+          // Arabic subtitle: قد يكون "ara"/"ar" أو نص عربي مثل "اَلْعَرَبِيَّةُ"
+          const araCap = captions.find((c: any) =>
+            c.language === "ara" || c.language === "ar" ||
+            (c.language && /[\u0600-\u06FF]/.test(String(c.language)))
+          );
+          const subExtra = araCap?.url ? { subtitleUrl: araCap.url } : undefined;
+          let foundAny = false;
+
+          // الحالة 1: HLS playlist مباشر
+          const hlsPlaylist: string = vlData?.stream?.playlist || "";
+          if (hlsPlaylist && (hlsPlaylist.includes(".m3u8") || hlsPlaylist.includes("manifest"))) {
+            const vlProxy = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsPlaylist)}&ref=${encodeURIComponent(VL_REF)}`;
+            sendSource(vlProxy, "VidLink · HLS", hlsPlaylist, vlProxy, subExtra);
+            foundAny = true;
+          }
+
+          // الحالة 2: MP4 متعددة الجودة (stream.qualities) — الأكثر شيوعاً
+          // stormvv.vodvidl.site: URLs موقَّعة IP-bound → video-proxy إلزامي
+          if (vlData?.stream?.qualities) {
             const quals = vlData.stream.qualities as Record<string, { type?: string; url?: string }>;
             for (const q of ["1080", "720", "480", "360"]) {
-              if (quals[q]?.url) { hlsUrl = quals[q].url; break; }
+              const qData = quals[q];
+              if (!qData?.url) continue;
+              const isHls = qData.url.includes(".m3u8") || qData.type === "hls";
+              const vlProxy = isHls
+                ? `/api/anime/hls-proxy?url=${encodeURIComponent(qData.url)}&ref=${encodeURIComponent(VL_REF)}`
+                : `/api/anime/video-proxy?url=${encodeURIComponent(qData.url)}&ref=${encodeURIComponent(VL_REF)}`;
+              sendSource(vlProxy, `VidLink · ${q}p`, qData.url, vlProxy, subExtra);
+              foundAny = true;
             }
           }
-          if (!hlsUrl) { console.error("[vidlink_anim] no playlist in response", JSON.stringify(vlData).slice(0, 200)); return; }
-          const captions: any[] = vlData?.stream?.captions || vlData?.captions || [];
-          const araCap = captions.find((c: any) => c.language === "ara" || c.language === "ar");
-          // storm.vodvidl.site auth token is bound to the server IP that requested it.
-          // Browser (different IP) gets 403. Use hls-proxy so server fetches segments
-          // with the same IP that generated the auth token.
-          // For MP4 (file type), use video-proxy instead of hls-proxy.
-          const VL_REF   = "https://vidlink.pro/";
-          const isVlHls  = hlsUrl.includes(".m3u8") || hlsUrl.includes("manifest");
-          const vlProxy  = isVlHls
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`
-            : `/api/anime/video-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(VL_REF)}`;
-          sendSource(
-            vlProxy, "VidLink · HLS", hlsUrl, vlProxy,
-            araCap?.url ? { subtitleUrl: araCap.url } : undefined,
-          );
+
+          // الحالة 3: DASH (stream.alternates.dash) — المتصفح يشغّله مباشرة
+          const dashUrl: string = vlData?.stream?.alternates?.dash?.playlist || "";
+          if (dashUrl && dashUrl.includes(".mpd")) {
+            sendSource(dashUrl, "VidLink · DASH", dashUrl, dashUrl, subExtra);
+            foundAny = true;
+          }
+
+          if (!foundAny) console.error("[vidlink_anim] no stream in response", JSON.stringify(vlData).slice(0, 300));
         } catch { /* silent */ }
       }),
 
