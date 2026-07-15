@@ -425,6 +425,21 @@ async function cfProxyGet(url: string): Promise<string> {
   return r.text();
 }
 
+// cfDirectGet — fallback لـ cf_proxy الحقيقي على port 8000 (يعمل حتى لو Hopx معطوب)
+const _CF_DIRECT_KEY = process.env.CF_PROXY_KEY || "";
+async function cfDirectGet(url: string, timeoutMs = 15_000): Promise<string | null> {
+  try {
+    const params = new URLSearchParams({ url });
+    if (_CF_DIRECT_KEY) params.set("key", _CF_DIRECT_KEY);
+    const r = await fetch("http://localhost:8000/fetch?" + params.toString(), {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    return text && text.length > 500 && !text.includes("Just a moment") ? text : null;
+  } catch { return null; }
+}
+
 // cfOrOrkestGet — يستخدم cfProxy فقط
 async function cfOrOrkestGet(url: string): Promise<string> {
   const isCfPage = (h: string) =>
@@ -2161,7 +2176,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // videasy3: أُضيف 2026-07-15 (نُقل من قسم الأنمي بطلب المستخدم؛ backend أُصلح أيضاً)
   // vidfast_vc: أُضيف 2026-07-15 (enc-dec.app flow — Beta server يعمل لبعض الأفلام)
   // vidlink_encdec: مُعاد تفعيله — يرجع 200 + MP4 متعددة الجودة من VPS (اختُبر 2026-07-15)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3", "vidfast_vc", "vidlink_encdec", "multimovies_anim", "fourkhdhub_anim"]);
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3", "vidfast_vc", "vidfast", "vidlink_encdec", "multimovies_anim", "fourkhdhub_anim"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -3303,7 +3318,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const hlsPlaylist: string = vlData?.stream?.playlist || "";
           if (hlsPlaylist && (hlsPlaylist.includes(".m3u8") || hlsPlaylist.includes("manifest"))) {
             const vlProxy = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsPlaylist)}&ref=${encodeURIComponent(VL_REF)}`;
-            sendSource(vlProxy, "VidLink · HLS", hlsPlaylist, vlProxy, subExtra);
+            sendSource(vlProxy, "VidLink · HLS", vlProxy, vlProxy, subExtra);
             foundAny = true;
           }
 
@@ -3318,7 +3333,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const vlProxy = isHls
                 ? `/api/anime/hls-proxy?url=${encodeURIComponent(qData.url)}&ref=${encodeURIComponent(VL_REF)}`
                 : `/api/anime/video-proxy?url=${encodeURIComponent(qData.url)}&ref=${encodeURIComponent(VL_REF)}`;
-              sendSource(vlProxy, `VidLink · ${q}p`, qData.url, vlProxy, subExtra);
+              sendSource(vlProxy, `VidLink · ${q}p`, vlProxy, vlProxy, subExtra);
               foundAny = true;
             }
           }
@@ -4541,9 +4556,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
           // Step 2: search
           const q = title.replace(/[:()\[\]]/g, " ").trim();
-          const searchHtml = await hopxProxyGet(
-            `${mmBase}/?s=${encodeURIComponent(q)}`, mmBase + "/",
-          );
+          const _mmSearchUrl = `${mmBase}/?s=${encodeURIComponent(q)}`;
+          const searchHtml = await hopxProxyGet(_mmSearchUrl, mmBase + "/")
+            ?? await cfDirectGet(_mmSearchUrl);
           if (!searchHtml) { console.log("[multimovies] search failed"); return; }
 
           // اعثر على أول رابط فيلم — بدون افتراض أن الاسم "multimovies" لا يزال في الـ domain
@@ -4572,7 +4587,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }
 
           // Step 3: movie page → post_id
-          const movieHtml = await hopxProxyGet(movieUrl, movieBase + "/");
+          const movieHtml = await hopxProxyGet(movieUrl, movieBase + "/")
+            ?? await cfDirectGet(movieUrl);
           if (!movieHtml) return;
           // أنماط متعددة لـ post ID
           const pidM = movieHtml.match(/postid-(\d+)/)
@@ -4614,23 +4630,31 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             // الحل: browser-html(wait=5s) لتصيير الصفحة ← parse iframe.src ← browser-extract على المشغّل الفعلي
             let targetUrl = embedUrl;
             if (embedUrl.includes("gdmirrorbot")) {
-              const bhP = new URLSearchParams({ url: embedUrl, ref: movieUrl, wait: "5000" });
-              const bhR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-html?${bhP}`, {
-                signal: AbortSignal.timeout(20_000),
-              });
-              if (bhR.ok) {
-                const bhD: any = await bhR.json();
-                const iframeM = (bhD.html || "").match(/<iframe[^>]+src=["']([^"']+)["']/i);
-                if (iframeM?.[1]?.startsWith("http")) {
-                  targetUrl = iframeM[1];
-                  console.log(`[multimovies] gdmirrorbot resolved → ${targetUrl.slice(0, 80)}`);
+              // direct browser-extract (timeout=30s) — أسرع من two-step iframe chain
+              try {
+                const bxGDParams = new URLSearchParams({ url: embedUrl, ref: movieUrl, timeout: "30000" });
+                const bxGDResp = await fetch(HOPX_PROXY_BASE_ANIM + "/browser-extract?" + bxGDParams.toString(), {
+                  signal: AbortSignal.timeout(38_000),
+                });
+                if (bxGDResp.ok) {
+                  const bxGDData: any = await bxGDResp.json();
+                  if (bxGDData.ok && Array.isArray(bxGDData.urls) && bxGDData.urls.length > 0) {
+                    for (const item of (bxGDData.urls as { url: string; type: string }[]).slice(0, 3)) {
+                      const isHlsItem = item.type === "hls" || item.url.includes(".m3u8");
+                      const proxyUrl2 = isHlsItem ? wrapHls(item.url, embedUrl) : item.url;
+                      sendSource(proxyUrl2, "MultiMovies", item.url, proxyUrl2);
+                    }
+                    console.log("[multimovies] gdmirrorbot direct OK -> " + bxGDData.urls.length + " streams");
+                    return;
+                  }
                 }
-              }
+              } catch (gdErr: any) { console.warn("[multimovies] gdmirrorbot err:", gdErr?.message); }
+              continue;
             }
 
-            const bxParams = new URLSearchParams({ url: targetUrl, ref: embedUrl, timeout: "18000" });
+            const bxParams = new URLSearchParams({ url: targetUrl, ref: embedUrl, timeout: "22000" });
             const bxR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-extract?${bxParams}`, {
-              signal: AbortSignal.timeout(28_000),
+              signal: AbortSignal.timeout(32_000),
             });
             if (!bxR.ok) continue;
             const bxData: any = await bxR.json();
@@ -4681,7 +4705,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           };
 
           let movieUrl = "";
-          const directHtml = await hopxProxyGet(searchUrl, khBase + "/", 12_000);
+          const directHtml = await hopxProxyGet(searchUrl, khBase + "/", 12_000) ?? await cfDirectGet(searchUrl, 12_000);
           if (directHtml) movieUrl = extractMovieUrl(directHtml);
 
           if (!movieUrl) {

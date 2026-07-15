@@ -199,6 +199,7 @@ interface Source {
   status?: "loading" | "ok" | "fail";
   tier?: QualityTier;
   isEmbed?: boolean;
+  headers?: Record<string, string>;  // CDN auth headers (e.g. Referer/Origin for ironbubble)
   _retriedDirect?: boolean; // true after first retry with raw directUrl
 }
 
@@ -211,6 +212,8 @@ function getSourceTier(src: Source): QualityTier {
   if (lblUp.includes("1080") || lblUp.includes("FHD") || lblUp.includes("4K") || lblUp.includes("2160")) return "1080p FHD";
   if (lblUp.includes("480") || lblUp.includes("360") || lblUp.includes("240") || lblUp.includes(" SD")) return "360p SD";
   if (lbl.startsWith("Icefy") || lbl.startsWith("Vyla")) return "1080p FHD";
+  // VidFast/VidKing/Videasy CDN URLs are direct (no hls-proxy) but always FHD
+  if (lbl.startsWith("VidFast") || lbl.startsWith("VidKing") || lbl.startsWith("Videasy")) return "1080p FHD";
   if (url.includes("hls-proxy")) {
     if (
       lbl.startsWith("VidLink") ||
@@ -644,7 +647,7 @@ export default function AnimationWatch() {
 
       es.addEventListener("source", (e) => {
         if (!alive) return;
-        const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; subtitleUrl?: string; isEmbed?: boolean };
+        const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; subtitleUrl?: string; isEmbed?: boolean; headers?: Record<string, string> };
 
         // Embed sources (e.g. Mega.nz) — أضفها مباشرة كـ isEmbed بدون proxy wrapping
         if (src.isEmbed) {
@@ -669,7 +672,7 @@ export default function AnimationWatch() {
           const resolved = src.proxyUrl || src.directUrl!;
           const hl       = isHlsUrl(resolved);
           const proxyUrl = src.proxyUrl || (hl ? wrapHls(src.directUrl!, window.location.origin) : wrapMp4(src.directUrl!, window.location.origin));
-          newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, subtitleUrl: src.subtitleUrl, status: "ok" };
+          newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, subtitleUrl: src.subtitleUrl, headers: src.headers, status: "ok" };
         } else {
           newSrc = { url: src.url, label: src.label, subtitleUrl: src.subtitleUrl, status: "loading" };
           tryExtract(src.url);
