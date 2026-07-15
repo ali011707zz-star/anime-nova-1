@@ -362,8 +362,8 @@ async def _async_network_capture(url: str, referer: str, wait_ms: int = 10000) -
                     body = await resp.body()
                     txt = body.decode("utf-8", errors="ignore")
                     # Also look for m3u8 URLs in response body
-                    found = _re.findall(r"https?://[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*", txt)
-                    found += _re.findall(r"https?://[^\s"'<>\\]+\.mp4[^\s"'<>\\]*", txt)
+                    found = _re.findall(r'https?://[^\s"\'<>\\]+\.m3u8[^\s"\'<>\\]*', txt)
+                    found += _re.findall(r'https?://[^\s"\'<>\\]+\.mp4[^\s"\'<>\\]*', txt)
                     video_urls.extend(found)
                     resps.append({"status": resp.status, "url": u,
                                   "body": txt[:400]})
@@ -484,6 +484,65 @@ def get_html_sync(url: str, referer: str, wait_ms: int) -> dict:
         return {"ok": False, "html": "", "error": str(e)}
 
 
+# ── Cookie extractor (Playwright) ─────────────────────────────────────────────
+# يُشغّل المتصفح مرة واحدة → يحل CF challenge → يُرجع كل الكوكيز + HTML المُعالج.
+# الـ caller يخزّنها ويعيد استخدامها بدون متصفح في الطلبات التالية.
+
+async def _async_extract_cookies(url: str, referer: str, wait_ms: int) -> dict:
+    from playwright.async_api import async_playwright
+    cookies_list: list = []
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                  "--disable-blink-features=AutomationControlled"],
+        )
+        ctx = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/136.0.0.0 Safari/537.36"
+            ),
+            extra_http_headers={"Referer": referer} if referer else {},
+            ignore_https_errors=True,
+        )
+        # إخفاء بصمة webdriver
+        await ctx.add_init_script(
+            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
+        )
+        page = await ctx.new_page()
+        try:
+            await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            # انتظر حل CF challenge + تحميل JS
+            await asyncio.sleep(wait_ms / 1000)
+            cookies_list = await ctx.cookies()
+            html  = await page.content()
+            title = await page.title()
+        except Exception as e:
+            await browser.close()
+            return {"ok": False, "cookie_str": "", "cookies": {}, "html": "", "error": str(e)}
+        await browser.close()
+    cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies_list)
+    return {
+        "ok":         True,
+        "cookie_str": cookie_str,
+        "cookies":    {c["name"]: c["value"] for c in cookies_list},
+        "html":       html[:80000],
+        "title":      title,
+    }
+
+
+def extract_cookies_sync(url: str, referer: str, wait_ms: int) -> dict:
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_async_extract_cookies(url, referer, wait_ms))
+        finally:
+            loop.close()
+    except Exception as e:
+        return {"ok": False, "cookie_str": "", "cookies": {}, "html": "", "error": str(e)}
+
+
 # ── HTTP server ──────────────────────────────────────────────────────────────
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -516,15 +575,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # ── /fetch ───────────────────────────────────────────────────────────
         if parsed.path == "/fetch":
             params = self._parse_qs()
-            url = unquote(params.get("url", ""))
-            imp = params.get("imp", "chrome136")
-            ref = params.get("ref", "")
+            url    = unquote(params.get("url", ""))
+            imp    = params.get("imp", "chrome136")
+            ref    = params.get("ref", "")
+            cookie = unquote(params.get("cookie", ""))   # كوكيز مسبقة الاستخراج
             if not url:
                 self._send_json(400, {"error": "no url"}); return
             try:
-                hdrs = {"Referer": ref} if ref else None
+                hdrs: dict = {"Referer": ref} if ref else {}
+                if cookie:
+                    hdrs["Cookie"] = cookie
                 r = session.get(url, impersonate=imp, timeout=25,
-                                allow_redirects=True, headers=hdrs)
+                                allow_redirects=True, headers=hdrs or None)
                 self._send_json(200, {
                     "status": r.status_code,
                     "html": r.text[:80000],
@@ -651,6 +713,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(200, network_capture_sync(url, ref, wait_ms))
             return
 
+        # ── /extract-cookies ─────────────────────────────────────────────────────
+        # يُشغّل Playwright مرة واحدة → يحل CF challenge → يُرجع cookies + HTML
+        # الـ TTL والتخزين مسؤولية الـ caller (animation.ts)
+        if parsed.path == "/extract-cookies":
+            if not _check_playwright():
+                self._send_json(503, {"ok": False, "error": "playwright not available"})
+                return
+            params  = self._parse_qs()
+            url     = unquote(params.get("url", ""))
+            ref     = params.get("ref", "")
+            wait_ms = int(params.get("wait", "6000"))
+            if not url:
+                self._send_json(400, {"ok": False, "error": "no url"}); return
+            self._send_json(200, extract_cookies_sync(url, ref, wait_ms))
+            return
+
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -658,18 +736,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/post":
             params = self._parse_qs()
-            url = unquote(params.get("url", ""))
+            url    = unquote(params.get("url", ""))
+            cookie = unquote(params.get("cookie", ""))   # كوكيز مسبقة الاستخراج
             if not url:
                 self._send_json(400, {"error": "no url"}); return
             try:
                 length = int(self.headers.get("Content-Length", 0))
-                raw = self.rfile.read(length) if length else b"{}"
-                body = json.loads(raw) if raw else {}
+                raw    = self.rfile.read(length) if length else b"{}"
+                body   = json.loads(raw) if raw else {}
+                hdrs: dict = {}
+                if cookie:
+                    hdrs["Cookie"] = cookie
                 r = session.post(url, impersonate="chrome136", timeout=25,
-                                 data=body.get("data"), json=body.get("json"))
+                                 data=body.get("data"), json=body.get("json"),
+                                 headers=hdrs or None)
                 self._send_json(200, {
-                    "status": r.status_code,
-                    "html": r.text[:80000],
+                    "status":  r.status_code,
+                    "html":    r.text[:80000],
                     "cookies": dict(r.cookies),
                 })
             except Exception as e:
