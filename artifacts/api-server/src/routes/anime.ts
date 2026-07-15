@@ -13138,18 +13138,36 @@ async function serveHlsVPS(
 ): Promise<void> {
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
-  try {
-    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
-    if (!r.ok) { res.status(r.status).send("upstream error"); return; }
-    const body = await r.text();
-    const rewritten = rewriteM3u8ForVPS(body, url, ref);
-    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "no-cache");
-    res.send(rewritten);
-  } catch {
-    res.status(502).send("HLS fetch failed");
+  // بعض CDNs (moon.ironwallnet.net/ironbubble.site خلف Videasy) ترجع 403 متقطعة
+  // عند طلبات متزامنة (audio track + video variants) رغم أن الرابط صالح —
+  // إعادة محاولة سريعة (2x) قبل الاستسلام تحلّ الشاشة السوداء المتقطعة.
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
+      if (!r.ok) {
+        lastStatus = r.status;
+        if ((r.status === 403 || r.status === 429 || r.status === 503) && attempt < 2) {
+          await new Promise(res2 => setTimeout(res2, 300 + attempt * 400));
+          continue;
+        }
+        res.status(r.status).send("upstream error");
+        return;
+      }
+      const body = await r.text();
+      const rewritten = rewriteM3u8ForVPS(body, url, ref);
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "no-cache");
+      res.send(rewritten);
+      return;
+    } catch {
+      if (attempt < 2) { await new Promise(res2 => setTimeout(res2, 300 + attempt * 400)); continue; }
+      res.status(502).send("HLS fetch failed");
+      return;
+    }
   }
+  if (!res.headersSent) res.status(lastStatus || 502).send("upstream error");
 }
 
 // ── VPS-side segment/video proxy (يُستخدم عند سقوط CF Worker) ─────────────────
