@@ -144,6 +144,7 @@ interface Props {
   serverIndex?: number;
   downloadUrl?: string;
   resumeTime?: number;
+  hlsHeaders?: Record<string, string>; // CDN auth headers (Referer/Origin) — passed to xhrSetup
   subCues?: SubCue[];
   subElapsed?: number;
   subOffset?: number;
@@ -208,7 +209,7 @@ export default function RiftPlayer({
   downloadUrl, subCues, subElapsed, subOffset = 0, subSettings, subEnabled = false,
   subNote,
   onSubtitleClick, onSubSettingsChange, onSubtitleOff,
-  skipIntro, skipOutro, animeId, autoPlay,
+  skipIntro, skipOutro, animeId, autoPlay, hlsHeaders,
   onBack, onPrevEp, onNextEp, onEpisodeSelect, onRealQuality, onTimeUpdate, onDuration, onFail,
 }: Props) {
 
@@ -552,6 +553,12 @@ export default function RiftPlayer({
         renderTextTracksNatively: false,
         xhrSetup: (xhr: XMLHttpRequest) => {
           xhr.timeout = 25000;
+          // CDN auth headers (Referer/Origin) — needed for Dulo raw URLs blocked from datacenter IP
+          if (hlsHeaders) {
+            for (const [k, v] of Object.entries(hlsHeaders)) {
+              try { xhr.setRequestHeader(k, v); } catch { /* ignore read-only headers */ }
+            }
+          }
         },
       });
       hlsRef.current = hls;
