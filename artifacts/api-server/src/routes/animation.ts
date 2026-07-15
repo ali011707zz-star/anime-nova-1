@@ -1830,6 +1830,69 @@ async function scrapeAflaamSeries(
   return [];
 }
 
+// ── VidFast.vc scraper (enc-dec.app API) ─────────────────────────────────────
+// Flow: GET vidfast.vc page → extract encrypted "en" text → enc-vidfast → POST servers
+//       → dec-vidfast → for each server: POST stream/{data} → dec-vidfast → final URL
+// CDN: moon.ironwallnet.net (DASH MPD); sent as rawUrl (browser accesses directly).
+async function scrapeVidFastVc(
+  tmdbId: string,
+  mtype: "movie" | "tv",
+  season: number,
+  episode: number,
+): Promise<Array<{ url: string; label: string }>> {
+  const ENCDEC   = "https://enc-dec.app/api";
+  const VF_REF   = "https://vidfast.vc/";
+  const pageUrl  = mtype === "movie"
+    ? `https://vidfast.vc/movie/${tmdbId}/`
+    : `https://vidfast.vc/tv/${tmdbId}/${season}/${episode}/`;
+
+  const html = await fetch(pageUrl, {
+    headers: { "User-Agent": UA, "Referer": VF_REF },
+    signal: AbortSignal.timeout(18_000),
+  }).then(r => { if (!r.ok) throw new Error(`page ${r.status}`); return r.text(); });
+
+  const m = html.match(/\\"en\\":\\"(.*?)\\"/);
+  if (!m) throw new Error("vidfast_vc: no encrypted text in page");
+  const text = m[1];
+
+  const encR = await fetch(`${ENCDEC}/enc-vidfast?text=${encodeURIComponent(text)}`, {
+    headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10_000),
+  }).then(r => r.json()) as { status?: number; result?: { servers: string; stream: string; token: string } };
+  if (encR.status !== 200 || !encR.result) throw new Error(`vidfast_vc: enc-vidfast ${encR.status}`);
+
+  const { servers: serversUrl, stream: streamBase, token } = encR.result;
+  const hdrs = { "User-Agent": UA, "Referer": VF_REF, "X-CSRF-Token": token, "X-Requested-With": "XMLHttpRequest" };
+
+  const encServers = await fetch(serversUrl, { method: "POST", headers: hdrs, signal: AbortSignal.timeout(10_000) })
+    .then(r => { if (!r.ok) throw new Error(`servers ${r.status}`); return r.text(); });
+
+  const decSrv = await fetch(`${ENCDEC}/dec-vidfast`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: encServers }), signal: AbortSignal.timeout(10_000),
+  }).then(r => r.json()) as { status?: number; result?: Array<{ name: string; description?: string; data: string }> };
+  if (decSrv.status !== 200 || !Array.isArray(decSrv.result)) throw new Error("vidfast_vc: dec-vidfast servers failed");
+
+  const out: Array<{ url: string; label: string }> = [];
+  await Promise.all(decSrv.result.map(async (srv) => {
+    if (!srv.data) return;
+    try {
+      const encStream = await fetch(`${streamBase}/${srv.data}`, {
+        method: "POST", headers: hdrs, signal: AbortSignal.timeout(10_000),
+      }).then(r => { if (!r.ok) throw new Error(`stream ${r.status}`); return r.text(); });
+
+      const decStr = await fetch(`${ENCDEC}/dec-vidfast`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: encStream }), signal: AbortSignal.timeout(10_000),
+      }).then(r => r.json()) as { status?: number; result?: { url?: string } };
+
+      if (decStr.status === 200 && decStr.result?.url) {
+        out.push({ url: decStr.result.url, label: `VidFast · ${srv.name}` });
+      }
+    } catch { /* server offline or expired */ }
+  }));
+  return out;
+}
+
 // ── Videasy fresh URL redirect ─────────────────────────────────────────────────
 // Returns a 302 redirect to a freshly-fetched Videasy CDN URL.
 // Called from the browser so the browser follows the redirect with its own
@@ -1974,7 +2037,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // moviz_time_anim أُضيف للسماح به 2026-07-13 (مصدر جديد بطلب المستخدم)
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs (2026-07-15)
   // videasy3: أُضيف 2026-07-15 (نُقل من قسم الأنمي بطلب المستخدم؛ backend أُصلح أيضاً)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3"]);
+  // vidfast_vc: أُضيف 2026-07-15 (enc-dec.app flow — Beta server يعمل لبعض الأفلام)
+  // vidlink_encdec: مُعطَّل — vidlink.pro يُرجع empty body من VPS IP (2026-07-15)
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3", "vidfast_vc"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -3065,14 +3130,16 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
           const sources = await getVideasyAnimationSources(String(tmdbId), type === "movie" ? "movie" : "tv", season, epNum, title);
           for (const src of sources) {
-            sendSource(src.url, src.label, src.url, src.url); // rawUrl: ironbubble CDN blocks VPS datacenter IP
+            // ironbubble.site blocks browser Origin header → proxy m3u8 through VPS hls-proxy
+            // (VPS fetches without Origin → 200). Referer: player.videasy.to is allowed by ironbubble.
+            const proxy = wrapHls(src.url, "https://player.videasy.to/");
+            sendSource(proxy, src.label, src.url, proxy);
           }
         } catch { /* silent */ }
       }),
 
-      // ── VidLink via enc-dec.app — DISABLED 2026-07-08: enc-dec.app/api/enc-vidlink suspended ──
+      // ── VidLink via enc-dec.app — re-enabled 2026-07-15: enc-vidlink confirmed working ────────
       scrapeAnimCached("vidlink_encdec", async () => {
-        return; // enc-dec.app suspended — re-enable when service recovers
         if (!tmdbId) return;
         try {
           send("status", { msg: "VidLink: جاري التشفير…" });
@@ -3124,6 +3191,22 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             araCap?.url ? { subtitleUrl: araCap.url } : undefined,
           );
         } catch { /* silent */ }
+      }),
+
+      // ── VidFast.vc via enc-dec.app ─────────────────────────────────────────────
+      // CDN: moon.ironwallnet.net — DASH MPD; sent as rawUrl (browser plays directly)
+      scrapeAnimCached("vidfast_vc", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "VidFast: جاري الاستخراج…" });
+          const sources = await scrapeVidFastVc(
+            String(tmdbId), type === "movie" ? "movie" : "tv", season, epNum,
+          );
+          for (const src of sources) {
+            // ironwallnet.net CDN — send as rawUrl; browser accesses directly (datacenter IPs blocked)
+            sendSource(src.url, src.label, src.url, src.url);
+          }
+        } catch (e) { console.error("[vidfast_vc]", (e as Error).message?.slice(0, 80)); }
       }),
 
       // ── MX Player (mxplayer.in) — licensed anime/animation — بدون ترجمة مدمجة ──
