@@ -271,6 +271,18 @@ let _duloAnimCookie   = "";
 let _duloAnimCookieAt = 0;
 const DULO_SESS_TTL_ANIM = 7 * 3_600_000;
 
+// ═══════════════════════════════════════════════════════════════════════
+// Browser Cookie Cache — كوكيز مُستخرجة بالمتصفح، تُعاد استخدامها بدونه
+// الاستخدام: hopxExtractCookies() مرة واحدة → يخزّن هنا بـ TTL 6 ساعات
+// ═══════════════════════════════════════════════════════════════════════
+const _browserCookieCache = new Map<string, { str: string; html: string; ts: number }>();
+const BROWSER_COOKIE_TTL  = 6 * 3_600_000; // 6 ساعات
+
+// Domain caches for rotating-domain sites
+const _mmDomainCache   = { url: "", ts: 0 };   // MultiMovies
+const _4khdDomainCache = { url: "", ts: 0 };   // 4K HDHub
+const DOMAIN_CACHE_TTL = 6 * 3_600_000;
+
 function duloRequestHeaders(cookie: string): Record<string, string> {
   return {
     "X-API-Key":     DULO_TV_API_KEY,
@@ -404,6 +416,86 @@ async function orkestDirectGet(url: string, timeoutMs = 25_000): Promise<string>
     throw new Error("CF blocked via cfProxy");
   }
   return html;
+}
+
+// ── hopxExtractCookies — تشغيل المتصفح مرة واحدة لاستخراج الكوكيز ─────────────
+// يُشغّل Playwright في Hopx sandbox → يحل CF → يُرجع الكوكيز + HTML المُعالج.
+// النتيجة مُخزَّنة في _browserCookieCache بـ TTL 6h → لا يحتاج browser في الطلبات التالية.
+async function hopxExtractCookies(
+  url: string,
+  referer = "",
+  waitMs = 6000,
+): Promise<{ ok: boolean; cookieStr: string; html: string }> {
+  // فحص الكاش
+  let domain = "";
+  try { domain = new URL(url).hostname; } catch {}
+  if (domain) {
+    const cached = _browserCookieCache.get(domain);
+    if (cached && Date.now() - cached.ts < BROWSER_COOKIE_TTL)
+      return { ok: true, cookieStr: cached.str, html: cached.html };
+  }
+  // فحص Hopx alive
+  const now = Date.now();
+  if (_hopxAliveAnim === null || now - _hopxCheckedAtAnim > 60_000) {
+    try {
+      const h = await fetch(`${HOPX_PROXY_BASE_ANIM}/health`, { signal: AbortSignal.timeout(3000) });
+      const body = await h.json() as { ok?: boolean };
+      _hopxAliveAnim = h.ok && body.ok === true;
+    } catch { _hopxAliveAnim = false; }
+    _hopxCheckedAtAnim = now;
+  }
+  if (!_hopxAliveAnim) return { ok: false, cookieStr: "", html: "" };
+  try {
+    const params = new URLSearchParams({ url, wait: String(waitMs) });
+    if (referer) params.set("ref", referer);
+    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/extract-cookies?${params}`, {
+      signal: AbortSignal.timeout(waitMs + 25_000),
+    });
+    if (!r.ok) return { ok: false, cookieStr: "", html: "" };
+    const data: any = await r.json();
+    if (data.ok && data.cookie_str) {
+      if (domain) _browserCookieCache.set(domain, { str: data.cookie_str, html: data.html || "", ts: Date.now() });
+      return { ok: true, cookieStr: data.cookie_str, html: data.html || "" };
+    }
+  } catch {}
+  return { ok: false, cookieStr: "", html: "" };
+}
+
+// ── hopxFetchCookied — جلب URL عبر Hopx curl_cffi مع كوكيز مُحددة ────────────
+// يُرسل Cookie header مع الطلب → يتجاوز CF بدون تشغيل browser جديد.
+async function hopxFetchCookied(
+  url: string, referer: string, cookies: string, timeoutMs = 20_000
+): Promise<string | null> {
+  try {
+    const params = new URLSearchParams({ url, cookie: cookies });
+    if (referer) params.set("ref", referer);
+    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/fetch?${params}`, {
+      signal: AbortSignal.timeout(timeoutMs + 5_000),
+    });
+    if (!r.ok) return null;
+    const data: any = await r.json();
+    if (data.error || !data.html || (data.status !== undefined && data.status >= 400)) return null;
+    return data.html;
+  } catch { return null; }
+}
+
+// ── hopxPostCookied — POST عبر Hopx curl_cffi مع كوكيز مُحددة ───────────────
+async function hopxPostCookied(
+  url: string, formBody: string, cookies: string,
+): Promise<string | null> {
+  try {
+    const params = new URLSearchParams({ url });
+    if (cookies) params.set("cookie", cookies);
+    const r = await fetch(`${HOPX_PROXY_BASE_ANIM}/post?${params}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: formBody }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) return null;
+    const data: any = await r.json();
+    return data.html ?? null;
+  } catch { return null; }
 }
 
 // cfProxyChainFetch — يجلب url1 ثم url2 بنفس الجلسة (cookies مشتركة)
@@ -2039,7 +2131,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // videasy3: أُضيف 2026-07-15 (نُقل من قسم الأنمي بطلب المستخدم؛ backend أُصلح أيضاً)
   // vidfast_vc: أُضيف 2026-07-15 (enc-dec.app flow — Beta server يعمل لبعض الأفلام)
   // vidlink_encdec: مُعاد تفعيله — يرجع 200 + MP4 متعددة الجودة من VPS (اختُبر 2026-07-15)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3", "vidfast_vc", "vidlink_encdec"]);
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3", "vidfast_vc", "vidlink_encdec", "multimovies_anim", "fourkhdhub_anim"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -4392,6 +4484,219 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       }),
 
       // -- primesrc.me -- 85k movies+TV via Filemoon/Streamwish/Filelions
+      // ── MultiMovies (multimovies.homes) — DooPlay WP → GDMirrorBot ──────────
+      // السلسلة: search → doo_player_ajax → gdmirrorbot embed
+      //   1) browser-extract على الـ embed يلتقط video URLs مباشرة
+      //   2) Fallback: hopxExtractCookies (مرة واحدة/6h) → POST check_status.php
+      scrapeAnimCached("multimovies_anim", async () => {
+        if (type !== "movie" || !title) return;
+        try {
+          // Step 1: domain
+          let mmBase = _mmDomainCache.url;
+          if (!mmBase || Date.now() - _mmDomainCache.ts > DOMAIN_CACHE_TTL) {
+            try {
+              const jr = await fetch(
+                "https://raw.githubusercontent.com/SaurabhKaperwan/Utils/refs/heads/main/urls.json",
+                { signal: AbortSignal.timeout(8_000) },
+              );
+              if (jr.ok) {
+                const jd: any = await jr.json();
+                mmBase = String(jd["multimovies"] || "https://multimovies.homes").replace(/\/$/, "");
+              }
+            } catch {}
+            if (!mmBase) mmBase = "https://multimovies.homes";
+            _mmDomainCache.url = mmBase; _mmDomainCache.ts = Date.now();
+          }
+
+          // Step 2: search
+          const q = title.replace(/[:()\[\]]/g, " ").trim();
+          const searchHtml = await hopxProxyGet(
+            `${mmBase}/?s=${encodeURIComponent(q)}`, mmBase + "/",
+          );
+          if (!searchHtml) { console.log("[multimovies] search failed"); return; }
+
+          const linkM = searchHtml.match(/href="(https?:\/\/multimovies[^"]+\/movies\/[^"]+\/)"/);
+          if (!linkM?.[1]) { console.log("[multimovies] no result:", q.slice(0, 40)); return; }
+          const movieUrl = linkM[1];
+
+          // Step 3: movie page → post_id
+          const movieHtml = await hopxProxyGet(movieUrl, mmBase + "/");
+          if (!movieHtml) return;
+          const pidM = movieHtml.match(/"post"\s*:\s*(\d+)/) || movieHtml.match(/class="[^"]*post-(\d+)/);
+          const postId = pidM?.[1];
+          if (!postId) { console.log("[multimovies] no postId"); return; }
+
+          // Step 4: doo_player_ajax → GDMirrorBot embed URL
+          const ajaxR = await fetch(`${mmBase}/wp-admin/admin-ajax.php`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              "Referer": movieUrl, "User-Agent": UA, "X-Requested-With": "XMLHttpRequest",
+            },
+            body: `action=doo_player_ajax&post=${postId}&nume=1&type=movie`,
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!ajaxR.ok) return;
+          const ajaxData: any = await ajaxR.json().catch(() => null);
+          const embedUrl: string = ajaxData?.embed_url || "";
+          if (!embedUrl.includes("gdmirrorbot")) {
+            console.log("[multimovies] embed not gdmirror:", embedUrl.slice(0, 60)); return;
+          }
+
+          // Step 5a: browser-extract — يلتقط video URLs من network requests
+          const bxParams = new URLSearchParams({ url: embedUrl, ref: movieUrl, timeout: "22000" });
+          const bxR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-extract?${bxParams}`, {
+            signal: AbortSignal.timeout(35_000),
+          });
+          if (bxR.ok) {
+            const bxData: any = await bxR.json();
+            if (bxData.ok && Array.isArray(bxData.urls) && bxData.urls.length > 0) {
+              for (const item of (bxData.urls as { url: string; type: string }[]).slice(0, 4)) {
+                const isHls = item.type === "hls" || item.url.includes(".m3u8");
+                const proxy = isHls ? wrapHls(item.url, embedUrl) : item.url;
+                sendSource(proxy, "MultiMovies", item.url, proxy);
+              }
+              console.log(`[multimovies] ${bxData.urls.length} streams via browser-extract`);
+              return;
+            }
+          }
+
+          // Step 5b: Fallback — كوكيز مخزّنة + check_status.php
+          const sid = (embedUrl.match(/\/embed\/([^/?#]+)/) || [])[1];
+          if (!sid) return;
+          const { ok: ckOk, cookieStr, html: ckHtml } = await hopxExtractCookies(embedUrl, movieUrl, 8000);
+          if (!ckOk) { console.log("[multimovies] cookie extract failed"); return; }
+
+          // محاولة استخراج URL من الـ HTML المُعالج
+          const directM = ckHtml.match(/"file"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/)
+                       || ckHtml.match(/"(https?:\/\/[^"]+\.m3u8[^"]*)"/);
+          if (directM?.[1]) {
+            sendSource(wrapHls(directM[1], embedUrl), "MultiMovies", directM[1], wrapHls(directM[1], embedUrl));
+            console.log("[multimovies] stream from cookie-html"); return;
+          }
+
+          // POST check_status.php بالكوكيز المخزّنة
+          const csHtml = await hopxPostCookied(
+            "https://gdmirrorbot.nl/embeds/check_status.php",
+            `sid=${sid}`,
+            cookieStr,
+          );
+          if (csHtml && !csHtml.includes("302 Found") && csHtml.length > 20) {
+            const m3u8s = [...(csHtml.matchAll(/"(https?:\/\/[^"]+\.m3u8[^"]*)"/g))].map(m => m[1]);
+            for (const u of m3u8s.slice(0, 3)) {
+              sendSource(wrapHls(u, embedUrl), "MultiMovies", u, wrapHls(u, embedUrl));
+            }
+            if (m3u8s.length) console.log(`[multimovies] check_status ${m3u8s.length} sources`);
+            else console.log("[multimovies] check_status no m3u8:", csHtml.slice(0, 120));
+          }
+        } catch (e: any) { console.warn("[multimovies_anim]", e?.message); }
+      }),
+
+      // ── 4K HDHub (4khdhub.one) — HubCloud → gamerxyt (cookies cached) ────────
+      // السلسلة: search → movie page → HubCloud links → gamerxyt URL+token
+      //   → hopxExtractCookies لأول مرة فقط (مرة/6h) → hopxFetchCookied للطلبات التالية
+      scrapeAnimCached("fourkhdhub_anim", async () => {
+        if (!title) return;
+        try {
+          // Step 1: domain
+          let khBase = _4khdDomainCache.url;
+          if (!khBase || Date.now() - _4khdDomainCache.ts > DOMAIN_CACHE_TTL) {
+            try {
+              const jr = await fetch(
+                "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json",
+                { signal: AbortSignal.timeout(8_000) },
+              );
+              if (jr.ok) {
+                const jd: any = await jr.json();
+                khBase = String(jd["4khdhub"] || "https://4khdhub.one").replace(/\/$/, "");
+              }
+            } catch {}
+            if (!khBase) khBase = "https://4khdhub.one";
+            _4khdDomainCache.url = khBase; _4khdDomainCache.ts = Date.now();
+          }
+
+          // Step 2: search
+          const q = title.replace(/[:()\[\]]/g, " ").trim();
+          const searchHtml = await hopxProxyGet(
+            `${khBase}/?s=${encodeURIComponent(q)}`, khBase + "/",
+          );
+          if (!searchHtml) { console.log("[4khdhub] search failed"); return; }
+
+          const linkRe = /href="(https?:\/\/4khdhub[^"]+)"/g;
+          let movieUrl = "";
+          let lm: RegExpExecArray | null;
+          while ((lm = linkRe.exec(searchHtml)) !== null) {
+            const u = lm[1];
+            if (!u.match(/(?:category|tag|page|author|feed|#)/)) { movieUrl = u; break; }
+          }
+          if (!movieUrl) { console.log("[4khdhub] no result:", q.slice(0, 40)); return; }
+
+          // Step 3: movie page → HubCloud links
+          const movieHtml = await hopxProxyGet(movieUrl, khBase + "/");
+          if (!movieHtml) return;
+          const hubLinks = [...movieHtml.matchAll(/href="(https?:\/\/hubcloud[^"]+)"/gi)].map(m => m[1]);
+          if (!hubLinks.length) { console.log("[4khdhub] no HubCloud links"); return; }
+
+          // Step 4: HubCloud page → gamerxyt URL + token
+          const hcHtml = await hopxProxyGet(hubLinks[0], movieUrl);
+          if (!hcHtml) return;
+          const gamerM = hcHtml.match(/href="(https?:\/\/gamerxyt\.com\/hubcloud\.php\?[^"]+)"/);
+          if (!gamerM?.[1]) { console.log("[4khdhub] no gamerxyt URL in HubCloud page"); return; }
+          const gamerUrl = gamerM[1];
+
+          // Step 5: كوكيز gamerxyt.com — مُخزَّنة 6h، تُجلب بالمتصفح مرة واحدة فقط
+          const gamerDomain = "gamerxyt.com";
+          const gamerCached = _browserCookieCache.get(gamerDomain);
+          let gamerCookies = (gamerCached && Date.now() - gamerCached.ts < BROWSER_COOKIE_TTL)
+            ? gamerCached.str : "";
+          let gamerHtml = "";
+
+          if (!gamerCookies) {
+            // أول طلب: تشغيل المتصفح لاستخراج وتخزين الكوكيز
+            const { ok, cookieStr, html } = await hopxExtractCookies(gamerUrl, hubLinks[0], 6000);
+            if (!ok) { console.log("[4khdhub] gamerxyt cookie extract failed"); return; }
+            gamerCookies = cookieStr;
+            gamerHtml    = html;
+          } else {
+            // طلبات تالية: استخدام الكوكيز المخزّنة بدون browser
+            gamerHtml = await hopxFetchCookied(gamerUrl, hubLinks[0], gamerCookies) || "";
+          }
+          if (!gamerHtml) { console.log("[4khdhub] no gamerxyt HTML"); return; }
+
+          // Step 6: استخراج روابط التنزيل من HTML المُعالج
+          const mp4s  = [...(gamerHtml.matchAll(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/gi))].map(m => m[0]).filter(u => u.length > 30 && !u.includes("sample"));
+          const m3u8s = [...(gamerHtml.matchAll(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/gi))].map(m => m[0]);
+          const buzzes = [...(gamerHtml.matchAll(/https?:\/\/buzzserver[^\s"'<>]+/gi))].map(m => m[0]);
+          const allLinks = [...m3u8s, ...buzzes, ...mp4s].slice(0, 3);
+
+          if (!allLinks.length) {
+            // آخر محاولة: browser-extract على صفحة gamerxyt نفسها
+            console.log("[4khdhub] no direct links, fallback browser-extract");
+            const bxParams = new URLSearchParams({ url: gamerUrl, ref: hubLinks[0], timeout: "20000" });
+            const bxR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-extract?${bxParams}`, {
+              signal: AbortSignal.timeout(30_000),
+            });
+            if (bxR.ok) {
+              const bxData: any = await bxR.json();
+              for (const item of ((bxData.urls || []) as { url: string; type: string }[]).slice(0, 3)) {
+                const isHls = item.type === "hls";
+                const proxy = isHls ? wrapHls(item.url, gamerUrl) : item.url;
+                sendSource(proxy, "4K HDHub", item.url, proxy);
+              }
+              if (bxData.urls?.length) console.log(`[4khdhub] ${bxData.urls.length} streams browser-extract`);
+            }
+            return;
+          }
+
+          for (const link of allLinks) {
+            const isHls = link.includes(".m3u8");
+            const proxy = isHls ? wrapHls(link, gamerUrl) : link;
+            sendSource(proxy, "4K HDHub", link, proxy);
+          }
+          console.log(`[4khdhub] ${allLinks.length} sources → ${allLinks[0].slice(0, 60)}`);
+        } catch (e: any) { console.warn("[fourkhdhub_anim]", e?.message); }
+      }),
+
       scrapeAnimCached("primesrc_anim", async () => {
         try {
           const PBASE = "https://primesrc.me";
