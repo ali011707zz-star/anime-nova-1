@@ -501,7 +501,8 @@ export default function AnimationWatch() {
   /* ── Resolve play URL ── */
   const getSourceInfo = (src: Source): { url: string; isHls: boolean } => {
     const url   = src.proxyUrl || src.directUrl || src.url;
-    const isHls = isHlsUrl(url);
+    // CF Worker URLs (workers.dev?t=) wrap HLS manifests — check directUrl/src.url too
+    const isHls = isHlsUrl(url) || isHlsUrl(src.directUrl || "") || isHlsUrl(src.url);
     return { url, isHls };
   };
 

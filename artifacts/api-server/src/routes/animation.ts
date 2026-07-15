@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomBytes, createHash, createDecipheriv } from "node:crypto";
+import { randomBytes, createHash, createDecipheriv, createCipheriv } from "node:crypto";
 import { encryptParam, encryptProxyUrl, isEncrypted } from "../lib/security.js";
 import {
   makeAnimCacheKey,
@@ -426,7 +426,27 @@ async function cfProxyGet(url: string): Promise<string> {
 }
 
 // cfDirectGet — fallback لـ cf_proxy الحقيقي على port 8000 (يعمل حتى لو Hopx معطوب)
-const _CF_DIRECT_KEY = process.env.CF_PROXY_KEY || "";
+const _CF_DIRECT_KEY  = process.env.CF_PROXY_KEY  || "";
+const _CF_WORKER_URL  = process.env.CF_WORKER_URL || "";
+
+/**
+ * لف رابط HLS عبر CF Worker (يُضيف Referer server-side ويُعيد كتابة segments).
+ * يستخدم نفس AES-256-GCM المُطبَّق في worker.js:encryptCfToken.
+ * يُرجع null إذا لم يكن CF_WORKER_URL أو CF_PROXY_KEY مُعرَّفَين.
+ */
+async function wrapCfWorker(url: string, ref: string, expSeconds = 21600): Promise<string | null> {
+  if (!_CF_WORKER_URL || !_CF_DIRECT_KEY) return null;
+  try {
+    const keyBuf  = Buffer.from(_CF_DIRECT_KEY.padEnd(32, "0").slice(0, 32));
+    const iv      = randomBytes(12);
+    const payload = JSON.stringify({ url, ref, exp: Math.floor(Date.now() / 1000) + expSeconds });
+    const cipher  = createCipheriv("aes-256-gcm", keyBuf, iv);
+    const enc     = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
+    const tag     = cipher.getAuthTag();
+    const token   = iv.toString("hex") + Buffer.concat([enc, tag]).toString("hex");
+    return `${_CF_WORKER_URL}?t=${token}`;
+  } catch { return null; }
+}
 async function cfDirectGet(url: string, timeoutMs = 15_000): Promise<string | null> {
   try {
     const params = new URLSearchParams({ url });
@@ -3423,16 +3443,29 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     signal: AbortSignal.timeout(6_000),
                   });
                   if (!probe.ok && probe.status !== 206) {
-                    // CDN blocks server IP → raw URL for direct client access
+                    // CDN blocks VPS datacenter IP → route through CF Worker
+                    // CF Worker يُضيف Referer: dulo.tv server-side ويُعيد كتابة segments
+                    const cfUrl = await wrapCfWorker(src.url, `${DULO_TV_BASE}/`);
+                    if (cfUrl) {
+                      finalUrl = cfUrl;
+                      // لا نُعيّن useRawFallback — CF Worker يتحمل Referer + rewriting
+                    } else {
+                      // CF Worker غير مُعرَّف → raw URL مع headers للـ mobile (ExoPlayer يقبلها)
+                      finalUrl = src.url;
+                      useRawFallback = true;
+                    }
+                  }
+                } catch {
+                  // Probe timeout → fallback to CF Worker
+                  const cfUrl = await wrapCfWorker(src.url, `${DULO_TV_BASE}/`);
+                  if (cfUrl) {
+                    finalUrl = cfUrl;
+                  } else {
                     finalUrl = src.url;
                     useRawFallback = true;
                   }
-                } catch {
-                  finalUrl = src.url;
-                  useRawFallback = true;
                 }
-                /* للروابط الخام (بدون proxy): أرسل Referer/Origin الصحيح حتى يُرسله ExoPlayer
-                   مباشرةً للـ CDN (لأنه لا يمر عبر CF Worker في هذه الحالة) */
+                /* للروابط الخام فقط (حين CF Worker غير متاح): headers للـ mobile (ExoPlayer يُرسلها) */
                 const duloExtra = useRawFallback
                   ? { headers: { Referer: `${DULO_TV_BASE}/`, Origin: DULO_TV_BASE } }
                   : undefined;
