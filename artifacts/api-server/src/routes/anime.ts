@@ -11098,8 +11098,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
       // ── مصادر جديدة يوليو 2026 ────────────────────────────────────────────
       scrapeCached("nekowatch",  () => getNekowatchSources(title, english, ep, anilistId),  false, 18000),
-      scrapeCached("xpass_anim",   () => getXpassAnimeSources(title, english, ep, anilistId),   false, 20000),
-      scrapeCached("vaplayer_anim",() => getVaplayerAnimeSources(title, english, ep, anilistId), false, 18000),
+      // xpass_anim: محذوف — CDN يحجب VPS/CF IPs (2026-07-15)
+      // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن (2026-07-15)
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 (Cloudflare) لكل الطلبات منذ 2026-07-09
       // scrapeCached("xyra_anim",  () => getXyraAnimeSources(title, english, ep, anilistId),  false, 18000),
       scrapeCached("sanime",     () => getSAnimeSources(title, english, ep),                 false, 20000),
@@ -11147,7 +11147,9 @@ router.get("/anime/fetch-source", async (req, res) => {
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
     // TMDB-native embed sources (xpass + vaplayer) — no Arabic scraping, pure TMDB lookup
-    "xpass_anim", "vaplayer_anim", "videasy_anim",
+    "videasy_anim",
+    // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
+    // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن 2026-07-15
     // witanime/faselhd_db/moviz_time: أُزيلت من القائمة — معطّلة بطلب المستخدم 2026-07-14
   ]);
   // الطلبات الداخلية (x-internal:1) تتجاوز القائمة لتسمح لـ animation.ts باستدعاء moviz_time وغيره
@@ -11270,8 +11272,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
-      case "xpass_anim":   (await race(getXpassAnimeSources(title, english, ep, anilistId),    20_000, [])).forEach(collectSrc); break;
-      case "vaplayer_anim":(await race(getVaplayerAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
+      // case "xpass_anim": محذوف 2026-07-15
+      // case "vaplayer_anim": محذوف من الأنمي 2026-07-15
       // xyra_anim: معطّل مؤقتاً — api.xyra.stream يرجع 502 دائماً (عطل من طرفهم)
       // case "xyra_anim":    (await race(getXyraAnimeSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;

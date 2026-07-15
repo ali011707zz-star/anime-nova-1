@@ -174,8 +174,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
   { site: "videasy_anim", name: "Videasy",         desc: "FHD · ياباني مترجم · HLS", tag: "VE", audioLang: "en" },
-  { site: "xpass_anim",  name: "XPass",          desc: "FHD · TMDB مباشر · HLS",  tag: "XP", audioLang: "en" },
-  { site: "vaplayer_anim",name: "VaPlayer",       desc: "FHD · TMDB مباشر · HLS",  tag: "VP", audioLang: "en" },
+  // xpass_anim: محذوف — CDN يحجب VPS/CF IPs، المقاطع تفشل للمستخدم 2026-07-15
+  // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
   // witanime (WI) / faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
 ];
 

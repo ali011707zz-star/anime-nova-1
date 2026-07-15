@@ -1834,7 +1834,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   //    Dulo (dulo_anim) و StarCima (starcima) — السكرابر لا يمر بأي مصدر آخر إطلاقاً.
   //    لإعادة التفعيل: احذف/عدّل ANIM_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   // moviz_time_anim أُضيف للسماح به 2026-07-13 (مصدر جديد بطلب المستخدم)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "xpass_anim", "vaplayer_anim"]);
+  // xpass_anim: محذوف — CDN يحجب VPS/CF IPs (2026-07-15)
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim"]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -4140,62 +4141,7 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         }
       }),
 
-      // ── XPass (play.xpass.top) — MEG direct HLS (no embed page, no bot-detection) ─
-      scrapeAnimCached("xpass_anim", async () => {
-        if (!tmdbId) return;
-        try {
-          const XBASE = "https://play.xpass.top";
-          const XREF  = XBASE + "/";
-          // MEG CDN: predictable URL — no embed page fetch needed
-          const megUrls = type === "movie"
-            ? [
-                `${XBASE}/meg/movie/${tmdbId}/1/playlist.json`,
-                `${XBASE}/meg/movie/${tmdbId}/2/playlist.json`,
-              ]
-            : [
-                `${XBASE}/meg/tv/${tmdbId}/${season}/${epNum}/1/playlist.json`,
-                `${XBASE}/meg/tv/${tmdbId}/${season}/${epNum}/2/playlist.json`,
-              ];
-
-          // Helper: direct أولاً ثم Hopx fallback
-          async function fetchXpassAnim(pUrl: string): Promise<any[] | null> {
-            try {
-              const pr = await fetch(pUrl, {
-                headers: { "User-Agent": UA, "Referer": XREF },
-                signal: AbortSignal.timeout(8_000),
-              });
-              if (pr.ok) {
-                const pj: any = await pr.json();
-                const srcs: any[] = pj?.playlist?.[0]?.sources ?? [];
-                if (srcs.length) return srcs;
-              }
-            } catch { /* fallthrough */ }
-            const html = await hopxProxyGet(pUrl, XREF, 12_000);
-            if (!html) return null;
-            try { return JSON.parse(html)?.playlist?.[0]?.sources ?? null; } catch { return null; }
-          }
-
-          let sent = 0;
-          const plResults = await Promise.allSettled(megUrls.map(fetchXpassAnim));
-          for (const res of plResults) {
-            if (res.status !== "fulfilled" || !res.value) continue;
-            for (const s of (res.value as any[])) {
-              if (typeof s?.file !== "string" || !s.file.startsWith("http")) continue;
-              const isHls = s.file.includes(".m3u8") || s.type === "hls";
-              const proxyUrl = isHls ? wrapHls(s.file, XREF) : s.file;
-              // corsOk: mobile plays directUrl with residential IP (ps1.1x2.space blocks VPS/CF IPs)
-              sendSource(s.file, `XPass · FHD`, s.file, proxyUrl, { corsOk: true, headers: { Referer: XREF } });
-              sent++;
-              if (sent >= 3) break;
-            }
-            if (sent >= 3) break;
-          }
-          console.log(`[XPass-anim] tmdb:${tmdbId} ${type} → ${sent} sources`);
-        } catch (e: any) {
-          console.warn("[XPass-anim]", e?.message);
-        }
-
-      }),
+      // xpass_anim: محذوف بطلب المستخدم 2026-07-15 — CDN (ps1/vip.1x2.space) يحجب VPS/CF IPs
 
       // ── VaPlayer (streamdata.vaplayer.ru) — TMDB-native, direct HLS ────────────
       // TV:    /api.php?tmdb={id}&type=tv&season={s}&episode={e}
