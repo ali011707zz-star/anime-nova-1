@@ -13247,15 +13247,28 @@ router.get("/anime/video-proxy", async (req, res) => {
 });
 
 // ── seg-proxy: VPS يجلب الـ segment مع Referer الصحيح ───────────────────────
-// CDNs من anineko تحزم الـ TS segments داخل PNG (252 بايت header ثم TS خام)
-// نكشفها تلقائياً وننزع الـ header
-const ANINEKO_STRIP_CDNS = [
-  "cdn.anizara.store",
-  "otakuhg.com",
-  "otakuvid.com",
-  "bibiemb.xyz",
-];
-const ANINEKO_STRIP_BYTES = 252;
+// بعض CDNs (anineko, cdn.1shows.app وغيرها) تحزم الـ TS segments داخل PNG
+// نكشف PNG-wrapping تلقائياً من أول 4 بايت ونجد أول MPEG-TS sync byte (0x47)
+// لا نعتمد على قائمة CDNs ثابتة — أي CDN يُرجع image/* أو application/octet-stream
+// وأول 4 بايته هي PNG magic سيُعالَج تلقائياً.
+
+/** يكشف PNG-wrapped MPEG-TS ويُرجع المخزن المؤقت بعد إزالة غلاف PNG */
+function stripPngWrapper(raw: ArrayBuffer): Buffer | null {
+  const buf = Buffer.from(raw);
+  // PNG magic: 89 50 4E 47 0D 0A 1A 0A
+  if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504E47) return null;
+  // ابحث عن أول MPEG-TS sync byte (0x47) متبوعاً بـ 0x47 بعد 188 بايت
+  for (let i = 0; i < Math.min(buf.length - 188, 1024); i++) {
+    if (buf[i] === 0x47 && buf[i + 188] === 0x47) {
+      return buf.slice(i);
+    }
+  }
+  // لم نجد نمط TS مزدوج — جرّب نمط أول 0x47 فقط (آخر الملف)
+  for (let i = 0; i < Math.min(buf.length, 512); i++) {
+    if (buf[i] === 0x47) return buf.slice(i);
+  }
+  return null; // ليس TS مُغلَّف
+}
 
 router.get("/anime/seg-proxy", async (req, res) => {
   const rawUrl = (req.query.url as string || "").trim();
@@ -13272,28 +13285,47 @@ router.get("/anime/seg-proxy", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
 
-  // anineko CDN: segments مُغلَّفة كـ PNG (252 بايت, ثم MPEG-TS خام)
-  const needsStrip = ANINEKO_STRIP_CDNS.some(h => url.includes(h));
-  if (needsStrip) {
-    const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
-    if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
-    try {
-      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
-      if (!r.ok) { res.status(r.status).send("upstream error"); return; }
-      const raw = await r.arrayBuffer();
-      const stripped = raw.byteLength > ANINEKO_STRIP_BYTES
-        ? raw.slice(ANINEKO_STRIP_BYTES)
-        : raw;
-      res.setHeader("Content-Type", "video/MP2T");
-      res.setHeader("Content-Length", String(stripped.byteLength));
-      res.status(200).end(Buffer.from(stripped));
-    } catch {
-      if (!res.headersSent) res.status(502).send("segment fetch failed");
-    }
-    return;
-  }
+  const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
+  if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
 
-  await serveMediaVPS(url, ref, req, res);
+  try {
+    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
+    if (!r.ok) { res.status(r.status).send("upstream error"); return; }
+
+    const ct = (r.headers.get("content-type") || "").toLowerCase();
+    const mightBePng =
+      ct.startsWith("image/") ||
+      ct === "application/octet-stream" ||
+      ct === "binary/octet-stream";
+
+    if (mightBePng) {
+      // نبفّر ونختبر PNG magic
+      const raw = await r.arrayBuffer();
+      const stripped = stripPngWrapper(raw);
+      if (stripped) {
+        // PNG-wrapped MPEG-TS مكتشف — أرسل TS نظيفاً
+        res.setHeader("Content-Type", "video/MP2T");
+        res.setHeader("Content-Length", String(stripped.length));
+        res.status(200).end(stripped);
+        return;
+      }
+      // ليس PNG-wrapped — أرسل كما هو
+      const cl = r.headers.get("content-length");
+      if (cl) res.setHeader("Content-Length", cl);
+      // تصحيح Content-Type لـ MP4 يُرجَع كـ octet-stream
+      const correctedCt = (ct === "application/octet-stream" || ct === "binary/octet-stream") && /\.mp4(\?|$)/i.test(url)
+        ? "video/mp4"
+        : ct;
+      res.setHeader("Content-Type", correctedCt);
+      res.status(200).end(Buffer.from(raw));
+      return;
+    }
+
+    // Content-Type طبيعي — بثّ مباشرة بدون تخزين في الذاكرة
+    await serveMediaVPS(url, ref, req, res);
+  } catch {
+    if (!res.headersSent) res.status(502).send("segment fetch failed");
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════
