@@ -6952,8 +6952,8 @@ async function getAnimeGGSources(
 //  صوت ياباني + ترجمة إنجليزية | AES-CTR + hex decode + AES-CBC
 // ════════════════════════════════════════════════════════════════════
 const ALLANIME_API   = "https://api.allanime.day";
-const ALLANIME_REF   = "https://allmanga.to";
-const ALLANIME_UA    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
+const ALLANIME_REF   = "https://youtu-chan.com";   // allmanga.to → 400; youtu-chan.com → 200 ✅
+const ALLANIME_UA    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0";
 const ALLANIME_PASS  = "Xot36i3lK3:v1";
 const ALLANIME_EP_H  = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec";
 
@@ -7044,7 +7044,7 @@ async function getAllMangaSources(
     const results: any[] = sd?.shows?.edges ?? [];
     if (!results.length) return [];
 
-    // 2. Best match (prefer AniList ID)
+    // 2. Best match — AniList ID أولاً، ثم مطابقة الاسم
     const normQ = q.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
     let best = results[0];
     for (const r of results) {
@@ -7055,66 +7055,93 @@ async function getAllMangaSources(
 
     // 3. Episode sources (persisted query)
     const epVars = { showId: best._id, translationType: "sub", episodeString: String(ep) };
-    const epData = await aaGet(
+    const epRaw = await aaGet(
       `${ALLANIME_API}/api?variables=${encodeURIComponent(JSON.stringify(epVars))}&extensions=${encodeURIComponent(JSON.stringify({ persistedQuery: { version: 1, sha256Hash: ALLANIME_EP_H } }))}`
     );
-    const srcUrls: any[] = epData?.episode?.sourceUrls ?? [];
-    const sources: UnifiedSource[] = [];
 
-    for (const src of srcUrls.slice(0, 8)) {
-      let url: string = src.sourceUrl ?? "";
-      if (!url) continue;
-      if (url.startsWith("--")) url = aaHexDecode(url.slice(2));
-      if (url.startsWith("/apivtwo/clock")) url = "https://allanime.day" + url.replace("/clock", "/clock.json");
-
-      // allanime.uns.bio — AES-CBC encrypted HLS
-      if (url.includes("allanime.uns.bio")) {
-        try {
-          const token = url.split("#").pop() ?? "";
-          if (!token || token.length <= 2) continue;
-          const base = "https://allanime.uns.bio";
-          const vr = await fetch(`${base}/api/v1/video?id=${token}&w=1280&h=720&r=`, {
-            headers: { "User-Agent": ALLANIME_UA, "Referer": `${base}/#${token}`, "Origin": base },
-            signal: AbortSignal.timeout(8000),
-          });
-          if (!vr.ok) continue;
-          const hexStr = (await vr.text()).trim();
-          if (!hexStr || !/^[0-9a-f]+$/i.test(hexStr)) continue;
-          const parsed = JSON.parse(await aaUnsDec(hexStr));
-          const hlsUrl: string = parsed.source || parsed.cf || "";
-          if (!hlsUrl.startsWith("http")) continue;
-          sources.push({
-            name: "AllManga · HLS · ياباني مترجم",
-            url: hlsUrl, quality: "1080p", qualityRank: 8, site: "allmanga",
-            directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(hlsUrl)}&ref=${encodeURIComponent(ALLANIME_REF + "/")}`,
-            directType: "hls",
-          });
-        } catch { /* skip */ }
-      }
-      // mp4upload — scrape embed for MP4
-      else if (url.includes("mp4upload.com")) {
-        try {
-          const m = url.match(/embed-([a-zA-Z0-9]+)\.html/);
-          if (!m) continue;
-          const er = await fetch(`https://www.mp4upload.com/embed-${m[1]}.html`, {
-            headers: { "User-Agent": ALLANIME_UA, "Referer": ALLANIME_REF + "/" },
-            signal: AbortSignal.timeout(8000),
-          });
-          if (!er.ok) continue;
-          const html = await er.text();
-          const mp = html.match(/player\.src\s*\(\s*\{[^}]*\bsrc\s*:\s*"([^"]+)"/) || html.match(/"file"\s*:\s*"(https?:[^"]+\.mp4[^"]*)"/);
-          const mp4Url = mp?.[1]?.replace(/\\/g, "");
-          if (!mp4Url) continue;
-          sources.push({
-            name: "AllManga · MP4 · ياباني مترجم",
-            url: mp4Url, quality: "1080p", qualityRank: 7, site: "allmanga",
-            directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mp4Url)}&ref=${encodeURIComponent("https://www.mp4upload.com/")}`,
-            directType: "mp4",
-          });
-        } catch { /* skip */ }
-      }
-      if (sources.length >= 2) break;
+    // 4. استخراج sourceUrls — API قد يُعيد tobeparsed (AES-CTR) أو episode.sourceUrls مباشرة
+    let srcUrls: any[] = [];
+    if (epRaw?.tobeparsed) {
+      // tobeparsed = AES-CTR بـ SHA256(ALLANIME_PASS) — يحتوي {episode:{sourceUrls:[]}}
+      try {
+        const plain = await aaDecryptB64(epRaw.tobeparsed);
+        const obj = JSON.parse(plain);
+        srcUrls = obj?.episode?.sourceUrls ?? obj?.sourceUrls ?? [];
+      } catch { /* skip */ }
+    } else {
+      srcUrls = epRaw?.episode?.sourceUrls ?? [];
     }
+    if (!srcUrls.length) return [];
+
+    // 5. معالجة المصادر بالأولوية:
+    //    player/Yt-mp4 → MP4 مباشر من fast4speed (الأفضل) ← أولاً
+    //    mp4upload     → embed scrape                    ← ثانياً
+    //    clock.json    → 500 من VPS — تُتجاهل
+    //    Ss-Hls        → streamsb ميت — تُتجاهل
+    const sources: UnifiedSource[] = [];
+    const HDRS = { "User-Agent": ALLANIME_UA, "Referer": ALLANIME_REF + "/" };
+
+    // مرور أول: Yt-mp4 / player (مصدر مباشر — الأسرع والأوثق)
+    for (const src of srcUrls) {
+      if (src.type !== "player") continue;
+      const url: string = src.sourceUrl ?? "";
+      if (!url || !url.startsWith("http")) continue;
+      const isHls = url.includes(".m3u8");
+      sources.push({
+        name: "AllAnime · ياباني مترجم",
+        url,
+        quality: src.resolutionStr || "auto",
+        qualityRank: 9,
+        site: "allmanga",
+        directUrl: isHls
+          ? `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ALLANIME_REF + "/")}`
+          : url,
+        directType: isHls ? "hls" : "mp4",
+      });
+      if (sources.length >= 1) break; // مصدر واحد مباشر يكفي
+    }
+
+    // مرور ثانٍ: mp4upload إن لم يُوجد player
+    if (sources.length < 2) {
+      for (const src of srcUrls) {
+        let url: string = src.sourceUrl ?? "";
+        if (!url) continue;
+        // hex decode للروابط المشفّرة
+        if (url.startsWith("--")) {
+          url = aaHexDecode(url.slice(2));
+          // clock.json → يُعيد 500 من VPS → تخطَّ
+          if (url.includes("/clock")) continue;
+        }
+        // clock.json URLs مباشرة → تخطَّ
+        if (url.includes("clock.json") || url.includes("/apivtwo/clock")) continue;
+        // Ss-Hls (streamsb) ميت → تخطَّ
+        if ((src.sourceName ?? "").includes("Ss-Hls") || url.includes("streamsb")) continue;
+
+        if (url.includes("mp4upload.com")) {
+          try {
+            const m = url.match(/embed-([a-zA-Z0-9]+)\.html/);
+            if (!m) continue;
+            const er = await fetch(`https://www.mp4upload.com/embed-${m[1]}.html`, {
+              headers: HDRS, signal: AbortSignal.timeout(8000),
+            });
+            if (!er.ok) continue;
+            const html = await er.text();
+            const mp = html.match(/player\.src\s*\(\s*\{[^}]*\bsrc\s*:\s*"([^"]+)"/) ||
+                       html.match(/"file"\s*:\s*"(https?:[^"]+\.mp4[^"]*)"/);
+            const mp4Url = mp?.[1]?.replace(/\\/g, "");
+            if (!mp4Url) continue;
+            sources.push({
+              name: "AllAnime · MP4Upload · ياباني مترجم",
+              url: mp4Url, quality: "1080p", qualityRank: 7, site: "allmanga",
+              directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(mp4Url)}&ref=${encodeURIComponent("https://www.mp4upload.com/")}`,
+              directType: "mp4",
+            });
+          } catch { /* skip */ }
+        }
+        if (sources.length >= 2) break;
+      }
+    }
+
     return sources;
   } catch { return []; }
 }
@@ -11093,7 +11120,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animetime CDN (vidhls.com) يعمل لبعض الأنمي (200) — مُعاد تفعيله 2026-07-01
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
-      // allmanga:     clock.json→500, fast4speed→401
+      // allmanga:     مُعاد تفعيله 2026-07-15 — tobeparsed AES-CTR + Yt-mp4 player type (fast4speed يعمل ✅)
+      scrapeCached("allmanga", () => getAllMangaSources(title, english, ep, anilistId), false, 18000),
       // reanime: DEAD — reanime.net أوقف خدمته تماماً 2026-07 (REANIME_DISABLED=true)
       // scrapeCached("reanime", () => getReanímeSources(title, english, ep, anilistId), false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
