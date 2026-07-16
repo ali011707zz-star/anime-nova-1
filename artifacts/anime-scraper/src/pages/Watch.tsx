@@ -3116,6 +3116,10 @@ export default function WatchPage() {
     setFailedSrcToast(true);
     setShowPicker(true);
     setPhase("picker");
+    /* إعادة ضبط autoPlayedRef حتى يتمكن fallback auto-play من تشغيل مصدر آخر تلقائياً
+       (المشكلة: quick-resume يضبطه true → رابط CDN منتهي الصلاحية → فشل → العودة للـ picker
+       لكن autoPlayedRef=true يمنع أي تشغيل تلقائي آخر → المستخدم عالق يدوياً) */
+    autoPlayedRef.current = false;
     setTimeout(() => setFailedSrcToast(false), 3500);
   }
 
