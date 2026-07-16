@@ -13369,10 +13369,8 @@ router.get("/anime/seg-proxy", async (req, res) => {
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
 
-  try {
-    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
-    if (!r.ok) { res.status(r.status).send("upstream error"); return; }
-
+  /** مساعد داخلي: يخدم segment من response جاهز (مع دعم PNG wrapper) */
+  async function serveSegResponse(r: Response): Promise<boolean> {
     const ct = (r.headers.get("content-type") || "").toLowerCase();
     const mightBePng =
       ct.startsWith("image/") ||
@@ -13380,30 +13378,53 @@ router.get("/anime/seg-proxy", async (req, res) => {
       ct === "binary/octet-stream";
 
     if (mightBePng) {
-      // نبفّر ونختبر PNG magic
       const raw = await r.arrayBuffer();
       const stripped = stripPngWrapper(raw);
       if (stripped) {
-        // PNG-wrapped MPEG-TS مكتشف — أرسل TS نظيفاً
         res.setHeader("Content-Type", "video/MP2T");
         res.setHeader("Content-Length", String(stripped.length));
         res.status(200).end(stripped);
-        return;
+        return true;
       }
-      // ليس PNG-wrapped — أرسل كما هو
       const cl = r.headers.get("content-length");
       if (cl) res.setHeader("Content-Length", cl);
-      // تصحيح Content-Type لـ MP4 يُرجَع كـ octet-stream
       const correctedCt = (ct === "application/octet-stream" || ct === "binary/octet-stream") && /\.mp4(\?|$)/i.test(url)
         ? "video/mp4"
         : ct;
       res.setHeader("Content-Type", correctedCt);
       res.status(200).end(Buffer.from(raw));
+      return true;
+    }
+
+    // Content-Type طبيعي — بثّ مباشرة
+    await serveMediaVPS(url, ref, req, res);
+    return true;
+  }
+
+  try {
+    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
+
+    if (!r.ok) {
+      // ── CF Worker fallback: CDN يحجب VPS IP (403/429) → نُرسِل عبر Cloudflare ──
+      // نفس المنطق المُطبَّق في serveHlsVPS لمانيفيست HLS.
+      // الـ VPS IP محجوب لـ segments أيضاً ← سبب الشاشة السوداء الرئيسي.
+      if ((r.status === 403 || r.status === 429) && !res.headersSent) {
+        try {
+          const cfUrl = await wrapHlsViaCfWorker(url, ref);
+          if (cfUrl) {
+            const cfR = await fetch(cfUrl, { signal: AbortSignal.timeout(25000) });
+            if (cfR.ok) {
+              await serveSegResponse(cfR);
+              return;
+            }
+          }
+        } catch { /* CF Worker فشل → أرجع الخطأ الأصلي */ }
+      }
+      if (!res.headersSent) res.status(r.status).send("upstream error");
       return;
     }
 
-    // Content-Type طبيعي — بثّ مباشرة بدون تخزين في الذاكرة
-    await serveMediaVPS(url, ref, req, res);
+    await serveSegResponse(r);
   } catch {
     if (!res.headersSent) res.status(502).send("segment fetch failed");
   }
