@@ -224,8 +224,25 @@ const ANIME_SITES = [
   "notorrent", "sanime", "anslayer",
   // مصادر عربية مُستعادة
   "anime3rb", "akwam",
+  // ياباني مترجم — مُضاف 2026-07-16 (كان في الويب لكن ناقص من المحمول)
+  "allmanga",
 ] as const;
+
+/* timeout موحّد افتراضي — يُستبدل بـ SITE_TIMEOUT_MAP للمواقع التي تحتاج وقتاً أطول */
 const SITE_TIMEOUT_MS = 28_000;
+
+/* timeout مُخصَّص لكل موقع — يجب أن يكون >= timeout الباكند + هامش
+   وإلا يُقتل الطلب قبل أن يرد الباكند (سبب اختفاء المصادر في cache البارد) */
+const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
+  animekai:     46_000,  // backend = 40s + 6s هامش
+  animewitcher: 32_000,  // backend = 28s + 4s هامش
+  cinesrc_anim: 38_000,  // backend = 35s + 3s هامش
+  mycima:       34_000,  // backend = 30s + 4s هامش
+  anime4up2:    28_000,  // backend = 25s + 3s هامش
+  anikototv:    28_000,  // backend = 25s + 3s هامش
+  hianime:      26_000,  // backend = 22s + 4s هامش
+  anipm:        24_000,  // backend = 20s + 4s هامش
+};
 
 /* ── Spinning loader ── */
 function SpinRing({ size = 36 }: { size?: number }) {
@@ -423,7 +440,8 @@ export default function WatchScreen() {
     const fetchOneSite = async (site: string) => {
       /* مهلة مستقلة لكل مصدر مع ربطها بـ abort الرئيسي */
       const siteCtrl = new AbortController();
-      const tid = setTimeout(() => siteCtrl.abort(), SITE_TIMEOUT_MS);
+      const effectiveTimeout = SITE_TIMEOUT_MAP[site as keyof typeof SITE_TIMEOUT_MAP] ?? SITE_TIMEOUT_MS;
+      const tid = setTimeout(() => siteCtrl.abort(), effectiveTimeout);
       const onMainAbort = () => siteCtrl.abort();
       mainSignal.addEventListener("abort", onMainAbort, { once: true });
 
@@ -657,7 +675,8 @@ export default function WatchScreen() {
     try {
       await warmAuthToken();
       const siteCtrl = new AbortController();
-      const tid = setTimeout(() => siteCtrl.abort(), 28000);
+      const lazyTimeout = SITE_TIMEOUT_MAP[site as keyof typeof SITE_TIMEOUT_MAP] ?? SITE_TIMEOUT_MS;
+      const tid = setTimeout(() => siteCtrl.abort(), lazyTimeout);
       const res = await secureFetch(`${base}/api/anime/fetch-source?site=${site}&${qs}`, { signal: siteCtrl.signal });
       clearTimeout(tid);
 

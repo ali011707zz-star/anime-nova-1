@@ -3143,9 +3143,23 @@ export default function WatchPage() {
     const resolvedTitle   = anime?.title?.romaji   || titleParam;
     const resolvedEnglish = anime?.title?.english  || englishParam || "";
 
+    /* timeout مُصمَّم لكل موقع — يجب أن يكون >= timeout الباكند لنفس الموقع
+       حتى لا يُقتل الطلب قبل أن يرد الباكند (مشكلة جذرية لفقدان المصادر في cache البارد) */
+    const SITE_REQUEST_TIMEOUTS: Record<string, number> = {
+      animekai:     46000,  // backend = 40s + هامش 6s
+      animewitcher: 32000,  // backend = 28s + هامش 4s
+      cinesrc_anim: 38000,  // backend = 35s + هامش 3s
+      anime4up2:    28000,  // backend = 25s + هامش 3s
+      mycima:       34000,  // backend = 30s + هامش 4s
+      witanime:     48000,  // backend = 45s + هامش 3s
+      anikototv:    28000,  // backend = 25s + هامش 3s
+      hianime:      26000,  // backend = 22s + هامش 4s
+      anipm:        24000,  // backend = 20s + هامش 4s
+    };
+    const siteTimeout = SITE_REQUEST_TIMEOUTS[site] ?? 24000;
     const ctrl = new AbortController();
     fetchControllersRef.current[site] = ctrl;
-    const timeoutId = window.setTimeout(() => ctrl.abort(), 22000);
+    const timeoutId = window.setTimeout(() => ctrl.abort(), siteTimeout);
 
     try {
       const params = new URLSearchParams({ site, title: resolvedTitle, english: resolvedEnglish, ep: String(ep), anime: String(animeId || 0), format: anime?.format || sp.get("format") || "" });
