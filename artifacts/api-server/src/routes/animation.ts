@@ -2209,7 +2209,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     // moviz_time_anim: أُخفي بطلب المستخدم 2026-07-16
     // egydead: أُخفي بطلب المستخدم 2026-07-16
     // akwam: أُخفي بطلب المستخدم 2026-07-16
-    "vaplayer_anim", "videasy3", "vidfast_vc", "vidfast", "vidlink_encdec", "multimovies_anim", "fourkhdhub_anim",
+    "vaplayer_anim", "videasy3", "vidfast_vc", "vidfast", "vidlink_encdec", "multimovies_anim",
+    // fourkhdhub_anim: مُعطَّل — روابط CF Workers تنتهي صلاحيتها بسرعة (403) + ملفات MKV REMUX غير قابلة للتشغيل في المتصفح
   ]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
@@ -4883,6 +4884,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                   : text.includes("pixel") ? "Pixeldrain" : text.includes("s3") ? "S3"
                   : text.includes("mega") ? "Mega" : text.includes("pdl") ? "PDL" : "Server";
                 const lbl = `4K HDHub [${srvName}] ${qual}`;
+                // helper: هل الرابط هو صفحة hubcloud redirect (وليس ملف مباشر)؟
+                const isHubcloudRedirect = (u: string) =>
+                  /hubcloud[^/]*\/[^"?]*[?&]id=/i.test(u) || /pixel\.hubcloud\./i.test(u);
                 if (text.includes("buzz")) {
                   try {
                     const br = await fetch(`${link}/download`, {
@@ -4893,13 +4897,27 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                     if (redir) results2.push({ url: redir, label: lbl });
                   } catch {}
                 } else if (text.includes("pixel")) {
-                  const pid = link.replace(/\/$/, "").split("/").pop() || "";
-                  results2.push({ url: link.includes("download") ? link : `https://pixeldrain.com/api/file/${pid}?download`, label: lbl });
+                  if (isHubcloudRedirect(link)) {
+                    // pixel.hubcloud.cx/?id=… هي صفحة redirect أخرى — حلّها recursively
+                    try { results2.push(...(await khHubcloud(link)).slice(0, 2)); } catch {}
+                  } else {
+                    const pid = link.replace(/\/$/, "").split("/").pop() || "";
+                    results2.push({ url: link.includes("download") ? link : `https://pixeldrain.com/api/file/${pid}?download`, label: lbl });
+                  }
                 } else if (text.includes("fsl") || text.includes("s3") || text.includes("mega") ||
                            text.includes("pdl") || text.includes("10gbps") || text.includes("download file")) {
+                  if (isHubcloudRedirect(link)) {
+                    // رابط hubcloud آخر يحتاج حلاً إضافياً
+                    try { results2.push(...(await khHubcloud(link)).slice(0, 2)); } catch {}
+                  } else {
+                    results2.push({ url: link, label: lbl });
+                  }
+                } else if (/\.(mp4|m3u8)(\?|$)/i.test(link)) {
+                  // MP4/M3U8 مباشر — قابل للتشغيل
                   results2.push({ url: link, label: lbl });
-                } else if (/\.(mp4|mkv|m3u8)(\?|$)/i.test(link)) {
-                  results2.push({ url: link, label: lbl });
+                } else if (/\.mkv(\?|$)/i.test(link)) {
+                  // MKV — قابل للتشغيل على الموبايل (ExoPlayer) وليس على المتصفح
+                  results2.push({ url: link, label: lbl + " [MKV]" });
                 }
               }
               return results2;
@@ -4983,11 +5001,24 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           await Promise.allSettled(picks.map(async (srv: any) => {
             const embedUrl = EMBED_MAP[srv.name].replace("KEY", srv.key);
             try {
-              const html = await cfGet(embedUrl, PBASE + "/");
-              const m = html.match(/"file"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/) || html.match(/"file":\s*"(https?:\/\/[^"]+\.mp4[^"]*)"/);
+              // استخدم CF Worker (cfDirectGet) بدل cfGet لتجاوز حماية CDN
+              const raw = await cfDirectGet(embedUrl, 14_000) ?? await hopxProxyGet(embedUrl, PBASE + "/", 14_000);
+              if (!raw) return;
+              // unpack Dean-Edwards p,a,c,k,e,d
+              let html = raw;
+              const packM = raw.match(/\beval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*[,)]/);
+              if (packM) {
+                try {
+                  const unpackFn = new Function("return (" + raw.slice(raw.indexOf(packM[0])).match(/eval\s*\((.+)\)\s*;?\s*$/s)?.[1] + ")") as () => string;
+                  const unpacked = unpackFn();
+                  if (typeof unpacked === "string" && unpacked.length > 20) html = raw + " " + unpacked;
+                } catch {}
+              }
+              const m = html.match(/"file"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/)
+                     || html.match(/"file":\s*"(https?:\/\/[^"]+\.mp4[^"]*)"/);
               if (!m?.[1]) return;
               const hls = m[1];
-              sendSource(hls, `PrimeSrc · ${srv.name}`, hls, wrapHls(hls, embedUrl));
+              sendSource(wrapHls(hls, embedUrl), `PrimeSrc · ${srv.name}`, hls, wrapHls(hls, embedUrl));
               sent++;
             } catch { /* skip */ }
           }));
