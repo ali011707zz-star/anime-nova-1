@@ -11086,7 +11086,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       if (!cu.startsWith("/api/")) return true; // روابط خارجية: نثق بها
       // hls-proxy/seg-proxy: لا نختبرها (مانيفيست HLS معقد) — نثق بها
       if (cu.includes("/hls-proxy") || cu.includes("/seg-proxy")) return true;
-      // video-proxy: اختبر رابط الهدف الفعلي بـ HEAD request (يكشف روابط MediaFire/Streamtape المنتهية)
+      // video-proxy: اختبر رابط الهدف الفعلي — HEAD أولاً ثم GET-Range كـ fallback
+      // بعض CDNs ترفض HEAD بـ 403/405 لكن تعمل مع GET — لا نحذف المصدر عند فشل HEAD
       if (cu.includes("/video-proxy")) {
         try {
           const params = new URL("http://x" + cu).searchParams;
@@ -11095,16 +11096,26 @@ router.get("/anime/sources-stream", async (req, res) => {
           if (!targetUrl) return false;
           if (isEncrypted(targetUrl)) targetUrl = decryptParam(targetUrl);
           if (!targetUrl.startsWith("http")) return false;
+          const commonHdrs = {
+            Referer: ref && isEncrypted(ref) ? decryptParam(ref) : (ref || ""),
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          };
           const headRes = await fetch(targetUrl, {
-            method: "HEAD",
-            headers: {
-              Referer: ref && isEncrypted(ref) ? decryptParam(ref) : (ref || ""),
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
-            redirect: "follow",
+            method: "HEAD", headers: commonHdrs, redirect: "follow",
             signal: AbortSignal.timeout(4_000),
           });
-          return headRes.ok; // 200-299 = صالح
+          if (headRes.ok) return true;
+          // HEAD أعاد 403/405/501 — قد يكون CDN لا يدعم HEAD (false negative)
+          // جرّب GET-Range للتأكد
+          if (headRes.status === 403 || headRes.status === 405 || headRes.status === 501) {
+            const getRes = await fetch(targetUrl, {
+              method: "GET", headers: { ...commonHdrs, Range: "bytes=0-0" }, redirect: "follow",
+              signal: AbortSignal.timeout(5_000),
+            });
+            // 200/206 = حي؛ 416 = CDN يعمل لكن رفض range (يعني الرابط حي)
+            return getRes.status === 200 || getRes.status === 206 || getRes.status === 416;
+          }
+          return false;
         } catch { return false; }
       }
       const localUrl = `http://127.0.0.1:${PORT_NUM}${cu}`;
@@ -11125,6 +11136,15 @@ router.get("/anime/sources-stream", async (req, res) => {
         .map(r => r.value.s);
     }
 
+    // مواقع ذات CDN token قصير الأجل — بياناتها Stale = منتهية الصلاحية حتماً
+    // لا يجب تقديمها للمستخدم (يرى المصدر لكن البث يفشل بـ 403)
+    const SHORT_TTL_NO_STALE = new Set([
+      "animewitcher", "animeify",       // Streamtape/MediaFire ~45min
+      "moviebox", "moviebox_anim",      // &t= signed URLs ~10min
+      "vidlink_encdec", "vidlink_anim", // stormvv URLs ~45min
+      "xpass_anim",                     // XPass token ~8min
+    ]);
+
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
     async function scrapeCached(
       site: string,
@@ -11137,34 +11157,40 @@ router.get("/anime/sources-stream", async (req, res) => {
       const hit  = await getFromSourceCache(cKey);
 
       if (hit) {
-        // ✅ تقديم من الـ Cache فوراً (< 5ms)
-        hit.sources.forEach(s => sendSrc(s));
+        const isStaleOrNearExpiry = hit.stale || shouldRefreshCache(hit.expiresAt);
 
-        // تجديد خلفي إذا اقترب الانتهاء أو انتهى فعلاً (stale-while-revalidate)
-        if (hit.stale || shouldRefreshCache(hit.expiresAt)) {
-          setImmediate(async () => {
-            try {
-              const srcs = await race(scrape(), timeoutMs, []);
-              if (!srcs.length) return;
-              if (useExtract) {
-                const buf: UnifiedSource[] = [];
-                await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
-                if (buf.length) {
-                  await setSourceCache(cKey, site, buf);
-                  // أرسل المصادر الجديدة للاتصال المفتوح إن وُجد
-                  if (!closed) buf.forEach(s => sendSrc(s));
+        // مواقع ذات CDN token قصير: لا تُقدَّم بيانات قديمة — كشط مباشر
+        if (isStaleOrNearExpiry && SHORT_TTL_NO_STALE.has(site)) {
+          // سقوط مباشر للكشط الحي (لا نُرجع شيئاً من الكاش القديم)
+        } else {
+          // ✅ تقديم من الـ Cache فوراً (< 5ms)
+          hit.sources.forEach(s => sendSrc(s));
+
+          // تجديد خلفي إذا اقترب الانتهاء أو انتهى فعلاً (stale-while-revalidate)
+          if (isStaleOrNearExpiry) {
+            setImmediate(async () => {
+              try {
+                const srcs = await race(scrape(), timeoutMs, []);
+                if (!srcs.length) return;
+                if (useExtract) {
+                  const buf: UnifiedSource[] = [];
+                  await extractAndCollect(srcs, buf, new Set<string>(), EXTRACT_MS);
+                  if (buf.length) {
+                    await setSourceCache(cKey, site, buf);
+                    if (!closed) buf.forEach(s => sendSrc(s));
+                  }
+                } else {
+                  const alive = await probeAndFilter(srcs);
+                  if (alive.length) {
+                    await setSourceCache(cKey, site, alive);
+                    if (!closed) alive.forEach(s => sendSrc(s));
+                  }
                 }
-              } else {
-                const alive = await probeAndFilter(srcs);
-                if (alive.length) {
-                  await setSourceCache(cKey, site, alive);
-                  if (!closed) alive.forEach(s => sendSrc(s));
-                }
-              }
-            } catch {}
-          });
+              } catch {}
+            });
+          }
+          return; // لا حاجة للانتظار
         }
-        return; // لا حاجة للانتظار
       }
 
       // ❌ لا يوجد cache → اكشط
@@ -11316,7 +11342,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
     "animekai",  // مُضاف بطلب المستخدم 2026-07-16
-    // allmanga: أُخفي بطلب المستخدم 2026-07-16
+    "allmanga",  // مُصحَّح 2026-07-16 — كان في SCRAPER_DEFS لكن ناقص من هنا → صفر مصادر دائماً
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
     // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن 2026-07-15
