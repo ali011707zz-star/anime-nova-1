@@ -3453,42 +3453,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 if (!isHls) continue;
                 const proxied = wrapHls(src.url, `${DULO_TV_BASE}/`);
                 const label = `Dulo · ${prov}${src.title ? " · " + src.title : ""}`;
-                // Probe CDN — some CDNs block datacenter IPs (403) → send raw URL for direct mobile access
-                let finalUrl = proxied;
-                let finalRaw = src.url;
-                let useRawFallback = false;
-                try {
-                  const probe = await fetch(`http://127.0.0.1:${DULO_PROBE_PORT}${proxied}`, {
-                    signal: AbortSignal.timeout(6_000),
-                  });
-                  if (!probe.ok && probe.status !== 206) {
-                    // CDN blocks VPS datacenter IP → route through CF Worker
-                    // CF Worker يُضيف Referer: dulo.tv server-side ويُعيد كتابة segments
-                    const cfUrl = await wrapCfWorker(src.url, `${DULO_TV_BASE}/`);
-                    if (cfUrl) {
-                      finalUrl = cfUrl;
-                      // لا نُعيّن useRawFallback — CF Worker يتحمل Referer + rewriting
-                    } else {
-                      // CF Worker غير مُعرَّف → raw URL مع headers للـ mobile (ExoPlayer يقبلها)
-                      finalUrl = src.url;
-                      useRawFallback = true;
-                    }
-                  }
-                } catch {
-                  // Probe timeout → fallback to CF Worker
-                  const cfUrl = await wrapCfWorker(src.url, `${DULO_TV_BASE}/`);
-                  if (cfUrl) {
-                    finalUrl = cfUrl;
-                  } else {
-                    finalUrl = src.url;
-                    useRawFallback = true;
-                  }
-                }
-                /* للروابط الخام فقط (حين CF Worker غير متاح): headers للـ mobile (ExoPlayer يُرسلها) */
-                const duloExtra = useRawFallback
-                  ? { headers: { Referer: `${DULO_TV_BASE}/`, Origin: DULO_TV_BASE } }
-                  : undefined;
-                sendSource(finalUrl, label, finalRaw, finalUrl, duloExtra);
+                // VPS hls-proxy يتعامل مع CDN مباشرة؛ إذا حجب CDN VPS IP يتدخل Hopx تلقائياً
+                sendSource(proxied, label, src.url, proxied, undefined);
               }
             } catch (err: any) { console.warn(`[dulo_anim] ${prov} error: ${err?.message}`); }
           }));
