@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, createHash, createDecipheriv, createCipheriv } from "node:crypto";
-import { encryptParam, encryptProxyUrl, isEncrypted } from "../lib/security.js";
+import { encryptParam, encryptProxyUrl, isEncrypted, decryptParam } from "../lib/security.js";
 import {
   makeAnimCacheKey,
   getFromSourceCache,
@@ -2169,11 +2169,19 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
       try {
         const pu = new URL(proxyLookup.startsWith("/") ? `http://x.com${proxyLookup}` : proxyLookup);
         const ref = pu.searchParams.get("ref");
-        /* تجاهل ref المشفَّر بـ encryptParam (hex خالص) — إرسال headers فقط للقيم الواضحة */
-        if (ref && !isEncrypted(ref)) {
-          let origin = "";
-          try { origin = new URL(ref).origin; } catch {}
-          headers = origin ? { Referer: ref, Origin: origin } : { Referer: ref };
+        if (ref) {
+          /* الإصلاح الجذري: نفكّ تشفير ref المُشفَّر بـ encryptParam لاستخراج Referer الحقيقي.
+             ExoPlayer/AVPlayer يحتاج هذا الـ header لإرساله مع كل طلب (manifest + segments)
+             مباشرةً للـ CDN — خاصةً للروابط الخام (raw URL، useRawFallback). */
+          let actualRef = ref;
+          if (isEncrypted(ref)) {
+            try { actualRef = decryptParam(ref); } catch { actualRef = ""; }
+          }
+          if (actualRef && actualRef.startsWith("http")) {
+            let origin = "";
+            try { origin = new URL(actualRef).origin; } catch {}
+            headers = origin ? { Referer: actualRef, Origin: origin } : { Referer: actualRef };
+          }
         }
       } catch { /* ignore */ }
     }
