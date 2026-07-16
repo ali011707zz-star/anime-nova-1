@@ -151,7 +151,7 @@ function CharCard({ e, animeId, animeTitle, favIds, onToggle }: {
           style={[d.charHeartBtn, isFav && d.charHeartBtnActive]}
           hitSlop={6}
         >
-          <Ionicons name={isFav ? "heart" : "heart-outline"} size={12} color={isFav ? "#f43f5e" : "rgba(255,255,255,0.80)"} />
+          <Ionicons name={isFav ? "heart" : "heart-outline"} size={12} color={isFav ? "#fff" : "rgba(255,255,255,0.90)"} />
         </Pressable>
       </View>
       <Text style={d.charName} numberOfLines={2}>{n.name?.full}</Text>
@@ -858,8 +858,8 @@ const d = StyleSheet.create({
   charImgWrap: { width: (W - 32 - 60) / 5, aspectRatio: 0.7, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "#1C1C22", position: "relative" },
   charImgMain: { borderColor: "rgba(139,92,246,0.4)", borderWidth: 2 },
   charImg: { width: "100%", height: "100%" },
-  charHeartBtn: { position: "absolute", bottom: 4, right: 4, backgroundColor: "rgba(0,0,0,0.60)", borderRadius: 10, padding: 4, zIndex: 2, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
-  charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.25)", borderColor: "rgba(244,63,94,0.60)" },
+  charHeartBtn: { position: "absolute", bottom: 4, right: 4, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 10, padding: 4, zIndex: 2, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.35)" },
+  charHeartBtnActive: { backgroundColor: "rgba(244,63,94,0.85)", borderColor: "#f43f5e" },
   charName: { fontSize: 8, color: "rgba(255,255,255,0.6)", fontFamily: "Cairo_400Regular", textAlign: "center", lineHeight: 12 },
   emptyTabText: { textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 12, fontFamily: "Cairo_400Regular", paddingVertical: 20 },
   relCard: { width: 100, gap: 6 },

@@ -1078,8 +1078,8 @@ function CharCard({ e, main, isFav, onToggleFav }: { e: any; main?: boolean; isF
           onPointerDown={ev => ev.stopPropagation()}
           onClick={ev => { ev.stopPropagation(); ev.preventDefault(); onToggleFav?.(); }}
           className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-all active:scale-90"
-          style={{ background: isFav ? "rgba(236,72,153,0.85)" : "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)", zIndex: 10, position: "absolute" }}>
-          <Heart className={`w-3 h-3 ${isFav ? "fill-white text-white" : "text-white/60"}`} />
+          style={{ background: isFav ? "rgba(236,72,153,0.85)" : "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", zIndex: 10, position: "absolute", border: isFav ? "1.5px solid rgba(236,72,153,0.9)" : "1.5px solid rgba(255,255,255,0.35)" }}>
+          <Heart className={`w-3 h-3 ${isFav ? "fill-white text-white" : "text-white"}`} />
         </button>
         {n.favourites > 0 && (
           <div className="absolute bottom-1 left-1 flex items-center gap-0.5 bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded-lg">
