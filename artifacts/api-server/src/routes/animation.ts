@@ -2204,7 +2204,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // videasy3: أُضيف 2026-07-15 (نُقل من قسم الأنمي بطلب المستخدم؛ backend أُصلح أيضاً)
   // vidfast_vc: أُضيف 2026-07-15 (enc-dec.app flow — Beta server يعمل لبعض الأفلام)
   // vidlink_encdec: مُعاد تفعيله — يرجع 200 + MP4 متعددة الجودة من VPS (اختُبر 2026-07-15)
-  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set(["dulo_anim", "starcima", "moviz_time_anim", "egydead", "akwam", "vaplayer_anim", "videasy3", "vidfast_vc", "vidfast", "vidlink_encdec", "multimovies_anim", "fourkhdhub_anim"]);
+  const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set([
+    "dulo_anim", "starcima",
+    // moviz_time_anim: أُخفي بطلب المستخدم 2026-07-16
+    // egydead: أُخفي بطلب المستخدم 2026-07-16
+    // akwam: أُخفي بطلب المستخدم 2026-07-16
+    "vaplayer_anim", "videasy3", "vidfast_vc", "vidfast", "vidlink_encdec", "multimovies_anim", "fourkhdhub_anim",
+  ]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
@@ -4566,16 +4572,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
         } catch (e: any) { console.warn("[vixsrc_anim]", e?.message); }
       }),
 
-      // -- primesrc.me -- 85k movies+TV via Filemoon/Streamwish/Filelions
-      // ── MultiMovies (multimovies.homes) — DooPlay WP → GDMirrorBot ──────────
-      // السلسلة: search → doo_player_ajax → gdmirrorbot embed
-      //   1) browser-extract على الـ embed يلتقط video URLs مباشرة
-      //   2) Fallback: hopxExtractCookies (مرة واحدة/6h) → POST check_status.php
+      // ── MultiMovies (multimovies.homes) — pure HTTP chain (zangetsu-providers ref) ─
+      // السلسلة: search → movie page → DooPlay player options → doo_player_ajax
+      //   → iqsmartgames embed → mymovieapi (fileslug) → embedhelper.php
+      //   → mresult base64 → siteUrls → StreamWish embed → packed-JS unpack → m3u8
+      // لا browser-extract — كل الخطوات HTTP مباشر
       scrapeAnimCached("multimovies_anim", async () => {
         if (type !== "movie" || !title) return;
-        startCookieAutoRefresh();
         try {
-          // Step 1: domain من GitHub JSON (يُحدَّث كل 6h)
+          // Step 1: domain من GitHub JSON
           let mmBase = _mmDomainCache.url;
           if (!mmBase || Date.now() - _mmDomainCache.ts > DOMAIN_CACHE_TTL) {
             try {
@@ -4585,238 +4590,365 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               );
               if (jr.ok) {
                 const jd: any = await jr.json();
-                mmBase = String(jd["multimovies"] || "https://multimovies.study").replace(/\/$/, "");
+                mmBase = String(jd["multimovies"] || "https://multimovies.homes").replace(/\/$/, "");
               }
             } catch {}
-            if (!mmBase) mmBase = "https://multimovies.study";
+            if (!mmBase) mmBase = "https://multimovies.homes";
             _mmDomainCache.url = mmBase; _mmDomainCache.ts = Date.now();
           }
 
           // Step 2: search
           const q = title.replace(/[:()\[\]]/g, " ").trim();
-          const _mmSearchUrl = `${mmBase}/?s=${encodeURIComponent(q)}`;
-          const searchHtml = await hopxProxyGet(_mmSearchUrl, mmBase + "/")
-            ?? await cfDirectGet(_mmSearchUrl);
+          const mmSearchUrl = `${mmBase}/?s=${encodeURIComponent(q)}`;
+          const searchHtml = await cfDirectGet(mmSearchUrl) ?? await hopxProxyGet(mmSearchUrl, mmBase + "/");
           if (!searchHtml) { console.log("[multimovies] search failed"); return; }
 
-          // اعثر على أول رابط فيلم — بدون افتراض أن الاسم "multimovies" لا يزال في الـ domain
-          // (الموقع يُدوّر النطاق بالكامل أحياناً؛ نعتمد على بنية الرابط /movies/slug/ فقط)
+          // Step 3: find movie URL (/movies/ pattern)
           const mmHost = (() => { try { return new URL(mmBase).host; } catch { return ""; } })();
-          const hostEsc = mmHost.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          // 1) رابط كامل بنفس الـ host الحالي
+          const hostEsc = Array.from(mmHost).map(c => /[.*+?^${}()|[\]\\]/.test(c) ? "\\" + c : c).join("");
           let linkM = hostEsc
             ? searchHtml.match(new RegExp(`href="(https?:\\/\\/${hostEsc}\\/movies\\/[^"]+\\/)"`))
             : null;
-          // 2) أي رابط كامل لصفحة /movies/ (يغطي حالة إعادة توجيه لدومين جديد كلياً)
           if (!linkM) linkM = searchHtml.match(/href="(https?:\/\/[^"]+\/movies\/[^"\/]+\/)"/);
           let movieUrl = linkM?.[1] || "";
-          // 3) رابط نسبي /movies/slug/ (نفس الدومين الحالي)
           if (!movieUrl) {
             const relM = searchHtml.match(/href="(\/movies\/[^"\/]+\/)"/);
             if (relM?.[1]) movieUrl = `${mmBase}${relM[1]}`;
           }
-          if (!movieUrl) { console.log("[multimovies] no result:", q.slice(0, 40)); return; }
+          if (!movieUrl) { console.log("[multimovies] no movie result:", q.slice(0, 40)); return; }
 
-          // اكتشاف الـ domain الفعلي من رابط الفيلم نفسه — أدق من مطابقة "multimovies\."
           const movieBase = movieUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || mmBase;
-          if (movieBase !== mmBase) {
-            mmBase = movieBase;
-            _mmDomainCache.url = mmBase; _mmDomainCache.ts = Date.now();
+          if (movieBase !== mmBase) { mmBase = movieBase; _mmDomainCache.url = mmBase; _mmDomainCache.ts = Date.now(); }
+          console.log(`[multimovies] movieUrl=${movieUrl}`);
+
+          // Step 4: get movie page
+          const movieHtml = await cfDirectGet(movieUrl) ?? await hopxProxyGet(movieUrl, movieBase + "/");
+          if (!movieHtml) { console.log("[multimovies] movie page failed"); return; }
+
+          // Step 5: parse DooPlay player options
+          interface MmPlayerOpt { post: string; nume: string; type: string; }
+          const playerOpts: MmPlayerOpt[] = [];
+          const optRe = /<li[^>]*class=['"][^'"]*dooplay_player_option[^'"]*['"][^>]*>/gi;
+          let optM: RegExpExecArray | null;
+          while ((optM = optRe.exec(movieHtml)) !== null) {
+            const tag = optM[0];
+            const post = tag.match(/data-post=['"](\d+)/)?.[1];
+            const nume = tag.match(/data-nume=['"]([^'"]+)/)?.[1];
+            const otype = tag.match(/data-type=['"]([^'"]+)/)?.[1];
+            if (post && nume && otype) playerOpts.push({ post, nume, type: otype });
           }
+          if (!playerOpts.length) { console.log("[multimovies] no player options"); return; }
 
-          // Step 3: movie page → post_id
-          const movieHtml = await hopxProxyGet(movieUrl, movieBase + "/")
-            ?? await cfDirectGet(movieUrl);
-          if (!movieHtml) return;
-          // أنماط متعددة لـ post ID
-          const pidM = movieHtml.match(/postid-(\d+)/)
-                    || movieHtml.match(/data-id="(\d+)"/)
-                    || movieHtml.match(/"post"\s*:\s*(\d+)/)
-                    || movieHtml.match(/class="[^"]*post-(\d+)/);
-          const postId = pidM?.[1];
-          if (!postId) { console.log("[multimovies] no postId for:", movieUrl); return; }
-          console.log(`[multimovies] postId=${postId} url=${movieUrl}`);
-
-          // Step 4: جرب servers 1..5 بـ doo_player_ajax، مرّر أي embed لـ browser-extract
-          const ajaxBase = movieBase; // admin-ajax في نفس domain الفيلم
-          for (let num = 1; num <= 5; num++) {
-            let ajaxR: Response;
+          // Step 6: doo_player_ajax → find iqsmartgames embed
+          let iqEmbedUrl = "";
+          for (const opt of playerOpts.slice(0, 6)) {
             try {
-              ajaxR = await fetch(`${ajaxBase}/wp-admin/admin-ajax.php`, {
+              const ajaxR = await fetch(`${movieBase}/wp-admin/admin-ajax.php`, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/x-www-form-urlencoded",
                   "Referer": movieUrl, "User-Agent": UA, "X-Requested-With": "XMLHttpRequest",
                 },
-                body: `action=doo_player_ajax&post=${postId}&nume=${num}&type=movie`,
+                body: `action=doo_player_ajax&post=${opt.post}&nume=${opt.nume}&type=${opt.type}`,
                 signal: AbortSignal.timeout(10_000),
               });
-            } catch { break; }
-            if (!ajaxR.ok) continue;
-            const ajaxData: any = await ajaxR.json().catch(() => null);
-            // embed_url قد يحتوي على HTML أو URL مباشر
-            let rawEmbed: string = ajaxData?.embed_url || "";
-            // استخراج src من iframe HTML إن وُجد
-            const srcM = rawEmbed.match(/SRC=["']?([^"'\s>]+)["']?/i) || rawEmbed.match(/src=["']?([^"'\s>]+)["']?/i);
-            const embedUrl = (srcM?.[1] || rawEmbed).replace(/[\t\n\r]/g, "").trim();
-            if (!embedUrl.startsWith("http")) continue;
-
-            console.log(`[multimovies] server ${num} embed: ${embedUrl.slice(0, 80)}`);
-
-            // استخراج الـ video URLs:
-            // gdmirrorbot يُحمّل iframe فرعي عبر JS — browser-extract عليه مباشرة بطيء (>35s).
-            // الحل: browser-html(wait=5s) لتصيير الصفحة ← parse iframe.src ← browser-extract على المشغّل الفعلي
-            let targetUrl = embedUrl;
-            if (embedUrl.includes("gdmirrorbot")) {
-              // direct browser-extract (timeout=30s) — أسرع من two-step iframe chain
-              try {
-                const bxGDParams = new URLSearchParams({ url: embedUrl, ref: movieUrl, timeout: "30000" });
-                const bxGDResp = await fetch(HOPX_PROXY_BASE_ANIM + "/browser-extract?" + bxGDParams.toString(), {
-                  signal: AbortSignal.timeout(38_000),
-                });
-                if (bxGDResp.ok) {
-                  const bxGDData: any = await bxGDResp.json();
-                  if (bxGDData.ok && Array.isArray(bxGDData.urls) && bxGDData.urls.length > 0) {
-                    for (const item of (bxGDData.urls as { url: string; type: string }[]).slice(0, 3)) {
-                      const isHlsItem = item.type === "hls" || item.url.includes(".m3u8");
-                      const proxyUrl2 = isHlsItem ? wrapHls(item.url, embedUrl) : item.url;
-                      sendSource(proxyUrl2, "MultiMovies", item.url, proxyUrl2);
-                    }
-                    console.log("[multimovies] gdmirrorbot direct OK -> " + bxGDData.urls.length + " streams");
-                    return;
-                  }
-                }
-              } catch (gdErr: any) { console.warn("[multimovies] gdmirrorbot err:", gdErr?.message); }
-              continue;
-            }
-
-            const bxParams = new URLSearchParams({ url: targetUrl, ref: embedUrl, timeout: "22000" });
-            const bxR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-extract?${bxParams}`, {
-              signal: AbortSignal.timeout(32_000),
-            });
-            if (!bxR.ok) continue;
-            const bxData: any = await bxR.json();
-            if (bxData.ok && Array.isArray(bxData.urls) && bxData.urls.length > 0) {
-              for (const item of (bxData.urls as { url: string; type: string }[]).slice(0, 3)) {
-                const isHls = item.type === "hls" || item.url.includes(".m3u8");
-                const proxy = isHls ? wrapHls(item.url, targetUrl) : item.url;
-                sendSource(proxy, "MultiMovies", item.url, proxy);
+              if (!ajaxR.ok) continue;
+              let embed = ((await ajaxR.json().catch(() => null) as any)?.embed_url || "").replace(/\\\//g, "/");
+              const srcM2 = embed.match(/SRC=["']([^"']+)/i) || embed.match(/src=["']([^"']+)/i) || embed.match(/(https?:\/\/[^"'<> ]+)/);
+              const embedCandidate = srcM2?.[1] || embed;
+              if (embedCandidate && embedCandidate.includes("iqsmartgames")) {
+                iqEmbedUrl = embedCandidate; break;
               }
-              console.log(`[multimovies] ✅ server ${num} → ${bxData.urls.length} streams`);
-              return; // يكفي مصدر واحد ناجح
-            }
+            } catch {}
           }
-          console.log("[multimovies] all servers exhausted");
+          if (!iqEmbedUrl) { console.log("[multimovies] no iqsmartgames embed"); return; }
+          console.log(`[multimovies] iqEmbed=${iqEmbedUrl.slice(0, 80)}`);
+
+          // Step 7: get iqsmartgames embed page → extract inline JS vars
+          const iqHtml = await cfDirectGet(iqEmbedUrl) ?? await hopxProxyGet(iqEmbedUrl, movieUrl);
+          if (!iqHtml) { console.log("[multimovies] iq page failed"); return; }
+
+          const embedVar = (html: string, name: string): string =>
+            html.match(new RegExp(name + "\\s*=\\s*['\"]([^'\"]*)['\"]"))?.[1] || "";
+
+          const iqOrigin = (() => { try { return new URL(iqEmbedUrl).origin; } catch { return ""; } })();
+          const apiUrl   = embedVar(iqHtml, "api_url") || iqOrigin;
+          const playerBase = embedVar(iqHtml, "player_base") || iqOrigin.replace("://streams.", "://pro.");
+          const myKey   = embedVar(iqHtml, "myKey");
+          let   finalId = embedVar(iqHtml, "FinalID");
+          const idType  = embedVar(iqHtml, "idType") || "imdbid";
+          if (!finalId) { const pm = iqEmbedUrl.match(/\/embed\/(?:movie|tv)\/([^/?]+)/); if (pm) finalId = pm[1]; }
+          if (!finalId || !myKey) { console.log("[multimovies] missing FinalID/myKey"); return; }
+
+          // Step 8: mymovieapi → data[].fileslug
+          const apiPath = `/mymovieapi?${idType}=${encodeURIComponent(finalId)}&key=${encodeURIComponent(myKey)}`;
+          const apiBody = await cfDirectGet(apiUrl + apiPath, 12_000) ?? await hopxProxyGet(apiUrl + apiPath, apiUrl + "/", 12_000);
+          if (!apiBody) { console.log("[multimovies] mymovieapi failed"); return; }
+          const apiItems: any[] = JSON.parse(apiBody)?.data || [];
+          if (!apiItems.length) { console.log("[multimovies] no items from mymovieapi"); return; }
+
+          // Dean-Edwards p,a,c,k,e,d unpacker (ported from zangetsu-providers)
+          const mmUnpack = (src: string): string => {
+            const h = src.indexOf("}('");
+            if (h < 0 || !src.includes(".split('|')")) return src;
+            // read single-quoted string starting at pos
+            const readStr = (s: string, i: number): { str: string; next: number } => {
+              let out = ""; i++;
+              while (i < s.length) {
+                const c = s[i];
+                if (c === "\\") { out += s[i + 1]; i += 2; continue; }
+                if (c === "'") return { str: out, next: i + 1 };
+                out += c; i++;
+              }
+              return { str: out, next: i };
+            };
+            const p = readStr(src, h + 2);
+            const rest = src.slice(p.next);
+            const m2 = rest.match(/^,(\d+),(\d+),/);
+            if (!m2) return src;
+            const base2 = parseInt(m2[1], 10), count = parseInt(m2[2], 10);
+            const d2 = readStr(src, p.next + m2[0].length);
+            const dict = d2.str.split("|");
+            const enc = (n: number): string =>
+              (n < base2 ? "" : enc(Math.floor(n / base2))) +
+              ((n = n % base2) > 35 ? String.fromCharCode(n + 29) : n.toString(36));
+            let out2 = p.str;
+            for (let ci = count - 1; ci >= 0; ci--) {
+              if (dict[ci]) out2 = out2.replace(new RegExp("\\b" + enc(ci) + "\\b", "g"), dict[ci]);
+            }
+            return out2;
+          };
+
+          // Step 9: embedhelper.php → mresult → siteUrls → StreamWish embed → m3u8
+          for (const item of apiItems.slice(0, 3)) {
+            const fileslug = item?.fileslug;
+            if (!fileslug) continue;
+            try {
+              const ehR = await fetch(`${playerBase}/embedhelper.php`, {
+                method: "POST",
+                headers: {
+                  "User-Agent": UA, "Referer": playerBase + "/",
+                  "X-Requested-With": "XMLHttpRequest",
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: `sid=${encodeURIComponent(fileslug)}`,
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (!ehR.ok) continue;
+              const eh: any = await ehR.json().catch(() => null);
+              if (!eh?.mresult) continue;
+
+              const mr: any = JSON.parse(Buffer.from(eh.mresult, "base64").toString("utf8"));
+              const su: any = eh.siteUrls || {};
+              const names: any = eh.siteFriendlyNames || {};
+              const embeds: Array<{ url: string; name: string }> = [];
+              for (const k of Object.keys(mr)) {
+                if (su[k] && mr[k]) embeds.push({ url: su[k] + mr[k], name: names[k] || k });
+              }
+
+              for (const entry of embeds.slice(0, 5)) {
+                try {
+                  const ref = (() => { try { return new URL(entry.url).origin + "/"; } catch { return ""; } })();
+                  const embedHtml = await cfDirectGet(entry.url, 12_000) ?? await hopxProxyGet(entry.url, iqEmbedUrl, 12_000);
+                  if (!embedHtml) continue;
+                  const unpacked = mmUnpack(embedHtml);
+                  const hay = embedHtml + " " + unpacked;
+                  const m3Match = hay.match(/https?:\/\/[^"'\\ \n]+\.m3u8[^"'\\ \n]*/i)
+                    || hay.match(/["']file["']\s*:\s*["']([^"']+\.m3u8[^"']*)/i)
+                    || hay.match(/["']hls\d?["']\s*:\s*["']([^"']+\.m3u8[^"']*)/i);
+                  const m3url = (m3Match?.[1] || m3Match?.[0] || "").trim();
+                  if (m3url && m3url.startsWith("http")) {
+                    const proxied = wrapHls(m3url, ref || entry.url);
+                    sendSource(proxied, `MultiMovies [${entry.name}]`, m3url, proxied);
+                    console.log(`[multimovies] ✅ ${entry.name} → m3u8`);
+                  }
+                } catch {}
+              }
+            } catch {}
+          }
         } catch (e: any) { console.warn("[multimovies_anim]", e?.message); }
       }),
 
-      // ── 4K HDHub (4khdhub.one) — JS-rendered: browser-html للبحث ───────────────
-      // الموقع يُحمّل نتائج البحث عبر AJAX بعد تحميل الصفحة → browser-html مع wait.
-      // السلسلة: browser-html(search, wait=8s) → روابط فيلم → browser-extract(movie page)
+      // ── 4K HDHub (4khdhub.link) — pure HTTP chain (zangetsu-providers ref) ───────
+      // السلسلة: search → movie page → download hrefs → resolve id= redirect
+      //   (triple base64 + ROT13) → HubCloud → button links → direct MP4/URLs
+      // لا browser-extract — كل الخطوات HTTP مباشر
       scrapeAnimCached("fourkhdhub_anim", async () => {
         if (!title) return;
-        startCookieAutoRefresh();
         try {
-          // Step 1: domain
+          // Step 1: domain من domains.json
           let khBase = _4khdDomainCache.url;
           if (!khBase || Date.now() - _4khdDomainCache.ts > DOMAIN_CACHE_TTL) {
-            khBase = "https://4khdhub.one";
+            try {
+              const jr = await fetch(
+                "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json",
+                { signal: AbortSignal.timeout(8_000) },
+              );
+              if (jr.ok) {
+                const jd: any = await jr.json();
+                khBase = String(jd["4khdhub"] || "https://4khdhub.link").replace(/\/$/, "");
+              }
+            } catch {}
+            if (!khBase) khBase = "https://4khdhub.link";
             _4khdDomainCache.url = khBase; _4khdDomainCache.ts = Date.now();
           }
 
-          // Step 2: بحث سريع — /?s= يُرجع HTML ثابت فيه نتائج البحث فعلياً (لا حاجة لمتصفح)
-          //   تحقّق ميداني 2026-07-15: fetch مباشر لـ /?s= يُرجع 200 + روابط أفلام كاملة
-          //   بدون تصيير JS. browser-html (وقت 8s) يبقى fallback فقط عند حجب/فشل الجلب المباشر.
+          // Step 2: search
           const q = title.replace(/[:()\[\]]/g, " ").trim();
-          const searchUrl = `${khBase}/?s=${encodeURIComponent(q)}`;
+          const khSearchUrl = `${khBase}/?s=${encodeURIComponent(q)}`;
+          const searchHtml = await cfDirectGet(khSearchUrl, 12_000) ?? await hopxProxyGet(khSearchUrl, khBase + "/", 12_000);
+          if (!searchHtml) { console.log("[4khdhub] search failed"); return; }
 
-          const extractMovieUrl = (html: string): string => {
-            const re = /href=["']((https?:\/\/4khdhub[^"']+|\/[a-z0-9][a-z0-9\-]+\/))["']/g;
-            let m: RegExpExecArray | null;
-            while ((m = re.exec(html)) !== null) {
-              const u = m[1];
-              if (!u.match(/[?#]|category|tag|page|author|feed|search|image|favicon|manifest|js|css/i)) {
-                return u.startsWith("http") ? u : `${khBase}${u}`;
-              }
-            }
-            return "";
+          // Step 3: find movie URL — cards with <h3> title
+          let khMovieUrl = "";
+          const cardRe = /<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+          let cardM: RegExpExecArray | null;
+          while ((cardM = cardRe.exec(searchHtml)) !== null) {
+            const href = cardM[1]; const inner = cardM[2];
+            if (!inner.includes("<h3") && !inner.includes("<H3")) continue;
+            if (/[?#]|\/category\/|\/tag\/|\/page\/|\/author\/|\/feed\//i.test(href)) continue;
+            if (href.startsWith("http")) { khMovieUrl = href; break; }
+            if (href.startsWith("/")) { khMovieUrl = khBase + href; break; }
+          }
+          if (!khMovieUrl) { console.log("[4khdhub] no movie URL for:", q.slice(0, 40)); return; }
+          console.log(`[4khdhub] movieUrl=${khMovieUrl}`);
+
+          // Step 4: get movie page
+          const movieBase = khMovieUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || khBase;
+          const movieHtml = await cfDirectGet(khMovieUrl, 12_000) ?? await hopxProxyGet(khMovieUrl, khBase + "/", 12_000);
+          if (!movieHtml) { console.log("[4khdhub] movie page failed"); return; }
+
+          // Step 5: extract download hrefs
+          const khDlHrefs: string[] = [];
+          const dlRe = /<a[^>]+href="([^"]+)"/g;
+          let dlM: RegExpExecArray | null;
+          while ((dlM = dlRe.exec(movieHtml)) !== null) {
+            if (/hubcloud|hubdrive|hblinks|hubcdn|id=/i.test(dlM[1])) khDlHrefs.push(dlM[1]);
+          }
+          const uniqueHrefs = [...new Set(khDlHrefs)].slice(0, 8);
+          if (!uniqueHrefs.length) { console.log("[4khdhub] no download hrefs"); return; }
+          console.log(`[4khdhub] ${uniqueHrefs.length} hrefs`);
+
+          // Helper: triple base64 + ROT13 redirect resolver
+          const khResolveRedirect = async (url: string): Promise<string> => {
+            try {
+              const html = await cfDirectGet(url, 10_000) ?? "";
+              let combined = "";
+              const re2 = /s\('o','([A-Za-z0-9+/=]+)'|ck\('_wp_http_\d+','([^']+)'/g;
+              let rm: RegExpExecArray | null;
+              while ((rm = re2.exec(html)) !== null) combined += (rm[1] || rm[2] || "");
+              if (!combined) return "";
+              const s1 = Buffer.from(combined, "base64").toString("binary");
+              const s2 = Buffer.from(s1, "base64").toString("binary");
+              const s3 = s2.replace(/[a-zA-Z]/g, (c) => {
+                const base = c <= "Z" ? 65 : 97;
+                return String.fromCharCode((c.charCodeAt(0) - base + 13) % 26 + base);
+              });
+              const decoded = Buffer.from(s3, "base64").toString("utf8");
+              const json = JSON.parse(decoded);
+              const o = json.o ? Buffer.from(json.o, "base64").toString("utf8").trim() : "";
+              if (o) return o;
+              const data = json.data ? Buffer.from(json.data, "base64").toString("utf8") : "";
+              const wp = json.blog_url || "";
+              if (!wp || !data) return "";
+              return (await cfDirectGet(`${wp}?re=${data}`, 8_000) ?? "").replace(/<[^>]*>/g, "").trim();
+            } catch { return ""; }
           };
 
-          let movieUrl = "";
-          const directHtml = await hopxProxyGet(searchUrl, khBase + "/", 12_000) ?? await cfDirectGet(searchUrl, 12_000);
-          if (directHtml) movieUrl = extractMovieUrl(directHtml);
-
-          if (!movieUrl) {
-            // fallback: browser-html — wait=8000ms لتحميل نتائج AJAX لو الجلب المباشر مُحجوب
-            console.log("[4khdhub] direct fetch found no link, falling back to browser-html");
-            const bhSearchParams = new URLSearchParams({ url: searchUrl, ref: khBase + "/", wait: "8000" });
-            const bhSearchR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-html?${bhSearchParams}`, {
-              signal: AbortSignal.timeout(35_000),
-            });
-            if (!bhSearchR.ok) { console.log("[4khdhub] browser-html search failed"); return; }
-            const bhSearchData: any = await bhSearchR.json();
-            if (!bhSearchData.ok) { console.log("[4khdhub] browser-html not ok:", bhSearchData.error); return; }
-            movieUrl = extractMovieUrl(bhSearchData.html || "");
-          }
-
-          if (!movieUrl) {
-            console.log("[4khdhub] no movie URL found for:", q.slice(0, 40));
-            return;
-          }
-          console.log(`[4khdhub] movie URL: ${movieUrl}`);
-
-          // Step 3: browser-extract على صفحة الفيلم لالتقاط video URLs مباشرة
-          const bxMovieParams = new URLSearchParams({ url: movieUrl, ref: searchUrl, timeout: "22000" });
-          const bxMovieR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-extract?${bxMovieParams}`, {
-            signal: AbortSignal.timeout(35_000),
-          });
-          if (!bxMovieR.ok) { console.log("[4khdhub] browser-extract movie failed"); return; }
-          const bxMovieData: any = await bxMovieR.json();
-
-          // إذا التقط video URLs مباشرة (M3U8 أو MP4)
-          if (bxMovieData.ok && Array.isArray(bxMovieData.urls) && bxMovieData.urls.length > 0) {
-            for (const item of (bxMovieData.urls as { url: string; type: string }[]).slice(0, 3)) {
-              const isHls = item.type === "hls" || item.url.includes(".m3u8");
-              const proxy = isHls ? wrapHls(item.url, movieUrl) : item.url;
-              sendSource(proxy, "4K HDHub", item.url, proxy);
-            }
-            console.log(`[4khdhub] ✅ ${bxMovieData.urls.length} streams from movie page`);
-            return;
-          }
-
-          // Step 4: fallback — browser-html لصفحة الفيلم + استخراج embed links
-          const bhMovieParams = new URLSearchParams({ url: movieUrl, ref: searchUrl, wait: "6000" });
-          const bhMovieR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-html?${bhMovieParams}`, {
-            signal: AbortSignal.timeout(35_000),
-          });
-          const bhMovieData: any = bhMovieR.ok ? await bhMovieR.json() : {};
-          const movieRendered: string = bhMovieData.html || "";
-          const embedRe = /href=["'](https?:\/\/(?:hubcloud|gdmirrorbot|streamwish|filelions|vidhide)[^"']+)["'']/gi;
-          const embedLinks: string[] = [];
-          let em: RegExpExecArray | null;
-          while ((em = embedRe.exec(movieRendered)) !== null) embedLinks.push(em[1]);
-
-          if (embedLinks.length) {
-            console.log(`[4khdhub] trying ${embedLinks.length} embed links`);
-            for (const embedUrl of embedLinks.slice(0, 2)) {
-              const bxEm = new URLSearchParams({ url: embedUrl, ref: movieUrl, timeout: "20000" });
-              const bxEmR = await fetch(`${HOPX_PROXY_BASE_ANIM}/browser-extract?${bxEm}`, {
-                signal: AbortSignal.timeout(30_000),
-              });
-              if (!bxEmR.ok) continue;
-              const bxEmData: any = await bxEmR.json();
-              if (bxEmData.ok && bxEmData.urls?.length) {
-                for (const item of (bxEmData.urls as { url: string; type: string }[]).slice(0, 3)) {
-                  const isHls = item.type === "hls" || item.url.includes(".m3u8");
-                  const proxy = isHls ? wrapHls(item.url, embedUrl) : item.url;
-                  sendSource(proxy, "4K HDHub", item.url, proxy);
-                }
-                console.log(`[4khdhub] ✅ ${bxEmData.urls.length} streams from embed`);
-                return;
+          // Helper: HubCloud chain
+          const khHubcloud = async (url: string): Promise<Array<{ url: string; label: string }>> => {
+            try {
+              const hcBase = url.match(/^(https?:\/\/[^/]+)/)?.[1] || "";
+              let dlPage = url;
+              if (!url.includes("hubcloud.php")) {
+                const h1 = await cfDirectGet(url, 10_000) ?? await hopxProxyGet(url, hcBase + "/", 10_000);
+                if (!h1) return [];
+                const raw2 = (h1.match(/id=["']download["'][^>]*href="([^"]+)"/) ||
+                              h1.match(/href="([^"]+)"[^>]*id=["']download["']/))?.[1] || "";
+                if (!raw2) return [];
+                dlPage = /^https?:/i.test(raw2) ? raw2 : `${hcBase}/${raw2.replace(/^\//, "")}`;
               }
-            }
+              const doc = await cfDirectGet(dlPage, 10_000) ?? await hopxProxyGet(dlPage, hcBase + "/", 10_000);
+              if (!doc) return [];
+              const titleStr = (doc.match(/<div class="card-header[^"]*"[^>]*>([\s\S]*?)<\/div>/)?.[1] || "").replace(/<[^>]*>/g, "");
+              const qual = (titleStr.match(/(\d{3,4})[pP]/)?.[1] || "2160") + "p";
+              const results2: Array<{ url: string; label: string }> = [];
+              const btnRe2 = /<a[^>]*href="([^"]+)"[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*>([\s\S]*?)<\/a>|<a[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+              let btnM: RegExpExecArray | null;
+              while ((btnM = btnRe2.exec(doc)) !== null) {
+                const link = btnM[1] || btnM[3];
+                const text = (btnM[2] || btnM[4] || "").replace(/<[^>]*>/g, "").toLowerCase().trim();
+                if (!link) continue;
+                const srvName = text.includes("fsl") ? "FSL" : text.includes("buzz") ? "Buzz"
+                  : text.includes("pixel") ? "Pixeldrain" : text.includes("s3") ? "S3"
+                  : text.includes("mega") ? "Mega" : text.includes("pdl") ? "PDL" : "Server";
+                const lbl = `4K HDHub [${srvName}] ${qual}`;
+                if (text.includes("buzz")) {
+                  try {
+                    const br = await fetch(`${link}/download`, {
+                      headers: { "Referer": link, "User-Agent": UA },
+                      redirect: "manual", signal: AbortSignal.timeout(8_000),
+                    });
+                    const redir = br.headers.get("hx-redirect") || br.headers.get("HX-Redirect") || br.headers.get("location") || "";
+                    if (redir) results2.push({ url: redir, label: lbl });
+                  } catch {}
+                } else if (text.includes("pixel")) {
+                  const pid = link.replace(/\/$/, "").split("/").pop() || "";
+                  results2.push({ url: link.includes("download") ? link : `https://pixeldrain.com/api/file/${pid}?download`, label: lbl });
+                } else if (text.includes("fsl") || text.includes("s3") || text.includes("mega") ||
+                           text.includes("pdl") || text.includes("10gbps") || text.includes("download file")) {
+                  results2.push({ url: link, label: lbl });
+                } else if (/\.(mp4|mkv|m3u8)(\?|$)/i.test(link)) {
+                  results2.push({ url: link, label: lbl });
+                }
+              }
+              return results2;
+            } catch { return []; }
+          };
+
+          // Helper: HubDrive → HubCloud
+          const khHubdrive = async (url: string): Promise<Array<{ url: string; label: string }>> => {
+            try {
+              const h = await cfDirectGet(url, 10_000) ?? "";
+              const href2 = (h.match(/class="[^"]*btn-success1[^"]*"[^>]*href="([^"]+)"/) ||
+                             h.match(/href="([^"]+)"[^>]*class="[^"]*btn-success1/))?.[1] || "";
+              return href2 ? khHubcloud(href2) : [];
+            } catch { return []; }
+          };
+
+          // Step 6: process hrefs
+          for (const href of uniqueHrefs) {
+            try {
+              let resolved = href;
+              if (href.includes("id=")) {
+                resolved = await khResolveRedirect(href);
+                if (!resolved) continue;
+              }
+              const rl = resolved.toLowerCase();
+              let sources2: Array<{ url: string; label: string }> = [];
+              if (rl.includes("hubcloud"))      sources2 = await khHubcloud(resolved);
+              else if (rl.includes("hubdrive")) sources2 = await khHubdrive(resolved);
+              else if (rl.includes("hblinks")) {
+                const hbHtml = await cfDirectGet(resolved, 10_000) ?? "";
+                const hbLinks: string[] = [];
+                const hbRe = /<a[^>]+href="([^"]+)"/g; let hbM: RegExpExecArray | null;
+                while ((hbM = hbRe.exec(hbHtml)) !== null) {
+                  if (/hubcloud|hubdrive/i.test(hbM[1])) hbLinks.push(hbM[1]);
+                }
+                for (const hbl of [...new Set(hbLinks)].slice(0, 3)) {
+                  const s3 = hbl.toLowerCase().includes("hubcloud") ? await khHubcloud(hbl) : await khHubdrive(hbl);
+                  sources2.push(...s3);
+                }
+              }
+              for (const src of sources2.slice(0, 3)) {
+                const isHls2 = src.url.includes(".m3u8");
+                const proxy2 = isHls2 ? wrapHls(src.url, khMovieUrl) : src.url;
+                sendSource(proxy2, src.label, src.url, proxy2);
+                console.log(`[4khdhub] ✅ ${src.label}`);
+              }
+              if (sources2.length > 0) break;
+            } catch {}
           }
-          console.log("[4khdhub] no streams found, html_len:", movieRendered.length);
         } catch (e: any) { console.warn("[fourkhdhub_anim]", e?.message); }
       }),
 
