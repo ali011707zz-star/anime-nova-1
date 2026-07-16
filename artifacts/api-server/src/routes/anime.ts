@@ -13113,25 +13113,18 @@ function toAbsoluteUrl(raw: string, base: string): string {
   return raw.startsWith("/") ? (new URL(base).origin + raw) : dir + raw;
 }
 
-// ── CF Worker env vars (لاستخدامها في hls-proxy fallback) ────────────────────
-const _CF_WORKER_URL_ANIME = process.env.CF_WORKER_URL || "";
-const _CF_DIRECT_KEY_ANIME = process.env.CF_PROXY_KEY  || "";
+// ── Hopx proxy port (يحل CF Worker — كل الفيديو عبر VPS) ───────────────────────
+const _HOPX_PORT = process.env.CF_PROXY_PORT || "8001";
 
 /**
- * يبني CF Worker URL بنفس AES-256-GCM المُطبَّق في animation.ts::wrapCfWorker.
- * يُرجع null إذا لم تكن المتغيرات مُعرَّفة.
+ * يجلب URL عبر Hopx proxy (localhost:8001/stream) الذي يستخدم curl_cffi
+ * لتجاوز حجب CDNs لـ datacenter IPs. يُرجع null عند الفشل.
  */
-async function wrapHlsViaCfWorker(url: string, ref: string): Promise<string | null> {
-  if (!_CF_WORKER_URL_ANIME || !_CF_DIRECT_KEY_ANIME) return null;
+async function fetchViaHopx(url: string, ref: string, timeoutMs = 14000): Promise<Response | null> {
   try {
-    const keyBuf  = Buffer.from(_CF_DIRECT_KEY_ANIME.padEnd(32, "0").slice(0, 32));
-    const iv      = randomBytes(12);
-    const payload = JSON.stringify({ url, ref, exp: Math.floor(Date.now() / 1000) + 21600 });
-    const cipher  = createCipheriv("aes-256-gcm", keyBuf, iv);
-    const enc     = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
-    const tag     = cipher.getAuthTag();
-    const token   = iv.toString("hex") + Buffer.concat([enc, tag]).toString("hex");
-    return `${_CF_WORKER_URL_ANIME}?t=${token}`;
+    const hopxUrl = `http://localhost:${_HOPX_PORT}/stream?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref || url)}`;
+    const r = await fetch(hopxUrl, { signal: AbortSignal.timeout(timeoutMs) });
+    return r.ok ? r : null;
   } catch { return null; }
 }
 
@@ -13224,28 +13217,25 @@ async function serveHlsVPS(
     }
   }
 
-  // ── CF Worker fallback: يحل حجب CDN لـ VPS datacenter IPs ──────────────────
+  // ── Hopx fallback: يحل حجب CDN لـ VPS datacenter IPs ────────────────────────
   // يُستخدم عند: 403 (CDN يحجب VPS) أو 429 (rate-limit) أو خطأ شبكة.
-  // CF Worker يُرسل Referer صحيح ويتجاوز حجب الـ datacenter.
-  const shouldTryCf = gotNetworkError || lastStatus === 403 || lastStatus === 429;
-  if (shouldTryCf) {
+  // Hopx يستخدم curl_cffi مع Chrome impersonation لتجاوز الحجب.
+  const shouldTryHopx = gotNetworkError || lastStatus === 403 || lastStatus === 429;
+  if (shouldTryHopx) {
     try {
-      const cfUrl = await wrapHlsViaCfWorker(url, ref);
-      if (cfUrl) {
-        const cfR = await fetch(cfUrl, { signal: AbortSignal.timeout(14000) });
-        if (cfR.ok) {
-          const body = await cfR.text();
-          if (body.includes("#EXTM3U")) {
-            const rewritten = rewriteM3u8ForVPS(body, url, ref);
-            res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-            res.setHeader("Access-Control-Allow-Origin", "*");
-            res.setHeader("Cache-Control", "no-cache");
-            res.send(rewritten);
-            return;
-          }
+      const hopxR = await fetchViaHopx(url, ref, 14000);
+      if (hopxR) {
+        const body = await hopxR.text();
+        if (body.includes("#EXTM3U")) {
+          const rewritten = rewriteM3u8ForVPS(body, url, ref);
+          res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Cache-Control", "no-cache");
+          res.send(rewritten);
+          return;
         }
       }
-    } catch { /* CF Worker فشل أيضاً — أرجع الخطأ الأصلي */ }
+    } catch { /* Hopx فشل أيضاً — أرجع الخطأ الأصلي */ }
   }
 
   if (!res.headersSent) res.status(lastStatus || 502).send("upstream error");
@@ -13405,20 +13395,16 @@ router.get("/anime/seg-proxy", async (req, res) => {
     const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
 
     if (!r.ok) {
-      // ── CF Worker fallback: CDN يحجب VPS IP (403/429) → نُرسِل عبر Cloudflare ──
-      // نفس المنطق المُطبَّق في serveHlsVPS لمانيفيست HLS.
-      // الـ VPS IP محجوب لـ segments أيضاً ← سبب الشاشة السوداء الرئيسي.
+      // ── Hopx fallback: CDN يحجب VPS IP (403/429) → نُرسِل عبر Hopx ──────────
+      // Hopx يستخدم curl_cffi مع Chrome impersonation لتجاوز الحجب.
       if ((r.status === 403 || r.status === 429) && !res.headersSent) {
         try {
-          const cfUrl = await wrapHlsViaCfWorker(url, ref);
-          if (cfUrl) {
-            const cfR = await fetch(cfUrl, { signal: AbortSignal.timeout(25000) });
-            if (cfR.ok) {
-              await serveSegResponse(cfR);
-              return;
-            }
+          const hopxR = await fetchViaHopx(url, ref, 25000);
+          if (hopxR) {
+            await serveSegResponse(hopxR);
+            return;
           }
-        } catch { /* CF Worker فشل → أرجع الخطأ الأصلي */ }
+        } catch { /* Hopx فشل → أرجع الخطأ الأصلي */ }
       }
       if (!res.headersSent) res.status(r.status).send("upstream error");
       return;
