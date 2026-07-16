@@ -952,6 +952,76 @@ const SourceRow = memo(function SourceRow({ src, idx, onPlaySrc }: { src: Fetche
   );
 });
 
+/* ── SourceGroup: مجموعة (موقع + جودة) → صف واحد يتنافس سيرفراته داخلياً ── */
+type SourceGroup = {
+  site: string;
+  quality: Quality;
+  srcs: FetchedSrc[];
+  def: typeof SCRAPER_DEFS[number];
+};
+
+const SourceGroupRow = memo(function SourceGroupRow({
+  group, idx, onPlayGroup,
+}: {
+  group: SourceGroup;
+  idx: number;
+  onPlayGroup: (group: SourceGroup) => void;
+}) {
+  const q   = group.quality;
+  const qs  = QUALITY_STYLE[q];
+  const def = group.def;
+  const cnt = group.srcs.length;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(idx * 0.025, 0.14), duration: 0.14 }}>
+      <div
+        className="flex items-center px-3 py-2.5 gap-2.5 cursor-pointer hover:bg-white/[0.02] active:bg-white/[0.04] transition-colors"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+        onClick={() => onPlayGroup(group)}>
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: qs.badge, border: `1px solid ${qs.border}` }}>
+          <MonitorPlay className="w-3.5 h-3.5" style={{ color: qs.icon }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <p className="text-white/90 text-[12px] font-black font-['Cairo'] leading-tight">{def.name}</p>
+            <span className="text-[10px] font-black px-1.5 py-0.5 rounded font-mono"
+              dir="ltr"
+              style={{ color: "rgba(196,181,253,0.90)", background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.30)" }}>
+              {def.tag}
+            </span>
+            {def.audioLang === "en" && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded font-['Cairo'] shrink-0"
+                style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.28)", color: "rgba(147,197,253,0.85)" }}>
+                🎌 ياباني/إنجليزي
+              </span>
+            )}
+            {cnt > 1 && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded font-['Cairo'] shrink-0"
+                style={{ background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.25)", color: "rgba(110,231,183,0.75)" }}>
+                {cnt} سيرفر
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="font-mono text-[7px] font-bold px-1.5 py-0.5 rounded"
+            style={{ background: qs.badge, border: `1px solid ${qs.border}`, color: qs.text }}>
+            {Q_LABEL[q]}
+          </span>
+          <div className="flex items-center gap-0.5 px-2.5 py-1.5 rounded-xl"
+            style={{ background: "linear-gradient(135deg,rgba(124,58,237,0.90),rgba(91,33,182,0.96))", border: "1px solid rgba(167,139,250,0.25)", boxShadow: "0 2px 10px rgba(109,40,217,0.25)" }}>
+            <Play className="w-2.5 h-2.5 text-white fill-white" />
+            <span className="text-white text-[10.5px] font-black font-['Cairo']">تشغيل</span>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+});
+
 function ScraperPicker({
   cover, title, ep, totalEps, animeId, anime,
   slotStatus, slotSources,
@@ -986,25 +1056,27 @@ function ScraperPicker({
     : nextAiringEp ? ep >= nextAiringEp - 1 : false;
   const isMovie = anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT";
 
-  /* Flatten + filter + deduplicate all fetched sources — memoised to avoid re-work on every SSE tick */
-  const { displaySources, embedFallbacks } = useMemo(() => {
-    const flat: FetchedSrc[] = [];
-    const seen = new Set<string>();
+  /* تجميع المصادر حسب (موقع + جودة) — صف واحد لكل مجموعة، السيرفرات تتنافس داخلياً */
+  const { sourceGroups, embedFallbacks } = useMemo(() => {
+    const groupMap = new Map<string, SourceGroup>();
+    const seenUrls = new Set<string>();
     for (const srcs of Object.values(slotSources)) {
       for (const s of srcs) {
         if (!shouldShowSrc(s)) continue;
-        const key = s.directUrl || s.url;
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        flat.push(s);
+        const url = s.directUrl || s.url;
+        if (!url || seenUrls.has(url)) continue;
+        seenUrls.add(url);
+        const def = SCRAPER_DEFS.find(d => d.site === s.site);
+        if (!def) continue;
+        const q = getSrcQualityTier(s);
+        const key = `${s.site}::${q}`;
+        if (!groupMap.has(key)) groupMap.set(key, { site: s.site!, quality: q, srcs: [], def });
+        groupMap.get(key)!.srcs.push(s);
       }
     }
-    flat.sort((a, b) => {
-      const tA = QUALITY_TIER_RANK[getSrcQualityTier(a)];
-      const tB = QUALITY_TIER_RANK[getSrcQualityTier(b)];
-      if (tA !== tB) return tB - tA;
-      return (b.qualityRank ?? 0) - (a.qualityRank ?? 0);
-    });
+    const groups = [...groupMap.values()].sort((a, b) =>
+      QUALITY_TIER_RANK[b.quality] - QUALITY_TIER_RANK[a.quality]
+    );
     const embeds: FetchedSrc[] = [];
     const seenE = new Set<string>();
     for (const srcs of Object.values(slotSources)) {
@@ -1016,18 +1088,22 @@ function ScraperPicker({
         embeds.push(s);
       }
     }
-    return { displaySources: flat, embedFallbacks: embeds };
+    return { sourceGroups: groups, embedFallbacks: embeds };
   }, [slotSources]);
 
-  /* Group ALL sources by quality tier — English-audio sites merged in (badge shown on card) */
-  const grouped: Record<Quality, FetchedSrc[]> = useMemo(() => ({
-    "1080p FHD": displaySources.filter(s => getSrcQualityTier(s) === "1080p FHD"),
-    "720p HD":   displaySources.filter(s => getSrcQualityTier(s) === "720p HD"),
-    "360p SD":   displaySources.filter(s => getSrcQualityTier(s) === "360p SD"),
-  }), [displaySources]);
+  const groupsByQuality: Record<Quality, SourceGroup[]> = useMemo(() => ({
+    "1080p FHD": sourceGroups.filter(g => g.quality === "1080p FHD"),
+    "720p HD":   sourceGroups.filter(g => g.quality === "720p HD"),
+    "360p SD":   sourceGroups.filter(g => g.quality === "360p SD"),
+  }), [sourceGroups]);
 
-  const hasSources = displaySources.length > 0;
+  const hasSources = sourceGroups.length > 0;
   const hasBackupSources = embedFallbacks.length > 0;
+
+  function handlePlayGroup(group: SourceGroup) {
+    const sorted = [...group.srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
+    onPlaySrc(sorted[0]);
+  }
 
   /* ── Shared: extract anime metadata — memoised ── */
   const animeScore   = anime?.averageScore ? (anime.averageScore / 10) : 0;
@@ -1118,12 +1194,8 @@ function ScraperPicker({
     </>
   );
 
-  /* ── Show loading screen while the auto-fetch-all wave is in progress (fetching OR
-     still-idle-but-scheduled scrapers), not only while one happens to be "fetching" right
-     this instant. Gating on `anyFetching` alone caused a flicker back to the bare site grid
-     whenever a fast scraper resolved before the next staggered one had started (~70ms gap),
-     producing "servers list → loading → servers list → player". ── */
-  if ((anyFetching || hasIdleScrapers) && !hasSources && !hasBackupSources) {
+  /* كشط كسول: شاشة التحميل مزالة — سبينر على الزر فقط */
+  if (false && (anyFetching || hasIdleScrapers) && !hasSources && !hasBackupSources) {
     return (
       <div className="fixed inset-0 bg-[#07070d] overflow-hidden" dir="rtl">
         {/* Blurred poster background */}
@@ -2793,7 +2865,7 @@ export default function WatchPage() {
      فلن تظهر شاشة السيرفرات مطلقاً؛ إن لم يُعثر على أي مصدر بهذه السرعة تظهر الشاشة
      لتسمح للمستخدم باختيار مصدر يدوياً. هذا يمنع "الفلاش" السابق (ظهور الشاشة لثوانٍ
      ثم اختفاؤها فجأة عند نجاح أول مصدر). */
-  const [showPicker,   setShowPicker]   = useState(false);
+  const [showPicker,   setShowPicker]   = useState(true);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
@@ -3175,27 +3247,7 @@ export default function WatchPage() {
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
 
-        /* المستخدم اختار هذا المصدر — شغّل أول نتيجة فوراً وابدأ تحميل الباقي خلفياً.
-           شرط: لا يُشغَّل تلقائياً إلا مصدر بجودة 1080p فأعلى (qualityRank >= 13) —
-           إن كانت أفضل نتيجة من هذا المصدر أقل من ذلك، ننتظر مصدراً آخر يصل بجودة أعلى
-           (الـ fallback effect أدناه يتكفَّل بالتشغيل بأفضل المتاح إن لم يظهر 1080p إطلاقاً). */
-        if (!bgLoad && !autoPlayedRef.current && phaseRef.current === "picker") {
-          const playable = srcs
-            .filter(s => shouldShowSrc(s))
-            .sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))[0];
-          if (playable && (playable.qualityRank ?? 0) >= 13) {
-            autoPlayedRef.current = true;
-            handlePlaySrc(playable);
-            /* تحميل خلفي لبقية المصادر لملء الـ picker داخل المشغّل — فقط إذا لم تكن موجة
-               auto-fetch-all (mount effect) قد جدولت كل المواقع مسبقاً، لتجنّب موجتين مكررتين. */
-            if (!autoFetchAllRef.current) {
-              SCRAPER_DEFS.filter(d => d.site !== site).forEach((def, i) => {
-                const id = window.setTimeout(() => handleFetchSite(def.site, true), 300 + i * 80);
-                pendingTimeoutsRef.current.push(id);
-              });
-            }
-          }
-        }
+        /* كشط كسول: المصدر تحمَّل — المستخدم يختار بنفسه من القائمة أدناه */
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
@@ -3236,33 +3288,9 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Auto-fetch على غرار قسم الأنميشن: يبدأ تحميل كل السكربرز تلقائياً دون انتظار
-     اختيار المستخدم — أول مصدر جاهز يُشغَّل تلقائياً فوراً (نفس منطق handleFetchSite
-     الحالي عند bgLoad=false)، والباقي يستمر بالتحميل خلفياً ليظهر في قائمة السيرفرات
-     الكاملة (مثل شاشة "مصادر المشاهدة" بعد فتح المشغّل في قسم الأنميشن). ── */
+  /* ── كشط كسول: لا تحميل تلقائي — المستخدم يختار المصدر بنفسه.
+     cleanup: إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
   useEffect(() => {
-    if (!titleParam) return;
-    /* single=1 → آتٍ من قسم "أحدث الحلقات" (مصدر anslayer مباشرةً بمعرّفه الخاص) —
-       يجب ألا يجلب أي مصدر آخر سوى anslayer نفسه. */
-    const singleSite = sp.get("single") === "1" ? sp.get("site") : null;
-    const defs = singleSite ? SCRAPER_DEFS.filter(d => d.site === singleSite) : SCRAPER_DEFS;
-    autoFetchAllRef.current = true;
-    /* أحدث حلقة (لم تُبثّ بعد كحلقات قديمة) → أولوية AW أولاً.
-       الحلقات العادية/القديمة → أولوية KW (kawaii) كما هو معتاد.
-       المصدر ذو الأولوية يُجلب أولاً بدون تأخير → أول مصدر جاهز يُشغَّل فوراً */
-    const isLatestEp = totalEps > 0 && totalEps < 999 && ep >= totalEps;
-    const priorityTag = isLatestEp ? "animewitcher" : "kawaii";
-    const priorityDef = defs.find(d => d.site === priorityTag);
-    const restDefs  = defs.filter(d => d.site !== priorityTag);
-    const orderedDefs = priorityDef ? [priorityDef, ...restDefs] : defs;
-    orderedDefs.forEach((def, i) => {
-      const id = window.setTimeout(() => handleFetchSite(def.site, false), i * 70);
-      pendingTimeoutsRef.current.push(id);
-    });
-    /* شاشة السيرفرات تبدأ مخفية (showPicker=false) — تظهر تلقائياً فقط إن فشلت جميع
-       المصادر (handleTierExhausted) أو إن ضغط المستخدم "رجوع" من المشغّل.
-       لا تظهر بمؤقت تلقائي قبل بدء البث لتجنب الـ flash. */
-    /* Cancel any still-queued (not-yet-started) fetches on episode change/unmount */
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
       pendingTimeoutsRef.current = [];
@@ -3270,27 +3298,7 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animeId, ep]);
 
-  /* ── Fallback auto-play: التشغيل التلقائي يشترط جودة 1080p فأعلى (أعلاه في handleFetchSite).
-     إن انتهت جميع السكربرزات من الجلب دون أن يصل أي مصدر بجودة 1080p، نُشغِّل أفضل مصدر
-     متوفر بأي جودة — لتجنّب بقاء المستخدم عالقاً في شاشة الاختيار بلا تشغيل تلقائي إطلاقاً. */
-  useEffect(() => {
-    if (phase !== "picker") return;
-    if (autoPlayedRef.current) return;
-    const singleSite2 = sp.get("single") === "1" ? sp.get("site") : null;
-    const activeDefs = singleSite2 ? SCRAPER_DEFS.filter(d => d.site === singleSite2) : SCRAPER_DEFS;
-    const stillFetching = activeDefs.some(d => slotStatus[d.site] === "fetching" || !slotStatus[d.site] || slotStatus[d.site] === "idle");
-    if (stillFetching) return; // بعض المصادر لم تنتهِ بعد — استمر بالانتظار لمصدر 1080p
-
-    const allFlat: FetchedSrc[] = [];
-    for (const srcs of Object.values(slotSources)) {
-      for (const s of srcs) { if (shouldShowSrc(s)) allFlat.push(s); }
-    }
-    if (allFlat.length === 0) return; // لا مصادر متاحة — تبقى شاشة الاختيار/الفشل كما هي
-    allFlat.sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
-    autoPlayedRef.current = true;
-    handlePlaySrc(allFlat[0]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slotStatus, slotSources, phase]);
+  /* كشط كسول: لا تشغيل تلقائي — المستخدم يضغط على الصف ليُشغَّل */
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {

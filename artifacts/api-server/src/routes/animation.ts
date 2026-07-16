@@ -2212,12 +2212,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     "videasy3", "vidlink_encdec", "vidfast",
     "fourkhdhub_anim",
   ]);
+  /* كشط كسول: إذا أُرسل ?site= يُشغَّل ذلك المصدر فقط (lazy per-site fetch) */
+  const siteParam = (req.query.site as string) || null;
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
   async function scrapeAnimCached(
     site: string,
     scrape: () => Promise<void>,
   ) {
+    if (siteParam && site !== siteParam) return;
     if (ANIM_SOURCE_ALLOWLIST && !ANIM_SOURCE_ALLOWLIST.has(site)) return;
     const cKey = makeAnimCacheKey(site, tmdbId || title.slice(0, 20), type, season, epNum);
     const hit  = await getFromSourceCache(cKey);
