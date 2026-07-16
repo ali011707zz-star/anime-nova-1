@@ -2196,21 +2196,25 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     if (captureArr) captureArr.push({ url, label, directUrl: safeDirectUrl, proxyUrl: safeProxyUrl, ...extra });
   };
 
-  // ── تقييد مؤقت (بطلب المستخدم 2026-07-13): تعطيل كل مصادر الأنميشن ما عدا
-  //    Dulo (dulo_anim) و StarCima (starcima) — السكرابر لا يمر بأي مصدر آخر إطلاقاً.
-  //    لإعادة التفعيل: احذف/عدّل ANIM_SOURCE_ALLOWLIST بالأسفل. ─────────────────
-  // moviz_time_anim أُضيف للسماح به 2026-07-13 (مصدر جديد بطلب المستخدم)
-  // xpass_anim: محذوف — CDN يحجب VPS/CF IPs (2026-07-15)
-  // videasy3: أُضيف 2026-07-15 (نُقل من قسم الأنمي بطلب المستخدم؛ backend أُصلح أيضاً)
-  // vidfast_vc: أُضيف 2026-07-15 (enc-dec.app flow — Beta server يعمل لبعض الأفلام)
-  // vidlink_encdec: مُعاد تفعيله — يرجع 200 + MP4 متعددة الجودة من VPS (اختُبر 2026-07-15)
+  // ── قائمة المصادر المُفعَّلة للأنيميشن ─────────────────────────────────────
+  // dulo_anim    ✅ purstream HLS — API key مُضمَّن في الكود
+  // starcima     ✅ vidzee HLS — يعمل من VPS
+  // vaplayer_anim ✅ nextgencloudfabric CDN — FHD مؤكَّد
+  // multimovies_anim ✅ streamhg/earnvids HLS — مؤكَّد بالـ logs
+  //
+  // مُعطَّلة (آثار VL/VE/VF أُزيلت 2026-07-16 بطلب المستخدم):
+  // videasy3: معطَّل — api.speedracelight.com يُعيد 403 من VPS IP
+  // vidfast_vc + vidfast: معطَّلان — آثار فقط، بطلب المستخدم
+  // vidlink_encdec: معطَّل — آثار فقط، بطلب المستخدم
+  //
+  // معطَّلة سابقاً:
+  // moviz_time_anim: أُخفي 2026-07-16
+  // egydead: أُخفي 2026-07-16
+  // akwam: أُخفي 2026-07-16
+  // fourkhdhub_anim: روابط CF Workers تنتهي (403) + ملفات MKV REMUX
   const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "dulo_anim", "starcima",
-    // moviz_time_anim: أُخفي بطلب المستخدم 2026-07-16
-    // egydead: أُخفي بطلب المستخدم 2026-07-16
-    // akwam: أُخفي بطلب المستخدم 2026-07-16
-    "vaplayer_anim", "videasy3", "vidfast_vc", "vidfast", "vidlink_encdec", "multimovies_anim",
-    // fourkhdhub_anim: مُعطَّل — روابط CF Workers تنتهي صلاحيتها بسرعة (403) + ملفات MKV REMUX غير قابلة للتشغيل في المتصفح
+    "vaplayer_anim", "multimovies_anim",
   ]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
