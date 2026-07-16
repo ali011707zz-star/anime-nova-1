@@ -1,11 +1,4 @@
 import { Router, type IRouter } from "express";
-<<<<<<< HEAD
-import healthRouter from "./health";
-
-const router: IRouter = Router();
-
-router.use(healthRouter);
-=======
 import healthRouter    from "./health";
 import animeRouter     from "./anime";
 import animationRouter from "./animation";
@@ -21,6 +14,5 @@ router.use(animeRouter);
 router.use(animationRouter);
 router.use(dubbedRouter);
 router.use(reportRouter);
->>>>>>> origin/main
 
 export default router;
