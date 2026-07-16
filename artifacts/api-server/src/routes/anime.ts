@@ -10348,6 +10348,16 @@ async function getVaplayerAnimeSources(
   return out;
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  AnimeSlayer — cracked auth (Client-Id/Client-Secret from APK RE)
+//  API: https://anslayer.com/anime/public/{path}?json={params}
+// ════════════════════════════════════════════════════════════════════
+const ANSLAYER_BASE   = "https://anslayer.com/anime/public";
+const ANSLAYER_CID    = "android-app2";
+const ANSLAYER_CSEC   = "7befba6263cc14c90d2f1d6da2c5cf9b251bfbbd";
+const _anslayerCacheMap = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const ANSLAYER_TTL    = 4 * 3_600_000;
+
 async function anslayerGet(path: string, params: Record<string, any>): Promise<any | null> {
   try {
     const json = encodeURIComponent(JSON.stringify(params));

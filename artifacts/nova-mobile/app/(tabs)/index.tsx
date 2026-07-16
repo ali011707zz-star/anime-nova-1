@@ -347,7 +347,7 @@ export default function HomeScreen() {
                           key={item.key || item.id || idx}
                           onPress={() => {
                             const seasons = JSON.stringify(item.seasons || [{ label: "الحلقات", arabicToonsId: item.arabicToonsId }]);
-                            router.push({ pathname: "/dubbed/[seriesId]" as any, params: { seriesId: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
+                            router.push({ pathname: "/dubbed/[id]" as any, params: { id: item.key || item.id || item.title, title: item.title, seasons, img: rawImg } });
                           }}
                           style={[todayStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                         >
