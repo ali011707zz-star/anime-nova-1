@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createHash, createDecipheriv } from "crypto";
+import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync } from "child_process";
 import { existsSync, writeFileSync, readFileSync, readdirSync } from "fs";
 import {
@@ -13112,6 +13112,28 @@ function toAbsoluteUrl(raw: string, base: string): string {
   return raw.startsWith("/") ? (new URL(base).origin + raw) : dir + raw;
 }
 
+// ── CF Worker env vars (لاستخدامها في hls-proxy fallback) ────────────────────
+const _CF_WORKER_URL_ANIME = process.env.CF_WORKER_URL || "";
+const _CF_DIRECT_KEY_ANIME = process.env.CF_PROXY_KEY  || "";
+
+/**
+ * يبني CF Worker URL بنفس AES-256-GCM المُطبَّق في animation.ts::wrapCfWorker.
+ * يُرجع null إذا لم تكن المتغيرات مُعرَّفة.
+ */
+async function wrapHlsViaCfWorker(url: string, ref: string): Promise<string | null> {
+  if (!_CF_WORKER_URL_ANIME || !_CF_DIRECT_KEY_ANIME) return null;
+  try {
+    const keyBuf  = Buffer.from(_CF_DIRECT_KEY_ANIME.padEnd(32, "0").slice(0, 32));
+    const iv      = randomBytes(12);
+    const payload = JSON.stringify({ url, ref, exp: Math.floor(Date.now() / 1000) + 21600 });
+    const cipher  = createCipheriv("aes-256-gcm", keyBuf, iv);
+    const enc     = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
+    const tag     = cipher.getAuthTag();
+    const token   = iv.toString("hex") + Buffer.concat([enc, tag]).toString("hex");
+    return `${_CF_WORKER_URL_ANIME}?t=${token}`;
+  } catch { return null; }
+}
+
 // ── بناء رابط seg-proxy (VPS fallback) ───────────────────────────────────────
 function toVpsSegProxy(absUrl: string, ref: string): string {
   return `/api/anime/seg-proxy?url=${encryptParam(absUrl)}&ref=${encryptParam(ref || absUrl)}`;
@@ -13161,17 +13183,20 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
   return out.join("\n");
 }
 
-// ── VPS-side HLS manifest proxy (يُستخدم عند سقوط CF Worker) ──────────────────
+// ── VPS-side HLS manifest proxy ─────────────────────────────────────────────
+// الإصلاح الجذري للشاشة السوداء: عند فشل VPS بسبب حجب CDN (403/429)، ننتقل
+// تلقائياً لـ CF Worker كـ fallback. هذا يحل مشكلة Variant Playlists (audio+video
+// tracks) التي تُعاد كتابتها عبر hls-proxy وتظل تصطدم بحجب CDN لـ VPS IP.
 async function serveHlsVPS(
   url: string, ref: string,
   res: import("express").Response,
 ): Promise<void> {
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
-  // بعض CDNs (moon.ironwallnet.net/ironbubble.site خلف Videasy) ترجع 403 متقطعة
-  // عند طلبات متزامنة (audio track + video variants) رغم أن الرابط صالح —
-  // إعادة محاولة سريعة (2x) قبل الاستسلام تحلّ الشاشة السوداء المتقطعة.
+
   let lastStatus = 0;
+  let gotNetworkError = false;
+
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
@@ -13181,8 +13206,8 @@ async function serveHlsVPS(
           await new Promise(res2 => setTimeout(res2, 300 + attempt * 400));
           continue;
         }
-        res.status(r.status).send("upstream error");
-        return;
+        // الفشل النهائي — اكسر الحلقة وجرّب CF Worker
+        break;
       }
       const body = await r.text();
       const rewritten = rewriteM3u8ForVPS(body, url, ref);
@@ -13193,10 +13218,35 @@ async function serveHlsVPS(
       return;
     } catch {
       if (attempt < 2) { await new Promise(res2 => setTimeout(res2, 300 + attempt * 400)); continue; }
-      res.status(502).send("HLS fetch failed");
-      return;
+      gotNetworkError = true;
+      break;
     }
   }
+
+  // ── CF Worker fallback: يحل حجب CDN لـ VPS datacenter IPs ──────────────────
+  // يُستخدم عند: 403 (CDN يحجب VPS) أو 429 (rate-limit) أو خطأ شبكة.
+  // CF Worker يُرسل Referer صحيح ويتجاوز حجب الـ datacenter.
+  const shouldTryCf = gotNetworkError || lastStatus === 403 || lastStatus === 429;
+  if (shouldTryCf) {
+    try {
+      const cfUrl = await wrapHlsViaCfWorker(url, ref);
+      if (cfUrl) {
+        const cfR = await fetch(cfUrl, { signal: AbortSignal.timeout(14000) });
+        if (cfR.ok) {
+          const body = await cfR.text();
+          if (body.includes("#EXTM3U")) {
+            const rewritten = rewriteM3u8ForVPS(body, url, ref);
+            res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Cache-Control", "no-cache");
+            res.send(rewritten);
+            return;
+          }
+        }
+      }
+    } catch { /* CF Worker فشل أيضاً — أرجع الخطأ الأصلي */ }
+  }
+
   if (!res.headersSent) res.status(lastStatus || 502).send("upstream error");
 }
 

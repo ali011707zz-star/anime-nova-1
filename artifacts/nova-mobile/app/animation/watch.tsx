@@ -197,6 +197,11 @@ function getAnimTag(label: string): string {
   if (l.startsWith("aether"))         return "AE";
   if (l.startsWith("egydeadnet") || l.startsWith("egydead")) return "EG";
   if (l.startsWith("animetime"))      return "AT";
+  if (l.startsWith("vaplayer"))       return "VP";
+  if (l.startsWith("multimovies"))    return "MM";
+  if (l.startsWith("4khdh") || l.startsWith("fourkhd")) return "4K";
+  if (l.startsWith("akwam"))          return "AK";
+  if (l.startsWith("egybest"))        return "EB";
   // ─── fallback: أول حرفان من label ───
   const word = label.replace(/[^a-zA-Z\u0621-\u064a]/g, "").slice(0, 2).toUpperCase();
   return word || "??";
