@@ -31,6 +31,7 @@
 - [Orkestr removal](orkestr-removal.md) — Orkestr أُزيل كلياً من animation.ts+anime.ts; كل calls صارت cfProxy (localhost:8000); CINESRC_BASE=http://localhost:13004 أُضيف لـ ecosystem.
 - [AniTaku APK Analysis](anitaku-apk-analysis.md) — EasyPlex base; static token found (GxoNdPhOrskWYZfSw2d9hgeXToSlUBal); DB empty; client_secret not in APK; routes mapped.
 - [serveHlsVPS CF Worker fallback](servehlsvps-cf-worker-fallback.md) — hls-proxy now retries via CF Worker on 403/429; fixes animation black-screen when CDN blocks VPS IP on variant playlists.
+- [kartoney Arabic dubbed catalog](kartoney-arabic-dubbed.md) — kartoney.com: 106 مسلسل مدبلج عربي; MP4 مباشر من servallvid; no CF; slug→TMDB مطابقة; لم يُطبَّق بعد.
 
 - [Lightpanda sources research](lightpanda-sources-research.md) — FaselHD ✅ data-url→scdns.io M3U8; fastvip /stream/?json=1 ✅ untested; PHOENIX/ANIMEDAR/RISTO/ANIMETIME جزئية; 4XANIME/ANIMERCO Turnstile محجوبة.
 - [New sources July 2026](new-sources-2026-07.md) — nekowatch(anineko/AniList/HLS✅) + xyra(freekey/TMDB/17streams✅) + notorrent(IMDB/9streams✅) + spencerdevs(srv1✅); implementation plan inside.
