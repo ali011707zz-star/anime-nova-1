@@ -2197,24 +2197,20 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   };
 
   // ── قائمة المصادر المُفعَّلة للأنيميشن ─────────────────────────────────────
-  // dulo_anim    ✅ purstream HLS — API key مُضمَّن في الكود
-  // starcima     ✅ vidzee HLS — يعمل من VPS
-  // vaplayer_anim ✅ nextgencloudfabric CDN — FHD مؤكَّد
-  // multimovies_anim ✅ streamhg/earnvids HLS — مؤكَّد بالـ logs
+  // dulo_anim         ✅ purstream HLS — API key مُضمَّن في الكود
+  // starcima          ✅ vidzee HLS — يعمل من VPS
+  // vaplayer_anim     ✅ nextgencloudfabric CDN — FHD مؤكَّد
+  // videasy3  (VE)    ✅ api.speedracelight.com — STREAMCRYPTO HLS multi-quality
+  // vidlink_encdec (VL) ✅ enc-dec.app → vidlink MP4/DASH
+  // vidfast    (VF)   ✅ vidfast.pro TMDB-native AES-256-GCM HLS
+  // fourkhdhub_anim (4K) ✅ 4khdhub.link → HubCloud MP4 — MKV مُفلتَر
   //
-  // مُعطَّلة (آثار VL/VE/VF أُزيلت 2026-07-16 بطلب المستخدم):
-  // videasy3: معطَّل — api.speedracelight.com يُعيد 403 من VPS IP
-  // vidfast_vc + vidfast: معطَّلان — آثار فقط، بطلب المستخدم
-  // vidlink_encdec: معطَّل — آثار فقط، بطلب المستخدم
-  //
-  // معطَّلة سابقاً:
-  // moviz_time_anim: أُخفي 2026-07-16
-  // egydead: أُخفي 2026-07-16
-  // akwam: أُخفي 2026-07-16
-  // fourkhdhub_anim: روابط CF Workers تنتهي (403) + ملفات MKV REMUX
+  // محذوف:
+  // multimovies_anim (MM): حُذف بطلب المستخدم 2026-07-16
   const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set([
-    "dulo_anim", "starcima",
-    "vaplayer_anim", "multimovies_anim",
+    "dulo_anim", "starcima", "vaplayer_anim",
+    "videasy3", "vidlink_encdec", "vidfast",
+    "fourkhdhub_anim",
   ]);
 
   // ── scrapeAnimCached: يكشط مع كاش L1+L2 (Supabase) ──────────────────────
@@ -4929,8 +4925,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 }
               }
               for (const src of sources2.slice(0, 3)) {
+                // MKV لا يدعمه المتصفح — تخطَّى
+                if (/\.mkv(\?|$)/i.test(src.url)) continue;
                 const isHls2 = src.url.includes(".m3u8");
-                const proxy2 = isHls2 ? wrapHls(src.url, khMovieUrl) : src.url;
+                // MP4 يحتاج video-proxy لدعم Range + CORS من VPS
+                const proxy2 = isHls2 ? wrapHls(src.url, khMovieUrl) : wrapMp4(src.url, khMovieUrl);
                 sendSource(proxy2, src.label, src.url, proxy2);
                 console.log(`[4khdhub] ✅ ${src.label}`);
               }
