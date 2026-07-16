@@ -100,3 +100,4 @@
 - [Videasy ironbubble rawUrl fix](videasy-ironbubble-rawurl.md) — ironbubble يحجب VPS؛ الحل rawUrl مباشر للمتصفح مع headers Referer/Origin في extra.
 - [4KHDHub + HubCloud + Hopx](4khdhub-hubcloud-hopx.md) — 4khdhub pipeline يعمل (browser-html) لكن embeds كلها hubcloud.ist محجوب من Hopx؛ ecosystem.config.cjs .env fix موثّق هنا.
 - [Animation source issues 2026-07-15](animation-source-issues-2026-07-15.md) — VF جودة 360p بدل FHD (fix في AnimationWatch.tsx)؛ VE ironbubble 403 من VPS؛ VL proxy يعمل لكن frontend قد يستخدم directUrl؛ UHD Movies 4K pipeline موثّق.
+- [AllAnime fix 2026-07-15](allanime-fix-2026-07-15.md) — Referer youtu-chan.com (لا allmanga.to)؛ tobeparsed=AES-CTR؛ Yt-mp4/player→direct MP4 fast4speed ✅؛ clock.json=500 تجاهل.
