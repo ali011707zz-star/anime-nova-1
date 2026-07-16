@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nekos.best — معاينة GIFs الأنيمي</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #050508; color: #fff; font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; min-height: 100vh; }
+h1 { text-align: center; font-size: 18px; color: #a78bfa; margin-bottom: 4px; }
+.sub { text-align: center; color: #6b7280; font-size: 12px; margin-bottom: 20px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; background: rgba(124,58,237,.12); border: 1px solid rgba(124,58,237,.3); border-radius: 999px; font-size: 11px; color: #a78bfa; margin: 0 auto 20px; display: block; width: fit-content; }
+
+/* ─── Player Mockup ─── */
+.player-wrap { max-width: 720px; margin: 0 auto 28px; background: #0d0d14; border-radius: 14px; border: 1px solid #1a1a30; overflow: hidden; position: relative; aspect-ratio: 16/9; }
+.player-bg { width: 100%; height: 100%; object-fit: cover; opacity: .15; position: absolute; inset: 0; }
+.player-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.gif-ring { width: 130px; height: 130px; border-radius: 50%; overflow: hidden; border: 3px solid #7c3aed; box-shadow: 0 0 40px rgba(124,58,237,.5); background: #111; transition: box-shadow .3s; }
+.gif-ring img { width: 100%; height: 100%; object-fit: cover; }
+.gif-ring:hover { box-shadow: 0 0 60px rgba(167,139,250,.7); }
+.dots { display: flex; gap: 5px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #7c3aed; animation: bop 1.4s ease-in-out infinite; }
+.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
+@keyframes bop{0%,80%,100%{transform:scale(.3);opacity:.3}40%{transform:scale(1);opacity:1}}
+.state-lbl { font-size: 12px; color: #a78bfa; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600; }
+.anime-credit { font-size: 10px; color: #4b5563; font-style: italic; }
+.bar-wrap { width: 180px; height: 2px; background: #1f1f35; border-radius: 4px; overflow: hidden; }
+.bar { height: 100%; background: linear-gradient(90deg,#7c3aed,#a78bfa); animation: prog 2.5s ease-in-out infinite; }
+@keyframes prog{0%{width:0%}70%{width:80%}100%{width:90%}}
+
+/* ─── Chips ─── */
+.chips { max-width: 720px; margin: 0 auto 18px; display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { padding: 5px 14px; border-radius: 999px; font-size: 11px; cursor: pointer; border: 1px solid #1f2937; background: #0d0d18; color: #9ca3af; transition: .2s; user-select: none; }
+.chip.on, .chip:hover { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+
+/* ─── Grid ─── */
+.sec-title { max-width: 720px; margin: 0 auto 12px; font-size: 13px; color: #6b7280; border-bottom: 1px solid #1a1a2a; padding-bottom: 6px; display: flex; justify-content: space-between; }
+.sec-title span { color: #a78bfa; font-weight: 700; }
+.grid { max-width: 720px; margin: 0 auto 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.card { background: #0d0d18; border-radius: 10px; overflow: hidden; border: 2px solid transparent; cursor: pointer; transition: border-color .2s, transform .15s, box-shadow .2s; }
+.card:hover, .card.on { border-color: #7c3aed; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(124,58,237,.3); }
+.card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #111; }
+.card .lbl { padding: 4px 6px; font-size: 10px; display: flex; justify-content: space-between; align-items: center; }
+.card .lbl .ar { color: #d1d5db; }
+.card .lbl .cnt { color: #7c3aed; font-weight: 700; font-size: 9px; }
+
+/* loading skeleton */
+.skel { width: 100%; aspect-ratio: 1; background: linear-gradient(90deg, #111 25%, #1a1a2e 50%, #111 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+</style>
+</head>
+<body>
+
+<h1>🎌 nekos.best — GIFs أبطال الأنيمي</h1>
+<p class="sub">اضغط على أي GIF لمعاينته في شاشة "جاري تشغيل الحلقة"</p>
+<div class="badge">🔥 مشاهد حقيقية من: MHA · One Piece · JoJo · Chainsaw Man · Fate · Bleach وأكثر</div>
+
+<!-- State chips -->
+<div class="chips" id="chips">
+  <div class="chip on" onclick="setState('punch','أثناء التحميل')">👊 punch</div>
+  <div class="chip" onclick="setState('dance','رقص')">💃 dance</div>
+  <div class="chip" onclick="setState('run','ركض')">🏃 run</div>
+  <div class="chip" onclick="setState('happy','سعادة')">😊 happy</div>
+  <div class="chip" onclick="setState('cry','خطأ')">😭 cry</div>
+  <div class="chip" onclick="setState('spin','تحميل')">🌀 spin</div>
+  <div class="chip" onclick="setState('tableflip','إحباط')">😤 tableflip</div>
+  <div class="chip" onclick="setState('laugh','نجاح')">😂 laugh</div>
+  <div class="chip" onclick="setState('wave','ترحيب')">👋 wave</div>
+  <div class="chip" onclick="setState('bonk','خطأ')">🔨 bonk</div>
+  <div class="chip" onclick="setState('slap','خطأ شديد')">👋 slap</div>
+  <div class="chip" onclick="setState('cuddle','انتظار')">🤗 cuddle</div>
+</div>
+
+<!-- Player mockup -->
+<div class="player-wrap">
+  <img class="player-bg" id="bg-img" src="https://s4.anilist.co/file/anilistcdn/media/anime/banner/21-wf37VakJmZqs.jpg" alt="">
+  <div class="player-center">
+    <div class="gif-ring"><img id="main-gif" src="" alt=""></div>
+    <div class="state-lbl" id="state-lbl">جاري تحميل الحلقة</div>
+    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    <div class="bar-wrap"><div class="bar"></div></div>
+    <div class="anime-credit" id="anime-name">Boku no Hero Academia</div>
+  </div>
+</div>
+
+<!-- Grid -->
+<div class="sec-title">📂 كل التصنيفات <span id="count-badge">جاري التحميل…</span></div>
+<div class="grid" id="grid"></div>
+
+<script>
+const BASE_API = 'https://nekos.best/api/v2';
+
+const CATS = [
+  {n:'punch',    ar:'لكمة',      anime:'Boku no Hero Academia'},
+  {n:'run',      ar:'ركض',       anime:'Fate Zero'},
+  {n:'dance',    ar:'رقص',       anime:'Re:Zero'},
+  {n:'happy',    ar:'سعادة',     anime:'Acchi Kocchi'},
+  {n:'tableflip',ar:'إحباط',     anime:'Chuunibyou'},
+  {n:'slap',     ar:'صفعة',      anime:'Chainsaw Man'},
+  {n:'cuddle',   ar:'دلال',      anime:'One Piece'},
+  {n:'laugh',    ar:'ضحك',       anime:'Code Geass'},
+  {n:'cry',      ar:'بكاء',      anime:'Kimi no Na wa'},
+  {n:'wave',     ar:'تلويح',     anime:'Youkoso'},
+  {n:'bonk',     ar:'ضربة',      anime:'Kaguya-sama'},
+  {n:'spin',     ar:'دوران',     anime:'Sakurasou'},
+  {n:'clap',     ar:'تصفيق',     anime:'Yuri on Ice'},
+  {n:'pat',      ar:'تربيت',     anime:'Hitoribocchi'},
+  {n:'hug',      ar:'عناق',      anime:'NHK ni Youkoso'},
+  {n:'nod',      ar:'موافقة',    anime:'Zetsuen no Tempest'},
+  {n:'angry',    ar:'غضب',       anime:'Alya-san'},
+  {n:'baka',     ar:'سخرية',     anime:'Nyan Koi'},
+  {n:'highfive', ar:'إشادة',     anime:'No Game No Life'},
+  {n:'facepalm', ar:'دهشة',      anime:'Hetalia'},
+  {n:'poke',     ar:'نكزة',      anime:'Hetalia'},
+  {n:'kiss',     ar:'قبلة',      anime:'Yagate Kimi ni Naru'},
+  {n:'handshake',ar:'مصافحة',    anime:'Inazuma Eleven'},
+  {n:'stare',    ar:'تحديق',     anime:'Log Horizon'},
+  {n:'shoot',    ar:'إطلاق',     anime:'Date a Bullet'},
+  {n:'salute',   ar:'تحية',      anime:'Giarlish Number'},
+  {n:'thumbsup', ar:'إعجاب',     anime:'Witch Watch'},
+  {n:'shrug',    ar:'لامبالاة',  anime:'KanColle'},
+  {n:'sleep',    ar:'نوم',       anime:'Gakkougurashi'},
+  {n:'yawn',     ar:'تثاؤب',     anime:'Lucky Star'},
+  {n:'nom',      ar:'أكل',       anime:'Tonikaku Kawaii'},
+  {n:'blush',    ar:'خجل',       anime:'New Game'},
+  {n:'smug',     ar:'غرور',      anime:'Owari no Seraph'},
+  {n:'think',    ar:'تفكير',     anime:'Hanako-kun'},
+  {n:'wink',     ar:'غمزة',      anime:'Kono Bijutsubu'},
+  {n:'sip',      ar:'شرب',       anime:'Summer Pockets'},
+  {n:'confused', ar:'تشويش',     anime:'Slow Loop'},
+  {n:'lurk',     ar:'ترقب',      anime:'Clannad'},
+  {n:'nope',     ar:'رفض',       anime:'Atri'},
+  {n:'carry',    ar:'حمل',       anime:'Hikikomari'},
+  {n:'feed',     ar:'إطعام',     anime:'New Game'},
+  {n:'wag',      ar:'هز ذيل',    anime:'Senko-san'},
+  {n:'shake',    ar:'اهتزاز',    anime:'Shikanoko'},
+  {n:'kick',     ar:'ركلة',      anime:'Shiro Seijo'},
+  {n:'bite',     ar:'عض',        anime:'GJ-bu'},
+  {n:'tickle',   ar:'دغدغة',     anime:'H2O'},
+  {n:'pout',     ar:'تذمر',      anime:'Love Live'},
+  {n:'handhold', ar:'إمساك يد',  anime:'Summer Wars'},
+  {n:'smile',    ar:'ابتسامة',   anime:'Senko-san'},
+  {n:'lappillow',ar:'وسادة حضن', anime:'Anime original'},
+];
+
+// Cache fetched GIFs
+const cache = {};
+let currentCat = 'punch';
+
+async function fetchGif(cat) {
+  if (cache[cat]) return cache[cat];
+  try {
+    const res = await fetch(`${BASE_API}/${cat}?amount=3`);
+    const data = await res.json();
+    cache[cat] = data.results || [];
+    return cache[cat];
+  } catch { return []; }
+}
+
+async function setState(cat, label) {
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  event?.target?.classList.add('on');
+  currentCat = cat;
+  document.getElementById('state-lbl').textContent = label || cat;
+  const gifs = await fetchGif(cat);
+  if (gifs.length) {
+    const r = gifs[Math.floor(Math.random() * gifs.length)];
+    document.getElementById('main-gif').src = r.url;
+    document.getElementById('anime-name').textContent = r.anime_name || 'Anime';
+  }
+  document.querySelectorAll('.card').forEach(c => {
+    c.classList.toggle('on', c.dataset.cat === cat);
+  });
+}
+
+async function buildGrid() {
+  const grid = document.getElementById('grid');
+  let loaded = 0;
+
+  for (const cat of CATS) {
+    const card = document.createElement('div');
+    card.className = 'card' + (cat.n === 'punch' ? ' on' : '');
+    card.dataset.cat = cat.n;
+    card.innerHTML = `<div class="skel" id="skel-${cat.n}"></div><div class="lbl"><span class="ar">${cat.ar}</span><span class="cnt">${cat.n}</span></div>`;
+    card.onclick = () => setState(cat.n, cat.ar);
+    grid.appendChild(card);
+
+    // Fetch async — don't block render
+    fetchGif(cat.n).then(gifs => {
+      const skel = document.getElementById(`skel-${cat.n}`);
+      if (!skel) return;
+      if (gifs.length) {
+        const r = gifs[0];
+        const img = document.createElement('img');
+        img.src = r.url;
+        img.loading = 'lazy';
+        img.alt = cat.ar;
+        skel.replaceWith(img);
+        // If this is the initial cat, set it in the player
+        if (cat.n === 'punch' && !document.getElementById('main-gif').src.includes('nekos')) {
+          document.getElementById('main-gif').src = r.url;
+          document.getElementById('anime-name').textContent = r.anime_name || 'Anime';
+        }
+      } else {
+        skel.style.background = '#111';
+      }
+      loaded++;
+      document.getElementById('count-badge').textContent = `${loaded} / ${CATS.length} تصنيف`;
+    });
+  }
+}
+
+// Init
+buildGrid();
+// Load initial player GIF
+fetchGif('punch').then(gifs => {
+  if (gifs.length) {
+    document.getElementById('main-gif').src = gifs[0].url;
+    document.getElementById('anime-name').textContent = gifs[0].anime_name || '';
+  }
+});
+</script>
+</body>
+</html>
