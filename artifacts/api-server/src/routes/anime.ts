@@ -11175,6 +11175,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   //    لإعادة التفعيل: احذف/عدّل ANIME_SOURCE_ALLOWLIST بالأسفل. ─────────────────
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
+    "allmanga",   // مُعاد تفعيله 2026-07-16 — tobeparsed AES-CTR + Yt-mp4 fast4speed ✅
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
     // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن 2026-07-15
