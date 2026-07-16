@@ -11308,6 +11308,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
+      case "allmanga":     (await race(getAllMangaSources(title, english, ep, anilistId),  18_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
