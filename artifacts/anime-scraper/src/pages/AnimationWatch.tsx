@@ -322,6 +322,13 @@ export default function AnimationWatch() {
   const subAbortRef = useRef<AbortController | null>(null);
 
 
+  /* ── Lazy site picking ── */
+  const [sitePickMode, setSitePickMode] = useState(true); // يبدأ بـ picker — المستخدم يختار المصدر
+  const [animSiteStatus, setAnimSiteStatus] = useState<Record<string, "idle" | "fetching" | "done" | "failed">>({});
+  const bgSiteTimersRef   = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const sseEpochRef       = useRef(0);                     // epoch — يُبطل SSE callbacks القديمة
+  const activeEsSetRef    = useRef<Set<EventSource>>(new Set()); // جميع EventSource النشطة للإغلاق عند التنقل
+
   const esRef            = useRef<EventSource | null>(null);
   const seenUrls         = useRef(new Set<string>());
   const lastProgressSave = useRef(0);
@@ -641,38 +648,65 @@ export default function AnimationWatch() {
       .catch(() => {});
   }, [tmdbId, type, ep, displayTitle]);
 
-  /* ── SSE stream ── */
+  /* ── إعادة ضبط عند تغيير الحلقة/العنوان — لا تشغيل SSE تلقائي (كشط كسول) ── */
   useEffect(() => {
-    setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
+    // رفع epoch يُبطل فوراً أي SSE callback لا يزال ينتظر — بما فيها callbacks داخل stream
+    sseEpochRef.current++;
+    // إغلاق صريح لكل EventSource نشط (لا تُغلَق تلقائياً عند تغيير الحلقة)
+    activeEsSetRef.current.forEach(es => es.close());
+    activeEsSetRef.current.clear();
+    bgSiteTimersRef.current.forEach(clearTimeout);
+    bgSiteTimersRef.current = [];
+
+    setStep("sources"); setSources([]); setSelSrc(null); setSseDone(false);
+    setSitePickMode(true); setAnimSiteStatus({});
     setSubCues([]); setSubStatus("off"); setSubChoice("ar-translated"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
+    esRef.current?.close();
+    esRef.current = null;
 
-    let localEs: EventSource | null = null;
-    let alive = true;
+    return () => {
+      // cleanup عند unmount أو قبل re-run التالي
+      sseEpochRef.current++;
+      activeEsSetRef.current.forEach(es => es.close());
+      activeEsSetRef.current.clear();
+      bgSiteTimersRef.current.forEach(clearTimeout);
+    };
+  }, [title, type, ep, season, tmdbId]); // eslint-disable-line
+
+  /* ── startSseForSite: يجلب مصدراً واحداً بـ SSE مع ?site= (كشط كسول) ── */
+  const startSseForSite = useCallback((site: string, isPrimary = false) => {
+    setAnimSiteStatus(prev => ({ ...prev, [site]: "fetching" }));
+    const myEpoch = sseEpochRef.current; // epoch guard — أي state write يُفحص epoch أولاً
 
     getAppToken().then(tok => {
-      if (!alive) return;
+      // رفض مبكر: تغيّرت الحلقة/العنوان أثناء انتظار التوكن
+      if (sseEpochRef.current !== myEpoch) return;
       const tokParam = tok ? `&_tok=${encodeURIComponent(tok)}` : "";
-      const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodeURIComponent(title))}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}${tokParam}`;
+      const q = `/api/animation/sources-stream?title=${encodeURIComponent(decodeURIComponent(title))}&type=${type}&ep=${ep}&season=${season}&tmdbId=${encodeURIComponent(tmdbId)}&site=${site}${tokParam}`;
       const es = new EventSource(q);
-      localEs = es;
-      esRef.current = es;
+      activeEsSetRef.current.add(es); // تتبع كل EventSource لإغلاقها عند التنقل
 
-      es.addEventListener("source", (e) => {
-        if (!alive) return;
-        const src = JSON.parse(e.data) as { url: string; label: string; directUrl?: string; proxyUrl?: string; subtitleUrl?: string; isEmbed?: boolean; headers?: Record<string, string> };
+      const closeEs = () => {
+        es.close();
+        activeEsSetRef.current.delete(es);
+      };
+
+      es.addEventListener("source", (ev) => {
+        // فحص epoch داخل الـ callback — يمنع stale SSEs من تلويث episode جديدة
+        if (sseEpochRef.current !== myEpoch) { closeEs(); return; }
+        const src = JSON.parse(ev.data) as {
+          url: string; label: string; directUrl?: string; proxyUrl?: string;
+          subtitleUrl?: string; isEmbed?: boolean; headers?: Record<string, string>;
+        };
 
         // Embed sources (e.g. Mega.nz) — أضفها مباشرة كـ isEmbed بدون proxy wrapping
         if (src.isEmbed) {
-          const embedKey = src.url;
-          if (seenUrls.current.has(embedKey)) return;
-          seenUrls.current.add(embedKey);
-          const embedSrc: Source = {
-            url: src.url, label: src.label,
-            subtitleUrl: src.subtitleUrl, status: "ok", isEmbed: true,
-          };
-          sourceCountRef.current += 1;
-          setSources(prev => [...prev, embedSrc]);
+          if (seenUrls.current.has(src.url)) return;
+          seenUrls.current.add(src.url);
+          sourceCountRef.current++;
+          setSources(prev => [...prev, { url: src.url, label: src.label, subtitleUrl: src.subtitleUrl, status: "ok", isEmbed: true }]);
+          setAnimSiteStatus(prev => ({ ...prev, [site]: "done" }));
           return;
         }
 
@@ -683,36 +717,45 @@ export default function AnimationWatch() {
         let newSrc: Source;
         if (src.directUrl || src.proxyUrl) {
           const resolved = src.proxyUrl || src.directUrl!;
-          const hl       = isHlsUrl(resolved);
+          const hl = isHlsUrl(resolved);
           const proxyUrl = src.proxyUrl || (hl ? wrapHls(src.directUrl!, window.location.origin) : wrapMp4(src.directUrl!, window.location.origin));
           newSrc = { url: src.url, label: src.label, directUrl: src.directUrl, proxyUrl, subtitleUrl: src.subtitleUrl, headers: src.headers, status: "ok" };
         } else {
           newSrc = { url: src.url, label: src.label, subtitleUrl: src.subtitleUrl, status: "loading" };
           tryExtract(src.url);
         }
-        sourceCountRef.current += 1;
+        sourceCountRef.current++;
         setSources(prev => [newSrc, ...prev]);
+        setAnimSiteStatus(prev => ({ ...prev, [site]: "done" }));
       });
 
-      es.addEventListener("done", () => {
-        es.close(); setSseDone(true);
-      });
-      es.addEventListener("error", () => { /* ignore — done will fire */ });
-      es.onerror = () => { es.close(); setSseDone(true); };
+      const onDone = () => {
+        closeEs();
+        // فحص epoch قبل أي state write
+        if (sseEpochRef.current !== myEpoch) return;
+        setAnimSiteStatus(prev => ({ ...prev, [site]: prev[site] === "done" ? "done" : "failed" }));
+        if (isPrimary) setSseDone(true); // يُعلم auto-play بانتهاء المصدر الأساسي
+      };
+      es.addEventListener("done", onDone);
+      es.onerror = () => {
+        if (sseEpochRef.current !== myEpoch) { closeEs(); return; }
+        onDone();
+      };
     });
+  }, [title, type, ep, season, tmdbId, tryExtract]); // eslint-disable-line
 
-    return () => {
-      alive = false;
-      localEs?.close();
-      esRef.current?.close();
-    };
-  }, [title, type, ep, season, tmdbId, tryExtract]);
-
-  /* ── Step transitions on SSE done (sourceCountRef avoids stale closure) ── */
-  useEffect(() => {
-    if (!sseDone) return;
-    setStep(prev => prev === "playing" ? prev : (sourceCountRef.current === 0 ? "error" : "sources"));
-  }, [sseDone]);
+  /* ── handlePickAnimSite: اختيار المصدر + تحميل الباقي خلفياً ── */
+  const handlePickAnimSite = useCallback((site: string) => {
+    setSitePickMode(false);
+    startSseForSite(site, true); // المصدر الأساسي — isPrimary=true
+    let delay = 2500;
+    ANIM_SOURCE_DEFS.forEach(def => {
+      if (def.site === site) return;
+      const tid = setTimeout(() => startSseForSite(def.site, false), delay);
+      bgSiteTimersRef.current.push(tid);
+      delay += 2500;
+    });
+  }, [startSseForSite]); // eslint-disable-line
 
   /* ── Subtitle helpers ── */
   const parseTiming = (t: string): number => {
@@ -1228,7 +1271,45 @@ export default function AnimationWatch() {
       {/* ── Scrollable source list ── */}
       <div className="flex-1 overflow-y-auto" style={{ paddingBottom: "max(32px, env(safe-area-inset-bottom))" }}>
 
-        {(!hasSources && sseDone) ? (
+        {sitePickMode ? (
+          /* ── Site picker: المستخدم يختار المصدر — كشط كسول ── */
+          <div className="px-4 pt-5 pb-4">
+            <p className="text-white/30 text-[11px] font-['Cairo'] font-bold mb-4 text-center tracking-wide">
+              اختر مصدراً للمشاهدة
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {ANIM_SOURCE_DEFS.map(def => {
+                const st = animSiteStatus[def.site] || "idle";
+                const isLoading = st === "fetching";
+                const isDone    = st === "done";
+                const isFailed  = st === "failed";
+                return (
+                  <button key={def.site} onClick={() => handlePickAnimSite(def.site)} disabled={isLoading}
+                    className="flex flex-col gap-1.5 px-4 py-4 rounded-2xl border text-right transition-all active:scale-[0.97]"
+                    style={{
+                      background: isDone ? "rgba(52,211,153,0.06)" : isFailed ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.04)",
+                      border: `1px solid ${isDone ? "rgba(52,211,153,0.22)" : isFailed ? "rgba(239,68,68,0.18)" : "rgba(255,255,255,0.09)"}`,
+                    }}>
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-mono text-[10px] font-black px-2 py-0.5 rounded"
+                        style={{ background: "rgba(139,92,246,0.18)", border: "1px solid rgba(139,92,246,0.3)", color: "rgba(196,181,253,0.9)" }}>
+                        {def.tag}
+                      </span>
+                      {isLoading && (
+                        <motion.div animate={{ rotate: 360 }} transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+                          className="w-3.5 h-3.5 rounded-full border border-white/15 border-t-violet-400/70" />
+                      )}
+                      {isDone && <span className="text-emerald-400/70 text-[10px]">✓</span>}
+                      {isFailed && <span className="text-red-400/50 text-[10px]">✗</span>}
+                    </div>
+                    <span className="text-white/80 text-[13px] font-black font-['Cairo'] leading-none">{def.name}</span>
+                    <span className="text-white/30 text-[10px] font-['Cairo']">{def.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (!hasSources && sseDone) ? (
           <NoSourcesMessage
             type={type} ep={ep}
             onPrevEp={type === "tv" && ep > 1 ? () => {
@@ -1239,6 +1320,15 @@ export default function AnimationWatch() {
           />
         ) : (
           <>
+            {/* مؤشر تحميل المصادر في الخلفية */}
+            {Object.values(animSiteStatus).some(s => s === "fetching") && (
+              <div className="flex items-center gap-2 px-4 pt-4 pb-1 text-white/20 text-[10px] font-['Cairo']">
+                <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="w-3 h-3 rounded-full border border-white/15 border-t-violet-400/40 shrink-0" />
+                جاري تحميل المزيد من المصادر…
+              </div>
+            )}
+
             {QUALITY_TIERS.map(q => {
               const srcs = grouped[q];
               if (!srcs.length) return null;
