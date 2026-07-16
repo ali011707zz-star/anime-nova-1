@@ -1,0 +1,32 @@
+name: site-monitor
+
+on:
+  schedule:
+    - cron: "*/8 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: check-endpoints
+        run: |
+          PICK=$(( RANDOM % 3 ))
+          if [ "$PICK" -eq 0 ]; then
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -m 20 \
+              -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" \
+              "https://animenovaa.duckdns.org/api/animation/search?q=naruto&type=tv")
+          elif [ "$PICK" -eq 1 ]; then
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -m 20 \
+              -X POST "https://animenovaa.duckdns.org/api/anilist" \
+              -H "Content-Type: application/json" \
+              -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" \
+              -d '{"query":"query{Page(page:1,perPage:1){media{id title{romaji}}}}"}')
+          else
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -m 20 \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+              "https://animenovaa.duckdns.org/api/animation/search?q=dragon+ball&type=movie")
+          fi
+          echo "pick=$PICK status=$STATUS"
+          [ "$STATUS" -lt 500 ] || exit 1

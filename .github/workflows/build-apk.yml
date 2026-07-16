@@ -1,0 +1,136 @@
+name: 🤖 بناء APK أندرويد
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      backend_domain:
+        description: 'Backend API URL'
+        required: false
+        default: 'https://animenovaa.duckdns.org'
+
+env:
+  EXPO_PUBLIC_DOMAIN: ${{ github.event.inputs.backend_domain || 'https://animenovaa.duckdns.org' }}
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v4
+
+      - name: ☕ Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 🔧 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: 💾 pnpm store path
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: 💾 Cache pnpm
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: 📥 Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: 🏗️ Expo Prebuild
+        working-directory: artifacts/nova-mobile
+        run: npx expo prebuild --platform android --clean --no-install
+
+      # ── إصلاح Gradle: تثبيت 8.13 + تعطيل الأخطاء الإهمالية ──────────────
+      # RN 0.81.5 يستخدم deprecated Gradle APIs تُعتبر أخطاءً في 8.8+.
+      # 2026-07-10: AGP الحالي يتطلب Gradle 8.13 كحد أدنى (8.10.2 صار يفشل البناء بـ
+      # "Minimum supported Gradle version is 8.13. Current version is 8.10.2.")
+      # الحل: تثبيت 8.13 + org.gradle.warning.mode=none (لا يزال يمنع أخطاء deprecation)
+      - name: 🔧 Fix Gradle compatibility
+        working-directory: artifacts/nova-mobile/android
+        run: |
+          # تثبيت Gradle wrapper على 8.13 (متوافق مع Expo SDK 54 + AGP الحالي)
+          sed -i \
+            's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-all.zip|' \
+            gradle/wrapper/gradle-wrapper.properties
+
+          # تعطيل أخطاء الإهمال وتسريع البناء
+          cat >> gradle.properties << 'EOF'
+          org.gradle.warning.mode=none
+          android.suppressUnsupportedCompileSdk=35
+          android.defaults.buildfeatures.buildconfig=true
+          EOF
+
+          echo "=== gradle-wrapper.properties ==="
+          cat gradle/wrapper/gradle-wrapper.properties
+          echo "=== gradle.properties (last 10 lines) ==="
+          tail -10 gradle.properties
+
+      - name: 💾 Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-8.13-${{ hashFiles('artifacts/nova-mobile/android/app/build.gradle') }}
+          restore-keys: gradle-${{ runner.os }}-8.13-
+
+      - name: 🔨 Build APK
+        working-directory: artifacts/nova-mobile/android
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m -Dorg.gradle.warning.mode=none"
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            --no-daemon \
+            --warning-mode=none \
+            --stacktrace \
+            2>&1 | tee build.log || {
+              echo ""
+              echo "══════ آخر 80 سطر من سجل البناء ══════"
+              tail -80 build.log
+              exit 1
+            }
+
+      - name: 📱 Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnimeNova-v${{ github.run_number }}
+          path: artifacts/nova-mobile/android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      - name: 📤 Upload build log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-v${{ github.run_number }}
+          path: artifacts/nova-mobile/android/build.log
+          retention-days: 7
+
+      - name: ✅ APK Info
+        run: |
+          APK=$(find artifacts/nova-mobile/android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          if [ -f "$APK" ]; then
+            echo "✅ تم البناء بنجاح — الحجم: $(du -h "$APK" | cut -f1)"
+          else
+            echo "❌ فشل البناء"
+            exit 1
+          fi

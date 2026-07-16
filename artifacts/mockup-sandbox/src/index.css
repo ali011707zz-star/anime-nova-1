@@ -40,6 +40,7 @@
   --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
   --color-sidebar-border: hsl(var(--sidebar-border));
   --color-sidebar-ring: hsl(var(--sidebar-ring));
+<<<<<<< HEAD
 
   --text-xs: 0.75rem;
   --text-xs--line-height: calc(1 / 0.75);
@@ -67,6 +68,8 @@
   --text-8xl--line-height: 1;
   --text-9xl: 8rem;
   --text-9xl--line-height: 1;
+=======
+>>>>>>> origin/main
 }
 
 /* LIGHT MODE - Default theme with placeholder values */
@@ -182,4 +185,8 @@
     color: hsl(var(--muted-foreground));
     pointer-events: none;
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> origin/main
