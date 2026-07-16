@@ -4648,15 +4648,16 @@ async function getAnimeifySources(title: string, english: string | null, ep: num
             directType: "hls",
           });
         } else {
-          // AF fallback: FileMoon extraction failed → أرسل embed لـ iframe
+          // AF fallback: FileMoon extraction failed → isEmbed:true حتى يُعرض في الفرونتند كـ embed
+          // (directType:"embed" بدون isEmbed:true يُرسَل للمشغّل المباشر فيفشل لأنه صفحة HTML)
           sources.push({
-            name: "فايل مون · HD",
+            name: "فايل مون · embed",
             url: filemoonUrl,
             quality: "HD",
-            qualityRank: 24,
+            qualityRank: 8,
             site: "animeify",
             directUrl: filemoonUrl,
-            directType: "embed" as any,
+            isEmbed: true,
           });
         }
       } catch {}
@@ -7082,20 +7083,27 @@ async function getAllMangaSources(
     const HDRS = { "User-Agent": ALLANIME_UA, "Referer": ALLANIME_REF + "/" };
 
     // مرور أول: Yt-mp4 / player (مصدر مباشر — الأسرع والأوثق)
+    // AllAnime "player" type → fast4speed CDN (MP4/HLS مباشر).
+    // بعض الحلقات ترجع رابط صفحة HTML بدل ملف وسائط → نُصفِّي بـ domain/extension.
     for (const src of srcUrls) {
       if (src.type !== "player") continue;
       const url: string = src.sourceUrl ?? "";
       if (!url || !url.startsWith("http")) continue;
+      // نقبل fast4speed CDN أو أي رابط يحتوي امتداد وسائط مباشر
+      const isFast4Speed = url.includes("fast4speed") || url.includes("tools.fast4speed");
+      const isDirectExt  = /\.(mp4|m3u8|webm|mkv)(\?|$)/i.test(url);
+      if (!isFast4Speed && !isDirectExt) continue; // تجاهل embed pages (player.allanime.day وغيرها)
       const isHls = url.includes(".m3u8");
       sources.push({
         name: "AllAnime · ياباني مترجم",
         url,
         quality: src.resolutionStr || "auto",
-        qualityRank: 9,
+        qualityRank: 12,  // رُفع من 9 (يُؤهله للـ auto-play في بعض الحالات)
         site: "allmanga",
+        // لف MP4 في video-proxy مع ALLANIME_REF الصحيح لتفادي CORS وضمان Referer سليم
         directUrl: isHls
           ? `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ALLANIME_REF + "/")}`
-          : url,
+          : `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ALLANIME_REF + "/")}`,
         directType: isHls ? "hls" : "mp4",
       });
       if (sources.length >= 1) break; // مصدر واحد مباشر يكفي
