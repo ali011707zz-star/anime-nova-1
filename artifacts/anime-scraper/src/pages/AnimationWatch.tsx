@@ -189,6 +189,17 @@ const Q_LABEL: Record<QualityTier, string> = {
 const Q_SHORT: Record<QualityTier, string> = { "1080p FHD": "FHD", "720p HD": "HD", "360p SD": "SD" };
 const QUALITY_TIERS: QualityTier[] = ["1080p FHD", "720p HD", "360p SD"];
 
+/* ── ANIM_SOURCE_DEFS: نفس المصادر المفعَّلة في ANIM_SOURCE_ALLOWLIST بالخادم ── */
+const ANIM_SOURCE_DEFS = [
+  { site: "dulo_anim",       tag: "DU", name: "Dulo",     desc: "عربي مدبلج · HLS" },
+  { site: "starcima",        tag: "SC", name: "StarCima", desc: "عربي · HLS" },
+  { site: "vaplayer_anim",   tag: "VA", name: "VaPlayer", desc: "عربي · HLS" },
+  { site: "vidlink_encdec",  tag: "VL", name: "VidLink",  desc: "إنجليزي · MP4/DASH" },
+  { site: "vidfast",         tag: "VF", name: "VidFast",  desc: "إنجليزي · HLS" },
+  { site: "videasy3",        tag: "VE", name: "Videasy",  desc: "إنجليزي · HLS" },
+  { site: "fourkhdhub_anim", tag: "4K", name: "4KHDHub",  desc: "إنجليزي · 4K" },
+] as const;
+
 /* ── Source ── */
 interface Source {
   url: string;
@@ -201,6 +212,7 @@ interface Source {
   isEmbed?: boolean;
   headers?: Record<string, string>;  // CDN auth headers (e.g. Referer/Origin for ironbubble)
   _retriedDirect?: boolean; // true after first retry with raw directUrl
+  site?: string; // مُعرِّف المصدر (lazy fetch)
 }
 
 function getSourceTier(src: Source): QualityTier {

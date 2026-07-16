@@ -208,24 +208,10 @@ const SITE_PRIORITY: Record<string, number> = {
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
+/* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
-  // الأولوية القصوى: KW → AW → HI → DU
-  "kawaii", "animewitcher", "hianime", "dulo_anim",
-  // مصادر سريعة (ياباني مترجم / إنجليزي)
-  "vidlink_anim", "anineko", "anikoto",
-  "mitanime", "vidfast", "anikototv", "animekai", "animepahe", "anipm",
-  // مصادر عربية (تحتاج extraction)
-  "shahiid", "animelek", "animedar", "okanime", "ristoanime",
-  "animeify", "animeday", "arabseed", "anime4up2",
-  "mycima", "topcinemaa", "animephoenix",
-  // قاعدة بيانات FaselHD + AnimeTime + WITanime + WITanime-DB (مدبلج)
-  "faselhd_db", "animetime", "witanime", "witanime_db",
-  // مصادر جديدة يوليو 2026 (xyra_anim معطّل مؤقتاً — خادمهم يرجع 502 دائماً)
-  "notorrent", "sanime", "anslayer",
-  // مصادر عربية مُستعادة
-  "anime3rb", "akwam",
-  // ياباني مترجم — مُضاف 2026-07-16 (كان في الويب لكن ناقص من المحمول)
-  "allmanga",
+  "kawaii", "anikoto", "hianime", "animewitcher",
+  "anineko", "anslayer", "animeify", "allmanga",
 ] as const;
 
 /* timeout موحّد افتراضي — يُستبدل بـ SITE_TIMEOUT_MAP للمواقع التي تحتاج وقتاً أطول */
@@ -702,26 +688,7 @@ export default function WatchScreen() {
         // لا نضيف لـ fetchedSitesRef — يسمح بإعادة المحاولة يدوياً
       }
 
-      /* شغّل أفضل مصدر فوراً */
-      if (autoPlayResult && !autoPlayFiredRef.current && newSrcs.length) {
-        const direct = newSrcs.filter(isDirectPlayable);
-        const best = direct.find(s => s.site === "kawaii") ??
-                     direct.find(s => s.site === "hianime") ??
-                     direct.find(s => s.site === "animewitcher") ??
-                     direct[0];
-        if (best) {
-          autoPlayFiredRef.current = true;
-          playSrc(best);
-          /* تحميل خلفي لبقية المواقع — فقط إذا لم تكن موجة "تحميل الكل" (mount effect)
-             قد جدولت كل المواقع مسبقاً، لتجنّب موجتين مكررتين تستهلكان الـ VPS مرتين. */
-          if (!autoFetchAllRef.current) {
-            ANIME_SITES.filter(s => s !== site).forEach((s, i) => {
-              const tid = setTimeout(() => { handlePickSite(s, false); }, 400 + i * 100);
-              bgTimersRef.current.push(tid);
-            });
-          }
-        }
-      }
+      /* كشط كسول: المصدر تحمَّل — المستخدم يختار الصف من القائمة ليُشغَّل */
     } catch {
       if (isMountedRef.current) setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       // لا نضيف لـ fetchedSitesRef عند الخطأ — يسمح بإعادة المحاولة
