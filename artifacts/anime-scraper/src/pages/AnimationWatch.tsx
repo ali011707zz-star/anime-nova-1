@@ -357,11 +357,20 @@ export default function AnimationWatch() {
 
   /* ── Fallback: إذا فشل المصدر الأساسي (sseDone) بلا مصادر → أظهر قائمة المصادر ──
      المصادر الخلفية تواصل التحميل؛ لو وصل أي مصدر لاحقاً يُشغَّل تلقائياً. ── */
+  /* ── Fallback: شاشة التحميل تبقى حتى يتشغّل مصدر تلقائياً أو تنتهي جميع المصادر ──
+     سبب الشاشة الفارغة السابقة: المصدر الأساسي ينتهي (sseDone) بلا نتائج فيُنقل step→"sources"
+     لكن المصادر الخلفية لم تبدأ بعد (حالتها "idle") → شاشة سوداء حتى يصل أول مصدر.
+     الحل: ننتظر حتى تنتهي جميع ANIM_SOURCE_DEFS (done/failed) قبل الانتقال. ── */
   useEffect(() => {
-    if (step !== "loading" || !sseDone) return;
+    if (step !== "loading") return;
     const hasPlayable = sources.some(s => s.status === "ok" || s.status === "loading");
-    if (!hasPlayable) setStep("sources");
-  }, [sseDone, sources, step]);
+    if (hasPlayable) return;
+    // لا ننتقل لقائمة المصادر حتى تنتهي جميع المصادر (أساسية وخلفية)
+    const allDone = ANIM_SOURCE_DEFS.every(
+      d => animSiteStatus[d.site] === "done" || animSiteStatus[d.site] === "failed",
+    );
+    if (allDone) setStep("sources");
+  }, [step, sources, animSiteStatus]);
 
   /* ── onFail ref pattern (prevents cascade bug) ── */
   const onFailRef    = useRef<() => void>(() => {});
