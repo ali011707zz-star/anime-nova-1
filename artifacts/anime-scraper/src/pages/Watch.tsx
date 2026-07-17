@@ -173,7 +173,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
-  { site: "allmanga",     name: "AllAnime",      desc: "ياباني مترجم · MP4 مباشر", tag: "AA" },
+  // allmanga: معطّل 2026-07-17 — AllAnime أضافت AA_CRYPTO_MISSING على endpoint الحلقات (anti-scraping)
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs، المقاطع تفشل للمستخدم 2026-07-15
   // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
   // witanime (WI) / faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
@@ -3307,7 +3307,8 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
+  /* ── كشط كسول: لا تحميل تلقائي — المستخدم يختار المصدر بنفسه.
+     cleanup: إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
   useEffect(() => {
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
@@ -3315,21 +3316,6 @@ export default function WatchPage() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animeId, ep]);
-
-  /* ── تشغيل تلقائي عند فتح الحلقة — يبدأ الكشط فوراً دون انتظار المستخدم ──
-     نفس نهج AnimationWatch.tsx: المصدر الأول يُجلَب فوراً → يُشغَّل تلقائياً → يُجدول الباقون خلفياً.
-     autoFetchedRef يمنع تكرار الاستدعاء في حالة re-render. ── */
-  useEffect(() => {
-    if (autoFetchedRef.current) return;
-    autoFetchedRef.current = true;
-    const firstSite = SCRAPER_DEFS[0]?.site;
-    if (!firstSite) return;
-    const tid = window.setTimeout(() => {
-      handleFetchSite(firstSite, false);
-    }, 80);
-    return () => clearTimeout(tid);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {

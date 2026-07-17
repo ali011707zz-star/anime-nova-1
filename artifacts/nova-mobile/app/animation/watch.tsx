@@ -505,12 +505,11 @@ export default function AnimationWatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tmdbId, type, ep, season, titleStr, animSrcCacheKey]);
 
-  /* ── تشغيل تلقائي عند فتح الحلقة — يبدأ SSE فوراً دون انتظار المستخدم ── */
-  useEffect(() => {
-    fetchSources();
-    return () => abortRef.current?.abort();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchSources]);
+  /* كشط كسول: لا تحميل تلقائي — المستخدم يضغط على زر المصدر */
+  // useEffect(() => {
+  //   fetchSources();
+  //   return () => abortRef.current?.abort();
+  // }, [fetchSources]);
 
   /* ── 22-second timeout — انتقل للـ picker بدلاً من الانتظار إلى الأبد ── */
   useEffect(() => {

@@ -6671,68 +6671,38 @@ async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
-    // 1. البحث في Firestore (عام) بدلاً من Algolia المحجوب (متوقف 2026-07).
-    //    أولاً: نبحث بـ aniList_id إن وُجد ← أسرع وأدق.
-    //    ثانياً: نبحث بـ mal_id (كثيراً ما يتطابق مع AniList ID للأنيميات القديمة).
+    // 1. إيجاد docId بدون Algolia/Firestore (كلاهما محجوب من VPS 2026-07-17).
+    //    الـ HF Space يخزن الأنمي في Firestore بمفتاح = اسم الأنمي بالإنجليزي.
+    //    نجرب العنوان الإنجليزي أولاً ثم الرومانية — كل مرشح يُختبر بـ /api/episodes.
     let docId: string | null = null;
+    let episodes: Array<{ id: string; name: string; num: number }> = [];
 
-    const tryFsQuery = async (field: string, value: string): Promise<string | null> => {
-      const r = await fetch(`${AW_FS_BASE}:runQuery`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          structuredQuery: {
-            from: [{ collectionId: "anime_list" }],
-            where: { fieldFilter: { field: { fieldPath: field }, op: "EQUAL", value: { stringValue: value } } },
-            limit: 1,
-          },
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!r.ok) return null;
-      const docs = await r.json() as Array<{ document?: { name: string } }>;
-      const name = docs[0]?.document?.name;
-      if (!name) return null;
-      // document name: "projects/.../documents/anime_list/{docId}"
-      const seg = name.split("anime_list/")[1];
-      return seg ? decodeURIComponent(seg) : null;
+    const tryCandidate = async (candidate: string): Promise<boolean> => {
+      try {
+        const r = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(candidate)}`, {
+          headers: BASE_HDRS,
+          signal: AbortSignal.timeout(12000),
+        });
+        if (!r.ok) return false;
+        const d = await r.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
+        if (!d.episodes?.length) return false;
+        docId = candidate;
+        episodes = d.episodes;
+        return true;
+      } catch { return false; }
     };
 
-    if (_anilistId) {
-      docId = await tryFsQuery("aniList_id", String(_anilistId)).catch(() => null);
-      if (!docId) docId = await tryFsQuery("mal_id", String(_anilistId)).catch(() => null);
-    }
-    // نجرّب أيضاً البحث بـ AniList ID كـ integer لبعض الوثائق القديمة
-    if (!docId && _anilistId) {
-      const r2 = await fetch(`${AW_FS_BASE}:runQuery`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          structuredQuery: {
-            from: [{ collectionId: "anime_list" }],
-            where: { fieldFilter: { field: { fieldPath: "aniList_id" }, op: "EQUAL", value: { integerValue: String(_anilistId) } } },
-            limit: 1,
-          },
-        }),
-        signal: AbortSignal.timeout(8000),
-      }).catch(() => null);
-      if (r2?.ok) {
-        const docs = await r2.json() as Array<{ document?: { name: string } }>;
-        const name = docs[0]?.document?.name;
-        if (name) docId = decodeURIComponent(name.split("anime_list/")[1] || "");
-      }
+    // بناء قائمة المرشحين من العنوانين الإنجليزي والرومانية
+    const candidates: string[] = [];
+    if (english) candidates.push(english);
+    if (title && title !== english) candidates.push(title);
+
+    for (const c of candidates) {
+      if (await tryCandidate(c)) break;
     }
     if (!docId) return [];
 
-    // 2. احصل على قائمة الحلقات واستخرج معرف الحلقة المطلوبة
-    const epsR = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(docId)}`, {
-      headers: BASE_HDRS,
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!epsR.ok) return [];
-    const epsData = await epsR.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
-    const episodes = epsData.episodes || [];
-
+    // 2. ابحث عن الحلقة المطلوبة (episodes جُلبت في tryCandidate)
     const epObj = episodes.find(e => Math.round(e.num) === ep)
       || episodes.find(e => Math.abs(e.num - ep) < 0.6);
     if (!epObj) return [];
@@ -6758,13 +6728,10 @@ async function getAnimeWitcherSources(
       const srvName = srv.name.toUpperCase();
 
       if (srvName === "PD") {
-        // Pixeldrain: free accounts block hotlinking from browser (hotlink_detected).
-        // Route through video-proxy with Referer:pixeldrain.com so request appears internal.
         const pdProxied = `/api/anime/video-proxy?url=${encodeURIComponent(srv.url)}&ref=${encodeURIComponent("https://pixeldrain.com/")}`;
         sources.push({ name: `AnimeWitcher · ${qLabel} · PD`, url: srv.url, quality: q, qualityRank: qRank, site: "animewitcher", directUrl: pdProxied, directType: "mp4" });
 
       } else if (srvName === "MF") {
-        // MediaFire CDN URLs مربوطة بـ IP الـ HF Space → نمررها عبر proxy_url الخاص به
         const mfProxied = srv.proxy_url
           ? `${AW_HF_BASE}${srv.proxy_url.startsWith("/") ? srv.proxy_url : "/" + srv.proxy_url}`
           : srv.url;
@@ -6795,7 +6762,6 @@ async function getAnimeWitcherSources(
           }
         } catch {}
       }
-      // KF (KrakenFiles): دائماً playable=false من الـ API → لا يصل هنا
     }
 
     return sources;
@@ -11347,8 +11313,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // animetime CDN (vidhls.com) يعمل لبعض الأنمي (200) — مُعاد تفعيله 2026-07-01
       // animehub:     ترجمة إنجليزية مدمجة في الفيديو
       // animegg:      معطّل بطلب المستخدم
-      // allmanga:     مُعاد تفعيله 2026-07-15 — tobeparsed AES-CTR + Yt-mp4 player type (fast4speed يعمل ✅)
-      scrapeCached("allmanga", () => getAllMangaSources(title, english, ep, anilistId), false, 18000),
+      // allmanga: معطّل 2026-07-17 — AA_CRYPTO_MISSING على endpoint الحلقات (AllAnime أضافت anti-scraping)
+      // scrapeCached("allmanga", () => getAllMangaSources(title, english, ep, anilistId), false, 18000),
       // reanime: DEAD — reanime.net أوقف خدمته تماماً 2026-07 (REANIME_DISABLED=true)
       // scrapeCached("reanime", () => getReanímeSources(title, english, ep, anilistId), false, 25000),
       // animepahe:    mirurotvapi + owocdn AES-128 HLS — 18ث timeout — ثقيل جداً في التشغيل
@@ -11403,7 +11369,7 @@ router.get("/anime/fetch-source", async (req, res) => {
   const ANIME_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
     "animekai",  // مُضاف بطلب المستخدم 2026-07-16
-    "allmanga",  // مُصحَّح 2026-07-16 — كان في SCRAPER_DEFS لكن ناقص من هنا → صفر مصادر دائماً
+    // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
     // vaplayer_anim: محذوف من الأنمي — يُبقى فقط في الأنيميشن 2026-07-15
@@ -11536,7 +11502,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "sanime":       (await race(getSAnimeSources(title, english, ep),               20_000, [])).forEach(collectSrc); break;
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
-      case "allmanga":     (await race(getAllMangaSources(title, english, ep, anilistId),  18_000, [])).forEach(collectSrc); break;
+      // case "allmanga": معطّل 2026-07-17
       default: break;
     }
 
