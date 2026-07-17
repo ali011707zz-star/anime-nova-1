@@ -112,3 +112,4 @@
 - [AnimeKai improvements 2026-07-17](animekai-improvements-2026-07-17.md) — hsub أُزيل نهائياً؛ sub/softsub فقط؛ kaiHostRank موسَّع؛ altTitles (JP/AR) تُحسَّن المطابقة؛ 8 pool/4 sources.
 - [PrimeSrc/Icefy embed blocked](primesrc-icefy-embed-blocked.md) — primesrc.me+icefy API تعمل لكن كل embeds تحجب VPS (Streamtape 404، Dood 403، Filemoon CF)؛ معطَّلة حتى residential proxy؛ code جاهز.
 - [Animation sources state 2026-07-17](animation-sources-2026-07-17.md) — vidfast_vc مضاف ✅ (4-5 servers)؛ 4KHDHub .rar filter؛ VidLink Hindi filter؛ 12-18 مصدر للأفلام الشائعة.
+- [WitAnime integration status](witanime-integration-status.md) — ok.ru ✅ 7 sources؛ yonaplay/videa ❌ (hopx جاهز لكن resolution لا تزال 0)؛ 3 إصلاحات مطبّقة على VPS؛ خطوات تالية محددة.
