@@ -3309,16 +3309,23 @@ export default function WatchPage() {
 
   /* ── تشغيل تلقائي: كشط متوازٍ لجميع المصادر فور فتح الصفحة ──
      أول مصدر يصل ويُشغَّل تلقائياً (bgLoad=false → autoPlayedRef يمنع تكرار التشغيل).
+     إذا كان quick-resume قد فعّل التشغيل مسبقاً (autoPlayedRef=true) تعمل كـ bgLoad=true
+     فقط لتجميع المصادر في قائمة السيرفرات — دون إعادة الضبط أو تشغيل مصدر جديد.
      cleanup: إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
   useEffect(() => {
     if (!animeId && !titleParam) return;
-    // إعادة ضبط الحراس عند كل حلقة جديدة
-    autoPlayedRef.current    = false;
+    // إذا كان quick-resume قد شغّل مصدراً بالفعل → لا نُعيد ضبط autoPlayedRef
+    // (إعادة الضبط تُعيد التشغيل التلقائي فوق مصدر الاستئناف الجاري)
+    const resumeAlreadyPlaying = autoPlayedRef.current;
+    if (!resumeAlreadyPlaying) {
+      autoPlayedRef.current   = false;
+    }
     autoFetchAllRef.current  = false;
     inFlightRef.current      = new Set();
     SCRAPER_DEFS.forEach((d, i) => {
       const tid = window.setTimeout(
-        () => handleFetchSite(d.site, false),
+        // bgLoad=true عند الاستئناف: يُجمّع المصادر خلفياً دون تشغيل تلقائي
+        () => handleFetchSite(d.site, resumeAlreadyPlaying ? true : false),
         i * 70,
       );
       pendingTimeoutsRef.current.push(tid);

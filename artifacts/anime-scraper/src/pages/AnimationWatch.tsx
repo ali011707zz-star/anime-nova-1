@@ -476,6 +476,7 @@ export default function AnimationWatch() {
     if (sseDone) {
       if (autoPlayTimerRef.current) { clearTimeout(autoPlayTimerRef.current); autoPlayTimerRef.current = null; }
       const best = slowSrc ?? okSources[0];
+      if (!best) return; // لا مصادر بعد — لا تضبط autoPlayedRef حتى تصل مصادر خلفية لاحقاً
       autoPlayAttemptsRef.current += 1;
       autoPlayedRef.current = true;
       playSource(best);
