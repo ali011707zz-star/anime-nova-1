@@ -108,3 +108,6 @@
 - [AllAnime fix 2026-07-15](allanime-fix-2026-07-15.md) — Referer youtu-chan.com (لا allmanga.to)؛ tobeparsed=AES-CTR؛ Yt-mp4/player→direct MP4 fast4speed ✅؛ clock.json=500 تجاهل.
 - [AnimeKai CF TTL](animekai-cf-ttl.md) — enc-dec.app DB (24h TTL) لا يحتاج CF؛ anikai.cc الحقيقي CF ~45min TTL (يحتاج اختبار).
 - [Autoplay waterfall plan](autoplay-waterfall-plan.md) — waterfall scraping + source aggregation + verifyRealPlayback — خطط متفق عليها للتطبيق لاحقاً.
+- [AnimeKai improvements 2026-07-17](animekai-improvements-2026-07-17.md) — hsub أُزيل نهائياً؛ sub/softsub فقط؛ kaiHostRank موسَّع؛ altTitles (JP/AR) تُحسَّن المطابقة؛ 8 pool/4 sources.
+- [PrimeSrc/Icefy embed blocked](primesrc-icefy-embed-blocked.md) — primesrc.me+icefy API تعمل لكن كل embeds تحجب VPS (Streamtape 404، Dood 403، Filemoon CF)؛ معطَّلة حتى residential proxy؛ code جاهز.
+- [Animation sources state 2026-07-17](animation-sources-2026-07-17.md) — vidfast_vc مضاف ✅ (4-5 servers)؛ 4KHDHub .rar filter؛ VidLink Hindi filter؛ 12-18 مصدر للأفلام الشائعة.

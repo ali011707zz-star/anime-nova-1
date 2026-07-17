@@ -2211,6 +2211,9 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
     "dulo_anim", "starcima", "vaplayer_anim",
     "videasy3", "vidlink_encdec", "vidfast",
     "fourkhdhub_anim",
+    // مضاف 2026-07: vidfast.vc يعمل (enc-dec.app) ✅; nebula محدودة لكن تعمل
+    // primesrc_anim + icefy: embeds كلها تحجب VPS IPs (Streamtape 404، Dood 403، Filemoon CF) — معطّلة لحين إيجاد residential proxy
+    "vidfast_vc", "nebula",
   ]);
   /* كشط كسول: إذا أُرسل ?site= يُشغَّل ذلك المصدر فقط (lazy per-site fetch) */
   const siteParam = (req.query.site as string) || null;
@@ -2943,18 +2946,61 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
       // rivestream: محذوف (iframe fallback غير مرغوب)
 
-      // ── 16. Icefy (streams.icefy.top) — عبر Orkestr EU relay ────────────────
-      // CF تحجب IPs ريبليت → Orkestr (EU) يتجاوزها للـ API والـ CDN معاً
+      // ── 16. Icefy (streams.icefy.top) — نفس API كـ primesrc.me، يرجع servers[]
+      // تصحيح 2026-07: API غيّر الـ format من {stream:"..."} إلى {servers:[{name,key,...}]}
       scrapeAnimCached("icefy", async () => {
         if (!tmdbId) return;
-        if (type !== "movie") return; // TV endpoint format غير مكتشف
         try {
           send("status", { msg: "Icefy: جاري الاستخراج…" });
-          const raw = await orkestDirectGet(`https://streams.icefy.top/movie/${tmdbId}`, 12_000);
-          const data = JSON.parse(raw) as { stream?: string };
-          if (!data.stream) return;
-          const proxied = wrapHls(data.stream, "https://icefy.top/");
-          sendSource(proxied, "Icefy · FHD", data.stream, proxied);
+          const ICE_BASE = "https://streams.icefy.top";
+          const apiUrl = type === "movie"
+            ? `${ICE_BASE}/movie/${tmdbId}`
+            : `${ICE_BASE}/tv/${tmdbId}/${season}/${epNum}`;
+          let raw = "";
+          try { raw = await orkestDirectGet(apiUrl, 12_000); }
+          catch { raw = await fetch(apiUrl, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10_000) }).then(r => r.ok ? r.text() : "").catch(() => ""); }
+          if (!raw || raw.length < 10) return;
+          const data: any = JSON.parse(raw);
+          const servers: any[] = data?.servers ?? [];
+          if (!servers.length) return;
+          // فلتر هندي + EMBED_MAP مشترك مع primesrc
+          const ICE_EMBED_MAP: Record<string, string> = {
+            Voe: "https://voe.sx/e/KEY", Filemoon: "https://filemoon.sx/e/KEY",
+            Filelions: "https://filelions.to/e/KEY", Streamwish: "https://streamwish.to/e/KEY",
+            Streamplay: "https://streamplay.to/e/KEY", Vidmoly: "https://vidmoly.to/embed-KEY.html",
+            Luluvdoo: "https://luluvdo.com/e/KEY",
+            Streamtape: "https://streamtape.to/e/KEY", Dood: "https://dood.li/e/KEY",
+          };
+          const HINDI_RE = /^(hi|ur|hin|urdu)$/i;
+          const seen = new Set<string>();
+          const picks = servers
+            .filter((s: any) => ICE_EMBED_MAP[s.name] && s.key && !seen.has(s.key) && !HINDI_RE.test(s.audio_language || "") && !!seen.add(s.key))
+            .slice(0, 5);
+          await Promise.allSettled(picks.map(async (srv: any) => {
+            const embedUrl = ICE_EMBED_MAP[srv.name].replace("KEY", srv.key);
+            try {
+              // CF-check fallback: إذا HTML قصيرة أو CF challenge → Hopx browser
+              let html = await cfDirectGet(embedUrl, 12_000);
+              if (!html || html.length < 1000 || html.includes("Just a moment") || !html.includes("file")) {
+                html = await hopxProxyGet(embedUrl, ICE_BASE + "/", 14_000) ?? "";
+              }
+              if (!html) return;
+              // unpack Dean-Edwards إذا وُجد
+              let body = html;
+              const packM = html.match(/\beval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*[,)]/);
+              if (packM) {
+                try {
+                  const unpackFn = new Function("return (" + html.slice(html.indexOf(packM[0])).match(/eval\s*\((.+)\)\s*;?\s*$/s)?.[1] + ")") as () => string;
+                  const unpacked = unpackFn();
+                  if (typeof unpacked === "string" && unpacked.length > 20) body = html + " " + unpacked;
+                } catch {}
+              }
+              const m = body.match(/"file"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/)
+                     || body.match(/"file":\s*"(https?:\/\/[^"]+\.mp4[^"]*)"/);
+              if (!m?.[1]) return;
+              sendSource(wrapHls(m[1], embedUrl), `Icefy · ${srv.name}`, m[1], wrapHls(m[1], embedUrl));
+            } catch { /* skip */ }
+          }));
         } catch { /* silent */ }
       }),
 
@@ -3357,11 +3403,15 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
           // الحالة 2: MP4 متعددة الجودة (stream.qualities) — الأكثر شيوعاً
           // stormvv.vodvidl.site: URLs موقَّعة IP-bound → video-proxy إلزامي
+          // فلترة الصوت الهندي: نستبعد Servers التي يظهر في اسمها/URL صوت هندي
+          const VL_HINDI_RE = /\b(hindi|urdu|bolly|bollywood|hin)\b/i;
           if (vlData?.stream?.qualities) {
-            const quals = vlData.stream.qualities as Record<string, { type?: string; url?: string }>;
+            const quals = vlData.stream.qualities as Record<string, { type?: string; url?: string; label?: string }>;
             for (const q of ["1080", "720", "480", "360"]) {
               const qData = quals[q];
               if (!qData?.url) continue;
+              // فلتر: إذا كان الـ label أو URL يشير للهندي → تخطَّ
+              if (VL_HINDI_RE.test(qData.label || "") || VL_HINDI_RE.test(qData.url)) continue;
               const isHls = qData.url.includes(".m3u8") || qData.type === "hls";
               const vlProxy = isHls
                 ? `/api/anime/hls-proxy?url=${encodeURIComponent(qData.url)}&ref=${encodeURIComponent(VL_REF)}`
@@ -4928,8 +4978,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
                 }
               }
               for (const src of sources2.slice(0, 3)) {
-                // MKV لا يدعمه المتصفح — تخطَّى
-                if (/\.mkv(\?|$)/i.test(src.url)) continue;
+                // MKV/RAR/ZIP لا يصلح للتشغيل المباشر — تخطَّ
+                if (/\.(mkv|rar|zip|7z)(\?|$)/i.test(src.url)) continue;
                 const isHls2 = src.url.includes(".m3u8");
                 // MP4 يحتاج video-proxy لدعم Range + CORS من VPS
                 const proxy2 = isHls2 ? wrapHls(src.url, khMovieUrl) : wrapMp4(src.url, khMovieUrl);
@@ -4944,9 +4994,11 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
       scrapeAnimCached("primesrc_anim", async () => {
         try {
+          // primesrc.me = نفس API مع streams.icefy.top (مصدر مشترك)
+          // تصحيح 2026-07: الأفلام تعمل مع tmdb= مباشرة (لا تحتاج imdbId)
           const PBASE = "https://primesrc.me";
           const apiUrl = type === "movie"
-            ? (imdbId ? `${PBASE}/api/v1/s?type=movie&imdb=${imdbId}` : null)
+            ? (tmdbId ? `${PBASE}/api/v1/s?type=movie&tmdb=${tmdbId}` : imdbId ? `${PBASE}/api/v1/s?type=movie&imdb=${imdbId}` : null)
             : (tmdbId ? `${PBASE}/api/v1/s?type=tv&tmdb=${tmdbId}&season=${season}&episode=${epNum}` : null);
           if (!apiUrl) return;
           const apiR = await fetch(apiUrl, {
@@ -4957,6 +5009,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           const data: any = await apiR.json();
           const servers: any[] = data?.servers ?? [];
           if (!servers.length) { console.log("[primesrc_anim] no servers"); return; }
+
+          // EMBED_MAP: تضمين جميع hosters المعروفة التي ترجعها API
           const EMBED_MAP: Record<string, string> = {
             Filemoon:   "https://filemoon.sx/e/KEY",
             Filelions:  "https://filelions.to/e/KEY",
@@ -4964,33 +5018,57 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
             Streamplay: "https://streamplay.to/e/KEY",
             Vidmoly:    "https://vidmoly.to/embed-KEY.html",
             Luluvdoo:   "https://luluvdo.com/e/KEY",
+            // مُضاف 2026-07 (مكتشفة من primesrc/icefy API)
+            Voe:        "https://voe.sx/e/KEY",
+            Streamtape: "https://streamtape.to/e/KEY",
+            Dood:       "https://dood.li/e/KEY",
+            Mixdrop:    "https://mixdrop.ps/e/KEY",
           };
+
+          // فلتر الصوت الهندي: نستبعد خوادم تحتوي صوت هندي/أردو
+          const HINDI_LANG = /^(hi|ur|hin|urdu)$/i;
           let sent = 0;
           const seenKeys = new Set<string>();
           const picks = servers
-            .filter((s: any) => EMBED_MAP[s.name] && s.key && !seenKeys.has(s.key) && !!seenKeys.add(s.key))
+            .filter((s: any) => {
+              if (!EMBED_MAP[s.name] || !s.key || seenKeys.has(s.key)) return false;
+              if (s.audio_language && HINDI_LANG.test(s.audio_language)) return false; // فلتر هندي
+              seenKeys.add(s.key);
+              return true;
+            })
             .slice(0, 6);
+          // مساعد: استخراج m3u8/mp4 من HTML مع unpack Dean-Edwards
+          const extractMediaUrl = (raw: string): string | null => {
+            let html = raw;
+            const packM = raw.match(/\beval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*[,)]/);
+            if (packM) {
+              try {
+                const unpackFn = new Function("return (" + raw.slice(raw.indexOf(packM[0])).match(/eval\s*\((.+)\)\s*;?\s*$/s)?.[1] + ")") as () => string;
+                const unpacked = unpackFn();
+                if (typeof unpacked === "string" && unpacked.length > 20) html = raw + " " + unpacked;
+              } catch {}
+            }
+            const m = html.match(/"file"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/)
+                   || html.match(/"file":\s*"(https?:\/\/[^"]+\.mp4[^"]*)"/);
+            return m?.[1] ?? null;
+          };
+          // مساعد: جلب embed مع CF-check fallback إلى Hopx browser
+          const fetchEmbed = async (embedUrl: string, refBase: string): Promise<string> => {
+            let html = await cfDirectGet(embedUrl, 12_000);
+            // إذا HTML قصيرة (<1KB) أو تحتوي CF challenge → نجرب Hopx browser
+            if (!html || html.length < 1000 || html.includes("Just a moment") || html.includes("Attention Required") || !html.includes("file")) {
+              html = await hopxProxyGet(embedUrl, refBase, 14_000) ?? "";
+            }
+            return html;
+          };
           await Promise.allSettled(picks.map(async (srv: any) => {
             const embedUrl = EMBED_MAP[srv.name].replace("KEY", srv.key);
             try {
-              // استخدم CF Worker (cfDirectGet) بدل cfGet لتجاوز حماية CDN
-              const raw = await cfDirectGet(embedUrl, 14_000) ?? await hopxProxyGet(embedUrl, PBASE + "/", 14_000);
-              if (!raw) return;
-              // unpack Dean-Edwards p,a,c,k,e,d
-              let html = raw;
-              const packM = raw.match(/\beval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*[,)]/);
-              if (packM) {
-                try {
-                  const unpackFn = new Function("return (" + raw.slice(raw.indexOf(packM[0])).match(/eval\s*\((.+)\)\s*;?\s*$/s)?.[1] + ")") as () => string;
-                  const unpacked = unpackFn();
-                  if (typeof unpacked === "string" && unpacked.length > 20) html = raw + " " + unpacked;
-                } catch {}
-              }
-              const m = html.match(/"file"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/)
-                     || html.match(/"file":\s*"(https?:\/\/[^"]+\.mp4[^"]*)"/);
-              if (!m?.[1]) return;
-              const hls = m[1];
-              sendSource(wrapHls(hls, embedUrl), `PrimeSrc · ${srv.name}`, hls, wrapHls(hls, embedUrl));
+              const html = await fetchEmbed(embedUrl, PBASE + "/");
+              if (!html) return;
+              const mediaUrl = extractMediaUrl(html);
+              if (!mediaUrl) return;
+              sendSource(wrapHls(mediaUrl, embedUrl), `PrimeSrc · ${srv.name}`, mediaUrl, wrapHls(mediaUrl, embedUrl));
               sent++;
             } catch { /* skip */ }
           }));

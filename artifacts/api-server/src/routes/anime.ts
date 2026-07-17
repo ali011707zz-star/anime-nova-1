@@ -6455,8 +6455,8 @@ function kaiSlug(href: string): string {
   return m ? "watch/" + m[1] : "";
 }
 
-function kaiParseCards(html: string): Array<{ id: string; title: string }> {
-  const out: Array<{ id: string; title: string }> = [];
+function kaiParseCards(html: string): Array<{ id: string; title: string; altTitles: string[] }> {
+  const out: Array<{ id: string; title: string; altTitles: string[] }> = [];
   const seen = new Set<string>();
   const parts = html.split(/<div[^>]*class="[^"]*\baitem\b/i);
   for (let i = 1; i < parts.length; i++) {
@@ -6469,12 +6469,18 @@ function kaiParseCards(html: string): Array<{ id: string; title: string }> {
     if (!slug || seen.has(slug)) continue;
     seen.add(slug);
     const titleTag = (block.match(/<a[^>]+class="[^"]*\btitle\b[^"]*"[^>]*>/i) || [])[0] || "";
+    // CoorenLabs insight: cards expose data-en (English), data-jp (Japanese), data-ar (Arabic)
     let title = kaiAttr(titleTag, "data-en") || kaiAttr(titleTag, "title") || "";
+    const altTitles: string[] = [];
+    const jpTitle = kaiAttr(titleTag, "data-jp");
+    const arTitle = kaiAttr(titleTag, "data-ar");
+    if (jpTitle) altTitles.push(jpTitle);
+    if (arTitle) altTitles.push(arTitle);
     if (!title) {
       const inner = block.match(/<a[^>]+class="[^"]*\btitle\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i);
       title = inner ? inner[1].replace(/<[^>]+>/g, "").trim() : "Untitled";
     }
-    out.push({ id: slug, title });
+    out.push({ id: slug, title, altTitles });
   }
   return out;
 }
@@ -6527,11 +6533,15 @@ function kaiParseServers(html: string): KaiServer[] {
 }
 
 function kaiHostRank(url: string): number {
-  // vivibebe.site is the current primary embed host for anikai.cc (2026-07)
-  if (/vivibebe\.|bibiemb\.|vibeplayer\./i.test(url)) return 6;
+  // Primary embed hosts for anikai.cc — plain `const src = "...m3u8"` pattern, no decrypt needed
+  if (/vivibebe\.|bibiemb\.|vibeplayer\.|animeplayer\.|gogoplay\.|streamanim\.|otakuplayer\./i.test(url)) return 7;
+  // Secondary reliable hosts with direct m3u8
+  if (/kwik\.|kodik\.|playtaku\.|animefever\.|anplay\./i.test(url)) return 5;
+  // megaup/4spromax — need enc-dec.app dec-mega
   if (/megaup|4spromax/i.test(url)) return 3;
+  // otaku family
   if (/otakuhg|otakuvid/i.test(url)) return 2;
-  return 1; // default: still try unknown hosts via plain embed
+  return 1; // still try unknown hosts via plain embed
 }
 
 async function kaiResolvePlainEmbed(embedUrl: string): Promise<string | null> {
@@ -6590,12 +6600,16 @@ async function getAnimeKaiSources(
     const cards = kaiParseCards(searchHtml);
     if (!cards.length) return [];
 
-    // 2. Find best title match
-    const scored = cards.map(c => ({
-      ...c, score: Math.max(similarity(q, c.title), asciiSimilarity(q, c.title)),
-    })).sort((a, b) => b.score - a.score);
+    // 2. Find best title match — check English title + Japanese/Arabic alt titles
+    const scored = cards.map(c => {
+      const scores = [
+        similarity(q, c.title), asciiSimilarity(q, c.title),
+        ...c.altTitles.map((t: string) => Math.max(similarity(q, t), asciiSimilarity(q, t))),
+      ];
+      return { ...c, score: Math.max(...scores) };
+    }).sort((a, b) => b.score - a.score);
     const best = scored[0];
-    if (!best || best.score < 0.4) return [];
+    if (!best || best.score < 0.35) return [];
 
     // 3. Get watch page → full episode list
     const watchUrl = `${KAI_BASE}/${best.id}`;
@@ -6614,16 +6628,17 @@ async function getAnimeKaiSources(
     const servers = kaiParseServers(epHtml);
     if (!servers.length) return [];
 
-    // 5. Filter sub/softsub (بدون hsub — ترجمة إنجليزية مدمجة صعبة) → sort by host quality → resolve
-    //    hsub = hard-subtitled English burned into video — نتجنبها ما أمكن
-    const wantedLangs = ["sub", "softsub"];
-    let pool = servers.filter(s => wantedLangs.includes(s.lang));
-    // fallback: إذا لم يتوفر sub/softsub → قبول hsub كحل أخير
-    if (!pool.length) pool = servers.slice();
+    // 5. Filter: sub + softsub فقط — بدون hsub (ترجمة مدمجة مشفوعة في الفيديو)
+    //    dub: نقبله فقط إذا لم يوجد sub/softsub ولكن نضعه بأدنى أولوية
+    const subPool   = servers.filter(s => s.lang === "sub" || s.lang === "softsub");
+    const dubPool   = servers.filter(s => s.lang === "dub");
+    // لا hsub مطلقاً — يحتوي ترجمة إنجليزية محروقة في الصورة
+    let pool = subPool.length ? subPool : dubPool;
+    if (!pool.length) return []; // لا مصدر نظيف متاح
     pool.sort((a, b) => kaiHostRank(b.videoUrl) - kaiHostRank(a.videoUrl));
 
     const sources: UnifiedSource[] = [];
-    for (const srv of pool.slice(0, 6)) {
+    for (const srv of pool.slice(0, 8)) {
       try {
         let m3u8: string | null = null;
         if (/megaup|4spromax/i.test(srv.videoUrl)) {
@@ -6638,14 +6653,15 @@ async function getAnimeKaiSources(
         const proxyUrl = isHls
           ? `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(KAI_BASE + "/")}`
           : `/api/anime/video-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(KAI_BASE + "/")}`;
-        const langLabel = srv.lang === "dub" ? "مدبلج" : srv.lang === "hsub" ? "ياباني مترجم (ناعم)" : "ياباني مترجم";
+        // sub/softsub = صوت ياباني + ترجمة ناعمة (خارجية) — النوع المطلوب
+        const langLabel = srv.lang === "dub" ? "مدبلج" : "ياباني · ترجمة ناعمة";
         sources.push({
           name: `AnimeKai · ${langLabel} · ${srv.name}`,
           url: m3u8, quality: "auto", qualityRank: 15,
           site: "animekai", directUrl: proxyUrl,
           directType: isHls ? "hls" : "mp4",
         });
-        if (sources.length >= 3) break;
+        if (sources.length >= 4) break;
       } catch { continue; }
     }
     return sources;
