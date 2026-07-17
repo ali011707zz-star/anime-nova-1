@@ -181,12 +181,6 @@ export default function AnimationEpisodesScreen() {
               <Text style={s.epCountText}>{episodes.length} حلقة</Text>
             </View>
           )}
-          <Pressable
-            onPress={() => router.push(`/comments?tmdbId=${id}&title=${encodeURIComponent(title)}` as any)}
-            style={s.commentsHeaderBtn}
-          >
-            <Ionicons name="chatbubble-ellipses" size={16} color="rgba(196,181,253,0.85)" />
-          </Pressable>
         </View>
 
         {/* Season tabs */}
@@ -304,8 +298,6 @@ const s = StyleSheet.create({
   epProgressText: { fontSize: 8, fontFamily: "Cairo_700Bold", color: "rgba(139,92,246,0.65)" },
 
   epPlayIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.22)", alignItems: "center", justifyContent: "center" },
-
-  commentsHeaderBtn: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(139,92,246,0.12)", borderWidth: 1, borderColor: "rgba(139,92,246,0.25)" },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   loadingText: { fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "Cairo_400Regular" },
