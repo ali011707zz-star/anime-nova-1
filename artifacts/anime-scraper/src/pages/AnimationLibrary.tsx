@@ -311,7 +311,7 @@ export default function AnimationLibrary() {
                         const active = sort === opt.value;
                         return (
                           <button key={opt.value} onClick={() => setSort(opt.value)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-all"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] transition-all"
                             style={active
                               ? { background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", color: "#fff", boxShadow: "0 3px 12px rgba(109,40,217,0.35)" }
                               : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -332,7 +332,7 @@ export default function AnimationLibrary() {
                         const active = year === val;
                         return (
                           <button key={y} onClick={() => setYear(val)}
-                            className="shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-all"
+                            className="shrink-0 px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] transition-all"
                             style={active
                               ? { background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", color: "#fff" }
                               : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -351,7 +351,7 @@ export default function AnimationLibrary() {
                         const active = genre === g.id;
                         return (
                           <button key={g.id} onClick={() => setGenre(g.id)}
-                            className="px-3 py-1.5 rounded-xl text-[11px] font-black font-['Cairo'] transition-all"
+                            className="px-2.5 py-1 rounded-xl text-[10px] font-black font-['Cairo'] transition-all"
                             style={active
                               ? { background: "linear-gradient(135deg,#8B5CF6,#6D28D9)", color: "#fff" }
                               : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.08)" }}>

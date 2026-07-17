@@ -99,13 +99,23 @@ const AR_TO_EN: Record<string, string> = {
   "سوورد ارت": "Sword Art Online", "توكيو غول": "Tokyo Ghoul",
   "ريزيرو": "Re:Zero", "تيتان": "Titan", "ابطال": "Hero Academia",
 };
-function translateQuery(q: string): string {
+async function translateQuery(q: string): Promise<string> {
   const trimmed = q.trim();
   if (AR_TO_EN[trimmed]) return AR_TO_EN[trimmed];
   if (/[\u0600-\u06FF]/.test(trimmed)) {
     for (const [ar, en] of Object.entries(AR_TO_EN)) {
       if (trimmed.includes(ar)) return trimmed.replace(ar, en);
     }
+    // Fall back to backend translation for Arabic not in local dict
+    try {
+      const r = await fetch(`/api/anime/translate?text=${encodeURIComponent(trimmed)}`);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.translated && d.translated !== trimmed && !/[\u0600-\u06FF]/.test(d.translated)) {
+          return d.translated;
+        }
+      }
+    } catch { /* ignore */ }
   }
   return trimmed;
 }
@@ -249,7 +259,7 @@ export default function Search() {
       try {
         let q: object;
         if (query.trim()) {
-          const searchTerm = translateQuery(query);
+          const searchTerm = await translateQuery(query);
           q = { query: buildQuery(sort, format, status, genre, season), variables: { search: searchTerm, page: 1, perPage: 30 } };
           const updated = [query, ...history.filter(h => h !== query)].slice(0, 8);
           setHistory(updated);

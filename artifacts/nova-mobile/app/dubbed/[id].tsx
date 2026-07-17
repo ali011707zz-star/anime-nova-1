@@ -94,24 +94,6 @@ export default function DubbedDetailScreen() {
         <View style={styles.epInfo}>
           <Text style={styles.epTitle}>الحلقة {ep.number}</Text>
         </View>
-        <Pressable
-          onPress={(e) => {
-            e.stopPropagation();
-            router.push({
-              pathname: "/comments",
-              params: {
-                tmdbId: `dubbed-${id}`,
-                type: "dubbed",
-                ep: String(ep.number),
-                title,
-              },
-            } as any);
-          }}
-          style={styles.epCommentBtn}
-          hitSlop={8}
-        >
-          <Ionicons name="chatbubble-outline" size={15} color="rgba(255,255,255,0.35)" />
-        </Pressable>
         <Ionicons name="chevron-back" size={16} color="rgba(255,255,255,0.3)" />
       </Pressable>
     );
@@ -282,10 +264,6 @@ const styles = StyleSheet.create({
   },
   epInfo: { flex: 1 },
   epTitle: { color: "#fff", fontSize: 13, fontWeight: "700", fontFamily: "Cairo_700Bold" },
-  epCommentBtn: {
-    width: 30, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
-  },
   emptyText: {
     color: "rgba(255,255,255,0.3)", textAlign: "center",
     fontFamily: "Cairo_400Regular", paddingVertical: 32,
