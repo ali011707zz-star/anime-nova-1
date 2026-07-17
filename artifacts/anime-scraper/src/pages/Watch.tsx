@@ -3464,9 +3464,9 @@ export default function WatchPage() {
     /* Show full picker only when user navigated back from player */
     if (showPicker) {
       return (
-        <AnimatePresence mode="wait">
+        <div className="fixed inset-0">
           <motion.div key="picker"
-            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.22, ease: "easeOut" }} className="fixed inset-0">
             <ScraperPicker
               cover={cover} title={title} ep={ep} totalEps={totalEps}
@@ -3508,7 +3508,7 @@ export default function WatchPage() {
               )}
             </AnimatePresence>
           </motion.div>
-        </AnimatePresence>
+        </div>
       );
     }
 
