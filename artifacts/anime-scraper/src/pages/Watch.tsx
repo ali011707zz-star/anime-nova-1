@@ -3596,34 +3596,35 @@ export default function WatchPage() {
     );
   }
 
+  /* يستخدم key لإعادة تهيئة EpisodePlayer عند تغيير المصدر (playKey++) —
+     بدون AnimatePresence حتى لا يبقى EpisodePlayer مُرندَراً أثناء exit animation
+     عند الخروج (كان يُسبّب crash يُطلق error boundary). */
   return (
-    <AnimatePresence mode="wait">
-      <motion.div key={`player-${playKey}`} className="fixed inset-0">
-        <EpisodePlayer
-          servers={servers}
-          quality={quality}
-          allServers={playerServers}
-          initialServer={initialSrv}
-          title={title}
-          epTitle={arEpTitle || epTitle}
-          animeTitle={animeTitle}
-          animeId={animeId}
-          cover={cover} ep={ep} totalEps={totalEps}
-          isMovie={anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT"}
-          downloadUrl={playerDlUrl}
-          subtitleUrl={playerSubUrl || kawaiiSubUrl}
-          subtitleSite={playerSrcSite}
-          hideSubtitle={ARABIC_SITES.has(playerSrcSite)}
-          skipTimes={skipTimes}
-          onBack={handleBack}
-          onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
-          onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
-          onEpisodeSelect={n => { handleBack(); setTimeout(() => goEp(n), 80); }}
-          onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
-          userId={userId}
-          onTierExhausted={handleTierExhausted}
-        />
-      </motion.div>
-    </AnimatePresence>
+    <div key={`player-${playKey}`} className="fixed inset-0">
+      <EpisodePlayer
+        servers={servers}
+        quality={quality}
+        allServers={playerServers}
+        initialServer={initialSrv}
+        title={title}
+        epTitle={arEpTitle || epTitle}
+        animeTitle={animeTitle}
+        animeId={animeId}
+        cover={cover} ep={ep} totalEps={totalEps}
+        isMovie={anime?.format === "MOVIE" || anime?.format === "MOVIE_SHORT"}
+        downloadUrl={playerDlUrl}
+        subtitleUrl={playerSubUrl || kawaiiSubUrl}
+        subtitleSite={playerSrcSite}
+        hideSubtitle={ARABIC_SITES.has(playerSrcSite)}
+        skipTimes={skipTimes}
+        onBack={handleBack}
+        onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
+        onPrevEp={() => ep > 1 ? goEp(ep - 1) : undefined}
+        onEpisodeSelect={n => { handleBack(); setTimeout(() => goEp(n), 80); }}
+        onChangeQuality={q => { setQuality(q); setInitialSrv(0); }}
+        userId={userId}
+        onTierExhausted={handleTierExhausted}
+      />
+    </div>
   );
 }

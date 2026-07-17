@@ -323,7 +323,7 @@ export default function AnimationWatch() {
 
 
   /* ── Lazy site picking ── */
-  const [sitePickMode, setSitePickMode] = useState(true); // يبدأ بـ picker — المستخدم يختار المصدر
+  const [sitePickMode, setSitePickMode] = useState(false); // يبدأ بالتحميل التلقائي (لا picker)
   const [animSiteStatus, setAnimSiteStatus] = useState<Record<string, "idle" | "fetching" | "done" | "failed">>({});
   const bgSiteTimersRef   = useRef<ReturnType<typeof setTimeout>[]>([]);
   const sseEpochRef       = useRef(0);                     // epoch — يُبطل SSE callbacks القديمة
@@ -354,6 +354,14 @@ export default function AnimationWatch() {
   /* ── Keep sourcesRef + sseDoneRef in sync ── */
   useEffect(() => { sourcesRef.current = sources; }, [sources]);
   useEffect(() => { sseDoneRef.current = sseDone; }, [sseDone]);
+
+  /* ── Fallback: إذا فشل المصدر الأساسي (sseDone) بلا مصادر → أظهر قائمة المصادر ──
+     المصادر الخلفية تواصل التحميل؛ لو وصل أي مصدر لاحقاً يُشغَّل تلقائياً. ── */
+  useEffect(() => {
+    if (step !== "loading" || !sseDone) return;
+    const hasPlayable = sources.some(s => s.status === "ok" || s.status === "loading");
+    if (!hasPlayable) setStep("sources");
+  }, [sseDone, sources, step]);
 
   /* ── onFail ref pattern (prevents cascade bug) ── */
   const onFailRef    = useRef<() => void>(() => {});
@@ -659,8 +667,8 @@ export default function AnimationWatch() {
     bgSiteTimersRef.current.forEach(clearTimeout);
     bgSiteTimersRef.current = [];
 
-    setStep("sources"); setSources([]); setSelSrc(null); setSseDone(false);
-    setSitePickMode(true); setAnimSiteStatus({});
+    setStep("loading"); setSources([]); setSelSrc(null); setSseDone(false);
+    setSitePickMode(false); setAnimSiteStatus({});
     setSubCues([]); setSubStatus("off"); setSubChoice("ar-translated"); setHlsTime(0); setShowSubPanel(false);
     seenUrls.current.clear(); histSavedRef.current = false; autoPlayedRef.current = false; sourceCountRef.current = 0;
     esRef.current?.close();
