@@ -6707,10 +6707,10 @@ async function getAnimeWitcherSources(
       || episodes.find(e => Math.abs(e.num - ep) < 0.6);
     if (!epObj) return [];
 
-    // 3. احصل على الـ servers المحلولة
+    // 3. احصل على الـ servers المحلولة (يحتاج ~30ث — رُفع الـ timeout بناءً على قياسات VPS)
     const srvR = await fetch(
       `${AW_HF_BASE}/api/servers_resolved?anime=${encodeURIComponent(docId)}&ep=${encodeURIComponent(epObj.id)}`,
-      { headers: BASE_HDRS, signal: AbortSignal.timeout(25000) },
+      { headers: BASE_HDRS, signal: AbortSignal.timeout(33000) },
     );
     if (!srvR.ok) return [];
     const srvData = await srvR.json() as {
@@ -11274,7 +11274,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       scrapeCached("anipm",        () => getAniPmSources(title, english, ep, anilistId),        false, 20000),
       scrapeCached("anizone",      () => getAniZoneSources(title, english, ep),                 false, 18000),
       scrapeCached("2dhive",       () => get2DhiveSources(title, english, ep),                  true,  20000),
-      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 28000),
+      scrapeCached("animewitcher", () => getAnimeWitcherSources(title, english, ep, anilistId), false, 38000),
       // ── مدبلج عربي/كرتون (WordPress REST) ───────────────────────────
       scrapeCached("stardima",     () => getStardimaSources(title, english, ep, isMovie),      false, 20000),
       // ── ياباني مترجم (بدون ID) ────────────────────────────────────
@@ -11470,7 +11470,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // anikuro: محذوف
       // anivault: محذوف
       case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),28000, [])).forEach(collectSrc); break;
+      case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),38000, [])).forEach(collectSrc); break;
       case "stardima":    (await race(getStardimaSources(title, english, ep, isMovie),       20000, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
