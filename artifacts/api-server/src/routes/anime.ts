@@ -6405,9 +6405,21 @@ const KAI_EMBED_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/
 const KAI_CFPY_BASE = "http://localhost:8000";
 
 async function kaiGet(url: string, referer?: string, timeoutMs = 22000): Promise<string | null> {
-  // anikai.cc is behind Cloudflare.
-  // Priority: hopxProxy (Playwright — best CF bypass) → Python cf-proxy (curl_cffi fallback)
+  // anikai.cc — confirmed 2026-07: accessible without CF bypass via plain HTTP.
+  // Priority: direct fetch → hopxProxy → Python cf-proxy
   const ref = referer || KAI_BASE + "/";
+
+  // 0) Direct HTTP — fastest, works without any proxy (confirmed 2026-07)
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": KAI_EMBED_UA, "Referer": ref, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" },
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 12000)),
+    });
+    if (r.ok) {
+      const text = await r.text();
+      if (text && !isCloudflareBlock(text) && text.length > 200) return text;
+    }
+  } catch { /* fall through to proxy methods */ }
 
   // 1) hopxProxyGet — properly extracts data.html from Hopx JSON response
   const hopx = await hopxProxyGet(url, ref, Math.min(timeoutMs, 20000)).catch(() => null);
@@ -6650,39 +6662,70 @@ async function getAnimeKaiSources(
 //  المزايا: روابط مباشرة جاهزة، حقل playable يُصفّي الميتة،
 //           بحث بالاسم (لا حاجة لـ AniList ID)، 1000+ أنمي
 // ════════════════════════════════════════════════════════════════════
-const AW_HF_BASE = "https://1we323-witcher.hf.space";
+const AW_HF_BASE   = "https://1we323-witcher.hf.space";
+const AW_FS_BASE   = "https://firestore.googleapis.com/v1/projects/animewitcher-1c66d/databases/(default)/documents";
 
 async function getAnimeWitcherSources(
   title: string, english: string | null, ep: number, _anilistId?: number,
 ): Promise<UnifiedSource[]> {
   try {
-    // 1. البحث عبر AllAnime GraphQL — HF Space Algolia API متوقف منذ 2026-07
-    //    HF Space يستخدم AllAnime _id داخلياً → نجلبها مباشرة من api.allanime.day
-    //    نبحث بوضع sub أولاً (تغطية أوسع للعناوين) ثم dub — ثم نجرّب الـ ID مع HF Space
-    const AW_SEARCH_GQL = `query($search:SearchInput $limit:Int $page:Int $translationType:VaildTranslationTypeEnumType $countryOrigin:VaildCountryOriginEnumType){shows(search:$search limit:$limit page:$page translationType:$translationType countryOrigin:$countryOrigin){edges{_id name}}}`;
-    let animeId: string | null = null;
-    const queries = [english, title].filter(Boolean) as string[];
+    // 1. البحث في Firestore (عام) بدلاً من Algolia المحجوب (متوقف 2026-07).
+    //    أولاً: نبحث بـ aniList_id إن وُجد ← أسرع وأدق.
+    //    ثانياً: نبحث بـ mal_id (كثيراً ما يتطابق مع AniList ID للأنيميات القديمة).
+    let docId: string | null = null;
 
-    outer: for (const q of queries) {
-      for (const transType of ["sub", "dub"] as const) {
-        const data = await aaPost(AW_SEARCH_GQL, {
-          search: { allowAdult: false, allowUnknown: false, query: q },
-          limit: 15, page: 1, translationType: transType, countryOrigin: "ALL",
-        }).catch(() => null);
-        const edges: Array<{ _id: string; name: string }> = data?.shows?.edges ?? [];
-        if (!edges.length) continue;
-        const sorted = edges.map(e => ({ ...e, score: Math.max(similarity(q, e.name), asciiSimilarity(q, e.name)) }))
-          .sort((a, b) => b.score - a.score);
-        const best = sorted[0];
-        if (best && best.score >= 0.40) { animeId = best._id; break outer; }
+    const tryFsQuery = async (field: string, value: string): Promise<string | null> => {
+      const r = await fetch(`${AW_FS_BASE}:runQuery`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          structuredQuery: {
+            from: [{ collectionId: "anime_list" }],
+            where: { fieldFilter: { field: { fieldPath: field }, op: "EQUAL", value: { stringValue: value } } },
+            limit: 1,
+          },
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) return null;
+      const docs = await r.json() as Array<{ document?: { name: string } }>;
+      const name = docs[0]?.document?.name;
+      if (!name) return null;
+      // document name: "projects/.../documents/anime_list/{docId}"
+      const seg = name.split("anime_list/")[1];
+      return seg ? decodeURIComponent(seg) : null;
+    };
+
+    if (_anilistId) {
+      docId = await tryFsQuery("aniList_id", String(_anilistId)).catch(() => null);
+      if (!docId) docId = await tryFsQuery("mal_id", String(_anilistId)).catch(() => null);
+    }
+    // نجرّب أيضاً البحث بـ AniList ID كـ integer لبعض الوثائق القديمة
+    if (!docId && _anilistId) {
+      const r2 = await fetch(`${AW_FS_BASE}:runQuery`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          structuredQuery: {
+            from: [{ collectionId: "anime_list" }],
+            where: { fieldFilter: { field: { fieldPath: "aniList_id" }, op: "EQUAL", value: { integerValue: String(_anilistId) } } },
+            limit: 1,
+          },
+        }),
+        signal: AbortSignal.timeout(8000),
+      }).catch(() => null);
+      if (r2?.ok) {
+        const docs = await r2.json() as Array<{ document?: { name: string } }>;
+        const name = docs[0]?.document?.name;
+        if (name) docId = decodeURIComponent(name.split("anime_list/")[1] || "");
       }
     }
-    if (!animeId) return [];
+    if (!docId) return [];
 
     // 2. احصل على قائمة الحلقات واستخرج معرف الحلقة المطلوبة
-    const epsR = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(animeId)}`, {
+    const epsR = await fetch(`${AW_HF_BASE}/api/episodes?id=${encodeURIComponent(docId)}`, {
       headers: BASE_HDRS,
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(20000),
     });
     if (!epsR.ok) return [];
     const epsData = await epsR.json() as { episodes?: Array<{ id: string; name: string; num: number }> };
@@ -6694,7 +6737,7 @@ async function getAnimeWitcherSources(
 
     // 3. احصل على الـ servers المحلولة
     const srvR = await fetch(
-      `${AW_HF_BASE}/api/servers_resolved?anime=${encodeURIComponent(animeId)}&ep=${encodeURIComponent(epObj.id)}`,
+      `${AW_HF_BASE}/api/servers_resolved?anime=${encodeURIComponent(docId)}&ep=${encodeURIComponent(epObj.id)}`,
       { headers: BASE_HDRS, signal: AbortSignal.timeout(25000) },
     );
     if (!srvR.ok) return [];
@@ -7186,23 +7229,23 @@ async function getAllMangaSources(
       if (names.includes(normQ)) { best = r; break; }
     }
 
-    // 3. Episode sources (persisted query)
-    const epVars = { showId: best._id, translationType: "sub", episodeString: String(ep) };
-    const epRaw = await aaGet(
-      `${ALLANIME_API}/api?variables=${encodeURIComponent(JSON.stringify(epVars))}&extensions=${encodeURIComponent(JSON.stringify({ persistedQuery: { version: 1, sha256Hash: ALLANIME_EP_H } }))}`
-    );
+    // 3. Episode sources — API schema updated 2026-07: sourceUrls is now a scalar Object
+    //    (no subfield selection allowed); variables must be non-nullable (String!).
+    //    Response wraps result in tobeparsed AES-GCM at top-level data field.
+    const EP_GQL = `query($showId:String! $translationType:VaildTranslationTypeEnumType! $episodeString:String!){episode(showId:$showId translationType:$translationType episodeString:$episodeString){sourceUrls}}`;
+    const epRaw = await aaPost(EP_GQL, {
+      showId: best._id,
+      translationType: "sub",
+      episodeString: String(ep),
+    }).catch(() => null);
 
-    // 4. استخراج sourceUrls — API قد يُعيد tobeparsed (AES-CTR) أو episode.sourceUrls مباشرة
+    // 4. استخراج sourceUrls — aaPost يفكّ تشفير tobeparsed تلقائياً على مستوى data
+    //    بعد الفكّ، epRaw = {episode:{sourceUrls:[...]}} أو {episode:{sourceUrls: raw_array}}
     let srcUrls: any[] = [];
-    if (epRaw?.tobeparsed) {
-      // tobeparsed = AES-CTR بـ SHA256(ALLANIME_PASS) — يحتوي {episode:{sourceUrls:[]}}
-      try {
-        const plain = await aaDecryptB64(epRaw.tobeparsed);
-        const obj = JSON.parse(plain);
-        srcUrls = obj?.episode?.sourceUrls ?? obj?.sourceUrls ?? [];
-      } catch { /* skip */ }
-    } else {
-      srcUrls = epRaw?.episode?.sourceUrls ?? [];
+    if (epRaw?.episode?.sourceUrls) {
+      const sv = epRaw.episode.sourceUrls;
+      // قد تكون مصفوفة مباشرة أو JSON string
+      srcUrls = Array.isArray(sv) ? sv : (typeof sv === "string" ? (() => { try { return JSON.parse(sv); } catch { return []; } })() : []);
     }
     if (!srcUrls.length) return [];
 
