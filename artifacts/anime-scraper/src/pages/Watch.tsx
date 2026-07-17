@@ -3307,8 +3307,7 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── كشط كسول: لا تحميل تلقائي — المستخدم يختار المصدر بنفسه.
-     cleanup: إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
+  /* ── إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
   useEffect(() => {
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
@@ -3317,7 +3316,20 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animeId, ep]);
 
-  /* كشط كسول: لا تشغيل تلقائي — المستخدم يضغط على الصف ليُشغَّل */
+  /* ── تشغيل تلقائي عند فتح الحلقة — يبدأ الكشط فوراً دون انتظار المستخدم ──
+     نفس نهج AnimationWatch.tsx: المصدر الأول يُجلَب فوراً → يُشغَّل تلقائياً → يُجدول الباقون خلفياً.
+     autoFetchedRef يمنع تكرار الاستدعاء في حالة re-render. ── */
+  useEffect(() => {
+    if (autoFetchedRef.current) return;
+    autoFetchedRef.current = true;
+    const firstSite = SCRAPER_DEFS[0]?.site;
+    if (!firstSite) return;
+    const tid = window.setTimeout(() => {
+      handleFetchSite(firstSite, false);
+    }, 80);
+    return () => clearTimeout(tid);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── Background server accumulation: once player is open, append new sources as scrapers finish ── */
   useEffect(() => {
