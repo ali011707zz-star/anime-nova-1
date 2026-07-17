@@ -1100,6 +1100,23 @@ function ScraperPicker({
   const hasSources = sourceGroups.length > 0;
   const hasBackupSources = embedFallbacks.length > 0;
 
+  /* ── grouped: Quality → FetchedSrc[] (flat individual sources per tier, for SourceRow) ──
+     NOTE: these two variables (grouped, displaySources) were previously undefined → ReferenceError
+     → black-screen crash every time the picker rendered with any sources. ── */
+  const grouped: Record<Quality, FetchedSrc[]> = useMemo(() => ({
+    "1080p FHD": groupsByQuality["1080p FHD"]
+      .flatMap(g => [...g.srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))),
+    "720p HD":   groupsByQuality["720p HD"]
+      .flatMap(g => [...g.srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))),
+    "360p SD":   groupsByQuality["360p SD"]
+      .flatMap(g => [...g.srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0))),
+  }), [groupsByQuality]);
+
+  const displaySources = useMemo(
+    () => (Object.values(grouped) as FetchedSrc[][]).flat(),
+    [grouped],
+  );
+
   function handlePlayGroup(group: SourceGroup) {
     const sorted = [...group.srcs].sort((a, b) => (b.qualityRank ?? 0) - (a.qualityRank ?? 0));
     onPlaySrc(sorted[0]);
@@ -2902,6 +2919,8 @@ export default function WatchPage() {
   /* playKey: يتزايد في كل اختيار مصدر → يجبر EpisodePlayer على إعادة التهيئة الكاملة */
   const [playKey,      setPlayKey]      = useState(0);
   const [phase,        setPhase]        = useState<"picker" | "player">("picker");
+  /* boundaryResetKey يتزايد كلما مسكت _WatchBoundary خطأً → يغير resetKey → تخرج من حالة error */
+  const [boundaryResetKey, setBoundaryResetKey] = useState(0);
   /* showPicker: يبدأ false — إن وُجد مصدر جاهز للتشغيل التلقائي سريعاً (أقل من ~900ms)
      فلن تظهر شاشة السيرفرات مطلقاً؛ إن لم يُعثر على أي مصدر بهذه السرعة تظهر الشاشة
      لتسمح للمستخدم باختيار مصدر يدوياً. هذا يمنع "الفلاش" السابق (ظهور الشاشة لثوانٍ
@@ -2945,7 +2964,8 @@ export default function WatchPage() {
   // autoPlayReady removed — يُفعَّل الـ auto-play الآن داخل handleFetchSite مباشرةً
 
   // Keep emergency-reset callback always current — called by _WatchBoundary on crash
-  _watchResetRef.fn = () => { setPhase("picker"); setShowPicker(true); };
+  // يجب زيادة boundaryResetKey حتى يتغير resetKey → تخرج الـ boundary من حالة error
+  _watchResetRef.fn = () => { setPhase("picker"); setShowPicker(true); setBoundaryResetKey(k => k + 1); };
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -3508,7 +3528,7 @@ export default function WatchPage() {
     /* Show full picker only when user navigated back from player */
     if (showPicker) {
       return (
-        <_WatchBoundary resetKey={`picker-${playKey}`}>
+        <_WatchBoundary resetKey={`picker-${playKey}-${boundaryResetKey}`}>
         <div className="fixed inset-0">
           <motion.div key="picker"
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
