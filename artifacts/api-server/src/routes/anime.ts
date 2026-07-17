@@ -5812,10 +5812,15 @@ async function getHiAnimeSources(
     if (!slug) return [];
 
     // صفحة الحلقة — /watch/{slug}/ep-{N}
-    const epHtml = await fetch(`${HIANIME_BASE}/watch/${slug}/ep-${ep}`, {
-      headers: { ...BASE_HDRS, Referer: `${HIANIME_BASE}/anime/${slug}` },
-      signal: AbortSignal.timeout(15000),
-    }).then(r => r.ok ? r.text() : "").catch(() => "");
+    // hianime.ad تحوّلت لـ JS-rendered SPA — Hopx يُشغّل JS للحصول على data-video
+    let epHtml = await orkestGet(`${HIANIME_BASE}/watch/${slug}/ep-${ep}`, `${HIANIME_BASE}/anime/${slug}`, 25_000) ?? "";
+    if (!epHtml || epHtml.length < 1000) {
+      // Fallback: direct fetch
+      epHtml = await fetch(`${HIANIME_BASE}/watch/${slug}/ep-${ep}`, {
+        headers: { ...BASE_HDRS, Referer: `${HIANIME_BASE}/anime/${slug}` },
+        signal: AbortSignal.timeout(15000),
+      }).then(r => r.ok ? r.text() : "").catch(() => "");
+    }
     if (!epHtml || epHtml.length < 1000) return [];
 
     // استخرج data-video — HSUB (مع ?sub= VTT) مفضّل على SUB (بدون ترجمة)
@@ -6118,7 +6123,16 @@ const ANINEKO_SLUG_TTL = 12 * 3_600_000;
 
 async function searchAnineko(query: string): Promise<Array<{ slug: string; title: string }>> {
   const searchUrl = `${ANINEKO_BASE}/browser?keyword=${encodeURIComponent(query)}`;
-  const html = await orkestGet(searchUrl, `${ANINEKO_BASE}/`, 20000) ?? "";
+  // anineko.to مُتاح مباشرةً من VPS IP — direct أسرع؛ Hopx كـ fallback
+  let html = "";
+  try {
+    const _dr = await fetch(searchUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: `${ANINEKO_BASE}/`, Accept: "text/html,*/*;q=0.9", "Accept-Language": "ar,en;q=0.9" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (_dr.ok) html = await _dr.text();
+  } catch { /* fall through */ }
+  if (!html) html = await orkestGet(searchUrl, `${ANINEKO_BASE}/`, 20000) ?? "";
 
   const results: Array<{ slug: string; title: string }> = [];
   for (const m of html.matchAll(/<a\b[^>]*class=["'][^"']*nv-anime-thumb[^"']*["'][^>]*>[\s\S]*?<\/a>/gi)) {
@@ -6632,9 +6646,10 @@ async function getAnimeKaiSources(
     //    dub: نقبله فقط إذا لم يوجد sub/softsub ولكن نضعه بأدنى أولوية
     const subPool   = servers.filter(s => s.lang === "sub" || s.lang === "softsub");
     const dubPool   = servers.filter(s => s.lang === "dub");
-    // لا hsub مطلقاً — يحتوي ترجمة إنجليزية محروقة في الصورة
-    let pool = subPool.length ? subPool : dubPool;
-    if (!pool.length) return []; // لا مصدر نظيف متاح
+    // hsub كـ fallback أخير عند غياب sub/softsub/dub — أفضل من لا شيء
+    const hsubPool  = servers.filter(s => s.lang === "hsub");
+    let pool = subPool.length ? subPool : dubPool.length ? dubPool : hsubPool;
+    if (!pool.length) return [];
     pool.sort((a, b) => kaiHostRank(b.videoUrl) - kaiHostRank(a.videoUrl));
 
     const sources: UnifiedSource[] = [];
@@ -8616,7 +8631,7 @@ async function getMXPlayerSources(title: string, english: string | null, ep: num
 // ── VidLink via enc-dec.app (TMDB-native, auth-token IP-tied → hls-proxy) ──
 // DISABLED 2026-07-08: enc-dec.app/api/enc-vidlink is suspended — service returns errors consistently
 async function getVidLinkAnimeSources(title: string, english: string | null, ep: number, anilistId?: number): Promise<UnifiedSource[]> {
-  return []; // enc-dec.app suspended
+  // re-enabled 2026-07-17 — enc-dec.app restored
   const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
   if (!tmdbId) return [];
   try {
@@ -8962,7 +8977,11 @@ const DULO_SESS_TTL = 7 * 3_600_000; // 7h (server TTL is 8h)
 async function getDuloSession(): Promise<string> {
   if (_duloCookie && Date.now() - _duloCookieAt < DULO_SESS_TTL) return _duloCookie;
   try {
-    const r = await fetch(`${DULO_BASE}/api/session`, {
+    // Dulo.tv محمية بـ Cloudflare — نجلب الـ session عبر Hopx (IP سكني) للحصول على cf_clearance
+    const sessionUrl = `${DULO_BASE}/api/session`;
+    await hopxProxyGet(sessionUrl, `${DULO_BASE}/`, 15_000).catch(() => null);
+    // نجرب plain fetch أيضاً لاستخراج set-cookie header
+    const r = await fetch(sessionUrl, {
       headers: DULO_HDRS,
       signal:  AbortSignal.timeout(8_000),
     });
@@ -8987,7 +9006,9 @@ async function getDuloAnimeSources(title: string, english: string | null, ep: nu
   await Promise.allSettled(DULO_ANIME_PROVIDERS.map(async (prov) => {
     try {
       const url = `${DULO_BASE}/api/sources/call?type=tv&provider=${prov}&tmdb=${tmdbId}&season=1&episode=${ep}`;
-      const r = await fetch(url, {
+      // Cloudflare يحجب VPS على هذا endpoint — نمرّ عبر Hopx (IP سكني) أولاً
+      const _hopxDuloR = await hopxProxyGet(url, `${DULO_BASE}/`, 18_000).catch(() => null);
+      const r = _hopxDuloR ?? await fetch(url, {
         headers: { ...DULO_HDRS, ...(cookie ? { Cookie: cookie } : {}) },
         signal:  AbortSignal.timeout(14_000),
       });
@@ -13467,7 +13488,8 @@ async function serveMediaVPS(
     let ct = r.headers.get("content-type") || "video/MP2T";
     // بعض CDNs (مثل Akwam) ترجع Content-Type عام (octet-stream/binary) لملفات MP4،
     // ما يمنع بعض المشغّلات (متصفح/ExoPlayer) من التعرّف على نوع الفيديو
-    if ((ct === "application/octet-stream" || ct === "binary/octet-stream") && /\.mp4(\?|$)/i.test(url)) {
+    if ((ct === "application/octet-stream" || ct === "binary/octet-stream") &&
+        (/\.mp4(\?|$)/i.test(url) || /pyramid\.surf|buzzheavier|buzzheav\.com/i.test(url))) {
       ct = "video/mp4";
     }
     res.setHeader("Content-Type", ct);
