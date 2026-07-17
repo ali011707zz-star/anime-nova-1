@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/apiBase";
-import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo, Component, type ReactNode } from "react";
 import { getAppToken } from "@/lib/appToken";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
@@ -2834,6 +2834,47 @@ function EpisodePlayer({
   );
 }
 
+/* ══ Local Error Boundary ══════════════════════════════════════════════════
+   يمسك render crashes عند الانتقال player→picker دون إظهار شاشة الخطأ العالمية.
+   Bridge: _watchResetRef تُملأ من WatchPage أثناء كل render (inline ref assignment).
+   ═══════════════════════════════════════════════════════════════════════════ */
+const _watchResetRef: { fn: (() => void) | null } = { fn: null };
+
+class _WatchBoundary extends Component<
+  { children: ReactNode; resetKey: string },
+  { hasError: boolean; lastKey: string }
+> {
+  constructor(props: { children: ReactNode; resetKey: string }) {
+    super(props);
+    this.state = { hasError: false, lastKey: props.resetKey };
+  }
+  static getDerivedStateFromProps(
+    props: { children: ReactNode; resetKey: string },
+    state: { hasError: boolean; lastKey: string },
+  ) {
+    // أعِد الضبط تلقائياً عند تغيير resetKey (تغيّر phase أو playKey)
+    if (props.resetKey !== state.lastKey) return { hasError: false, lastKey: props.resetKey };
+    return null;
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error) {
+    console.error("[WatchBoundary] render crash →", err?.message, err?.stack?.slice(0, 300));
+    // أعِد الضبط للـ picker بعد انتهاء هذا الـ render cycle
+    queueMicrotask(() => { _watchResetRef.fn?.(); });
+  }
+  render(): ReactNode {
+    if (this.state.hasError) {
+      // سبينر مؤقت ريثما يُطلَق emergency reset
+      return (
+        <div className="fixed inset-0 bg-[#07070d] flex items-center justify-center">
+          <div className="w-6 h-6 rounded-full border-2 border-violet-500/30 border-t-violet-400 animate-spin" />
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ══════════════════════════════════ WATCH PAGE ══════════════ */
 const EMPTY_SLOTS = (): Record<string, SlotStatus> =>
   Object.fromEntries(SCRAPER_DEFS.map(d => [d.site, "idle" as SlotStatus]));
@@ -2902,6 +2943,9 @@ export default function WatchPage() {
   const fetchControllersRef = useRef<Record<string, AbortController>>({});
   const pendingTimeoutsRef  = useRef<number[]>([]);
   // autoPlayReady removed — يُفعَّل الـ auto-play الآن داخل handleFetchSite مباشرةً
+
+  // Keep emergency-reset callback always current — called by _WatchBoundary on crash
+  _watchResetRef.fn = () => { setPhase("picker"); setShowPicker(true); };
 
   const title      = anime?.title?.english || anime?.title?.romaji || titleParam || "أنمي";
   const animeTitle = title;
@@ -3464,6 +3508,7 @@ export default function WatchPage() {
     /* Show full picker only when user navigated back from player */
     if (showPicker) {
       return (
+        <_WatchBoundary resetKey={`picker-${playKey}`}>
         <div className="fixed inset-0">
           <motion.div key="picker"
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -3509,6 +3554,7 @@ export default function WatchPage() {
             </AnimatePresence>
           </motion.div>
         </div>
+        </_WatchBoundary>
       );
     }
 
