@@ -13478,6 +13478,20 @@ async function serveMediaVPS(
   res: import("express").Response,
 ): Promise<void> {
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
+  // بعض CDNs مثل stormvv.vodvidl.site (VidLink) تُضمِّن headers مطلوبة في ?headers={...}
+  // نستخرجها ونُضيفها للطلب، ونحذفها من URL الفعلي قبل الإرسال
+  try {
+    const pu = new URL(url);
+    const embeddedHeaders = pu.searchParams.get("headers");
+    if (embeddedHeaders) {
+      const parsed = JSON.parse(embeddedHeaders) as Record<string, string>;
+      for (const [k, v] of Object.entries(parsed)) {
+        if (k && v && typeof v === "string") hdrs[k] = v;
+      }
+      pu.searchParams.delete("headers");
+      url = pu.toString();
+    }
+  } catch { /* URL parse failed — continue with original */ }
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
   const range = req.headers.range;
   if (range) hdrs.Range = range;

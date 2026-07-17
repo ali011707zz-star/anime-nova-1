@@ -2200,19 +2200,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // dulo_anim         ✅ purstream HLS — API key مُضمَّن في الكود
   // starcima          ✅ vidzee HLS — يعمل من VPS
   // vaplayer_anim     ✅ nextgencloudfabric CDN — FHD مؤكَّد
-  // videasy3  (VE)    ✅ api.speedracelight.com — STREAMCRYPTO HLS multi-quality
   // vidlink_encdec (VL) ✅ enc-dec.app → vidlink MP4/DASH
   // vidfast    (VF)   ✅ vidfast.pro TMDB-native AES-256-GCM HLS
-  // fourkhdhub_anim (4K) ✅ 4khdhub.link → HubCloud MP4 — MKV مُفلتَر
   //
-  // محذوف:
+  // محذوف/معطّل:
+  // videasy3 (VE): speedracelight API محجوب بـ CF من VPS + ironbubble HTTP 000 — لا يمكن إصلاحه
+  // fourkhdhub_anim (4K): hubcloud يحجب VPS+Hopx — لا يمكن استخراج الرابط — لا يمكن إصلاحه
   // multimovies_anim (MM): حُذف بطلب المستخدم 2026-07-16
   const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "dulo_anim", "starcima", "vaplayer_anim",
-    "videasy3", "vidlink_encdec", "vidfast",
-    "fourkhdhub_anim",
+    "vidlink_encdec", "vidfast",
     // مضاف 2026-07: vidfast.vc يعمل (enc-dec.app) ✅; nebula محدودة لكن تعمل
-    // primesrc_anim + icefy: embeds كلها تحجب VPS IPs (Streamtape 404، Dood 403، Filemoon CF) — معطّلة لحين إيجاد residential proxy
+    // primesrc_anim + icefy: embeds كلها تحجب VPS IPs — معطّلة لحين إيجاد residential proxy
     "vidfast_vc", "nebula",
   ]);
   /* كشط كسول: إذا أُرسل ?site= يُشغَّل ذلك المصدر فقط (lazy per-site fetch) */
