@@ -6,7 +6,7 @@
 - [ScraperAPI removed](scraperapi-removed.md) — scraperApiGet + SCRAPERAPI_KEY حُذفا كلياً من anime.ts؛ smartFetch يستخدم cfProxy ثم ScrapingAnt فقط.
 - [Streamrip integration](streamrip-integration.md) — MovieBox [English] MP4 source added to animation sources-stream; video-proxy supports optional &origin= override with validation.
 - [HLS & Translation optimizations](hls-translation-opts.md) — seg-proxy was 1-1.7s; translate-vtt-stream was 40s; fixed with Nginx cache + Google Translate API + hls.js 1.6.2 config.
-- [Dulo.tv integration](dulo-integration.md) — API key configured via env/code; vidrock+purstream confirmed working for anime TMDB IDs; session cookie cached 7h.
+- [Dulo.tv integration](dulo-integration.md) — 2026-07-17: CF blocks VPS on /api/sources/call regardless of session cookie; fix=hopxProxyGet fallback on both anime.ts+animation.ts; cf_clearance needed.
 - [7-repo deep analysis](repo-analysis-2026-07.md) — ani.pm ✅ excellent (37 sub sources per ep); anineko.to ✅ M3U8 verified; Miruro/Videasy/EncDecEndpoints/MovieBox all dead/blocked from VPS; staticine+hls-downloader irrelevant.
 - [Videasy disable + Dubbed foupix fix](videasy-dubbed-fixes.md) — videasy disabled (STREAMCRYPTO_SEED_INVALID); dubbed 403 = datacenter IP block by foupix CDN; fix: rawUrl direct streaming from mobile; SSRF fix in watch-src.
 - [Web vs Mobile source sync](web-mobile-source-sync.md) — VPS IP gives more sources than Replit IP; dead sites removed from web SCRAPER_DEFS; mobile ANIME_SITES synced; vidmoly embed bug fixed; mp4upload filtered on mobile.

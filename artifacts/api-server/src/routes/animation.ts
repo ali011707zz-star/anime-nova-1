@@ -3350,9 +3350,10 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Videasy: جاري الاستخراج…" });
           const sources = await getVideasyAnimationSources(String(tmdbId), type === "movie" ? "movie" : "tv", season, epNum, title);
           for (const src of sources) {
-            // يمر عبر hls-proxy (VPS) مع Referer صحيح — بطلب المستخدم (لا CF Worker، لا مشكلة في الاستهلاك)
-            const proxied = wrapHls(src.url, "https://player.videasy.to/");
-            sendSource(src.url, src.label, src.url, proxied);
+            // ironbubble CDN يحجب VPS IP — rawUrl مباشر للمتصفح مع Referer/Origin في extra.headers
+            sendSource(src.url, src.label, src.url, src.url, {
+              headers: { "Referer": "https://www.vidking.net/", "Origin": "https://www.vidking.net" },
+            });
           }
         } catch { /* silent */ }
       }),
@@ -3484,16 +3485,17 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Dulo: جاري الاستخراج…" });
           const cookie = await duloGetSession();
           const hdrs   = duloRequestHeaders(cookie);
-          // Confirmed working from VPS: purstream (TV+Movie); vidrock returns 0 from VPS IPs
-          // purstream only — vidrock consistently returns 0 from VPS IPs
-          const providers = ["purstream"];
+          // 2026-07-17: كلا الـ providers محجوبان بـ Cloudflare من VPS IP — نمرّ عبر Hopx
+          const providers = ["vidrock", "purstream"];
           const DULO_PROBE_PORT = parseInt(String(process.env.PORT || 5000), 10);
           await Promise.allSettled(providers.map(async (prov) => {
             try {
               const apiUrl = type === "tv"
                 ? `${DULO_TV_BASE}/api/sources/call?type=tv&provider=${prov}&tmdb=${tmdbId}&season=${season}&episode=${epNum}`
                 : `${DULO_TV_BASE}/api/sources/call?type=movie&provider=${prov}&tmdb=${tmdbId}`;
-              const r = await fetch(apiUrl, { headers: hdrs, signal: AbortSignal.timeout(14_000) });
+              // Cloudflare يحجب VPS على Dulo — نمرّ عبر Hopx (IP سكني) أولاً
+              const _hopxDuloR = await hopxProxyGet(apiUrl, `${DULO_TV_BASE}/`, 18_000).catch(() => null);
+              const r = _hopxDuloR ?? await fetch(apiUrl, { headers: hdrs, signal: AbortSignal.timeout(14_000) });
               if (!r.ok) { console.warn(`[dulo_anim] ${prov} → HTTP ${r.status}`); return; }
               const data = await r.json() as { sources?: Array<{ url: string; type?: string; title?: string }> };
               for (const src of (data.sources ?? [])) {
