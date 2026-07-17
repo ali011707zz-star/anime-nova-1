@@ -2,11 +2,8 @@ import { API_BASE } from "@/lib/apiBase";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { AnimeMascot } from "@/components/AnimeMascot";
 import { useParams, useLocation, useSearch, Link } from "wouter";
-import { ChevronRight, Play, Clock, MessageCircle, X } from "lucide-react";
+import { ChevronRight, Play, Clock, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import EpComments from "@/components/EpComments";
-
-interface CommentEpItem { episode_number: number; }
 
 const IMG_W = "https://image.tmdb.org/t/p/w500";
 const IMG_S = "https://image.tmdb.org/t/p/w185";
@@ -33,7 +30,6 @@ export default function AnimationEpisodes() {
   const [episodes, setEpisodes]   = useState<Episode[]>([]);
   const [epLoading, setEpLoading] = useState(true);
   const [epProgress, setEpProgress] = useState<Record<number, number>>({});
-  const [commentEp, setCommentEp] = useState<CommentEpItem | null>(null);
 
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -276,19 +272,12 @@ export default function AnimationEpisodes() {
                     </div>
                   </div>
 
-                  {/* Buttons */}
-                  <div className="flex flex-col gap-1.5 shrink-0">
+                  {/* Play button */}
+                  <div className="shrink-0">
                     <div className="w-8 h-8 rounded-xl flex items-center justify-center"
                       style={{ background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.22)" }}>
                       <Play className="w-3.5 h-3.5 text-primary fill-primary" />
                     </div>
-                    <button
-                      onClick={e => { e.preventDefault(); e.stopPropagation(); setCommentEp({ episode_number: epItem.episode_number }); }}
-                      className="w-8 h-8 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
-                    >
-                      <MessageCircle className="w-3.5 h-3.5 text-white/40" />
-                    </button>
                   </div>
                 </motion.div>
               </Link>
@@ -298,27 +287,6 @@ export default function AnimationEpisodes() {
       </div>
     </main>
 
-    {/* ── صفحة التعليقات الكاملة ── */}
-    <AnimatePresence>
-      {commentEp && (
-        <motion.div
-          initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }}
-          transition={{ type: "spring", damping: 28, stiffness: 300 }}
-          className="fixed inset-0 z-[70] bg-[#07070a] flex flex-col"
-          dir="rtl"
-        >
-          <div className="flex items-center gap-3 px-4 shrink-0" style={{ paddingTop: "calc(env(safe-area-inset-top,0px) + 14px)", paddingBottom: 14, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-            <button onClick={() => setCommentEp(null)} className="w-9 h-9 rounded-xl bg-white/6 flex items-center justify-center shrink-0">
-              <ChevronRight className="w-4 h-4 text-white/70" />
-            </button>
-            <h3 className="text-[15px] font-black font-['Cairo'] text-white flex-1 truncate">تعليقات الحلقة {commentEp.episode_number}</h3>
-          </div>
-          <div className="overflow-y-auto flex-1 p-3">
-            <EpComments commKey={`anim-${type}-${id}-s${selSeason}-ep${commentEp.episode_number}`} />
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
     </>
   );
 }

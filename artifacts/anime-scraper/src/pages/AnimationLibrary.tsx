@@ -210,12 +210,12 @@ export default function AnimationLibrary() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowFilters(o => !o)}
-                className="relative w-9 h-9 rounded-2xl flex items-center justify-center active:scale-90 transition-transform"
+                className="relative w-7 h-7 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
                 style={{ background: showFilters ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.06)", border: `1px solid ${showFilters ? "rgba(139,92,246,0.4)" : "rgba(255,255,255,0.10)"}` }}
               >
-                <SlidersHorizontal className="w-4 h-4" style={{ color: showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)" }} />
+                <SlidersHorizontal className="w-3.5 h-3.5" style={{ color: showFilters ? "#c4b5fd" : "rgba(255,255,255,0.55)" }} />
                 {activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -left-1 w-4 h-4 rounded-full text-[8px] font-black flex items-center justify-center text-white"
+                  <span className="absolute -top-1 -left-1 w-3.5 h-3.5 rounded-full text-[7px] font-black flex items-center justify-center text-white"
                     style={{ background: "linear-gradient(135deg,#8B5CF6,#6D28D9)" }}>
                     {activeFilterCount}
                   </span>
@@ -223,10 +223,10 @@ export default function AnimationLibrary() {
               </button>
               <button
                 onClick={() => { setSearchOpen(o => !o); setTimeout(() => searchRef.current?.focus(), 100); }}
-                className="w-9 h-9 rounded-2xl flex items-center justify-center active:scale-90 transition-transform"
+                className="w-7 h-7 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
                 style={{ background: searchOpen ? "rgba(139,92,246,0.22)" : "rgba(255,255,255,0.06)", border: `1px solid ${searchOpen ? "rgba(139,92,246,0.4)" : "rgba(255,255,255,0.10)"}` }}
               >
-                <Search className="w-4 h-4" style={{ color: searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)" }} />
+                <Search className="w-3.5 h-3.5" style={{ color: searchOpen ? "#c4b5fd" : "rgba(255,255,255,0.55)" }} />
               </button>
             </div>
           </div>
