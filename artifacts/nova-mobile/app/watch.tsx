@@ -683,12 +683,30 @@ export default function WatchScreen() {
         fetchedSitesRef.current.add(site); // ✓ نجح — امنع الإعادة
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
         setSources(prev => [...prev, ...newSrcs]);
+
+        /* تشغيل تلقائي عند أول نجاح */
+        if (autoPlayResult && !autoPlayFiredRef.current) {
+          const best = newSrcs.find(isDirectPlayable) ?? newSrcs[0];
+          if (isDirectPlayable(best)) {
+            autoPlayFiredRef.current = true;
+            playSrc(best);
+          }
+        }
+
+        /* كشط خلفي: بعد أول نجاح جدوِل بقية المصادر الخاملة */
+        if (autoPlayResult && !autoFetchAllRef.current) {
+          autoFetchAllRef.current = true;
+          let bgIdx = 0;
+          ANIME_SITES.forEach(s => {
+            if (s === site) return;
+            const t = setTimeout(() => handlePickSite(s, false), 70 * (++bgIdx));
+            bgTimersRef.current.push(t);
+          });
+        }
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
         // لا نضيف لـ fetchedSitesRef — يسمح بإعادة المحاولة يدوياً
       }
-
-      /* كشط كسول: المصدر تحمَّل — المستخدم يختار الصف من القائمة ليُشغَّل */
     } catch {
       if (isMountedRef.current) setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       // لا نضيف لـ fetchedSitesRef عند الخطأ — يسمح بإعادة المحاولة

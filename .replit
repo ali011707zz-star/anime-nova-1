@@ -20,10 +20,6 @@ expertMode = true
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
 
-[[ports]]
-localPort = 5000
-externalPort = 80
-
 [nix]
 channel = "stable-25_05"
 packages = ["openssl", "postgresql"]

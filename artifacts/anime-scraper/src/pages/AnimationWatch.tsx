@@ -757,6 +757,13 @@ export default function AnimationWatch() {
     });
   }, [startSseForSite]); // eslint-disable-line
 
+  /* ── تشغيل تلقائي عند فتح الصفحة — يبدأ الكشط فوراً بدون انتظار المستخدم ── */
+  useEffect(() => {
+    if (!tmdbId || !ANIM_SOURCE_DEFS.length) return;
+    const tid = setTimeout(() => handlePickAnimSite(ANIM_SOURCE_DEFS[0].site), 100);
+    return () => clearTimeout(tid);
+  }, [title, type, ep, season, tmdbId, handlePickAnimSite]); // eslint-disable-line
+
   /* ── Subtitle helpers ── */
   const parseTiming = (t: string): number => {
     const parts = t.trim().split(":");
