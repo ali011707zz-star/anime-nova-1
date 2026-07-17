@@ -112,9 +112,10 @@ const HIDDEN_RESOLVE_EMBED_HOSTS = ["fasel-hd.cam", "animelek.top", "animedar.co
 // مواقع تُحلَّل عبر متصفح خفي على جهاز المستخدم (WEBVIEW_RESOLVE_SITES في التطبيق) —
 // روابط سيرفراتها متنوّعة (mp4plus/anafast/vidoba/... لماي سيما، عدة CDNs لويت أنمي)
 // لذا نسمح بها بالاعتماد على site بدل مطابقة hostname واحد.
-// witanime أُزيل من هذه القائمة بطلب المستخدم 2026-07-13 — يُسمح فقط بروابط
-// مباشرة (extraction ناجح) أو iframe من مضيفي mega/vidmoly القياسيين لهذا المصدر.
-const HIDDEN_RESOLVE_EMBED_SITES = ["mycima", "moviz_time"];
+// witanime أُعيد إضافته 2026-07-18 — مُعاد تفعيله 2026-07-17 بـ pipeline كامل
+// (yonaplay/streamwish/hgcloud). hopxBrowserExtract لا يكتشف yonaplay لذا
+// نُمرر isEmbed للـ client (mobile WEBVIEW + web Watch.tsx isEmbedFallback).
+const HIDDEN_RESOLVE_EMBED_SITES = ["mycima", "moviz_time", "witanime"];
 
 // Hosts that cannot be extracted AND are NOT allowed as embed → skip entirely
 const EMBED_ONLY_HOSTS = [
@@ -4909,36 +4910,81 @@ const witaSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }
 
 /** البحث في anime taxonomy → taxonomy ID */
 async function searchWitanimeYou(title: string): Promise<number | null> {
-  const apiUrl = `${WITANIME_YOU_BASE}/wp-json/wp/v2/anime?search=${encodeURIComponent(title)}&per_page=10`;
-  const parseResults = (data: unknown): number | null => {
+  const apiBase = `${WITANIME_YOU_BASE}/wp-json/wp/v2/anime`;
+
+  // دالة تقييم: تقارن كل نتيجة بـ query المُستخدم (وليس title الكامل دائماً)
+  const parseResults = (data: unknown, query: string): number | null => {
     if (!Array.isArray(data) || !data.length) return null;
     let best: { id: number; score: number } | null = null;
     for (const a of data as Array<{ id: number; name: string; slug: string }>) {
       const score = Math.max(
-        similarity(a.name, title),
+        similarity(a.name, title),           // قارن بـ title الكامل دائماً
+        similarity(a.name, query),           // وبـ query الجزئي أيضاً
         asciiSimilarity(a.slug.replace(/-/g, " "), title),
+        asciiSimilarity(a.slug.replace(/-/g, " "), query),
       );
       if (!best || score > best.score) best = { id: a.id, score };
     }
     return best && best.score > 0.35 ? best.id : null;
   };
+
+  // helper: cf-proxy port 8000 (curl_cffi Chrome) — يتجاوز CF challenge
+  const cfGet = async (url: string): Promise<unknown[] | null> => {
+    try {
+      const p = new URLSearchParams({ url, ref: WITANIME_YOU_BASE + "/", timeout: "12" });
+      const r = await fetch(`http://localhost:8000/fetch?${p}`, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) return null;
+      const text = await r.text();
+      if (!text.trim().startsWith("[")) return null; // CF challenge أو HTML
+      return JSON.parse(text) as unknown[];
+    } catch { return null; }
+  };
+
+  // ── 1. cf-proxy (Chrome impersonation) — الأكثر موثوقية لـ witanime.life ──
   try {
-    // direct fetch أولاً
-    const r = await fetch(apiUrl, { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) });
+    const data = await cfGet(`${apiBase}?search=${encodeURIComponent(title)}&per_page=15`);
+    if (data !== null) {
+      const id = parseResults(data, title);
+      if (id) { console.log(`[WitAnime/search] found via cf-proxy full-title: ${id}`); return id; }
+      // العنوان الكامل لم يعطِ تطابقاً — جرّب الكلمة الأولى (مثلاً "Naruto" من "Naruto Shippuden")
+      const firstWord = title.split(/[\s:+]/)[0];
+      if (firstWord && firstWord.length > 2) {
+        const hits2 = await cfGet(`${apiBase}?search=${encodeURIComponent(firstWord)}&per_page=15`);
+        if (hits2) {
+          const id2 = parseResults(hits2, title);
+          if (id2) { console.log(`[WitAnime/search] found via cf-proxy first-word "${firstWord}": ${id2}`); return id2; }
+        }
+      }
+    }
+  } catch { /* silent */ }
+
+  // ── 2. direct fetch ────────────────────────────────────────────────────────
+  try {
+    const r = await fetch(
+      `${apiBase}?search=${encodeURIComponent(title)}&per_page=15`,
+      { headers: BASE_HDRS, signal: AbortSignal.timeout(10000) },
+    );
     if (r.ok) {
       const data = await r.json();
-      const id = parseResults(data);
-      if (id) return id;
+      const id = parseResults(data, title);
+      if (id) { console.log(`[WitAnime/search] found via direct: ${id}`); return id; }
     }
   } catch { /* silent */ }
-  // hopx fallback — witanime.you قد يحجب VPS IP أو يحتاج TLS fingerprint
+
+  // ── 3. hopx fallback — خط دفاع أخير ─────────────────────────────────────
   try {
-    const hopxHtml = await hopxProxyGet(apiUrl, `${WITANIME_YOU_BASE}/`, 15_000);
+    const hopxHtml = await hopxProxyGet(
+      `${apiBase}?search=${encodeURIComponent(title)}&per_page=15`,
+      `${WITANIME_YOU_BASE}/`, 15_000,
+    );
     if (hopxHtml) {
       const data = JSON.parse(hopxHtml);
-      return parseResults(data);
+      const id = parseResults(data, title);
+      if (id) { console.log(`[WitAnime/search] found via hopx: ${id}`); return id; }
     }
   } catch { /* silent */ }
+
+  console.warn(`[WitAnime/search] no match for: "${title}"`);
   return null;
 }
 
@@ -5186,7 +5232,14 @@ async function resolveWitaServerUrl(
         }];
       }
     } catch (e: any) { console.warn("[WitAnime/yonaplay/fallback]", e?.message); }
-    return [];
+    // cf-proxy failed entirely — still return as isEmbed (client can try)
+    return [{
+      name: serverName || "Yonaplay",
+      url: embedUrl,
+      quality: "FHD", qualityRank: 11,
+      site: "witanime",
+      isEmbed: true,
+    }];
   }
 
   // ── hgcloud / streamwish-family ───────────────────────────────────────────
@@ -5228,7 +5281,14 @@ async function resolveWitaServerUrl(
         }
       }
     } catch (e: any) { console.warn("[WitAnime/streamwish]", e?.message); }
-    return [];
+    // hopx + cf-proxy كلاهما فشل — ارجع embed كـ last resort
+    return [{
+      name: serverName || "StreamHG",
+      url: embedUrl,
+      quality: "HD", qualityRank: 9,
+      site: "witanime",
+      isEmbed: true,
+    }];
   }
 
   // ── videa / videas ─────────────────────────────────────────────────────────
