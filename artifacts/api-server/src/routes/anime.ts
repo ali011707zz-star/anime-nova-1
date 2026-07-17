@@ -5245,14 +5245,29 @@ async function resolveWitaServerUrl(
   }
 
   // ── hgcloud / streamwish-family ───────────────────────────────────────────
-  // hopxBrowserExtract أُزيل — browser-extract يُرجع ok=False لـ streamwish من VPS
-  // مباشرة إلى cf-proxy fetch + parseStreamwish
+  // Hopx browser-extract يعمل لـ hgcloud.to (~7s) — نجرّبه أولاً
+  // ثم cf-proxy + parseStreamwish كـ fallback
   if (
     host.includes("hgcloud.to") || host.includes("streamwish") ||
     host.includes("embedwish") || host.includes("wishembed") ||
     host.includes("stmruby.com") || host.includes("swdyu.com")
   ) {
-    // cf-proxy fetch + parseStreamwish
+    // 1) Hopx browser extract — يعمل لـ hgcloud حتى من VPS
+    if (host.includes("hgcloud.to")) {
+      const hopx = await hopxBrowserExtract(embedUrl, "https://witanime.life/", 18000);
+      if (hopx) {
+        console.log(`[WitAnime/hgcloud] hopx got ${hopx.type} URL`);
+        return [{
+          name: serverName || "StreamHG",
+          url: hopx.url,
+          directUrl: hopx.type === "hls"
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(hopx.url)}&ref=${encodeURIComponent("https://witanime.life/")}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(hopx.url)}&ref=${encodeURIComponent("https://witanime.life/")}`,
+          quality: "HD", qualityRank: 9, site: "witanime",
+        }];
+      }
+    }
+    // 2) cf-proxy fetch + parseStreamwish
     try {
       const p = new URLSearchParams({ url: embedUrl, ref: "https://witanime.life/", timeout: "18" });
       const rr = await fetch(`http://localhost:8000/fetch?${p}`, { signal: AbortSignal.timeout(20000) });
@@ -5272,7 +5287,7 @@ async function resolveWitaServerUrl(
         }
       }
     } catch (e: any) { console.warn("[WitAnime/streamwish]", e?.message); }
-    // hopx + cf-proxy كلاهما فشل — ارجع embed كـ last resort
+    // كلاهما فشل — ارجع embed كـ last resort
     return [{
       name: serverName || "StreamHG",
       url: embedUrl,
@@ -5282,10 +5297,95 @@ async function resolveWitaServerUrl(
     }];
   }
 
-  // ── videa / videas ─────────────────────────────────────────────────────────
-  // hopxBrowserExtract أُزيل — browser-extract يُرجع ok=False لـ videa دائماً من VPS
-  // isEmbed مباشرة بدون 20s انتظار هدر
-  if (host.includes("videa.hu") || host.includes("videas.")) {
+  // ── app.videas.fr — رابط M3U8 مباشر في HTML ───────────────────────────────
+  // مثال: https://app.videas.fr/embed/media/{uuid}/
+  // يُرجع M3U8 على cdn.videas.fr في HTML نفسه — fetch مباشر < 1s
+  if (host === "app.videas.fr" || host.endsWith(".videas.fr")) {
+    try {
+      const r = await fetch(embedUrl, {
+        headers: {
+          "Referer": "https://witanime.life/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (r.ok) {
+        const html = await r.text();
+        const m3u8 = html.match(/["'](https:\/\/cdn\.videas\.fr\/[^"']+\.m3u8[^"']*)['"]/);
+        if (m3u8) {
+          console.log(`[WitAnime/videas] got M3U8 from HTML`);
+          return [{
+            name: serverName || "Videas",
+            url: m3u8[1],
+            directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8[1])}&ref=${encodeURIComponent("https://app.videas.fr/")}`,
+            quality: "FHD", qualityRank: 11, site: "witanime",
+          }];
+        }
+      }
+    } catch (e: any) { console.warn("[WitAnime/videas]", e?.message); }
+    return [{
+      name: serverName || "Videas",
+      url: embedUrl,
+      quality: "FHD", qualityRank: 10,
+      site: "witanime",
+      isEmbed: true,
+    }];
+  }
+
+  // ── videa.hu ────────────────────────────────────────────────────────────────
+  // يحتوي HTML الـ player على _xt (nonce) — نستخدمه لاستدعاء video-xml.php
+  if (host === "videa.hu" || host.endsWith(".videa.hu")) {
+    try {
+      // 1. جلب صفحة الـ player لاستخراج _xt
+      const pR = await fetch(embedUrl, {
+        headers: {
+          "Referer": "https://witanime.life/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (pR.ok) {
+        const pHtml = await pR.text();
+        const xtM = pHtml.match(/var\s+_xt\s*=\s*["']([^"']{20,100})["']/);
+        const vidM = embedUrl.match(/[?&]v=([A-Za-z0-9_-]{8,32})/);
+        if (xtM && vidM) {
+          const v = vidM[1];
+          const xt = xtM[1];
+          // 2. استدعاء video-xml.php بـ nonce
+          for (const param of ["_t", "nonce", "_xt", "hash"]) {
+            const xmlUrl = `https://videa.hu/videaplayer/video-xml.php?v=${v}&${param}=${encodeURIComponent(xt)}`;
+            const xR = await fetch(xmlUrl, {
+              headers: {
+                "Referer": "https://videa.hu/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36",
+              },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (xR.ok && xR.status !== 404) {
+              const xml = await xR.text();
+              // استخرج رابط الفيديو من XML
+              const srcM = xml.match(/<video_url[^>]*>([^<]+)<\/video_url>/i)
+                ?? xml.match(/<src[^>]*>([^<]+)<\/src>/i)
+                ?? xml.match(/src=["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i);
+              if (srcM && srcM[1].startsWith("http")) {
+                const vUrl = srcM[1];
+                const isHls = vUrl.includes(".m3u8");
+                console.log(`[WitAnime/videa] got ${isHls ? "HLS" : "MP4"} via ${param}`);
+                return [{
+                  name: serverName || "Videa",
+                  url: vUrl,
+                  directUrl: isHls
+                    ? `/api/anime/hls-proxy?url=${encodeURIComponent(vUrl)}&ref=${encodeURIComponent("https://videa.hu/")}`
+                    : `/api/anime/video-proxy?url=${encodeURIComponent(vUrl)}&ref=${encodeURIComponent("https://videa.hu/")}`,
+                  quality: "HD", qualityRank: 8, site: "witanime",
+                }];
+              }
+              break; // لا نجح الـ API لكن استجاب — لا نكرر بـ params مختلفة
+            }
+          }
+        }
+      }
+    } catch (e: any) { console.warn("[WitAnime/videa]", e?.message); }
     return [{
       name: serverName || "Videa",
       url: embedUrl,
@@ -5295,7 +5395,7 @@ async function resolveWitaServerUrl(
     }];
   }
 
-  // ── عام — isEmbed مباشرة (hopxBrowserExtract أُزيل — لا يستخرج شيئاً من witanime servers) ──
+  // ── عام — isEmbed مباشرة ───────────────────────────────────────────────────
   return [{
     name: serverName || host,
     url: embedUrl,
