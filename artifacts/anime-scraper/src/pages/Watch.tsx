@@ -176,7 +176,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // allmanga: معطّل 2026-07-17 — AllAnime أضافت AA_CRYPTO_MISSING على endpoint الحلقات (anti-scraping)
   // xpass_anim: محذوف — CDN يحجب VPS/CF IPs، المقاطع تفشل للمستخدم 2026-07-15
   // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
-  // witanime (WI) / faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
+  // faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
+  { site: "witanime",     name: "ويت أنمي",      desc: "عربي · ok.ru / yonaplay",    tag: "WI", isArabic: true },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */
