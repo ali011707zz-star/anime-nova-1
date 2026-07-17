@@ -1325,7 +1325,7 @@ export default function AnimationWatch() {
               })}
             </div>
           </div>
-        ) : (!hasSources && sseDone && !Object.values(animSiteStatus).some(s => s === "fetching")) ? (
+        ) : (!hasSources && ANIM_SOURCE_DEFS.every(d => animSiteStatus[d.site] === "done" || animSiteStatus[d.site] === "failed")) ? (
           <NoSourcesMessage
             type={type} ep={ep}
             onPrevEp={type === "tv" && ep > 1 ? () => {

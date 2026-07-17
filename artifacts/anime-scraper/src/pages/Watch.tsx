@@ -2271,16 +2271,16 @@ function EpisodePlayer({
      never re-fires from identity changes here. */
 
   /* ── Embed-type URL → sandboxed iframe player ── */
+  /* AnimatePresence mode="wait" أُزيل هنا — كان يُبقي MegaEmbedPlayer حياً أثناء exit animation
+     بعد أن يُنهار الـ parent (EpisodePlayer) عند العودة للـ picker، مما يُطلق error boundary. */
   if (currentUrl && isIframeUrl(currentUrl)) {
     return (
-      <AnimatePresence mode="wait">
-        <MegaEmbedPlayer
-          key={currentUrl}
-          src={currentUrl}
-          ep={ep} totalEps={totalEps} title={title}
-          onBack={onBack} onNextEp={onNextEp} onPrevEp={onPrevEp}
-        />
-      </AnimatePresence>
+      <MegaEmbedPlayer
+        key={currentUrl}
+        src={currentUrl}
+        ep={ep} totalEps={totalEps} title={title}
+        onBack={onBack} onNextEp={onNextEp} onPrevEp={onPrevEp}
+      />
     );
   }
 
