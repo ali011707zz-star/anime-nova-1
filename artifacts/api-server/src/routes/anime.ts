@@ -4971,19 +4971,7 @@ async function searchWitanimeYou(title: string): Promise<number | null> {
     }
   } catch { /* silent */ }
 
-  // ── 3. hopx fallback — خط دفاع أخير ─────────────────────────────────────
-  try {
-    const hopxHtml = await hopxProxyGet(
-      `${apiBase}?search=${encodeURIComponent(title)}&per_page=15`,
-      `${WITANIME_YOU_BASE}/`, 15_000,
-    );
-    if (hopxHtml) {
-      const data = JSON.parse(hopxHtml);
-      const id = parseResults(data, title);
-      if (id) { console.log(`[WitAnime/search] found via hopx: ${id}`); return id; }
-    }
-  } catch { /* silent */ }
-
+  // hopx fallback أُزيل — cf-proxy (0.5s) + direct كافيان، hopx يُضيف 15s penalty عند الفشل
   console.warn(`[WitAnime/search] no match for: "${title}"`);
   return null;
 }
@@ -5041,8 +5029,8 @@ async function getWitanimeYouEpisodeUrl(animeId: number, ep: number): Promise<st
 
     // cf-proxy لا يُعيد headers — نحسب totalPages من عدد النتائج + استعلام منفصل
     const totalRes = await cfFetchJson(`${BASE}&per_page=1`, 8000);
-    // اعتمد افتراضياً على 13 صفحات كحد أقصى إذا فشل
-    let totalPages = 13;
+    // اعتمد 6 صفحات كحد أقصى (600 حلقة) — cf-proxy تسلسلي، كل صفحة ~0.5s
+    let totalPages = 6;
     // فحص page 1
     for (const e of firstEps) {
       if (extractWitaEpNum(decodeURIComponent(e.slug), e.title?.rendered ?? "") === ep) return e.link;
@@ -5181,87 +5169,90 @@ async function resolveWitaServerUrl(
   }
 
   // ── yonaplay.net ──────────────────────────────────────────────────────────
-  // أولاً: hopxBrowserExtract (إذا كان الـ sandbox حياً)
-  // ثانياً: cfProxy (port 8000) fetch + استخراج HLS من الـ HTML
+  // الصفحة static HTML بالكامل — الروابط مشفّرة بـ base64 داخل go_to_player('...')
+  // لا حاجة لـ Playwright أو hopx — fetch مباشر < 1s
   if (host.includes("yonaplay.net")) {
     try {
-      // محاولة hopx browser أولاً
-      const bv = await hopxBrowserExtract(embedUrl, "https://witanime.life/", 25000);
-      if (bv) {
-        console.log(`[WitAnime/yonaplay] hopx browser got ${bv.type} URL`);
-        return [{
-          name: serverName || "Yonaplay",
-          url: bv.url,
-          directUrl: bv.type === "hls"
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(bv.url)}&ref=${encodeURIComponent("https://yonaplay.net/")}`
-            : `/api/anime/video-proxy?url=${encodeURIComponent(bv.url)}&ref=${encodeURIComponent("https://yonaplay.net/")}`,
-          quality: "FHD", qualityRank: 12, site: "witanime",
-        }];
-      }
-    } catch { /* hopx unavailable */ }
+      const html = await fetch(embedUrl, {
+        headers: {
+          "Referer": "https://witanime.life/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(10000),
+      }).then(r => r.ok ? r.text() : null).catch(() => null);
 
-    // Fallback: fetch HTML من cf-proxy (port 8000) + parse m3u8
-    try {
-      const p = new URLSearchParams({ url: embedUrl, ref: "https://witanime.life/", timeout: "20" });
-      const rr = await fetch(`http://localhost:8000/fetch?${p}`, { signal: AbortSignal.timeout(22000) });
-      if (rr.ok) {
-        const html = await rr.text();
-        // يوناplay يُحمّل M3U8 عبر JS — ابحث في الـ source عن روابط HLS مباشرة
-        const hlsM = html.match(/["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)["']/);
-        const srcM = html.match(/['"](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)["']/);
-        const url = hlsM?.[1] ?? srcM?.[1] ?? null;
-        if (url) {
-          const isHls = url.includes(".m3u8");
-          console.log(`[WitAnime/yonaplay] cf-proxy HTML got ${isHls ? "hls" : "mp4"}`);
-          return [{
-            name: serverName || "Yonaplay",
-            url,
-            directUrl: isHls
-              ? `/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent("https://yonaplay.net/")}`
-              : `/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent("https://yonaplay.net/")}`,
-            quality: "FHD", qualityRank: 11, site: "witanime",
-          }];
+      if (html) {
+        // استخرج كل go_to_player('base64') → فكّ base64 → احصل على URL الحقيقي
+        const b64Matches = [...html.matchAll(/go_to_player\(['"]([A-Za-z0-9+/=]+)['"]\)/g)];
+        const sources: UnifiedSource[] = [];
+
+        for (const m of b64Matches) {
+          let decoded: string;
+          try { decoded = Buffer.from(m[1], "base64").toString("utf-8"); }
+          catch { continue; }
+          if (!decoded.startsWith("http")) continue;
+
+          const dHost = (() => { try { return new URL(decoded).hostname.replace(/^www\./, ""); } catch { return ""; } })();
+
+          // ok.ru مباشر — استخرج HLS
+          if (dHost.includes("ok.ru") || dHost.includes("odnoklassniki.ru")) {
+            const vidId = decoded.match(/(?:\/video\/|\/videoembed\/)([\d]+)/)?.[1];
+            if (vidId) {
+              const vids = await extractOkRuVideo(vidId).catch(() => []);
+              for (const v of vids) {
+                const isHls = v.type === "hls";
+                sources.push({
+                  name: `OK.ru · ${v.name.toUpperCase()}`,
+                  url: v.url,
+                  directUrl: isHls
+                    ? `/api/anime/hls-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent("https://ok.ru/")}`
+                    : `/api/anime/video-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent("https://ok.ru/")}`,
+                  quality: isHls ? "FHD" : (v.name.toLowerCase() === "hd" ? "HD" : "SD"),
+                  qualityRank: isHls ? 11 : (v.name.toLowerCase() === "hd" ? 8 : 5),
+                  site: "witanime",
+                });
+              }
+              continue;
+            }
+          }
+
+          // mega.nz / 4shared / gdrive / غيرها — isEmbed (يعمل في WebView)
+          const label = dHost.split(".")[0] || "Yonaplay";
+          sources.push({
+            name: label,
+            url: decoded,
+            quality: "FHD", qualityRank: 10,
+            site: "witanime",
+            isEmbed: true,
+          });
         }
-        // Last resort: return as isEmbed for client-side resolution
-        return [{
-          name: serverName || "Yonaplay",
-          url: embedUrl,
-          quality: "FHD", qualityRank: 11,
-          site: "witanime",
-          isEmbed: true,
-        }];
+
+        if (sources.length) {
+          console.log(`[WitAnime/yonaplay] parsed ${sources.length} sources from HTML`);
+          return sources;
+        }
       }
-    } catch (e: any) { console.warn("[WitAnime/yonaplay/fallback]", e?.message); }
-    // cf-proxy failed entirely — still return as isEmbed (client can try)
+    } catch (e: any) { console.warn("[WitAnime/yonaplay]", e?.message); }
+
+    // fallback أخير إذا فشل fetch
     return [{
       name: serverName || "Yonaplay",
       url: embedUrl,
-      quality: "FHD", qualityRank: 11,
+      quality: "FHD", qualityRank: 9,
       site: "witanime",
       isEmbed: true,
     }];
   }
 
   // ── hgcloud / streamwish-family ───────────────────────────────────────────
+  // hopxBrowserExtract أُزيل — browser-extract يُرجع ok=False لـ streamwish من VPS
+  // مباشرة إلى cf-proxy fetch + parseStreamwish
   if (
     host.includes("hgcloud.to") || host.includes("streamwish") ||
     host.includes("embedwish") || host.includes("wishembed") ||
     host.includes("stmruby.com") || host.includes("swdyu.com")
   ) {
-    try {
-      // محاولة hopx browser أولاً
-      const bv = await hopxBrowserExtract(embedUrl, "https://witanime.life/", 22000);
-      if (bv) {
-        return [{
-          name: serverName || "StreamHG",
-          url: bv.url,
-          directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(bv.url)}&ref=${encodeURIComponent("https://witanime.life/")}`,
-          quality: "FHD", qualityRank: 10, site: "witanime",
-        }];
-      }
-    } catch { /* hopx unavailable */ }
-
-    // Fallback: cf-proxy fetch + parseStreamwish
+    // cf-proxy fetch + parseStreamwish
     try {
       const p = new URLSearchParams({ url: embedUrl, ref: "https://witanime.life/", timeout: "18" });
       const rr = await fetch(`http://localhost:8000/fetch?${p}`, { signal: AbortSignal.timeout(20000) });
@@ -5292,21 +5283,9 @@ async function resolveWitaServerUrl(
   }
 
   // ── videa / videas ─────────────────────────────────────────────────────────
+  // hopxBrowserExtract أُزيل — browser-extract يُرجع ok=False لـ videa دائماً من VPS
+  // isEmbed مباشرة بدون 20s انتظار هدر
   if (host.includes("videa.hu") || host.includes("videas.")) {
-    try {
-      const bv = await hopxBrowserExtract(embedUrl, "https://witanime.life/", 20000);
-      if (bv) {
-        return [{
-          name: serverName || "Videa",
-          url: bv.url,
-          directUrl: bv.type === "hls"
-            ? `/api/anime/hls-proxy?url=${encodeURIComponent(bv.url)}&ref=${encodeURIComponent(embedUrl)}`
-            : `/api/anime/video-proxy?url=${encodeURIComponent(bv.url)}&ref=${encodeURIComponent(embedUrl)}`,
-          quality: "HD", qualityRank: 8, site: "witanime",
-        }];
-      }
-    } catch { /* hopx unavailable — return as embed */ }
-    // When hopx unavailable, return as isEmbed so client can resolve
     return [{
       name: serverName || "Videa",
       url: embedUrl,
@@ -5316,21 +5295,7 @@ async function resolveWitaServerUrl(
     }];
   }
 
-  // ── عام — fallback شامل ───────────────────────────────────────────────────
-  try {
-    const bv = await hopxBrowserExtract(embedUrl, "https://witanime.life/", 20000);
-    if (bv) {
-      return [{
-        name: serverName || host,
-        url: bv.url,
-        directUrl: bv.type === "hls"
-          ? `/api/anime/hls-proxy?url=${encodeURIComponent(bv.url)}&ref=${encodeURIComponent(embedUrl)}`
-          : `/api/anime/video-proxy?url=${encodeURIComponent(bv.url)}&ref=${encodeURIComponent(embedUrl)}`,
-        quality: "HD", qualityRank: 7, site: "witanime",
-      }];
-    }
-  } catch {}
-  // last resort: isEmbed
+  // ── عام — isEmbed مباشرة (hopxBrowserExtract أُزيل — لا يستخرج شيئاً من witanime servers) ──
   return [{
     name: serverName || host,
     url: embedUrl,
@@ -5360,6 +5325,9 @@ async function getWitanimeSources(
   const hit = witaSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
+  const T0 = Date.now();
+  const ts = () => `+${((Date.now() - T0) / 1000).toFixed(1)}s`;
+
   try {
     // 1. ابحث عن anime taxonomy ID
     const sCacheKey = (title + "|" + (english || "")).toLowerCase();
@@ -5367,21 +5335,25 @@ async function getWitanimeSources(
     const sHit = witaSeriesCache.get(sCacheKey);
     if (sHit && Date.now() - sHit.ts < SRC_TTL) {
       animeId = sHit.id;
+      console.log(`[WitAnime/time] ${ts()} animeId from cache: ${animeId}`);
     } else {
       for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
         animeId = await searchWitanimeYou(q);
         if (animeId) break;
       }
+      console.log(`[WitAnime/time] ${ts()} search done → id=${animeId}`);
       witaSeriesCache.set(sCacheKey, { id: animeId, ts: Date.now() });
     }
     if (!animeId) return [];
 
     // 2. رابط الحلقة عبر REST API
     const epUrl = await getWitanimeYouEpisodeUrl(animeId, ep);
+    console.log(`[WitAnime/time] ${ts()} epUrl=${epUrl ? "found" : "null"}`);
     if (!epUrl) return [];
 
     // 3. فك تشفير server URLs من صفحة الحلقة
     const serverUrls = await fetchWitaYouServers(epUrl);
+    console.log(`[WitAnime/time] ${ts()} serverUrls=${serverUrls.length}`);
     if (!serverUrls.length) return [];
 
     // 4. حلّ كل URL لرابط مباشر بالتوازي (ok.ru / yonaplay / streamwish / …)
