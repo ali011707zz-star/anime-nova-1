@@ -2865,7 +2865,7 @@ export default function WatchPage() {
      فلن تظهر شاشة السيرفرات مطلقاً؛ إن لم يُعثر على أي مصدر بهذه السرعة تظهر الشاشة
      لتسمح للمستخدم باختيار مصدر يدوياً. هذا يمنع "الفلاش" السابق (ظهور الشاشة لثوانٍ
      ثم اختفاؤها فجأة عند نجاح أول مصدر). */
-  const [showPicker,   setShowPicker]   = useState(true);
+  const [showPicker,   setShowPicker]   = useState(false);
   // failedSrcToast: shown briefly when all servers in a tier fail → lets user know why they're back at picker
   const [failedSrcToast, setFailedSrcToast] = useState(false);
   // keep phaseRef in sync so async fetch handlers can guard against updating picker state while player is active
@@ -3307,9 +3307,22 @@ export default function WatchPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── كشط كسول: لا تحميل تلقائي — المستخدم يختار المصدر بنفسه.
+  /* ── تشغيل تلقائي: كشط متوازٍ لجميع المصادر فور فتح الصفحة ──
+     أول مصدر يصل ويُشغَّل تلقائياً (bgLoad=false → autoPlayedRef يمنع تكرار التشغيل).
      cleanup: إلغاء المهل المجدولة عند تغيير الحلقة أو unmount. ── */
   useEffect(() => {
+    if (!animeId && !titleParam) return;
+    // إعادة ضبط الحراس عند كل حلقة جديدة
+    autoPlayedRef.current    = false;
+    autoFetchAllRef.current  = false;
+    inFlightRef.current      = new Set();
+    SCRAPER_DEFS.forEach((d, i) => {
+      const tid = window.setTimeout(
+        () => handleFetchSite(d.site, false),
+        i * 70,
+      );
+      pendingTimeoutsRef.current.push(tid);
+    });
     return () => {
       pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
       pendingTimeoutsRef.current = [];
