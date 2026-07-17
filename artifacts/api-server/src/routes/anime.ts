@@ -6614,9 +6614,11 @@ async function getAnimeKaiSources(
     const servers = kaiParseServers(epHtml);
     if (!servers.length) return [];
 
-    // 5. Filter sub/hsub → sort by host quality → resolve
-    const wantedLangs = ["sub", "hsub", "softsub"];
+    // 5. Filter sub/softsub (بدون hsub — ترجمة إنجليزية مدمجة صعبة) → sort by host quality → resolve
+    //    hsub = hard-subtitled English burned into video — نتجنبها ما أمكن
+    const wantedLangs = ["sub", "softsub"];
     let pool = servers.filter(s => wantedLangs.includes(s.lang));
+    // fallback: إذا لم يتوفر sub/softsub → قبول hsub كحل أخير
     if (!pool.length) pool = servers.slice();
     pool.sort((a, b) => kaiHostRank(b.videoUrl) - kaiHostRank(a.videoUrl));
 
@@ -7240,12 +7242,18 @@ async function getAllMangaSources(
     }).catch(() => null);
 
     // 4. استخراج sourceUrls — aaPost يفكّ تشفير tobeparsed تلقائياً على مستوى data
-    //    بعد الفكّ، epRaw = {episode:{sourceUrls:[...]}} أو {episode:{sourceUrls: raw_array}}
+    //    بعد الفكّ، epRaw = {episode:{sourceUrls:[...]}} أو {episode:{sourceUrls: Object/string}}
     let srcUrls: any[] = [];
     if (epRaw?.episode?.sourceUrls) {
       const sv = epRaw.episode.sourceUrls;
-      // قد تكون مصفوفة مباشرة أو JSON string
-      srcUrls = Array.isArray(sv) ? sv : (typeof sv === "string" ? (() => { try { return JSON.parse(sv); } catch { return []; } })() : []);
+      if (Array.isArray(sv)) {
+        srcUrls = sv;
+      } else if (typeof sv === "string") {
+        try { srcUrls = JSON.parse(sv); } catch { srcUrls = []; }
+      } else if (sv && typeof sv === "object") {
+        // sourceUrls قد تكون Object بمفاتيح رقمية ({0:{...}, 1:{...}}) — حوّلها لمصفوفة
+        srcUrls = Object.values(sv);
+      }
     }
     if (!srcUrls.length) return [];
 

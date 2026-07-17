@@ -313,7 +313,7 @@ export default function WatchScreen() {
   const displayTitle = titleArStr || englishStr || titleStr;
 
   /* ── State ── */
-  const [screen,      setScreen]      = useState<Screen>("picker"); // يبدأ بـ picker مباشرة — المستخدم يختار المصدر
+  const [screen,      setScreen]      = useState<Screen>("loading"); // يبدأ بـ loading — التشغيل التلقائي
   const [sources,     setSources]     = useState<Src[]>([]);
   const [loading,     setLoading]     = useState(false);
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
@@ -526,9 +526,12 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, srcCacheKey]);
 
-  /* ── لا تحميل تلقائي — المستخدم يختار المصدر بنفسه لتقليل الضغط على VPS ──
-     الـ picker يظهر فوراً عند فتح الشاشة. عند الضغط على مصدر:
-       handlePickSite(site, true) → يجلب ذلك المصدر → يُشغّل أول نتيجة → يُحمّل الباقي خلفياً. ── */
+  /* ── تشغيل تلقائي عند فتح الحلقة — يجلب جميع المصادر بالتوازي ويُشغّل أول نتيجة ── */
+  useEffect(() => {
+    fetchSources();
+    return () => abortRef.current?.abort();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anime, epNum]);
 
   /* ── Cleanup bgTimers on unmount/episode-change ── */
   useEffect(() => {
