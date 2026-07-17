@@ -5216,15 +5216,17 @@ async function resolveWitaServerUrl(
             }
           }
 
-          // mega.nz / 4shared / gdrive / غيرها — isEmbed (يعمل في WebView)
-          const label = dHost.split(".")[0] || "Yonaplay";
-          sources.push({
-            name: label,
-            url: decoded,
-            quality: "FHD", qualityRank: 10,
-            site: "witanime",
-            isEmbed: true,
-          });
+          // mega.nz فقط يُقبل كـ isEmbed — الباقي (4shared/gdrive/…) يُتجاهل
+          if (dHost.includes("mega.nz") || dHost.includes("mega.co.nz")) {
+            sources.push({
+              name: "mega",
+              url: decoded,
+              quality: "FHD", qualityRank: 10,
+              site: "witanime",
+              isEmbed: true,
+            });
+          }
+          // غير mega → تجاهل (continue ضمني)
         }
 
         if (sources.length) {
@@ -5234,14 +5236,8 @@ async function resolveWitaServerUrl(
       }
     } catch (e: any) { console.warn("[WitAnime/yonaplay]", e?.message); }
 
-    // fallback أخير إذا فشل fetch
-    return [{
-      name: serverName || "Yonaplay",
-      url: embedUrl,
-      quality: "FHD", qualityRank: 9,
-      site: "witanime",
-      isEmbed: true,
-    }];
+    // yonaplay فشل الفك — لا نُرجع isEmbed، نتجاهله
+    return [];
   }
 
   // ── hgcloud / streamwish-family ───────────────────────────────────────────
@@ -5287,14 +5283,8 @@ async function resolveWitaServerUrl(
         }
       }
     } catch (e: any) { console.warn("[WitAnime/streamwish]", e?.message); }
-    // كلاهما فشل — ارجع embed كـ last resort
-    return [{
-      name: serverName || "StreamHG",
-      url: embedUrl,
-      quality: "HD", qualityRank: 9,
-      site: "witanime",
-      isEmbed: true,
-    }];
+    // فشل الاستخراج — لا نُرجع isEmbed
+    return [];
   }
 
   // ── app.videas.fr — رابط M3U8 مباشر في HTML ───────────────────────────────
@@ -5323,13 +5313,7 @@ async function resolveWitaServerUrl(
         }
       }
     } catch (e: any) { console.warn("[WitAnime/videas]", e?.message); }
-    return [{
-      name: serverName || "Videas",
-      url: embedUrl,
-      quality: "FHD", qualityRank: 10,
-      site: "witanime",
-      isEmbed: true,
-    }];
+    return []; // فشل الاستخراج — لا نُرجع isEmbed
   }
 
   // ── videa.hu ────────────────────────────────────────────────────────────────
@@ -5386,23 +5370,11 @@ async function resolveWitaServerUrl(
         }
       }
     } catch (e: any) { console.warn("[WitAnime/videa]", e?.message); }
-    return [{
-      name: serverName || "Videa",
-      url: embedUrl,
-      quality: "HD", qualityRank: 8,
-      site: "witanime",
-      isEmbed: true,
-    }];
+    return []; // فشل الاستخراج — لا نُرجع isEmbed
   }
 
-  // ── عام — isEmbed مباشرة ───────────────────────────────────────────────────
-  return [{
-    name: serverName || host,
-    url: embedUrl,
-    quality: "HD", qualityRank: 6,
-    site: "witanime",
-    isEmbed: true,
-  }];
+  // ── عام — تجاهل (لا نُرجع isEmbed لأي host مجهول) ──────────────────────────
+  return [];
 }
 /** Generic helper: find best-matching href from html */
 function findBestLink(
@@ -5475,7 +5447,14 @@ async function getWitanimeSources(
 
     const sources: UnifiedSource[] = [];
     for (const r of resolved) {
-      if (r.status === "fulfilled") sources.push(...r.value);
+      if (r.status === "fulfilled") {
+        for (const s of r.value) {
+          // فقط mega.nz مسموح له بـ isEmbed — كل الباقي يجب أن يكون مباشراً
+          if (!s.isEmbed || s.url.includes("mega.nz") || s.url.includes("mega.co.nz")) {
+            sources.push(s);
+          }
+        }
+      }
     }
 
     if (!sources.length) {
