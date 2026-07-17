@@ -3247,7 +3247,26 @@ export default function WatchPage() {
         setSlotStatus(prev => ({ ...prev, [site]: "ready" }));
         if (animeId) saveAnimeSrcs(animeId, ep, site, srcs);
 
-        /* كشط كسول: المصدر تحمَّل — المستخدم يختار بنفسه من القائمة أدناه */
+        /* تشغيل تلقائي: المصدر الأول يُشغَّل فوراً عند أول نجاح (مرة واحدة فقط) */
+        if (!bgLoad && !autoPlayedRef.current) {
+          autoPlayedRef.current = true;
+          handlePlaySrc(srcs[0]);
+        }
+
+        /* تحميل خلفي: بعد تشغيل أي مصدر، اكشط بقية المصادر الخاملة تلقائياً
+           بتأخير 70ms بين كل طلب لتوزيع الحمل على السيرفر */
+        if (!bgLoad && !autoFetchAllRef.current) {
+          autoFetchAllRef.current = true;
+          const otherSites = SCRAPER_DEFS.filter(
+            d => d.site !== site && slotStatusRef.current[d.site] === "idle"
+          );
+          otherSites.forEach((d, i) => {
+            const tid = window.setTimeout(() => {
+              handleFetchSite(d.site, true);
+            }, 70 * (i + 1));
+            pendingTimeoutsRef.current.push(tid);
+          });
+        }
       } else {
         setSlotStatus(prev => ({ ...prev, [site]: "failed" }));
       }
