@@ -464,13 +464,17 @@ export default function AnimationWatchScreen() {
               seenKeys.current.add(key);
               freshSrcs.push(src);
 
-              // أضف المصدر للقائمة — لا تشغيل تلقائي، المستخدم يختار
               setSources(prev => [...prev, src]);
+
+              /* تشغيل تلقائي عند أول مصدر مباشر */
+              if (!autoPlayFiredRef.current && isDirectPlayable(src)) {
+                autoPlayFiredRef.current = true;
+                setTimeout(() => playSrc(src), 0);
+              }
 
             } else if (isDone) {
               setLoading(false);
               setSources(prev => {
-                /* عند اكتمال الجلب — انتقل دائماً للـ picker ليختار المستخدم المصدر بنفسه */
                 setTimeout(() => setScreen(s => s === "loading" ? "picker" : s), 0);
                 if (animSrcCacheKey && freshSrcs.length > 0) {
                   AsyncStorage.setItem(animSrcCacheKey, JSON.stringify({ sources: freshSrcs, ts: Date.now() })).catch(() => {});
