@@ -211,7 +211,8 @@ const SITE_PRIORITY: Record<string, number> = {
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
   "kawaii", "anikoto", "hianime", "animewitcher",
-  "anineko", "anslayer", "animeify", "allmanga",
+  "anineko", "anslayer", "animeify",
+  // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
 
 /* timeout موحّد افتراضي — يُستبدل بـ SITE_TIMEOUT_MAP للمواقع التي تحتاج وقتاً أطول */
@@ -313,7 +314,7 @@ export default function WatchScreen() {
   const displayTitle = titleArStr || englishStr || titleStr;
 
   /* ── State ── */
-  const [screen,      setScreen]      = useState<Screen>("loading"); // يبدأ بـ loading — التشغيل التلقائي
+  const [screen,      setScreen]      = useState<Screen>("picker"); // يبدأ بـ picker مباشرة — المستخدم يختار المصدر
   const [sources,     setSources]     = useState<Src[]>([]);
   const [loading,     setLoading]     = useState(false);
   const [playingSrc,  setPlayingSrc]  = useState<Src | null>(null);
@@ -526,12 +527,9 @@ export default function WatchScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anime, epNum, titleStr, englishStr, format, year, episodes, native, srcCacheKey]);
 
-  /* ── تشغيل تلقائي عند فتح الحلقة — يجلب جميع المصادر بالتوازي ويُشغّل أول نتيجة ── */
-  useEffect(() => {
-    fetchSources();
-    return () => abortRef.current?.abort();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, epNum]);
+  /* ── لا تحميل تلقائي — المستخدم يختار المصدر بنفسه لتقليل الضغط على VPS ──
+     الـ picker يظهر فوراً عند فتح الشاشة. عند الضغط على مصدر:
+       handlePickSite(site, true) → يجلب ذلك المصدر → يُشغّل أول نتيجة → يُحمّل الباقي خلفياً. ── */
 
   /* ── Cleanup bgTimers on unmount/episode-change ── */
   useEffect(() => {
