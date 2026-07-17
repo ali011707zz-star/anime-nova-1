@@ -17,7 +17,9 @@ class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }
     if (props.resetKey !== state.lastKey) return { hasError: false, lastKey: props.resetKey };
     return null;
   }
-  componentDidCatch() {}
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[ErrorBoundary] React render crash:", error?.message, "\nStack:", error?.stack?.slice(0, 600), "\nComponent:", info?.componentStack?.slice(0, 400));
+  }
   render() {
     if (this.state.hasError) {
       return (
