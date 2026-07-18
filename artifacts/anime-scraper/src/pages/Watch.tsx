@@ -178,6 +178,8 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   // vaplayer_anim: محذوف من الأنمي — مصدره إنجليزي فقط، أُبقي في الأنيميشن 2026-07-15
   // faselhd_db (FH) / moviz_time (MT): معطّلة بطلب المستخدم 2026-07-14
   { site: "witanime",     name: "ويت أنمي",      desc: "عربي · ok.ru / yonaplay",    tag: "WI", isArabic: true },
+  { site: "nflixmovies_anim", name: "NflixMovies", desc: "إنجليزي · HLS", tag: "NX" },
+  { site: "vidbolt_anim",     name: "VidBolt",      desc: "إنجليزي · HLS", tag: "VB" },
 ];
 
 /** مجموعة المصادر العربية — لا تعرض زر الترجمة الخارجية لها */

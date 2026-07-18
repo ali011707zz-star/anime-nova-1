@@ -11955,10 +11955,68 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "anslayer":     (await race(getAnimeSlayerSources(title, english, ep, anslayerId), 20_000, [])).forEach(collectSrc); break;
       case "ristoanime":   (await race(getRistoAnimeSources(title, english, ep),          22_000, [])).forEach(collectSrc); break;
       // case "allmanga": معطّل 2026-07-17
+      case "nflixmovies_anim": (await race(getNflixMoviesAnimeSources(english, title, ep, isMovie, anilistId), 18_000, [])).forEach(collectSrc); break;
+      case "vidbolt_anim":     (await race(getVidboltAnimeSources(english, title, ep, isMovie, anilistId), 25_000, [])).forEach(collectSrc); break;
       default: break;
     }
 
-    // ── حفظ في الكاش بعد الكشط ──────────────────────────────────
+    
+// ── NflixMovies (stream.nflixmovies.app) — TMDB-native HLS بدون browser ───
+async function getNflixMoviesAnimeSources(
+  english: string | null, title: string, ep: number, isMovie: boolean, anilistId?: number
+): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+  const NFLIX_TOKEN = "tvk_1olLFNOIoDx6xfMYo_RKovws8zFe_hhyUfgf3E0NNR8";
+  try {
+    const params = new URLSearchParams({ id: String(tmdbId), type: "tv" });
+    params.set("season", "1"); params.set("episode", String(ep));
+    const r = await fetch(`https://stream.nflixmovies.app/api/v1/play?${params}`, {
+      headers: { "Authorization": `Bearer ${NFLIX_TOKEN}`, "Origin": "https://nflixmovies.app" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!r.ok) return [];
+    const data = await r.json() as { ok?: boolean; hlsUrl?: string; upstream?: string; label?: string; provider?: string };
+    if (!data.ok || !data.hlsUrl) return [];
+    return [{
+      url: data.hlsUrl,
+      directUrl: data.upstream || data.hlsUrl,
+      proxyUrl: data.hlsUrl,
+      label: `NflixMovies · ${data.label || "HLS"}`,
+    }];
+  } catch { return []; }
+}
+
+// ── VidBolt (vidbolt.xyz) — multi-extractor HLS بدون browser ───────────────
+async function getVidboltAnimeSources(
+  english: string | null, title: string, ep: number, isMovie: boolean, anilistId?: number
+): Promise<UnifiedSource[]> {
+  const tmdbId = await fetchAnimeTmdbId(english, title, anilistId);
+  if (!tmdbId) return [];
+  const id = `tmdb${tmdbId}`;
+  const params = new URLSearchParams({ tmdbId: String(tmdbId), season: "1", episode: String(ep), title: english || title });
+  const out: UnifiedSource[] = [];
+  for (const ext of ["Vaplayer", "VidNest", "StreamVault"]) {
+    try {
+      const path = `/scrape/${ext}/tv/${id}?${params}`;
+      const b64 = Buffer.from(path).toString("base64");
+      const r = await fetch(`https://vidbolt.xyz/api/proxy-vidcdn?b64path=${b64}`, {
+        headers: { "Origin": "https://vidbolt.xyz", "Referer": "https://vidbolt.xyz/" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!r.ok) continue;
+      const data = await r.json() as { sources?: Array<{ url: string; name?: string }> };
+      for (const s of (data.sources || [])) {
+        if (!s.url) continue;
+        const rawUrl = s.url.startsWith("/proxy/") ? `https://wormhole.filmu.in${s.url}` : s.url;
+        out.push({ url: rawUrl, directUrl: rawUrl, label: `VidBolt · ${ext} · ${s.name || "HD"}` });
+      }
+    } catch { /* skip */ }
+  }
+  return out;
+}
+
+// ── حفظ في الكاش بعد الكشط ──────────────────────────────────
     if (sources.length) {
       setSourceCache(cKey, site, sources).catch(() => {});
     }
