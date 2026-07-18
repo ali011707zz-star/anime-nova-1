@@ -49,6 +49,20 @@ export const SITE_TTL: Record<string, number> = {
   "2embed":       4 * 3_600_000,
   moviebox:       10 * 60_000,    // CDN URLs مُوقَّعة بـ &t= تنتهي بسرعة → 10 دقائق فقط
   moviebox_anim:  10 * 60_000,    // نفس السبب — Animation version
+  // ── مصادر أنمي ──────────────────────────────────────────────────
+  witanime:       3 * 3_600_000,   // ok.ru + hgcloud عادةً مستقرة لساعات
+  anslayer:       6 * 3_600_000,   // روابط Mediafire/OK.ru دائمة نسبياً
+  animewitcher:   45 * 60_000,     // Streamtape/VTube تنتهي سريعاً
+  animeify:       45 * 60_000,     // Mediafire CDN ~1h
+  nekowatch:      4 * 3_600_000,   // HLS مباشر نسبياً مستقر
+  xyra:           4 * 3_600_000,
+  notorrent:      4 * 3_600_000,
+  moviztime:      3 * 3_600_000,
+  akwam:          4 * 3_600_000,
+  egybest:        4 * 3_600_000,
+  wecima:         4 * 3_600_000,
+  faselhd:        3 * 3_600_000,
+  faselhddb:      6 * 3_600_000,
 };
 const DEFAULT_TTL = 4 * 3_600_000;
 
@@ -151,6 +165,52 @@ async function sbDeleteExpired(): Promise<void> {
 
 setInterval(sbDeleteExpired, 3_600_000);
 
+// ── L3: فايل JSON محلي على القرص (fallback عند انقطاع Supabase) ──────────────
+// يحفظ في /opt/nova-cache/ ويبقى بعد restart الـ pm2 (إلا عند reboot الـ VPS)
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+const L3_DIR = "/opt/nova-cache";
+try { if (!existsSync(L3_DIR)) mkdirSync(L3_DIR, { recursive: true }); } catch {}
+
+function l3Key(cacheKey: string): string {
+  return join(L3_DIR, cacheKey.replace(/[^a-z0-9:._-]/gi, "_") + ".json");
+}
+
+function l3Get(cacheKey: string): { sources: any[]; expiresAt: number } | null {
+  try {
+    const file = l3Key(cacheKey);
+    if (!existsSync(file)) return null;
+    const row = JSON.parse(readFileSync(file, "utf8")) as { sources: any[]; expiresAt: number };
+    if (Date.now() > row.expiresAt + 60_000) return null; // expired (allow 60s grace)
+    return row;
+  } catch { return null; }
+}
+
+function l3Set(cacheKey: string, sources: any[], expiresAt: number): void {
+  try {
+    writeFileSync(l3Key(cacheKey), JSON.stringify({ sources, expiresAt }), "utf8");
+  } catch { /* disk full or permissions issue — silently skip */ }
+}
+
+// تنظيف L3 كل 6 ساعات — احذف الملفات المنتهية الصلاحية
+setInterval(() => {
+  try {
+    const now = Date.now();
+    for (const fn of readdirSync(L3_DIR)) {
+      try {
+        const fp = join(L3_DIR, fn);
+        const row = JSON.parse(readFileSync(fp, "utf8"));
+        if (row.expiresAt && now > row.expiresAt + 10 * 60_000) {
+          const { unlinkSync } = require("node:fs");
+          unlinkSync(fp);
+        }
+      } catch {}
+    }
+  } catch {}
+}, 6 * 3_600_000);
+
+
 setTimeout(() => {
   if (isCacheDbReady()) {
     console.log("[sourceCache] ✅ Supabase L2 cache مفعّل — الروابط مشتركة بين جميع المستخدمين");
@@ -188,16 +248,25 @@ export async function getFromSourceCache(
 
   // L2: Supabase
   const row = await sbGet(key);
-  if (!row) return null;
-
-  if (Date.now() > row.expiresAt) {
-    // بيانات منتهية الصلاحية — أعدها مع علامة stale لإعادة الجلب
-    return { sources: row.sources, expiresAt: row.expiresAt, stale: true };
+  if (row) {
+    if (Date.now() > row.expiresAt) {
+      return { sources: row.sources, expiresAt: row.expiresAt, stale: true };
+    }
+    l1.set(key, { sources: row.sources, expiresAt: row.expiresAt });
+    return { sources: row.sources, expiresAt: row.expiresAt };
   }
 
-  // خزِّن في L1 لتسريع الطلبات القادمة
-  l1.set(key, { sources: row.sources, expiresAt: row.expiresAt });
-  return { sources: row.sources, expiresAt: row.expiresAt };
+  // L3: ملف JSON محلي (fallback عند انقطاع Supabase أو بعد restart)
+  const l3row = l3Get(key);
+  if (l3row) {
+    if (Date.now() > l3row.expiresAt) {
+      return { sources: l3row.sources, expiresAt: l3row.expiresAt, stale: true };
+    }
+    l1.set(key, { sources: l3row.sources, expiresAt: l3row.expiresAt });
+    return { sources: l3row.sources, expiresAt: l3row.expiresAt };
+  }
+
+  return null;
 }
 
 // ── كتابة في Cache (L1 + L2) ──
@@ -212,6 +281,8 @@ export async function setSourceCache(
   l1.set(key, { sources, expiresAt });
   // L2 Supabase: fire-and-forget (لا يؤخر الاستجابة)
   sbUpsertCache(key, site, sources, expiresAt);
+  // L3 ملف محلي: يُكتب دائماً بغض النظر عن Supabase
+  l3Set(key, sources, expiresAt);
 }
 
 export function shouldRefreshCache(expiresAt: number): boolean {

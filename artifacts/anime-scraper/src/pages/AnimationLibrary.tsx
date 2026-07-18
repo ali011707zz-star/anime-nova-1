@@ -471,7 +471,7 @@ export default function AnimationLibrary() {
                 <motion.div key={`${item.id}-${i}`}
                   initial={{ opacity: 0, scale: 0.93 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: Math.min(i % 12, 11) * 0.03, duration: 0.25 }}>
+                  transition={{ delay: Math.min(i % 12, 11) * 0.015, duration: 0.2 }}>
                   <Link href={`/animation/${type}/${item.id}`} className="block">
                     <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/6 aspect-[2/3]"
                       style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>

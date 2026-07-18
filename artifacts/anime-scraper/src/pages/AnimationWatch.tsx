@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import RiftPlayer, { type SubSettings } from "@/components/player/RiftPlayer";
-import EpComments from "@/components/EpComments";
 
 /* ── SubCue + SubTrack ── */
 interface SubCue  { start: number; end: number; text: string; }
@@ -1448,11 +1447,6 @@ export default function AnimationWatch() {
             </AnimatePresence>
           </div>
         )}
-
-        {/* ── Episode comments ── */}
-        <EpComments commKey={type === "tv"
-          ? `nova-anim-ep-comments-${tmdbId}-s${season}e${ep}`
-          : `nova-anim-ep-comments-${tmdbId}`} />
 
       </div>
 

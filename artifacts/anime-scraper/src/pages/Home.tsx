@@ -455,14 +455,14 @@ export default function Home() {
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10, transition: { duration: 0.18 } }}
-                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1], delay: 0.04 }}
+                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1], delay: 0.02 }}
                 >
                   {/* Badges row */}
                   <motion.div
                     className="flex items-center gap-1.5 mb-3 flex-wrap"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: 0.07 }}
+                    transition={{ duration: 0.18, delay: 0.035 }}
                   >
                     {hero.genres?.slice(0, 3).map((g: string) => (
                       <span key={g} className="text-[9px] font-black bg-white/10 backdrop-blur-md text-white/75 px-2.5 py-0.5 rounded-full border border-white/10 tracking-wide">
@@ -487,7 +487,7 @@ export default function Home() {
                     style={{ fontSize: "clamp(21px, 6.5vw, 42px)", textShadow: "0 4px 30px rgba(0,0,0,0.9)" }}
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: 0.09 }}
+                    transition={{ duration: 0.18, delay: 0.045 }}
                   >
                     {hero.title?.romaji}
                   </motion.h1>
@@ -497,7 +497,7 @@ export default function Home() {
                     className="text-white/45 text-xs font-bold mb-3"
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: 0.11 }}
+                    transition={{ duration: 0.18, delay: 0.055 }}
                   >
                     {hero.episodes ? `${hero.episodes} حلقة` : ""}
                     {hero.episodes && hero.format ? " · " : ""}
@@ -509,7 +509,7 @@ export default function Home() {
                     className="flex gap-2.5 items-center"
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.18, delay: 0.13 }}
+                    transition={{ duration: 0.18, delay: 0.065 }}
                   >
                     <Link href={`/episodes/${hero.id}`}>
                       <motion.button
@@ -543,7 +543,7 @@ export default function Home() {
                   initial={{ opacity: 0, scale: 0.85, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-                  transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: 0.08 }}
+                  transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: 0.04 }}
                   style={{ perspective: "600px" }}
                 >
                   <div
