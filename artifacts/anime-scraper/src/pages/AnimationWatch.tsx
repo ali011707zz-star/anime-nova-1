@@ -197,6 +197,8 @@ const ANIM_SOURCE_DEFS = [
   { site: "vidfast",         tag: "VF", name: "VidFast",  desc: "إنجليزي · HLS" },
   { site: "videasy3",        tag: "VE", name: "Videasy",  desc: "إنجليزي · HLS" },
   { site: "fourkhdhub_anim", tag: "4K", name: "4KHDHub",  desc: "إنجليزي · 4K" },
+  { site: "nflixmovies_flux2", tag: "NF",  name: "NflixMovies", desc: "إنجليزي · HLS" },
+  { site: "vidbolt_flux3",     tag: "VB",  name: "VidBolt",     desc: "إنجليزي · HLS" },
 ] as const;
 
 /* ── Source ── */

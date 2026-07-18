@@ -949,6 +949,30 @@ function hasCJK(text: string): boolean {
   return /[\u3040-\u30ff\u4e00-\u9fff\u3400-\u4dbf\uff00-\uffef\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]/.test(text);
 }
 
+// ── تغليف روابط CDN المباشرة للموبايل عبر VPS proxy (animation) ──────────
+function wrapAnimForMobile(directUrl: string | undefined, proxyUrl: string | undefined, headers: Record<string,string> | undefined): { directUrl: string | undefined; proxyUrl: string | undefined } {
+  // إذا يوجد proxyUrl مسبق (مُمرَّر من الـ scraper)، استخدمه دون تغيير
+  if (proxyUrl && proxyUrl.startsWith("/api/")) return { directUrl, proxyUrl };
+  const raw = directUrl || "";
+  if (!raw) return { directUrl, proxyUrl };
+  if (raw.startsWith("/api/")) return { directUrl, proxyUrl };
+  if (raw.includes("mega.nz") || raw.includes("mega.co.nz")) return { directUrl, proxyUrl };
+  const ref = headers?.Referer || "";
+  const isHls = /\.m3u8|/i.test(raw);
+  if (isHls) {
+    const p = ref
+      ? `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`
+      : `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}`;
+    return { directUrl: p, proxyUrl: p };
+  }
+  if (raw.includes(".mp4") && ref) {
+    const p = `/api/anime/video-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`;
+    return { directUrl: p, proxyUrl: p };
+  }
+  return { directUrl, proxyUrl };
+}
+
+
 router.get("/animation/browse", async (req: Request, res: Response) => {
   try {
     const type   = String(req.query.type   || "movie");
@@ -2188,8 +2212,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
 
     const extra = { ...(adSub ? { subtitleUrl: adSub } : {}), ...(extra2 || {}), ...(headers ? { headers } : {}) };
     // تشفير params في روابط الـ proxy قبل إرسالها للعميل — يمنع كشف CDN URLs في devtools
-    const safeProxyUrl  = proxyUrl  ? encryptProxyUrl(proxyUrl)  : proxyUrl;
-    const safeDirectUrl = directUrl ? encryptProxyUrl(directUrl) : directUrl;
+    const mobileHeaders = extra?.headers as Record<string,string> | undefined;
+    const isMob = (req.headers?.["x-nova-client"] || "").toString().includes("mobile");
+    const { directUrl: wrappedDirect, proxyUrl: wrappedProxy } = isMob
+      ? wrapAnimForMobile(directUrl, proxyUrl, mobileHeaders || headers || undefined)
+      : { directUrl, proxyUrl };
+    const safeProxyUrl  = wrappedProxy  ? encryptProxyUrl(wrappedProxy)  : wrappedProxy;
+    const safeDirectUrl = wrappedDirect ? encryptProxyUrl(wrappedDirect) : wrappedDirect;
     send("source", { url, label, directUrl: safeDirectUrl, proxyUrl: safeProxyUrl, ...extra });
     // capture for caching — isolated per async context (no race condition)
     const captureArr = captureStorage.getStore();
@@ -2200,19 +2229,22 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // dulo_anim         ✅ purstream HLS — API key مُضمَّن في الكود
   // starcima          ✅ vidzee HLS — يعمل من VPS
   // vaplayer_anim     ✅ nextgencloudfabric CDN — FHD مؤكَّد
+  // videasy3  (VE)    ✅ api.speedracelight.com — STREAMCRYPTO HLS multi-quality
   // vidlink_encdec (VL) ✅ enc-dec.app → vidlink MP4/DASH
   // vidfast    (VF)   ✅ vidfast.pro TMDB-native AES-256-GCM HLS
+  // fourkhdhub_anim (4K) ✅ 4khdhub.link → HubCloud MP4 — MKV مُفلتَر
   //
-  // محذوف/معطّل:
-  // videasy3 (VE): speedracelight API محجوب بـ CF من VPS + ironbubble HTTP 000 — لا يمكن إصلاحه
-  // fourkhdhub_anim (4K): hubcloud يحجب VPS+Hopx — لا يمكن استخراج الرابط — لا يمكن إصلاحه
+  // محذوف:
   // multimovies_anim (MM): حُذف بطلب المستخدم 2026-07-16
   const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "dulo_anim", "starcima", "vaplayer_anim",
+    // videasy3 (VE): speedracelight API محجوب بـ CF من VPS + ironbubble HTTP 000 — معطّل
+    // fourkhdhub_anim (4K): hubcloud يحجب VPS+Hopx — لا يمكن استخراج الرابط — معطّل
     "vidlink_encdec", "vidfast",
     // مضاف 2026-07: vidfast.vc يعمل (enc-dec.app) ✅; nebula محدودة لكن تعمل
     // primesrc_anim + icefy: embeds كلها تحجب VPS IPs — معطّلة لحين إيجاد residential proxy
     "vidfast_vc", "nebula",
+    "nflixmovies_flux2", "vidbolt_flux3",
   ]);
   /* كشط كسول: إذا أُرسل ?site= يُشغَّل ذلك المصدر فقط (lazy per-site fetch) */
   const siteParam = (req.query.site as string) || null;
@@ -3484,7 +3516,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           send("status", { msg: "Dulo: جاري الاستخراج…" });
           const cookie = await duloGetSession();
           const hdrs   = duloRequestHeaders(cookie);
-          // 2026-07-17: كلا الـ providers محجوبان بـ Cloudflare من VPS IP — نمرّ عبر Hopx
+          // 2026-07-17: كلا الـ providers محجوبان بـ Cloudflare من VPS IP
+          // نجرب كليهما عبر Hopx (IP سكني يتجاوز الحجب)
           const providers = ["vidrock", "purstream"];
           const DULO_PROBE_PORT = parseInt(String(process.env.PORT || 5000), 10);
           await Promise.allSettled(providers.map(async (prov) => {
@@ -3492,8 +3525,8 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
               const apiUrl = type === "tv"
                 ? `${DULO_TV_BASE}/api/sources/call?type=tv&provider=${prov}&tmdb=${tmdbId}&season=${season}&episode=${epNum}`
                 : `${DULO_TV_BASE}/api/sources/call?type=movie&provider=${prov}&tmdb=${tmdbId}`;
-              // Cloudflare يحجب VPS على Dulo — نمرّ عبر Hopx (IP سكني) أولاً
-              const _hopxDuloR = await hopxProxyGet(apiUrl, `${DULO_TV_BASE}/`, 18_000).catch(() => null);
+              // Cloudflare يحجب VPS على Dulo — نمرّ عبر Hopx أولاً
+              const _hopxDuloR = await hopxProxyGet(apiUrl, `${DULO_TV_BASE}/`, 18_000);
               const r = _hopxDuloR ?? await fetch(apiUrl, { headers: hdrs, signal: AbortSignal.timeout(14_000) });
               if (!r.ok) { console.warn(`[dulo_anim] ${prov} → HTTP ${r.status}`); return; }
               const data = await r.json() as { sources?: Array<{ url: string; type?: string; title?: string }> };
@@ -5075,6 +5108,60 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           }));
           console.log(`[primesrc_anim] ${type} -> ${sent} sources`);
         } catch (e: any) { console.warn("[primesrc_anim]", e?.message); }
+      }),
+
+
+      scrapeAnimCached("nflixmovies_flux2", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "NflixMovies: جاري الاستخراج…" });
+          const NFLIX_TOKEN = "tvk_1olLFNOIoDx6xfMYo_RKovws8zFe_hhyUfgf3E0NNR8";
+          const params = new URLSearchParams({ id: String(tmdbId), type: type === "movie" ? "movie" : "tv" });
+          if (type !== "movie") { params.set("season", String(season)); params.set("episode", String(epNum)); }
+          const r = await fetch(`https://stream.nflixmovies.app/api/v1/play?${params}`, {
+            headers: { "Authorization": `Bearer ${NFLIX_TOKEN}`, "Origin": "https://nflixmovies.app" },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!r.ok) return;
+          const data = await r.json() as { ok?: boolean; hlsUrl?: string; upstream?: string; label?: string; provider?: string };
+          if (!data.ok || !data.hlsUrl) return;
+          const proxied = wrapHls(data.hlsUrl, "https://nflixmovies.app/");
+          sendSource(proxied, `NflixMovies · ${data.label || "HLS"}`, data.upstream || data.hlsUrl, proxied);
+          console.log(`[nflixmovies] ok provider=${data.provider} label=${data.label}`);
+        } catch (e: any) { console.warn("[nflixmovies_flux2]", e?.message); }
+      }),
+
+      scrapeAnimCached("vidbolt_flux3", async () => {
+        if (!tmdbId) return;
+        try {
+          send("status", { msg: "VidBolt: جاري الاستخراج…" });
+          const mediaType = type === "movie" ? "movie" : "tv";
+          const id = `tmdb${tmdbId}`;
+          const params = new URLSearchParams({ tmdbId: String(tmdbId), title: enTitlePrefetched || title });
+          if (type !== "movie") { params.set("season", String(season)); params.set("episode", String(epNum)); }
+          let sent = 0;
+          for (const ext of ["Vaplayer", "VidNest", "StreamVault"]) {
+            try {
+              const path = `/scrape/${ext}/${mediaType}/${id}?${params}`;
+              const b64 = Buffer.from(path).toString("base64");
+              const r = await fetch(`https://vidbolt.xyz/api/proxy-vidcdn?b64path=${b64}`, {
+                headers: { "Origin": "https://vidbolt.xyz", "Referer": "https://vidbolt.xyz/" },
+                signal: AbortSignal.timeout(15_000),
+              });
+              if (!r.ok) continue;
+              const data = await r.json() as { sources?: Array<{ url: string; name?: string }> };
+              for (const s of (data.sources || [])) {
+                if (!s.url) continue;
+                const rawUrl = s.url.startsWith("/proxy/") ? `https://wormhole.filmu.in${s.url}` : s.url;
+                const isHls = rawUrl.includes(".m3u8");
+                const proxied = isHls ? wrapHls(rawUrl, "https://vidbolt.xyz/") : rawUrl;
+                sendSource(proxied, `VidBolt · ${ext} · ${s.name || "HD"}`, rawUrl, proxied);
+                sent++;
+              }
+            } catch { /* skip extractor */ }
+          }
+          console.log(`[vidbolt_flux3] ${sent} sources`);
+        } catch (e: any) { console.warn("[vidbolt_flux3]", e?.message); }
       }),
 
     ]);
