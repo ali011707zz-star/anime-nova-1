@@ -185,6 +185,8 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   // روابط embed (mega / vidmoly) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
   if (url.includes("mp4upload")) return url;
+  // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
+  if (url.includes("lookmovie.")) return url;
   const ref = headers?.Referer || "";
   const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {

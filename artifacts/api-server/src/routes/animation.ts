@@ -2230,17 +2230,18 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
   // starcima          ✅ vidzee HLS — يعمل من VPS
   // vaplayer_anim     ✅ nextgencloudfabric CDN — FHD مؤكَّد
   // videasy3  (VE)    ✅ api.speedracelight.com — STREAMCRYPTO HLS multi-quality
-  // vidlink_encdec (VL) ✅ enc-dec.app → vidlink MP4/DASH
   // vidfast    (VF)   ✅ vidfast.pro TMDB-native AES-256-GCM HLS
   // fourkhdhub_anim (4K) ✅ 4khdhub.link → HubCloud MP4 — MKV مُفلتَر
   //
   // محذوف:
   // multimovies_anim (MM): حُذف بطلب المستخدم 2026-07-16
+  // vidlink_encdec (VL): vidlink.pro API يحجب VPS (response فارغ) — معطَّل 2026-07-18
   const ANIM_SOURCE_ALLOWLIST: Set<string> | null = new Set([
     "dulo_anim", "starcima", "vaplayer_anim",
     // videasy3 (VE): speedracelight API محجوب بـ CF من VPS + ironbubble HTTP 000 — معطّل
     // fourkhdhub_anim (4K): hubcloud يحجب VPS+Hopx — لا يمكن استخراج الرابط — معطّل
-    "vidlink_encdec", "vidfast",
+    // vidlink_encdec (VL): vidlink.pro يحجب VPS — response فارغ — معطّل 2026-07-18
+    "vidfast",
     // مضاف 2026-07: vidfast.vc يعمل (enc-dec.app) ✅; nebula محدودة لكن تعمل
     // primesrc_anim + icefy: embeds كلها تحجب VPS IPs — معطّلة لحين إيجاد residential proxy
     "vidfast_vc", "nebula",
@@ -5125,9 +5126,13 @@ router.get("/animation/sources-stream", async (req: Request, res: Response) => {
           if (!r.ok) return;
           const data = await r.json() as { ok?: boolean; hlsUrl?: string; upstream?: string; label?: string; provider?: string };
           if (!data.ok || !data.hlsUrl) return;
-          const proxied = wrapHls(data.hlsUrl, "https://nflixmovies.app/");
-          sendSource(proxied, `NflixMovies · ${data.label || "HLS"}`, data.upstream || data.hlsUrl, proxied);
-          console.log(`[nflixmovies] ok provider=${data.provider} label=${data.label}`);
+          /* LookMovie CDN يحجب VPS/datacenter IPs — نُرسل rawUrl مباشرةً للتطبيق
+             (IP السكني للمستخدم يمكنه الوصول مع Referer صحيح) */
+          const rawRef = "https://nflixmovies.app/";
+          sendSource(data.hlsUrl, `NflixMovies · ${data.label || "HLS"}`, data.hlsUrl, data.hlsUrl, {
+            headers: { Referer: rawRef, Origin: "https://nflixmovies.app" },
+          });
+          console.log(`[nflixmovies] rawUrl sent provider=${data.provider} label=${data.label}`);
         } catch (e: any) { console.warn("[nflixmovies_flux2]", e?.message); }
       }),
 
