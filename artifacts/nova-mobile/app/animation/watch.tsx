@@ -54,6 +54,8 @@ const TIER_RANK: Record<Quality, number> = { "1080p FHD": 3, "720p HD": 2, "360p
 /** استخراج Referer/Origin من رابط proxy (ref= param) — fallback إذا لم تُرسَل headers من الخادم */
 function extractHeadersFromProxy(url: string): Record<string, string> | undefined {
   if (!url) return undefined;
+  /* روابط VPS proxy — ref الخاص بها hex مشفَّر وليس URL حقيقي؛ تخطَّها */
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return undefined;
   try {
     const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
     const u = new URL(fullUrl);
@@ -708,7 +710,12 @@ export default function AnimationWatchScreen() {
   /* ═══════════════════ RIFT PLAYER ═══════════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
   if (screen === "native" && playerSources.length > 0) {
-    const startIdx = Math.max(0, playerSources.findIndex(s => s.url === getPlayUrl(playingSrc!)));
+    /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
+    const _base = getBaseUrl();
+    const _playRaw = getPlayUrl(playingSrc!);
+    const _playHeaders = playingSrc?.headers || extractHeadersFromProxy(_playRaw);
+    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, _base);
+    const startIdx = Math.max(0, playerSources.findIndex(s => s.url === _playFinal));
     return (
       <RiftPlayer
         sources={playerSources}

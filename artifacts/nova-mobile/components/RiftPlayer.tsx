@@ -505,6 +505,9 @@ export function RiftPlayer({
   const gestureStartPosRef= useRef(0);
   const gestureStartXRef  = useRef(0);
   const orientLockRef     = useRef<"left" | "right">("left");
+  /* timeout لاكتشاف الشاشة السوداء: إذا بقي المشغّل في "loading" أكثر من 25ث
+     نعامله كخطأ ونتجاوز للمصدر التالي تلقائياً */
+  const loadTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ─── expo-video player ─── */
   /* نستخدم ref ثابت للـ VideoSource الأولي حتى لا يُعيد useVideoPlayer
@@ -585,32 +588,49 @@ export function RiftPlayer({
       setBuffering(false);
     });
     const sub2 = player.addListener("statusChange", (e: any) => {
-      if (e.status === "loading") { setBuffering(true); }
-      else if (e.status === "readyToPlay") {
-        setBuffering(false);
-        setError(false);
-        console.log(`[RiftPlayer] ✅ readyToPlay: ${sources[srcIdx]?.label || "?"} → ${sources[srcIdx]?.url?.slice(0, 100)}`);
-        /* ── Restore position on readyToPlay (server-switch or initial resume) ──
-           Doing this here (not in the polling timer) ensures we only seek AFTER
-           the new stream is actually buffered, preventing conflicts with loading. */
-        const swPos = switchPosRef.current;
-        const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
-        const restorePos = swPos > 5 ? swPos : initPos;
-        if (!resumedRef.current && restorePos > 5) {
-          resumedRef.current = true;
-          switchPosRef.current = 0;
-          try { player.currentTime = restorePos; } catch {}
+      if (e.status === "loading") {
+        setBuffering(true);
+        /* إذا بقي التحميل أكثر من 25ث (شاشة سوداء) نعامله كخطأ ونتجاوز للمصدر التالي */
+        if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+        loadTimeoutRef.current = setTimeout(() => {
+          loadTimeoutRef.current = null;
+          console.warn(`[RiftPlayer] ⏱ timeout (25s) — ${sources[srcIdx]?.label || "?"}: ${sources[srcIdx]?.url?.slice(0, 80)}`);
+          setError(true);
+          setBuffering(false);
+        }, 25000);
+      } else {
+        /* أي حالة غير loading → ألغِ الـ timeout */
+        if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+        if (e.status === "readyToPlay") {
+          setBuffering(false);
+          setError(false);
+          console.log(`[RiftPlayer] ✅ readyToPlay: ${sources[srcIdx]?.label || "?"} → ${sources[srcIdx]?.url?.slice(0, 100)}`);
+          /* ── Restore position on readyToPlay (server-switch or initial resume) ──
+             Doing this here (not in the polling timer) ensures we only seek AFTER
+             the new stream is actually buffered, preventing conflicts with loading. */
+          const swPos = switchPosRef.current;
+          const initPos = initialPosition && initialPosition > 5 ? initialPosition : 0;
+          const restorePos = swPos > 5 ? swPos : initPos;
+          if (!resumedRef.current && restorePos > 5) {
+            resumedRef.current = true;
+            switchPosRef.current = 0;
+            try { player.currentTime = restorePos; } catch {}
+          }
+          try { player.play(); } catch {}
         }
-        try { player.play(); } catch {}
-      }
-      else if (e.status === "error") {
-        setError(true);
-        setBuffering(false);
-        /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
-        console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
+        else if (e.status === "error") {
+          setError(true);
+          setBuffering(false);
+          /* تفاصيل الخطأ — ضرورية لتشخيص مشاكل ExoPlayer/AVPlayer مع المصادر */
+          console.error(`[RiftPlayer] ❌ خطأ في التشغيل:`, JSON.stringify(e));
+        }
       }
     });
-    return () => { sub1.remove(); sub2.remove(); };
+    return () => {
+      sub1.remove();
+      sub2.remove();
+      if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
+    };
   }, [player, initialPosition]); // eslint-disable-line
 
   /* ─── Auto-advance on error ─── */
@@ -1094,6 +1114,8 @@ export function RiftPlayer({
   }, [player, fadeIn]);
 
   const switchSource = useCallback((idx: number) => {
+    /* ألغِ timeout التحميل القديم عند التبديل */
+    if (loadTimeoutRef.current) { clearTimeout(loadTimeoutRef.current); loadTimeoutRef.current = null; }
     /* ── Save current position before replacing source ── */
     const savedPos = player.currentTime || 0;
     if (savedPos > 5) switchPosRef.current = savedPos;

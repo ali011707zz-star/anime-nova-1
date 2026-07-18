@@ -153,6 +153,8 @@ function getPlayUrl(s: Src): string {
  */
 function extractProxyHeaders(url: string): Record<string, string> | undefined {
   if (!url) return undefined;
+  /* روابط VPS proxy — ref الخاص بها hex مشفَّر وليس URL حقيقي؛ تخطَّها */
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return undefined;
   try {
     const fullUrl = url.startsWith("/") ? `http://x.com${url}` : url;
     const u = new URL(fullUrl);
@@ -764,10 +766,13 @@ export default function WatchScreen() {
     /* مطابق لـ isArabic في web SCRAPER_DEFS — مصادر عربية لا تحتاج SmartSub */
     const ARABIC_SITES = new Set(["shahiid","animelek","animedar","okanime","arabseed","animephoenix","animeify","animeday","mycima","topcinemaa","anime4up2","animewitcher","ristoanime","faselhd_db","animetime","witanime","witanime_db","sanime"]);
     return srcs.map(s => {
-      const url = getPlayUrl(s);
+      const rawUrl = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم أولاً (Referer/Origin المباشرة)،
          ثم احسبها من رابط الـ proxy كـ fallback للإصدارات القديمة من الكاش */
-      const headers = s.headers || extractProxyHeaders(url);
+      const headers = s.headers || extractProxyHeaders(rawUrl);
+      /* نضمن أن كل الروابط تمرّ عبر VPS proxy — ExoPlayer/AVPlayer لا يُرسل Referer
+         بشكل موثوق لـ CDNs، وكثير من CDNs تحجب IPs مراكز البيانات بدون Referer صحيح */
+      const url = ensureVpsProxy(rawUrl, headers, base);
       return {
         url,
         headers,
@@ -842,7 +847,11 @@ export default function WatchScreen() {
   /* ══════════════ RIFT PLAYER ══════════════ */
   const playerSources = frozenSources.length > 0 ? frozenSources : riftSources;
   if (screen === "native" && playerSources.length > 0) {
-    const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === getPlayUrl(playingSrc)));
+    /* نحسب الرابط النهائي لـ playingSrc (بعد ensureVpsProxy) لمطابقة صحيحة مع playerSources */
+    const _playRaw = getPlayUrl(playingSrc!);
+    const _playHeaders = playingSrc?.headers || extractProxyHeaders(_playRaw);
+    const _playFinal = ensureVpsProxy(_playRaw, _playHeaders, getBaseUrl());
+    const startIdx = Math.max(0, playerSources.findIndex(s => playingSrc && s.url === _playFinal));
     return (
       <RiftPlayer
         sources={playerSources}
