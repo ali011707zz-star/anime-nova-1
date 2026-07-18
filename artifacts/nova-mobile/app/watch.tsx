@@ -797,17 +797,24 @@ export default function WatchScreen() {
   useEffect(() => { riftSourcesRef.current = riftSources; }, [riftSources]);
 
   /* تجميد قائمة المصادر لحظة دخول المشغّل، ومسحها عند الخروج (picker/embed/loading).
-     بدون هذا، أي مصدر خلفي جديد يصل أثناء التشغيل (من موجة التحميل الكلي) يُعيد حساب
-     riftSources بمصفوفة جديدة (ترتيب مختلف) → RiftPlayer يستقبل sources prop جديد
-     أثناء التشغيل الفعلي مما يُسبِّب توقف/إعادة تعيين غير متوقعة والعودة لشاشة الـ picker. */
+     — عند دخول native: إذا كانت فارغة نملأها بـ riftSources الحالية (التجميد الأول).
+       إذا وصلت مصادر جديدة أثناء التشغيل نُضيفها للنهاية فقط (append) بدون تغيير
+       المصادر الموجودة حتى لا يُعيد RiftPlayer ترتيبها ويُعطّل التشغيل.
+     — هذا يحل مشكلة auto-play الذي كان يُجمِّد مصدراً واحداً فقط فيُفشل كل المصادر. */
   useEffect(() => {
     if (screen === "native") {
-      if (frozenSources.length === 0 && riftSources.length > 0) setFrozenSources(riftSources);
+      setFrozenSources(prev => {
+        if (prev.length === 0) return riftSources.length > 0 ? riftSources : prev;
+        // أضف المصادر الجديدة فقط (بدون إزاحة الحالية)
+        const existingUrls = new Set(prev.map(s => s.url));
+        const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
+        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+      });
     } else {
       setFrozenSources([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen]);
+  }, [screen, riftSources]);
 
   /* ── Grouped by quality for picker ── */
   const grouped = useMemo<Record<Quality, Src[]>>(() => ({

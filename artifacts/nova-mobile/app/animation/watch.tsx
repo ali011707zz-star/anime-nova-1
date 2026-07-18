@@ -560,15 +560,21 @@ export default function AnimationWatchScreen() {
     // "native" orientation is handled by RiftPlayer itself
   }, [screen]);
 
-  /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker) ── */
+  /* ── تجميد المصادر لحظة دخول المشغّل، ومسحها عند الخروج (يحل مشكلة العودة للـ picker).
+     — append فقط أثناء التشغيل: لا نُزيح المصادر الحالية حتى لا يتأثر RiftPlayer. ── */
   useEffect(() => {
     if (screen === "native") {
-      if (frozenSources.length === 0 && riftSources.length > 0) setFrozenSources(riftSources);
+      setFrozenSources(prev => {
+        if (prev.length === 0) return riftSources.length > 0 ? riftSources : prev;
+        const existingUrls = new Set(prev.map(s => s.url));
+        const newOnes = riftSources.filter(s => s.url && !existingUrls.has(s.url));
+        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+      });
     } else {
       setFrozenSources([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen]);
+  }, [screen, riftSources]);
 
   /* ── Play a source ── */
   const playSrc = useCallback((src: AnimSrc) => {
