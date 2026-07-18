@@ -15,124 +15,99 @@ jobs:
   refresh:
     name: تجديد cf_clearance
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
-      - name: 🔧 Node.js 20
-        uses: actions/setup-node@v4
+      - name: 🐍 Python 3.12
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
+          python-version: '3.12'
 
-      - name: 📦 تثبيت puppeteer-extra + stealth
-        run: |
-          npm init -y
-          npm install puppeteer-extra puppeteer-extra-plugin-stealth puppeteer
+      - name: 📦 تثبيت curl_cffi
+        run: pip install curl_cffi
 
       - name: 🌐 جلب cf_clearance من anime3rb
-        id: get_cookie
         env:
           SITE: ${{ github.event.inputs.site || 'anime3rb' }}
           VPS_API_URL: ${{ secrets.VPS_API_URL }}
           APP_SECRET: ${{ secrets.APP_SECRET }}
         run: |
-          node << 'SCRIPT'
-          const puppeteer = require('puppeteer-extra');
-          const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-          puppeteer.use(StealthPlugin());
+          python3 << 'PYEOF'
+          import os, sys, time, json
+          from curl_cffi import requests as cf_requests
 
-          const SITE = process.env.SITE || 'anime3rb';
-          const URLS = { anime3rb: 'https://anime3rb.com' };
-          const TARGET = URLS[SITE];
+          SITE = os.environ.get("SITE", "anime3rb")
+          URLS = {"anime3rb": "https://anime3rb.com"}
+          TARGET = URLS.get(SITE)
 
-          if (!TARGET) {
-            console.error(`موقع غير معروف: ${SITE}`);
-            process.exit(1);
-          }
+          if not TARGET:
+              print(f"[!] موقع غير معروف: {SITE}")
+              sys.exit(1)
 
-          (async () => {
-            console.log(`[*] فتح ${TARGET} (stealth mode) ...`);
-            const browser = await puppeteer.launch({
-              headless: true,
-              args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled',
-              ],
-            });
-            const page = await browser.newPage();
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
-            await page.setViewport({ width: 1280, height: 800 });
+          print(f"[*] طلب {TARGET} عبر curl_cffi (Chrome TLS fingerprint) ...")
 
-            const sleep = ms => new Promise(r => setTimeout(r, ms));
+          # curl_cffi يُزوّر TLS fingerprint لـ Chrome — هذا ما تفحصه CF فعلاً
+          session = cf_requests.Session(impersonate="chrome124")
 
-            try {
-              await page.goto(TARGET, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          try:
+              resp = session.get(TARGET, timeout=30)
+              print(f"[~] Status: {resp.status_code}")
 
-              // انتظر حتى 20 ثانية ريثما يحل CF التحدي
-              let cf = null;
-              for (let i = 0; i < 4; i++) {
-                await sleep(5000);
-                const cookies = await page.cookies();
-                cf = cookies.find(c => c.name === 'cf_clearance');
-                if (cf) break;
-                console.log(`[~] انتظار CF... (${(i + 1) * 5}s)`);
-              }
+              cookies = session.cookies
+              cf_val = cookies.get("cf_clearance")
 
-              const cookies = await page.cookies();
+              if not cf_val:
+                  print("[!] cf_clearance غير موجود بعد الطلب الأول — جرب retry...")
+                  # بعض المواقع تحتاج طلبين
+                  time.sleep(3)
+                  resp2 = session.get(TARGET, timeout=30)
+                  cf_val = session.cookies.get("cf_clearance")
 
-              if (!cf) {
-                console.log('[!] cf_clearance غير موجود — الموقع ربما لا يحتاج CF اليوم، الـ workflow ينجح بلا تحديث');
-                await browser.close();
-                process.exit(0);
-              }
+              if not cf_val:
+                  print("[!] cf_clearance ما زال غير موجود — الموقع لا يحتاج CF أو blocked. ننجح بلا تحديث.")
+                  sys.exit(0)
 
-              const cookieStr = cookies
-                .filter(c => ['cf_clearance', '__cf_bm', '__cflb'].includes(c.name))
-                .map(c => `${c.name}=${c.value}`)
-                .join('; ');
+              # اجمع كل كوكيز CF
+              cf_names = ["cf_clearance", "__cf_bm", "__cflb"]
+              cookie_str = "; ".join(
+                  f"{k}={v}" for k, v in session.cookies.items() if k in cf_names
+              )
 
-              const ttlHours = ((cf.expires * 1000) - Date.now()) / 3600000;
-              console.log(`[✓] cf_clearance: ${cf.value.slice(0, 40)}...`);
-              console.log(`[✓] TTL الفعلي: ${ttlHours.toFixed(1)} ساعة`);
-              console.log(`[✓] expires: ${new Date(cf.expires * 1000).toISOString()}`);
+              # احسب TTL
+              # curl_cffi لا يكشف expires مباشرة — نفترض 24h
+              ttl_est = 24.0
+              print(f"[✓] cf_clearance: {cf_val[:40]}...")
+              print(f"[✓] cookie string: {cookie_str[:80]}...")
+              print(f"[✓] TTL المقدّر: {ttl_est}h (CF default)")
 
-              // أرسل الكوكيز للـ VPS
-              const VPS_URL = process.env.VPS_API_URL || 'https://animenovaa.duckdns.org';
-              const APP_SECRET = process.env.APP_SECRET;
+              # أرسل للـ VPS
+              VPS_URL = os.environ.get("VPS_API_URL", "https://animenovaa.duckdns.org")
+              APP_SECRET = os.environ.get("APP_SECRET")
 
-              if (!APP_SECRET) {
-                console.error('[!] APP_SECRET غير موجود في secrets');
-                process.exit(1);
-              }
+              if not APP_SECRET:
+                  print("[!] APP_SECRET غير موجود في secrets")
+                  sys.exit(1)
 
-              const resp = await fetch(`${VPS_URL}/api/admin/update-cf-cookie`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-app-secret': APP_SECRET,
-                },
-                body: JSON.stringify({ site: SITE, cookie: cookieStr, ts: Date.now() }),
-              });
+              send = cf_requests.post(
+                  f"{VPS_URL}/api/admin/update-cf-cookie",
+                  headers={"Content-Type": "application/json", "x-app-secret": APP_SECRET},
+                  content=json.dumps({"site": SITE, "cookie": cookie_str, "ts": int(time.time() * 1000)}).encode(),
+                  timeout=15,
+              )
 
-              const result = await resp.json();
-              if (resp.ok && result.ok) {
-                console.log(`[✓] VPS تم التحديث: ${JSON.stringify(result)}`);
-                require('fs').appendFileSync(
-                  process.env.GITHUB_STEP_SUMMARY || '/dev/null',
-                  `## ✅ تم تجديد كوكيز ${SITE}\n` +
-                  `- TTL الفعلي لـ cf_clearance: **${ttlHours.toFixed(1)} ساعة**\n` +
-                  `- تحديث في: ${new Date().toISOString()}\n`
-                );
-              } else {
-                console.error(`[!] VPS رفض: ${resp.status} ${JSON.stringify(result)}`);
-                process.exit(1);
-              }
+              result = send.json()
+              if send.status_code == 200 and result.get("ok"):
+                  print(f"[✓] VPS تم التحديث: {result}")
+                  summary = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+                  with open(summary, "a") as f:
+                      f.write(f"## ✅ تم تجديد كوكيز {SITE}\n")
+                      f.write(f"- cf_clearance: `{cf_val[:40]}...`\n")
+                      f.write(f"- تحديث في: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
+              else:
+                  print(f"[!] VPS رفض: {send.status_code} {result}")
+                  sys.exit(1)
 
-              await browser.close();
-            } catch (e) {
-              console.error('[!] خطأ:', e.message);
-              await browser.close();
-              process.exit(1);
-            }
-          })();
-          SCRIPT
+          except Exception as e:
+              print(f"[!] خطأ: {e}")
+              sys.exit(1)
+          PYEOF
