@@ -475,6 +475,46 @@ async function scrapingAntGet(
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  zenRowsGet — جلب HTML عبر ZenRows (residential proxy + CF bypass)
+//  الأفضل لتجاوز Cloudflare Interactive Challenge (Turnstile)
+//  1000 طلب/شهر مجاناً مع residential IPs
+//  التسجيل: https://app.zenrows.com/register
+//  يتطلب: ZENROWS_KEY في env vars
+// ════════════════════════════════════════════════════════════════════
+const ZENROWS_KEY = process.env.ZENROWS_KEY || "";
+
+async function zenRowsGet(
+  url: string,
+  opts: { js?: boolean; premium?: boolean; timeoutMs?: number } = {},
+): Promise<string | null> {
+  if (!ZENROWS_KEY) return null;
+  const { js = true, premium = true, timeoutMs = 60000 } = opts;
+  try {
+    const apiUrl = new URL("https://api.zenrows.com/v1/");
+    apiUrl.searchParams.set("apikey", ZENROWS_KEY);
+    apiUrl.searchParams.set("url", url);
+    if (js)      apiUrl.searchParams.set("js_render", "true");
+    if (premium) apiUrl.searchParams.set("premium_proxy", "true");
+    // CF bypass — يمر بـ CF Bot Management
+    apiUrl.searchParams.set("antibot", "true");
+    const r = await fetch(apiUrl.toString(), { signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) {
+      console.warn(`[zenrows] ${r.status} for ${url}`);
+      return null;
+    }
+    const text = await r.text();
+    if (isCloudflareBlock(text)) {
+      console.warn("[zenrows] still CF-blocked even after bypass");
+      return null;
+    }
+    return text.length > 50 ? text : null;
+  } catch (e: any) {
+    console.warn(`[zenrows] error: ${e.message}`);
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════════════
 //  hopxProxyGet — جلب عبر Hopx sandbox (IP مختلف يتجاوز CF-block)
@@ -5609,9 +5649,28 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
     console.warn("[anime3rb] Hopx unavailable — trying ScrapingAnt");
   }
 
-  // ── المسار البطيء 2: ScrapingAnt (Chrome headless + residential IP) ──
-  // يحل CF Turnstile Interactive Challenge بشكل كامل
-  // browser=true → 10 كريدت/طلب | 10,000 كريدت مجاناً/شهر
+  // ── المسار البطيء 2: ZenRows (residential proxy + CF bypass + JS render) ──
+  // الأقوى لتجاوز CF Interactive Challenge — residential IP + antibot
+  // 1,000 طلب/شهر مجاناً | التسجيل: https://app.zenrows.com/register
+  if (ZENROWS_KEY) {
+    try {
+      console.log(`[anime3rb] ZenRows (residential+antibot) → ${url.slice(-50)}`);
+      const html = await zenRowsGet(url, { js: true, premium: true, timeoutMs: Math.min(timeoutMs, 60000) });
+      if (html) {
+        console.log(`[anime3rb] ZenRows ✅ got ${html.length} chars`);
+        return html;
+      }
+      console.warn("[anime3rb] ZenRows returned empty/blocked");
+    } catch (e) {
+      console.warn("[anime3rb] ZenRows error:", (e as any).message);
+    }
+  } else {
+    console.warn("[anime3rb] ZENROWS_KEY غير مُضبوط — سجّل على https://app.zenrows.com/register");
+  }
+
+  // ── المسار البطيء 3: ScrapingAnt (Chrome headless — datacenter IP) ──
+  // يحل JS Challenge العادي لكن لا يتجاوز CF Interactive Challenge من datacenter
+  // مفيد فقط إذا تغيّر نوع الحماية على anime3rb مستقبلاً
   if (SCRAPINGANT_KEY) {
     try {
       console.log(`[anime3rb] ScrapingAnt browser → ${url.slice(-50)}`);
@@ -5624,8 +5683,6 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
     } catch (e) {
       console.warn("[anime3rb] ScrapingAnt error:", (e as any).message);
     }
-  } else {
-    console.warn("[anime3rb] SCRAPINGANT_KEY غير مُضبوط — أضفه في .env لتفعيل هذا المسار");
   }
 
   return null;

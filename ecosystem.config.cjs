@@ -39,6 +39,8 @@ module.exports = {
         CINESRC_BASE: _e("CINESRC_BASE") || "http://localhost:13004",
         SUPABASE_URL: _e("SUPABASE_URL"),
         SUPABASE_SERVICE_KEY: _e("SUPABASE_SERVICE_KEY"),
+        SCRAPINGANT_KEY: _e("SCRAPINGANT_KEY"),
+        ZENROWS_KEY: _e("ZENROWS_KEY"),
         MXP_SERVICE_PORT: "8002",
         CF_PROXY_PORT: "8001",   // ← السكرابر الآن عبر Hopx (35Mbps, 2vCPU) بدل cf-proxy
         HOPX_PROXY_URL: "http://localhost:8001",
