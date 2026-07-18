@@ -5519,7 +5519,85 @@ const A3RB_SUPA_KEY =
 const a3rbSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const a3rbSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-/** جلب صفحة HTML عبر Hopx browser-html (Playwright headless) */
+// ── cf_clearance cookie cache لـ anime3rb ──────────────────────────────
+// المنطق: browser مرة واحدة كل 20 ساعة → cycleTLS للباقي (سريع ~1-2ث)
+let _a3rbCfCookie    = "";   // "cf_clearance=xxx; __cf_bm=yyy"
+let _a3rbCfCookieAt  = 0;
+const A3RB_COOKIE_TTL = 20 * 3_600_000; // 20 ساعة
+
+/**
+ * يجلب صفحة anime3rb بطريقتين:
+ *  المسار السريع: cycleTLS + cf_clearance cookie المخزّنة (~1-2ث)
+ *  المسار البطيء: Hopx /extract-cookies (browser Playwright يحل CF)
+ *                 → يُخزّن cookie للاستخدام اللاحق (~15-20ث مرة واحدة كل 20ساعة)
+ */
+async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | null> {
+  const REF = A3RB_BASE + "/";
+
+  // ── المسار السريع: cycleTLS + cookie مخزّنة ──────────────────────────
+  if (_a3rbCfCookie && Date.now() - _a3rbCfCookieAt < A3RB_COOKIE_TTL) {
+    try {
+      const client = await getCycleTLS();
+      if (client) {
+        const r = await client.get(url, {
+          ja3: CYCLE_JA3,
+          userAgent: CYCLE_UA,
+          headers: {
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ar,en;q=0.9",
+            Referer: REF,
+            Cookie: _a3rbCfCookie,
+          },
+        });
+        const text: string = Buffer.isBuffer(r.data)
+          ? r.data.toString("utf-8")
+          : typeof r.data === "string" ? r.data : "";
+        if (r.status === 200 && text && !isCloudflareBlock(text)) {
+          console.log(`[anime3rb] fast-path (cycleTLS+cookie) ✅ ${url.slice(-40)}`);
+          return text;
+        }
+        // cookie منتهية أو باتت غير صالحة — نجدد
+        console.warn(`[anime3rb] fast-path cookie expired/invalid → refreshing via browser`);
+        _a3rbCfCookie = "";
+      }
+    } catch { /* fall through to browser */ }
+  }
+
+  // ── المسار البطيء: Hopx /extract-cookies (Playwright) ───────────────
+  try {
+    const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(4000) });
+    if (!h.ok) { console.warn("[anime3rb] Hopx unavailable"); return null; }
+    const hj = await h.json() as { ok?: boolean; playwright?: boolean };
+    if (!hj.ok || !hj.playwright) { console.warn("[anime3rb] Hopx has no Playwright"); return null; }
+  } catch { console.warn("[anime3rb] Hopx health check failed"); return null; }
+
+  try {
+    console.log(`[anime3rb] slow-path (Hopx browser) → solving CF for ${url.slice(-50)}`);
+    const params = new URLSearchParams({ url, ref: REF, wait: "8000" });
+    const r = await fetch(`${HOPX_PROXY_BASE}/extract-cookies?${params}`, {
+      signal: AbortSignal.timeout(timeoutMs + 10000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as {
+      ok?: boolean; html?: string; cookie_str?: string;
+      cookies?: Record<string, string>; error?: string;
+    };
+    if (!data.ok) { console.warn("[anime3rb] browser extract failed:", data.error); return null; }
+
+    // خزّن الـ cookie للاستخدامات القادمة
+    if (data.cookie_str) {
+      _a3rbCfCookie   = data.cookie_str;
+      _a3rbCfCookieAt = Date.now();
+      console.log(`[anime3rb] cf_clearance cached ✅ (valid ~20h)`);
+    }
+    return data.html ?? null;
+  } catch (e) {
+    console.error("[anime3rb] browser fetch error:", e);
+    return null;
+  }
+}
+
+/** جلب صفحة HTML عبر Hopx browser-html (Playwright headless) — للاستخدامات العامة */
 async function hopxBrowserHtml(
   url: string,
   referer?: string,
@@ -5667,10 +5745,10 @@ async function getAnime3rbSources(
     const epUrl = `${A3RB_BASE}/episode/${slug}/${ep}`;
     console.log(`[anime3rb] slug=${slug} ep=${ep} → ${epUrl}`);
 
-    // 3. جلب صفحة الحلقة عبر Hopx browser-html (يحل CF Managed Challenge)
-    const html = await hopxBrowserHtml(epUrl, A3RB_BASE + "/", 6000, 35000);
+    // 3. جلب صفحة الحلقة (cookie cache → cycleTLS سريع؛ أو browser بطيء مرة/20ساعة)
+    const html = await a3rbFetchPage(epUrl, 35000);
     if (!html) {
-      console.warn(`[anime3rb] Hopx browser-html unavailable for ${epUrl}`);
+      console.warn(`[anime3rb] فشل جلب صفحة الحلقة (Hopx غير متاح أو cookie منتهية)`);
       return [];
     }
 
