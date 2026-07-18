@@ -5842,21 +5842,39 @@ async function getAnime3rbSources(
     const epUrl = `${A3RB_BASE}/episode/${slug}/${ep}`;
     console.log(`[anime3rb] slug=${slug} ep=${ep} → ${epUrl}`);
 
-    // 3. جلب صفحة الحلقة (cookie cache → cycleTLS سريع؛ أو browser بطيء مرة/20ساعة)
+    // ── Embed fallback دائم: رابط الحلقة مباشرة من Animatoo Supabase ──────
+    // المستخدم يفتحه في WebView (IP حقيقي) → يحل Cloudflare Turnstile بنفسه
+    // هذا يضمن أن anime3rb يُرجع دائماً مصدراً واحداً على الأقل.
+    const embedSource: UnifiedSource = {
+      name: "أنمي 3رب · مشغّل داخلي",
+      url: epUrl,
+      directUrl: epUrl,
+      quality: "HD",
+      qualityRank: 12,
+      site: "anime3rb",
+      audioLang: "ar",
+      isEmbed: true,
+    };
+
+    // 3. محاولة جلب روابط vid3rb مباشرة (سريع إن كانت الكوكيز سارية)
     const html = await a3rbFetchPage(epUrl, 35000);
     if (!html) {
-      console.warn(`[anime3rb] فشل جلب صفحة الحلقة (Hopx غير متاح أو cookie منتهية)`);
-      return [];
+      console.warn(`[anime3rb] فشل جلب الـ HTML — إرجاع embed fallback`);
+      const fallback = [embedSource];
+      a3rbSrcCache.set(ck, { sources: fallback, ts: Date.now() });
+      return fallback;
     }
 
     // 4. استخراج URLs المصادر
     const videoUrls = extractA3rbVideoUrls(html);
     if (!videoUrls.length) {
-      console.warn(`[anime3rb] no video URLs found in episode page`);
-      return [];
+      console.warn(`[anime3rb] لم تُوجد روابط فيديو مباشرة — إرجاع embed fallback`);
+      const fallback = [embedSource];
+      a3rbSrcCache.set(ck, { sources: fallback, ts: Date.now() });
+      return fallback;
     }
 
-    // 5. تصنيف المصادر
+    // 5. تصنيف المصادر المباشرة + إضافة embed كخيار إضافي
     const sources: UnifiedSource[] = videoUrls.map((url, i) => {
       const isHls  = url.includes(".m3u8");
       const isDirect = url.includes("vid3rb") || isHls || url.includes(".mp4");
@@ -5871,6 +5889,8 @@ async function getAnime3rbSources(
         ...(isDirect ? {} : { isEmbed: true }),
       } as UnifiedSource;
     });
+    // أضف embed كآخر خيار (مشغّل موقع anime3rb نفسه)
+    sources.push(embedSource);
 
     a3rbSrcCache.set(ck, { sources, ts: Date.now() });
     // ── حفظ في file cache (يصمد بعد restart، 24 ساعة) ──
