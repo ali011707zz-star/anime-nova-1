@@ -23,11 +23,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 📦 تثبيت playwright-extra + stealth
+      - name: 📦 تثبيت puppeteer-extra + stealth
         run: |
           npm init -y
-          npm install playwright-extra playwright-extra-plugin-stealth playwright-core playwright
-          npx playwright install chromium --with-deps
+          npm install puppeteer-extra puppeteer-extra-plugin-stealth puppeteer
 
       - name: 🌐 جلب cf_clearance من anime3rb
         id: get_cookie
@@ -37,9 +36,9 @@ jobs:
           APP_SECRET: ${{ secrets.APP_SECRET }}
         run: |
           node << 'SCRIPT'
-          const { chromium } = require('playwright-extra');
-          const StealthPlugin = require('playwright-extra-plugin-stealth');
-          chromium.use(StealthPlugin());
+          const puppeteer = require('puppeteer-extra');
+          const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+          puppeteer.use(StealthPlugin());
 
           const SITE = process.env.SITE || 'anime3rb';
           const URLS = { anime3rb: 'https://anime3rb.com' };
@@ -52,7 +51,7 @@ jobs:
 
           (async () => {
             console.log(`[*] فتح ${TARGET} (stealth mode) ...`);
-            const browser = await chromium.launch({
+            const browser = await puppeteer.launch({
               headless: true,
               args: [
                 '--no-sandbox',
@@ -60,12 +59,11 @@ jobs:
                 '--disable-blink-features=AutomationControlled',
               ],
             });
-            const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-              viewport: { width: 1280, height: 800 },
-              locale: 'ar-SA',
-            });
-            const page = await context.newPage();
+            const page = await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36');
+            await page.setViewport({ width: 1280, height: 800 });
+
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
 
             try {
               await page.goto(TARGET, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -73,14 +71,14 @@ jobs:
               // انتظر حتى 20 ثانية ريثما يحل CF التحدي
               let cf = null;
               for (let i = 0; i < 4; i++) {
-                await page.waitForTimeout(5000);
-                const cookies = await context.cookies();
+                await sleep(5000);
+                const cookies = await page.cookies();
                 cf = cookies.find(c => c.name === 'cf_clearance');
                 if (cf) break;
                 console.log(`[~] انتظار CF... (${(i + 1) * 5}s)`);
               }
 
-              const cookies = await context.cookies();
+              const cookies = await page.cookies();
 
               if (!cf) {
                 console.log('[!] cf_clearance غير موجود — الموقع ربما لا يحتاج CF اليوم، الـ workflow ينجح بلا تحديث');
