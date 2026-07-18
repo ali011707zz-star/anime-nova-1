@@ -1,0 +1,138 @@
+name: 🍪 تجديد كوكيز Cloudflare
+
+on:
+  schedule:
+    # كل 18 ساعة (cf_clearance يدوم 24h → هامش أمان 6h)
+    - cron: "0 */18 * * *"
+  workflow_dispatch:
+    inputs:
+      site:
+        description: 'الموقع المراد تجديد كوكيزه'
+        required: false
+        default: 'anime3rb'
+
+jobs:
+  refresh:
+    name: تجديد cf_clearance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 🔧 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 تثبيت Playwright
+        run: |
+          npm init -y
+          npm install playwright-core playwright
+          npx playwright install chromium --with-deps
+
+      - name: 🌐 جلب cf_clearance من anime3rb
+        id: get_cookie
+        env:
+          SITE: ${{ github.event.inputs.site || 'anime3rb' }}
+        run: |
+          node << 'SCRIPT'
+          const { chromium } = require('playwright');
+          const SITE = process.env.SITE || 'anime3rb';
+
+          const URLS = {
+            anime3rb: 'https://anime3rb.com',
+          };
+
+          const TARGET = URLS[SITE];
+          if (!TARGET) {
+            console.error(`موقع غير معروف: ${SITE}`);
+            process.exit(1);
+          }
+
+          (async () => {
+            console.log(`[*] فتح ${TARGET} ...`);
+            const browser = await chromium.launch({
+              headless: true,
+              args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            });
+            const context = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+              viewport: { width: 1280, height: 800 },
+            });
+            const page = await context.newPage();
+
+            try {
+              await page.goto(TARGET, { waitUntil: 'networkidle', timeout: 60000 });
+              // انتظر حتى يحل Cloudflare التحدي
+              await page.waitForTimeout(5000);
+
+              const cookies = await context.cookies();
+              const cf = cookies.find(c => c.name === 'cf_clearance');
+
+              if (!cf) {
+                console.error('[!] cf_clearance غير موجود — ربما الموقع لا يحتاج CF أو فشل التحدي');
+                // ليس خطأ قاتلاً — لا تفشل الـ workflow
+                await browser.close();
+                process.exit(0);
+              }
+
+              // اجمع كل كوكيز CF
+              const cookieStr = cookies
+                .filter(c => ['cf_clearance', '__cf_bm', '__cflb'].includes(c.name))
+                .map(c => `${c.name}=${c.value}`)
+                .join('; ');
+
+              console.log(`[✓] cf_clearance: ${cf.value.slice(0, 30)}...`);
+              console.log(`[✓] cookie string: ${cookieStr.slice(0, 60)}...`);
+              console.log(`[✓] expires: ${new Date(cf.expires * 1000).toISOString()}`);
+
+              // احسب المدة الفعلية
+              const ttlHours = ((cf.expires * 1000) - Date.now()) / 3600000;
+              console.log(`[✓] TTL الفعلي: ${ttlHours.toFixed(1)} ساعة`);
+
+              // أرسل الكوكيز للـ VPS
+              const VPS_URL = process.env.VPS_API_URL || 'https://animenovaa.duckdns.org';
+              const APP_SECRET = process.env.APP_SECRET;
+
+              if (!APP_SECRET) {
+                console.error('[!] APP_SECRET غير موجود في secrets');
+                process.exit(1);
+              }
+
+              const resp = await fetch(`${VPS_URL}/api/admin/update-cf-cookie`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-app-secret': APP_SECRET,
+                },
+                body: JSON.stringify({
+                  site: SITE,
+                  cookie: cookieStr,
+                  ts: Date.now(),
+                }),
+              });
+
+              const result = await resp.json();
+              if (resp.ok && result.ok) {
+                console.log(`[✓] VPS تم التحديث بنجاح: ${JSON.stringify(result)}`);
+                // أخرج TTL الفعلي لتوثيقه
+                require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY || '/dev/null',
+                  `## ✅ تم تجديد كوكيز ${SITE}\n` +
+                  `- TTL الفعلي لـ cf_clearance: **${ttlHours.toFixed(1)} ساعة**\n` +
+                  `- تحديث في: ${new Date().toISOString()}\n`
+                );
+              } else {
+                console.error(`[!] VPS رفض الطلب: ${resp.status} ${JSON.stringify(result)}`);
+                process.exit(1);
+              }
+
+              await browser.close();
+            } catch (e) {
+              console.error('[!] خطأ:', e.message);
+              await browser.close();
+              process.exit(1);
+            }
+          })();
+          SCRIPT
+        env:
+          VPS_API_URL: ${{ secrets.VPS_API_URL }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}

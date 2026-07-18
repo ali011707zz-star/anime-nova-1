@@ -5525,6 +5525,14 @@ let _a3rbCfCookie    = "";   // "cf_clearance=xxx; __cf_bm=yyy"
 let _a3rbCfCookieAt  = 0;
 const A3RB_COOKIE_TTL = 20 * 3_600_000; // 20 ساعة
 
+/** يُحدِّث cf_clearance من مصدر خارجي (GitHub Actions) */
+export function setA3rbCfCookie(cookie: string, ts?: number): void {
+  if (!cookie) return;
+  _a3rbCfCookie   = cookie;
+  _a3rbCfCookieAt = ts ?? Date.now();
+  console.log("[anime3rb] cf_clearance updated externally ✅ (valid ~20h)");
+}
+
 /**
  * يجلب صفحة anime3rb بطريقتين:
  *  المسار السريع: cycleTLS + cf_clearance cookie المخزّنة (~1-2ث)
