@@ -79,6 +79,8 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
   if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
   // روابط embed (mega) — لا نلفّها
   if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
+  // LookMovie CDN — يعمل مباشرة من IP سكني مع Referer؛ يحجب VPS/datacenter
+  if (url.includes("lookmovie.")) return url;
   const ref = headers?.Referer || "";
   const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
   if (isHls) {
@@ -110,7 +112,7 @@ function getSrcQuality(src: AnimSrc): Quality {
   if (lbl.startsWith("vyla") || lbl.startsWith("starcima") || lbl.startsWith("videasy") ||
       lbl.startsWith("vidlink") || lbl.startsWith("aflaam") || lbl.startsWith("arabseed") ||
       lbl.startsWith("seepanel") || lbl.startsWith("lordflix") || lbl.startsWith("topcinem") ||
-      lbl.startsWith("stardima")) return "1080p FHD";
+      lbl.startsWith("stardima") || lbl.startsWith("nflixmovies") || lbl.startsWith("vidbolt")) return "1080p FHD";
 
   if (url.includes("hls-proxy")) return "720p HD";
   if (url.includes(".mp4") || url.includes("video-proxy")) return "720p HD";
@@ -210,6 +212,8 @@ function getAnimTag(label: string): string {
   if (l.startsWith("streamrip"))      return "SR";
   if (l.startsWith("cinepro"))        return "CP";
   // ─── مصادر إنجليزية / دولية ───
+  if (l.startsWith("nflix"))          return "NF";
+  if (l.startsWith("vidbolt"))        return "VB";
   if (l.startsWith("icefy"))          return "IF";
   if (l.startsWith("nebula"))         return "NB";
   if (l.startsWith("superembed"))     return "SE";
