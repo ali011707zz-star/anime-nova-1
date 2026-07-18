@@ -35,6 +35,7 @@
 - [kartoney Arabic dubbed catalog](kartoney-arabic-dubbed.md) — kartoney.com: 106 مسلسل مدبلج عربي; MP4 مباشر من servallvid; no CF; slug→TMDB مطابقة; لم يُطبَّق بعد.
 - [witanime.life RE](witanime-life-re.md) — _zH/_zW base64→JSON decode; ok.ru FHD /dk?videoPlayerMetadata ✅ HLS; WP REST API يعمل للبحث+الحلقات; hgcloud/yonaplay يحتاج browser.
 - [anime3rb scraper](anime3rb-scraper-impl.md) — Laravel+Livewire+CF; slug via Animatoo Supabase(iwccaog..,anon key في APK); /episode/{slug}/{ep}; vid3rb CDN; Hopx browser-html لحل CF.
+- [CF Cookie Refresh System](cf-cookie-refresh-system.md) — GitHub Actions cron كل 18h يجدد cf_clearance عبر Playwright; endpoint POST /api/admin/update-cf-cookie محمي بـ APP_SECRET.
 
 - [AnimeSlayer constants restored](anslayer-constants-restored.md) — ANSLAYER_BASE/CID/CSEC حُذفت من anime.ts وأُعيدت؛ لا تحذفها مجدداً.
 - [Slow sources fix plan](slow-sources-fix-plan.md) — خطط جذرية (بدون تطبيق) لـ HiAnime/AW/AN/AS/VL/VF/4K: slug-cache+Hopx+enc-dec-validation+vidfast.vc
