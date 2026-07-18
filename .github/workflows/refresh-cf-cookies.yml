@@ -63,9 +63,10 @@ jobs:
             const page = await context.newPage();
 
             try {
-              await page.goto(TARGET, { waitUntil: 'networkidle', timeout: 60000 });
-              // انتظر حتى يحل Cloudflare التحدي
-              await page.waitForTimeout(5000);
+              // domcontentloaded بدل networkidle لأن CF challenge يبقي الشبكة نشطة إلى الأبد
+              await page.goto(TARGET, { waitUntil: 'domcontentloaded', timeout: 30000 });
+              // انتظر حتى يحل Cloudflare التحدي (عادةً 5-10 ثوانٍ)
+              await page.waitForTimeout(15000);
 
               const cookies = await context.cookies();
               const cf = cookies.find(c => c.name === 'cf_clearance');
