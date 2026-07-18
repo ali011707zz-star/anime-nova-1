@@ -67,6 +67,29 @@ function extractHeadersFromProxy(url: string): Record<string, string> | undefine
   }
 }
 
+/**
+ * يضمن أن رابط الفيديو يمرّ عبر VPS proxy لضمان التوافق مع ExoPlayer/AVPlayer.
+ * CDN كثيرة تحجب طلبات الأجهزة المحمولة الـ datacenter بدون Referer صحيح.
+ */
+function ensureVpsProxy(url: string, headers: Record<string, string> | undefined, base: string): string {
+  if (!url) return url;
+  // بالفعل proxy عبر VPS
+  if (url.includes("/api/anime/") || url.includes("/api/animation/")) return url;
+  // روابط embed (mega) — لا نلفّها
+  if (url.includes("mega.nz") || url.includes("mega.co.nz")) return url;
+  const ref = headers?.Referer || "";
+  const isHls = /\.(m3u8)(\?|$)|\/hls\/|\/playlist\//i.test(url);
+  if (isHls) {
+    return ref
+      ? `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`
+      : `${base}/api/anime/hls-proxy?url=${encodeURIComponent(url)}`;
+  }
+  if (ref) {
+    return `${base}/api/anime/video-proxy?url=${encodeURIComponent(url)}&ref=${encodeURIComponent(ref)}`;
+  }
+  return url;
+}
+
 function resolveUrl(url: string | undefined, base: string): string {
   if (!url) return "";
   return url.startsWith("/") ? base + url : url;
@@ -596,12 +619,14 @@ export default function AnimationWatchScreen() {
         ? resolveUrl(s.subtitleUrl, base)
         : activeSubUrl);
       const isArabic = subLang === "ar" && !!resolvedSubUrl;
-      const playUrl = getPlayUrl(s);
+      const rawUrl = getPlayUrl(s);
       /* headers: استخدم الـ headers المُرسَلة من الخادم (Referer/Origin مباشرة)،
          ثم احسبها من رابط الـ proxy كـ fallback */
-      const headers = s.headers || extractHeadersFromProxy(playUrl);
+      const headers = s.headers || extractHeadersFromProxy(rawUrl);
+      /* ضمان المرور عبر VPS proxy — يمنع حجب CDN للجهاز المحمول */
+      const url = ensureVpsProxy(rawUrl, headers, base);
       return {
-        url: playUrl,
+        url,
         label: lbl || "مصدر",
         quality: getSrcQuality(s),
         subtitleUrl: resolvedSubUrl,
@@ -973,9 +998,6 @@ const w = StyleSheet.create({
   loadHintNew: { fontSize: 13, color: "rgba(255,255,255,0.75)", fontFamily: "Cairo_700Bold", textAlign: "center", lineHeight: 22, paddingHorizontal: 16 },
   loadPrayerText: { fontSize: 13, color: "rgba(255,255,255,0.85)", fontFamily: "Cairo_800ExtraBold", textAlign: "center" },
   topBackBtn: { position: "absolute", left: 16, zIndex: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
-  commentsBtn: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 14, backgroundColor: "rgba(139,92,246,0.06)", borderWidth: 1, borderColor: "rgba(139,92,246,0.18)" },
-  commentsBtnText: { flex: 1, fontSize: 13, fontFamily: "Cairo_700Bold", color: "rgba(196,181,253,0.85)" },
-
   /* Video top bar */
   videoTopBar: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingBottom: 20 },
   videoBackBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },

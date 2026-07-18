@@ -180,7 +180,7 @@ export default function DubbedLibrary() {
                     key={s.key || s.title}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(i * 0.03, 0.4) }}
+                    transition={{ delay: Math.min(i * 0.015, 0.15) }}
                   >
                     <SeriesCard s={s} onClick={() => openDetail(s)} />
                   </motion.div>

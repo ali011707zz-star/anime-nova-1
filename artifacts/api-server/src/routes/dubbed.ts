@@ -3,6 +3,30 @@ import { logger } from "../lib/logger";
 
 const router = Router();
 
+// ── Disk cache for dubbed catalog (يبقى بعد pm2 restart) ──────────────────────
+import { existsSync as _dcExists, readFileSync as _dcRead, writeFileSync as _dcWrite, mkdirSync as _dcMkdir } from "node:fs";
+import { join as _dcJoin } from "node:path";
+
+const _DC_DIR = "/opt/nova-cache/dubbed";
+try { if (!_dcExists(_DC_DIR)) _dcMkdir(_DC_DIR, { recursive: true }); } catch {}
+
+function _dcGet(key: string): any | null {
+  try {
+    const fp = _dcJoin(_DC_DIR, key.replace(/[^a-z0-9_-]/gi,"_") + ".json");
+    if (!_dcExists(fp)) return null;
+    const r = JSON.parse(_dcRead(fp, "utf8"));
+    if (r._ts && Date.now() - r._ts > CATALOG_TTL * 2) return null; // 2× TTL grace
+    return r.data;
+  } catch { return null; }
+}
+
+function _dcSet(key: string, data: any): void {
+  try {
+    const fp = _dcJoin(_DC_DIR, key.replace(/[^a-z0-9_-]/gi,"_") + ".json");
+    _dcWrite(fp, JSON.stringify({ data, _ts: Date.now() }), "utf8");
+  } catch {}
+}
+
 const SC_BASE = "https://starcima.com";
 const AT_BASE = "https://www.arabic-toons.com";
 const CF_PROXY_BASE = "http://localhost:8000";
@@ -88,12 +112,17 @@ async function cfGet(url: string, referer?: string, timeoutMs = 18000): Promise<
 
 // ── L1 cache for catalog pages ──
 const _catalogCache = new Map<string, { data: any; ts: number }>();
-const CATALOG_TTL = 30 * 60_000;
+const CATALOG_TTL = 4 * 60 * 60_000; // 4 ساعات — أطول من قبل (كان 30 دقيقة)
 
 async function fetchStarCimaDubbed(path: string): Promise<any> {
   const hit = _catalogCache.get(path);
   if (hit && Date.now() - hit.ts < CATALOG_TTL) return hit.data;
   try {
+    // قبل الجلب من الشبكة، جرّب الـ disk cache (يبقى بعد restart)
+    const diskHit = _dcGet(path);
+    if (diskHit) {
+      _catalogCache.set(path, { data: diskHit, ts: Date.now() - CATALOG_TTL + 10 * 60_000 }); // يُجدَّد خلال 10 دقائق
+    }
     const r = await fetch(`${SC_BASE}${path}`, {
       headers: {
         "User-Agent": BROWSER_UA,
@@ -105,6 +134,7 @@ async function fetchStarCimaDubbed(path: string): Promise<any> {
     if (!r.ok) return null;
     const data = await r.json();
     _catalogCache.set(path, { data, ts: Date.now() });
+    _dcSet(path, data); // حفظ على القرص للـ restart القادم
     return data;
   } catch (e) {
     logger.warn({ err: e }, "dubbed: fetchStarCimaDubbed error");
