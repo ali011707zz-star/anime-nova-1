@@ -5497,117 +5497,212 @@ async function getWitanimeSources(
 
 
 // ════════════════════════════════════════════════════════════════════
-//  ANIME3RB.COM scraper  (CF-protected Arabic WordPress anime site)
-//  Same Playwright cookie strategy as witanime.life
-//  Search: /?s={query} or AJAX
-//  Episode URL patterns vary by theme
+//  ANIME3RB.COM scraper — Laravel + Livewire, CF-protected
+//
+//  استراتيجية الـ RE (2026-07):
+//  1. Slug lookup: Animatoo Supabase (tmdb_id → slug أو en_title بحث)
+//     — يتجاوز البحث على anime3rb نفسه (CF-محمي)
+//  2. Episode URL مباشر: /episode/{slug}/{ep_number}
+//  3. صفحة الحلقة: Hopx browser-html (Playwright يحل CF)
+//  4. استخراج vid3rb.com URLs من الـ HTML
+//
+//  Animatoo Supabase: iwccaogufwaqzrodojvh.supabase.co
+//  — 6,339 أنمي + 77,395 حلقة — كلها anime3rb slugs
 // ════════════════════════════════════════════════════════════════════
-const A3RB_BASE  = "https://anime3rb.com";
-const A3RB_HDRS: Record<string, string> = { ...BASE_HDRS, Referer: A3RB_BASE + "/" };
+const A3RB_BASE   = "https://anime3rb.com";
+const A3RB_SUPA   = "https://iwccaogufwaqzrodojvh.supabase.co/rest/v1";
+const A3RB_SUPA_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" +
+  ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3Y2Nhb2d1ZndhcXpyb2RvanZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTMxNjUsImV4cCI6MjA5NDY4OTE2NX0" +
+  ".hEl_v7cfd1lZMqI3QJAk2eaX-AFw3C_TAAWpkSMMGwk";
 
-const a3rbSeriesCache = new Map<string, { url: string | null; ts: number }>();
-const a3rbSrcCache    = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const a3rbSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const a3rbSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 
-async function searchAnime3rb(query: string): Promise<string | null> {
-  const html = await cycleTLSGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`, A3RB_BASE + "/")
-    ?? await cfProxyGet(`${A3RB_BASE}/?s=${encodeURIComponent(query)}`, A3RB_BASE + "/");
-  if (!html) return null;
+/** جلب صفحة HTML عبر Hopx browser-html (Playwright headless) */
+async function hopxBrowserHtml(
+  url: string,
+  referer?: string,
+  waitMs = 5000,
+  timeoutMs = 35000,
+): Promise<string | null> {
+  try {
+    const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(4000) });
+    if (!h.ok) return null;
+    const hj = await h.json() as { ok?: boolean; playwright?: boolean };
+    if (!hj.ok || !hj.playwright) return null;
+  } catch { return null; }
 
-  const candidates: Array<{ url: string; score: number }> = [];
-  // Pattern: series/anime pages with slug in URL
-  for (const re of [
-    /href="(https?:\/\/anime3rb\.com\/(?:anime|series)\/([^/"]+)\/?)"/gi,
-    /href="(https?:\/\/anime3rb\.com\/(?:manga|watch|show)\/([^/"]+)\/?)"/gi,
-  ]) {
-    for (const m of html.matchAll(re)) {
-      if (m[2].includes("/page/") || m[2].includes("/feed/")) continue;
-      const slug = decodeURIComponent(m[2]).replace(/-/g, " ");
-      const score = Math.max(similarity(slug, query), asciiSimilarity(m[2], query));
-      candidates.push({ url: m[1], score });
+  try {
+    const params = new URLSearchParams({ url, wait: String(waitMs) });
+    if (referer) params.set("ref", referer);
+    const r = await fetch(`${HOPX_PROXY_BASE}/browser-html?${params}`, {
+      signal: AbortSignal.timeout(timeoutMs + 8000),
+    });
+    if (!r.ok) return null;
+    const data = await r.json() as { ok?: boolean; html?: string; error?: string };
+    if (!data.ok || !data.html) return null;
+    return data.html;
+  } catch { return null; }
+}
+
+/**
+ * البحث عن anime3rb slug عبر Animatoo Supabase DB
+ * أولوية: tmdb_id → en_title search → title search
+ */
+async function getA3rbSlug(
+  title: string,
+  english: string | null,
+  tmdbId?: number,
+): Promise<string | null> {
+  const cacheKey = `${tmdbId ?? ""}:${(english ?? title).toLowerCase()}`;
+  const hit = a3rbSlugCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < 24 * 3600_000) return hit.slug;
+
+  const headers = {
+    apikey: A3RB_SUPA_KEY,
+    Authorization: `Bearer ${A3RB_SUPA_KEY}`,
+    "Content-Type": "application/json",
+  };
+
+  let slug: string | null = null;
+
+  // 1. بحث بـ tmdb_id (أدق)
+  if (tmdbId) {
+    try {
+      const r = await fetch(
+        `${A3RB_SUPA}/anime?tmdb_id=eq.${tmdbId}&select=slug,episode_count&order=episode_count.desc&limit=3`,
+        { headers, signal: AbortSignal.timeout(8000) },
+      );
+      if (r.ok) {
+        const data = await r.json() as Array<{ slug: string; episode_count: number }>;
+        if (data.length) slug = data[0].slug;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 2. بحث بـ en_title أو title
+  if (!slug) {
+    for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
+      try {
+        // جرب en_title أولاً
+        // بحث في en_title أو title (الياباني المرومن)
+      const r = await fetch(
+          `${A3RB_SUPA}/anime?or=(en_title.ilike.*${encodeURIComponent(q)}*,title.ilike.*${encodeURIComponent(q)}*)&select=slug,en_title,title,episode_count&order=episode_count.desc&limit=5`,
+          { headers, signal: AbortSignal.timeout(8000) },
+        );
+        if (r.ok) {
+          const data = await r.json() as Array<{ slug: string; en_title: string; episode_count: number }>;
+          if (data.length) {
+            // أفضل مطابقة بالتشابه
+            const best = data.reduce((prev, cur) => {
+              const ps = asciiSimilarity(prev.en_title, q);
+              const cs = asciiSimilarity(cur.en_title, q);
+              return cs > ps ? cur : prev;
+            });
+            if (best.episode_count > 0 || data.length === 1) {
+              slug = best.slug;
+              break;
+            }
+          }
+        }
+      } catch { /* ignore */ }
     }
   }
-  if (!candidates.length) {
-    // Broad match: any link with title-like text near it
-    for (const m of html.matchAll(/href="(https?:\/\/anime3rb\.com\/[^"]+)"[^>]*>([^<]{3,60})<\/a>/gi)) {
-      const label = m[2].trim();
-      const score = Math.max(similarity(label, query), asciiSimilarity(label, query));
-      if (score > 0.25) candidates.push({ url: m[1], score });
+
+  a3rbSlugCache.set(cacheKey, { slug, ts: Date.now() });
+  return slug;
+}
+
+/** استخراج مصادر vid3rb.com وغيرها من HTML صفحة حلقة anime3rb */
+function extractA3rbVideoUrls(html: string): string[] {
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  const add = (u: string) => {
+    u = u.trim().replace(/\\(["'])/g, "$1");
+    if (u.startsWith("http") && !seen.has(u) && u.length > 20) {
+      seen.add(u);
+      urls.push(u);
     }
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0]?.score > 0.1 ? candidates[0].url : null;
+  };
+
+  // vid3rb.com — CDN الخاص بـ anime3rb (mp4 مباشر أو HLS)
+  for (const m of html.matchAll(/(https?:\/\/[^\s"'<>\\]+vid3rb[^\s"'<>\\]*(?:\.mp4|\.m3u8|\/video\/)[^\s"'<>\\]*)/gi)) add(m[1]);
+  // HLS مباشر
+  for (const m of html.matchAll(/(https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*)/gi)) add(m[1]);
+  // MP4 مباشر
+  for (const m of html.matchAll(/(https?:\/\/[^\s"'<>\\]+\.mp4[^\s"'<>\\]*)/gi)) add(m[1]);
+  // "file"/"src"/"url" في JSON
+  for (const m of html.matchAll(/"(?:file|src|url|stream|source)"\s*:\s*"(https?:\/\/[^"\\]+)"/gi)) add(m[1]);
+  // data-src / data-url / data-embed
+  for (const m of html.matchAll(/data-(?:src|url|embed|file)="(https?:\/\/[^"]+)"/gi)) add(m[1]);
+  // iframes (embed providers)
+  for (const m of html.matchAll(/<iframe[^>]+src="(https?:\/\/[^"]+)"/gi)) add(m[1]);
+
+  // فلتر الـ noise (صور، تتبع، إعلانات)
+  const NOISE = ["thumb", "poster", "banner", "logo", "icon", "ads", "analytics",
+                 "google", "facebook", "twitter", "youtube", "doubleclick", "png", "jpg", "webp", "svg"];
+  return urls.filter(u => !NOISE.some(n => u.toLowerCase().includes(n)));
 }
 
 async function getAnime3rbSources(
-  title: string, english: string | null, ep: number,
+  title: string,
+  english: string | null,
+  ep: number,
+  tmdbId?: number,
 ): Promise<UnifiedSource[]> {
   const ck = `a3rb:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = a3rbSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
 
   try {
-    let seriesUrl: string | null = null;
-    const sCacheKey = (title + "|" + (english || "")).toLowerCase();
-    const sHit = a3rbSeriesCache.get(sCacheKey);
-    if (sHit && Date.now() - sHit.ts < SRC_TTL) {
-      seriesUrl = sHit.url;
-    } else {
-      for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
-        seriesUrl = await searchAnime3rb(q);
-        if (seriesUrl) break;
-      }
-      a3rbSeriesCache.set(sCacheKey, { url: seriesUrl, ts: Date.now() });
+    // 1. احصل على الـ slug من Animatoo Supabase
+    const slug = await getA3rbSlug(title, english, tmdbId);
+    if (!slug) {
+      console.warn(`[anime3rb] no slug for "${english ?? title}"`);
+      return [];
     }
-    if (!seriesUrl) return [];
 
-    // Fetch series page → find episode link
-    const seriesHtml = await cycleTLSGet(seriesUrl, A3RB_BASE + "/")
-      ?? await cfProxyGet(seriesUrl, A3RB_BASE + "/");
-    if (!seriesHtml) return [];
+    // 2. بناء URL الحلقة مباشرة (بدون scraping صفحة العنوان)
+    const epUrl = `${A3RB_BASE}/episode/${slug}/${ep}`;
+    console.log(`[anime3rb] slug=${slug} ep=${ep} → ${epUrl}`);
 
-    // Find episode link by number
-    let epUrl: string | null = null;
-    const epPatterns = [
-      /href="(https?:\/\/anime3rb\.com\/(?:episode|ep|watch)\/([^/"]+)\/?)"/gi,
-      /href="(https?:\/\/anime3rb\.com\/[^"]+(?:episode|ep|الحلقة)[^"]+)"/gi,
-    ];
-    for (const re of epPatterns) {
-      for (const m of seriesHtml.matchAll(re)) {
-        const slug = decodeURIComponent(m[1]);
-        if (slug.match(new RegExp(`[-/]0*${ep}[-/]?$`)) || slug.endsWith(`-${ep}/`) || slug.includes(`الحلقة-${ep}`)) {
-          epUrl = m[1]; break;
-        }
-      }
-      if (epUrl) break;
+    // 3. جلب صفحة الحلقة عبر Hopx browser-html (يحل CF Managed Challenge)
+    const html = await hopxBrowserHtml(epUrl, A3RB_BASE + "/", 6000, 35000);
+    if (!html) {
+      console.warn(`[anime3rb] Hopx browser-html unavailable for ${epUrl}`);
+      return [];
     }
-    if (!epUrl) return [];
 
-    // Fetch episode page via CF bypass chain
-    const epHtml = await cycleTLSGet(epUrl, seriesUrl)
-      ?? await cfProxyGet(epUrl, seriesUrl);
-    if (!epHtml) return [];
+    // 4. استخراج URLs المصادر
+    const videoUrls = extractA3rbVideoUrls(html);
+    if (!videoUrls.length) {
+      console.warn(`[anime3rb] no video URLs found in episode page`);
+      return [];
+    }
 
-    const urls: string[] = [];
-    const seen = new Set<string>();
-    const addUrl = (u: string) => { if (u?.startsWith("http") && !seen.has(u)) { seen.add(u); urls.push(u); } };
-
-    for (const m of epHtml.matchAll(/data-(?:src|url|embed)="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
-    for (const m of epHtml.matchAll(/<iframe[^>]+src="(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
-    for (const m of epHtml.matchAll(/"(?:file|src|url)"\s*:\s*"(https?:\/\/[^"]+)"/gi)) addUrl(m[1]);
-
-    if (!urls.length) return [];
-
-    const sources: UnifiedSource[] = urls.map((url, i) => ({
-      name: `أنمي 3رب · سيرفر ${i + 1}`,
-      url,
-      quality: "HD",
-      qualityRank: 9,
-      site: "anime3rb",
-    }));
+    // 5. تصنيف المصادر
+    const sources: UnifiedSource[] = videoUrls.map((url, i) => {
+      const isHls  = url.includes(".m3u8");
+      const isDirect = url.includes("vid3rb") || isHls || url.includes(".mp4");
+      return {
+        name: `أنمي 3رب · سيرفر ${i + 1}`,
+        url,
+        proxyUrl: isDirect ? undefined : url,
+        quality: "HD",
+        qualityRank: 9,
+        site: "anime3rb",
+        audioLang: "ar",
+        ...(isDirect ? {} : { isEmbed: true }),
+      } as UnifiedSource;
+    });
 
     a3rbSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
-  } catch { return []; }
+  } catch (e) {
+    console.error("[anime3rb]", e);
+    return [];
+  }
 }
 
 
@@ -11749,7 +11844,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
       // witanime: مُعاد تفعيله 2026-07-17 — ok.ru/yonaplay/streamwish resolution
       scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 50000),
-      scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 22000),
+      scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 38000),
       scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
       scrapeCached("moviebox",  () => getMovieBoxAnimeSources(title, english, ep, isMovie), false, 18000),
@@ -11819,6 +11914,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
     "animekai",  // مُضاف بطلب المستخدم 2026-07-16
     "witanime",  // مُعاد تفعيله 2026-07-17 — _zH/_zW + ok.ru/yonaplay/streamwish resolution
+    "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
     // xpass_anim: محذوف — CDN (ps1/vip.1x2.space) يحجب VPS 2026-07-15
@@ -11944,7 +12040,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "reanime": DEAD — reanime.net أوقف خدمته 2026-07
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
-      case "anime3rb":     await runExtract(await race(getAnime3rbSources(title, english, ep), 22_000, [])); break;
+      case "anime3rb":     (await race(getAnime3rbSources(title, english, ep), 38_000, [])).forEach(collectSrc); break;
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       // case "xpass_anim": محذوف 2026-07-15
