@@ -476,55 +476,16 @@ async function scrapingAntGet(
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  zenRowsGet — جلب HTML عبر ZenRows (residential proxy + CF bypass)
-//  الأفضل لتجاوز Cloudflare Interactive Challenge (Turnstile)
-//  1000 طلب/شهر مجاناً مع residential IPs
-//  التسجيل: https://app.zenrows.com/register
-//  يتطلب: ZENROWS_KEY في env vars
-// ════════════════════════════════════════════════════════════════════
-const ZENROWS_KEY = process.env.ZENROWS_KEY || "";
-
-async function zenRowsGet(
-  url: string,
-  opts: { js?: boolean; premium?: boolean; timeoutMs?: number } = {},
-): Promise<{ html: string; cookies: string } | null> {
-  if (!ZENROWS_KEY) return null;
-  const { js = true, premium = true, timeoutMs = 60000 } = opts;
-  try {
-    const apiUrl = new URL("https://api.zenrows.com/v1/");
-    apiUrl.searchParams.set("apikey", ZENROWS_KEY);
-    apiUrl.searchParams.set("url", url);
-    if (js)      apiUrl.searchParams.set("js_render", "true");
-    if (premium) apiUrl.searchParams.set("premium_proxy", "true");
-    // CF bypass — يمر بـ CF Bot Management
-    apiUrl.searchParams.set("antibot", "true");
-    const r = await fetch(apiUrl.toString(), { signal: AbortSignal.timeout(timeoutMs) });
-    if (!r.ok) {
-      console.warn(`[zenrows] ${r.status} for ${url}`);
-      return null;
-    }
-    const text = await r.text();
-    if (isCloudflareBlock(text)) {
-      console.warn("[zenrows] still CF-blocked even after bypass");
-      return null;
-    }
-    if (text.length < 50) return null;
-    // استخرج cookies من Zr-Cookies header (يحتوي cf_clearance + session cookies)
-    const cookieHeader = r.headers.get("Zr-Cookies") ?? "";
-    return { html: text, cookies: cookieHeader };
-  } catch (e: any) {
-    console.warn(`[zenrows] error: ${e.message}`);
-    return null;
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════════════
 //  hopxProxyGet — جلب عبر Hopx sandbox (IP مختلف يتجاوز CF-block)
 //  يُستخدم كـ fallback للمواقع المحجوبة من VPS IP مباشرة
 // ════════════════════════════════════════════════════════════════════
-const HOPX_PROXY_BASE = process.env.HOPX_PROXY_URL || "http://localhost:8001";
+const HOPX_PROXY_BASE      = process.env.HOPX_PROXY_URL    || "http://localhost:8001";
+// OpenShift CF Bypass Service — بديل مجاني مُستضاف على OpenShift Developer Sandbox
+// يعمل كـ Playwright browser يُجدّد cf_clearance لـ anime3rb بدون مفاتيح خارجية
+// النشر: bash cf-bypass-service/deploy-openshift.sh <TOKEN>
+const OPENSHIFT_CF_URL     = process.env.OPENSHIFT_CF_URL   || "";
 let _hopxAlive: boolean | null = null;
 let _hopxCheckedAt = 0;
 
@@ -5686,50 +5647,38 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
     console.warn("[anime3rb] Hopx unavailable — trying ScrapingAnt");
   }
 
-  // ── المسار البطيء 2: ZenRows (residential proxy + CF bypass + JS render) ──
-  // الأقوى لتجاوز CF Interactive Challenge — residential IP + antibot
-  // 1,000 طلب/شهر مجاناً | يستخرج cf_clearance → يُخزَّن 20ساعة للـ cycleTLS المجاني
-  if (ZENROWS_KEY) {
+  // ── المسار البطيء 2: OpenShift CF Bypass (Playwright مُستضاف مجاناً) ──
+  // يعمل تماماً كـ Hopx — يُجدّد cf_clearance ويُخزّنها 20ساعة للـ cycleTLS
+  // النشر: bash cf-bypass-service/deploy-openshift.sh <TOKEN>
+  // الـ URL يُضبط عبر OPENSHIFT_CF_URL في .env / ecosystem.config.cjs
+  if (OPENSHIFT_CF_URL) {
     try {
-      console.log(`[anime3rb] ZenRows (residential+antibot) → ${url.slice(-50)}`);
-      const result = await zenRowsGet(url, { js: true, premium: true, timeoutMs: Math.min(timeoutMs, 60000) });
-      if (result) {
-        console.log(`[anime3rb] ZenRows ✅ got ${result.html.length} chars`);
-        // ── استخراج cf_clearance من Zr-Cookies وتخزينها للـ 20 ساعة القادمة ──
-        if (result.cookies) {
-          // Zr-Cookies: "cf_clearance=xxx; session=yyy; ..."
-          const cfMatch = result.cookies.match(/cf_clearance=[^;]+/);
-          if (cfMatch) {
-            _a3rbCfCookie   = cfMatch[0]; // cf_clearance=xxx فقط
+      console.log(`[anime3rb] OpenShift CF bypass (Playwright) → ${url.slice(-50)}`);
+      const params = new URLSearchParams({ url, ref: REF, wait: "8000" });
+      const r = await fetch(`${OPENSHIFT_CF_URL}/extract-cookies?${params}`, {
+        signal: AbortSignal.timeout(timeoutMs + 10000),
+      });
+      if (r.ok) {
+        const data = await r.json() as {
+          ok?: boolean; html?: string; cookie_str?: string;
+          cookies?: Record<string, string>; error?: string;
+        };
+        if (data.ok) {
+          if (data.cookie_str) {
+            _a3rbCfCookie   = data.cookie_str;
             _a3rbCfCookieAt = Date.now();
-            console.log("[anime3rb] cf_clearance استُخرج من ZenRows ✅ — cycleTLS جاهز للـ 20ساعة القادمة");
+            console.log(`[anime3rb] cf_clearance cached via OpenShift ✅ — cycleTLS جاهز للـ 20ساعة القادمة`);
           }
+          if (data.html) return data.html;
+        } else {
+          console.warn("[anime3rb] OpenShift CF bypass failed:", data.error);
         }
-        return result.html;
       }
-      console.warn("[anime3rb] ZenRows returned empty/blocked");
     } catch (e) {
-      console.warn("[anime3rb] ZenRows error:", (e as any).message);
+      console.warn("[anime3rb] OpenShift CF bypass error:", (e as any).message);
     }
   } else {
-    console.warn("[anime3rb] ZENROWS_KEY غير مُضبوط — سجّل على https://app.zenrows.com/register");
-  }
-
-  // ── المسار البطيء 3: ScrapingAnt (Chrome headless — datacenter IP) ──
-  // يحل JS Challenge العادي لكن لا يتجاوز CF Interactive Challenge من datacenter
-  // مفيد فقط إذا تغيّر نوع الحماية على anime3rb مستقبلاً
-  if (SCRAPINGANT_KEY) {
-    try {
-      console.log(`[anime3rb] ScrapingAnt browser → ${url.slice(-50)}`);
-      const html = await scrapingAntGet(url, { browser: true, timeoutMs: Math.min(timeoutMs, 45000) });
-      if (html) {
-        console.log(`[anime3rb] ScrapingAnt ✅ got ${html.length} chars`);
-        return html;
-      }
-      console.warn("[anime3rb] ScrapingAnt returned empty/blocked");
-    } catch (e) {
-      console.warn("[anime3rb] ScrapingAnt error:", (e as any).message);
-    }
+    console.warn("[anime3rb] OPENSHIFT_CF_URL غير مُضبوط — شغّل: bash cf-bypass-service/deploy-openshift.sh <TOKEN>");
   }
 
   return null;
@@ -5876,7 +5825,7 @@ async function getAnime3rbSources(
   // ── 2. File cache (يبقى بعد restart، 24 ساعة) ───────────────────────
   const fileHit = a3rbFileCacheGet(ck);
   if (fileHit) {
-    console.log(`[anime3rb] file cache hit ✅ (${fileHit.length} sources) → لا حاجة لـ ZenRows`);
+    console.log(`[anime3rb] file cache hit ✅ (${fileHit.length} sources) → لا حاجة لـ browser`);
     a3rbSrcCache.set(ck, { sources: fileHit, ts: Date.now() });
     return fileHit;
   }
