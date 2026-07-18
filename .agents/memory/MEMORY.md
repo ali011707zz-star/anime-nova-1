@@ -115,3 +115,4 @@
 - [WitAnime integration status](witanime-integration-status.md) — ok.ru ✅ 7 sources؛ yonaplay/videa ❌ (hopx جاهز لكن resolution لا تزال 0)؛ 3 إصلاحات مطبّقة على VPS؛ خطوات تالية محددة.
 - [WitAnime new extractors](witanime-new-extractors.md) — app.videas.fr ✅ (~800ms M3U8 in HTML); hgcloud.to ✅ Hopx (~7s); 0→10 direct sources; videa.hu _xt extracted but API pattern unsolved; mega.nz skip.
 - [yt-dlp WitAnime extractors](ytdlp-witanime-extractors.md) — videa.hu+mp4upload now use extractViaYtDlp(); _zH/_zW decode algo documented; yonaplay=base64→mega/ok.ru/4shared.
+- [Orkestr removal + scraper timeout fixes](orkestr-scraper-fixes-2026-07.md) — anineko direct fetch ✅ (no orkestGet needed); anikoto/hianime/anineko timeouts fixed 7s→20-30s; witanime no-empty-cache fix.

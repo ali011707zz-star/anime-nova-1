@@ -5490,7 +5490,7 @@ async function getWitanimeSources(
       return [];
     }
 
-    witaSrcCache.set(ck, { sources, ts: Date.now() });
+    if (sources.length) witaSrcCache.set(ck, { sources, ts: Date.now() }); // لا تحفظ [] في الكاش
     return sources;
   } catch { return []; }
 }
@@ -6220,13 +6220,15 @@ async function getHiAnimeSources(
     if (!slug) return [];
 
     // صفحة الحلقة — /watch/{slug}/ep-{N}
-    // hianime.ad تحوّلت لـ JS-rendered SPA — Hopx يُشغّل JS للحصول على data-video
-    let epHtml = await orkestGet(`${HIANIME_BASE}/watch/${slug}/ep-${ep}`, `${HIANIME_BASE}/anime/${slug}`, 25_000) ?? "";
-    if (!epHtml || epHtml.length < 1000) {
-      // Fallback: direct fetch
+    // hianime.ad SPA — cfProxyGet (curl_cffi Chrome) → hopxProxyGet (residential IP) → direct VPS
+    let epHtml = await cfProxyGet(`${HIANIME_BASE}/watch/${slug}/ep-${ep}`, HIANIME_REF, 18000) ?? "";
+    if (!epHtml || epHtml.length < 1000 || !epHtml.includes("data-video")) {
+      epHtml = await hopxProxyGet(`${HIANIME_BASE}/watch/${slug}/ep-${ep}`, HIANIME_REF, 20000) ?? "";
+    }
+    if (!epHtml || epHtml.length < 1000 || !epHtml.includes("data-video")) {
       epHtml = await fetch(`${HIANIME_BASE}/watch/${slug}/ep-${ep}`, {
         headers: { ...BASE_HDRS, Referer: `${HIANIME_BASE}/anime/${slug}` },
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(12000),
       }).then(r => r.ok ? r.text() : "").catch(() => "");
     }
     if (!epHtml || epHtml.length < 1000) return [];
@@ -6540,7 +6542,7 @@ async function searchAnineko(query: string): Promise<Array<{ slug: string; title
     });
     if (_dr.ok) html = await _dr.text();
   } catch { /* fall through */ }
-  if (!html) html = await orkestGet(searchUrl, `${ANINEKO_BASE}/`, 20000) ?? "";
+  // orkestGet removed — anineko.to accessible directly from VPS IP (confirmed 2026-07)
 
   const results: Array<{ slug: string; title: string }> = [];
   for (const m of html.matchAll(/<a\b[^>]*class=["'][^"']*nv-anime-thumb[^"']*["'][^>]*>[\s\S]*?<\/a>/gi)) {
@@ -6593,7 +6595,11 @@ async function extractAninekoHls(embedUrl: string, seriesSlug: string): Promise<
 async function extractAninekoAllHls(
   embedUrl: string, seriesSlug: string,
 ): Promise<Array<{ quality: string; rank: number; url: string }>> {
-  const html = await orkestGet(embedUrl, `${ANINEKO_BASE}/watch/${seriesSlug}`, 18000) ?? "";
+  // direct fetch — anineko.to does not block VPS IP (Orkestr account closed 2026-07)
+  let html = await fetch(embedUrl, {
+    headers: { "User-Agent": BROWSER_UA, Referer: `${ANINEKO_BASE}/watch/${seriesSlug}`, Accept: "text/html,*/*;q=0.9" },
+    signal: AbortSignal.timeout(12_000),
+  }).then(r => r.ok ? r.text() : "").catch(() => "");
   const unpacked = unpackPacked(html) ?? "";
   const embedDomain = (() => { try { return new URL(embedUrl).origin; } catch { return ""; } })();
 
@@ -6631,7 +6637,7 @@ async function extractAninekoAllHls(
   return results;
 }
 
-const ANINEKO_DISABLED = false; // مُعاد تفعيله عبر Orkestr external relay (IP أوروبي)
+const ANINEKO_DISABLED = false; // يعمل مباشرة من VPS IP — لا يحتاج Orkestr
 
 async function getAninekoSources(
   title: string, english: string | null, ep: number,
@@ -6641,18 +6647,15 @@ async function getAninekoSources(
     const slug = await findAninekoSlug(title, english);
     if (!slug) return [];
 
-    // صفحة الحلقة — عبر Orkestr relay أولاً، ثم direct fetch كـ fallback
-    let epHtml = await orkestGet(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, `${ANINEKO_BASE}/watch/${slug}`, 20000) ?? "";
-    if (!epHtml) {
-      // Fallback: direct fetch (VPS IP is not blocked by anineko)
-      try {
-        const rfr = await fetch(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, {
-          headers: { "User-Agent": BROWSER_UA, Referer: `${ANINEKO_BASE}/watch/${slug}`, Accept: "text/html,*/*;q=0.9", "Accept-Language": "ar,en;q=0.9" },
-          signal: AbortSignal.timeout(15_000),
-        });
-        if (rfr.ok) epHtml = await rfr.text();
-      } catch { /* ignore */ }
-    }
+    // direct fetch — anineko.to accessible directly from VPS (Orkestr account closed 2026-07)
+    let epHtml = "";
+    try {
+      const rfr = await fetch(`${ANINEKO_BASE}/watch/${slug}/ep-${ep}`, {
+        headers: { "User-Agent": BROWSER_UA, Referer: `${ANINEKO_BASE}/watch/${slug}`, Accept: "text/html,*/*;q=0.9", "Accept-Language": "ar,en;q=0.9" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (rfr.ok) epHtml = await rfr.text();
+    } catch { /* ignore */ }
     if (!epHtml) return [];
 
     // استهدف الـ panel الخاص بـ sub مباشرة (class lang-group + data-id="sub")
@@ -11913,15 +11916,15 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "moviz_time":  (await race(getMovizTimeSources(title, english, ep, isMovie), 20000, [])).forEach(collectSrc); break;
       case "topcinemaa":   await runExtract(await race(getTopCimaaSources(title, english, ep, isMovie), SCRAPER_MS, [])); break;
       case "kawaii":      (await race(getKawaiiAnimeSources(title, english, ep, anilistId), SCRAPER_MS, [])).forEach(collectSrc); break;
-      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anikoto":     (await race(getAniKotoSources(title, english, ep, anilistId),     20_000, [])).forEach(collectSrc); break;
       case "anikototv":   (await race(getAnikototvSources(title, english, ep),              25000, [])).forEach(collectSrc); break;
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    40_000, [])).forEach(collectSrc); break;
       // anikuro: محذوف
       // anivault: محذوف
-      case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      30_000, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),38000, [])).forEach(collectSrc); break;
       case "stardima":    (await race(getStardimaSources(title, english, ep, isMovie),       20000, [])).forEach(collectSrc); break;
-      case "anineko":       (await race(getAninekoSources(title, english, ep),                SCRAPER_MS, [])).forEach(collectSrc); break;
+      case "anineko":       (await race(getAninekoSources(title, english, ep),                20_000, [])).forEach(collectSrc); break;
       case "anipm":         (await race(getAniPmSources(title, english, ep, anilistId),       20_000,     [])).forEach(collectSrc); break;
       case "anizone":       (await race(getAniZoneSources(title, english, ep),               18_000,     [])).forEach(collectSrc); break;
       case "2dhive":        await runExtract(await race(get2DhiveSources(title, english, ep), 20_000, [])); break;
