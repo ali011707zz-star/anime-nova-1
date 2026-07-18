@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
 import { execSync, execFile } from "child_process";
-import { existsSync, writeFileSync, readFileSync, readdirSync } from "fs";
+import { existsSync, writeFileSync, readFileSync, readdirSync, mkdirSync } from "fs";
+import { join as pathJoin } from "path";
 import {
   makeSourceCacheKey,
   getFromSourceCache,
@@ -486,7 +487,7 @@ const ZENROWS_KEY = process.env.ZENROWS_KEY || "";
 async function zenRowsGet(
   url: string,
   opts: { js?: boolean; premium?: boolean; timeoutMs?: number } = {},
-): Promise<string | null> {
+): Promise<{ html: string; cookies: string } | null> {
   if (!ZENROWS_KEY) return null;
   const { js = true, premium = true, timeoutMs = 60000 } = opts;
   try {
@@ -507,7 +508,10 @@ async function zenRowsGet(
       console.warn("[zenrows] still CF-blocked even after bypass");
       return null;
     }
-    return text.length > 50 ? text : null;
+    if (text.length < 50) return null;
+    // استخرج cookies من Zr-Cookies header (يحتوي cf_clearance + session cookies)
+    const cookieHeader = r.headers.get("Zr-Cookies") ?? "";
+    return { html: text, cookies: cookieHeader };
   } catch (e: any) {
     console.warn(`[zenrows] error: ${e.message}`);
     return null;
@@ -5558,6 +5562,39 @@ const A3RB_SUPA_KEY =
 
 const a3rbSlugCache = new Map<string, { slug: string | null; ts: number }>();
 const a3rbSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
+const A3RB_DB_TTL = 24 * 3_600_000; // 24 ساعة
+
+// ── File cache (يبقى بعد restart السيرفر — بدون DB) ──────────────────
+const A3RB_CACHE_FILE = pathJoin(process.cwd(), "cache", "a3rb_src.json");
+let _a3rbFileCache: Record<string, { sources: UnifiedSource[]; ts: number }> = {};
+// تحميل عند بدء التشغيل
+(function loadA3rbFileCache() {
+  try {
+    mkdirSync(pathJoin(process.cwd(), "cache"), { recursive: true });
+    if (existsSync(A3RB_CACHE_FILE)) {
+      _a3rbFileCache = JSON.parse(readFileSync(A3RB_CACHE_FILE, "utf8"));
+      console.log(`[anime3rb] file cache loaded: ${Object.keys(_a3rbFileCache).length} entries`);
+    }
+  } catch { _a3rbFileCache = {}; }
+})();
+
+function a3rbFileCacheGet(ck: string): UnifiedSource[] | null {
+  const entry = _a3rbFileCache[ck];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > A3RB_DB_TTL) { delete _a3rbFileCache[ck]; return null; }
+  return entry.sources;
+}
+
+function a3rbFileCacheSave(ck: string, sources: UnifiedSource[]): void {
+  try {
+    _a3rbFileCache[ck] = { sources, ts: Date.now() };
+    const now = Date.now();
+    for (const k of Object.keys(_a3rbFileCache)) {
+      if (now - _a3rbFileCache[k].ts > A3RB_DB_TTL) delete _a3rbFileCache[k];
+    }
+    writeFileSync(A3RB_CACHE_FILE, JSON.stringify(_a3rbFileCache), "utf8");
+  } catch { /* silent */ }
+}
 
 // ── cf_clearance cookie cache لـ anime3rb ──────────────────────────────
 // المنطق: browser مرة واحدة كل 20 ساعة → cycleTLS للباقي (سريع ~1-2ث)
@@ -5651,14 +5688,24 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
 
   // ── المسار البطيء 2: ZenRows (residential proxy + CF bypass + JS render) ──
   // الأقوى لتجاوز CF Interactive Challenge — residential IP + antibot
-  // 1,000 طلب/شهر مجاناً | التسجيل: https://app.zenrows.com/register
+  // 1,000 طلب/شهر مجاناً | يستخرج cf_clearance → يُخزَّن 20ساعة للـ cycleTLS المجاني
   if (ZENROWS_KEY) {
     try {
       console.log(`[anime3rb] ZenRows (residential+antibot) → ${url.slice(-50)}`);
-      const html = await zenRowsGet(url, { js: true, premium: true, timeoutMs: Math.min(timeoutMs, 60000) });
-      if (html) {
-        console.log(`[anime3rb] ZenRows ✅ got ${html.length} chars`);
-        return html;
+      const result = await zenRowsGet(url, { js: true, premium: true, timeoutMs: Math.min(timeoutMs, 60000) });
+      if (result) {
+        console.log(`[anime3rb] ZenRows ✅ got ${result.html.length} chars`);
+        // ── استخراج cf_clearance من Zr-Cookies وتخزينها للـ 20 ساعة القادمة ──
+        if (result.cookies) {
+          // Zr-Cookies: "cf_clearance=xxx; session=yyy; ..."
+          const cfMatch = result.cookies.match(/cf_clearance=[^;]+/);
+          if (cfMatch) {
+            _a3rbCfCookie   = cfMatch[0]; // cf_clearance=xxx فقط
+            _a3rbCfCookieAt = Date.now();
+            console.log("[anime3rb] cf_clearance استُخرج من ZenRows ✅ — cycleTLS جاهز للـ 20ساعة القادمة");
+          }
+        }
+        return result.html;
       }
       console.warn("[anime3rb] ZenRows returned empty/blocked");
     } catch (e) {
@@ -5821,8 +5868,18 @@ async function getAnime3rbSources(
   tmdbId?: number,
 ): Promise<UnifiedSource[]> {
   const ck = `a3rb:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
+
+  // ── 1. Memory cache (سريع جداً) ──────────────────────────────────────
   const hit = a3rbSrcCache.get(ck);
-  if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
+  if (hit && Date.now() - hit.ts < A3RB_DB_TTL) return hit.sources;
+
+  // ── 2. File cache (يبقى بعد restart، 24 ساعة) ───────────────────────
+  const fileHit = a3rbFileCacheGet(ck);
+  if (fileHit) {
+    console.log(`[anime3rb] file cache hit ✅ (${fileHit.length} sources) → لا حاجة لـ ZenRows`);
+    a3rbSrcCache.set(ck, { sources: fileHit, ts: Date.now() });
+    return fileHit;
+  }
 
   try {
     // 1. احصل على الـ slug من Animatoo Supabase
@@ -5867,6 +5924,8 @@ async function getAnime3rbSources(
     });
 
     a3rbSrcCache.set(ck, { sources, ts: Date.now() });
+    // ── حفظ في file cache (يصمد بعد restart، 24 ساعة) ──
+    a3rbFileCacheSave(ck, sources);
     return sources;
   } catch (e) {
     console.error("[anime3rb]", e);
