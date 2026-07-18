@@ -114,3 +114,4 @@
 - [Animation sources state 2026-07-17](animation-sources-2026-07-17.md) — vidfast_vc مضاف ✅ (4-5 servers)؛ 4KHDHub .rar filter؛ VidLink Hindi filter؛ 12-18 مصدر للأفلام الشائعة.
 - [WitAnime integration status](witanime-integration-status.md) — ok.ru ✅ 7 sources؛ yonaplay/videa ❌ (hopx جاهز لكن resolution لا تزال 0)؛ 3 إصلاحات مطبّقة على VPS؛ خطوات تالية محددة.
 - [WitAnime new extractors](witanime-new-extractors.md) — app.videas.fr ✅ (~800ms M3U8 in HTML); hgcloud.to ✅ Hopx (~7s); 0→10 direct sources; videa.hu _xt extracted but API pattern unsolved; mega.nz skip.
+- [yt-dlp WitAnime extractors](ytdlp-witanime-extractors.md) — videa.hu+mp4upload now use extractViaYtDlp(); _zH/_zW decode algo documented; yonaplay=base64→mega/ok.ru/4shared.
