@@ -1,0 +1,13 @@
+{
+  "name": "nova-cf-bypass",
+  "version": "1.0.0",
+  "description": "Cloudflare bypass service using Playwright — drop-in Hopx /extract-cookies replacement",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "playwright-core": "^1.52.0"
+  }
+}
