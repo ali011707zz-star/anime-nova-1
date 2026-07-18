@@ -5571,38 +5571,64 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
     } catch { /* fall through to browser */ }
   }
 
-  // ── المسار البطيء: Hopx /extract-cookies (Playwright) ───────────────
+  // ── المسار البطيء 1: Hopx /extract-cookies (Playwright) ────────────
+  let hopxOk = false;
   try {
     const h = await fetch(`${HOPX_PROXY_BASE}/health`, { signal: AbortSignal.timeout(4000) });
-    if (!h.ok) { console.warn("[anime3rb] Hopx unavailable"); return null; }
     const hj = await h.json() as { ok?: boolean; playwright?: boolean };
-    if (!hj.ok || !hj.playwright) { console.warn("[anime3rb] Hopx has no Playwright"); return null; }
-  } catch { console.warn("[anime3rb] Hopx health check failed"); return null; }
+    hopxOk = !!(h.ok && hj.ok && hj.playwright);
+  } catch { /* hopx unavailable */ }
 
-  try {
-    console.log(`[anime3rb] slow-path (Hopx browser) → solving CF for ${url.slice(-50)}`);
-    const params = new URLSearchParams({ url, ref: REF, wait: "8000" });
-    const r = await fetch(`${HOPX_PROXY_BASE}/extract-cookies?${params}`, {
-      signal: AbortSignal.timeout(timeoutMs + 10000),
-    });
-    if (!r.ok) return null;
-    const data = await r.json() as {
-      ok?: boolean; html?: string; cookie_str?: string;
-      cookies?: Record<string, string>; error?: string;
-    };
-    if (!data.ok) { console.warn("[anime3rb] browser extract failed:", data.error); return null; }
-
-    // خزّن الـ cookie للاستخدامات القادمة
-    if (data.cookie_str) {
-      _a3rbCfCookie   = data.cookie_str;
-      _a3rbCfCookieAt = Date.now();
-      console.log(`[anime3rb] cf_clearance cached ✅ (valid ~20h)`);
+  if (hopxOk) {
+    try {
+      console.log(`[anime3rb] slow-path (Hopx browser) → solving CF for ${url.slice(-50)}`);
+      const params = new URLSearchParams({ url, ref: REF, wait: "8000" });
+      const r = await fetch(`${HOPX_PROXY_BASE}/extract-cookies?${params}`, {
+        signal: AbortSignal.timeout(timeoutMs + 10000),
+      });
+      if (r.ok) {
+        const data = await r.json() as {
+          ok?: boolean; html?: string; cookie_str?: string;
+          cookies?: Record<string, string>; error?: string;
+        };
+        if (data.ok) {
+          if (data.cookie_str) {
+            _a3rbCfCookie   = data.cookie_str;
+            _a3rbCfCookieAt = Date.now();
+            console.log(`[anime3rb] cf_clearance cached via Hopx ✅`);
+          }
+          if (data.html) return data.html;
+        } else {
+          console.warn("[anime3rb] Hopx browser extract failed:", data.error);
+        }
+      }
+    } catch (e) {
+      console.warn("[anime3rb] Hopx browser fetch error:", (e as any).message);
     }
-    return data.html ?? null;
-  } catch (e) {
-    console.error("[anime3rb] browser fetch error:", e);
-    return null;
+  } else {
+    console.warn("[anime3rb] Hopx unavailable — trying ScrapingAnt");
   }
+
+  // ── المسار البطيء 2: ScrapingAnt (Chrome headless + residential IP) ──
+  // يحل CF Turnstile Interactive Challenge بشكل كامل
+  // browser=true → 10 كريدت/طلب | 10,000 كريدت مجاناً/شهر
+  if (SCRAPINGANT_KEY) {
+    try {
+      console.log(`[anime3rb] ScrapingAnt browser → ${url.slice(-50)}`);
+      const html = await scrapingAntGet(url, { browser: true, timeoutMs: Math.min(timeoutMs, 45000) });
+      if (html) {
+        console.log(`[anime3rb] ScrapingAnt ✅ got ${html.length} chars`);
+        return html;
+      }
+      console.warn("[anime3rb] ScrapingAnt returned empty/blocked");
+    } catch (e) {
+      console.warn("[anime3rb] ScrapingAnt error:", (e as any).message);
+    }
+  } else {
+    console.warn("[anime3rb] SCRAPINGANT_KEY غير مُضبوط — أضفه في .env لتفعيل هذا المسار");
+  }
+
+  return null;
 }
 
 /** جلب صفحة HTML عبر Hopx browser-html (Playwright headless) — للاستخدامات العامة */
