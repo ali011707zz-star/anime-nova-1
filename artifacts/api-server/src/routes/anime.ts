@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { createHash, createDecipheriv, createCipheriv, randomBytes } from "crypto";
-import { execSync } from "child_process";
+import { execSync, execFile } from "child_process";
 import { existsSync, writeFileSync, readFileSync, readdirSync } from "fs";
 import {
   makeSourceCacheKey,
@@ -542,6 +542,38 @@ async function hopxBrowserExtract(
     const first = data.urls[0];
     return { url: first.url, type: first.type === "hls" ? "hls" : "mp4" };
   } catch { return null; }
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  extractViaYtDlp — استخراج رابط مباشر من embed page عبر yt-dlp
+//  تعمل بشكل ممتاز مع: videa.hu · mp4upload · أي embed تدعمه yt-dlp
+// ════════════════════════════════════════════════════════════════════
+async function extractViaYtDlp(
+  embedUrl: string,
+  referer?: string,
+  timeoutMs = 25000,
+): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    const args = [
+      "--no-warnings",
+      "--no-download",
+      "--get-url",
+      "--no-playlist",
+    ];
+    if (referer) {
+      args.push("--add-header", `Referer:${referer}`);
+    }
+    args.push(embedUrl);
+
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    execFile("/usr/local/bin/yt-dlp", args, { timeout: timeoutMs }, (err, stdout) => {
+      clearTimeout(timer);
+      if (err || !stdout.trim()) { resolve(null); return; }
+      const urls = stdout.trim().split("\n").map((l: string) => l.trim()).filter((l: string) => l.startsWith("http"));
+      resolve(urls[0] ?? null);
+    });
+  });
 }
 
 //  smartFetch — جلب ذكي يجرب كل الوسائل بالترتيب (تلقائياً)
@@ -5316,61 +5348,42 @@ async function resolveWitaServerUrl(
     return []; // فشل الاستخراج — لا نُرجع isEmbed
   }
 
-  // ── videa.hu ────────────────────────────────────────────────────────────────
-  // يحتوي HTML الـ player على _xt (nonce) — نستخدمه لاستدعاء video-xml.php
+  // ── videa.hu — yt-dlp extraction (tested: returns MP4 URL directly) ────────
   if (host === "videa.hu" || host.endsWith(".videa.hu")) {
     try {
-      // 1. جلب صفحة الـ player لاستخراج _xt
-      const pR = await fetch(embedUrl, {
-        headers: {
-          "Referer": "https://witanime.life/",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36",
-        },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (pR.ok) {
-        const pHtml = await pR.text();
-        const xtM = pHtml.match(/var\s+_xt\s*=\s*["']([^"']{20,100})["']/);
-        const vidM = embedUrl.match(/[?&]v=([A-Za-z0-9_-]{8,32})/);
-        if (xtM && vidM) {
-          const v = vidM[1];
-          const xt = xtM[1];
-          // 2. استدعاء video-xml.php بـ nonce
-          for (const param of ["_t", "nonce", "_xt", "hash"]) {
-            const xmlUrl = `https://videa.hu/videaplayer/video-xml.php?v=${v}&${param}=${encodeURIComponent(xt)}`;
-            const xR = await fetch(xmlUrl, {
-              headers: {
-                "Referer": "https://videa.hu/",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36",
-              },
-              signal: AbortSignal.timeout(8000),
-            });
-            if (xR.ok && xR.status !== 404) {
-              const xml = await xR.text();
-              // استخرج رابط الفيديو من XML
-              const srcM = xml.match(/<video_url[^>]*>([^<]+)<\/video_url>/i)
-                ?? xml.match(/<src[^>]*>([^<]+)<\/src>/i)
-                ?? xml.match(/src=["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i);
-              if (srcM && srcM[1].startsWith("http")) {
-                const vUrl = srcM[1];
-                const isHls = vUrl.includes(".m3u8");
-                console.log(`[WitAnime/videa] got ${isHls ? "HLS" : "MP4"} via ${param}`);
-                return [{
-                  name: serverName || "Videa",
-                  url: vUrl,
-                  directUrl: isHls
-                    ? `/api/anime/hls-proxy?url=${encodeURIComponent(vUrl)}&ref=${encodeURIComponent("https://videa.hu/")}`
-                    : `/api/anime/video-proxy?url=${encodeURIComponent(vUrl)}&ref=${encodeURIComponent("https://videa.hu/")}`,
-                  quality: "HD", qualityRank: 8, site: "witanime",
-                }];
-              }
-              break; // لا نجح الـ API لكن استجاب — لا نكرر بـ params مختلفة
-            }
-          }
-        }
+      const ytUrl = await extractViaYtDlp(embedUrl, "https://witanime.life/", 20000);
+      if (ytUrl && ytUrl.startsWith("http")) {
+        const isHls = ytUrl.includes(".m3u8");
+        console.log(`[WitAnime/videa] yt-dlp got ${isHls ? "HLS" : "MP4"}: ${ytUrl.slice(0, 80)}`);
+        return [{
+          name: serverName || "Videa",
+          url: ytUrl,
+          directUrl: isHls
+            ? `/api/anime/hls-proxy?url=${encodeURIComponent(ytUrl)}&ref=${encodeURIComponent("https://videa.hu/")}`
+            : `/api/anime/video-proxy?url=${encodeURIComponent(ytUrl)}&ref=${encodeURIComponent("https://videa.hu/")}`,
+          quality: "HD", qualityRank: 8, site: "witanime",
+        }];
       }
     } catch (e: any) { console.warn("[WitAnime/videa]", e?.message); }
-    return []; // فشل الاستخراج — لا نُرجع isEmbed
+    return [];
+  }
+
+
+  // ── mp4upload — yt-dlp extraction ─────────────────────────────────────────
+  if (host.includes("mp4upload.com")) {
+    try {
+      const ytUrl = await extractViaYtDlp(embedUrl, "https://witanime.life/", 20000);
+      if (ytUrl && ytUrl.startsWith("http")) {
+        console.log(`[WitAnime/mp4upload] yt-dlp got MP4: ${ytUrl.slice(0, 80)}`);
+        return [{
+          name: serverName || "mp4upload",
+          url: ytUrl,
+          directUrl: `/api/anime/video-proxy?url=${encodeURIComponent(ytUrl)}&ref=${encodeURIComponent("https://www.mp4upload.com/")}`,
+          quality: "SD", qualityRank: 5, site: "witanime",
+        }];
+      }
+    } catch (e: any) { console.warn("[WitAnime/mp4upload]", e?.message); }
+    return [];
   }
 
   // ── عام — تجاهل (لا نُرجع isEmbed لأي host مجهول) ──────────────────────────
