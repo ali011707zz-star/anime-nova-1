@@ -33,6 +33,8 @@ jobs:
         id: get_cookie
         env:
           SITE: ${{ github.event.inputs.site || 'anime3rb' }}
+          VPS_API_URL: ${{ secrets.VPS_API_URL }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
         run: |
           node << 'SCRIPT'
           const { chromium } = require('playwright');
@@ -133,6 +135,3 @@ jobs:
             }
           })();
           SCRIPT
-        env:
-          VPS_API_URL: ${{ secrets.VPS_API_URL }}
-          APP_SECRET: ${{ secrets.APP_SECRET }}
