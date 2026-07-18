@@ -5,6 +5,7 @@ import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
 import { setDbConfig, clearDbConfigCache } from "../lib/dbConfig.js";
 import { checkAppSecret } from "../lib/security.js";
+import { setA3rbCfCookie } from "./anime.js";
 
 // دالة مساعدة للتحقق من secret أو صلاحيات الأدمن
 async function hasRelayAccess(req: Request): Promise<boolean> {
@@ -454,6 +455,26 @@ router.get("/admin/setup/status", async (req: Request, res: Response) => {
       SMTP_USER:           process.env.SMTP_USER            ? "✅ في البيئة" : "⚠️ غير موجود",
     },
   });
+});
+
+
+// ── تحديث cf_clearance كوكيز من GitHub Actions ─────────────────────────────
+
+router.post("/admin/update-cf-cookie", async (req: Request, res: Response) => {
+  const provided = (req.headers["x-app-secret"] as string | undefined);
+  if (!checkAppSecret(provided)) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const { site, cookie, ts } = req.body as { site?: string; cookie?: string; ts?: number };
+  if (!cookie || typeof cookie !== "string" || cookie.length < 10) {
+    return res.status(400).json({ error: "cookie مطلوب وغير صالح" });
+  }
+  if (site === "anime3rb" || !site) {
+    setA3rbCfCookie(cookie, ts);
+    console.log("[admin] cf_clearance updated for anime3rb via external trigger");
+    return res.json({ ok: true, site: "anime3rb", updated: new Date().toISOString() });
+  }
+  return res.status(400).json({ error: `site غير معروف: ${site}` });
 });
 
 export default router;
