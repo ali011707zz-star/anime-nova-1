@@ -553,6 +553,7 @@ async function extractViaYtDlp(
   embedUrl: string,
   referer?: string,
   timeoutMs = 25000,
+  format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
 ): Promise<string | null> {
   return new Promise<string | null>((resolve) => {
     const args = [
@@ -560,6 +561,7 @@ async function extractViaYtDlp(
       "--no-download",
       "--get-url",
       "--no-playlist",
+      "-f", format,
     ];
     if (referer) {
       args.push("--add-header", `Referer:${referer}`);
@@ -570,10 +572,22 @@ async function extractViaYtDlp(
     execFile("/usr/local/bin/yt-dlp", args, { timeout: timeoutMs }, (err, stdout) => {
       clearTimeout(timer);
       if (err || !stdout.trim()) { resolve(null); return; }
+      // bestvideo+bestaudio يُرجع سطرين (video URL + audio URL) — نأخذ الأول فقط
       const urls = stdout.trim().split("\n").map((l: string) => l.trim()).filter((l: string) => l.startsWith("http"));
       resolve(urls[0] ?? null);
     });
   });
+}
+
+/** استخرج جودة الفيديو من رابط videa.hu (w1080p/w720p/360p/…) */
+function videaQualityFromUrl(url: string): { quality: string; qualityRank: number } {
+  const m = url.match(/\/(?:w(\d+)p|(\d+)p)\//);
+  const h = m ? parseInt(m[1] ?? m[2], 10) : 0;
+  if (h >= 1080) return { quality: "FHD", qualityRank: 11 };
+  if (h >= 720)  return { quality: "HD",  qualityRank: 9  };
+  if (h >= 480)  return { quality: "SD+", qualityRank: 7  };
+  if (h >= 360)  return { quality: "SD",  qualityRank: 5  };
+  return { quality: "SD", qualityRank: 5 };
 }
 
 //  smartFetch — جلب ذكي يجرب كل الوسائل بالترتيب (تلقائياً)
@@ -5354,14 +5368,15 @@ async function resolveWitaServerUrl(
       const ytUrl = await extractViaYtDlp(embedUrl, "https://witanime.life/", 20000);
       if (ytUrl && ytUrl.startsWith("http")) {
         const isHls = ytUrl.includes(".m3u8");
-        console.log(`[WitAnime/videa] yt-dlp got ${isHls ? "HLS" : "MP4"}: ${ytUrl.slice(0, 80)}`);
+        const { quality, qualityRank } = videaQualityFromUrl(ytUrl);
+        console.log(`[WitAnime/videa] yt-dlp got ${quality} ${isHls ? "HLS" : "MP4"}: ${ytUrl.slice(0, 80)}`);
         return [{
-          name: serverName || "Videa",
+          name: `${serverName || "Videa"} · ${quality}`,
           url: ytUrl,
           directUrl: isHls
             ? `/api/anime/hls-proxy?url=${encodeURIComponent(ytUrl)}&ref=${encodeURIComponent("https://videa.hu/")}`
             : `/api/anime/video-proxy?url=${encodeURIComponent(ytUrl)}&ref=${encodeURIComponent("https://videa.hu/")}`,
-          quality: "HD", qualityRank: 8, site: "witanime",
+          quality, qualityRank, site: "witanime",
         }];
       }
     } catch (e: any) { console.warn("[WitAnime/videa]", e?.message); }
