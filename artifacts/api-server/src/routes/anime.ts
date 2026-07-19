@@ -12159,7 +12159,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("shahiid",      () => getShahiidSources(title, english, ep, isMovie, matchCtx)),
       // scrapeCached("animelek",     () => getAnimelekSources(title, english, ep, isMovie, matchCtx)),
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
-      scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx)),
+      scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -12370,7 +12370,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
-      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
+      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie),    22_000, [])); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
