@@ -116,7 +116,7 @@ const HIDDEN_RESOLVE_EMBED_HOSTS = ["fasel-hd.cam", "animelek.top", "animedar.co
 // witanime أُعيد إضافته 2026-07-18 — مُعاد تفعيله 2026-07-17 بـ pipeline كامل
 // (yonaplay/streamwish/hgcloud). hopxBrowserExtract لا يكتشف yonaplay لذا
 // نُمرر isEmbed للـ client (mobile WEBVIEW + web Watch.tsx isEmbedFallback).
-const HIDDEN_RESOLVE_EMBED_SITES = ["mycima", "moviz_time", "witanime"];
+const HIDDEN_RESOLVE_EMBED_SITES = ["mycima", "moviz_time"];
 
 // Hosts that cannot be extracted AND are NOT allowed as embed → skip entirely
 const EMBED_ONLY_HOSTS = [
@@ -12363,8 +12363,10 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("shahiid",      () => getShahiidSources(title, english, ep, isMovie, matchCtx)),
       // scrapeCached("animelek",     () => getAnimelekSources(title, english, ep, isMovie, matchCtx)),
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
-      scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
-      scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
+      // okanime: معطّل بطلب المستخدم
+      // scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
+      // mitanime: معطّل بطلب المستخدم
+      // scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -12417,8 +12419,8 @@ router.get("/anime/sources-stream", async (req, res) => {
       // ── FaselHD-DB — GitHub JSON catalog + Orkestr relay (fasel-hd.cam) ─────
       // faselhd_db: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // scrapeCached("faselhd_db", () => getFaselhdDbSources(title, english, ep, isMovie), false, 28000),
-      // witanime: مُعاد تفعيله 2026-07-17 — ok.ru/yonaplay/streamwish resolution
-      scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 50000),
+      // witanime: معطّل بطلب المستخدم
+      // scrapeCached("witanime",  () => getWitanimeSources(title, english, ep),   false, 50000),
       scrapeCached("anime3rb",  () => getAnime3rbSources(title, english, ep),   false, 38000),
       scrapeCached("akoam",     () => getAkoamSources(title, english, ep),       false, 22000),
       // ── MovieBox — MP4 مباشر، صوت خام، بدون ترجمة مدمجة ─────────────────────
@@ -12587,8 +12589,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
-      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie), 22_000, [])); break;
-      case "mitanime":    (await race(getMitanimeSources(title, english, ep),                             60_000, [])).forEach(collectSrc); break;
+      // case "okanime": معطّل بطلب المستخدم
+      // case "mitanime": معطّل بطلب المستخدم
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
@@ -12624,7 +12626,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "witanime_db":  (await race(getWitanimeDBSources(title, english, ep, anilistId), 25_000, [])).forEach(collectSrc); break;
       // faselhd_db: معطّلة بطلب المستخدم 2026-07-14 (قسم الأنمي فقط)
       // case "faselhd_db":   await runExtract(await race(getFaselhdDbSources(title, english, ep, isMovie), 28_000, [])); break;
-      case "witanime":     (await race(getWitanimeSources(title, english, ep), 50_000, [])).forEach(collectSrc); break;
+      // case "witanime": معطّل بطلب المستخدم
       // case "reanime": DEAD — reanime.net أوقف خدمته 2026-07
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;

@@ -21,7 +21,7 @@ type Screen     = "loading" | "picker" | "native" | "embed" | "resolving";
 
 /* ── مواقع محمية بـ Cloudflare/Turnstile يفشل الخادم (VPS) بجلب فيديوها المباشر —
    نحاول أولاً حلّها عبر WebView مخفي (IP سكني حقيقي للجهاز) قبل عرض بطاقة "يحتاج تطبيق أصلي" ── */
-const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "animephoenix", "anime3rb", "ristoanime", "faselhd_db", "witanime", "witanime_db", "mycima"]);
+const WEBVIEW_RESOLVE_SITES = new Set(["animelek", "animedar", "animephoenix", "anime3rb", "ristoanime", "faselhd_db", "witanime_db", "mycima"]);
 function needsHiddenResolve(s: Src): boolean {
   return !!s.isEmbed && !!s.site && WEBVIEW_RESOLVE_SITES.has(s.site);
 }
@@ -206,16 +206,16 @@ function ensureVpsProxy(url: string, headers: Record<string, string> | undefined
 const SITE_PRIORITY: Record<string, number> = {
   kawaii: 100, hianime: 95, animewitcher: 90,
   dulo_anim: 70, vidlink_anim: 55,
-  anineko: 50, mitanime: 45, anikoto: 40, vidfast: 35,
+  anineko: 50, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
-  witanime: 12,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
   "kawaii", "anikoto", "hianime", "animewitcher",
-  "anineko", "anslayer", "animeify", "witanime",
+  "anineko", "anslayer", "animeify",
+  // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
 
