@@ -129,3 +129,13 @@ ALTER TABLE watch_progress         DISABLE ROW LEVEL SECURITY;
 ALTER TABLE source_cache           DISABLE ROW LEVEL SECURITY;
 ALTER TABLE subtitle_cache         DISABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_verifications  DISABLE ROW LEVEL SECURITY;
+
+-- ── site_cookies — تخزين كوكيز CF دائم (يصمد بعد restart) ───────────
+-- يُستخدم لـ anime3rb cf_clearance: يُجدَّد مرة/20ساعة عبر nopecha
+CREATE TABLE IF NOT EXISTS site_cookies (
+  site        TEXT        PRIMARY KEY,
+  cookie_str  TEXT        NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ NOT NULL
+);
+ALTER TABLE site_cookies DISABLE ROW LEVEL SECURITY;
