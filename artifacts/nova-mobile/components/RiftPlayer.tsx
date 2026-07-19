@@ -483,6 +483,12 @@ export function RiftPlayer({
   /* ─── Refs ─── */
   const hideTimer         = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressTimer     = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** كاشف الـ stall: موضع آخر حركة + وقتها (لكشف "يشتغل بدون تقدّم") */
+  const stallRef          = useRef<{ lastPos: number; lastAt: number }>({ lastPos: -1, lastAt: 0 });
+  /** refs للحالات التي يحتاجها الـ polling interval بدون stale closure */
+  const isPlayingRef      = useRef(false);
+  const isErrorRef        = useRef(false);
+  const isEndedRef        = useRef(false);
   const lastTap           = useRef<{ time: number; side: "L" | "R" } | null>(null);
   const tapTimer          = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -660,8 +666,14 @@ export function RiftPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSourceIndex]);
 
+  /* ─── مزامنة refs الحالة مع polling ─── */
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { isErrorRef.current = error; }, [error]);
+  useEffect(() => { isEndedRef.current = isEnded; }, [isEnded]);
+
   /* ─── Progress polling ─── */
   useEffect(() => {
+    const STALL_TIMEOUT_MS = 15000; // 15ث بدون تقدّم = stall
     progressTimer.current = setInterval(() => {
       try {
         const rawPos = player.currentTime;
@@ -682,6 +694,24 @@ export function RiftPlayer({
           const buf = (player as any).bufferedPosition || 0;
           setBufferedPct(dur > 0 ? Math.min(buf / dur, 1) : 0);
         } catch {}
+        /* ── Stall detection: شاشة سوداء صامتة بدون error event ──
+           إذا بقي المشغّل في "يشتغل" (isPlaying=true) بدون تقدّم في الـ position
+           لمدة 15ث نعامله كخطأ → auto-advance للمصدر التالي.
+           نتجاهل حالة الإيقاف المؤقت أو نهاية الحلقة أو حالة الخطأ الموجودة. */
+        if (isPlayingRef.current && !isErrorRef.current && !isEndedRef.current && dur > 0) {
+          if (pos > stallRef.current.lastPos + 0.1) {
+            // تقدّم طبيعي — أعد ضبط العداد
+            stallRef.current = { lastPos: pos, lastAt: Date.now() };
+          } else if (stallRef.current.lastAt > 0 && Date.now() - stallRef.current.lastAt > STALL_TIMEOUT_MS) {
+            console.warn(`[RiftPlayer] 🔴 stall detected (${STALL_TIMEOUT_MS / 1000}s no progress) — switching source`);
+            stallRef.current = { lastPos: -1, lastAt: 0 };
+            setError(true);
+            setBuffering(false);
+          }
+        } else {
+          // ليس في حالة تشغيل نشط — أعد ضبط العداد لتجنّب false positive
+          stallRef.current = { lastPos: pos, lastAt: isPlayingRef.current ? Date.now() : 0 };
+        }
       } catch {}
     }, 500);
     return () => { if (progressTimer.current) clearInterval(progressTimer.current); };
@@ -1136,6 +1166,8 @@ export function RiftPlayer({
     setBuffering(true);
     setIsEnded(false);
     resumedRef.current = false;
+    /* إعادة ضبط كاشف الـ stall عند كل تبديل مصدر */
+    stallRef.current = { lastPos: -1, lastAt: 0 };
     /* مسح الترجمات القديمة فوراً حتى لا تظهر مع المصدر الجديد */
     setLoadedCues([]);
     /* Reset whisper status when source changes */
