@@ -1180,7 +1180,26 @@ async function parseShareMaxStreams(
         if (link.startsWith("//")) link = "https:" + link;
         if (!link.startsWith("http")) continue;
         const drv: string = mirror.driver ?? "";
-        if (drv === "streamhg" || link.includes("streamwish")) {
+        // ── ok.ru: fastest reliable direct HLS ──────────────────────────────
+        if (drv === "ok" || link.includes("ok.ru/videoembed/")) {
+          const okm = link.match(/\/videoembed\/(\d+)/);
+          if (okm) {
+            try {
+              const vids = await extractOkRuVideo(okm[1]);
+              const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
+              if (hlsSrc) return { url: hlsSrc.url, type: "hls" };
+              const bestMp4 = vids.filter((v: any) => v.url && v.type !== "hls")
+                .sort((a: any, b: any) => {
+                  const rank = (n: string) =>
+                    n.includes("1080") || n.includes("fhd") ? 4 :
+                    n.includes("720")  || n.includes("hd")  ? 3 :
+                    n.includes("480")  || n.includes("sd")  ? 2 : 1;
+                  return rank(b.name.toLowerCase()) - rank(a.name.toLowerCase());
+                })[0];
+              if (bestMp4) return { url: bestMp4.url, type: "mp4" };
+            } catch {}
+          }
+        } else if (drv === "streamhg" || link.includes("streamwish")) {
           try {
             const r = await fetch(link, {
               headers: { "User-Agent": BROWSER_UA, Referer: iframeUrl },
@@ -1413,6 +1432,44 @@ async function extractVideoDeep(
       }
       if (url.includes("vidhls.com/player/")) {
         const v = await parseVidHls(html, ref); if (v) return v;
+      }
+      // ── ok.ru / odnoklassniki videoembed ─────────────────────────
+      if (url.includes("ok.ru/videoembed/") || url.includes("odnoklassniki.ru/videoembed/")) {
+        const okm = url.match(/\/videoembed\/(\d+)/);
+        if (okm) {
+          try {
+            const vids = await extractOkRuVideo(okm[1]);
+            // Prefer HLS master (adaptive), fall back to best MP4
+            const hlsSrc = vids.find(v => v.type === "hls" && v.name === "auto" && v.url);
+            if (hlsSrc) return { url: hlsSrc.url, type: "hls" };
+            const bestMp4 = vids.filter(v => v.url && v.type !== "hls")
+              .sort((a, b) => {
+                const rank = (n: string) =>
+                  n.includes("1080") || n.includes("fhd") ? 4 :
+                  n.includes("720")  || n.includes("hd")  ? 3 :
+                  n.includes("480")  || n.includes("sd")  ? 2 : 1;
+                return rank(b.name.toLowerCase()) - rank(a.name.toLowerCase());
+              })[0];
+            if (bestMp4) return { url: bestMp4.url, type: "mp4" };
+          } catch {}
+        }
+        break; // don't follow iframes for ok.ru
+      }
+      // ── mp4upload — yt-dlp (Rocket Loader hides the video URL) ────
+      if (url.includes("mp4upload.com/embed-")) {
+        try {
+          const ytUrl = await extractViaYtDlp(url, ref, 25000);
+          if (ytUrl) return { url: ytUrl, type: "mp4" };
+        } catch {}
+        break;
+      }
+      // ── upvideo.to — yt-dlp ───────────────────────────────────────
+      if (url.includes("upvideo.to/e/")) {
+        try {
+          const ytUrl = await extractViaYtDlp(url, ref, 25000);
+          if (ytUrl) return { url: ytUrl, type: "mp4" };
+        } catch {}
+        break;
       }
       const direct = parseVideoUrl(html);
       if (direct) return direct;
@@ -2771,7 +2828,7 @@ async function resolveMitanimeSlug(title: string, english: string | null): Promi
 async function getMitanimeSources(
   title: string, english: string | null, ep: number,
 ): Promise<UnifiedSource[]> {
-  return []; // mitanime.net: site down 2026-07
+
   const ck = `mitanime:${(title + "|" + (english || "")).toLowerCase()}:${ep}`;
   const hit = mitanimeSrcCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.sources;
@@ -2792,63 +2849,109 @@ async function getMitanimeSources(
     const servers = parseMitanimeServers(text);
     const sources: UnifiedSource[] = [];
     // Skip file-hosting/download sites (not streamable embeds)
-    const SKIP_URL_FRAGMENTS = ["mediafire.com","workupload","gofile.io","4shared.com",
-                                "drive.google","videa.hu","soraplay"];
+    // Sites confirmed dead/parked — skip immediately to save time
+    const MITA_SKIP = ["mediafire.com","workupload","gofile.io","4shared.com",
+                       "drive.google","videa.hu","soraplay",
+                       "suzihazarpc.com","vivystream.com",  // suzihazarpc=vivystream (parked 2026-07)
+                       "my.mail.ru","dotplay.net","yourupload.com",  // embed-only, VPS blocked
+                       "vk.com"];
 
-    for (const server of servers) {
-      if (server.isLocked) continue;
-      const sUrl = server.url;
-      if (!sUrl || sUrl === "premium" || !sUrl.startsWith("http")) continue;
-      if (SKIP_URL_FRAGMENTS.some(n => sUrl.toLowerCase().includes(n))) continue;
+    // Process all servers in PARALLEL — yt-dlp/ok.ru each take ~5-25s so sequential
+    // would exceed the 60s race timeout for episodes with many servers.
+    const serverTasks = servers
+      .filter(sv => !sv.isLocked && sv.url && sv.url !== "premium" && sv.url.startsWith("http"))
+      .filter(sv => !MITA_SKIP.some(n => sv.url.toLowerCase().includes(n)))
+      .map(async (server): Promise<UnifiedSource[]> => {
+        const sUrl   = server.url;
+        const qRank  = server.quality === "FHD" ? 12 : server.quality === "HD" ? 11 : 10;
+        const qLabel = server.quality === "FHD" ? "1080p" : server.quality === "HD" ? "720p" : "480p";
+        const sName  = server.name || (() => { try { return new URL(sUrl).hostname.replace(/^www\./, ""); } catch { return "stream"; } })();
+        const out: UnifiedSource[] = [];
 
-      const qRank = server.quality === "FHD" ? 12 : server.quality === "HD" ? 11 : 10;
-      const qLabel = server.quality === "FHD" ? "1080p" : server.quality === "HD" ? "720p" : "480p";
+        // ── mega.nz → isEmbed ──────────────────────────────────────────────────
+        if (sUrl.includes("mega.nz/embed") || sUrl.includes("mega.co.nz/embed")) {
+          out.push({ name: `ميتانيمي · ميغا · ${qLabel}`, url: sUrl, quality: qLabel,
+            qualityRank: qRank, site: "mitanime", directUrl: sUrl, isEmbed: true });
+          return out;
+        }
 
-      // mega.nz/embed → allowed as isEmbed directly
-      if (sUrl.includes("mega.nz/embed") || sUrl.includes("mega.co.nz/embed")) {
-        sources.push({
-          name: `ميتانيمي · ميغا · ${qLabel}`,
-          url: sUrl,
-          quality: qLabel,
-          qualityRank: qRank,
-          site: "mitanime",
-          directUrl: sUrl,
-          isEmbed: true,
-        });
-        continue;
-      }
+        // ── ok.ru / odnoklassniki → dedicated HLS extractor ───────────────────
+        if (sUrl.includes("ok.ru/videoembed/") || sUrl.includes("odnoklassniki.ru/videoembed/")) {
+          try {
+            const okm = sUrl.match(/\/videoembed\/(\d+)/);
+            if (okm) {
+              const vids = await extractOkRuVideo(okm[1]);
+              for (const v of vids.filter(x => x.url)) {
+                const isHls = v.type === "hls";
+                const vName = v.name === "auto" ? "HLS Auto" : v.name;
+                const directUrl = isHls
+                  ? `/api/anime/hls-proxy?url=${encodeURIComponent(v.url)}&ref=${encodeURIComponent(sUrl)}`
+                  : v.url;
+                out.push({ name: `ميتانيمي · OK.ru · ${vName} · ${qLabel}`,
+                  url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
+                  directUrl, directType: isHls ? "hls" : "mp4" });
+              }
+            }
+          } catch {}
+          return out;
+        }
 
-      // All other embed hosts — attempt extractVideoDeep (streamwish, filemoon, vidhide, etc.)
-      try {
-        const result = await Promise.race([
-          extractVideoDeep(sUrl, `${MITANIME_BASE}/`),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
-        ]);
-        if (result?.url) {
-          let directUrl: string;
-          if (result.type === "hls") {
-            directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`;
-          } else {
-            // MP4: check for non-standard ports (e.g. vidcache.net:8161) which are blocked by Replit.
-            // Route through video-proxy so the request comes from our server which has no port restrictions.
+        // ── mp4upload → yt-dlp ─────────────────────────────────────────────────
+        if (sUrl.includes("mp4upload.com/embed-")) {
+          try {
+            const ytUrl = await extractViaYtDlp(sUrl, `${MITANIME_BASE}/`, 30000);
+            // yt-dlp returns the input URL if it can't extract (expired/geo-blocked file) — skip those
+            const isReal = ytUrl && !ytUrl.includes("mp4upload.com/embed-") && ytUrl.startsWith("http");
+            if (isReal) {
+              // mp4upload CDN often uses non-standard ports (e.g. :183) — route through video-proxy
+              const hasNonStdPort = /:\d{4,5}\//.test(ytUrl) && !/:(80|443|8080|8443)\//.test(ytUrl);
+              const directUrl = hasNonStdPort
+                ? `/api/anime/video-proxy?url=${encodeURIComponent(ytUrl)}&ref=${encodeURIComponent(sUrl)}`
+                : ytUrl;
+              out.push({ name: `ميتانيمي · MP4Upload · ${qLabel}`,
+                url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
+                directUrl, directType: "mp4" });
+            }
+          } catch {}
+          return out;
+        }
+
+        // ── upvideo.to → yt-dlp ────────────────────────────────────────────────
+        if (sUrl.includes("upvideo.to/")) {
+          try {
+            const ytUrl = await extractViaYtDlp(sUrl, `${MITANIME_BASE}/`, 30000);
+            if (ytUrl) out.push({ name: `ميتانيمي · UpVideo · ${qLabel}`,
+              url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
+              directUrl: ytUrl, directType: "mp4" });
+          } catch {}
+          return out;
+        }
+
+        // ── share4max / playerwish / streamwish-family → extractVideoDeep ──────
+        try {
+          const result = await Promise.race([
+            extractVideoDeep(sUrl, `${MITANIME_BASE}/`),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 22000)),
+          ]);
+          if (result?.url) {
+            const isHls = result.type === "hls";
             const hasNonStdPort = /:\d{4,5}\//.test(result.url) &&
               !/:(80|443|8080|8443)\//.test(result.url);
-            directUrl = hasNonStdPort
-              ? `/api/anime/video-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`
-              : result.url;
+            const directUrl = isHls
+              ? `/api/anime/hls-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`
+              : hasNonStdPort
+                ? `/api/anime/video-proxy?url=${encodeURIComponent(result.url)}&ref=${encodeURIComponent(sUrl)}`
+                : result.url;
+            out.push({ name: `ميتانيمي · ${sName} · ${qLabel}`,
+              url: sUrl, quality: qLabel, qualityRank: qRank, site: "mitanime",
+              directUrl, directType: result.type });
           }
-          sources.push({
-            name: `ميتانيمي · ستريم · ${qLabel}`,
-            url: sUrl,
-            quality: qLabel,
-            qualityRank: qRank,
-            site: "mitanime",
-            directUrl,
-            directType: result.type,
-          });
-        }
-      } catch {}
-    }
+        } catch {}
+        return out;
+      });
+
+    const perServer = await Promise.all(serverTasks);
+    for (const batch of perServer) sources.push(...batch);
 
     if (sources.length) mitanimeSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
@@ -3354,38 +3457,119 @@ async function getOkAnimeSources(
     }
     if (html.length < 500) return [];
 
-    // Parse structured source entries from Alpine.js HTML:
-    // <a data-server="uqload" ... data-umami-event-quality="720p"
-    //    @click="setServer('URL')"> <span>HD</span>uqload </a>
-    // Each URL appears twice (active-check + click handler) — deduplicate by URL.
-    const seen = new Set<string>();
-    const sources: UnifiedSource[] = [];
-
+    // Parse structured source entries from Alpine.js HTML and resolve directly:
+    // - share4max/megamax  → Inertia API → ok.ru mirror → direct HLS (no iframe)
+    // - ok.ru / okru       → extractOkRuVideo → direct HLS
+    // - mega.nz/embed      → isEmbed (key in fragment, browser handles it)
+    // - other embeds       → skip (VPS IP blocked by uqload/mp4upload/doodstream CDNs)
+    type OkRawEntry = { serverKey: string; rawUrl: string; qlabel: string; slabel: string };
+    const rawEntries: OkRawEntry[] = [];
     const entryRe = /data-server="([^"]+)"[^>]*@click="setServer\('([^']+)'\)"[^>]*>\s*<span>([^<]+)<\/span>([^<]+)/g;
     for (const m of html.matchAll(entryRe)) {
-      const serverKey = m[1].trim();                          // e.g. "uqload", "okru", "doodstream"
-      const rawUrl    = decodeHtmlEntities(m[2].trim());      // embed URL
-      const qlabel    = m[3].trim().toUpperCase();            // "HD" / "FHD" / "SD"
-      const slabel    = m[4].trim();                          // "uqload", "ok.ru", "DoodStream" …
-
+      const serverKey = m[1].trim();
+      const rawUrl    = decodeHtmlEntities(m[2].trim());
+      const qlabel    = m[3].trim().toUpperCase();
+      const slabel    = m[4].trim();
       if (!rawUrl.startsWith("http") || seen.has(rawUrl)) continue;
-      if (OK_SKIP_SERVERS.has(serverKey)) continue;           // skip dead/unreliable hosts
+      if (OK_SKIP_SERVERS.has(serverKey)) continue;
       seen.add(rawUrl);
+      rawEntries.push({ serverKey, rawUrl, qlabel, slabel });
+    }
 
+    // Resolve in parallel — direct API calls, not embed loading
+    const resolvedBatches = await Promise.all(rawEntries.map(async ({ serverKey, rawUrl, qlabel, slabel }) => {
       const quality     = OK_QUALITY_MAP[qlabel]  ?? "HD 720p";
       const qualityRank = OK_QUALITY_RANK[qlabel] ?? 11;
       const displayName = `أوك أنمي · ${slabel} ${qlabel}`;
 
-      sources.push({ name: displayName, url: rawUrl, quality, qualityRank, site: "okanime" });
-    }
+      // share4max / megamax → Inertia API (ok.ru mirror → direct HLS, no iframe needed)
+      if (rawUrl.includes("share4max.com/iframe/") || rawUrl.includes("megamax.me/iframe/")) {
+        const hashMatch = rawUrl.match(/\/iframe\/([^/?#]+)/);
+        if (hashMatch) {
+          try {
+            let hn = "share4max.com";
+            try { hn = new URL(rawUrl).hostname; } catch {}
+            const direct = await parseShareMaxStreams(hn, hashMatch[1], rawUrl);
+            if (direct?.url) {
+              const directUrl = direct.type === "hls"
+                ? `/api/anime/hls-proxy?url=${encodeURIComponent(direct.url)}&ref=${encodeURIComponent(rawUrl)}`
+                : direct.url;
+              return [{ name: displayName, url: rawUrl, quality, qualityRank, site: "okanime",
+                        directUrl, directType: direct.type } as UnifiedSource];
+            }
+          } catch {}
+        }
+        return [{ name: displayName, url: rawUrl, quality, qualityRank, site: "okanime",
+                  isEmbed: true } as UnifiedSource];
+      }
 
-    // Fallback: simple setServer() scan (no structured data — handles edge-case HTML variants)
+      // ok.ru / okru → direct HLS extractor
+      if (serverKey === "okru" || rawUrl.includes("ok.ru/videoembed/") || rawUrl.includes("odnoklassniki.ru/videoembed/")) {
+        const okm = rawUrl.match(/\/videoembed\/(\d+)/);
+        if (okm) {
+          try {
+            const vids = await extractOkRuVideo(okm[1]);
+            const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
+            if (hlsSrc) {
+              const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsSrc.url)}&ref=${encodeURIComponent(rawUrl)}`;
+              return [{ name: displayName, url: rawUrl, quality, qualityRank, site: "okanime",
+                        directUrl, directType: "hls" } as UnifiedSource];
+            }
+          } catch {}
+        }
+        return [];
+      }
+
+      // mega.nz embed → return as embed (fragment key handled by browser)
+      if (rawUrl.includes("mega.nz/embed")) {
+        return [{ name: displayName, url: rawUrl, quality, qualityRank, site: "okanime",
+                  isEmbed: true } as UnifiedSource];
+      }
+
+      // Other embeds (uqload, mp4upload, doodstream…) → skip (CDN blocks VPS IPs)
+      return [] as UnifiedSource[];
+    }));
+    for (const batch of resolvedBatches) sources.push(...batch);
+
+        // Fallback: simple setServer() scan (no structured data — handles edge-case HTML variants)
+    // Fallback: simple setServer() scan — only accept share4max/ok.ru/mega (resolvable without embed loading)
     if (!sources.length) {
       for (const m of html.matchAll(/@click="setServer\('([^']+)'\)"/g)) {
         const url = decodeHtmlEntities(m[1].trim());
         if (!url.startsWith("http") || seen.has(url)) continue;
         seen.add(url);
-        sources.push({ name: `أوك أنمي · سيرفر ${sources.length + 1}`, url, quality: "HD 720p", qualityRank: 11, site: "okanime" });
+        if (url.includes("share4max.com/iframe/") || url.includes("megamax.me/iframe/")) {
+          const hm = url.match(/\/iframe\/([^/?#]+)/);
+          if (hm) {
+            try {
+              let hn = "share4max.com"; try { hn = new URL(url).hostname; } catch {}
+              const direct = await parseShareMaxStreams(hn, hm[1], url);
+              if (direct?.url) {
+                const directUrl = direct.type === "hls"
+                  ? `/api/anime/hls-proxy?url=${encodeURIComponent(direct.url)}&ref=${encodeURIComponent(url)}`
+                  : direct.url;
+                sources.push({ name: `أوك أنمي · سيرفر ${sources.length + 1}`, url, quality: "HD 720p", qualityRank: 11,
+                               site: "okanime", directUrl, directType: direct.type });
+              }
+            } catch {}
+          }
+        } else if (url.includes("ok.ru/videoembed/") || url.includes("odnoklassniki.ru/videoembed/")) {
+          const okm = url.match(/\/videoembed\/(\d+)/);
+          if (okm) {
+            try {
+              const vids = await extractOkRuVideo(okm[1]);
+              const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
+              if (hlsSrc) {
+                sources.push({ name: `أوك أنمي · سيرفر ${sources.length + 1}`, url, quality: "HD 720p", qualityRank: 11,
+                               site: "okanime", directUrl: `/api/anime/hls-proxy?url=${encodeURIComponent(hlsSrc.url)}&ref=${encodeURIComponent(url)}`, directType: "hls" });
+              }
+            } catch {}
+          }
+        } else if (url.includes("mega.nz/embed")) {
+          sources.push({ name: `أوك أنمي · ميغا ${sources.length + 1}`, url, quality: "HD 720p", qualityRank: 11,
+                        site: "okanime", isEmbed: true });
+        }
+        // Skip other embeds (uqload, mp4upload, etc.) — VPS IP blocked by their CDNs
       }
     }
 
@@ -12160,6 +12344,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       // scrapeCached("animelek",     () => getAnimelekSources(title, english, ep, isMovie, matchCtx)),
       scrapeCached("animedar",     () => getAnimadarSources(title, english, ep, isMovie, matchCtx)),
       scrapeCached("okanime",      () => getOkAnimeSources(title, english, ep, isMovie, matchCtx), true, 22_000),
+      scrapeCached("mitanime",    () => getMitanimeSources(title, english, ep),            false, 60000),
       scrapeCached("animeify",     () => getAnimeifySources(title, english, ep),  false, 18000),
       scrapeCached("animeday",     () => getAnimeDaySources(title, english, ep),    true, 18000),
       // scrapeCached("seepanel",  () => getSeepanelSources(title, english, ep, isMovie)), // DEAD: panel.seepanel.top/api returns 404 (2026-06)
@@ -12370,7 +12555,8 @@ router.get("/anime/fetch-source", async (req, res) => {
       // case "shahiid":      await runExtract(await race(getShahiidSources(title, english, ep, isMovie),    SCRAPER_MS, [])); break;
       // case "animelek":     await runExtract(await race(getAnimelekSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
       case "animedar":     await runExtract(await race(getAnimadarSources(title, english, ep, isMovie),   SCRAPER_MS, [])); break;
-      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie),    22_000, [])); break;
+      case "okanime":      await runExtract(await race(getOkAnimeSources(title, english, ep, isMovie), 22_000, [])); break;
+      case "mitanime":    (await race(getMitanimeSources(title, english, ep),                             60_000, [])).forEach(collectSrc); break;
       case "animeify":    (await race(getAnimeifySources(title, english, ep),  18000, [])).forEach(collectSrc); break;
       case "animeday":     await runExtract(await race(getAnimeDaySources(title, english, ep),   SCRAPER_MS, [])); break;
       // case "seepanel": DEAD
@@ -12397,7 +12583,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       // ── TMDB-native (StarCima محذوف من الأنمي — مصادر إنجليزية) ─────────────────────
       // case "starcima_anim": محذوف — يرسل صوتاً هندياً في قسم الأنمي
       // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
-      // vidlink_anim / mxplayer / animephoenix / mitanime / ristoanime: معطّلة — أُزيلت من دورة السكرابر (لا تعمل)
+      // vidlink_anim / mxplayer / animephoenix / ristoanime: معطّلة — أُزيلت من دورة السكرابر (لا تعمل)
       // lordflix_anim: محذوف
       // case "vyla_anim": DEAD
       case "vidfast":       (await race(getVidFastAnimeSources(title, english, ep, anilistId), 20_000, [])).forEach(collectSrc); break;
