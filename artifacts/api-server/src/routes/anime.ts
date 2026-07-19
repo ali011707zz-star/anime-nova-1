@@ -2851,15 +2851,13 @@ async function getMitanimeSources(
     // Skip file-hosting/download sites (not streamable embeds)
     // Sites confirmed dead/parked — skip immediately to save time
     const MITA_SKIP = ["mediafire.com","workupload","gofile.io","4shared.com",
-                       "drive.google","videa.hu","soraplay",
-                       "suzihazarpc.com","vivystream.com",  // suzihazarpc=vivystream (parked 2026-07)
-                       "my.mail.ru","dotplay.net","yourupload.com",  // embed-only, VPS blocked
-                       "vk.com"];
+                       "drive.google","soraplay","suzihazarpc.com","vivystream.com",
+                       "my.mail.ru","vk.com","wtsrv.xyz"];  // wtsrv.xyz=timer page (needs browser)
 
     // Process all servers in PARALLEL — yt-dlp/ok.ru each take ~5-25s so sequential
     // would exceed the 60s race timeout for episodes with many servers.
     const serverTasks = servers
-      .filter(sv => !sv.isLocked && sv.url && sv.url !== "premium" && sv.url.startsWith("http"))
+      .filter(sv => sv.url && sv.url !== "premium" && sv.url.startsWith("http"))  // isLocked ignored — server-side fetch bypasses JS paywall
       .filter(sv => !MITA_SKIP.some(n => sv.url.toLowerCase().includes(n)))
       .map(async (server): Promise<UnifiedSource[]> => {
         const sUrl   = server.url;
@@ -2880,7 +2878,11 @@ async function getMitanimeSources(
           try {
             const okm = sUrl.match(/\/videoembed\/(\d+)/);
             if (okm) {
-              const vids = await extractOkRuVideo(okm[1]);
+              // Race with 5s — ok.ru geo-blocked from VPS (12s default wastes time)
+              const vids = await Promise.race([
+                extractOkRuVideo(okm[1]),
+                new Promise<[]>(res => setTimeout(() => res([]), 5000)),
+              ]);
               for (const v of vids.filter(x => x.url)) {
                 const isHls = v.type === "hls";
                 const vName = v.name === "auto" ? "HLS Auto" : v.name;
@@ -3457,19 +3459,22 @@ async function getOkAnimeSources(
     }
     if (html.length < 500) return [];
 
-    // Parse structured source entries from Alpine.js HTML and resolve directly:
-    // - share4max/megamax  → Inertia API → ok.ru mirror → direct HLS (no iframe)
-    // - ok.ru / okru       → extractOkRuVideo → direct HLS
-    // - mega.nz/embed      → isEmbed (key in fragment, browser handles it)
-    // - other embeds       → skip (VPS IP blocked by uqload/mp4upload/doodstream CDNs)
+    // Parse structured source entries from Alpine.js HTML and resolve directly.
+    // NOTE: data-server and @click are on SEPARATE LINES in the HTML, so we
+    // split by <a tag and extract each attribute independently from each block.
     type OkRawEntry = { serverKey: string; rawUrl: string; qlabel: string; slabel: string };
     const rawEntries: OkRawEntry[] = [];
-    const entryRe = /data-server="([^"]+)"[^>]*@click="setServer\('([^']+)'\)"[^>]*>\s*<span>([^<]+)<\/span>([^<]+)/g;
-    for (const m of html.matchAll(entryRe)) {
-      const serverKey = m[1].trim();
-      const rawUrl    = decodeHtmlEntities(m[2].trim());
-      const qlabel    = m[3].trim().toUpperCase();
-      const slabel    = m[4].trim();
+    const linkBlocks = html.split(/<a\s/i).slice(1);
+    for (const block of linkBlocks) {
+      const serverKeyM = block.match(/data-server="([^"]+)"/);
+      const urlM       = block.match(/@click="setServer\('([^']+)'\)"/);
+      const qlM        = block.match(/<span>(FHD|HD|SD)<\/span>/i);
+      const lblM       = block.match(/<span>(?:FHD|HD|SD)<\/span>([^<]+)/i);
+      if (!serverKeyM || !urlM) continue;
+      const serverKey = serverKeyM[1].trim();
+      const rawUrl    = decodeHtmlEntities(urlM[1].trim());
+      const qlabel    = qlM ? qlM[1].trim().toUpperCase() : "HD";
+      const slabel    = lblM ? lblM[1].trim() : serverKey;
       if (!rawUrl.startsWith("http") || seen.has(rawUrl)) continue;
       if (OK_SKIP_SERVERS.has(serverKey)) continue;
       seen.add(rawUrl);
@@ -3485,11 +3490,19 @@ async function getOkAnimeSources(
       // share4max / megamax → Inertia API (ok.ru mirror → direct HLS, no iframe needed)
       if (rawUrl.includes("share4max.com/iframe/") || rawUrl.includes("megamax.me/iframe/")) {
         const hashMatch = rawUrl.match(/\/iframe\/([^/?#]+)/);
+        // Always return isEmbed fallback — race parseShareMaxStreams with 6s timeout
+        // (ok.ru geo-blocked = 12s+; this prevents 38s wait before fallback)
+        const isEmbedResult: UnifiedSource = { name: displayName, url: rawUrl, quality, qualityRank,
+                                               site: "okanime", isEmbed: true };
         if (hashMatch) {
           try {
             let hn = "share4max.com";
             try { hn = new URL(rawUrl).hostname; } catch {}
-            const direct = await parseShareMaxStreams(hn, hashMatch[1], rawUrl);
+            const race = Promise.race([
+              parseShareMaxStreams(hn, hashMatch[1], rawUrl),
+              new Promise<null>(res => setTimeout(() => res(null), 6000)),
+            ]);
+            const direct = await race;
             if (direct?.url) {
               const directUrl = direct.type === "hls"
                 ? `/api/anime/hls-proxy?url=${encodeURIComponent(direct.url)}&ref=${encodeURIComponent(rawUrl)}`
@@ -3499,8 +3512,7 @@ async function getOkAnimeSources(
             }
           } catch {}
         }
-        return [{ name: displayName, url: rawUrl, quality, qualityRank, site: "okanime",
-                  isEmbed: true } as UnifiedSource];
+        return [isEmbedResult];
       }
 
       // ok.ru / okru → direct HLS extractor
@@ -3508,7 +3520,11 @@ async function getOkAnimeSources(
         const okm = rawUrl.match(/\/videoembed\/(\d+)/);
         if (okm) {
           try {
-            const vids = await extractOkRuVideo(okm[1]);
+            // Race with 5s — ok.ru is geo-blocked from VPS (12s default timeout wastes time)
+            const vids = await Promise.race([
+              extractOkRuVideo(okm[1]),
+              new Promise<[]>(res => setTimeout(() => res([]), 5000)),
+            ]);
             const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
             if (hlsSrc) {
               const directUrl = `/api/anime/hls-proxy?url=${encodeURIComponent(hlsSrc.url)}&ref=${encodeURIComponent(rawUrl)}`;
@@ -3532,9 +3548,9 @@ async function getOkAnimeSources(
     for (const batch of resolvedBatches) sources.push(...batch);
 
         // Fallback: simple setServer() scan (no structured data — handles edge-case HTML variants)
-    // Fallback: simple setServer() scan — only accept share4max/ok.ru/mega (resolvable without embed loading)
+    // Fallback: setServer() scan — only accept share4max/ok.ru/mega (resolvable without embed loading)
     if (!sources.length) {
-      for (const m of html.matchAll(/@click="setServer\('([^']+)'\)"/g)) {
+      for (const m of html.matchAll(/@click="setServer\('([^']+)'\)"/gs)) {
         const url = decodeHtmlEntities(m[1].trim());
         if (!url.startsWith("http") || seen.has(url)) continue;
         seen.add(url);
@@ -3557,7 +3573,10 @@ async function getOkAnimeSources(
           const okm = url.match(/\/videoembed\/(\d+)/);
           if (okm) {
             try {
-              const vids = await extractOkRuVideo(okm[1]);
+              const vids = await Promise.race([
+                extractOkRuVideo(okm[1]),
+                new Promise<[]>(res => setTimeout(() => res([]), 5000)),
+              ]);
               const hlsSrc = vids.find((v: any) => v.type === "hls" && v.url);
               if (hlsSrc) {
                 sources.push({ name: `أوك أنمي · سيرفر ${sources.length + 1}`, url, quality: "HD 720p", qualityRank: 11,
