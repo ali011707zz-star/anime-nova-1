@@ -23,9 +23,9 @@ export const SITE_TTL: Record<string, number> = {
   okanime:       5 * 3_600_000,
   animetime:     5 * 3_600_000,
   ristoanime:    5 * 3_600_000,
-  anikoto:       5 * 3_600_000,
-  anineko:       5 * 3_600_000,
-  hianime:       5 * 3_600_000,
+  anikoto:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h; reduced from 5h
+  anineko:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h; reduced from 5h
+  hianime:       90 * 60_000,   // vibeplayer.site tokens expire ~1-2h; reduced from 5h
   animewitcher:  45 * 60_000,    // Streamtape/VTube URLs expire fast → 45min TTL
   animeday:      4 * 3_600_000,
   arabseed:      4 * 3_600_000,

@@ -231,7 +231,7 @@ const SITE_TIMEOUT_MAP: Partial<Record<typeof ANIME_SITES[number], number>> = {
   mycima:       34_000,  // backend = 30s + 4s هامش
   anime4up2:    28_000,  // backend = 25s + 3s هامش
   anikototv:    28_000,  // backend = 25s + 3s هامش
-  hianime:      26_000,  // backend = 22s + 4s هامش
+  hianime:      35_000,  // backend = 22s + 13s هامش (cold cache needs extra margin)
   anipm:        24_000,  // backend = 20s + 4s هامش
   witanime:     20_000,  // backend يوناplay static HTML < 1s + chain search ~15s
 };

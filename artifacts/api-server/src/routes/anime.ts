@@ -12286,6 +12286,7 @@ router.get("/anime/sources-stream", async (req, res) => {
       "moviebox", "moviebox_anim",      // &t= signed URLs ~10min
       "vidlink_encdec", "vidlink_anim", // stormvv URLs ~45min
       "xpass_anim",                     // XPass token ~8min
+      "hianime", "anineko", "anikoto",  // vibeplayer.site tokens expire in ~1-2h
     ]);
 
     // ── مساعد: كاشط بـ cache + extractAndCollect ──
@@ -14827,24 +14828,28 @@ router.get("/anime/seg-proxy", async (req, res) => {
     return true;
   }
 
-  /** fallback chain: Hopx → CF Worker → 502 */
+  /** fallback chain: CF Worker → Hopx → 502
+   *  CF Worker first: fast (~200ms) for small segment files
+   *  Hopx second: reliable but slow (5-20s per segment), causes ExoPlayer stall */
   async function segFallback(): Promise<void> {
     if (res.headersSent) return;
-    // 1. Hopx
+    // 1. CF Worker (fast for small segment files)
     try {
-      const hopxR = await fetchViaHopx(url, ref, 20000);
-      if (hopxR) {
-        const ok = await serveSegResponse(hopxR);
-        if (ok) return;
-      }
-    } catch { /* Hopx فشل */ }
-    // 2. CF Worker
-    if (!res.headersSent) {
       const cfR = await fetchSegViaCfWorker(url, ref);
       if (cfR) {
         const ok = await serveSegResponse(cfR);
         if (ok) return;
       }
+    } catch { /* CF Worker فشل */ }
+    // 2. Hopx (بطيء لكن موثوق)
+    if (!res.headersSent) {
+      try {
+        const hopxR = await fetchViaHopx(url, ref, 20000);
+        if (hopxR) {
+          const ok = await serveSegResponse(hopxR);
+          if (ok) return;
+        }
+      } catch { /* Hopx فشل */ }
     }
     if (!res.headersSent) res.status(502).send("CDN blocked");
   }
@@ -14863,7 +14868,8 @@ router.get("/anime/seg-proxy", async (req, res) => {
     const served = await serveSegResponse(r);
     if (!served) await segFallback();
   } catch {
-    if (!res.headersSent) res.status(502).send("segment fetch failed");
+    // network error / timeout → try fallback chain instead of immediate 502
+    await segFallback();
   }
 });
 
