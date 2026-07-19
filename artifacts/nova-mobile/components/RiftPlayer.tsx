@@ -649,6 +649,17 @@ export function RiftPlayer({
     return () => clearTimeout(t);
   }, [error, srcIdx, sources.length, onError]); // eslint-disable-line
 
+  /* ─── تبديل المصدر عندما يُغيِّر الـ parent قيمة initialSourceIndex (المستخدم اختار مصدراً مختلفاً) ─── */
+  const prevInitSourceIdxRef = useRef(initialSourceIndex ?? 0);
+  useEffect(() => {
+    const newIdx = initialSourceIndex ?? 0;
+    if (newIdx !== prevInitSourceIdxRef.current) {
+      prevInitSourceIdxRef.current = newIdx;
+      switchSource(newIdx);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSourceIndex]);
+
   /* ─── Progress polling ─── */
   useEffect(() => {
     progressTimer.current = setInterval(() => {
