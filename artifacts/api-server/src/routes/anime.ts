@@ -14506,6 +14506,30 @@ function toAbsoluteUrl(raw: string, base: string): string {
 // ── Hopx proxy port (يحل CF Worker — كل الفيديو عبر VPS) ───────────────────────
 const _HOPX_PORT = process.env.CF_PROXY_PORT || "8001";
 
+// ── mediaflow-proxy (localhost:8888) + mitmproxy CF Worker bridge (localhost:8890) ─
+// يُغطّي M3U8 + segments عبر Cloudflare بدل VPS IP المحجوب من CDNs
+const _MF_URL  = "http://localhost:8888";
+const _MF_PASS = process.env.MF_PASSWORD || "nova_mf_2026";
+let   _mfOk    = false; // يُحدَّث كل 20s
+
+// ── Hopx health check — نتجنّب 20s timeout إذا الـ sandbox ميت ──────────────────
+let _hopxOk = false;
+
+async function _checkProxies() {
+  // mediaflow-proxy health
+  try {
+    const r = await fetch(`${_MF_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    _mfOk = r.ok;
+  } catch { _mfOk = false; }
+  // Hopx health
+  try {
+    const r = await fetch(`http://localhost:${_HOPX_PORT}/health`, { signal: AbortSignal.timeout(3000) });
+    _hopxOk = r.ok;
+  } catch { _hopxOk = false; }
+}
+setInterval(_checkProxies, 20_000);
+_checkProxies(); // فحص فوري عند بدء التشغيل
+
 // ── CF Worker fallback للـ segments ─────────────────────────────────────────────
 const _SEG_CF_KEY = process.env.CF_PROXY_KEY  || "";
 const _SEG_CF_URL = process.env.CF_WORKER_URL || "";
@@ -14594,29 +14618,60 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
 }
 
 // ── VPS-side HLS manifest proxy ─────────────────────────────────────────────
-// الإصلاح الجذري للشاشة السوداء: عند فشل VPS بسبب حجب CDN (403/429)، ننتقل
-// تلقائياً لـ CF Worker كـ fallback. هذا يحل مشكلة Variant Playlists (audio+video
-// tracks) التي تُعاد كتابتها عبر hls-proxy وتظل تصطدم بحجب CDN لـ VPS IP.
+// طبقات الجلب (بالأولوية):
+//  1. mediaflow-proxy (localhost:8888) — يستخدم CF Worker bridge (mitmproxy:8890)
+//     → IP محايد من Cloudflare، يحل حجب CDN لـ VPS datacenter IP
+//  2. Direct VPS fetch (fallback إذا mediaflow-proxy غير متاح)
+//  3. Hopx fallback (إذا كان صحياً) — بطيء لكن موثوق
 async function serveHlsVPS(
   url: string, ref: string,
   res: import("express").Response,
 ): Promise<void> {
+  // ── 1. mediaflow-proxy عبر CF Worker bridge (الأولوية القصوى) ───────────────
+  if (_mfOk) {
+    try {
+      const headerObj: Record<string,string> = { "User-Agent": BASE_HDRS["User-Agent"] || "Mozilla/5.0" };
+      if (ref) { headerObj.Referer = ref; try { headerObj.Origin = new URL(ref).origin; } catch {} }
+      const mfParams = new URLSearchParams({
+        url,
+        d: _MF_PASS,
+        headers: JSON.stringify(headerObj),
+      });
+      const mfR = await fetch(`${_MF_URL}/proxy/hls/manifest?${mfParams}`, {
+        signal: AbortSignal.timeout(15000),
+      });
+      if (mfR.ok) {
+        const body = await mfR.text();
+        if (body.includes("#EXTM3U")) {
+          // mediaflow-proxy (M3U8_CONTENT_ROUTING=direct) يُرجع original URLs
+          // rewriteM3u8ForVPS يُغلّفها بـ seg-proxy/hls-proxy
+          const rewritten = rewriteM3u8ForVPS(body, url, ref);
+          res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Cache-Control", "no-cache");
+          res.send(rewritten);
+          return;
+        }
+      }
+    } catch { /* mediaflow-proxy فشل — انتقل للـ fallback */ }
+  }
+
+  // ── 2. Direct VPS fetch (fallback) ──────────────────────────────────────────
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
 
   let lastStatus = 0;
   let gotNetworkError = false;
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(10000) });
       if (!r.ok) {
         lastStatus = r.status;
-        if ((r.status === 403 || r.status === 429 || r.status === 503) && attempt < 2) {
-          await new Promise(res2 => setTimeout(res2, 300 + attempt * 400));
+        if ((r.status === 403 || r.status === 429 || r.status === 503) && attempt < 1) {
+          await new Promise(res2 => setTimeout(res2, 400));
           continue;
         }
-        // الفشل النهائي — اكسر الحلقة وجرّب CF Worker
         break;
       }
       const body = await r.text();
@@ -14627,19 +14682,17 @@ async function serveHlsVPS(
       res.send(rewritten);
       return;
     } catch {
-      if (attempt < 2) { await new Promise(res2 => setTimeout(res2, 300 + attempt * 400)); continue; }
+      if (attempt < 1) { await new Promise(res2 => setTimeout(res2, 400)); continue; }
       gotNetworkError = true;
       break;
     }
   }
 
-  // ── Hopx fallback: يحل حجب CDN لـ VPS datacenter IPs ────────────────────────
-  // يُستخدم عند: 403 (CDN يحجب VPS) أو 429 (rate-limit) أو خطأ شبكة.
-  // Hopx يستخدم curl_cffi مع Chrome impersonation لتجاوز الحجب.
-  const shouldTryHopx = gotNetworkError || lastStatus === 403 || lastStatus === 429;
+  // ── 3. Hopx fallback (إذا كان صحياً) ────────────────────────────────────────
+  const shouldTryHopx = _hopxOk && (gotNetworkError || lastStatus === 403 || lastStatus === 429);
   if (shouldTryHopx) {
     try {
-      const hopxR = await fetchViaHopx(url, ref, 14000);
+      const hopxR = await fetchViaHopx(url, ref, 12000);
       if (hopxR) {
         const body = await hopxR.text();
         if (body.includes("#EXTM3U")) {
@@ -14651,7 +14704,7 @@ async function serveHlsVPS(
           return;
         }
       }
-    } catch { /* Hopx فشل أيضاً — أرجع الخطأ الأصلي */ }
+    } catch { /* Hopx فشل أيضاً */ }
   }
 
   if (!res.headersSent) res.status(lastStatus || 502).send("upstream error");
@@ -14840,13 +14893,11 @@ router.get("/anime/seg-proxy", async (req, res) => {
     return true;
   }
 
-  /** fallback chain: CF Worker (5s fast-fail) → Hopx → 502
-   *  CF Worker: محاولة سريعة جداً (timeout=5ث) — إذا فشل نذهب فوراً لـ Hopx
-   *  Hopx second: reliable but slow (5-20s per segment) — مقبول لأنه يعمل
-   *  ملاحظة: 20ث timeout للـ CF Worker كان يُجمِّد ExoPlayer buffer → شاشة سوداء */
+  /** fallback chain: CF Worker (5s fast-fail) → Hopx (إذا كان صحياً) → 502
+   *  _hopxOk يُحدَّث كل 20s — إذا كان الـ sandbox ميتاً نتخطّاه فوراً بدل 20s timeout */
   async function segFallback(): Promise<void> {
     if (res.headersSent) return;
-    // 1. CF Worker (fast-fail 5s — نتجنّب تجميد ExoPlayer buffer بـ 20ث)
+    // 1. CF Worker (fast-fail 5s)
     try {
       const cfR = await fetchSegViaCfWorker(url, ref, 5000);
       if (cfR) {
@@ -14854,10 +14905,10 @@ router.get("/anime/seg-proxy", async (req, res) => {
         if (ok) return;
       }
     } catch { /* CF Worker فشل */ }
-    // 2. Hopx (بطيء لكن موثوق)
-    if (!res.headersSent) {
+    // 2. Hopx — فقط إذا كان صحياً (نتجنّب 20s وقت ضائع لـ sandbox ميت)
+    if (!res.headersSent && _hopxOk) {
       try {
-        const hopxR = await fetchViaHopx(url, ref, 20000);
+        const hopxR = await fetchViaHopx(url, ref, 18000);
         if (hopxR) {
           const ok = await serveSegResponse(hopxR);
           if (ok) return;
