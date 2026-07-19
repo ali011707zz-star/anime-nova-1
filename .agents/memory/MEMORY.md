@@ -1,3 +1,4 @@
+- [OkAnime RE 2026-07](okanime-re-2026-07.md) — /api/search?q= فقط؛ مصادر الحلقة Alpine HTML فقط؛ direct fetch يعمل بلا CF؛ scraper محسَّن (API-first + labels).
 - [FaselHD scdns.io RE](faselhd-scdns-reverse-engineering.md) — CDN=scdns.io; master.m3u8 أي IP بلا headers; quality URLs=نفس IP؛ TTL=~5-6h؛ browser مرة واحدة/محتوى (Hopx playwright)؛ cache بـ expiry_ts من URL.
 - [DramaWorld APK Analysis](dramaworld-apk-analysis.md) — API=app.arabypros.com/api; KEY=4F5A9C3D.../d506abfd; filtres محجوبة من servers; apk-mitm تعمل على VPS لتجاوز SSL pinning.
 - [CineSrc integration](cinesrc-integration.md) — cinesrc.st in animation.ts+anime.ts; VPS IP blocked for server actions (graceful fail); SubtleCrypto Proxy patch documented.

@@ -3210,21 +3210,19 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
   const hit = okSlugCache.get(ck);
   if (hit && Date.now() - hit.ts < SRC_TTL) return hit.slug;
 
-  // Build slug variants from titles (same strategy as other scrapers)
+  // Build slug variants from titles (fallback if API search fails)
   const slugVariants: string[] = [];
   for (const q of [english, title].filter(Boolean) as string[]) {
     const s = toSlug(q as string);
     if (!s) continue;
     slugVariants.push(s);
-    // Without trailing season indicator e.g. "-2nd-season" → "dandadan"
     const stripped = s.replace(/[-–](?:season[-–]?\d+|\d+(?:nd|rd|th)[-–]season|s\d+)$/i, "");
     if (stripped !== s && stripped.length > 2) slugVariants.push(stripped);
-    // Without colon suffix
     const noColon = toSlug((q as string).replace(/[:：].*/g, "").trim());
     if (noColon && noColon !== s) slugVariants.push(noColon);
   }
 
-  // Resolve the active OkAnime domain (try all variants)
+  // Resolve the active OkAnime domain by testing /api/search (fast JSON endpoint)
   async function resolveOkBase(): Promise<string> {
     for (const domain of OK_DOMAINS) {
       try {
@@ -3238,36 +3236,10 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
     return OK_BASE;
   }
 
-  // Method 1: Direct slug check via /anime/{slug} page (try all domains via cfProxy)
-  // Must verify page title matches the requested anime (score >= 0.40) to avoid wrong matches
-  const okDirectMin = ctx ? 0.52 : (isMovie ? 0.68 : 0.60);
-  for (const slug of [...new Set(slugVariants)]) {
-    for (const domain of OK_DOMAINS) {
-      const html = await cfProxyGet(`${domain}/anime/${slug}`, `${domain}/`);
-      if (!html || !html.includes("/episode/")) continue;
-      // Extract page <title> or <h1> and verify it matches the requested anime
-      const pageTitleM = html.match(/<title[^>]*>([^<]{2,120})<\/title>/i)
-        || html.match(/<h1[^>]*>([^<]{2,120})<\/h1>/i);
-      const pageTitle = (pageTitleM?.[1] || "").replace(/\s*[-–|].*$/, "").replace(/\s*–\s*okanime.*/i, "").trim();
-      const slugLabel = slug.replace(/-/g, " ");
-      const verScore = ctx
-        ? multiScore(pageTitle || slugLabel, { ...ctx, scraper: "okanime" }).score
-        : Math.max(
-          pageTitle ? similarity(pageTitle, title) : 0,
-          pageTitle && english ? similarity(pageTitle, english) : 0,
-          similarity(slugLabel, title),
-          english ? similarity(slugLabel, english) : 0,
-        );
-      if (verScore >= okDirectMin) {
-        OK_BASE = domain;
-        okSlugCache.set(ck, { slug, ts: Date.now() });
-        return slug;
-      }
-    }
-  }
-
-  // Method 2: JSON search API (try all domains)
+  // Method 1 (PRIMARY): /api/search?q= JSON endpoint — direct fetch, no CF needed
+  // Returns [{name, name_arabic, slug, poster, type}] — fast and reliable
   const activeBase = await resolveOkBase();
+  const okMin = ctx ? 0.52 : (isMovie ? 0.68 : 0.60);
   for (const q of [english, title].filter(Boolean) as string[]) {
     try {
       const r = await fetch(
@@ -3275,17 +3247,22 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
         { headers: { ...BASE_HDRS, Referer: `${activeBase}/` }, signal: AbortSignal.timeout(8000), redirect: "follow" },
       );
       if (!r.ok) continue;
-      const data = await r.json() as Array<{ name?: string; slug?: string }>;
+      const data = await r.json() as Array<{ name?: string; name_arabic?: string; slug?: string; type?: string }>;
       if (!Array.isArray(data) || !data.length) continue;
 
-      const okMin = ctx ? 0.52 : (isMovie ? 0.68 : 0.60);
       let best: string | null = null, bestScore = 0;
       for (const item of data) {
         if (!item.slug) continue;
+        // Filter by type if we know it (مسلسل=TV, فيلم=movie) to avoid wrong matches
+        if (isMovie && item.type && !["فيلم", "movie", "فيلم قصير"].some(t => (item.type || "").includes(t))) continue;
         const nameLabel = (item.name || "").toLowerCase();
+        const nameAr    = (item.name_arabic || "").toLowerCase();
         const slugLabel = item.slug.replace(/-/g, " ");
         const score = ctx
-          ? multiScore(nameLabel || slugLabel, { ...ctx, scraper: "okanime" }).score
+          ? Math.max(
+              multiScore(nameLabel || slugLabel, { ...ctx, scraper: "okanime" }).score,
+              nameAr ? multiScore(nameAr, { ...ctx, scraper: "okanime" }).score : 0,
+            )
           : isMovie
             ? Math.max(
                 strictMovieSimilarity(nameLabel, title),
@@ -3305,9 +3282,49 @@ async function searchOkAnime(title: string, english: string | null, isMovie = fa
     } catch {}
   }
 
+  // Method 2 (FALLBACK): Direct slug guess via /anime/{slug} page
+  // okanime does NOT block datacenter IPs — direct fetch works (HTTP 200 confirmed)
+  const okDirectMin = ctx ? 0.52 : (isMovie ? 0.68 : 0.60);
+  for (const slug of [...new Set(slugVariants)]) {
+    for (const domain of OK_DOMAINS) {
+      try {
+        const r = await fetch(`${domain}/anime/${slug}`, {
+          headers: { ...BASE_HDRS, Referer: `${domain}/` }, signal: AbortSignal.timeout(8000), redirect: "follow",
+        });
+        if (!r.ok) continue;
+        const html = await r.text();
+        if (!html.includes("/episode/")) continue;
+        const pageTitleM = html.match(/<title[^>]*>([^<]{2,120})<\/title>/i)
+          || html.match(/<h1[^>]*>([^<]{2,120})<\/h1>/i);
+        const pageTitle = (pageTitleM?.[1] || "").replace(/\s*[-–|].*$/, "").replace(/\s*–\s*okanime.*/i, "").trim();
+        const slugLabel = slug.replace(/-/g, " ");
+        const verScore = ctx
+          ? multiScore(pageTitle || slugLabel, { ...ctx, scraper: "okanime" }).score
+          : Math.max(
+            pageTitle ? similarity(pageTitle, title) : 0,
+            pageTitle && english ? similarity(pageTitle, english) : 0,
+            similarity(slugLabel, title),
+            english ? similarity(slugLabel, english) : 0,
+          );
+        if (verScore >= okDirectMin) {
+          OK_BASE = domain;
+          okSlugCache.set(ck, { slug, ts: Date.now() });
+          return slug;
+        }
+      } catch {}
+    }
+  }
+
   okSlugCache.set(ck, { slug: null, ts: Date.now() });
   return null;
 }
+
+// Dead/unreliable embed hosts on okanime — skip to avoid wasted iframe loads
+const OK_SKIP_SERVERS = new Set(["solidfiles", "4shared", "uptostream"]);
+
+// Quality label → qualityRank mapping (from okanime <span> labels)
+const OK_QUALITY_RANK: Record<string, number> = { FHD: 14, HD: 11, SD: 7 };
+const OK_QUALITY_MAP:  Record<string, string>  = { FHD: "FHD 1080p", HD: "HD 720p", SD: "SD 480p" };
 
 async function getOkAnimeSources(
   title: string, english: string | null, ep: number, isMovie = false,
@@ -3321,39 +3338,58 @@ async function getOkAnimeSources(
     const slug = await searchOkAnime(title, english, isMovie, ctx);
     if (!slug) return [];
 
-    // Try padded and non-padded episode number variants, across active domain
-    let r: Response | null = null;
+    // okanime does NOT block datacenter IPs — direct fetch works (HTTP 200 confirmed 2026-07)
+    // No need for cfProxy. Try non-padded then padded episode number.
+    let html = "";
     for (const epCandidate of [
       `${OK_BASE}/episode/${slug}-episode-${ep}`,
       `${OK_BASE}/episode/${slug}-episode-${String(ep).padStart(2, "0")}`,
     ]) {
       try {
-        const tryR = await fetch(epCandidate, {
-          headers: { ...BASE_HDRS, Referer: `${OK_BASE}/` }, signal: AbortSignal.timeout(10000), redirect: "follow",
+        const r = await fetch(epCandidate, {
+          headers: { ...BASE_HDRS, Referer: `${OK_BASE}/` }, signal: AbortSignal.timeout(12000), redirect: "follow",
         });
-        if (tryR.ok) { r = tryR; break; }
+        if (r.ok) { html = await r.text(); break; }
       } catch {}
     }
-    if (!r) return [];
-    const html = await r.text();
     if (html.length < 500) return [];
 
-    // Extract Alpine.js server URLs: @click="setServer('URL')"
-    const serverUrls: string[] = [];
-    for (const m of html.matchAll(/@click="setServer\('([^']+)'\)"/g)) {
-      const url = decodeHtmlEntities(m[1].trim());
-      if (url.startsWith("http") && !serverUrls.includes(url)) serverUrls.push(url);
+    // Parse structured source entries from Alpine.js HTML:
+    // <a data-server="uqload" ... data-umami-event-quality="720p"
+    //    @click="setServer('URL')"> <span>HD</span>uqload </a>
+    // Each URL appears twice (active-check + click handler) — deduplicate by URL.
+    const seen = new Set<string>();
+    const sources: UnifiedSource[] = [];
+
+    const entryRe = /data-server="([^"]+)"[^>]*@click="setServer\('([^']+)'\)"[^>]*>\s*<span>([^<]+)<\/span>([^<]+)/g;
+    for (const m of html.matchAll(entryRe)) {
+      const serverKey = m[1].trim();                          // e.g. "uqload", "okru", "doodstream"
+      const rawUrl    = decodeHtmlEntities(m[2].trim());      // embed URL
+      const qlabel    = m[3].trim().toUpperCase();            // "HD" / "FHD" / "SD"
+      const slabel    = m[4].trim();                          // "uqload", "ok.ru", "DoodStream" …
+
+      if (!rawUrl.startsWith("http") || seen.has(rawUrl)) continue;
+      if (OK_SKIP_SERVERS.has(serverKey)) continue;           // skip dead/unreliable hosts
+      seen.add(rawUrl);
+
+      const quality     = OK_QUALITY_MAP[qlabel]  ?? "HD 720p";
+      const qualityRank = OK_QUALITY_RANK[qlabel] ?? 11;
+      const displayName = `أوك أنمي · ${slabel} ${qlabel}`;
+
+      sources.push({ name: displayName, url: rawUrl, quality, qualityRank, site: "okanime" });
     }
-    if (!serverUrls.length) return [];
 
-    const sources: UnifiedSource[] = serverUrls.map((url, i) => ({
-      name: `أوك أنمي · سيرفر ${i + 1}`,
-      url,
-      quality: "HD",
-      qualityRank: 11,
-      site: "okanime",
-    }));
+    // Fallback: simple setServer() scan (no structured data — handles edge-case HTML variants)
+    if (!sources.length) {
+      for (const m of html.matchAll(/@click="setServer\('([^']+)'\)"/g)) {
+        const url = decodeHtmlEntities(m[1].trim());
+        if (!url.startsWith("http") || seen.has(url)) continue;
+        seen.add(url);
+        sources.push({ name: `أوك أنمي · سيرفر ${sources.length + 1}`, url, quality: "HD 720p", qualityRank: 11, site: "okanime" });
+      }
+    }
 
+    if (!sources.length) return [];
     okSrcCache.set(ck, { sources, ts: Date.now() });
     return sources;
   } catch { return []; }
