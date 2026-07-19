@@ -5620,33 +5620,23 @@ const A3RB_REFRESH_BEFORE = 4 * 3_600_000;   // جدّد عند بقاء < 4 س�
 const A3RB_CHECK_INTERVAL = 30 * 60_000;     // فحص كل 30 دقيقة
 let _a3rbRefreshing = false;
 
-async function a3rbTriggerNopechaRefresh(): Promise<void> {
+// يجدّد cf_clearance عبر المسار الموجود أصلاً (Hopx → OpenShift → ملف)
+// يستدعي a3rbFetchPage مباشرة — إذا نجحت تُخزَّن الكوكيز تلقائياً عبر setA3rbCfCookie
+async function a3rbTriggerCookieRefresh(): Promise<void> {
   if (_a3rbRefreshing) return;
-  const appSecret = process.env.APP_SECRET || "";
-  if (!OPENSHIFT_CF_URL || !appSecret) {
-    console.warn("[anime3rb] OPENSHIFT_CF_URL أو APP_SECRET غير مضبوط — تخطّي auto-refresh");
-    return;
-  }
   _a3rbRefreshing = true;
   try {
-    // NOPECHA_KEY يبقى على cf-bypass-service فقط — نُرسل APP_SECRET عبر header (لا query string)
-    const r = await fetch(`${OPENSHIFT_CF_URL}/nopecha-refresh?site=https://anime3rb.com`, {
-      headers: { "x-app-secret": appSecret },
-      signal: AbortSignal.timeout(70_000),
-    });
-    if (r.ok) {
-      const data = await r.json() as { ok?: boolean; cookie_str?: string; error?: string };
-      if (data.ok && data.cookie_str) {
-        setA3rbCfCookie(data.cookie_str);  // يحفظ في memory + Supabase
-        console.log("[anime3rb] ✅ auto-refresh via nopecha done");
-      } else {
-        console.warn("[anime3rb] nopecha-refresh response:", data.error);
-      }
+    console.log("[anime3rb] 🔄 تجديد cf_clearance عبر Hopx browser...");
+    // نستدعي الصفحة الرئيسية — إذا نجح Hopx يُخزَّن الكوكيز في memory + Supabase
+    const html = await a3rbFetchPage("https://anime3rb.com", 60_000);
+    if (html && !isCloudflareBlock(html)) {
+      // a3rbFetchPage تستدعي setA3rbCfCookie داخلياً عند نجاح Hopx/OpenShift
+      console.log("[anime3rb] ✅ cf_clearance جُدِّد عبر Hopx بنجاح");
     } else {
-      console.warn("[anime3rb] nopecha-refresh HTTP:", r.status);
+      console.warn("[anime3rb] تجديد الكوكيز: الصفحة محجوبة أو فارغة — سيُعاد المحاولة لاحقاً");
     }
   } catch (e: any) {
-    console.warn("[anime3rb] nopecha-refresh error:", e.message);
+    console.warn("[anime3rb] cookie refresh error:", e.message);
   } finally {
     _a3rbRefreshing = false;
   }
@@ -5661,7 +5651,7 @@ async function a3rbTriggerNopechaRefresh(): Promise<void> {
   const age = _a3rbCfCookieAt ? Date.now() - _a3rbCfCookieAt : A3RB_COOKIE_TTL + 1;
   if (age >= A3RB_COOKIE_TTL - A3RB_REFRESH_BEFORE) {
     console.log("[anime3rb] cookie near/past expiry on startup → triggering refresh");
-    a3rbTriggerNopechaRefresh().catch(() => {});
+    a3rbTriggerCookieRefresh().catch(() => {});
   }
 
   // 3. فحص دوري كل 30 دقيقة
@@ -5669,8 +5659,8 @@ async function a3rbTriggerNopechaRefresh(): Promise<void> {
     const remaining = A3RB_COOKIE_TTL - (Date.now() - (_a3rbCfCookieAt || 0));
     if (remaining < A3RB_REFRESH_BEFORE) {
       const remH = Math.round(remaining / 3_600_000 * 10) / 10;
-      console.log(`[anime3rb] 🔄 cookie expires in ${remH}h → triggering nopecha auto-refresh`);
-      a3rbTriggerNopechaRefresh().catch(() => {});
+      console.log(`[anime3rb] 🔄 cookie expires in ${remH}h → auto-refresh`);
+      a3rbTriggerCookieRefresh().catch(() => {});
     }
   }, A3RB_CHECK_INTERVAL);
 })().catch(e => console.error("[anime3rb] initCookieSystem error:", e.message));

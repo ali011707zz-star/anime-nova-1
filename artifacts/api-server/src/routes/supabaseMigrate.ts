@@ -202,9 +202,17 @@ CREATE TABLE IF NOT EXISTS anime_meta_cache (
   ttl_seconds INTEGER DEFAULT 21600,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- كوكيز CF المشتركة — تُجدَّد مرة/20ساعة عبر Playwright وتُخزَّن هنا
+CREATE TABLE IF NOT EXISTS site_cookies (
+  site        TEXT        PRIMARY KEY,
+  cookie_str  TEXT        NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ NOT NULL
+);
 `;
 
-const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache"];
+const REQUIRED_TABLES = ["users", "pending_verifications", "watch_history", "favorites", "translations_cache", "anime_meta_ar", "anime_meta_cache", "site_cookies"];
 
 // ── PostgreSQL direct migration (للـ Replit PostgreSQL) ──────────────────────
 const PG_MIGRATION_SQL = `
