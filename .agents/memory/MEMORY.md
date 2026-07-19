@@ -123,3 +123,4 @@
 - [yt-dlp WitAnime extractors](ytdlp-witanime-extractors.md) — videa.hu+mp4upload now use extractViaYtDlp(); _zH/_zW decode algo documented; yonaplay=base64→mega/ok.ru/4shared.
 - [Orkestr removal + scraper timeout fixes](orkestr-scraper-fixes-2026-07.md) — anineko direct fetch ✅ (no orkestGet needed); anikoto/hianime/anineko timeouts fixed 7s→20-30s; witanime no-empty-cache fix.
 - [CF Worker key resolution](cf-worker-key-resolution.md) — المفتاح الصحيح في ecosystem.config.cjs.bak؛ VPS .env كان خاطئاً؛ الحل: استعادة القيمة من الـ bak
+- [HLS VPS routing fix](hls-vps-routing-fix.md) — serveHlsVPS+segFallback كانا يُعطيان أولوية CF Worker على الموبايل؛ عُكس الترتيب: VPS مباشر → Hopx → CF Worker آخر ملجأ.
