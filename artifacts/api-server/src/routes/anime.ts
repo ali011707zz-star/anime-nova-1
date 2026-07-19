@@ -14252,6 +14252,32 @@ function toAbsoluteUrl(raw: string, base: string): string {
 // ── Hopx proxy port (يحل CF Worker — كل الفيديو عبر VPS) ───────────────────────
 const _HOPX_PORT = process.env.CF_PROXY_PORT || "8001";
 
+// ── CF Worker fallback للـ segments ─────────────────────────────────────────────
+const _SEG_CF_KEY = process.env.CF_PROXY_KEY  || "";
+const _SEG_CF_URL = process.env.CF_WORKER_URL || "";
+
+/**
+ * يجلب segment عبر CF Worker (nova-cdn-proxy) بنفس تشفير AES-256-GCM
+ * المُطبَّق في wrapCfWorker (animation.ts). يُرجع null عند الفشل.
+ * يُستخدم كـ fallback عندما يحجب CDN الـ VPS IP أو يُرجع HTML.
+ */
+async function fetchSegViaCfWorker(url: string, ref: string, timeoutMs = 20000): Promise<Response | null> {
+  if (!_SEG_CF_URL || !_SEG_CF_KEY) return null;
+  try {
+    const keyBuf  = Buffer.from(_SEG_CF_KEY.padEnd(32, "0").slice(0, 32));
+    const iv      = randomBytes(12);
+    const payload = JSON.stringify({ url, ref: ref || url, exp: Math.floor(Date.now() / 1000) + 3600 });
+    const cipher  = createCipheriv("aes-256-gcm", keyBuf, iv);
+    const enc     = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
+    const tag     = cipher.getAuthTag();
+    const token   = iv.toString("hex") + Buffer.concat([enc, tag]).toString("hex");
+    const cfUrl   = `${_SEG_CF_URL}?t=${token}`;
+    const r = await fetch(cfUrl, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) return null;
+    return r; // serveSegResponse تتولى كشف text/html vs بيانات TS حقيقية
+  } catch { return null; }
+}
+
 /**
  * يجلب URL عبر Hopx proxy (localhost:8001/stream) الذي يستخدم curl_cffi
  * لتجاوز حجب CDNs لـ datacenter IPs. يُرجع null عند الفشل.
@@ -14510,7 +14536,7 @@ router.get("/anime/seg-proxy", async (req, res) => {
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
 
-  /** مساعد داخلي: يخدم segment من response جاهز (مع دعم PNG wrapper) */
+  /** مساعد داخلي: يخدم segment من response جاهز (مع دعم PNG wrapper + تصحيح Content-Type) */
   async function serveSegResponse(r: Response): Promise<boolean> {
     const ct = (r.headers.get("content-type") || "").toLowerCase();
     const mightBePng =
@@ -14537,31 +14563,64 @@ router.get("/anime/seg-proxy", async (req, res) => {
       return true;
     }
 
+    // ── كشف Content-Type خاطئ من CDN (text/html مع بيانات TS حقيقية) ──────────
+    // بعض CDNs (مثل startupmomentumengine.site) تُرجع video/TS بـ text/html
+    // ExoPlayer يرفض text/html → شاشة سوداء حتى لو البيانات صحيحة
+    if (ct.startsWith("text/html")) {
+      const raw = await r.arrayBuffer();
+      const buf  = Buffer.from(raw);
+      // MPEG TS sync byte = 0x47, packet size = 188 bytes
+      if (buf.length > 1000 && buf[0] === 0x47) {
+        // بيانات TS حقيقية بـ Content-Type خاطئ → صحّح وأرسل
+        res.setHeader("Content-Type", "video/MP2T");
+        res.setHeader("Content-Length", String(buf.length));
+        res.status(200).end(buf);
+        return true;
+      }
+      // محتوى HTML فعلي (صفحة خطأ/حجب CDN) → أرجع false للـ fallback
+      return false;
+    }
+
     // Content-Type طبيعي — بثّ مباشرة
     await serveMediaVPS(url, ref, req, res);
     return true;
+  }
+
+  /** fallback chain: Hopx → CF Worker → 502 */
+  async function segFallback(): Promise<void> {
+    if (res.headersSent) return;
+    // 1. Hopx
+    try {
+      const hopxR = await fetchViaHopx(url, ref, 20000);
+      if (hopxR) {
+        const ok = await serveSegResponse(hopxR);
+        if (ok) return;
+      }
+    } catch { /* Hopx فشل */ }
+    // 2. CF Worker
+    if (!res.headersSent) {
+      const cfR = await fetchSegViaCfWorker(url, ref);
+      if (cfR) {
+        const ok = await serveSegResponse(cfR);
+        if (ok) return;
+      }
+    }
+    if (!res.headersSent) res.status(502).send("CDN blocked");
   }
 
   try {
     const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
 
     if (!r.ok) {
-      // ── Hopx fallback: CDN يحجب VPS IP (403/429) → نُرسِل عبر Hopx ──────────
-      // Hopx يستخدم curl_cffi مع Chrome impersonation لتجاوز الحجب.
-      if ((r.status === 403 || r.status === 429) && !res.headersSent) {
-        try {
-          const hopxR = await fetchViaHopx(url, ref, 25000);
-          if (hopxR) {
-            await serveSegResponse(hopxR);
-            return;
-          }
-        } catch { /* Hopx فشل → أرجع الخطأ الأصلي */ }
-      }
+      // 403/429 → fallback chain
+      if (r.status === 403 || r.status === 429) { await segFallback(); return; }
       if (!res.headersSent) res.status(r.status).send("upstream error");
       return;
     }
 
-    await serveSegResponse(r);
+    // serveSegResponse يُرجع false عند HTML فعلي (صفحة خطأ) → fallback
+    const served = await serveSegResponse(r);
+    if (!served) await segFallback();
   } catch {
     if (!res.headersSent) res.status(502).send("segment fetch failed");
   }
