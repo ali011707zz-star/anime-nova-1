@@ -14619,44 +14619,14 @@ function rewriteM3u8ForVPS(manifest: string, baseUrl: string, ref: string): stri
 
 // ── VPS-side HLS manifest proxy ─────────────────────────────────────────────
 // طبقات الجلب (بالأولوية):
-//  1. mediaflow-proxy (localhost:8888) — يستخدم CF Worker bridge (mitmproxy:8890)
-//     → IP محايد من Cloudflare، يحل حجب CDN لـ VPS datacenter IP
-//  2. Direct VPS fetch (fallback إذا mediaflow-proxy غير متاح)
-//  3. Hopx fallback (إذا كان صحياً) — بطيء لكن موثوق
+//  1. Direct VPS fetch — مباشر من VPS بلا وسيط
+//  2. Hopx fallback (إذا كان صحياً) — curl_cffi يتجاوز حجب CDN لـ datacenter IPs
+//  (mediaflow-proxy/CF Worker bridge مُعطَّل — يسبب مشاكل على الموبايل)
 async function serveHlsVPS(
   url: string, ref: string,
   res: import("express").Response,
 ): Promise<void> {
-  // ── 1. mediaflow-proxy عبر CF Worker bridge (الأولوية القصوى) ───────────────
-  if (_mfOk) {
-    try {
-      const headerObj: Record<string,string> = { "User-Agent": BASE_HDRS["User-Agent"] || "Mozilla/5.0" };
-      if (ref) { headerObj.Referer = ref; try { headerObj.Origin = new URL(ref).origin; } catch {} }
-      const mfParams = new URLSearchParams({
-        url,
-        d: _MF_PASS,
-        headers: JSON.stringify(headerObj),
-      });
-      const mfR = await fetch(`${_MF_URL}/proxy/hls/manifest?${mfParams}`, {
-        signal: AbortSignal.timeout(15000),
-      });
-      if (mfR.ok) {
-        const body = await mfR.text();
-        if (body.includes("#EXTM3U")) {
-          // mediaflow-proxy (M3U8_CONTENT_ROUTING=direct) يُرجع original URLs
-          // rewriteM3u8ForVPS يُغلّفها بـ seg-proxy/hls-proxy
-          const rewritten = rewriteM3u8ForVPS(body, url, ref);
-          res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-          res.setHeader("Access-Control-Allow-Origin", "*");
-          res.setHeader("Cache-Control", "no-cache");
-          res.send(rewritten);
-          return;
-        }
-      }
-    } catch { /* mediaflow-proxy فشل — انتقل للـ fallback */ }
-  }
-
-  // ── 2. Direct VPS fetch (fallback) ──────────────────────────────────────────
+  // ── 1. Direct VPS fetch ──────────────────────────────────────────────────────
   const hdrs: Record<string, string> = { ...BASE_HDRS, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
 
@@ -14893,20 +14863,12 @@ router.get("/anime/seg-proxy", async (req, res) => {
     return true;
   }
 
-  /** fallback chain: CF Worker (5s fast-fail) → Hopx (إذا كان صحياً) → 502
+  /** fallback chain: Hopx (VPS curl_cffi) → CF Worker (آخر ملجأ) → 502
    *  _hopxOk يُحدَّث كل 20s — إذا كان الـ sandbox ميتاً نتخطّاه فوراً بدل 20s timeout */
   async function segFallback(): Promise<void> {
     if (res.headersSent) return;
-    // 1. CF Worker (fast-fail 5s)
-    try {
-      const cfR = await fetchSegViaCfWorker(url, ref, 5000);
-      if (cfR) {
-        const ok = await serveSegResponse(cfR);
-        if (ok) return;
-      }
-    } catch { /* CF Worker فشل */ }
-    // 2. Hopx — فقط إذا كان صحياً (نتجنّب 20s وقت ضائع لـ sandbox ميت)
-    if (!res.headersSent && _hopxOk) {
+    // 1. Hopx — VPS مباشر بـ curl_cffi (يتجاوز حجب CDN لـ datacenter IPs)
+    if (_hopxOk) {
       try {
         const hopxR = await fetchViaHopx(url, ref, 18000);
         if (hopxR) {
@@ -14914,6 +14876,16 @@ router.get("/anime/seg-proxy", async (req, res) => {
           if (ok) return;
         }
       } catch { /* Hopx فشل */ }
+    }
+    // 2. CF Worker (fast-fail 5s) — آخر ملجأ إذا فشل Hopx
+    if (!res.headersSent) {
+      try {
+        const cfR = await fetchSegViaCfWorker(url, ref, 5000);
+        if (cfR) {
+          const ok = await serveSegResponse(cfR);
+          if (ok) return;
+        }
+      } catch { /* CF Worker فشل */ }
     }
     if (!res.headersSent) res.status(502).send("CDN blocked");
   }
