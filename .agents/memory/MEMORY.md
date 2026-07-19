@@ -38,6 +38,7 @@
 - [CF Cookie Refresh System](cf-cookie-refresh-system.md) — GitHub Actions cron كل 18h يجدد cf_clearance عبر Playwright; endpoint POST /api/admin/update-cf-cookie محمي بـ APP_SECRET.
 - [anime3rb Cookie Auto-Refresh](anime3rb-cookie-refresh-system.md) — nopecha-ext على OpenShift يحل Turnstile مرة/20h؛ scheduler 30min؛ Supabase site_cookies persistence؛ episodes table URL مباشر.
 
+- [seg-proxy text/html MPEG TS fix](seg-proxy-content-type-fix.md) — بعض CDNs تُرجع TS binary بـ text/html خاطئ → ExoPlayer يرفضه → شاشة سوداء؛ fix: كشف 0x47 sync byte وتصحيح Content-Type + CF Worker fallback.
 - [AnimeSlayer constants restored](anslayer-constants-restored.md) — ANSLAYER_BASE/CID/CSEC حُذفت من anime.ts وأُعيدت؛ لا تحذفها مجدداً.
 - [Slow sources fix plan](slow-sources-fix-plan.md) — خطط جذرية (بدون تطبيق) لـ HiAnime/AW/AN/AS/VL/VF/4K: slug-cache+Hopx+enc-dec-validation+vidfast.vc
 - [Lightpanda sources research](lightpanda-sources-research.md) — FaselHD ✅ data-url→scdns.io M3U8; fastvip /stream/?json=1 ✅ untested; PHOENIX/ANIMEDAR/RISTO/ANIMETIME جزئية; 4XANIME/ANIMERCO Turnstile محجوبة.
