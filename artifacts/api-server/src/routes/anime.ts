@@ -486,6 +486,7 @@ const HOPX_PROXY_BASE      = process.env.HOPX_PROXY_URL    || "http://localhost:
 // يعمل كـ Playwright browser يُجدّد cf_clearance لـ anime3rb بدون مفاتيح خارجية
 // النشر: bash cf-bypass-service/deploy-openshift.sh <TOKEN>
 const OPENSHIFT_CF_URL     = process.env.OPENSHIFT_CF_URL   || "";
+const NOPECHA_KEY          = process.env.NOPECHA_KEY         || "";
 let _hopxAlive: boolean | null = null;
 let _hopxCheckedAt = 0;
 
@@ -5521,7 +5522,7 @@ const A3RB_SUPA_KEY =
   ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3Y2Nhb2d1ZndhcXpyb2RvanZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTMxNjUsImV4cCI6MjA5NDY4OTE2NX0" +
   ".hEl_v7cfd1lZMqI3QJAk2eaX-AFw3C_TAAWpkSMMGwk";
 
-const a3rbSlugCache = new Map<string, { slug: string | null; ts: number }>();
+const a3rbSlugCache = new Map<string, { slug: string | null; id: number | null; ts: number }>();
 const a3rbSrcCache  = new Map<string, { sources: UnifiedSource[]; ts: number }>();
 const A3RB_DB_TTL = 24 * 3_600_000; // 24 ساعة
 
@@ -5563,12 +5564,131 @@ let _a3rbCfCookie    = "";   // "cf_clearance=xxx; __cf_bm=yyy"
 let _a3rbCfCookieAt  = 0;
 const A3RB_COOKIE_TTL = 20 * 3_600_000; // 20 ساعة
 
-/** يُحدِّث cf_clearance من مصدر خارجي (GitHub Actions) */
+/** يُحدِّث cf_clearance من مصدر خارجي (nopecha-refresh / GitHub Actions) */
 export function setA3rbCfCookie(cookie: string, ts?: number): void {
   if (!cookie) return;
   _a3rbCfCookie   = cookie;
   _a3rbCfCookieAt = ts ?? Date.now();
-  console.log("[anime3rb] cf_clearance updated externally ✅ (valid ~20h)");
+  console.log("[anime3rb] cf_clearance updated ✅ (valid ~20h)");
+  // حفظ فوري في Supabase بشكل غير متزامن
+  a3rbSaveCookieToSupabase(cookie, _a3rbCfCookieAt).catch(() => {});
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Supabase persistence — تخزين الكوكيز يصمد بعد restart السيرفر
+// ══════════════════════════════════════════════════════════════════════
+async function a3rbLoadCookieFromSupabase(): Promise<void> {
+  try {
+    const rows = await sbSelect<{ cookie_str: string; updated_at: string }>(
+      "site_cookies",
+      { site: "eq.anime3rb" },
+      { select: "cookie_str,updated_at", limit: 1 },
+    );
+    if (rows.length && rows[0].cookie_str) {
+      const updatedAt = new Date(rows[0].updated_at).getTime();
+      const age = Date.now() - updatedAt;
+      if (age < A3RB_COOKIE_TTL) {
+        _a3rbCfCookie   = rows[0].cookie_str;
+        _a3rbCfCookieAt = updatedAt;
+        console.log(`[anime3rb] ✅ cookie loaded from Supabase (age: ${Math.round(age / 3_600_000 * 10) / 10}h)`);
+      } else {
+        console.log("[anime3rb] Supabase cookie expired — will trigger nopecha refresh");
+      }
+    }
+  } catch (e: any) {
+    console.warn("[anime3rb] could not load cookie from Supabase:", e.message);
+  }
+}
+
+async function a3rbSaveCookieToSupabase(cookie: string, updatedAt: number): Promise<void> {
+  try {
+    const expiresAt = new Date(updatedAt + A3RB_COOKIE_TTL).toISOString();
+    await sbUpsert(
+      "site_cookies",
+      { site: "anime3rb", cookie_str: cookie, updated_at: new Date(updatedAt).toISOString(), expires_at: expiresAt },
+      "site",
+    );
+  } catch (e: any) {
+    console.warn("[anime3rb] could not save cookie to Supabase:", e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Auto-refresh scheduler — يجدد الكوكيز تلقائياً قبل انتهائه بـ 4 ساعات
+// ══════════════════════════════════════════════════════════════════════
+const A3RB_REFRESH_BEFORE = 4 * 3_600_000;   // جدّد عند بقاء < 4 ساعات
+const A3RB_CHECK_INTERVAL = 30 * 60_000;     // فحص كل 30 دقيقة
+let _a3rbRefreshing = false;
+
+async function a3rbTriggerNopechaRefresh(): Promise<void> {
+  if (_a3rbRefreshing) return;
+  const appSecret = process.env.APP_SECRET || "";
+  if (!OPENSHIFT_CF_URL || !appSecret) {
+    console.warn("[anime3rb] OPENSHIFT_CF_URL أو APP_SECRET غير مضبوط — تخطّي auto-refresh");
+    return;
+  }
+  _a3rbRefreshing = true;
+  try {
+    // NOPECHA_KEY يبقى على cf-bypass-service فقط — نُرسل APP_SECRET عبر header (لا query string)
+    const r = await fetch(`${OPENSHIFT_CF_URL}/nopecha-refresh?site=https://anime3rb.com`, {
+      headers: { "x-app-secret": appSecret },
+      signal: AbortSignal.timeout(70_000),
+    });
+    if (r.ok) {
+      const data = await r.json() as { ok?: boolean; cookie_str?: string; error?: string };
+      if (data.ok && data.cookie_str) {
+        setA3rbCfCookie(data.cookie_str);  // يحفظ في memory + Supabase
+        console.log("[anime3rb] ✅ auto-refresh via nopecha done");
+      } else {
+        console.warn("[anime3rb] nopecha-refresh response:", data.error);
+      }
+    } else {
+      console.warn("[anime3rb] nopecha-refresh HTTP:", r.status);
+    }
+  } catch (e: any) {
+    console.warn("[anime3rb] nopecha-refresh error:", e.message);
+  } finally {
+    _a3rbRefreshing = false;
+  }
+}
+
+// تشغيل عند بدء السيرفر: تحميل الكوكيز من Supabase + بدء الـ scheduler
+(async function initA3rbCookieSystem() {
+  // 1. حمّل الكوكيز من Supabase
+  await a3rbLoadCookieFromSupabase();
+
+  // 2. إن لم يكن هناك كوكيز صالحة → جدّد فوراً
+  const age = _a3rbCfCookieAt ? Date.now() - _a3rbCfCookieAt : A3RB_COOKIE_TTL + 1;
+  if (age >= A3RB_COOKIE_TTL - A3RB_REFRESH_BEFORE) {
+    console.log("[anime3rb] cookie near/past expiry on startup → triggering refresh");
+    a3rbTriggerNopechaRefresh().catch(() => {});
+  }
+
+  // 3. فحص دوري كل 30 دقيقة
+  setInterval(() => {
+    const remaining = A3RB_COOKIE_TTL - (Date.now() - (_a3rbCfCookieAt || 0));
+    if (remaining < A3RB_REFRESH_BEFORE) {
+      const remH = Math.round(remaining / 3_600_000 * 10) / 10;
+      console.log(`[anime3rb] 🔄 cookie expires in ${remH}h → triggering nopecha auto-refresh`);
+      a3rbTriggerNopechaRefresh().catch(() => {});
+    }
+  }, A3RB_CHECK_INTERVAL);
+})().catch(e => console.error("[anime3rb] initCookieSystem error:", e.message));
+
+/** يُرجع حالة الكوكيز الحالية لنظام التجديد الخارجي (nopecha-refresh) */
+export function getA3rbCfCookieStatus(): {
+  hasCookie: boolean;
+  updatedAt: number;
+  expiresInMs: number;
+  ttlMs: number;
+} {
+  const age = _a3rbCfCookieAt ? Date.now() - _a3rbCfCookieAt : A3RB_COOKIE_TTL + 1;
+  return {
+    hasCookie  : !!_a3rbCfCookie,
+    updatedAt  : _a3rbCfCookieAt,
+    expiresInMs: Math.max(0, A3RB_COOKIE_TTL - age),
+    ttlMs      : A3RB_COOKIE_TTL,
+  };
 }
 
 /**
@@ -5715,14 +5835,20 @@ async function hopxBrowserHtml(
  * البحث عن anime3rb slug عبر Animatoo Supabase DB
  * أولوية: tmdb_id → en_title search → title search
  */
-async function getA3rbSlug(
+/**
+ * جلب بيانات الأنمي من Animatoo Supabase — يُرجع {id, slug} أو null
+ * id مطلوب للاستعلام من جدول episodes مباشرة (URL جاهزة بدون بناء)
+ */
+async function getA3rbAnimeRow(
   title: string,
   english: string | null,
   tmdbId?: number,
-): Promise<string | null> {
+): Promise<{ id: number; slug: string } | null> {
   const cacheKey = `${tmdbId ?? ""}:${(english ?? title).toLowerCase()}`;
   const hit = a3rbSlugCache.get(cacheKey);
-  if (hit && Date.now() - hit.ts < 24 * 3600_000) return hit.slug;
+  if (hit && Date.now() - hit.ts < 24 * 3600_000) {
+    return hit.slug && hit.id ? { id: hit.id, slug: hit.slug } : null;
+  }
 
   const headers = {
     apikey: A3RB_SUPA_KEY,
@@ -5731,17 +5857,18 @@ async function getA3rbSlug(
   };
 
   let slug: string | null = null;
+  let id: number | null = null;
 
   // 1. بحث بـ tmdb_id (أدق)
   if (tmdbId) {
     try {
       const r = await fetch(
-        `${A3RB_SUPA}/anime?tmdb_id=eq.${tmdbId}&select=slug,episode_count&order=episode_count.desc&limit=3`,
+        `${A3RB_SUPA}/anime?tmdb_id=eq.${tmdbId}&select=id,slug,episode_count&order=episode_count.desc&limit=3`,
         { headers, signal: AbortSignal.timeout(8000) },
       );
       if (r.ok) {
-        const data = await r.json() as Array<{ slug: string; episode_count: number }>;
-        if (data.length) slug = data[0].slug;
+        const data = await r.json() as Array<{ id: number; slug: string; episode_count: number }>;
+        if (data.length) { slug = data[0].slug; id = data[0].id; }
       }
     } catch { /* ignore */ }
   }
@@ -5750,24 +5877,18 @@ async function getA3rbSlug(
   if (!slug) {
     for (const q of [...new Set([english, title].filter(Boolean) as string[])]) {
       try {
-        // جرب en_title أولاً
-        // بحث في en_title أو title (الياباني المرومن)
-      const r = await fetch(
-          `${A3RB_SUPA}/anime?or=(en_title.ilike.*${encodeURIComponent(q)}*,title.ilike.*${encodeURIComponent(q)}*)&select=slug,en_title,title,episode_count&order=episode_count.desc&limit=5`,
+        const r = await fetch(
+          `${A3RB_SUPA}/anime?or=(en_title.ilike.*${encodeURIComponent(q)}*,title.ilike.*${encodeURIComponent(q)}*)&select=id,slug,en_title,title,episode_count&order=episode_count.desc&limit=5`,
           { headers, signal: AbortSignal.timeout(8000) },
         );
         if (r.ok) {
-          const data = await r.json() as Array<{ slug: string; en_title: string; episode_count: number }>;
+          const data = await r.json() as Array<{ id: number; slug: string; en_title: string; episode_count: number }>;
           if (data.length) {
-            // أفضل مطابقة بالتشابه
-            const best = data.reduce((prev, cur) => {
-              const ps = asciiSimilarity(prev.en_title, q);
-              const cs = asciiSimilarity(cur.en_title, q);
-              return cs > ps ? cur : prev;
-            });
+            const best = data.reduce((prev, cur) =>
+              asciiSimilarity(cur.en_title, q) > asciiSimilarity(prev.en_title, q) ? cur : prev
+            );
             if (best.episode_count > 0 || data.length === 1) {
-              slug = best.slug;
-              break;
+              slug = best.slug; id = best.id; break;
             }
           }
         }
@@ -5775,8 +5896,36 @@ async function getA3rbSlug(
     }
   }
 
-  a3rbSlugCache.set(cacheKey, { slug, ts: Date.now() });
-  return slug;
+  a3rbSlugCache.set(cacheKey, { slug, id, ts: Date.now() });
+  return slug && id ? { id, slug } : null;
+}
+
+/** للتوافق مع الكود القديم */
+async function getA3rbSlug(title: string, english: string | null, tmdbId?: number): Promise<string | null> {
+  const row = await getA3rbAnimeRow(title, english, tmdbId);
+  return row?.slug ?? null;
+}
+
+/**
+ * جلب URL الحلقة مباشرة من جدول episodes في Animatoo Supabase
+ * أسرع وأدق من بناء URL من slug — يُرجع URL الجاهزة مباشرة
+ */
+async function getA3rbEpisodeUrl(animeId: number, slug: string, ep: number): Promise<string> {
+  try {
+    const r = await fetch(
+      `${A3RB_SUPA}/episodes?anime_id=eq.${animeId}&number=eq.${ep}&select=url&limit=1`,
+      {
+        headers: { apikey: A3RB_SUPA_KEY, Authorization: `Bearer ${A3RB_SUPA_KEY}` },
+        signal: AbortSignal.timeout(6000),
+      },
+    );
+    if (r.ok) {
+      const data = await r.json() as Array<{ url: string }>;
+      if (data.length && data[0].url) return data[0].url;
+    }
+  } catch { /* fallback */ }
+  // Fallback: بناء URL من slug
+  return `${A3RB_BASE}/episode/${slug}/${ep}`;
 }
 
 /** استخراج مصادر vid3rb.com وغيرها من HTML صفحة حلقة anime3rb */
@@ -5831,16 +5980,16 @@ async function getAnime3rbSources(
   }
 
   try {
-    // 1. احصل على الـ slug من Animatoo Supabase
-    const slug = await getA3rbSlug(title, english, tmdbId);
-    if (!slug) {
-      console.warn(`[anime3rb] no slug for "${english ?? title}"`);
+    // 1. احصل على بيانات الأنمي (id + slug) من Animatoo Supabase
+    const animeRow = await getA3rbAnimeRow(title, english, tmdbId);
+    if (!animeRow) {
+      console.warn(`[anime3rb] no anime row for "${english ?? title}"`);
       return [];
     }
 
-    // 2. بناء URL الحلقة مباشرة (بدون scraping صفحة العنوان)
-    const epUrl = `${A3RB_BASE}/episode/${slug}/${ep}`;
-    console.log(`[anime3rb] slug=${slug} ep=${ep} → ${epUrl}`);
+    // 2. جلب URL الحلقة مباشرة من جدول episodes (أدق من بناء URL)
+    const epUrl = await getA3rbEpisodeUrl(animeRow.id, animeRow.slug, ep);
+    console.log(`[anime3rb] anime_id=${animeRow.id} slug=${animeRow.slug} ep=${ep} → ${epUrl}`);
 
     // ── Embed fallback دائم: رابط الحلقة مباشرة من Animatoo Supabase ──────
     // المستخدم يفتحه في WebView (IP حقيقي) → يحل Cloudflare Turnstile بنفسه
