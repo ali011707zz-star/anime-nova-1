@@ -958,7 +958,7 @@ function wrapAnimForMobile(directUrl: string | undefined, proxyUrl: string | und
   if (raw.startsWith("/api/")) return { directUrl, proxyUrl };
   if (raw.includes("mega.nz") || raw.includes("mega.co.nz")) return { directUrl, proxyUrl };
   const ref = headers?.Referer || "";
-  const isHls = /\.m3u8|/i.test(raw);
+  const isHls = /\.m3u8/i.test(raw);
   if (isHls) {
     const p = ref
       ? `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`
