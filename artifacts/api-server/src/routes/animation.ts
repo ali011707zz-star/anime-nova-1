@@ -958,7 +958,8 @@ function wrapAnimForMobile(directUrl: string | undefined, proxyUrl: string | und
   if (raw.startsWith("/api/")) return { directUrl, proxyUrl };
   if (raw.includes("mega.nz") || raw.includes("mega.co.nz")) return { directUrl, proxyUrl };
   const ref = headers?.Referer || "";
-  const isHls = /\.m3u8/i.test(raw);
+  // Detect HLS by extension OR by common HLS path patterns (some CDNs omit .m3u8 extension)
+  const isHls = /\.m3u8/i.test(raw) || /\/hls\//i.test(raw) || /\/playlist\//i.test(raw) || /\/stream\//i.test(raw);
   if (isHls) {
     const p = ref
       ? `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}&ref=${encodeURIComponent(ref)}`
