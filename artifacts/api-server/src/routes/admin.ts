@@ -5,7 +5,7 @@ import { sbSelect, sbPatch, sbDelete } from "../lib/supabaseClient.js";
 import { SETUP_SQL, getTableStatus } from "../lib/supabaseMigrate.js";
 import { setDbConfig, clearDbConfigCache } from "../lib/dbConfig.js";
 import { checkAppSecret } from "../lib/security.js";
-import { setA3rbCfCookie } from "./anime.js";
+import { setA3rbCfCookie, getA3rbCfCookieStatus } from "./anime.js";
 
 // دالة مساعدة للتحقق من secret أو صلاحيات الأدمن
 async function hasRelayAccess(req: Request): Promise<boolean> {
@@ -459,6 +459,52 @@ router.get("/admin/setup/status", async (req: Request, res: Response) => {
 
 
 // ── تحديث cf_clearance كوكيز من GitHub Actions ─────────────────────────────
+
+// ── GET /api/admin/cf-cookie-status — لوحة حالة كوكيز anime3rb ──────────────
+router.get("/admin/cf-cookie-status", async (req: Request, res: Response) => {
+  const provided = req.headers["x-app-secret"] as string | undefined;
+  if (!checkAppSecret(provided)) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+  const status = getA3rbCfCookieStatus();
+  const remH   = (status.expiresInMs / 3_600_000).toFixed(1);
+  const updTs  = status.updatedAt ? new Date(status.updatedAt).toISOString() : "—";
+
+  // JSON للاستدعاء البرمجي
+  if (req.headers.accept?.includes("application/json")) {
+    return res.json({ ...status, updatedAtIso: updTs, remainingHours: parseFloat(remH) });
+  }
+
+  // HTML dashboard
+  const valid = status.hasCookie && status.expiresInMs > 0;
+  const html = `<!DOCTYPE html><html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><title>Cookie Status — anime3rb</title>
+<style>
+  body{font-family:Arial,sans-serif;background:#0f0f0f;color:#e0e0e0;padding:24px}
+  h1{color:#f90}
+  .badge{display:inline-block;padding:4px 14px;border-radius:20px;font-weight:bold}
+  .ok{background:#1a4a1a;color:#4cff4c}.bad{background:#4a1a1a;color:#ff4c4c}
+  table{border-collapse:collapse;margin-top:16px;width:100%;max-width:560px}
+  th,td{border:1px solid #333;padding:10px 14px;text-align:right}
+  th{background:#1a1a1a;color:#f90}
+  tr:hover{background:#181818}
+  .hint{color:#888;font-size:13px;margin-top:12px}
+</style></head>
+<body>
+<h1>🍪 حالة كوكيز anime3rb</h1>
+<span class="badge ${valid ? "ok" : "bad"}">${valid ? "✅ صالح" : "❌ منتهي أو غير موجود"}</span>
+<table>
+  <tr><th>البيانات</th><th>القيمة</th></tr>
+  <tr><td>آخر تحديث</td><td>${updTs}</td></tr>
+  <tr><td>ينتهي خلال</td><td>${valid ? remH + " ساعة" : "—"}</td></tr>
+  <tr><td>مدة الصلاحية</td><td>${(status.ttlMs / 3_600_000).toFixed(0)} ساعة</td></tr>
+  <tr><td>مخزَّن في Supabase</td><td>${status.hasCookie ? "✅" : "❌"}</td></tr>
+</table>
+<p class="hint">يتجدد تلقائياً عند بقاء &lt; 4 ساعات عبر nopecha-refresh على OpenShift.</p>
+</body></html>`;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
+});
 
 router.post("/admin/update-cf-cookie", async (req: Request, res: Response) => {
   const provided = (req.headers["x-app-secret"] as string | undefined);
