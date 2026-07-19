@@ -12504,9 +12504,21 @@ router.get("/anime/fetch-source", async (req, res) => {
   }
 
   // ── فحص الكاش أولاً ─────────────────────────────────────────────
+  // مواقع ذات tokens/URLs قصيرة الأجل — لا نقدّم بياناتها إذا كانت قديمة
+  const SHORT_TTL_FETCH_SITES = new Set([
+    "hianime", "anineko", "anikoto", "anikototv", // vibeplayer.site tokens ~1-2h
+    "animewitcher", "animeify",                    // Streamtape/MediaFire ~45min
+    "moviebox", "moviebox_anim",                   // &t= signed URLs ~10min
+    "vidlink_encdec", "vidlink_anim",              // stormvv URLs ~45min
+    "xpass_anim",                                  // XPass token ~8min
+  ]);
+  const SHORT_TTL_MAX_AGE_MS = 90 * 60_000; // 90 دقيقة — قبل انتهاء tokens
   const cKey = makeSourceCacheKey(site, title, ep);
   const cached = await getFromSourceCache(cKey);
-  if (cached && !shouldRefreshCache(cached.expiresAt)) {
+  // للمواقع قصيرة الـ TTL: إذا بقي للكاش أقل من 90 دقيقة أو انتهى → اكشط مباشرةً
+  const skipCacheForShortTtl = cached !== null && SHORT_TTL_FETCH_SITES.has(site) &&
+    (cached.stale === true || (cached.expiresAt - Date.now()) < SHORT_TTL_MAX_AGE_MS);
+  if (cached && !shouldRefreshCache(cached.expiresAt) && !skipCacheForShortTtl) {
     const enc = cached.sources.map((s: UnifiedSource) => {
       /* استخراج headers (Referer/Origin) من رابط الـ proxy قبل التشفير.
          يحتاجها ExoPlayer/AVPlayer لإرسال Referer مع طلبات الـ segments مباشرةً للـ CDN. */
@@ -12593,7 +12605,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "animekai":    (await race(getAnimeKaiSources(title, english, ep, anilistId),    40_000, [])).forEach(collectSrc); break;
       // anikuro: محذوف
       // anivault: محذوف
-      case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      30_000, [])).forEach(collectSrc); break;
+      case "hianime":     (await race(getHiAnimeSources(title, english, ep, anilistId),      22_000, [])).forEach(collectSrc); break;
       case "animewitcher":(await race(getAnimeWitcherSources(title, english, ep, anilistId),38000, [])).forEach(collectSrc); break;
       case "stardima":    (await race(getStardimaSources(title, english, ep, isMovie),       20000, [])).forEach(collectSrc); break;
       case "anineko":       (await race(getAninekoSources(title, english, ep),                20_000, [])).forEach(collectSrc); break;
@@ -14828,14 +14840,15 @@ router.get("/anime/seg-proxy", async (req, res) => {
     return true;
   }
 
-  /** fallback chain: CF Worker → Hopx → 502
-   *  CF Worker first: fast (~200ms) for small segment files
-   *  Hopx second: reliable but slow (5-20s per segment), causes ExoPlayer stall */
+  /** fallback chain: CF Worker (5s fast-fail) → Hopx → 502
+   *  CF Worker: محاولة سريعة جداً (timeout=5ث) — إذا فشل نذهب فوراً لـ Hopx
+   *  Hopx second: reliable but slow (5-20s per segment) — مقبول لأنه يعمل
+   *  ملاحظة: 20ث timeout للـ CF Worker كان يُجمِّد ExoPlayer buffer → شاشة سوداء */
   async function segFallback(): Promise<void> {
     if (res.headersSent) return;
-    // 1. CF Worker (fast for small segment files)
+    // 1. CF Worker (fast-fail 5s — نتجنّب تجميد ExoPlayer buffer بـ 20ث)
     try {
-      const cfR = await fetchSegViaCfWorker(url, ref);
+      const cfR = await fetchSegViaCfWorker(url, ref, 5000);
       if (cfR) {
         const ok = await serveSegResponse(cfR);
         if (ok) return;
@@ -14858,8 +14871,8 @@ router.get("/anime/seg-proxy", async (req, res) => {
     const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(20000) });
 
     if (!r.ok) {
-      // 403/429 → fallback chain
-      if (r.status === 403 || r.status === 429) { await segFallback(); return; }
+      // 403/429/5xx → fallback chain (CDN blocks VPS or upstream error)
+      if (r.status === 403 || r.status === 429 || r.status >= 500) { await segFallback(); return; }
       if (!res.headersSent) res.status(r.status).send("upstream error");
       return;
     }
