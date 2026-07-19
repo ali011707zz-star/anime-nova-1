@@ -7426,6 +7426,141 @@ async function getAninekoSources(
 }
 
 
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIPUB — صوت مدبلج/مترجم (دوب/سب)  +  ترجمات عربية
+//  API: anipub.xyz (مفتوح بلا CF)  →  Player: megaplay.buzz/stream/getSourcesNew
+//  CDN: nekostream.site M3U8 — يحتاج Referer: megaplay.buzz
+//  السلسلة:
+//    1. /api/search/:name  → Id
+//    2. /v1/api/details/:id → link "src=https://www.anipub.xyz/video/:vid/:type"
+//    3. megaplay.buzz/stream/s-2/:vid/:type → data-id
+//    4. /stream/getSourcesNew?id=:dataId  (X-Requested-With: XMLHttpRequest)
+//    5. sources.file = M3U8 url  |  tracks = [ara/eng VTT]
+// ════════════════════════════════════════════════════════════════════
+const ANIPUB_BASE = "https://anipub.xyz";
+
+async function findAnipubAnimeId(title: string, english: string | null): Promise<number | null> {
+  const queries = [title];
+  if (english && english !== title) queries.push(english);
+
+  for (const q of queries) {
+    try {
+      const r = await fetch(`${ANIPUB_BASE}/api/search/${encodeURIComponent(q)}`, {
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!r.ok) continue;
+      const results: Array<{ Name: string; Id: number; finder: string }> = await r.json();
+      if (!results?.length) continue;
+      const lq = q.toLowerCase();
+      const match = results.find(x => x.Name.toLowerCase().includes(lq) || lq.includes(x.Name.toLowerCase().slice(0, 8)));
+      const pick = match || results[0];
+      if (pick?.Id) return pick.Id;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
+async function getAniPubSources(
+  title: string, english: string | null, ep: number,
+): Promise<UnifiedSource[]> {
+  try {
+    const animeId = await findAnipubAnimeId(title, english);
+    if (!animeId) return [];
+
+    const detR = await fetch(`${ANIPUB_BASE}/v1/api/details/${animeId}`, {
+      headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!detR.ok) return [];
+    const det = await detR.json();
+    const local = det?.local;
+    if (!local) return [];
+
+    // ep=1 → local.link  |  ep=2 → local.ep[0]  |  ep=3 → local.ep[1] ...
+    const rawLink: string =
+      ep === 1
+        ? (local.link || "")
+        : (local.ep?.[ep - 2]?.link || "");
+    if (!rawLink) return [];
+
+    const src = rawLink.replace(/^src=/, "");
+    let megaUrl = "";
+    let epType = "sub";
+
+    // pattern 1: /video/:videoId/(sub|dub)
+    const vidM = src.match(/anipub\.xyz\/video\/(\d+)\/(sub|dub)/i);
+    // pattern 2: /play/:malId/:epNum/(sub|dub)
+    const playM = src.match(/anipub\.xyz\/play\/(\d+)\/(\d+)\/(sub|dub)/i);
+
+    if (vidM) {
+      epType = vidM[2];
+      megaUrl = `${MEGAPLAY_BASE}/stream/s-2/${vidM[1]}/${epType}`;
+    } else if (playM) {
+      epType = playM[3];
+      megaUrl = `${MEGAPLAY_BASE}/stream/mal/${playM[1]}/${playM[2]}/${epType}`;
+    } else {
+      return [];
+    }
+
+    // جلب صفحة megaplay لاستخراج data-id
+    const pageR = await fetch(megaUrl, {
+      headers: { "User-Agent": BROWSER_UA, Referer: `${ANIPUB_BASE}/`, Accept: "text/html,*/*" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!pageR.ok) return [];
+    const pageHtml = await pageR.text();
+    const dataIdM = pageHtml.match(/data-id="(\d+)"/);
+    if (!dataIdM) return [];
+    const dataId = dataIdM[1];
+
+    // getSourcesNew — يحتاج X-Requested-With: XMLHttpRequest
+    const srcR = await fetch(
+      `${MEGAPLAY_BASE}/stream/getSourcesNew?id=${dataId}&id=${dataId}`,
+      {
+        headers: {
+          "User-Agent": BROWSER_UA,
+          Referer: megaUrl,
+          Accept: "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!srcR.ok) return [];
+    const srcData = await srcR.json();
+
+    const m3u8: string = srcData?.sources?.file || "";
+    if (!m3u8.includes(".m3u8")) return [];
+
+    // الترجمة العربية
+    const tracks: Array<{ file: string; label: string }> = srcData?.tracks || [];
+    const arTrack = tracks.find((t: any) =>
+      (t.label || "").toLowerCase().includes("arabic") || (t.label || "").toLowerCase().includes("arab"),
+    );
+    const subtitleUrl: string | undefined = arTrack?.file;
+
+    const referer = `${MEGAPLAY_BASE}/`;
+    const proxied = `/api/anime/hls-proxy?url=${encodeURIComponent(m3u8)}&ref=${encodeURIComponent(referer)}`;
+    const typeLabel = epType === "dub" ? "مدبلج" : "مترجم";
+
+    return [{
+      name: `AniPub · MegaPlay · ${typeLabel}`,
+      url: m3u8,
+      quality: "1080p",
+      qualityRank: 10,
+      site: "anipub",
+      directUrl: proxied,
+      directType: "hls" as const,
+      headers: { Referer: referer },
+      ...(subtitleUrl ? { subtitleUrl } : {}),
+    }];
+  } catch {
+    return [];
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  ANIMEPAHE (via Miruro Kiwi) — صوت ياباني + ترجمة إنجليزية مدمجة
 //  CDN: vault-*.owocdn.top / vault-*.uwucdn.top — AES-128 HLS — CORS open
@@ -12491,6 +12626,7 @@ router.get("/anime/fetch-source", async (req, res) => {
     "kawaii", "anslayer", "anineko", "anikoto", "hianime", "animewitcher", "animeify",
     "animekai",  // مُضاف بطلب المستخدم 2026-07-16
     "witanime",  // مُعاد تفعيله 2026-07-17 — _zH/_zW + ok.ru/yonaplay/streamwish resolution
+    "anipub",    // مُضاف 2026-07-19 — AniPub/MegaPlay مدبلج+ترجمة+عربي
     "anime3rb",  // مُضاف 2026-07-18 — Animatoo Supabase slug + Hopx browser-html
     // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING
     // videasy_anim: نُقل بالكامل إلى قسم الأنيميشن بطلب المستخدم 2026-07-15
@@ -12631,6 +12767,7 @@ router.get("/anime/fetch-source", async (req, res) => {
       case "akoam":        await runExtract(await race(getAkoamSources(title, english, ep), 22_000, [])); break;
       case "moviebox":     (await race(getMovieBoxAnimeSources(title, english, ep, isMovie), 18_000, [])).forEach(collectSrc); break;
       case "anime3rb":     (await race(getAnime3rbSources(title, english, ep), 38_000, [])).forEach(collectSrc); break;
+      case "anipub":     (await race(getAniPubSources(title, english, ep),  20_000, [])).forEach(collectSrc); break;
       // case "appsanime": disabled — OK.ru blocks datacenter IPs server-side
       case "nekowatch":    (await race(getNekowatchSources(title, english, ep, anilistId), 18_000, [])).forEach(collectSrc); break;
       // case "xpass_anim": محذوف 2026-07-15

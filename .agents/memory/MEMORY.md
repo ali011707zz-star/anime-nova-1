@@ -38,6 +38,7 @@
 - [anime3rb scraper](anime3rb-scraper-impl.md) — Laravel+Livewire+CF; slug via Animatoo Supabase(iwccaog..,anon key في APK); /episode/{slug}/{ep}; vid3rb CDN; Hopx browser-html لحل CF.
 - [CF Cookie Refresh System](cf-cookie-refresh-system.md) — GitHub Actions cron كل 18h يجدد cf_clearance عبر Playwright; endpoint POST /api/admin/update-cf-cookie محمي بـ APP_SECRET.
 - [anime3rb Cookie Auto-Refresh](anime3rb-cookie-refresh-system.md) — nopecha-ext على OpenShift يحل Turnstile مرة/20h؛ scheduler 30min؛ Supabase site_cookies persistence؛ episodes table URL مباشر.
+- [AniPub/MegaPlay scraper](anipub-megaplay-scraper.md) — X-Requested-With:XMLHttpRequest لازم لـ getSourcesNew؛ M3U8 يحتاج Referer:megaplay.buzz؛ تجاوز CF عبر megaplay مباشرة.
 
 - [seg-proxy text/html MPEG TS fix](seg-proxy-content-type-fix.md) — بعض CDNs تُرجع TS binary بـ text/html خاطئ → ExoPlayer يرفضه → شاشة سوداء؛ fix: كشف 0x47 sync byte وتصحيح Content-Type + CF Worker fallback.
 - [AnimeSlayer constants restored](anslayer-constants-restored.md) — ANSLAYER_BASE/CID/CSEC حُذفت من anime.ts وأُعيدت؛ لا تحذفها مجدداً.
