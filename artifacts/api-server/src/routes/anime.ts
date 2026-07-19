@@ -5751,8 +5751,7 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
         };
         if (data.ok) {
           if (data.cookie_str) {
-            _a3rbCfCookie   = data.cookie_str;
-            _a3rbCfCookieAt = Date.now();
+            setA3rbCfCookie(data.cookie_str);   // يُخزَّن في Supabase تلقائياً
             console.log(`[anime3rb] cf_clearance cached via Hopx ✅`);
           }
           if (data.html) return data.html;
@@ -5785,8 +5784,7 @@ async function a3rbFetchPage(url: string, timeoutMs = 35000): Promise<string | n
         };
         if (data.ok) {
           if (data.cookie_str) {
-            _a3rbCfCookie   = data.cookie_str;
-            _a3rbCfCookieAt = Date.now();
+            setA3rbCfCookie(data.cookie_str);   // يُخزَّن في Supabase تلقائياً
             console.log(`[anime3rb] cf_clearance cached via OpenShift ✅ — cycleTLS جاهز للـ 20ساعة القادمة`);
           }
           if (data.html) return data.html;
