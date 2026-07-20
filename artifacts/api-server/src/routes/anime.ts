@@ -7493,6 +7493,8 @@ async function getAniPubSources(
     const vidM = src.match(/anipub\.xyz\/video\/(\d+)\/(sub|dub)/i);
     // pattern 2: /play/:malId/:epNum/(sub|dub)
     const playM = src.match(/anipub\.xyz\/play\/(\d+)\/(\d+)\/(sub|dub)/i);
+    // pattern 3: gogoanime.com.by embed → fetch page → extract megaplay iframe src
+    const isGogo = /gogoanime\.com\.by/i.test(src);
 
     if (vidM) {
       epType = vidM[2];
@@ -7500,6 +7502,19 @@ async function getAniPubSources(
     } else if (playM) {
       epType = playM[3];
       megaUrl = `${MEGAPLAY_BASE}/stream/mal/${playM[1]}/${playM[2]}/${epType}`;
+    } else if (isGogo) {
+      // gogoanime.com.by is a thin wrapper — its page contains an iframe pointing to megaplay
+      const gogoR = await fetch(src, {
+        headers: { "User-Agent": BROWSER_UA, Referer: `${ANIPUB_BASE}/`, Accept: "text/html,*/*" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!gogoR.ok) return [];
+      const gogoHtml = await gogoR.text();
+      // Extract megaplay iframe src — e.g. megaplay.buzz/stream/s-2/22219/dub
+      const iframeM = gogoHtml.match(/megaplay\.buzz\/stream\/s-2\/(\d+)\/(sub|dub)/i);
+      if (!iframeM) return [];
+      epType  = iframeM[2];
+      megaUrl = `${MEGAPLAY_BASE}/stream/s-2/${iframeM[1]}/${epType}`;
     } else {
       return [];
     }
