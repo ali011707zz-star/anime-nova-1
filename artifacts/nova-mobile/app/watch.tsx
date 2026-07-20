@@ -57,6 +57,7 @@ const SITE_TAG: Record<string, string> = {
   faselhd_db: "FH", witanime: "WI", witanime_db: "WD",
   notorrent: "NO", sanime: "SA", anipm: "PM", anslayer: "AS",
   anime3rb: "A3", akwam: "AQ",
+  anipub: "PB",
 };
 
 /* ── اسم عرض لكل موقع في منتقي المصادر ── */
@@ -73,6 +74,7 @@ const SITE_LABEL: Record<string, string> = {
   witanime: "WITanime", witanime_db: "WIT مدبلج",
   notorrent: "Notorrent", sanime: "SAnime", anipm: "AniPm", anslayer: "AnimeSlayer",
   anime3rb: "Anime3rb", akwam: "Akwam",
+  anipub: "AniPub",
 };
 function getSiteTag(site: string): string {
   return SITE_TAG[site] || site.slice(0, 2).toUpperCase();
@@ -98,6 +100,7 @@ const SITE_DESC: Record<string, string> = {
   notorrent: "IMDB · مصادر متعددة", sanime: "عربي مدبلج/مترجم · MP4",
   anslayer: "مشغلات خارجية · MixDrop/MediaFire",
   anime3rb: "عربي مترجم · embed مباشر", akwam: "عربي مترجم · MP4 مباشر",
+  anipub: "مدبلج · مترجم · MegaPlay",
 };
 function getSiteDesc(site: string): string {
   return SITE_DESC[site] || "";
@@ -208,13 +211,14 @@ const SITE_PRIORITY: Record<string, number> = {
   dulo_anim: 70, vidlink_anim: 55,
   anineko: 50, anikoto: 40, vidfast: 35,
   anikototv: 30, animekai: 25, animepahe: 20, anipm: 18,
+  witanime: 12, anipub: 10,
 };
 
 /* ── قائمة المصادر (KW أولاً — الأولوية القصوى للتشغيل الفوري) ── */
 /* مصادر موحَّدة مع الويب — نفس المصادر الـ 8 المفعَّلة في SCRAPER_DEFS */
 const ANIME_SITES = [
   "kawaii", "anikoto", "hianime", "animewitcher",
-  "anineko", "anslayer", "animeify",
+  "anineko", "anslayer", "animeify", "anipub",
   // "witanime": معطّل بطلب المستخدم
   // "allmanga": معطّل 2026-07-17 — AA_CRYPTO_MISSING على AllAnime
 ] as const;
