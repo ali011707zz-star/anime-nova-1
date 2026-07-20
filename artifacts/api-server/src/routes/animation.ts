@@ -950,29 +950,41 @@ function hasCJK(text: string): boolean {
 }
 
 // ── تغليف روابط CDN المباشرة للموبايل عبر VPS proxy (animation) ──────────
-function wrapAnimForMobile(directUrl: string | undefined, proxyUrl: string | undefined, headers: Record<string,string> | undefined): { directUrl: string | undefined; proxyUrl: string | undefined } {
+// ⚠️ القاعدة الثابتة: دائماً نمرّ عبر hls-proxy بغض النظر عن وجود Referer.
+// السبب: ExoPlayer/AVPlayer يُرسل Referer للـ manifest فقط، لكن لا يُضيفه
+// تلقائياً لكل segment في الـ HLS. hls-proxy يتولى rewrite الـ segments عبر
+// seg-proxy الذي يُضيف الـ Referer الصحيح لكل segment.
+// encryptParam إلزامي (لا encodeURIComponent) — hls-proxy يفك التشفير بـ decryptParam().
+function wrapAnimForMobile(
+  directUrl: string | undefined,
+  proxyUrl: string | undefined,
+  headers: Record<string, string> | undefined
+): { directUrl: string | undefined; proxyUrl: string | undefined } {
   // إذا يوجد proxyUrl مسبق (مُمرَّر من الـ scraper بـ /api/ prefix) → استخدمه دون تغيير
   if (proxyUrl && proxyUrl.startsWith("/api/")) return { directUrl, proxyUrl };
   const raw = directUrl || "";
   if (!raw) return { directUrl, proxyUrl };
   if (raw.startsWith("/api/")) return { directUrl, proxyUrl };
+  // mega.nz/mega.co.nz: تُشغَّل مباشرة في embed WebView
   if (raw.includes("mega.nz") || raw.includes("mega.co.nz")) return { directUrl, proxyUrl };
 
   const ref = headers?.Referer || "";
-
-  // ── الإصلاح الجذري: لا نمرّ عبر VPS proxy عندما يتوفر Referer ──────────────
-  // react-native-video v6 (TheWidlarzGroup) يُرسل headers (Referer/Origin) مع
-  // كل طلب نيتيفاً — المانيفست + كل segment — عبر ExoPlayer/AVPlayer.
-  // الـ VPS proxy يُسبّب المشكلة لأن CDNs كثيرة تحجب IP الـ datacenter (VPS).
-  // الجهاز المحمول يستخدم IP سكني → CDN يقبله طالما Referer صحيح.
-  if (ref) return { directUrl: raw, proxyUrl: raw };
-
-  // بدون Referer: VPS يُضيفه من الخادم → لا بديل سوى hls-proxy للـ HLS
   const isHls = /\.m3u8/i.test(raw) || /\/hls\//i.test(raw) || /\/playlist\//i.test(raw) || /\/stream\//i.test(raw);
+
   if (isHls) {
-    const p = `/api/anime/hls-proxy?url=${encodeURIComponent(raw)}`;
+    // دائماً عبر hls-proxy: يُعيد كتابة segments + يُضيف Referer لكل segment
+    const p = ref
+      ? `/api/anime/hls-proxy?url=${encryptParam(raw)}&ref=${encryptParam(ref)}`
+      : `/api/anime/hls-proxy?url=${encryptParam(raw)}`;
     return { directUrl: p, proxyUrl: p };
   }
+
+  // MP4/فيديو مباشر: video-proxy يُضيف Referer للطلب إذا توفّر
+  if ((raw.includes(".mp4") || raw.includes("/mp4/") || raw.includes("video/")) && ref) {
+    const p = `/api/anime/video-proxy?url=${encryptParam(raw)}&ref=${encryptParam(ref)}`;
+    return { directUrl: p, proxyUrl: p };
+  }
+
   return { directUrl, proxyUrl };
 }
 
