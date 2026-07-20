@@ -214,6 +214,7 @@ function getAnimTag(label: string): string {
   // ─── مصادر إنجليزية / دولية ───
   if (l.startsWith("nflix"))          return "NF";
   if (l.startsWith("vidbolt"))        return "VB";
+  if (l.startsWith("dahmermovies"))   return "DH";
   if (l.startsWith("icefy"))          return "IF";
   if (l.startsWith("nebula"))         return "NB";
   if (l.startsWith("superembed"))     return "SE";
