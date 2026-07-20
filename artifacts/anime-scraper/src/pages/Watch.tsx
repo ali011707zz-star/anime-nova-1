@@ -171,6 +171,7 @@ const SCRAPER_DEFS: { site: string; name: string; desc: string; tag: string; aud
   { site: "hianime",      name: "HiAnime",       desc: "ياباني مترجم · HLS نظيف", tag: "HI" },
   { site: "animewitcher", name: "AnimeWitcher",   desc: "PD/ST · مباشر",           tag: "AW", isArabic: true },
   { site: "anineko",      name: "AniNeko",        desc: "ياباني مترجم · HLS",      tag: "AN" },
+  { site: "reanime",      name: "Reanime",        desc: "ياباني مترجم · FlixCloud",  tag: "RE" },
   { site: "anslayer",     name: "أنمي سلاير",    desc: "مشغلات خارجية · MixDrop/MediaFire", tag: "AS", isArabic: true },
   { site: "animeify",     name: "أنمي فاي",     desc: "عربي · ميغا",             tag: "AF", isArabic: true },
   { site: "anipub",       name: "AniPub",        desc: "مدبلج · ترجمة عربية",     tag: "AP", isArabic: true },
@@ -3293,6 +3294,7 @@ export default function WatchPage() {
       mycima:       34000,  // backend = 30s + هامش 4s
       witanime:     48000,  // backend = 45s + هامش 3s
       anikototv:    28000,  // backend = 25s + هامش 3s
+      reanime:      28000,  // backend = 25s + هامش 3s
       hianime:      26000,  // backend = 22s + هامش 4s
       anipm:        24000,  // backend = 20s + هامش 4s
     };
@@ -3508,7 +3510,8 @@ export default function WatchPage() {
     setPlayerDlUrl(getDownloadUrl(src) || undefined);
     // مصادر عربية: ترجمة مدمجة/غير مطلوبة — لا تُشغّل ترجمة خارجية (نعتمد على إعدادات المزود)
     const skipExternalSub = ARABIC_SITES.has(src.site || "");
-    setPlayerSubUrl(skipExternalSub ? undefined : (src.subtitleUrl || undefined));
+    // مصادر عربية لكنها تُرسل subtitleUrl خاصة بها (مثل AniPub sub) — نمررها حتى تعمل الترجمة الناعمة
+    setPlayerSubUrl(skipExternalSub && !src.subtitleUrl ? undefined : (src.subtitleUrl || undefined));
     // مصادر عربية: امسح kawaiiSubUrl أيضاً لمنع تداخل الترجمة
     if (skipExternalSub) setKawaiiSubUrl(undefined);
     // subtitle state resets automatically when EpisodePlayer remounts with new key
@@ -3685,7 +3688,7 @@ export default function WatchPage() {
         downloadUrl={playerDlUrl}
         subtitleUrl={playerSubUrl || kawaiiSubUrl}
         subtitleSite={playerSrcSite}
-        hideSubtitle={ARABIC_SITES.has(playerSrcSite)}
+        hideSubtitle={ARABIC_SITES.has(playerSrcSite) && !(playerSubUrl || kawaiiSubUrl)}
         skipTimes={skipTimes}
         onBack={handleBack}
         onNextEp={() => ep < totalEps ? goEp(ep + 1) : undefined}
